@@ -54,7 +54,7 @@ import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import { createAgentTurnRef } from "../../agent/index.js";
-import type { AgentTurnHandle } from "../../core/agent-session.js";
+import type { AgentTurnHandle } from "../../agent/index.js";
 import { openedInChat } from "../../core/session-conversation.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
@@ -3782,10 +3782,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       : undefined;
 
     const attachTurn = async (handle: AgentTurnHandle) => {
-      const turnId = handle.turnId;
+      const turnId = handle.id;
 
       const stream = await createStream(sessionId, turnId, channelThreadKey, agentName);
-      stream.interrupt = handle.interrupt;
+      stream.interrupt = async (reason) => {
+        await handle.stop(reason);
+      };
       enqueueStream(sessionId, stream);
       if (autoTitle) {
         void generateAndPersistConversationTitle(sessionId, session.name, firstMessageForTitle);
@@ -3840,7 +3842,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             // Block id of the in-flight text block, from its deltas.
             let inFlightTextBlockId: string | undefined;
             let resultError: Extract<AgentEvent, { type: "error" }> | undefined;
-            for await (const msg of handle.events) {
+            for await (const msg of handle.events()) {
               if (msg.type === "input_status") continue;
               // Deltas other than text have no webchat consumer yet.
               if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
@@ -4191,7 +4193,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         started = attachTurn(handle);
         void started.catch((error) =>
           log.error("failed to attach input turn", {
-            turnId: handle.turnId,
+            turnId: handle.id,
             error: error instanceof Error ? error.message : String(error),
           }),
         );

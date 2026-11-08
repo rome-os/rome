@@ -2,7 +2,7 @@ import type { ThreadContext } from "@rome-os/app-runtime";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import { createLogger } from "../logger.js";
 import { sessionKeyChannel } from "./agent-session-key.js";
-import type { AgentSessionInit } from "./agent-session.js";
+import type { AgentSessionInit } from "../agent/index.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
 
 const log = createLogger("session-opening");

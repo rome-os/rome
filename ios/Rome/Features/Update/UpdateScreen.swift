@@ -1,0 +1,249 @@
+import SwiftUI
+
+/// The update page. Below the app's minimum version it covers the app with no
+/// way past it but updating; switching instance and signing out stay. A
+/// release the instance can do without opens it from the banner or the
+/// drawer, and it closes again.
+struct UpdateScreen: View {
+    @Environment(AppModel.self) private var model
+    @State private var showInstances = false
+    @State private var confirmSignOut = false
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    private var updater: InstanceUpdater { model.update }
+
+    private var statusLine: String? { UpdateGate.statusLine(updater.state, progress: updater.progress) }
+
+    var body: some View {
+        Group {
+            if typeSize.isAccessibilitySize {
+                // Large text: the page scrolls, and the buttons keep their own room.
+                ScrollView {
+                    VStack(spacing: 20) {
+                        Mascot(alive: isWaiting).frame(width: 64)
+                        center
+                    }
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 24)
+                    .frame(maxWidth: .infinity)
+                }
+                .background(Palette.bg.ignoresSafeArea())
+                .safeAreaInset(edge: .top, spacing: 0) {
+                    topBar
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                }
+                .safeAreaInset(edge: .bottom, spacing: 0) {
+                    bottom
+                        .padding(.horizontal, 20)
+                        .padding(.top, 12)
+                        .padding(.bottom, 18)
+                        .background(Palette.bg)
+                }
+            } else {
+                ZStack {
+                    Palette.bg
+                    // The mascot stays exactly where the opening screen has it; the
+                    // text hangs below it.
+                    Mascot(alive: isWaiting)
+                        .frame(width: Mascot.width)
+                        .overlay(alignment: .top) {
+                            center
+                                .frame(width: 320)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .offset(y: Mascot.width * Mascot.viewBox.height / Mascot.viewBox.width + 20)
+                        }
+                }
+                .ignoresSafeArea()
+                .overlay(alignment: .top) {
+                    topBar
+                        .padding(.horizontal, 16)
+                        .padding(.top, 4)
+                }
+                .overlay(alignment: .bottom) {
+                    bottom
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, 18)
+                }
+            }
+        }
+        // VoiceOver hears each step of the update as it comes.
+        .onChange(of: statusLine) { _, line in
+            if let line { AccessibilityNotification.Announcement(line).post() }
+        }
+        .animation(.spring(response: 0.4, dampingFraction: 0.9), value: updater.state)
+        .animation(.easeInOut(duration: 0.25), value: updater.progress)
+        .sheet(isPresented: $showInstances) {
+            NavigationStack {
+                InstancesScreen(onSwitched: { showInstances = false })
+            }
+            .presentationBackground(Palette.bg)
+        }
+        // The same confirmation as Settings'.
+        .alert("Sign out?", isPresented: $confirmSignOut) {
+            Button("Sign out", role: .destructive) { Task { await model.signOut() } }
+            Button("Cancel", role: .cancel) {}
+        }
+    }
+
+    // MARK: Parts
+
+    private var topBar: some View {
+        HStack {
+            if updater.canClose {
+                Button { updater.closePage() } label: {
+                    Image(systemName: "xmark")
+                        .romeFont(16, .semibold)
+                        .foregroundStyle(Palette.fg)
+                        .frame(width: 44, height: 44)
+                        .glassSurface(Circle(), interactive: true)
+                }
+                .accessibilityLabel(Text("Close"))
+            }
+            Spacer()
+            Menu {
+                Button { showInstances = true } label: {
+                    Label("Switch instance", systemImage: "arrow.left.arrow.right")
+                }
+                Button(role: .destructive) { confirmSignOut = true } label: {
+                    Label("Sign out", systemImage: "rectangle.portrait.and.arrow.right")
+                }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(instanceName)
+                        .romeFont(15, .semibold)
+                        .lineLimit(1)
+                    Image(systemName: "chevron.down")
+                        .romeFont(12, .semibold)
+                        .foregroundStyle(Palette.sub)
+                }
+                .foregroundStyle(Palette.fg)
+                .padding(.horizontal, 16)
+                .frame(height: 44)
+                .glassSurface(Capsule(), interactive: true)
+            }
+            .accessibilityLabel(Text("\(instanceName), account options"))
+        }
+    }
+
+    @ViewBuilder
+    private var center: some View {
+        switch updater.state {
+        case .starting, .updating:
+            VStack(spacing: 12) {
+                LoadingDots()
+                if let line = statusLine {
+                    Text(line)
+                        .romeFont(17, .semibold)
+                        .contentTransition(.opacity)
+                        .id(line)
+                        .transition(.opacity)
+                }
+                Text("This can take a few minutes. You can leave the app; it picks up where it left off.")
+                    .romeFont(15)
+                    .lineSpacing(3)
+                    .foregroundStyle(Palette.sub)
+            }
+            .multilineTextAlignment(.center)
+            .accessibilityElement(children: .combine)
+            .transition(.opacity)
+        case .failed(let failure):
+            VStack(spacing: 8) {
+                switch failure {
+                case .timedOut(let target):
+                    Text("The update is taking too long").romeFont(22, .semibold).tracking(-0.4)
+                    Text("Your Rome has not come back on \(target). Check it in Rome Cloud, or try again.")
+                        .romeFont(16)
+                        .foregroundStyle(Palette.sub)
+                case .start(_, _, let message):
+                    Text("Could not start the update").romeFont(22, .semibold).tracking(-0.4)
+                    Text(message)
+                        .romeFont(16)
+                        .foregroundStyle(Palette.sub)
+                }
+            }
+            .lineSpacing(3)
+            .multilineTextAlignment(.center)
+            .transition(.opacity)
+        default:
+            VStack(spacing: 8) {
+                // The Rome by name, never read as an update to this app.
+                Text(verbatim: UpdateCopy.action(instanceName))
+                    .romeFont(28, .bold)
+                    .lineLimit(1)
+                    .tracking(-0.7)
+                if latestChanged {
+                    Text("A newer release just came out.")
+                        .romeFont(15, .semibold)
+                        .foregroundStyle(Palette.primaryText)
+                }
+                if let release {
+                    Group {
+                        if updater.belowMinimum {
+                            if let current = release.current {
+                                Text("Your Rome is on \(current). The latest is \(release.latest). This app needs a newer Rome.")
+                            } else {
+                                Text("The latest is \(release.latest). This app needs a newer Rome.")
+                            }
+                        } else if let current = release.current {
+                            Text("Your Rome is on \(current). The latest is \(release.latest).")
+                        } else {
+                            Text("The latest is \(release.latest).")
+                        }
+                    }
+                    .romeFont(16)
+                    .lineSpacing(3)
+                    .foregroundStyle(Palette.sub)
+                }
+            }
+            .multilineTextAlignment(.center)
+            .transition(.opacity)
+        }
+    }
+
+    @ViewBuilder
+    private var bottom: some View {
+        switch updater.state {
+        case .required:
+            PrimaryButton(title: "Update now") {
+                Task { await updater.updateNow() }
+            }
+        case .failed:
+            PrimaryButton(title: "Try again") {
+                Task { await updater.retry() }
+            }
+        default:
+            EmptyView()
+        }
+    }
+
+    // MARK: Reading the state
+
+    private var instanceName: String {
+        model.workspace?.instanceName
+            ?? model.instances.first { $0.id == model.currentInstanceID }?.name
+            ?? String(localized: "My Rome")
+    }
+
+    private var release: (current: String?, latest: String)? {
+        switch updater.state {
+        case .required(let current, let latest, _), .starting(let current, let latest):
+            return (current, latest)
+        default:
+            return nil
+        }
+    }
+
+    private var latestChanged: Bool {
+        if case .required(_, _, true) = updater.state { return true }
+        return false
+    }
+
+    /// Waiting on the update: the mascot comes alive.
+    private var isWaiting: Bool {
+        switch updater.state {
+        case .starting, .updating: return true
+        default: return false
+        }
+    }
+}

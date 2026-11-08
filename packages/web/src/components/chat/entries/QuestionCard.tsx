@@ -137,13 +137,13 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
   // chat, which auto-dismisses it) vs answered through the card.
   const dismissed = resolved && (result as { dismissed?: unknown }).dismissed === true;
   const priorAnswers = answersFromResult(result);
-  // `drafts` holds the single/text value, and — for a multi question — only its
-  // typed-own free-text remainder. The chosen options of a multi live in `picks`.
+  // `drafts` holds the typed text: a text question's value, or a single/multi
+  // question's free-text box. The chosen options of a single/multi live in `picks`.
+  // The two are independent — typed text is never matched against option labels.
   const [drafts, setDrafts] = useState<Record<string, string>>(() => {
     const init: Record<string, string> = {};
     if (!resolved) {
       for (const q of questions) {
-        if (q.type === "single" && q.defaults?.length) init[q.id] = q.defaults[0];
         if (q.type === "text" && q.defaultText !== undefined) init[q.id] = q.defaultText;
       }
     }
@@ -153,6 +153,9 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
         const opts = q.options ?? [];
         const extra = (a.values ?? splitMulti(a.value)).filter((s) => !opts.includes(s));
         if (extra.length) init[q.id] = extra.join(MULTI_SEP);
+      } else if (q?.type === "single") {
+        // Restore only: a stored value that is one of the options was a pick.
+        if (!(q.options ?? []).includes(a.value)) init[q.id] = a.value;
       } else {
         init[a.questionId] = a.value;
       }
@@ -164,14 +167,18 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
     if (!resolved) {
       for (const q of questions) {
         if (q.type === "multi" && q.defaults) init[q.id] = [...new Set(q.defaults)];
+        if (q.type === "single" && q.defaults?.length) init[q.id] = [q.defaults[0]];
       }
     }
     for (const a of priorAnswers) {
       const q = questions.find((x) => x.id === a.questionId);
-      if (q?.type !== "multi") continue;
-      const opts = q.options ?? [];
-      const chosen = (a.values ?? splitMulti(a.value)).filter((s) => opts.includes(s));
-      if (chosen.length) init[q.id] = chosen;
+      if (q?.type === "multi") {
+        const opts = q.options ?? [];
+        const chosen = (a.values ?? splitMulti(a.value)).filter((s) => opts.includes(s));
+        if (chosen.length) init[q.id] = chosen;
+      } else if (q?.type === "single" && (q.options ?? []).includes(a.value)) {
+        init[q.id] = [a.value];
+      }
     }
     return init;
   });
@@ -179,11 +186,11 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
 
   const locked = resolved || sent;
   // Optional questions never block submit; required ones need a non-empty answer
-  // (for multi: at least one option picked, or something typed in free-text).
+  // (for single/multi: an option picked, or something typed in free-text).
   const isAnswered = (q: Question) =>
-    q.type === "multi"
-      ? (picks[q.id]?.length ?? 0) > 0 || (drafts[q.id] ?? "").trim().length > 0
-      : (drafts[q.id] ?? "").trim().length > 0;
+    q.type === "text"
+      ? (drafts[q.id] ?? "").trim().length > 0
+      : (picks[q.id]?.length ?? 0) > 0 || (drafts[q.id] ?? "").trim().length > 0;
   const allAnswered = questions.every((q) => q.optional || isAnswered(q));
 
   if (questions.length === 0) return null;
@@ -193,6 +200,18 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
       const cur = p[id] ?? [];
       return { ...p, [id]: cur.includes(opt) ? cur.filter((o) => o !== opt) : [...cur, opt] };
     });
+  }
+
+  /** Single: picking an option replaces (and clears) whatever was typed. */
+  function pickSingle(id: string, opt: string) {
+    setPicks((p) => ({ ...p, [id]: [opt] }));
+    setDrafts((d) => ({ ...d, [id]: "" }));
+  }
+
+  /** Free-text box edit; for single, typing replaces (deselects) the picked option. */
+  function typeOwn(q: Question, text: string) {
+    setDrafts((d) => ({ ...d, [q.id]: text }));
+    if (q.type === "single") setPicks((p) => ({ ...p, [q.id]: [] }));
   }
 
   function submit() {
@@ -208,7 +227,9 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
         const values = parts.some((part) => part.includes(MULTI_SEP)) ? { values: parts } : {};
         return parts.length ? [{ questionId: q.id, value: parts.join(MULTI_SEP), ...values }] : [];
       }
-      const value = (drafts[q.id] ?? "").trim();
+      // Single: the typed text if any (it replaced the pick), else the picked option.
+      const value =
+        (drafts[q.id] ?? "").trim() || (q.type === "single" ? (picks[q.id]?.[0] ?? "") : "");
       return value ? [{ questionId: q.id, value }] : [];
     });
     const summary = answers.map((a) => a.value).join(" · ");
@@ -250,9 +271,7 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
                       }
                     >
                       {options.map((opt) => {
-                        const selected = multi
-                          ? (picks[q.id] ?? []).includes(opt)
-                          : drafts[q.id] === opt;
+                        const selected = (picks[q.id] ?? []).includes(opt);
                         const description = descriptionOf(q, opt);
                         return (
                           <Button
@@ -262,11 +281,7 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
                             size="sm"
                             align={stacked ? "start" : "center"}
                             aria-pressed={selected}
-                            onClick={() =>
-                              multi
-                                ? togglePick(q.id, opt)
-                                : setDrafts((d) => ({ ...d, [q.id]: opt }))
-                            }
+                            onClick={() => (multi ? togglePick(q.id, opt) : pickSingle(q.id, opt))}
                             className={cn(
                               OPTION,
                               stacked && "w-full text-left",
@@ -294,19 +309,18 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
                         );
                       })}
                       {/* freeText: a single-line box sitting with the options.
-                          For single, typing here IS the answer (a value not
-                          matching any option), so it shows empty whenever a
-                          listed option is the pick. For multi it's an extra
-                          answer alongside whatever options are pressed. */}
+                          Its text is kept apart from the option picks and is
+                          never matched against option labels. For single, the
+                          last interaction wins: typing deselects the option and
+                          picking an option clears the box. For multi it's an
+                          extra answer alongside whatever options are pressed. */}
                       {q.freeText ? (
                         <Input
                           // Input defaults to `md`, which is a step taller than
                           // the options this sits with.
                           size="sm"
-                          value={
-                            multi || !options.includes(drafts[q.id]) ? (drafts[q.id] ?? "") : ""
-                          }
-                          onChange={(e) => setDrafts((d) => ({ ...d, [q.id]: e.target.value }))}
+                          value={drafts[q.id] ?? ""}
+                          onChange={(e) => typeOwn(q, e.target.value)}
                           placeholder={multi ? t("questionCard.addOwn") : t("questionCard.typeOwn")}
                           className={cn(
                             "max-w-full text-ui",

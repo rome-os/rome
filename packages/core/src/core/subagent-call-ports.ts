@@ -1,5 +1,6 @@
-// The subagent call service's ports over today's run, live turns and turn log.
-// They go once the session and the turn log move into the agent context.
+// The subagent call service's ports over the run's session manager, the live
+// turns and the turn log. They go once the session takes `submit` and `stop`
+// and the turn log moves into the agent context.
 
 import {
   storeSubagentParent,
@@ -11,7 +12,7 @@ import {
 } from "../agent/index.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
-import type { AgentSession, AgentSessionInit, AgentSessionManager } from "./agent-session.js";
+import type { AgentSession, AgentSessionInit, AgentSessionManager } from "../agent/index.js";
 import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-recorder.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { openedInChat } from "./session-conversation.js";
@@ -22,7 +23,7 @@ function subagentSession(child: AgentSession): SubagentSession {
   return {
     id: child.sessionId,
     submit(prompt, parentTurn, context) {
-      const { turnId, events } = child.sendTurn(
+      const turn = child.sendTurn(
         { prompt },
         {
           lifecycleParent: parentTurn,
@@ -33,7 +34,7 @@ function subagentSession(child: AgentSession): SubagentSession {
           initiatedBy: "system",
         },
       );
-      return { turnId, events };
+      return { turnId: turn.id, events: turn.events() };
     },
     stop: (reason) => child.interrupt(reason),
   };

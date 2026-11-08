@@ -1,7 +1,7 @@
 // Import rules for bounded contexts laid out as `<context>/<layer>` under
 // packages/core/src. The layout: DEVELOPMENT.md, "Established patterns".
 
-import type { Import, ImportRule } from "../import-rules.js";
+import type { Import, ImportRule, ListedCrossing } from "../import-rules.js";
 
 /** Folders directly under src/ laid out as `<context>/<layer>`. A context adopting the layout joins this list. */
 export const LAYERED_CONTEXTS = ["agent"];
@@ -61,5 +61,21 @@ export const layerRules: ImportRule[] = [
     description:
       "The layer rules can only judge an import they can resolve. A dynamic import inside a layered context names its module with a string literal.",
     rejects: (imp) => imp.kind === "computed" && placeOf(imp.from) !== null,
+  },
+];
+
+const SESSION = "agent/application/agent-session.ts";
+
+/**
+ * Crossings the agent context still makes on its way in. Each leaves the list
+ * when the port that replaces it lands.
+ */
+export const listedCrossings: ListedCrossing[] = [
+  {
+    rule: "application-imports-inward",
+    from: SESSION,
+    to: "lib/keyed-mutex.ts",
+    ticket: "ZHA-154",
+    why: "A generic lock with no domain meaning, until it moves to a shared package or the context's own code.",
   },
 ];

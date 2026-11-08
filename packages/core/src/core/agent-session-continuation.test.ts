@@ -1,7 +1,12 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
-import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import {
+  ChatSessionSettings,
+  readAnswerShape,
+  romeSessionTracing,
+  TurnUsageReporter,
+} from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { ConciergeService, type ConciergeDeps } from "../concierge/service.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -33,7 +38,7 @@ import {
   createAgentSessionManager,
   type AgentSession,
   type AgentSessionManager,
-} from "./agent-session.js";
+} from "../agent/index.js";
 import type { ModelSelectionId } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
@@ -160,6 +165,7 @@ describe("continuation notice through AgentSessionManager", () => {
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,
+        sessionTracing: romeSessionTracing,
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
         log: createLogger("agent-session"),
@@ -197,7 +203,7 @@ describe("continuation notice through AgentSessionManager", () => {
       { prompt: text, inputId },
       { threadContext, romeSessionId: CHAT, romeSessionType: "webchat" },
     );
-    for await (const _event of handle.events) {
+    for await (const _event of handle.events()) {
       // drain
     }
     at((now - START) / 1000 + 1);
@@ -206,7 +212,7 @@ describe("continuation notice through AgentSessionManager", () => {
       CHAT,
       "assistant",
       JSON.stringify([{ type: "text", content: `reply to ${text}` }]),
-      handle.turnId,
+      handle.id,
     );
   }
 
@@ -444,10 +450,9 @@ describe("continuation notice through AgentSessionManager", () => {
       { agentName, channelThreadKey: `webchat:${chatId}` },
       { workingDir: directory, threadContext: context, selectionId: from },
     );
-    for await (const _ of session.sendTurn(
-      { prompt: "first" },
-      { threadContext: context, romeSessionId: chatId },
-    ).events) {
+    for await (const _ of session
+      .sendTurn({ prompt: "first" }, { threadContext: context, romeSessionId: chatId })
+      .events()) {
     }
     if (concierge) {
       const raw = healthyState();

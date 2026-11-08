@@ -1,6 +1,11 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
-import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import {
+  ChatSessionSettings,
+  readAnswerShape,
+  romeSessionTracing,
+  TurnUsageReporter,
+} from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -18,7 +23,7 @@ import {
   type ModelProvider,
   type ModelSessionParams,
 } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
+import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
 import type { SessionToolContext } from "./session-tools.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
@@ -95,6 +100,7 @@ describe("AgentSession turn push level", () => {
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,
+        sessionTracing: romeSessionTracing,
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
         log: createLogger("agent-session"),
@@ -126,7 +132,7 @@ describe("AgentSession turn push level", () => {
     );
     const handle = session.sendTurn({ prompt: "go" }, pushLevel ? { pushLevel } : {});
     let result: string | undefined;
-    for await (const event of handle.events) {
+    for await (const event of handle.events()) {
       if (event.type === "result") result = event.content;
     }
     return result;

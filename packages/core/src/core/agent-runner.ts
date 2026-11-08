@@ -13,7 +13,7 @@ import type {
   ThreadStart,
 } from "../agent/index.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
-import type { AgentSession, AgentSessionManager } from "./agent-session.js";
+import type { AgentSession, AgentSessionManager } from "../agent/index.js";
 import type { AgentCatalog } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
@@ -162,67 +162,6 @@ export function createSessionFromRun(
   };
 }
 
-/**
- * A `ModelSession` for a **code-backed agent**: one whose turns
- * are always produced by a turn-middleware rather than a model. It opens no
- * provider query — nothing to resume, nothing to bill, no background SDK stream
- * that could error — so the events iterable simply parks until `close()`.
- *
- * For a correctly-configured code-backed agent a turn middleware short-circuits
- * every turn, so `sendUserInput` is never reached. If it is (no middleware
- * matched — a misconfiguration), the turn is terminated gracefully with a
- * fallback error rather than hanging, so the session never wedges.
- */
-export function createNullModelSession(params: ModelSessionParams): ModelSession {
-  const buffer: ModelSessionEvent[] = [];
-  const resolvers: Array<(item: IteratorResult<ModelSessionEvent>) => void> = [];
-  let closed = false;
-
-  const emit = (msg: ModelSessionEvent) => {
-    if (closed) return;
-    if (resolvers.length > 0) {
-      resolvers.shift()!({ value: msg, done: false });
-    } else {
-      buffer.push(msg);
-    }
-  };
-
-  const events: AsyncIterable<ModelSessionEvent> = {
-    [Symbol.asyncIterator]() {
-      return {
-        async next(): Promise<IteratorResult<ModelSessionEvent>> {
-          if (buffer.length > 0) return { value: buffer.shift()!, done: false };
-          if (closed) return { value: undefined as never, done: true };
-          return await new Promise<IteratorResult<ModelSessionEvent>>((resolve) => {
-            resolvers.push(resolve);
-          });
-        },
-      };
-    },
-  };
-
-  const FALLBACK =
-    "This conversation is handled by code, not a model, and no handler took this turn. You can start chatting with Rome normally.";
-
-  return {
-    providerId: "mock",
-    model: params.config.model,
-    events,
-    async sendUserInput(): Promise<void> {
-      emit({ type: "text", content: FALLBACK });
-      emit({ type: "error", error: "No handler took this turn" });
-    },
-    async interrupt(): Promise<void> {},
-    async close(): Promise<void> {
-      if (closed) return;
-      closed = true;
-      while (resolvers.length > 0) {
-        resolvers.shift()!({ value: undefined as never, done: true });
-      }
-    },
-  };
-}
-
 // AgentRunner — thin shim over AgentSessionManager: acquires the session for
 // a given (agentName, channelThreadKey), pushes one turn, and yields the
 // events.
@@ -348,16 +287,16 @@ export class AgentRunner {
         ...(params.pushLevel ? { pushLevel: params.pushLevel } : {}),
       },
     );
-    this.runLineDeps?.replies?.runs(handle.turnId, agentName);
+    this.runLineDeps?.replies?.runs(handle.id, agentName);
     if (lines && this.runLineDeps) {
       if (conversation.promptPersisted && lines.prompt !== null) {
-        this.runLineDeps.links.prompt(lines.prompt, romeSessionId, handle.turnId);
+        this.runLineDeps.links.prompt(lines.prompt, romeSessionId, handle.id);
       }
     } else if (this.webchatRepo && conversation.promptPersisted && params.platformMessageId) {
       await this.webchatRepo.assignConversationMessageTurn(
         romeSessionId,
         params.platformMessageId,
-        handle.turnId,
+        handle.id,
       );
     }
 
@@ -371,7 +310,7 @@ export class AgentRunner {
             romeSessionId,
             existingSessionId: conversation.existing ? romeSessionId : undefined,
             channelThreadKey,
-            turnId: handle.turnId,
+            turnId: handle.id,
             threadContext,
             // A recorder-owned conversation has no other transcript, whatever
             // the caller's channel keeps.
@@ -382,10 +321,10 @@ export class AgentRunner {
           })
         : null;
 
-    for await (const msg of handle.events) {
+    for await (const msg of handle.events()) {
       if (recorder) {
         await recordAgentTraceBestEffort(recorder, msg, log, {
-          turnId: handle.turnId,
+          turnId: handle.id,
           source: "agent-runner",
         });
         // The turn's input, under the caller's label, right after it starts.
@@ -394,7 +333,7 @@ export class AgentRunner {
             .recordSystemInput(params.inputLabel, params.prompt)
             .catch((error: unknown) =>
               log.warn("system input not recorded", {
-                turnId: handle.turnId,
+                turnId: handle.id,
                 error: error instanceof Error ? error.message : String(error),
               }),
             );
@@ -462,9 +401,9 @@ export class AgentRunner {
         prompt: params.prompt,
         tier: params.tier,
         mode: params.mode,
-        sourceCheckpoint: params.sourceCheckpoint,
+        checkpoint: params.sourceCheckpoint,
         threadContext: params.threadContext,
-        persistThreadKey: params.persistThreadKey,
+        continuityKey: params.persistThreadKey,
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;

@@ -153,8 +153,10 @@ import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocati
 import {
   AgentLoader,
   AppTurnHooks,
+  AppTurnMiddleware,
   readAnswerShape,
   TurnUsageReporter,
+  romeSessionTracing,
   ChatSessionSettings,
   createSubagentCalls,
   WebChatDashboardSessions,
@@ -195,7 +197,7 @@ import {
 } from "./agent/index.js";
 import { startCodexLoginChoice } from "./rome-cloud/codex-login.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
-import { createAgentSessionManager } from "./core/agent-session.js";
+import { createAgentSessionManager } from "./agent/index.js";
 import {
   type ChannelSurfaces,
   sessionOpeningFor,
@@ -216,7 +218,6 @@ import { startConciergeFollowing, watchProvidersOf } from "./concierge/following
 import { listConnectionViews } from "./api/routes/connections.js";
 import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
-import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
 import { stopActiveConversationTurn, stopSenderPlatform } from "./core/chat-stop.js";
 import { CapabilityDiscovery } from "./core/capability-discovery.js";
@@ -258,10 +259,12 @@ import {
   resolveWebchatContinuationDeviceFolder,
   resolveWebchatContinuationWorkingDir,
 } from "./webchat/projects.js";
-import { createActiveSubagentRegistry } from "./core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry.js";
-import { createSubagentExecutionService } from "./core/subagent-execution.js";
-import { subagentLiveTurns, subagentTurnLog } from "./core/subagent-call-ports.js";
+import {
+  subagentLiveTurns,
+  subagentSessions,
+  subagentTurnLog,
+} from "./core/subagent-call-ports.js";
 import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/core-required.js";
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
 import { preserveRecapOptOutAtBoot } from "./apps/recap-upgrade.js";
@@ -948,7 +951,7 @@ async function main() {
   // app lifecycle hooks (the `agentRunner` field is filled in below, before
   // any hook is loaded), so a scripted-conversation middleware can summon real
   // agents and reach its own app DB.
-  const turnMiddlewareChain = createTurnMiddlewareChain({
+  const turnMiddleware = new AppTurnMiddleware({
     appRuntimeServices: lifecycleAppRuntimeServices,
   });
   const appStartedDispatcher = createAppStartedDispatcher({
@@ -1048,7 +1051,6 @@ async function main() {
     turnLog: subagentTurnLog(webchatRepo),
     liveTurns: subagentLiveTurns(agentTurnStreamRegistry),
   });
-  const activeSubagentRegistry = createActiveSubagentRegistry(subagentCalls);
   const chatStop: ChatStopHandler = (input) =>
     stopActiveConversationTurn(input, {
       turns: agentTurnStreamRegistry,
@@ -1060,10 +1062,6 @@ async function main() {
         return (await peopleRepo.byAccount({ platform, id: senderId }))?.bondLevel === "guardian";
       },
     });
-  const subagentExecutionService = createSubagentExecutionService({
-    calls: subagentCalls,
-    webchatRepo,
-  });
   const romeCloudAccess = (): RomeCloudAccess | null => {
     const credentialId = instanceCredentialId();
     const origin = getRomeCloudOrigin();
@@ -1156,10 +1154,12 @@ async function main() {
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface,
       }),
-      subagentExecutionService,
-      activeSubagentRegistry,
-      turnMiddleware: turnMiddlewareChain,
+      subagentCalls,
+      subagentSessions: (manager, parentLink, inherited) =>
+        subagentSessions(manager, parentLink, webchatRepo, inherited),
+      turnMiddleware,
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
+      sessionTracing: romeSessionTracing,
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
       log: createLogger("agent-session"),
@@ -1540,7 +1540,7 @@ async function main() {
   const reloadTurnMiddlewareHooks = await registerCatalogHookLoad({
     sourcePrefix: "turn-middleware",
     warnMessage: "some turn-middleware hooks failed to initialize",
-    load: () => turnMiddlewareChain.loadFromCatalog(appCatalog),
+    load: () => turnMiddleware.loadFromCatalog(appCatalog),
     failureSource: (failure) => `turn-middleware:${failure.path}`,
   });
 

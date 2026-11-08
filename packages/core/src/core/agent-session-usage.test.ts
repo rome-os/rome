@@ -1,6 +1,6 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
-import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -17,11 +17,11 @@ import type { TurnUsageFacts } from "../agent/index.js";
 import { AgentLoader } from "../agent/index.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
+import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { SkillLoader } from "../agent/index.js";
-import type { TurnMiddlewareChain } from "./turn-middleware.js";
+import type { TurnMiddleware } from "../agent/index.js";
 import type { ModelAccountReports } from "../agent/index.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
@@ -136,13 +136,11 @@ describe("AgentSession turn usage", () => {
     const actionRegistry = new ActionRegistryImpl();
     const systemPrompts = createTestSystemPrompts();
     rs.spyOn(systemPrompts, "build").mockReturnValue("Usage test prompt");
-    const turnMiddleware: TurnMiddlewareChain = {
-      loadFromCatalog: async () => [],
+    const turnMiddleware: TurnMiddleware = {
       run: async (_ctx, terminal) => {
         await beforeModelDispatch?.();
         if (!shortCircuit) await terminal();
       },
-      size: () => 1,
     };
     manager = createAgentSessionManager(
       {
@@ -161,6 +159,7 @@ describe("AgentSession turn usage", () => {
         folders: agentFolders(),
         log: createLogger("agent-session"),
         turnMiddleware,
+        sessionTracing: romeSessionTracing,
         turnUsage: new TurnUsageReporter({
           usage: { recordTurn: (facts) => recorded.push(facts) },
         }),
@@ -203,11 +202,11 @@ describe("AgentSession turn usage", () => {
     };
     const session = await manager.acquire(key);
     const handle = session.sendTurn({ prompt: "hello" });
-    await drain(handle.events);
+    await drain(handle.events());
 
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({
-      turnId: handle.turnId,
+      turnId: handle.id,
       agentName: `core:${AGENT}`,
       status: "completed",
       provider: "openai",
@@ -235,8 +234,8 @@ describe("AgentSession turn usage", () => {
       yield { type: "error", error: "rejected before the provider" };
     };
     const session = await manager.acquire(key);
-    await drain(session.sendTurn({ prompt: "first" }).events);
-    await drain(session.sendTurn({ prompt: "second" }).events);
+    await drain(session.sendTurn({ prompt: "first" }).events());
+    await drain(session.sendTurn({ prompt: "second" }).events());
 
     expect(recorded.map((facts) => [facts.status, facts.providerTurnId])).toEqual([
       ["completed", "provider-turn-1"],
@@ -258,12 +257,35 @@ describe("AgentSession turn usage", () => {
     const session = await manager.acquire(key);
     const first = session.sendTurn({ prompt: "first" });
     const second = session.sendTurn({ prompt: "second" });
-    await Promise.all([drain(first.events), drain(second.events)]);
+    await Promise.all([drain(first.events()), drain(second.events())]);
 
     expect(recorded.map((facts) => [facts.status, facts.providerTurnId])).toEqual([
       ["completed", "provider-turn-1"],
       ["error", undefined],
     ]);
+  });
+
+  it("ends a queued turn stopped before it reached the provider with no terminal", async () => {
+    let releaseFirst!: () => void;
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    nextRun = async function* () {
+      await firstRelease;
+      yield { type: "result", content: "done" };
+    };
+    const session = await manager.acquire(key);
+    const first = session.sendTurn({ prompt: "first" });
+    const second = session.sendTurn({ prompt: "second" });
+
+    expect(await second.stop("user-stop")).toBe("requested");
+    releaseFirst();
+    await Promise.all([drain(first.events()), drain(second.events())]);
+
+    expect(await second.ended()).toEqual({ terminal: undefined, stoppedByRome: true });
+    const said: string[] = [];
+    for await (const event of second.events()) said.push(event.type);
+    expect(said).not.toContain("result");
   });
 
   it("keeps the login kind from the turn's login when the login changes during it", async () => {
@@ -288,7 +310,7 @@ describe("AgentSession turn usage", () => {
     loginKind = "rome_credits";
     resolverUsesRomeCredits = true;
     releaseFirst();
-    await drain(first.events);
+    await drain(first.events());
 
     let releaseSecond!: () => void;
     const secondRelease = new Promise<void>((resolve) => {
@@ -309,7 +331,7 @@ describe("AgentSession turn usage", () => {
     await turnUnderway();
     loginKind = "subscription";
     releaseSecond();
-    await drain(second.events);
+    await drain(second.events());
 
     expect(recorded.map((facts) => facts.loginKind)).toEqual(["api_credential", "rome_credits"]);
   });
@@ -323,7 +345,7 @@ describe("AgentSession turn usage", () => {
       loginKind = "api_credential";
     };
     const session = await manager.acquire(key);
-    await drain(session.sendTurn({ prompt: "after a reopen" }).events);
+    await drain(session.sendTurn({ prompt: "after a reopen" }).events());
 
     expect(recorded.map((facts) => facts.loginKind)).toEqual(["api_credential"]);
   });
@@ -338,7 +360,7 @@ describe("AgentSession turn usage", () => {
     };
     // A web chat shows cards and faces the guardian.
     const session = await manager.acquire(key, { drawsCards: true, guardianFacing: true });
-    await drain(session.sendTurn({ prompt: "first" }).events);
+    await drain(session.sendTurn({ prompt: "first" }).events());
     await drain(session.runForkedTurn!({ prompt: "side question", mode: "exact" }));
 
     const [source, fork] = opened;
@@ -372,9 +394,9 @@ describe("AgentSession turn usage", () => {
       };
     };
     const session = await manager.acquire(key);
-    await drain(session.sendTurn({ prompt: "first" }).events);
+    await drain(session.sendTurn({ prompt: "first" }).events());
     shortCircuit = true;
-    await drain(session.sendTurn({ prompt: "parked on a card" }).events);
+    await drain(session.sendTurn({ prompt: "parked on a card" }).events());
 
     const events: unknown[] = [];
     for await (const event of session.runForkedTurn!({ prompt: "side question" })) {
@@ -412,7 +434,7 @@ describe("AgentSession turn usage", () => {
     // The first status probe lands; Codex's login is still ChatGPT.
     loginKind = "subscription";
     releasePreparation();
-    await drain(turn.events);
+    await drain(turn.events());
 
     expect(providerCalls).toBe(1);
     expect(recorded.map((facts) => facts.loginKind)).toEqual(["subscription"]);
@@ -434,7 +456,7 @@ describe("AgentSession turn usage", () => {
     const session = await manager.acquire(key);
     for await (const event of session.runForkedTurn!({
       prompt: "side question",
-      sourceCheckpoint: SOURCE_CHECKPOINT,
+      checkpoint: SOURCE_CHECKPOINT,
     })) {
       if (event.type === "result") break;
     }
@@ -461,7 +483,7 @@ describe("AgentSession turn usage", () => {
     const session = await manager.acquire(key);
     const events = session.runForkedTurn!({
       prompt: "side question",
-      sourceCheckpoint: SOURCE_CHECKPOINT,
+      checkpoint: SOURCE_CHECKPOINT,
     });
     forkLoginKind = undefined;
     for await (const _event of events) {
@@ -479,7 +501,7 @@ describe("AgentSession turn usage", () => {
     const session = await manager.acquire(key);
     const events = session.runForkedTurn!({
       prompt: "side question",
-      sourceCheckpoint: SOURCE_CHECKPOINT,
+      checkpoint: SOURCE_CHECKPOINT,
     });
     let forkSessionId: string | undefined;
     for await (const event of events) {

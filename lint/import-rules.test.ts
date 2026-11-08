@@ -88,4 +88,22 @@ describe("checkImports with the layer rules", () => {
       "concierge/probe.ts:4 → ../agent/domain/nope.js [unresolved]",
     ]);
   });
+
+  it("skips a listed crossing and reports a listed crossing that no longer occurs", () => {
+    const crossing = (from: string, to: string) => ({
+      rule: "application-imports-inward",
+      from,
+      to,
+      ticket: "ZHA-0",
+      why: "fixture",
+    });
+    const lines = checkImports(join(root, "src"), join(root, "tsconfig.json"), layerRules, [
+      crossing("agent/application/sub/probe.ts", "agent/infrastructure/model/adapter.ts"),
+      crossing("agent/application/use.ts", "logger.ts"),
+    ])
+      .map(formatImportViolation)
+      .map((line) => line.replace(/: .*$/, ""))
+      .filter((line) => line.startsWith("agent/application/"));
+    expect(lines).toEqual(["agent/application/use.ts → logger.ts [stale-listing]"]);
+  });
 });

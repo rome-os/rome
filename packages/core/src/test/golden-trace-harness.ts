@@ -2,7 +2,7 @@ import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
-import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -14,7 +14,7 @@ import {
   type ModelProvider,
   type ModelRunParams,
 } from "../core/agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "../core/agent-session.js";
+import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./kit/model-accounts.js";
@@ -113,6 +113,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     skillCatalog: new SkillLoader(artifactIdentity),
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
     readAnswerShape,
+    sessionTracing: romeSessionTracing,
     turnUsage: new TurnUsageReporter(),
     folders: agentFolders(),
     log: createLogger("agent-session"),

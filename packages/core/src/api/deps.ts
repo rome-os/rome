@@ -45,7 +45,7 @@ import type { AppKeyInjector } from "../app-keys/injector.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import type { SessionRepository } from "../agent/index.js";
-import type { AgentSessionManager } from "../core/agent-session.js";
+import type { AgentSessionManager } from "../agent/index.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import type { Hono } from "hono";
 import type { ClaudeLogins, CodexLogins, ModelAccount, ModelAccounts } from "../agent/index.js";

@@ -447,8 +447,12 @@ describe("/api/auth/visitor/native", () => {
   });
 });
 
-describe("/api/auth/visitor — resending the allow-list after a first sign-in", () => {
-  async function routeWith(email: string): Promise<{ app: Hono; resends: () => number }> {
+describe("/api/auth/visitor — resending the allow-list after a new account signs in", () => {
+  async function routeWith(email: string): Promise<{
+    app: Hono;
+    resends: () => number;
+    signInAs: (accountId: string) => void;
+  }> {
     const state = new DashboardAccessState();
     state.setCloudEmailAccess(["ada@example.com"]);
     const deps = { ...(await buildTestDeps(testDb.db)), dashboardAccessState: state };
@@ -457,9 +461,11 @@ describe("/api/auth/visitor — resending the allow-list after a first sign-in",
     await deps.dashboardAccessStore.save({ cloudEmailAccess: ["ada@example.com"] });
     let count = 0;
     deps.visitorAllowListSync.requestResend = () => void (count += 1);
+    let accountId = "acct-1";
+    const fetchImpl: typeof fetch = (...args) => mockAccountSession(email, accountId)(...args);
     const app = new Hono();
-    app.route("/api", visitorAuthRoutes(deps, { fetchImpl: mockAccountSession(email) }));
-    return { app, resends: () => count };
+    app.route("/api", visitorAuthRoutes(deps, { fetchImpl }));
+    return { app, resends: () => count, signInAs: (id) => void (accountId = id) };
   }
 
   async function browserSignIn(app: Hono): Promise<void> {
@@ -486,6 +492,18 @@ describe("/api/auth/visitor — resending the allow-list after a first sign-in",
     await browserSignIn(app);
     await nativeSignIn(app);
     expect(resends()).toBe(1);
+  });
+
+  it("resends once when the email signs in with a new account, as after deleting and signing up again", async () => {
+    const { app, resends, signInAs } = await routeWith("ada@example.com");
+    await browserSignIn(app);
+    expect(resends()).toBe(1);
+
+    signInAs("acct-2");
+    await nativeSignIn(app);
+    expect(resends()).toBe(2);
+    await browserSignIn(app);
+    expect(resends()).toBe(2);
   });
 
   it("resends nothing for a sign-in the allow-list refuses", async () => {

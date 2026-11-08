@@ -16,7 +16,7 @@ import type { ApprovalsRepository } from "../db/repositories/approvals.js";
 import type { SkillCatalog } from "../agent/index.js";
 import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
 import type { AgentTurnFailedBeforeStart } from "../agent/index.js";
-import type { AgentSessionManager } from "../core/agent-session.js";
+import type { AgentSessionManager } from "../agent/index.js";
 import {
   accountAllowsModel,
   CODEX_LUNA_MODEL,

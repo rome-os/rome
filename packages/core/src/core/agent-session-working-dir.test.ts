@@ -1,6 +1,11 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
-import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import {
+  ChatSessionSettings,
+  readAnswerShape,
+  romeSessionTracing,
+  TurnUsageReporter,
+} from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -18,7 +23,7 @@ import {
   type AgentSessionInit,
   type AgentSessionKey,
   type AgentSessionManager,
-} from "./agent-session.js";
+} from "../agent/index.js";
 import { eq } from "drizzle-orm";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
@@ -94,6 +99,7 @@ describe("AgentSessionManager working dirs", () => {
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,
+        sessionTracing: romeSessionTracing,
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
         log: createLogger("agent-session"),

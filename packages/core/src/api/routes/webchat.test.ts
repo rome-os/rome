@@ -1,4 +1,5 @@
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
+import { testTurnHandle } from "../../test/turn-handle.js";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,7 +18,7 @@ import {
   AgentInputQueue,
   type AgentInputReceipt,
   type SubmitInputOptions,
-} from "../../core/agent-input-queue.js";
+} from "../../agent/index.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
 import { webchatChannel, webchatCaller } from "../../chats/dashboard/dashboard-account.js";
 import {
@@ -36,7 +37,7 @@ import type {
   AgentTurnHandle,
   AgentTurnInput,
   SendTurnOptions,
-} from "../../core/agent-session.js";
+} from "../../agent/index.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../agent/index.js";
 import { guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";
@@ -628,14 +629,15 @@ describe("Webchat API", () => {
     });
     const steerUserInput = rs.fn().mockResolvedValue("accepted" as const);
     const start = rs.fn(
-      (): AgentTurnHandle => ({
-        turnId: "input-turn",
-        turnContext: otelContext.active(),
-        events: (async function* () {
-          await terminal;
-          yield { type: "result" as const, content: "" };
-        })(),
-      }),
+      (): AgentTurnHandle =>
+        testTurnHandle({
+          turnId: "input-turn",
+          turnContext: otelContext.active(),
+          events: (async function* () {
+            await terminal;
+            yield { type: "result" as const, content: "" };
+          })(),
+        }),
     );
     const queue = new AgentInputQueue(
       start,
@@ -725,10 +727,11 @@ describe("Webchat API", () => {
     }
   });
 
-  it("refuses a queued turn's Stop without interrupting the active turn", async () => {
+  it("stops a queued turn by its own stop, leaving the active turn running", async () => {
     const finishers: (() => void)[] = [];
     let sequence = 0;
     const interrupt = rs.fn(async () => {});
+    const stops = new Map<string, ReturnType<typeof rs.fn>>();
     const agent = withSubmitInput({
       key: { agentName: "main", channelThreadKey: "webchat:test" },
       sessionId: "agent-session",
@@ -739,14 +742,17 @@ describe("Webchat API", () => {
         const terminal = new Promise<void>((resolve) => {
           finishers.push(resolve);
         });
-        return {
+        const stop = rs.fn(async () => {});
+        stops.set(turnId, stop);
+        return testTurnHandle({
           turnId,
+          interrupt: stop,
           turnContext: otelContext.active(),
           events: (async function* () {
             await terminal;
             yield { type: "result" as const, content: "" };
           })(),
-        };
+        });
       },
       subscribe: () => () => {},
       onStatusChange: () => () => {},
@@ -775,13 +781,15 @@ describe("Webchat API", () => {
           body: JSON.stringify({ text }),
         });
       expect((await app.request("/chat/turns/stop-2/interrupt", { method: "POST" })).status).toBe(
-        409,
+        202,
       );
-      expect(interrupt).not.toHaveBeenCalled();
+      expect(stops.get("stop-2")).toHaveBeenCalledWith("user-stop");
+      expect(stops.get("stop-1")).not.toHaveBeenCalled();
       expect((await app.request("/chat/turns/stop-1/interrupt", { method: "POST" })).status).toBe(
-        200,
+        202,
       );
-      expect(interrupt).toHaveBeenCalledWith("user-stop", "stop-1");
+      expect(stops.get("stop-1")).toHaveBeenCalledWith("user-stop");
+      expect(interrupt).not.toHaveBeenCalled();
     } finally {
       for (const finish of finishers) finish();
     }
@@ -790,6 +798,7 @@ describe("Webchat API", () => {
   it("takes an agent's send into a chat it starts for the guardian, as that agent's account", async () => {
     const finishers: (() => void)[] = [];
     const interrupt = rs.fn(async () => {});
+    const stopTurn = rs.fn(async () => {});
     const agent = withSubmitInput({
       key: { agentName: "main", channelThreadKey: "webchat:test" },
       sessionId: "agent-session",
@@ -799,14 +808,15 @@ describe("Webchat API", () => {
         const terminal = new Promise<void>((resolve) => {
           finishers.push(resolve);
         });
-        return {
+        return testTurnHandle({
           turnId: "task-1",
+          interrupt: stopTurn,
           turnContext: otelContext.active(),
           events: (async function* () {
             await terminal;
             yield { type: "result" as const, content: "" };
           })(),
-        };
+        });
       },
       subscribe: () => () => {},
       onStatusChange: () => () => {},
@@ -842,7 +852,8 @@ describe("Webchat API", () => {
       expect(runtime.isRunning(id)).toBe(true);
       expect(runtime.activeTurns(id)).toEqual(["task-1"]);
       await runtime.interruptTurn("task-1");
-      expect(interrupt).toHaveBeenCalledWith("user-stop", "task-1");
+      expect(stopTurn).toHaveBeenCalledWith("user-stop");
+      expect(interrupt).not.toHaveBeenCalled();
       await runtime.interruptTurn("no-such-turn");
 
       expect(await runtime.post(id, { text: "hi" }, { platform: "webchat", id: "nobody" })).toEqual(
@@ -2027,13 +2038,13 @@ describe("Webchat API", () => {
             sessionId: "agent-session",
             status: "idle",
             sendTurn() {
-              return {
+              return testTurnHandle({
                 turnId: "turn-inbound-log",
                 events: (async function* () {
                   yield { type: "result", content: "" };
                 })(),
                 turnContext: otelContext.active(),
-              };
+              });
             },
             subscribe: () => () => undefined,
             onStatusChange: () => () => undefined,
@@ -2451,13 +2462,13 @@ describe("Webchat API", () => {
         sendTurn(input: AgentTurnInput, options?: SendTurnOptions) {
           sentTurn = input;
           sentOptions = options;
-          return {
+          return testTurnHandle({
             turnId: "turn-1",
             events: (async function* () {
               yield { type: "result", content: "" };
             })(),
             turnContext: otelContext.active(),
-          };
+          });
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
@@ -2523,13 +2534,13 @@ describe("Webchat API", () => {
           status: "idle",
           sendTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
             sentOptions = options;
-            return {
+            return testTurnHandle({
               turnId: "turn-1",
               events: (async function* () {
                 yield { type: "result", content: "" };
               })(),
               turnContext: otelContext.active(),
-            };
+            });
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
@@ -2981,11 +2992,11 @@ describe("Webchat API", () => {
         sessionId: "agent-session",
         status: "idle",
         sendTurn() {
-          return {
+          return testTurnHandle({
             turnId: "turn-stream-1",
             events: script(),
             turnContext: otelContext.active(),
-          };
+          });
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
@@ -3197,13 +3208,13 @@ describe("Webchat API", () => {
         status: "idle",
         sendTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
           priorities.push((options as SubmitInputOptions | undefined)?.priority);
-          return {
+          return testTurnHandle({
             turnId: `turn-priority-${priorities.length}`,
             events: (async function* () {
               yield { type: "result", content: "ok" };
             })() as AsyncGenerator<never>,
             turnContext: otelContext.active(),
-          };
+          });
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
@@ -3678,42 +3689,43 @@ describe("Webchat API", () => {
         key: { agentName: "main", channelThreadKey: "webchat:cancel" },
         sessionId: "runtime",
         status: "running",
-        sendTurn: () => ({
-          turnId: "cancel-turn",
-          interrupt,
-          turnContext: otelContext.active(),
-          events: (async function* () {
-            yield {
-              type: "turn_start",
-              turnId: "cancel-turn",
-              sessionId: "runtime",
-              userPrompt: "work",
-            };
-            yield {
-              type: "tool_use",
-              id: "edit-1",
-              tool: "Edit",
-              input: { file_path: "test.txt" },
-            };
-            yield {
-              type: "tool_result",
-              toolUseId: "edit-1",
-              tool: "Edit",
-              output: "File changed",
-            };
-            if (tail === "partial")
-              yield { type: "text_delta", content: "Already changed the file" };
-            await gate;
-            if (tail === "result") yield { type: "result", content: "Already changed the file" };
-            if (tail === "error") yield { type: "error", error: "Actual provider failure" };
-            yield {
-              type: "turn_end",
-              turnId: "cancel-turn",
-              status: tail === "error" ? "error" : "interrupted",
-              durationMs: 10,
-            };
-          })(),
-        }),
+        sendTurn: () =>
+          testTurnHandle({
+            turnId: "cancel-turn",
+            interrupt,
+            turnContext: otelContext.active(),
+            events: (async function* () {
+              yield {
+                type: "turn_start",
+                turnId: "cancel-turn",
+                sessionId: "runtime",
+                userPrompt: "work",
+              };
+              yield {
+                type: "tool_use",
+                id: "edit-1",
+                tool: "Edit",
+                input: { file_path: "test.txt" },
+              };
+              yield {
+                type: "tool_result",
+                toolUseId: "edit-1",
+                tool: "Edit",
+                output: "File changed",
+              };
+              if (tail === "partial")
+                yield { type: "text_delta", content: "Already changed the file" };
+              await gate;
+              if (tail === "result") yield { type: "result", content: "Already changed the file" };
+              if (tail === "error") yield { type: "error", error: "Actual provider failure" };
+              yield {
+                type: "turn_end",
+                turnId: "cancel-turn",
+                status: tail === "error" ? "error" : "interrupted",
+                durationMs: 10,
+              };
+            })(),
+          }),
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
         interrupt: wrongTurnInterrupt,
@@ -3795,13 +3807,13 @@ describe("Webchat API", () => {
         status: "idle",
         sendTurn(input: AgentTurnInput) {
           sentTurn = input;
-          return {
+          return testTurnHandle({
             turnId: "turn-1",
             events: (async function* () {
               yield { type: "result", content: "" };
             })(),
             turnContext: otelContext.active(),
-          };
+          });
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
@@ -3878,13 +3890,13 @@ describe("Webchat API", () => {
         status: "idle",
         sendTurn(input: AgentTurnInput) {
           sentTurn = input;
-          return {
+          return testTurnHandle({
             turnId: "turn-1",
             events: (async function* () {
               yield { type: "result", content: "" };
             })(),
             turnContext: otelContext.active(),
-          };
+          });
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
@@ -3963,13 +3975,13 @@ describe("Webchat API", () => {
       status: "idle",
       sendTurn(input: AgentTurnInput) {
         turns.push(input);
-        return {
+        return testTurnHandle({
           turnId: `turn-${turns.length}`,
           turnContext: otelContext.active(),
           events: (async function* () {
             yield { type: "result" as const, content: "" };
           })(),
-        };
+        });
       },
       subscribe: () => () => undefined,
       onStatusChange: () => () => undefined,
@@ -4037,13 +4049,13 @@ describe("Webchat API", () => {
       status: "idle",
       sendTurn(input: AgentTurnInput) {
         turn = input;
-        return {
+        return testTurnHandle({
           turnId: "task-skill-turn",
           turnContext: otelContext.active(),
           events: (async function* () {
             yield { type: "result" as const, content: "" };
           })(),
-        };
+        });
       },
       subscribe: () => () => undefined,
       onStatusChange: () => () => undefined,
@@ -4103,11 +4115,11 @@ describe("Webchat API", () => {
           status: "idle",
           sendTurn(input: AgentTurnInput) {
             sentTurns.push(input);
-            return {
+            return testTurnHandle({
               turnId: `turn-${sentTurns.length}`,
               events: scripted() as AsyncGenerator<never>,
               turnContext: otelContext.active(),
-            };
+            });
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
@@ -5908,13 +5920,13 @@ describe("Webchat API", () => {
           sessionId: "fork-agent-session",
           status: "idle",
           sendTurn() {
-            return {
+            return testTurnHandle({
               turnId: "follow-up-turn",
               events: (async function* () {
                 yield { type: "result", content: "It fails closed." };
               })(),
               turnContext: otelContext.active(),
-            };
+            });
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
@@ -6018,13 +6030,13 @@ describe("Webchat API", () => {
           sessionId: "fork-agent-session",
           status: "idle",
           sendTurn() {
-            return {
+            return testTurnHandle({
               turnId: "follow-up-turn",
               events: (async function* () {
                 yield { type: "result", content: "Because the retry budget is per turn." };
               })(),
               turnContext: otelContext.active(),
-            };
+            });
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
@@ -6068,13 +6080,13 @@ describe("Webchat API", () => {
           sessionId: "fork-agent-session",
           status: "idle",
           sendTurn() {
-            return {
+            return testTurnHandle({
               turnId: "follow-up-turn",
               events: (async function* () {
                 yield { type: "result", content: "ok" };
               })(),
               turnContext: otelContext.active(),
-            };
+            });
           },
           subscribe: () => () => undefined,
           onStatusChange: () => () => undefined,
@@ -6941,13 +6953,13 @@ describe("Webchat API", () => {
         status: "idle",
         sendTurn(_input: AgentTurnInput, options?: { pushLevel?: string }) {
           levels.push(options?.pushLevel);
-          return {
+          return testTurnHandle({
             turnId: `turn-${levels.length}`,
             events: (async function* () {
               yield { type: "result" as const, content: "" };
             })(),
             turnContext: otelContext.active(),
-          };
+          });
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
@@ -6983,13 +6995,13 @@ describe("Webchat API", () => {
         status: "idle",
         sendTurn(_input: AgentTurnInput, options?: { pushLevel?: string }) {
           levels.push(options?.pushLevel);
-          return {
+          return testTurnHandle({
             turnId: `turn-${levels.length}`,
             events: (async function* () {
               yield { type: "result" as const, content: "" };
             })(),
             turnContext: otelContext.active(),
-          };
+          });
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
@@ -7036,13 +7048,13 @@ describe("Webchat API", () => {
         status: "idle",
         sendTurn(input: AgentTurnInput) {
           prompts.push(input.prompt);
-          return {
+          return testTurnHandle({
             turnId: `turn-${prompts.length}`,
             events: (async function* () {
               yield { type: "result" as const, content: "" };
             })(),
             turnContext: otelContext.active(),
-          };
+          });
         },
         subscribe: () => () => undefined,
         onStatusChange: () => () => undefined,
@@ -7608,10 +7620,10 @@ function withSubmitInput(fake: FakeSession): AgentSession {
       void options.onInputStatus?.({
         type: "input_status",
         inputId: input.inputId,
-        turnId: handle.turnId,
+        turnId: handle.id,
         state: "submitted",
       });
-      return { inputId: input.inputId, turnId: handle.turnId, disposition: "started" };
+      return { inputId: input.inputId, turnId: handle.id, disposition: "started" };
     },
     runForkedTurn: (): never => {
       throw new Error("fake session cannot fork");

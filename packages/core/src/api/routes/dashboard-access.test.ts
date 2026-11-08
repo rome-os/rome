@@ -79,7 +79,7 @@ describe("Dashboard-access API", () => {
     expect(await deps.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY)).toEqual({
       cloudEmailAccess: [],
       revision: 3,
-      signedIn: [],
+      visitorAccounts: {},
     });
     const getRes = await app.request("/dashboard-access");
     expect(await getRes.json()).toEqual({ cloudEmailAccess: [] });
