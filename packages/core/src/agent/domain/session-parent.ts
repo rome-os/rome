@@ -7,7 +7,9 @@
 //
 // The dashboard keeps a second copy of the same link, by its own id for the
 // session (`rome_sessions.parent_session_id`). `rootSession` walks that copy
-// and `walkToRoot` walks the string. Both find the same root session.
+// and `walkToRoot` walks the string. Both find the same root session, except
+// for a fork promoted to a chat: the dashboard then holds it as a chat, its
+// own root, while its string still leads to the chat it was forked from.
 
 import { v4 as uuidv4 } from "uuid";
 import type { SessionId } from "./session.js";
