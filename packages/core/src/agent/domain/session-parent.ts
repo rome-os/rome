@@ -12,6 +12,7 @@
 // own root, while its string still leads to the chat it was forked from.
 
 import { v4 as uuidv4 } from "uuid";
+import type { DashboardSessions } from "./dashboard-sessions.js";
 import type { SessionId } from "./session.js";
 import type { SessionRecordId } from "./subagent.js";
 
@@ -74,16 +75,6 @@ export function parentTurnSession(
   return type === "subagent" || type === "fork" ? parentSessionId : null;
 }
 
-/** The dashboard's sessions, by the dashboard's id for each session. */
-export interface DashboardSessions {
-  /**
-   * The parent turn's session of the session `id`, by the dashboard's id.
-   * Null when the session is neither a subagent's nor a fork's, or names no
-   * parent. Undefined when the dashboard has no session with the id.
-   */
-  parentSession(id: SessionRecordId): Promise<SessionRecordId | null | undefined>;
-}
-
 /** How many parents a walk to the root reads before it stops. A subagent can
  *  call again and a fork can be forked, so a chain deeper than this, or a
  *  cycle, is treated as unreachable. */
@@ -97,7 +88,7 @@ export const MAX_ANCESTORS = 16;
  * Null when the dashboard has no session with the id.
  */
 export async function rootSession(
-  sessions: DashboardSessions,
+  sessions: Pick<DashboardSessions, "parentSession">,
   id: SessionRecordId,
 ): Promise<SessionRecordId | null> {
   let current = id;

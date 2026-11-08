@@ -155,7 +155,8 @@ import {
   readAnswerShape,
   TurnUsageReporter,
   ChatSessionSettings,
-  DrizzleDashboardSessions,
+  createSubagentCalls,
+  WebChatDashboardSessions,
   requireAgent,
   rootSession,
   TurnListeners,
@@ -256,6 +257,7 @@ import {
 import { createActiveSubagentRegistry } from "./core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry.js";
 import { createSubagentExecutionService } from "./core/subagent-execution.js";
+import { subagentLiveTurns, subagentTurnLog } from "./core/subagent-call-ports.js";
 import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/core-required.js";
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
 import { preserveRecapOptOutAtBoot } from "./apps/recap-upgrade.js";
@@ -1035,8 +1037,14 @@ async function main() {
     });
   }
 
-  const activeSubagentRegistry = createActiveSubagentRegistry();
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
+  const dashboardSessions = new WebChatDashboardSessions(webchatRepo);
+  const subagentCalls = createSubagentCalls({
+    dashboard: dashboardSessions,
+    turnLog: subagentTurnLog(webchatRepo),
+    liveTurns: subagentLiveTurns(agentTurnStreamRegistry),
+  });
+  const activeSubagentRegistry = createActiveSubagentRegistry(subagentCalls);
   const chatStop: ChatStopHandler = (input) =>
     stopActiveConversationTurn(input, {
       turns: agentTurnStreamRegistry,
@@ -1049,16 +1057,14 @@ async function main() {
       },
     });
   const subagentExecutionService = createSubagentExecutionService({
+    calls: subagentCalls,
     webchatRepo,
-    activeRegistry: activeSubagentRegistry,
-    turnStreams: agentTurnStreamRegistry,
   });
   const romeCloudAccess = (): RomeCloudAccess | null => {
     const credentialId = instanceCredentialId();
     const origin = getRomeCloudOrigin();
     return credentialId && origin ? { credentialId, bearer: cloudBearer, origin } : null;
   };
-  const dashboardSessions = new DrizzleDashboardSessions(db);
   const usageAttribution = new UsageAttributionResolver(
     {
       getSession: (id) => webchatRepo.getSession(id),
@@ -2086,7 +2092,7 @@ async function main() {
       sessionOpeningFor: openingFor,
       conversationTitleGenerator,
       agentRunner,
-      activeSubagentRegistry,
+      subagentCalls,
       agentTurnStreamRegistry,
       modelAccounts,
       codexAccountService,

@@ -162,14 +162,9 @@ export type {
   RomeTools,
 } from "./domain/rome-tools.js";
 export {
-  refuseResume,
-  storedAgentName,
-  SubagentOutcomeReader,
   subagentRequest,
-  subagentSessionName,
   subagentToolName,
   type SessionRecordId,
-  type StoredSubagentSession,
   type Subagent,
   type SubagentOutcome,
   type SubagentRequest,
@@ -183,10 +178,26 @@ export {
   storeForkParent,
   storeSubagentParent,
   walkToRoot,
-  type DashboardSessions,
   type StoredRoot,
 } from "./domain/session-parent.js";
-export { DrizzleDashboardSessions } from "./infrastructure/drizzle-dashboard-sessions.js";
+export type {
+  DashboardSession,
+  DashboardSessions,
+  NewSubagentSession,
+} from "./domain/dashboard-sessions.js";
+export { WebChatDashboardSessions } from "./infrastructure/webchat-dashboard-sessions.js";
+export {
+  createSubagentCalls,
+  type CallingTurn,
+  type LiveTurns,
+  type SessionPlace,
+  type SubagentCall,
+  type SubagentCallKey,
+  type SubagentCalls,
+  type SubagentSession,
+  type SubagentSessions,
+  type SubagentTurnLog,
+} from "./application/subagent-calls.js";
 export { createRomeTools } from "./application/rome-tools.js";
 export { romeToolRunner } from "./application/rome-tool-runner.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";

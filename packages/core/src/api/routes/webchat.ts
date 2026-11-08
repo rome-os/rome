@@ -3946,10 +3946,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               stream.traceEvents.push(msg);
               emitTraceEvent(stream, msg);
               if (msg.type === "subagent_result") {
-                const parentRef = { sessionId, turnId, toolUseId: msg.toolUseId };
-                if (deps.activeSubagentRegistry.getLinkByParent(parentRef)) {
+                const call = { dashboardSessionId: sessionId, turnId, toolUseId: msg.toolUseId };
+                if (deps.subagentCalls.forget(call)) {
                   await safePersistTrace(stream, "subagent result");
-                  deps.activeSubagentRegistry.clearByParent(parentRef);
                 }
               }
               if (msg.type === "result") resultContent = msg.content;
