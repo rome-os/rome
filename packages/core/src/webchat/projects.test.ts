@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 
 import {
   getWebchatProjectDisplayName,
+  getWebchatProjectsRoot,
   normalizeSelectedWebchatProjectPath,
   normalizeWebchatProjectPath,
   resolveAgentProjectPath,

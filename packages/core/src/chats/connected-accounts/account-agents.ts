@@ -3,6 +3,7 @@
 // Vocabulary: docs/domains/chats.md#connected-account. Invariants:
 // docs/architecture/channels.md#an-accounts-agent.
 
+import type { AgentCatalog } from "../../agent/index.js";
 import type { Account, ChatSettingsSnapshot } from "@rome-os/app-runtime";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import type { AccountLink } from "@rome/api-types/account-agents";
@@ -49,12 +50,14 @@ function storedAgent(
  */
 export function readAccountAgent(
   sources: AccountAgents,
-  agents: { has(name: string): boolean },
+  agents: Pick<AgentCatalog, "find">,
   connectionId: string,
 ): string | null | undefined {
   const { takesAgent, agent } = storedAgent(sources, connectionId);
   if (!takesAgent) return undefined;
-  return agent !== null && (isCoreMainAgentId(agent) || agents.has(agent)) ? agent : null;
+  return agent !== null && (isCoreMainAgentId(agent) || agents.find(agent) !== undefined)
+    ? agent
+    : null;
 }
 
 /**
@@ -144,7 +147,7 @@ export class AccountListening implements InboundListening {
  */
 export function accountAgentResolver(
   sources: AccountAgents,
-  agents: { has(name: string): boolean },
+  agents: Pick<AgentCatalog, "find">,
 ): (connectionId: string) => string | null | undefined {
   const silent = new Map<string, string | null>();
   return (connectionId) => {

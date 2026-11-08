@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import type { PersonMappingRepository } from "@rome-os/app-runtime";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { PeopleRepository } from "../db/repositories/people.js";
 import { appPersonMapping } from "./app-person-mapping.js";
 

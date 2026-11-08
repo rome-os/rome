@@ -39,9 +39,14 @@ rs.mock("../../lib/oauth-providers.js", () => ({
   isOAuthProvider: (value: string) => ["google", "github", "slack"].includes(value),
   getEnabledOAuthProviders: () => ["github", "slack", "google"],
   isEnabledOAuthProvider: () => true,
+  OAUTH_PROVIDER_DESCRIPTORS: {
+    google: { label: "Google", description: "" },
+    github: { label: "GitHub", description: "" },
+    slack: { label: "Slack", description: "" },
+  },
 }));
 
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { importProviderBundle } from "../../connections/providers-import.js";

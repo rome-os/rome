@@ -67,6 +67,42 @@ describe("Remix login resume", () => {
     await waitFor(() => expect(screen.getByRole("status").textContent).toBe(path));
   });
 
+  it("resumes from where a first Cloud sign-in lands, the Concierge's main chat", async () => {
+    const first = render(
+      <MemoryRouter initialEntries={[path]}>
+        <Host />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Login" }));
+    first.unmount();
+    auth.bootstrap.phase = "ready";
+    render(
+      <MemoryRouter initialEntries={["/message"]}>
+        <Host />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(path));
+    expect(sessionStorage.getItem("rome:pending-app-remix")).toBeNull();
+  });
+
+  it("drops the saved intent once the guardian is somewhere else", async () => {
+    const first = render(
+      <MemoryRouter initialEntries={[path]}>
+        <Host />
+      </MemoryRouter>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Login" }));
+    first.unmount();
+    auth.bootstrap.phase = "ready";
+    render(
+      <MemoryRouter initialEntries={["/settings"]}>
+        <Host />
+      </MemoryRouter>,
+    );
+    await waitFor(() => expect(sessionStorage.getItem("rome:pending-app-remix")).toBeNull());
+    expect(screen.getByRole("status").textContent).toBe("/settings");
+  });
+
   it.each([
     { intent, expiresAt: 1 },
     { intent: null, expiresAt: Date.now() + 60000 },

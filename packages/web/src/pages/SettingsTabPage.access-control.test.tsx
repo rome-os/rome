@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "@/i18n";
+import { toast } from "sonner";
 import SettingsPage from "./SettingsTabPage";
 
 beforeAll(async () => {
@@ -20,7 +21,11 @@ function ok(json: unknown): Response {
   return { ok: true, status: 200, json: async () => structuredClone(json) } as Response;
 }
 
-function mockSettingsBackend(options?: { cloudEmailAccess?: string[]; failPut?: boolean }) {
+function mockSettingsBackend(options?: {
+  cloudEmailAccess?: string[];
+  failPut?: boolean;
+  putError?: { error: string; limit: number };
+}) {
   const putBodies: unknown[] = [];
   rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
@@ -34,6 +39,10 @@ function mockSettingsBackend(options?: { cloudEmailAccess?: string[]; failPut?: 
     if (url === "/api/dashboard-access") {
       if (init?.method === "PUT") {
         putBodies.push(JSON.parse(String(init.body)));
+        if (options?.putError) {
+          const body = options.putError;
+          return { ok: false, status: 400, json: async () => body } as Response;
+        }
         if (options?.failPut) {
           return { ok: false, status: 500, json: async () => ({ error: "boom" }) } as Response;
         }
@@ -184,5 +193,21 @@ describe("SettingsPage Access Control section", () => {
     await waitFor(() => expect(screen.queryByText("lin@example.com")).toBeNull());
     expect(screen.getByText("ada@example.com")).toBeTruthy();
     expect(screen.getByText("1 account")).toBeTruthy();
+  });
+
+  it.each([
+    [{ error: "too_many_emails", limit: 500 }, "Up to 500 emails allowed"],
+    [{ error: "email_too_long", limit: 320 }, "Email longer than 320 characters"],
+  ])("names the limit a refused save broke (%o)", async (putError, message) => {
+    const toastError = rs.spyOn(toast, "error");
+    mockSettingsBackend({ putError });
+    renderAdvancedSettings();
+    const user = userEvent.setup();
+
+    const input = await screen.findByLabelText("Add email address");
+    await user.type(input, "lin@example.com{Enter}");
+
+    await waitFor(() => expect(toastError).toHaveBeenCalledWith(message));
+    await waitFor(() => expect(screen.queryByText("lin@example.com")).toBeNull());
   });
 });

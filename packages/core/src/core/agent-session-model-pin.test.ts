@@ -1,16 +1,22 @@
+import { romeToolPorts } from "./rome-tool-ports.js";
+import { createLogger } from "../logger.js";
+import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
-import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
+import { createTestDb, type TestDb, createActionEngineRepos } from "../test/db.js";
 import type { AgentEvent } from "../types.js";
-import { AgentLoader } from "./agent-loader.js";
+import { AgentLoader } from "../agent/index.js";
 import {
+  AppTurnHooks,
+  TurnListeners,
   type AgentTurnFailedBeforeStart,
-  createAgentLifecycleDispatcher,
-} from "./agent-lifecycle.js";
+  type TurnLifecycle,
+} from "../agent/index.js";
 import {
   createSessionFromRun,
   type ModelProvider,
@@ -18,22 +24,16 @@ import {
   type ModelSessionParams,
   type ProviderId,
 } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
-import { CapabilityDiscovery } from "./capability-discovery.js";
-import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
+import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
+import { createModelResolver } from "../agent/index.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
-import { SkillCatalog } from "./skill-catalog.js";
+import { SkillLoader } from "../agent/index.js";
 import {
   createEmptyLegacyArtifactBindings,
   type ArtifactIdentityContext,
 } from "../apps/artifact-id.js";
-import { testChannelSurface } from "../test/channel-surface.js";
-import {
-  availabilityOf,
-  fakeAvailability,
-  RESTRICTED_PLAN,
-} from "../test/kit/model-availability.js";
+import { reportOf, fakeAccounts, loginsOn, RESTRICTED_PLAN } from "../test/kit/model-accounts.js";
 
 const AGENT = "pinned_agent";
 const MODEL = "gpt-5.3-codex-spark";
@@ -74,8 +74,8 @@ function createProvider(id: ProviderId) {
 
 function healthyState() {
   return {
-    openai: availabilityOf("available"),
-    anthropic: availabilityOf("available"),
+    openai: reportOf("available"),
+    anthropic: reportOf("available"),
   };
 }
 
@@ -106,30 +106,38 @@ describe("agent model pins through AgentSessionManager", () => {
   function createManager(
     isSubagent = false,
     useRomeCredits: boolean | (() => boolean) = false,
-    lifecycleDispatcher = createAgentLifecycleDispatcher(),
+    turnLifecycle: TurnLifecycle = new TurnListeners(new AppTurnHooks()),
   ): AgentSessionManager {
     const actionRegistry = new ActionRegistryImpl();
-    const promptBuilder = new PromptBuilder();
-    rs.spyOn(promptBuilder, "build").mockReturnValue("Model pin test prompt");
+    const systemPrompts = createTestSystemPrompts();
+    rs.spyOn(systemPrompts, "build").mockReturnValue("Model pin test prompt");
     const manager = createAgentSessionManager(
       {
         agentLoader: loader,
         sessionRepository,
-        promptBuilder,
-        actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+        systemPrompts,
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
-          availability: fakeAvailability(() => state),
-          romeCreditsPayer: {
-            isUsingRomeCredits: () =>
-              typeof useRomeCredits === "function" ? useRomeCredits() : useRomeCredits,
+          accounts: fakeAccounts(() => state),
+          codexLogins: {
+            login: () =>
+              loginsOn(
+                typeof useRomeCredits === "function" ? useRomeCredits() : useRomeCredits,
+              ).login(),
           },
         }),
-        capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher,
-        channelSurface: testChannelSurface,
+        networkMcpServers: () => ({}),
+        skillCatalog: new SkillLoader(artifactIdentity),
+        turnLifecycle,
+        readAnswerShape,
+        sessionTracing: romeSessionTracing,
+        turnUsage: new TurnUsageReporter(),
+        folders: agentFolders(),
+        log: createLogger("agent-session"),
+        ...romeToolPorts({
+          actionRegistry,
+          actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+        }),
       },
       { keepAliveAcrossTurns: true, isSubagent },
     );
@@ -157,8 +165,8 @@ describe("agent model pins through AgentSessionManager", () => {
   });
 
   it("loads a no-tier YAML pin and uses it on the first and later turns", async () => {
-    expect(loader.get(AGENT)).toMatchObject({ providerId: "openai", modelId: MODEL });
-    expect(loader.get(AGENT).tier).toBeUndefined();
+    expect(loader.find(AGENT)?.definition).toMatchObject({ providerId: "openai", modelId: MODEL });
+    expect(loader.find(AGENT)?.definition.tier).toBeUndefined();
     const session = await createManager().acquire(key, { workingDir: directory });
     await collect(session.sendTurn({ prompt: "first" }).events);
     await collect(session.sendTurn({ prompt: "second" }).events);
@@ -175,9 +183,9 @@ describe("agent model pins through AgentSessionManager", () => {
 
   it("pins a credit-funded session to the model ChatGPT would run", async () => {
     await writeConfig({ provider: undefined, modelId: undefined, tier: "large" });
-    // No account authorized: credits pay, and serve the frontier models.
-    state.openai = availabilityOf("unauthorized");
-    state.anthropic = availabilityOf("unauthorized");
+    // No account authorized: Rome credits are the login, and serve the frontier models.
+    state.openai = reportOf("unauthorized");
+    state.anthropic = reportOf("unauthorized");
     let usingRomeCredits = true;
     const session = await createManager(false, () => usingRomeCredits).acquire(key, {
       workingDir: directory,
@@ -188,8 +196,8 @@ describe("agent model pins through AgentSessionManager", () => {
       model: "gpt-6.1-sol",
     });
 
-    // Connecting ChatGPT changes only who pays: the pinned model keeps running.
-    state.openai = availabilityOf("available");
+    // Connecting ChatGPT changes only the login: the pinned model keeps running.
+    state.openai = reportOf("available");
     usingRomeCredits = false;
     await collect(session.sendTurn({ prompt: "guardian" }).events);
 
@@ -204,7 +212,7 @@ describe("agent model pins through AgentSessionManager", () => {
     await collect(first.sendTurn({ prompt: "guardian" }).events);
     await firstManager.shutdown();
 
-    state.openai = availabilityOf("unauthorized");
+    state.openai = reportOf("unauthorized");
     const resumed = await createManager(false, true).acquire(key, { workingDir: directory });
     await collect(resumed.sendTurn({ prompt: "credits" }).events);
 
@@ -255,7 +263,7 @@ describe("agent model pins through AgentSessionManager", () => {
   });
 
   it("fails closed on a disconnected pinned provider even when another provider is healthy", async () => {
-    state.openai = availabilityOf("unauthorized");
+    state.openai = reportOf("unauthorized");
     await expect(createManager().acquire(key, { workingDir: directory })).rejects.toMatchObject({
       code: "model_provider_unavailable",
       provider: "openai",
@@ -268,7 +276,7 @@ describe("agent model pins through AgentSessionManager", () => {
   it("fails a later turn on quota exhaustion and recovers on the same model", async () => {
     const session = await createManager().acquire(key, { workingDir: directory });
     await collect(session.sendTurn({ prompt: "first" }).events);
-    state.openai = availabilityOf("usage_limit_reached");
+    state.openai = reportOf("usage_limit_reached");
     const failed = await collect(session.sendTurn({ prompt: "blocked" }).events);
     expect(failed).toContainEqual(
       expect.objectContaining({
@@ -281,23 +289,25 @@ describe("agent model pins through AgentSessionManager", () => {
     expect(openai.calls).toHaveLength(1);
     expect(anthropic.openSession).not.toHaveBeenCalled();
 
-    state.openai = availabilityOf("available");
+    state.openai = reportOf("available");
     await collect(session.sendTurn({ prompt: "retry" }).events);
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
   });
 
   it("tells in-process listeners once of a later turn that fails before it starts", async () => {
-    const lifecycle = createAgentLifecycleDispatcher();
+    const lifecycle = new TurnListeners(new AppTurnHooks());
     const finished: string[] = [];
     const failedBeforeStart: AgentTurnFailedBeforeStart[] = [];
-    lifecycle.onFinished((event) => finished.push(event.turn.turnId));
-    lifecycle.onFailedBeforeStart((event) => failedBeforeStart.push(event));
+    lifecycle.listen({
+      ended: (event) => finished.push(event.turn.turnId),
+      couldNotStart: (event) => failedBeforeStart.push(event),
+    });
     const session = await createManager(false, false, lifecycle).acquire(key, {
       workingDir: directory,
     });
     const first = session.sendTurn({ prompt: "first" });
     await collect(first.events);
-    state.openai = availabilityOf("usage_limit_reached");
+    state.openai = reportOf("usage_limit_reached");
     const blocked = session.sendTurn({ prompt: "blocked" });
     await collect(blocked.events);
 
@@ -312,7 +322,7 @@ describe("agent model pins through AgentSessionManager", () => {
 
   it("enforces known model entitlements instead of substituting a tier model", async () => {
     await writeConfig({ modelId: "gpt-6-astra" });
-    state.openai = availabilityOf("available", RESTRICTED_PLAN);
+    state.openai = reportOf("available", RESTRICTED_PLAN);
     await expect(createManager().acquire(key, { workingDir: directory })).rejects.toMatchObject({
       code: "model_unavailable",
       provider: "openai",

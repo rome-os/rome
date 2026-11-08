@@ -1,8 +1,20 @@
+import { romeToolPorts } from "./rome-tool-ports.js";
+import { createLogger } from "../logger.js";
+import { sessionOpeningFor } from "./session-opening.js";
+import { chatPromptFacts } from "./chat-prompt-facts.js";
+import type { PromptFacts } from "../agent/index.js";
+import {
+  ChatSessionSettings,
+  readAnswerShape,
+  romeSessionTracing,
+  TurnUsageReporter,
+} from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
-import { AgentLoader } from "./agent-loader.js";
+import { AgentLoader, createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
 import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { ActionEngine } from "../actions/engine.js";
@@ -17,11 +29,11 @@ import {
 import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { romeAgentTraceBlocks, sessions } from "../db/schema.js";
-import type { RecordedConversation } from "./session-conversation.js";
+import type { DrizzleDb } from "../db/index.js";
+import { openedInChat } from "./session-conversation.js";
 import type { ForkRunParams } from "./types.js";
-import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
+import { subagentLiveTurns, subagentSessions, subagentTurnLog } from "./subagent-call-ports.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
-import { createSubagentExecutionService } from "./subagent-execution.js";
 import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
 
 const recordMetrics = rs.hoisted(() => rs.fn());
@@ -54,14 +66,14 @@ rs.mock("../paths.js", () => ({
   ...pathsModule,
   getProjectRoot: rs.fn(() => "/tmp/agent-runner-test"),
   getDefaultAgentWorkingDir: rs.fn(() => "/tmp/default-project"),
-  ensureDefaultAgentWorkingDir: rs.fn(async () => "/tmp/default-project"),
   getProfileDir: rs.fn(() => "/tmp/agent-runner-test/profile"),
   getProfileMemoryDir: rs.fn(() => "/tmp/agent-runner-test/memory"),
   getProfileInstalledAppsDir: rs.fn(() => "/tmp/agent-runner-test/installed-apps"),
 }));
 
-import { PromptBuilder } from "./prompt-builder.js";
-import { createSessionFromRun, createNullModelSession } from "./agent-runner.js";
+import type { SystemPrompts } from "../agent/index.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
+import { createSessionFromRun } from "./agent-runner.js";
 import type {
   ModelProvider,
   ModelSession,
@@ -69,40 +81,43 @@ import type {
   ProviderId,
   ThreadStart,
 } from "./agent-runner.js";
-import { createModelResolver, type ModelResolver } from "./model-resolver.js";
+import {
+  createModelResolver,
+  createTierModelsSetting,
+  type ModelResolver,
+  subagentToolName,
+} from "../agent/index.js";
 import {
   createAgentSessionManager,
   type AgentSession,
+  type AgentSessionInit,
   type AgentSessionManager,
   type AgentTurnHandle,
-  subagentToolName,
-} from "./agent-session.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+} from "../agent/index.js";
 import { createTurnMiddlewareChain, type TurnMiddlewareChain } from "./turn-middleware.js";
-import { CapabilityDiscovery } from "./capability-discovery.js";
-import { SkillCatalog } from "./skill-catalog.js";
-import type { AgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import { SkillLoader } from "../agent/index.js";
+import { AppTurnHooks, TurnListeners, type TurnLifecycle } from "../agent/index.js";
 import type {
   AgentTurnFinishedEvent,
   AgentTurnStartedEvent,
   ProviderSessionResetPolicy,
   TurnMiddlewareContext,
 } from "@rome-os/app-runtime";
-import type { TurnUsageFacts } from "../usage/recorder.js";
+import type { TurnUsageFacts } from "../agent/index.js";
 import { testChannelSurface } from "../test/channel-surface.js";
 import type { TurnLinks, UnseenLine } from "../sessions/turn-links.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import {
-  availabilityOf,
+  reportOf,
   bothAvailable,
-  fakeAvailability,
+  fakeAccounts,
   RESTRICTED_PLAN,
-} from "../test/kit/model-availability.js";
+} from "../test/kit/model-accounts.js";
 
 function createTestModelResolver({ providers }: { providers: ModelProvider[] }) {
   return createModelResolver({
     providers,
-    availability: fakeAvailability(bothAvailable()),
+    accounts: fakeAccounts(bothAvailable()),
   });
 }
 
@@ -136,7 +151,7 @@ describe("AgentRunner", () => {
   let agentLoader: AgentLoader;
   let artifactIdentity: ArtifactIdentityContext;
   let sessionRepository: SessionRepository;
-  let promptBuilder: PromptBuilder;
+  let systemPrompts: SystemPrompts;
   let actionRegistry: ActionRegistryImpl;
   let actionEngine: ActionEngine;
   let mockProvider: MockModelProvider;
@@ -152,7 +167,7 @@ describe("AgentRunner", () => {
     await agentLoader.loadAll(FIXTURES_DIR);
 
     sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
-    promptBuilder = new PromptBuilder();
+    systemPrompts = createTestSystemPrompts();
     actionRegistry = new ActionRegistryImpl();
     actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
     mockProvider = new MockModelProvider();
@@ -174,47 +189,6 @@ describe("AgentRunner", () => {
         },
       }),
     ).toThrow("Branching a thread is not supported by this provider");
-  });
-
-  it("code-backed null session parks until close and never resumes a provider", async () => {
-    const session = createNullModelSession({
-      config: { model: "code-backed", systemPrompt: "unused", builtinTools: [] },
-      tools: noRomeTools(),
-      thread: { kind: "new" },
-    });
-    expect(session.providerId).toBe("mock");
-    expect(session.modelThreadId).toBeUndefined();
-
-    // The events stream parks (no provider query, nothing to resume/error) until
-    // close() ends it — proven by racing the iterator against a timer.
-    const iterator = session.events[Symbol.asyncIterator]();
-    const raced = await Promise.race([
-      iterator.next(),
-      new Promise<"parked">((resolve) => setTimeout(() => resolve("parked"), 20)),
-    ]);
-    expect(raced).toBe("parked");
-
-    await session.close();
-    expect(await iterator.next()).toEqual({ value: undefined, done: true });
-  });
-
-  it("code-backed null session terminates gracefully if sendUserInput is ever reached", async () => {
-    // A correctly-configured code-backed agent short-circuits via middleware, so
-    // sendUserInput is never called. If it is (no middleware matched), the turn
-    // must terminate rather than hang: a fallback text + error land on events.
-    const session = createNullModelSession({
-      config: { model: "code-backed", systemPrompt: "unused", builtinTools: [] },
-      tools: noRomeTools(),
-      thread: { kind: "new" },
-    });
-    const drained: ModelSessionEvent[] = [];
-    const collector = (async () => {
-      for await (const msg of session.events) drained.push(msg);
-    })();
-    await session.sendUserInput({ text: "anything" });
-    await session.close();
-    await collector;
-    expect(drained.map((m) => m.type)).toEqual(["text", "error"]);
   });
 
   it("reuses a code-backed session across acquires without resolving a provider", async () => {
@@ -772,13 +746,23 @@ describe("AgentRunner", () => {
   });
 
   describe("a resumed session whose caller names no conversation", () => {
-    function resumedSession(recorded?: RecordedConversation) {
+    async function resumedSession(db: DrizzleDb, chatId: string) {
+      // The chat that has the session is read from the session's stored row.
+      const now = new Date();
+      await db.insert(sessions).values({
+        id: "agent-session",
+        agentName: "main",
+        channelThreadKey: "telegram:t1",
+        chatId,
+        createdAt: now,
+        lastActiveAt: now,
+        status: "active",
+      });
       type TurnRef = { romeSessionId?: string; romeSessionType?: string };
       const turns: TurnRef[] = [];
       const session = {
         key: { agentName: "main", channelThreadKey: "telegram:t1" },
         sessionId: "agent-session",
-        conversation: recorded && { origin: "recorded" as const, ...recorded },
         status: "idle" as const,
         sendTurn: rs.fn((input: { prompt: string }, options?: TurnRef) => {
           turns.push({
@@ -811,7 +795,7 @@ describe("AgentRunner", () => {
         peek: rs.fn(),
         shutdown: rs.fn(async () => undefined),
       } as unknown as AgentSessionManager;
-      return { manager, turns };
+      return { manager, turns, session };
     }
 
     it("leaves a recorded channel conversation to the inbox", async () => {
@@ -824,11 +808,7 @@ describe("AgentRunner", () => {
           name: "Telegram thread",
           agentName: null,
         });
-        const { manager, turns } = resumedSession({
-          id: "channel:telegram:t1",
-          name: "Telegram thread",
-          type: "channel",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "channel:telegram:t1");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -853,11 +833,7 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -882,11 +858,7 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -921,11 +893,7 @@ describe("AgentRunner", () => {
           name: "researcher: Telegram thread",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Telegram thread",
-          type: "subagent",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         // A backend turn delivers its reply to the thread and records it in the
@@ -958,11 +926,7 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         // A caller that keeps its own transcript keeps it for its channel,
@@ -995,11 +959,7 @@ describe("AgentRunner", () => {
           name: "Side chat",
           agentName: "main",
         });
-        const { manager, turns } = resumedSession({
-          id: "side-chat",
-          name: "Side chat",
-          type: "fork",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "side-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -1033,11 +993,7 @@ describe("AgentRunner", () => {
       try {
         const repo = new ChatsWebChatRepository(testDb.db);
         await repo.createSession("user-chat", "User chat");
-        const { manager, turns } = resumedSession({
-          id: "user-chat",
-          name: "User chat",
-          type: "webchat",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "user-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -1051,12 +1007,33 @@ describe("AgentRunner", () => {
       }
     });
 
+    it("records into the chat an open session's opener named, until it is reopened", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new ChatsWebChatRepository(testDb.db);
+        await repo.createSession("user-chat", "User chat");
+        const { manager, turns, session } = await resumedSession(testDb.db, "user-chat");
+        // The session is still open from a caller that named the chat. A
+        // reopened one is the case above, which leaves the chat alone.
+        await openedInChat(undefined, session, "user-chat");
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        );
+
+        expect(turns[0]?.romeSessionId).toBe("user-chat");
+      } finally {
+        testDb.close();
+      }
+    });
+
     it("does not recreate a recorded conversation that was deleted", async () => {
       const testDb = createTestDb();
       try {
         const repo = new ChatsWebChatRepository(testDb.db);
-        // The lookup at open found no conversation, so none is recorded.
-        const { manager, turns } = resumedSession();
+        // The session's row still names the chat, which no longer exists.
+        const { manager, turns } = await resumedSession(testDb.db, "deleted-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -1072,16 +1049,25 @@ describe("AgentRunner", () => {
     });
   });
 
-  it("links a fork to the conversation its source serves when no thread names one", async () => {
+  it("links a fork to the chat that has its source session when no thread names one", async () => {
     const testDb = createTestDb();
     try {
       const repo = new ChatsWebChatRepository(testDb.db);
       await repo.createSession("stored-chat", "Stored chat");
+      const now = new Date();
+      await testDb.db.insert(sessions).values({
+        id: "source-session",
+        agentName: "main",
+        channelThreadKey: "webchat:stored-chat",
+        chatId: "stored-chat",
+        createdAt: now,
+        lastActiveAt: now,
+        status: "active",
+      });
 
       const source = {
         key: { agentName: "main", channelThreadKey: "webchat:stored-chat" },
         sessionId: "source-session",
-        conversation: { origin: "named" as const, id: "stored-chat" },
         status: "idle" as const,
         sendTurn: rs.fn(),
         async *runForkedTurn(input: { prompt: string }) {
@@ -1121,6 +1107,53 @@ describe("AgentRunner", () => {
         name: "recap: Stored chat",
         parentSessionId: "stored-chat",
       });
+    } finally {
+      testDb.close();
+    }
+  });
+
+  it("records the chat that has a stored fork when its consumer stops early", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      const recordSessionInChat = rs.spyOn(repo, "recordSessionInChat");
+      const source = {
+        key: { agentName: "main", channelThreadKey: "webchat:stored-chat" },
+        sessionId: "source-session",
+        status: "idle" as const,
+        sendTurn: rs.fn(),
+        async *runForkedTurn(input: { prompt: string }) {
+          yield {
+            type: "turn_start",
+            turnId: "fork-turn",
+            sessionId: "fork-session",
+            userPrompt: input.prompt,
+            agent: "main",
+          } as const;
+          yield { type: "result", content: "Fork summary", agent: "main" } as const;
+        },
+        subscribe: rs.fn(() => () => undefined),
+        onStatusChange: rs.fn(() => () => undefined),
+        interrupt: rs.fn(async () => undefined),
+        close: rs.fn(async () => undefined),
+      };
+      const manager = {
+        acquire: rs.fn(),
+        peek: rs.fn(() => source),
+        shutdown: rs.fn(async () => undefined),
+      } as unknown as AgentSessionManager;
+      const runner = new AgentRunner(manager, agentLoader, repo);
+
+      for await (const message of runner.runForked({
+        agentName: "main",
+        sourceSessionId: "source-session",
+        channelThreadKey: "webchat:stored-chat",
+        prompt: "summarize",
+      })) {
+        if (message.type === "turn_start") break;
+      }
+
+      expect(recordSessionInChat).toHaveBeenCalledWith("fork-session", "fork-session");
     } finally {
       testDb.close();
     }
@@ -1788,18 +1821,11 @@ describe("AgentRunner", () => {
     });
 
     it("preserves App Store attribution on isolated forks", async () => {
-      const getRecord = agentLoader.getRecord.bind(agentLoader);
-      const recordSpy = rs.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
-        const record = getRecord(name);
-        if (record.config.name !== "test-main") return record;
-        return {
-          ...record,
-          metadata: {
-            ...record.metadata,
-            ownerType: "app",
-            ownerId: "test-app",
-          },
-        };
+      const find = agentLoader.find.bind(agentLoader);
+      const recordSpy = rs.spyOn(agentLoader, "find").mockImplementation((name) => {
+        const agent = find(name);
+        if (agent?.localName !== "test-main") return agent;
+        return { ...agent, ownerType: "app", ownerId: "test-app" };
       });
 
       try {
@@ -2113,48 +2139,6 @@ describe("AgentRunner", () => {
       expect((actionResult as { message: string }).message).toContain("Pick a time slot");
     });
 
-    it("takes the non-interactive fallback for action results when opened detached", async () => {
-      // A side chat's follow-up runs on a `webchat:` key, so the surface check
-      // would otherwise say it can mount UI — but it renders in the read-only
-      // Sessions detail view, where nobody can answer a card.
-      registerDemoAction(async () => ({
-        status: "pending_interaction",
-        interaction: {
-          appId: "demo-app",
-          promptText: "Pick a time slot",
-          render: { kind: "inline", componentId: "slot-picker" },
-        },
-      }));
-
-      let actionResult: unknown;
-      const runImpl = async function* (
-        params: import("./agent-runner.js").ModelRunParams,
-      ): AsyncIterable<AgentEvent> {
-        actionResult = await executeActionTool(params.tools, "demo_action", {});
-        yield { type: "result", content: "done" };
-      };
-      const provider: ModelProvider = {
-        id: "mock",
-        builtinTools: new Set<string>(),
-        openSession: makeOpenSessionFromRun("mock", runImpl),
-      };
-      const manager = createAgentSessionManager(
-        managerDeps(createTestModelResolver({ providers: [provider] })),
-      );
-      const session = await manager.acquire(
-        { agentName: "test-main", channelThreadKey: "webchat:detached-follow-up" },
-        { interactiveSurfaceDetached: true },
-      );
-      await collectMessages(session.sendTurn({ prompt: "continue" }).events);
-
-      expect(actionResult).toMatchObject({
-        message: expect.stringContaining("cannot render an interactive UI"),
-      });
-      expect((actionResult as { pendingInteraction?: boolean }).pendingInteraction).toBeUndefined();
-
-      await session.close("shutdown");
-    });
-
     it("exact fork subagents run in fresh fork-owned child sessions", async () => {
       const provider = withForkSupport(
         new MockModelProvider([
@@ -2222,76 +2206,76 @@ describe("AgentRunner", () => {
     });
   });
 
-  function createLifecycleRecorder(): AgentLifecycleDispatcher & {
-    started: AgentTurnStartedEvent[];
-    finished: AgentTurnFinishedEvent[];
+  function createLifecycleRecorder(): TurnLifecycle & {
+    startedEvents: AgentTurnStartedEvent[];
+    finishedEvents: AgentTurnFinishedEvent[];
   } {
-    const started: AgentTurnStartedEvent[] = [];
-    const finished: AgentTurnFinishedEvent[] = [];
+    const startedEvents: AgentTurnStartedEvent[] = [];
+    const finishedEvents: AgentTurnFinishedEvent[] = [];
     return {
-      started,
-      finished,
-      async loadFromCatalog() {
-        return [];
+      startedEvents,
+      finishedEvents,
+      started(event) {
+        startedEvents.push(event);
       },
-      dispatchStarted(event) {
-        started.push(event);
-        return { invoked: 0, skipped: 0, skips: [] };
+      ended(event) {
+        finishedEvents.push(event);
       },
-      dispatchFinished(event) {
-        finished.push(event);
-        return { invoked: 0, skipped: 0, skips: [] };
-      },
-      onFinished() {
-        return () => {};
-      },
-      dispatchFailedBeforeStart() {},
-      onFailedBeforeStart() {
-        return () => {};
-      },
+      couldNotStart() {},
     };
   }
 
-  // Full ManagerDeps over the suite's shared collaborators. CapabilityDiscovery
-  // is never start()ed and the default dispatcher has no hooks loaded, so both
-  // are real-but-inert.
+  // Full ManagerDeps over the suite's shared collaborators. No network MCP
+  // servers are found, and the default dispatcher has no hooks loaded.
   function managerDeps(
     modelResolver: ModelResolver,
-    lifecycleDispatcher?: AgentLifecycleDispatcher,
+    turnLifecycle?: TurnLifecycle,
     appCatalog?: Pick<AppCatalog, "get">,
   ) {
-    const activeSubagentRegistry = createActiveSubagentRegistry();
-    const turnStreams = createAgentTurnStreamRegistry();
+    const webchatRepo = new ChatsWebChatRepository(testDb.db);
+    const subagentCalls = createSubagentCalls({
+      dashboard: new WebChatDashboardSessions(webchatRepo),
+      turnLog: subagentTurnLog(webchatRepo),
+      liveTurns: subagentLiveTurns(createAgentTurnStreamRegistry()),
+    });
     return {
       agentLoader,
-      appCatalog,
       sessionRepository,
-      promptBuilder,
-      actionRegistry,
+      systemPrompts,
       modelResolver,
-      actionEngine,
-      webchatRepo: new ChatsWebChatRepository(testDb.db),
-      capabilityDiscovery: new CapabilityDiscovery(),
-      skillCatalog: new SkillCatalog(artifactIdentity),
-      lifecycleDispatcher: lifecycleDispatcher ?? createAgentLifecycleDispatcher(),
-      channelSurface: testChannelSurface,
-      activeSubagentRegistry,
-      subagentExecutionService: createSubagentExecutionService({
+      sessionSettings: new ChatSessionSettings({
         webchatRepo: new ChatsWebChatRepository(testDb.db),
-        activeRegistry: activeSubagentRegistry,
-        turnStreams,
+      }),
+      networkMcpServers: () => ({}),
+      skillCatalog: new SkillLoader(artifactIdentity),
+      turnLifecycle: turnLifecycle ?? new TurnListeners(new AppTurnHooks()),
+      readAnswerShape,
+      sessionTracing: romeSessionTracing,
+      turnUsage: new TurnUsageReporter({ apps: appCatalog }),
+      folders: { ...agentFolders(), defaultWorkingDir: "/tmp/default-project" },
+      log: createLogger("agent-session"),
+      subagentCalls,
+      subagentSessions: (
+        manager: AgentSessionManager,
+        parentLink: string,
+        inherited: Pick<AgentSessionInit, "toolEnv" | "spanAttributes">,
+      ) => subagentSessions(manager, parentLink, webchatRepo, inherited),
+      ...romeToolPorts({
+        actionRegistry,
+        actionEngine,
+        webchatRepo: new ChatsWebChatRepository(testDb.db),
       }),
     };
   }
 
   function createRunner(
     provider?: ModelProvider,
-    lifecycleDispatcher?: AgentLifecycleDispatcher,
+    turnLifecycle?: TurnLifecycle,
     options: {
       keepAliveAcrossTurns?: boolean;
       appCatalog?: Pick<AppCatalog, "get">;
       resetPolicy?: ProviderSessionResetPolicy;
-      turnLinks?: Pick<TurnLinks, "unseen" | "seen">;
+      turnLinks?: PromptFacts;
     } = {},
   ): AgentRunner {
     const active = provider ?? mockProvider;
@@ -2300,16 +2284,23 @@ describe("AgentRunner", () => {
     });
     const manager = createAgentSessionManager(
       {
-        ...managerDeps(modelResolver, lifecycleDispatcher, options.appCatalog),
-        ...(options.resetPolicy
-          ? { resolveProviderSessionReset: async () => options.resetPolicy! }
-          : {}),
-        ...(options.turnLinks ? { turnLinks: options.turnLinks } : {}),
+        ...managerDeps(modelResolver, turnLifecycle, options.appCatalog),
+        ...(options.turnLinks ? { promptFacts: options.turnLinks } : {}),
       },
       { keepAliveAcrossTurns: options.keepAliveAcrossTurns },
     );
+    const resetPolicy = options.resetPolicy;
     // A recorded run has its conversation's row, which its subagents need.
-    return new AgentRunner(manager, agentLoader, new ChatsWebChatRepository(testDb.db));
+    return new AgentRunner(
+      manager,
+      agentLoader,
+      new ChatsWebChatRepository(testDb.db),
+      undefined,
+      undefined,
+      undefined,
+      resetPolicy ? async () => resetPolicy : undefined,
+      sessionOpeningFor({ channelSurface: testChannelSurface }),
+    );
   }
 
   function createClosableModelSession(params: ModelSessionParams): ModelSession {
@@ -2374,7 +2365,10 @@ describe("AgentRunner", () => {
         {
           ...managerDeps(createTestModelResolver({ providers: [mockProvider] })),
           turnMiddleware,
-          usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
+          sessionTracing: romeSessionTracing,
+          turnUsage: new TurnUsageReporter({
+            usage: { recordTurn: (facts) => recorded.push(facts) },
+          }),
         },
         { keepAliveAcrossTurns: true },
       );
@@ -2521,7 +2515,7 @@ describe("AgentRunner", () => {
     });
 
     it("publishes an empty result for a middleware turn that emits no terminal", async () => {
-      // welcome-to-rome parks a turn on a question card this way.
+      // A scripted conversation parks a turn on a question card this way.
       const session = await openMiddlewareSession(async (ctx) => {
         ctx.emit({ type: "text", content: "Pick one" });
       });
@@ -2883,7 +2877,6 @@ describe("AgentRunner", () => {
         acquireBySessionId: rs.fn(async () => session),
         peek: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
-        recordConversation: rs.fn(async () => undefined),
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);
@@ -2936,7 +2929,6 @@ describe("AgentRunner", () => {
         acquireBySessionId: rs.fn(async () => session),
         peek: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
-        recordConversation: rs.fn(async () => undefined),
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);
@@ -3338,7 +3330,7 @@ describe("AgentRunner", () => {
       expect(
         await sessionRepository.deprecatedCheckpoint(start.sessionId, start.turnId),
       ).toBeNull();
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         status: "interrupted",
         output: { state: "partial", stop: { reason: "interrupted", raw: "interrupted" } },
       });
@@ -3666,8 +3658,8 @@ describe("AgentRunner", () => {
         }),
       );
 
-      expect(lifecycle.started).toHaveLength(1);
-      expect(lifecycle.started[0]).toMatchObject({
+      expect(lifecycle.startedEvents).toHaveLength(1);
+      expect(lifecycle.startedEvents[0]).toMatchObject({
         type: "agent-turn-started",
         version: 1,
         turn: {
@@ -3686,15 +3678,15 @@ describe("AgentRunner", () => {
         },
         input: { promptLength: "Hello lifecycle".length },
       });
-      expect(lifecycle.started[0].input).not.toHaveProperty("prompt");
+      expect(lifecycle.startedEvents[0].input).not.toHaveProperty("prompt");
 
-      expect(lifecycle.finished).toHaveLength(1);
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents).toHaveLength(1);
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         type: "agent-turn-finished",
         version: 1,
         turn: {
-          sessionId: lifecycle.started[0].turn.sessionId,
-          turnId: lifecycle.started[0].turn.turnId,
+          sessionId: lifecycle.startedEvents[0].turn.sessionId,
+          turnId: lifecycle.startedEvents[0].turn.turnId,
           agentName: "core:test-main",
           channelThreadKey: "webchat:session-1",
         },
@@ -3710,9 +3702,11 @@ describe("AgentRunner", () => {
           skillWritten: false,
         },
       });
-      expect(lifecycle.finished[0].timing.startedAt).toBe(lifecycle.started[0].timing.startedAt);
-      expect(lifecycle.finished[0].timing.finishedAt).toEqual(expect.any(String));
-      expect(lifecycle.finished[0].timing.durationMs).toEqual(expect.any(Number));
+      expect(lifecycle.finishedEvents[0].timing.startedAt).toBe(
+        lifecycle.startedEvents[0].timing.startedAt,
+      );
+      expect(lifecycle.finishedEvents[0].timing.finishedAt).toEqual(expect.any(String));
+      expect(lifecycle.finishedEvents[0].timing.durationMs).toEqual(expect.any(Number));
     });
 
     it("uses turn-scoped context when a session is reused", async () => {
@@ -3794,14 +3788,12 @@ describe("AgentRunner", () => {
         }),
       );
 
-      expect(lifecycle.started.map((event) => event.turn.threadContext?.channelUserId)).toEqual([
-        "guardian-one",
-        "guardian-two",
-      ]);
-      expect(lifecycle.finished.map((event) => event.turn.threadContext?.channelUserId)).toEqual([
-        "guardian-one",
-        "guardian-two",
-      ]);
+      expect(
+        lifecycle.startedEvents.map((event) => event.turn.threadContext?.channelUserId),
+      ).toEqual(["guardian-one", "guardian-two"]);
+      expect(
+        lifecycle.finishedEvents.map((event) => event.turn.threadContext?.channelUserId),
+      ).toEqual(["guardian-one", "guardian-two"]);
       expect(observedContexts).toEqual([
         { channelUserId: "guardian-one", sharedRunId: "run-one" },
         { channelUserId: "guardian-two", sharedRunId: "run-two" },
@@ -3830,8 +3822,8 @@ describe("AgentRunner", () => {
       const second = session.sendTurn({ prompt: "second" });
       await new Promise((resolve) => setTimeout(resolve, 0));
 
-      expect(lifecycle.started).toHaveLength(1);
-      expect(lifecycle.started[0].turn.turnId).toBe(first.turnId);
+      expect(lifecycle.startedEvents).toHaveLength(1);
+      expect(lifecycle.startedEvents[0].turn.turnId).toBe(first.turnId);
 
       await session.close("user");
       await collectMessages(first.events);
@@ -3842,9 +3834,9 @@ describe("AgentRunner", () => {
         expect.objectContaining({ type: "error", error: "AgentSession closed" }),
         expect.objectContaining({ type: "turn_end", turnId: second.turnId, status: "error" }),
       ]);
-      expect(lifecycle.started).toHaveLength(1);
-      expect(lifecycle.finished).toHaveLength(1);
-      expect(lifecycle.finished[0].turn.turnId).toBe(first.turnId);
+      expect(lifecycle.startedEvents).toHaveLength(1);
+      expect(lifecycle.finishedEvents).toHaveLength(1);
+      expect(lifecycle.finishedEvents[0].turn.turnId).toBe(first.turnId);
       await manager.shutdown();
     });
 
@@ -3916,8 +3908,10 @@ describe("AgentRunner", () => {
         }),
       );
 
-      const rootFinished = lifecycle.finished.filter((e) => e.turn.agentName === "core:test-main");
-      const childFinished = lifecycle.finished.filter(
+      const rootFinished = lifecycle.finishedEvents.filter(
+        (e) => e.turn.agentName === "core:test-main",
+      );
+      const childFinished = lifecycle.finishedEvents.filter(
         (e) => e.turn.agentName === "core:test-explore",
       );
 
@@ -3968,7 +3962,7 @@ describe("AgentRunner", () => {
       await collectMessages(
         createRunner(provider, lifecycle).run({ agentName: "test-main", prompt: "Continue" }),
       );
-      expect(lifecycle.finished[0].output).toMatchObject({
+      expect(lifecycle.finishedEvents[0].output).toMatchObject({
         error: message,
         failure: {
           message,
@@ -3987,7 +3981,7 @@ describe("AgentRunner", () => {
           { agentName: "test-main", prompt: "Continue" },
         ),
       );
-      expect(lifecycle.finished[0].output).not.toHaveProperty("failure");
+      expect(lifecycle.finishedEvents[0].output).not.toHaveProperty("failure");
     });
 
     it("classifies provider-interrupted terminal results separately from completions", async () => {
@@ -4015,8 +4009,8 @@ describe("AgentRunner", () => {
 
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Stop soon" }));
 
-      expect(lifecycle.finished).toHaveLength(1);
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents).toHaveLength(1);
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         status: "interrupted",
         output: {
           text: "Partial answer",
@@ -4055,7 +4049,7 @@ describe("AgentRunner", () => {
 
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Go long" }));
 
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         status: "completed",
         output: {
           state: "final",
@@ -4087,7 +4081,7 @@ describe("AgentRunner", () => {
 
       await collectMessages(runner.run({ agentName: "test-main", prompt: "Hi" }));
 
-      expect(lifecycle.finished[0]).toMatchObject({
+      expect(lifecycle.finishedEvents[0]).toMatchObject({
         status: "completed",
         output: {
           state: "final",
@@ -4163,7 +4157,7 @@ describe("AgentRunner", () => {
   });
 
   describe("prompt building", () => {
-    it("calls promptBuilder.build() with correct config and contextSuffix", async () => {
+    it("calls systemPrompts.build() with correct config and contextSuffix", async () => {
       const provider = new MockModelProvider([[{ type: "result", content: "Built" }]]);
       const runner = createRunner(provider);
 
@@ -4182,18 +4176,11 @@ describe("AgentRunner", () => {
     });
 
     it("attributes app-store agents by listing id and omits local app attribution", async () => {
-      const getRecord = agentLoader.getRecord.bind(agentLoader);
-      const recordSpy = rs.spyOn(agentLoader, "getRecord").mockImplementation((name) => {
-        const record = getRecord(name);
-        if (record.config.name !== "test-main") return record;
-        return {
-          ...record,
-          metadata: {
-            ...record.metadata,
-            ownerType: "app",
-            ownerId: "test-app",
-          },
-        };
+      const find = agentLoader.find.bind(agentLoader);
+      const recordSpy = rs.spyOn(agentLoader, "find").mockImplementation((name) => {
+        const agent = find(name);
+        if (agent?.localName !== "test-main") return agent;
+        return { ...agent, ownerType: "app", ownerId: "test-app" };
       });
 
       try {
@@ -4476,20 +4463,30 @@ describe("AgentRunner", () => {
       }
     });
 
-    it("skips stored-message context for a channel whose surface needs none", async () => {
+    it("catches up on nothing in a chat whose channel hands the agent every message", async () => {
       const webchatRepo = new ChatsWebChatRepository(testDb.db);
       const conversation = await webchatRepo.ensureChannelChat({
         channel: "discord",
         threadId: "quiet-context",
         agentName: "main",
       });
-      await webchatRepo.addConversationMessage({
-        sessionId: conversation.id,
-        role: "notification",
-        content: JSON.stringify([{ type: "text", content: "ambient update" }]),
-        platformMessageId: "ambient-message",
+      const ambient: UnseenLine = {
+        id: 7,
         senderName: "Bob",
-        createdAt: new Date("2026-08-03T08:01:00.000Z"),
+        text: "ambient update",
+        at: new Date("2026-08-03T08:01:00.000Z"),
+        fromRome: false,
+        quoted: null,
+        quotesOutside: false,
+      };
+      const seen: (readonly number[])[] = [];
+      // The same channel chat as above, but its surface says every message
+      // already reaches the agent, as webchat's does.
+      const promptFacts = chatPromptFacts({
+        facts: { unseen: () => [ambient], seen: (ids) => void seen.push(ids) },
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface: (channel) =>
+          channel === "discord" ? { interactiveCards: false, promptContext: false } : null,
       });
 
       const providerPrompts: string[] = [];
@@ -4501,14 +4498,8 @@ describe("AgentRunner", () => {
           yield { type: "result", content: "ok" };
         }),
       };
-      // The same channel conversation as above, but its surface says every
-      // message already reaches the agent, as webchat's does.
-      const manager = createAgentSessionManager({
-        ...managerDeps(createTestModelResolver({ providers: [provider] })),
-        channelSurface: () => ({ interactiveCards: false, promptContext: false }),
-      });
       await collectMessages(
-        new AgentRunner(manager, agentLoader).run({
+        createRunner(provider, undefined, { turnLinks: promptFacts }).run({
           agentName: "test-main",
           prompt: "current message",
           channelThreadKey: "discord:quiet-context",
@@ -4520,7 +4511,7 @@ describe("AgentRunner", () => {
       expect(providerPrompts).toHaveLength(1);
       expect(providerPrompts[0]).not.toContain("<conversation_context>");
       expect(providerPrompts[0]).not.toContain("ambient update");
-      await manager.shutdown();
+      expect(seen).toEqual([]);
     });
 
     it("catches up on the lines its turn links have not seen, and marks them seen", async () => {
@@ -4849,12 +4840,12 @@ describe("AgentRunner", () => {
       await manager.shutdown();
 
       const codexLoggedOut = {
-        openai: availabilityOf("unauthorized"),
-        anthropic: availabilityOf("available"),
+        openai: reportOf("unauthorized"),
+        anthropic: reportOf("available"),
       };
       const loggedOutResolver = createModelResolver({
         providers: [anthropic, openai],
-        availability: fakeAvailability(() => codexLoggedOut),
+        accounts: fakeAccounts(() => codexLoggedOut),
       });
       const loggedOutManager = createAgentSessionManager(managerDeps(loggedOutResolver));
 
@@ -4979,8 +4970,8 @@ describe("AgentRunner", () => {
   describe("per-turn model resolution", () => {
     it("does not replay a failed turn and selects the other provider on the next turn", async () => {
       const state = {
-        openai: availabilityOf("available"),
-        anthropic: availabilityOf("available"),
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       let codexTurns = 0;
       let claudeTurns = 0;
@@ -4993,7 +4984,7 @@ describe("AgentRunner", () => {
             "openai",
             async function* () {
               codexTurns += 1;
-              state.openai = availabilityOf("usage_limit_reached");
+              state.openai = reportOf("usage_limit_reached");
               yield { type: "error", error: "Codex quota exhausted", code: "usage_limit" };
             },
             params,
@@ -5019,7 +5010,7 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [codex, claude],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5048,8 +5039,8 @@ describe("AgentRunner", () => {
 
     it("reopens a provider backend after an auth-revoked terminal", async () => {
       const state = {
-        openai: availabilityOf("available"),
-        anthropic: availabilityOf("unauthorized"),
+        openai: reportOf("available"),
+        anthropic: reportOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const codex: ModelProvider = {
@@ -5062,7 +5053,7 @@ describe("AgentRunner", () => {
             "openai",
             async function* () {
               if (openNumber === 1) {
-                state.openai = availabilityOf("unauthorized");
+                state.openai = reportOf("unauthorized");
                 yield {
                   type: "error",
                   error: "Codex credentials were revoked",
@@ -5079,7 +5070,7 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [codex],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5097,7 +5088,7 @@ describe("AgentRunner", () => {
 
       // Simulate a completed re-login. The next turn must not reuse the model
       // session that observed the revoked credential.
-      state.openai = availabilityOf("available");
+      state.openai = reportOf("available");
       const second = await collectMessages(session.sendTurn({ prompt: "second" }).events);
 
       expect(second.find((message) => message.type === "result")).toMatchObject({
@@ -5112,8 +5103,8 @@ describe("AgentRunner", () => {
 
     it("reopens the same provider when an unpinned session's resolved model changes and keeps its native thread", async () => {
       const state = {
-        openai: availabilityOf("available"),
-        anthropic: availabilityOf("unauthorized"),
+        openai: reportOf("available"),
+        anthropic: reportOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const codex: ModelProvider = {
@@ -5141,7 +5132,7 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [codex],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5152,7 +5143,7 @@ describe("AgentRunner", () => {
       });
       await collectMessages(session.sendTurn({ prompt: "Sol" }).events);
 
-      state.openai = availabilityOf("available", RESTRICTED_PLAN);
+      state.openai = reportOf("available", RESTRICTED_PLAN);
       await collectMessages(session.sendTurn({ prompt: "Terra" }).events);
 
       expect(opens.map((params) => params.config.model)).toEqual(["gpt-6.1-sol", "gpt-5.6-terra"]);
@@ -5164,8 +5155,8 @@ describe("AgentRunner", () => {
 
     it("records the pin of the model that actually ran after an unpinned backend swap", async () => {
       const state = {
-        openai: availabilityOf("available"),
-        anthropic: availabilityOf("available"),
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       const codex: ModelProvider = {
         id: "openai",
@@ -5194,7 +5185,7 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [codex, claude],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5210,7 +5201,7 @@ describe("AgentRunner", () => {
 
       // Codex quota exhausts; the unpinned session re-resolves to Claude and
       // the first successful turn pins the model that actually ran.
-      state.openai = availabilityOf("usage_limit_reached");
+      state.openai = reportOf("usage_limit_reached");
       await collectMessages(session.sendTurn({ prompt: "Terra" }).events);
       expect(await sessionRepository.session(session.sessionId)).toMatchObject({
         provider: "anthropic",
@@ -5256,13 +5247,13 @@ describe("AgentRunner", () => {
 
     it("a pinned session keeps its model across an entitlement upgrade (no backend reopen)", async () => {
       const state = {
-        openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
-        anthropic: availabilityOf("unauthorized"),
+        openai: reportOf("available", { ...RESTRICTED_PLAN }),
+        anthropic: reportOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens)],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5278,7 +5269,7 @@ describe("AgentRunner", () => {
       // Sol access arrives mid-session. Tier resolution would now map large →
       // Sol, but the pinned session must keep running Terra on the same
       // backend — no close/reopen, no model switch.
-      state.openai = availabilityOf("available");
+      state.openai = reportOf("available");
       const second = await collectMessages(session.sendTurn({ prompt: "second" }).events);
 
       expect(second.find((message) => message.type === "result")).toMatchObject({
@@ -5290,8 +5281,8 @@ describe("AgentRunner", () => {
 
     it("a pinned session keeps its model after the tier mapping changes", async () => {
       const state = {
-        openai: availabilityOf("unauthorized"),
-        anthropic: availabilityOf("available"),
+        openai: reportOf("unauthorized"),
+        anthropic: reportOf("available"),
       };
       let tierModelMappings: unknown = { anthropic: { large: FABLE_MODEL } };
       const opens: ModelSessionParams[] = [];
@@ -5311,11 +5302,11 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [claude],
-        availability: fakeAvailability(() => state),
-        settingsRepo: {
+        accounts: fakeAccounts(() => state),
+        tierModels: createTierModelsSetting({
           get: async <T = unknown>(key: string): Promise<T | null> =>
             key === "tierModelMappings" ? (tierModelMappings as T) : null,
-        },
+        }),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5342,8 +5333,8 @@ describe("AgentRunner", () => {
 
     it("a stranded pinned session fails the turn with the structured resolution error", async () => {
       const state = {
-        openai: availabilityOf("available"),
-        anthropic: availabilityOf("available"),
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       const opens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
@@ -5363,7 +5354,7 @@ describe("AgentRunner", () => {
       };
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens), claude],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
       const manager = createAgentSessionManager(managerDeps(modelResolver), {
         keepAliveAcrossTurns: true,
@@ -5378,7 +5369,7 @@ describe("AgentRunner", () => {
 
       // Sol access is lost. The pinned session must fail closed with the
       // structured error — no tier re-map to Terra, no Claude substitution.
-      state.openai = availabilityOf("available", RESTRICTED_PLAN);
+      state.openai = reportOf("available", RESTRICTED_PLAN);
       const second = await collectMessages(session.sendTurn({ prompt: "second" }).events);
       expect(second.find((message) => message.type === "error")).toMatchObject({
         code: "model_unavailable",
@@ -5387,8 +5378,8 @@ describe("AgentRunner", () => {
       });
 
       // Provider-level outage (quota) fails the same way.
-      state.openai = availabilityOf("available");
-      state.openai = availabilityOf("usage_limit_reached");
+      state.openai = reportOf("available");
+      state.openai = reportOf("usage_limit_reached");
       const third = await collectMessages(session.sendTurn({ prompt: "third" }).events);
       expect(third.find((message) => message.type === "error")).toMatchObject({
         code: "model_provider_unavailable",
@@ -5403,13 +5394,13 @@ describe("AgentRunner", () => {
 
     it("a legacy session (NULL pin) resolves by tier, then pins on its next successful turn", async () => {
       const state = {
-        openai: availabilityOf("available"),
-        anthropic: availabilityOf("unauthorized"),
+        openai: reportOf("available"),
+        anthropic: reportOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens)],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
       const seeded = Session.create("test-main", { continuityKey: "telegram:legacy-row" });
       // A pre-cutover row: provider + thread persisted, model NULL.
@@ -5439,13 +5430,13 @@ describe("AgentRunner", () => {
 
     it("a new session of another agent on the same thread resolves its own tier (no pin inheritance)", async () => {
       const state = {
-        openai: availabilityOf("available", RESTRICTED_PLAN),
-        anthropic: availabilityOf("unauthorized"),
+        openai: reportOf("available", RESTRICTED_PLAN),
+        anthropic: reportOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens)],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
       // The main agent's session on this thread is pinned to Sol.
       const seeded = Session.create("test-main", { continuityKey: "webchat:shared-thread" });
@@ -5478,13 +5469,13 @@ describe("AgentRunner", () => {
 
     it("a resumed session runs on its pin even when tier resolution would pick another model", async () => {
       const state = {
-        openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
-        anthropic: availabilityOf("unauthorized"),
+        openai: reportOf("available", { ...RESTRICTED_PLAN }),
+        anthropic: reportOf("unauthorized"),
       };
       const opens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(opens)],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
       const firstManager = createAgentSessionManager(managerDeps(modelResolver));
       const first = await firstManager.acquire({
@@ -5497,7 +5488,7 @@ describe("AgentRunner", () => {
 
       // Entitlements improved while the session was cold. Tier resolution
       // would now pick Sol; the pin keeps the resume on Terra.
-      state.openai = availabilityOf("available");
+      state.openai = reportOf("available");
       const resumedManager = createAgentSessionManager(managerDeps(modelResolver));
       const runner = new AgentRunner(resumedManager, agentLoader);
       await collectMessages(
@@ -5514,14 +5505,14 @@ describe("AgentRunner", () => {
 
     it("an explicit selection overrides the pin and re-pins to the selected model", async () => {
       const state = {
-        openai: availabilityOf("available"),
-        anthropic: availabilityOf("available"),
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
 
       // A session already pinned to Codex Terra.
@@ -5560,13 +5551,13 @@ describe("AgentRunner", () => {
 
     it("a stranded pinned session becomes usable again through an explicit selection", async () => {
       const state = {
-        openai: availabilityOf("available", { ...RESTRICTED_PLAN }),
-        anthropic: availabilityOf("available"),
+        openai: reportOf("available", { ...RESTRICTED_PLAN }),
+        anthropic: reportOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens)],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
 
       // A session pinned to Sol, whose access is now lost: the pin strands it.
@@ -5616,14 +5607,14 @@ describe("AgentRunner", () => {
 
     it("a legacy resume honors a persisted selection whose provider differs from the stored provider", async () => {
       const state = {
-        openai: availabilityOf("available"),
-        anthropic: availabilityOf("available"),
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
 
       // A pre-cutover row (model NULL) whose chat stores a Claude selection,
@@ -5673,14 +5664,14 @@ describe("AgentRunner", () => {
 
     it("a legacy resume without a thread context reads the selection through its key", async () => {
       const state = {
-        openai: availabilityOf("available"),
-        anthropic: availabilityOf("available"),
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
 
       // A pre-cutover row (model NULL) whose chat stores a Claude selection,
@@ -5725,14 +5716,14 @@ describe("AgentRunner", () => {
 
     it("a legacy subagent resume ignores the parent chat's persisted selection", async () => {
       const state = {
-        openai: availabilityOf("available"),
-        anthropic: availabilityOf("available"),
+        openai: reportOf("available"),
+        anthropic: reportOf("available"),
       };
       const codexOpens: ModelSessionParams[] = [];
       const claudeOpens: ModelSessionParams[] = [];
       const modelResolver = createModelResolver({
         providers: [codexProvider(codexOpens), claudeProvider(claudeOpens)],
-        availability: fakeAvailability(() => state),
+        accounts: fakeAccounts(() => state),
       });
 
       // The parent chat stores a Claude selection. Its subagent's legacy row
@@ -5992,7 +5983,7 @@ describe("AgentRunner", () => {
 
     it("getActionCatalog reflects actions registered after the session opens (ZHA-98)", async () => {
       // Repro of the in-session app_management install flow: the provider's
-      // facade tools (list_actions, execute_action) must observe registrations
+      // Rome tools (list_actions, execute_action) must observe registrations
       // that happen *after* openSession captured a snapshot. The session
       // exposes the live view via params.getActionCatalog and routes the
       // executeAction callback through the same allow-list-filtered lookup.
@@ -6054,7 +6045,7 @@ describe("AgentRunner", () => {
       });
 
       // The live getter now reports both actions to anything that reads it
-      // (the facade tools' list_actions / search_actions / read_action).
+      // (the Rome tools' list_actions / search_actions / read_action).
       // Order is registry-insertion-order; sort for stable comparison.
       expect(await listActionNames(sessionParams.tools)).toEqual(["demo_action", "repro_hello"]);
 

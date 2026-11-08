@@ -9,7 +9,7 @@ A Rome session is the durable product boundary around one continuous body of age
 - A chat does not expire because it is idle. Rome may evict in-memory session objects to release resources, but the next message resumes the same chat and the same model thread.
 - Only an explicit product boundary — New Chat, or entering another platform-native thread — creates another session. An ordinary reply never does.
 - Provider compaction manages the live context window without deleting Rome's durable transcript.
-- Usage belongs to the session that executed it: a first-class child subagent session owns its own [turns](#turn) and accounting, and the parent session does not duplicate that usage. Parent/child sessions are linked and appear as session lineage.
+- Usage belongs to the session that executed it: a first-class child subagent session owns its own [turns](#turn) and accounting, and the parent session does not duplicate that usage. A child's session has its parent turn's session as parent, and a child's usage is counted under its root session.
 - Project attribution matches the session's project directory (exact path or child path). A project's display name is metadata, not an attribution fallback. Forks and subagents inherit the parent's project. Sessions created without project context stay unattributed.
 
 **Not to be confused with:**
@@ -25,6 +25,7 @@ A continuity key is the value that whatever opens a session, and comes back to i
 **Contracts:**
 
 - At most one session per continuity key and agent is active. A reset completes that session and starts the next one under the same continuity key, so the next message continues where the chat left off.
+- A chat's reset policy decides when its session is due for a reset. In code, the rule is `evaluateProviderSessionReset` in [`packages/core/src/agent/domain/session-reset.ts`](../../packages/core/src/agent/domain/session-reset.ts), and the session reads the policy through the `SessionSettings` port.
 - Sessions never reads what a continuity key means. Only the code that minted it may parse it.
 - A session can have no continuity key. A subagent and a one-shot fork are found only by their id.
 - Where the continuity key is stored is a storage decision, separate from this contract. Today it is a column on the session (`channel_thread_key`).
@@ -32,7 +33,7 @@ A continuity key is the value that whatever opens a session, and comes back to i
 **Not to be confused with:**
 
 - **Session id** — the id names one session. The continuity key names the run of sessions a chat has had, and finds the current one.
-- **[Chat](../domains/chats.md#chat)** — a chat is a place where messages are said. A continuity key is how that chat finds its agent's session, and a session may have one without being in any chat.
+- **[Chat](../domains/chats.md#chat)** — a chat is a place where messages are said. A continuity key is how that chat finds its agent's session, and a session may have one without being in any chat. A session never names a chat. Which chat has a session is [Participation](../domains/participation.md)'s question, asked by the session's id. Until Participation has that query, the web chat side answers it and records it on the session's stored row (`chatOfSession` and `recordSessionInChat` in [`packages/core/src/db/repositories/webchat.ts`](../../packages/core/src/db/repositories/webchat.ts)).
 
 ## Model pin
 
@@ -76,7 +77,8 @@ A turn is one request to an agent plus the agent work that follows until the age
 **Contracts:**
 
 - Usage reporting counts the user inputs, assistant output, and trace evidence of one turn once, not once per input. A turn can consume more than one user input.
-- Failed and interrupted turns still count as turns.
+- A turn ends completed, failed, stopped or abandoned. A Rome stop (the user's Stop, or a `now` input superseding the turn) or the provider's own stop decides first, and the turn is stopped. Otherwise the terminal event decides: an error event fails the turn and a result completes it. A turn whose stream ends with no terminal event and no stop is abandoned. On the wire these are `completed`, `error`, `interrupted` and `stopped`. The rule is `turnStatus` in [`packages/core/src/agent/domain/turn-end.ts`](../../packages/core/src/agent/domain/turn-end.ts).
+- Failed, stopped and abandoned turns still count as turns.
 - Stop targets one turn and requests provider cancellation. Until that turn ends, Stop can be retried. Accepting the request does not mean execution has ended.
 - Stopping preserves received text and tool evidence, including partial replies. It does not roll back changes. A tool call without a received result has an unknown outcome, not a guarantee that nothing ran.
 - A turn that a backend restart cuts off fails when Rome starts again, with an error that names the restart. Each subagent call the turn was still waiting on fails with the same error. The turn is not resumed. A turn that started more than a day before the most recent turn stays open.
@@ -98,7 +100,7 @@ User messages, assistant replies, cards, and interaction results stay in the tra
 History, lazy trace reads, and raw downloads follow the same session-wide decision.
 
 Activity includes user, assistant, trace, and notification rows. Notifications record real out-of-band conversation messages.
-Reading, renaming, pinning, and unknown metadata roles do not count. A lineage with no conversation messages is not an archive candidate.
+Reading, renaming, pinning, and unknown metadata roles do not count. A session that, with its ancestors, has no conversation messages is not an archive candidate.
 Each read batches session and ancestor message times in one recursive query, without reading trace payloads.
 There are no session-type exceptions: an old subagent remains visible under an active ancestor, and a fork, promoted side chat, or channel thread can stay active on its own messages under an idle source.
 A new message reactivates the session and its descendants, not its ancestors or siblings.
@@ -124,14 +126,14 @@ An event is one item of a turn's stream, as Rome publishes it to its consumers. 
 **Contracts:**
 
 - A turn's stream opens with its start event and closes with its end event.
-- A turn's stream carries exactly one terminal event, the result or error, before its end event. A turn that is interrupted, for example stopped by the user, can end with no terminal event, and the end event then reports how it ended.
+- A turn's stream carries exactly one terminal event, the result or error, before its end event. A turn that is stopped, for example by the user, can end with no terminal event, and the end event then reports how it ended.
 - The durable trace keeps every event of a turn except delta events and input-status events.
 - Delta events never open, close, or reorder a turn.
 
 **Not to be confused with:**
 
 - **[Message](../domains/chats.md#message)** — a message is a chat entry that a person or an agent sends. An event is an item of one turn's stream.
-- **[Block](#block)** — a block reaches consumers as a block event, except a subagent call's tool use and tool result, which normally reach them as subagent start and result events. A subagent call with no linked execution reaches them as a plain tool use and tool result. Results, errors, plan updates, and subagent reports are events that are not blocks.
+- **[Block](#block)** — a block reaches consumers as a block event, except a subagent call's tool use and tool result, which normally reach them as subagent start and result events. A subagent call that fails while it starts reaches them as a plain tool use and tool result. Results, errors, plan updates, and subagent reports are events that are not blocks.
 - **Event-bus event** — something that happens in Rome that a [routine](data.md#routines) or a hook can react to. It is not part of a turn's stream.
 - **[Routine](data.md#routines)** — surfaces that say "events" for scheduled automation mean routines, not turn events.
 - **Segment** — a display group of a turn's trace events. It groups events and is not one itself.
@@ -209,7 +211,7 @@ A forked turn is a side conversation branched from a live session's full context
 The caller creating the fork chooses one of two modes:
 
 - **Isolated** (the default) — the fork opens with an empty tool surface: no actions, skills, subagents, or builtin tools. It can only read the inherited conversation and answer. This is the right mode for side-channel turns that must not act.
-- **Exact** — the fork opens with the source session's exact configuration, so the conversation prefix the model sees (system prompt, tool catalog, transcript) is identical to the source. Tools remain callable. Anything the fork executes is attributed to the fork's own session and turn — never the source's — and subagent output streams into the fork, not the source conversation. This is the mode for branch-style features that need the fork to behave as a true continuation of the conversation.
+- **Exact** — the fork opens with the source session's exact configuration, so the conversation prefix the model sees (system prompt, tool catalog, transcript) is identical to the source. Tools remain callable. A session tool runs only when the fork can run it on its own, and the others are refused as unavailable in a forked turn ([Session tools](../domains/agents.md#session-tools)). Anything the fork executes is attributed to the fork's own session and turn — never the source's — and subagent output streams into the fork, not the source conversation. This is the mode for branch-style features that need the fork to behave as a true continuation of the conversation.
 
 The caller also chooses how long the fork's provider branch lives:
 

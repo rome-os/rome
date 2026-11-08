@@ -87,7 +87,7 @@
         "title": "Project",
         "label": "Composio project",
         "default": "{{name}} (default)",
-        "switched": "Connect your services again in this project, then ask the Concierge to follow them again."
+        "switched": "Connect your services again in this project, then ask {{name}} to follow them again."
       }
     },
     "loadFailedFallback": "Failed to load connections.",
@@ -545,7 +545,9 @@
       "remove": "Remove {{email}}",
       "invalidEmails": "Invalid email address: {{emails}}",
       "savedFlash": "Allowed emails saved",
-      "saveFailedFallback": "Failed to save allowed emails."
+      "saveFailedFallback": "Failed to save allowed emails.",
+      "tooMany": "Up to {{limit}} emails allowed",
+      "emailTooLong": "Email longer than {{limit}} characters"
     }
   },
   "aiTools": {
@@ -683,14 +685,6 @@
     },
     "features": {
       "title": "Features"
-    },
-    "experimental": {
-      "badge": "Experimental",
-      "concierge": {
-        "title": "Concierge",
-        "description": "One chat where your agent texts you short replies and hands long work to task chats.",
-        "toggleLabel": "Show Concierge in Chats"
-      }
     },
     "developerSettings": {
       "title": "Developer settings"

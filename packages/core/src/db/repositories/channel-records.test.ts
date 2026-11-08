@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import { channels } from "../schema.js";
-import { createTestDb, type TestDb, testAccountLinkOf } from "../../test/helpers.js";
+import { createTestDb, type TestDb, testAccountLinkOf } from "../../test/db.js";
 import { ChannelRecordsRepository } from "./channel-records.js";
 
 const NOW = new Date("2026-10-15T00:00:00.000Z");

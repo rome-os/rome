@@ -1,4 +1,5 @@
 import { createContext } from "react";
+import { isChatPath } from "@/lib/chat-session";
 
 // Class vocabulary shared by the pinned list (AppGrid) and the Recent zone, so
 // both zones of the sidebar are one visual system.
@@ -9,6 +10,7 @@ export function isEntryActive(pathname: string, href: string): boolean {
   if (href === "/apps") {
     return pathname === href;
   }
+  if (href === "/chat") return isChatPath(pathname);
   return pathname === href || pathname.startsWith(`${href}/`);
 }
 

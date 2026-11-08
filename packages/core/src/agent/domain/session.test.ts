@@ -12,7 +12,6 @@ describe("Session", () => {
     expect(session.modelThreadId).toBeNull();
     expect(session.model).toBeNull();
     expect(session.workingDir).toBe("/w");
-    expect(session.deprecatedChatId).toBeNull();
   });
 
   it("create() has no continuity key unless one is given", () => {
@@ -118,7 +117,6 @@ describe("Session", () => {
     const session = Session.create("main", {
       continuityKey: "webchat:chat-1",
       workingDir: "/w",
-      deprecatedChatId: "chat-1",
     });
     session.recordTurn({ provider: "openai", modelThreadId: "t-1", model: "gpt-5" });
 
@@ -134,21 +132,6 @@ describe("Session", () => {
     // The working dir is the provider's, so the successor starts without one
     // until it opens, as a reset does today.
     expect(successor.workingDir).toBeNull();
-    // The chat is inherited from the stored row when the repository writes
-    // the reset, not copied from this instance.
-    expect(successor.deprecatedChatId).toBeNull();
-  });
-
-  it("replace() gives the successor only a chat that is named", () => {
-    const session = Session.create("main", { continuityKey: "k", deprecatedChatId: "chat-1" });
-    expect(session.replace({ deprecatedChatId: "chat-2" }).deprecatedChatId).toBe("chat-2");
-  });
-
-  it("deprecatedRecordChat() fills a missing chat and never overwrites one", () => {
-    const session = Session.create("main");
-    expect(session.deprecatedRecordChat("chat-1")).toBe(true);
-    expect(session.deprecatedRecordChat("chat-2")).toBe(false);
-    expect(session.deprecatedChatId).toBe("chat-1");
   });
 
   it("snapshot() is a copy, so a later change is not seen through it", () => {

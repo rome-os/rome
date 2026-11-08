@@ -1,1 +1,0 @@
-ALTER TABLE `welcome_to_rome__progress` ADD `session_id` text;

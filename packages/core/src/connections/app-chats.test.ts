@@ -19,7 +19,7 @@ import { MessageRepository } from "../chats/storage/message-repository.js";
 import { SpeakerReplies } from "../sessions/speaker-replies.js";
 import { Speakers } from "../sessions/speakers.js";
 import { TurnLinks } from "../sessions/turn-links.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
 import { appChats } from "./app-chats.js";
 import { ChatAddresses } from "./chat-addresses.js";

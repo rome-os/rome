@@ -23,12 +23,12 @@ import type {
   ModelSessionEvent,
   ModelTurnActivityEvent,
   ModelPosition,
-  ModelFunding,
 } from "../../../domain/model-port.js";
+import type { ModelLoginKind } from "../../../domain/model-login.js";
 import { ROME_TOOL_GROUPS, type RomeTools } from "../../../domain/rome-tools.js";
 import { buildAgentAccounting } from "../provider-accounting.js";
 import type { LearnsRefusedTurns } from "../refused-turn.js";
-import { anthropicStop } from "../../../../core/stop-reason.js";
+import { anthropicStop } from "./stop.js";
 import { AsyncMessageQueue } from "./async-message-queue.js";
 import { createReopeningSession, type ClaudeQuerySession } from "./reopening-session.js";
 import { createLogger } from "../../../../logger.js";
@@ -44,12 +44,12 @@ import {
   markAnthropicAuthRevoked,
   resolveAnthropicAuthRevokedSourceForQuery,
   type AnthropicAuthRevokedSource,
-} from "../../../../lib/anthropic-login.js";
+} from "./refused-credential.js";
 import { ANTHROPIC_AUTH_REVOKED_CODE, isAnthropicAuthRevokedError } from "./auth-revoked.js";
 import { anthropicToolName, buildAnthropicMcpServers } from "./mcp-servers.js";
 import { anthropicUsageLimitReset, isAnthropicUsageLimitError } from "./usage-limit.js";
 import { createClaudeQueryProcess } from "./query-process.js";
-import { anthropicFunding } from "../../../../usage/funding.js";
+import { claudeLoginFrom } from "./login.js";
 import {
   compileOutputSchema,
   formatOutputSchemaErrors,
@@ -76,7 +76,7 @@ const GUARDIAN_TIMEZONE_SETTING_KEY = "guardianTimezone";
 // resulting spans land as orphan traces (no TRACEPARENT
 // auto-injection from Rome's `model.turn`), which clutters the trace store
 // without adding signal. The per-round / per-tool detail is reconstructed
-// by `turn-span-translator.ts` from the message stream instead.
+// by `agent/application/turn-spans.ts` from the message stream instead.
 // CLAUDE_CODE_ENABLE_TASKS=false keeps TodoWrite, which Rome turns into plan
 // updates. Since Claude Code 2.1.251 the default swaps it for TaskCreate.
 export const CLAUDE_AGENT_SDK_ENV = {
@@ -442,7 +442,7 @@ export class AnthropicProvider implements ModelProvider {
   private async buildQueryContext(): Promise<{
     env: Record<string, string | undefined>;
     authRevokedSource: AnthropicAuthRevokedSource | null;
-    funding: ModelFunding;
+    loginKind: ModelLoginKind;
   }> {
     const [credentials, timezone] = await Promise.all([
       getStoredAnthropicCompatibleCredentials(this.options.settingsRepo),
@@ -484,10 +484,11 @@ export class AnthropicProvider implements ModelProvider {
       }
     }
 
+    const login = claudeLoginFrom(credentials, baseEnv);
     return {
       env,
-      authRevokedSource: await resolveAnthropicAuthRevokedSourceForQuery(credentials, baseEnv),
-      funding: anthropicFunding({ hasCompatibleCredentials: !!credentials, env: baseEnv }),
+      authRevokedSource: await resolveAnthropicAuthRevokedSourceForQuery(credentials, login),
+      loginKind: login.kind,
     };
   }
 
@@ -1094,7 +1095,7 @@ export class AnthropicProvider implements ModelProvider {
     const session: ClaudeQuerySession = {
       providerId,
       model: effectiveModel,
-      funding: queryContext.funding,
+      loginKind: queryContext.loginKind,
       get ended(): boolean {
         return closed || abortController.signal.aborted;
       },

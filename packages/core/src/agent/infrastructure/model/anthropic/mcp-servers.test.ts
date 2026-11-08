@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { z } from "zod";
 import { buildAnthropicMcpServers } from "./mcp-servers.js";
-import { createRomeTools } from "../../../../core/mcp/server.js";
-import type { ModelToolCallContext, RomeToolDefinition } from "../../../../core/agent-runner.js";
-import type { ActionMcpDefinition } from "../../../../core/mcp-facade.js";
-import type { SkillMcpDefinition } from "../../../../core/skill-catalog.js";
+import { testRomeTools } from "../../../../test/tool-calls.js";
+import type { ModelToolCallContext } from "../../../../core/agent-runner.js";
+import type { AgentAction } from "../../../domain/agent-action.js";
+import type { Skill } from "../../../domain/skill.js";
+import { subagentToolName, type Subagent } from "../../../domain/subagent.js";
 
 const { createSdkMcpServerMock, sdkToolMock } = rs.hoisted(() => ({
   createSdkMcpServerMock: rs.fn((config: unknown) => config),
@@ -29,11 +30,11 @@ rs.mock("@anthropic-ai/claude-agent-sdk", () => ({
 }));
 
 interface BuildArgs {
-  actionCatalog?: ActionMcpDefinition[];
-  getActionCatalog?: () => ActionMcpDefinition[];
-  skillCatalog?: SkillMcpDefinition[];
-  getSkillCatalog?: () => SkillMcpDefinition[];
-  subagentTools?: RomeToolDefinition[];
+  actionCatalog?: AgentAction[];
+  getActionCatalog?: () => AgentAction[];
+  skillCatalog?: Skill[];
+  getSkillCatalog?: () => Skill[];
+  subagents?: Subagent[];
   executeAction?: (name: string, input: unknown) => Promise<unknown>;
   executeSubagent?: (
     name: string,
@@ -42,7 +43,7 @@ interface BuildArgs {
   ) => Promise<unknown>;
 }
 
-const baseActionCatalog: ActionMcpDefinition[] = [
+const baseActionCatalog: AgentAction[] = [
   {
     name: "demo_action",
     description: "Schedule a calendar event",
@@ -88,12 +89,18 @@ function build(args: BuildArgs = {}) {
   const actionSnapshot = args.actionCatalog ?? baseActionCatalog;
   const skillSnapshot = args.skillCatalog ?? [];
   return buildAnthropicMcpServers({
-    tools: createRomeTools({
-      getActionCatalog: args.getActionCatalog ?? (() => actionSnapshot),
-      getSkillCatalog: args.getSkillCatalog ?? (() => skillSnapshot),
-      subagentTools: args.subagentTools ?? [],
-      executeAction: args.executeAction ?? (async () => ({ ok: true })),
-      executeSubagent: args.executeSubagent ?? (async () => "delegated"),
+    tools: testRomeTools({
+      actions: {
+        list: args.getActionCatalog ?? (() => actionSnapshot),
+        permits: () => true,
+        run: async (_turn, name, input) => ({
+          status: "ok",
+          data: await (args.executeAction ?? (async () => ({ ok: true })))(name, input),
+        }),
+      },
+      skills: { list: args.getSkillCatalog ?? (() => skillSnapshot) },
+      subagents: args.subagents,
+      executeSubagent: args.executeSubagent,
     }),
   });
 }
@@ -197,20 +204,12 @@ describe("buildAnthropicMcpServers", () => {
   it("passes Claude's exact tool-use identity into subagent execution", async () => {
     const executeSubagent = rs.fn(async () => ({ status: "completed" }));
     build({
-      subagentTools: [
-        {
-          name: "researcher",
-          description: "Research a topic",
-          inputSchema: {
-            type: "object",
-            properties: { prompt: { type: "string" } },
-            required: ["prompt"],
-          },
-        },
-      ],
+      subagents: [{ name: "researcher", description: "Research a topic" }],
       executeSubagent,
     });
-    const tool = getSubagentServerTools().find((candidate) => candidate.name === "researcher");
+    const tool = getSubagentServerTools().find(
+      (candidate) => candidate.name === subagentToolName("researcher"),
+    );
 
     const response = await tool!.handler(
       { prompt: "inspect" },
@@ -346,8 +345,8 @@ describe("buildAnthropicMcpServers", () => {
   });
 
   it("executes actions with json_args and rejects invalid inputs", async () => {
-    // The facade's execute_action no longer pre-checks against the catalog;
-    // it delegates to the AgentSession-supplied executeAction, which is the
+    // execute_action no longer pre-checks against the catalog;
+    // it delegates to the session's `AgentActions` port, which is the
     // single source of truth for "is this name visible to this agent". The
     // stub here mirrors that contract: unknown name → throw.
     const allowedNames = new Set(baseActionCatalog.map((a) => a.name));
@@ -391,7 +390,7 @@ describe("buildAnthropicMcpServers", () => {
     // new action stays invisible. The stub here mirrors AgentSession's
     // contract: the executeAction callback is the gate that rejects names
     // that aren't currently visible.
-    const liveCatalog: ActionMcpDefinition[] = [baseActionCatalog[0]];
+    const liveCatalog: AgentAction[] = [baseActionCatalog[0]];
     const executeAction = rs.fn(async (name: string) => {
       if (!liveCatalog.some((a) => a.name === name)) {
         throw new Error(`Unknown action: ${name}`);
@@ -447,23 +446,25 @@ describe("buildAnthropicMcpServers", () => {
     // getSkillCatalog hook the new skill stays invisible until the next
     // session. This test pins the live-getter contract for skills, mirroring
     // the action-catalog test above.
-    const browserResearch: SkillMcpDefinition = {
+    const browserResearch: Skill = {
       name: "browser-research",
+      localName: "browser-research",
       description: "Inspect websites and gather findings",
       tools: ["WebSearch", "WebFetch"],
       content: "# Browser Research",
       ownerType: "core",
       ownerId: "browser-research",
     };
-    const calendarHelper: SkillMcpDefinition = {
+    const calendarHelper: Skill = {
       name: "calendar-helper",
+      localName: "calendar-helper",
       description: "Coordinate event planning",
       tools: ["demo_action"],
       content: "# Calendar Helper",
       ownerType: "core",
       ownerId: "calendar-helper",
     };
-    const liveSkills: SkillMcpDefinition[] = [browserResearch];
+    const liveSkills: Skill[] = [browserResearch];
     build({
       skillCatalog: liveSkills,
       getSkillCatalog: () => liveSkills,
@@ -498,8 +499,9 @@ describe("buildAnthropicMcpServers", () => {
   });
 
   it("read_skill returns the skill directory and companion files when present", async () => {
-    const withCompanions: SkillMcpDefinition = {
+    const withCompanions: Skill = {
       name: "system:app-lifecycle",
+      localName: "system:app-lifecycle",
       description: "Lifecycle",
       content: "# App lifecycle",
       directory: "/apps/system/dist/skills/app-lifecycle",
@@ -507,8 +509,9 @@ describe("buildAnthropicMcpServers", () => {
       ownerType: "app",
       ownerId: "system",
     };
-    const bare: SkillMcpDefinition = {
+    const bare: Skill = {
       name: "plain",
+      localName: "plain",
       description: "Plain",
       content: "# Plain",
       ownerType: "core",
@@ -538,7 +541,7 @@ describe("buildAnthropicMcpServers", () => {
     // skill-discovery tools, so the agent can re-list after `app_management`
     // installs an app and the SkillCatalog refreshes. Without this, the very
     // first install in a new session is undiscoverable until restart.
-    const liveSkills: SkillMcpDefinition[] = [];
+    const liveSkills: Skill[] = [];
     build({
       skillCatalog: liveSkills,
       getSkillCatalog: () => liveSkills,
@@ -556,6 +559,7 @@ describe("buildAnthropicMcpServers", () => {
       skillCatalog: [
         {
           name: "browser-research",
+          localName: "browser-research",
           description: "Inspect websites and gather findings",
           tools: ["WebSearch", "WebFetch"],
           content: "# Browser Research",
@@ -564,6 +568,7 @@ describe("buildAnthropicMcpServers", () => {
         },
         {
           name: "calendar-helper",
+          localName: "calendar-helper",
           description: "Coordinate event planning",
           tools: ["demo_action"],
           content: "# Calendar Helper",
@@ -584,6 +589,7 @@ describe("buildAnthropicMcpServers", () => {
       skillCatalog: [
         {
           name: "calendar-helper",
+          localName: "calendar-helper",
           description: "Coordinate event planning",
           tools: ["demo_action"],
           content: "# Calendar Helper",
@@ -606,6 +612,7 @@ describe("buildAnthropicMcpServers", () => {
       skillCatalog: [
         {
           name: "browser-research",
+          localName: "browser-research",
           description: "Inspect websites and gather findings",
           tools: ["WebSearch"],
           content: "# Browser Research",

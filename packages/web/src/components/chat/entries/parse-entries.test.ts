@@ -24,6 +24,20 @@ describe("parseEntries", () => {
     ]);
   });
 
+  it("keeps a connect card and drops one missing its entry", () => {
+    const card = {
+      type: "connect_card",
+      service: "mail",
+      label: "Mail",
+      connect: { kind: "dashboard" },
+    };
+    expect(
+      parseEntries(
+        JSON.stringify([card, { type: "connect_card", service: "mail", label: "Mail" }]),
+      ),
+    ).toEqual([card]);
+  });
+
   it("drops parts of unknown kinds and cards missing required fields", () => {
     const card = { type: "approval_card", approvalId: "a1", actionName: "send", status: "pending" };
     const content = JSON.stringify([

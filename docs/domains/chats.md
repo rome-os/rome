@@ -81,8 +81,10 @@ A dashboard chat where its owner talks with their Concierge: a [main chat](#main
 The one Concierge chat each owner always has.
 
 - The main chat exists while the Concierge is on, and it is never archived or deleted.
+- The dashboard opens it at `/message`, for the guardian and for each visitor alike. A topic chat is at `/chat/<id>`. The old `/chat/concierge` address redirects to `/message`.
 - The digest goes to the main chat and lists every Concierge chat's items, grouped by chat.
 - Alerts and tasks whose Concierge chat is archived or deleted come here.
+- The dashboard calls the Concierge by the name the guardian gave their agent (else "Concierge"), in the main chat's title and in its own copy. The stored chat name stays "Concierge".
 
 ## Topic chat
 
@@ -134,6 +136,7 @@ Something shown in a chat that people can look at or act on: a question with cho
 
 - Widgets come from one shared catalog. Each kind has a name, what it holds, what people can do with it (answer, approve or deny, pick), and how each of those reads as plain text. Rome's own question and approval are kinds in it, beside the kinds apps add.
 - Each platform draws the kinds it can as its own cards, and sends the plain-text line for the rest. Feishu draws a question as a card. Email sends it as text.
+- A place's widget drawing is card or plain text.
 - A widget's live state belongs to what it is about. An approval request shows as approved because the approval is.
 - An agent shows a widget by calling a tool.
 

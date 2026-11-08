@@ -1,3 +1,12 @@
+import { romeToolPorts } from "./rome-tool-ports.js";
+import { createLogger } from "../logger.js";
+import {
+  ChatSessionSettings,
+  readAnswerShape,
+  romeSessionTracing,
+  TurnUsageReporter,
+} from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6,22 +15,20 @@ import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
-import { testChannelSurface } from "../test/channel-surface.js";
-import { createActionEngineRepos, createTestDb, type TestDb } from "../test/helpers.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
-import { AgentLoader } from "./agent-loader.js";
+import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
+import { AgentLoader } from "../agent/index.js";
 import {
   createSessionFromRun,
   type ModelProvider,
   type ModelSessionParams,
 } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
+import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
 import type { SessionToolContext } from "./session-tools.js";
-import { CapabilityDiscovery } from "./capability-discovery.js";
-import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
-import { SkillCatalog } from "./skill-catalog.js";
-import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
+import { createModelResolver } from "../agent/index.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
+import { SkillLoader } from "../agent/index.js";
+import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 describe("AgentSession turn push level", () => {
@@ -72,31 +79,40 @@ describe("AgentSession turn push level", () => {
     };
 
     const actionRegistry = new ActionRegistryImpl();
-    const promptBuilder = new PromptBuilder();
-    rs.spyOn(promptBuilder, "build").mockReturnValue("push level test prompt");
+    const systemPrompts = createTestSystemPrompts();
+    rs.spyOn(systemPrompts, "build").mockReturnValue("push level test prompt");
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
         sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
-        webchatRepo: new ChatsWebChatRepository(testDb.db),
-        promptBuilder,
-        actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+        sessionSettings: new ChatSessionSettings({
+          webchatRepo: new ChatsWebChatRepository(testDb.db),
+        }),
+        systemPrompts,
         modelResolver: createModelResolver({
           providers: [provider],
-          availability: fakeAvailability({
-            anthropic: availabilityOf("available"),
-            openai: availabilityOf("unauthorized"),
+          accounts: fakeAccounts({
+            anthropic: reportOf("available"),
+            openai: reportOf("unauthorized"),
           }),
         }),
-        capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
-        channelSurface: testChannelSurface,
-        sessionTools: async (context) => {
-          tools = context;
-          return [];
-        },
+        networkMcpServers: () => ({}),
+        skillCatalog: new SkillLoader(artifactIdentity),
+        turnLifecycle: new TurnListeners(new AppTurnHooks()),
+        readAnswerShape,
+        sessionTracing: romeSessionTracing,
+        turnUsage: new TurnUsageReporter(),
+        folders: agentFolders(),
+        log: createLogger("agent-session"),
+        ...romeToolPorts({
+          webchatRepo: new ChatsWebChatRepository(testDb.db),
+          actionRegistry,
+          actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+          sessionTools: async (context) => {
+            tools = context;
+            return [];
+          },
+        }),
       },
       { keepAliveAcrossTurns: true },
     );

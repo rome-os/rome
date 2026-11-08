@@ -1,21 +1,26 @@
+import { romeToolPorts } from "../core/rome-tool-ports.js";
+import { createLogger } from "../logger.js";
+import { sessionOpeningFor } from "../core/session-opening.js";
+import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
+import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Tracer } from "@opentelemetry/api";
-import { AgentLoader } from "../core/agent-loader.js";
+import { AgentLoader } from "../agent/index.js";
 import {
   AgentRunner,
   createSessionFromRun,
   type ModelProvider,
   type ModelRunParams,
 } from "../core/agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "../core/agent-session.js";
-import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
-import { createModelResolver } from "../core/model-resolver.js";
-import { bothAvailable, fakeAvailability } from "./kit/model-availability.js";
-import { CapabilityDiscovery } from "../core/capability-discovery.js";
-import { SkillCatalog } from "../core/skill-catalog.js";
+import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
+import { createModelResolver } from "../agent/index.js";
+import { bothAvailable, fakeAccounts } from "./kit/model-accounts.js";
+import { SkillLoader } from "../agent/index.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
-import { PromptBuilder } from "../core/prompt-builder.js";
+import { createTestSystemPrompts } from "./system-prompts.js";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import type { ChannelMessage } from "@rome-os/app-runtime";
@@ -82,13 +87,13 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
   const testDb = createTestDb();
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
-  const promptBuilder = new PromptBuilder();
+  const systemPrompts = createTestSystemPrompts();
   const actionRegistry = new ActionRegistryImpl();
   const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db), {
     tracer: options.tracer,
   });
 
-  const agentLoader = new AgentLoader(artifactIdentity);
+  const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
   await agentLoader.loadAll(options.fixturesDir ?? FIXTURES_DIR);
 
   for (const action of options.extraActions ?? []) {
@@ -97,21 +102,36 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
 
   const modelResolver = createModelResolver({
     providers: [options.modelProvider],
-    availability: fakeAvailability(bothAvailable()),
+    accounts: fakeAccounts(bothAvailable()),
   });
   const manager = createAgentSessionManager({
     agentLoader,
     sessionRepository,
-    promptBuilder,
-    actionRegistry,
+    systemPrompts,
     modelResolver,
-    actionEngine,
-    capabilityDiscovery: new CapabilityDiscovery(),
-    skillCatalog: new SkillCatalog(artifactIdentity),
-    lifecycleDispatcher: createAgentLifecycleDispatcher(),
-    channelSurface: testChannelSurface,
+    networkMcpServers: () => ({}),
+    skillCatalog: new SkillLoader(artifactIdentity),
+    turnLifecycle: new TurnListeners(new AppTurnHooks()),
+    readAnswerShape,
+    sessionTracing: romeSessionTracing,
+    turnUsage: new TurnUsageReporter(),
+    folders: agentFolders(),
+    log: createLogger("agent-session"),
+    ...romeToolPorts({
+      actionRegistry,
+      actionEngine,
+    }),
   });
-  const runner = new AgentRunner(manager, agentLoader);
+  const runner = new AgentRunner(
+    manager,
+    agentLoader,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    sessionOpeningFor({ channelSurface: testChannelSurface }),
+  );
 
   const transports = new Map<string, FakeTransport>();
   for (const name of options.channels) {

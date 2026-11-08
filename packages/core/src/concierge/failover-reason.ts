@@ -1,6 +1,6 @@
 import type { AgentTurnFailure } from "@rome-os/app-runtime";
 import type { QuotaSwitchPart } from "@rome/api-types/chat";
-import { providerAuthorized, type ModelAvailabilityState } from "../agent/index.js";
+import { providerAuthorized, type ModelAccountReports } from "../agent/index.js";
 
 export type FailoverReason = NonNullable<QuotaSwitchPart["reason"]>;
 
@@ -11,17 +11,17 @@ export function ambiguousQuota(message: string): boolean {
 /** Classifies only subscription failures. Wording overrides a generic rate-limit kind. */
 export function failoverReason(
   failure: AgentTurnFailure | undefined,
-  state: ModelAvailabilityState,
+  state: ModelAccountReports,
 ): FailoverReason | null {
   if (!failure || (failure.provider !== "openai" && failure.provider !== "anthropic")) return null;
   const { message, code, reason, httpStatus, providerError } = failure;
-  const availability = state[failure.provider];
+  const report = state[failure.provider];
   // An account billed per use has no subscription to fail over from.
-  if (availability?.account.usageLimited === false) return null;
-  // Rome credits pay for Codex while its login is out, and recovery must not spend them.
+  if (report?.account.usageLimited === false) return null;
+  // Codex runs on Rome credits while the ChatGPT account is out, and recovery must not spend them.
   if (
     failure.provider === "openai" &&
-    !providerAuthorized(availability) &&
+    !providerAuthorized(report) &&
     code !== "auth_revoked" &&
     code !== "credits_used_up" &&
     reason !== "not_logged_in"
@@ -61,7 +61,7 @@ export function failoverReason(
     /failed to authenticate|oauth session expired|\b(?:status|error):?\s*(?:401|403)\b/i.test(
       message,
     ) ||
-    availability?.state === "expired"
+    report?.state === "expired"
   )
     return "login";
   if (

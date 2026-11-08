@@ -19,6 +19,7 @@ import type {
   TurnErrorEvent,
   TurnResultEvent,
 } from "@rome-os/app-runtime";
+import type { ModelLoginKind } from "./model-login.js";
 import type { RomeTools } from "./rome-tools.js";
 
 export type ProviderId = "anthropic" | "openai" | "mock";
@@ -30,12 +31,6 @@ export interface McpServerConfig {
   command: string;
   args: string[];
 }
-
-/**
- * Who pays the model provider for a turn. The provider knows its payer and
- * reports it; Rome's usage record carries it as read.
- */
-export type ModelFunding = "rome_credits" | "byok" | "subscription" | "unknown";
 
 /**
  * The provider's name for one of its threads. Two equal ids name the same
@@ -197,8 +192,8 @@ export interface ModelSession {
   /** The thread this session runs on, once it can be resumed. Claude: after the first assistant message. */
   readonly modelThreadId?: ModelThreadId;
 
-  /** Who pays the model provider for a turn that ends now. Unset when unknown. */
-  readonly funding?: ModelFunding;
+  /** The kind of login a turn that ends now runs on. Unset when Rome cannot tell. */
+  readonly loginKind?: ModelLoginKind;
 
   /** Push a new user turn. Resolves once the provider accepts it. */
   sendUserInput(input: ModelUserInput): Promise<void>;

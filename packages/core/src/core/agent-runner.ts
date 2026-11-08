@@ -13,9 +13,11 @@ import type {
   ThreadStart,
 } from "../agent/index.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
-import type { AgentSessionManager } from "./agent-session.js";
-import type { AgentLoader } from "./agent-loader.js";
+import type { AgentSession, AgentSessionManager } from "../agent/index.js";
+import type { AgentCatalog } from "../agent/index.js";
 import { createLogger } from "../logger.js";
+import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
+import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { channelChatId } from "../db/session-kind.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
@@ -25,7 +27,7 @@ import {
   resolveTurnConversation,
   shouldPersistAgentTrace,
 } from "./agent-trace-recorder.js";
-import { findRecordedConversation } from "./session-conversation.js";
+import { findChat, findSessionChat, openedInChat, openerChat } from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { adhocSessionKey } from "./agent-session-key.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
@@ -160,67 +162,6 @@ export function createSessionFromRun(
   };
 }
 
-/**
- * A `ModelSession` for a **code-backed agent**: one whose turns
- * are always produced by a turn-middleware rather than a model. It opens no
- * provider query — nothing to resume, nothing to bill, no background SDK stream
- * that could error — so the events iterable simply parks until `close()`.
- *
- * For a correctly-configured code-backed agent a turn middleware short-circuits
- * every turn, so `sendUserInput` is never reached. If it is (no middleware
- * matched — a misconfiguration), the turn is terminated gracefully with a
- * fallback error rather than hanging, so the session never wedges.
- */
-export function createNullModelSession(params: ModelSessionParams): ModelSession {
-  const buffer: ModelSessionEvent[] = [];
-  const resolvers: Array<(item: IteratorResult<ModelSessionEvent>) => void> = [];
-  let closed = false;
-
-  const emit = (msg: ModelSessionEvent) => {
-    if (closed) return;
-    if (resolvers.length > 0) {
-      resolvers.shift()!({ value: msg, done: false });
-    } else {
-      buffer.push(msg);
-    }
-  };
-
-  const events: AsyncIterable<ModelSessionEvent> = {
-    [Symbol.asyncIterator]() {
-      return {
-        async next(): Promise<IteratorResult<ModelSessionEvent>> {
-          if (buffer.length > 0) return { value: buffer.shift()!, done: false };
-          if (closed) return { value: undefined as never, done: true };
-          return await new Promise<IteratorResult<ModelSessionEvent>>((resolve) => {
-            resolvers.push(resolve);
-          });
-        },
-      };
-    },
-  };
-
-  const FALLBACK =
-    "This conversation is handled by code, not a model, and no handler took this turn. You can start chatting with Rome normally.";
-
-  return {
-    providerId: "mock",
-    model: params.config.model,
-    events,
-    async sendUserInput(): Promise<void> {
-      emit({ type: "text", content: FALLBACK });
-      emit({ type: "error", error: "No handler took this turn" });
-    },
-    async interrupt(): Promise<void> {},
-    async close(): Promise<void> {
-      if (closed) return;
-      closed = true;
-      while (resolvers.length > 0) {
-        resolvers.shift()!({ value: undefined as never, done: true });
-      }
-    },
-  };
-}
-
 // AgentRunner — thin shim over AgentSessionManager: acquires the session for
 // a given (agentName, channelThreadKey), pushes one turn, and yields the
 // events.
@@ -228,7 +169,7 @@ export function createNullModelSession(params: ModelSessionParams): ModelSession
 export class AgentRunner {
   constructor(
     private agentSessionManager: AgentSessionManager,
-    private agentLoader: AgentLoader,
+    private agentLoader: AgentCatalog,
     private webchatRepo?: WebChatRepository,
     private turnStreams?: AgentTurnStreamRegistry,
     private actionRegistry?: Pick<ActionRegistry, "getForAgent" | "getCanonicalName">,
@@ -236,6 +177,12 @@ export class AgentRunner {
      *  prompt becomes its turn's through Chats' turn links, not
      *  `webchatRepo`'s rows. */
     private runLineDeps?: RunLineDeps,
+    /** The reset policy of a connected account's chat. Absent, no session is reset. */
+    private resetPolicyOf?: ChatResetPolicy,
+    /** What this opener states for a session it opens. Absent, no channel shows cards. */
+    private openingFor: SessionOpeningFor = sessionOpeningFor({
+      channelSurface: () => null,
+    }),
   ) {}
 
   /**
@@ -244,7 +191,7 @@ export class AgentRunner {
    * configured to route to an agent that has been uninstalled.
    */
   hasAgent(name: string): boolean {
-    return this.agentLoader.has(name);
+    return this.agentLoader.find(name) !== undefined;
   }
 
   /**
@@ -254,12 +201,9 @@ export class AgentRunner {
    */
   hasAction(agentName: string, actionName: string): boolean {
     if (!this.actionRegistry) return false;
-    let actions: string[];
-    try {
-      actions = this.agentLoader.getRecord(agentName).config.actions ?? [];
-    } catch {
-      return false;
-    }
+    const agent = this.agentLoader.find(agentName);
+    if (!agent) return false;
+    const actions = agent.definition.actions ?? [];
     const canonical = this.actionRegistry.getCanonicalName?.(actionName) ?? actionName;
     return this.actionRegistry
       .getForAgent(actions)
@@ -280,13 +224,20 @@ export class AgentRunner {
     });
 
     const threadContext = await this.withChatId(params.threadContext);
+    const openedKey = explicitSessionId
+      ? await this.webchatRepo?.continuityKeyOfSession(explicitSessionId)
+      : requestedChannelThreadKey;
     const init = {
+      ...this.openingFor(openedKey ?? "", threadContext),
       workingDir: params.workingDir,
       threadContext,
-      romeSessionId: params.romeSessionId,
       sharedContext: params.sharedContext,
       contextSuffix: params.contextSuffix,
-      applyProviderSessionReset: Boolean(params.platformMessageId),
+      resetPolicy: await resetPolicyOfMessage(this.resetPolicyOf, {
+        platformMessageId: params.platformMessageId,
+        sessionId: explicitSessionId,
+        threadContext,
+      }),
     };
     const session = explicitSessionId
       ? await this.agentSessionManager.acquireBySessionId(explicitSessionId, params.agentName, init)
@@ -294,17 +245,23 @@ export class AgentRunner {
           { agentName: params.agentName, channelThreadKey: requestedChannelThreadKey },
           init,
         );
+    await openedInChat(this.webchatRepo, session, params.romeSessionId);
     const agentName = session.key.agentName;
     // An explicit sessionId is the source of truth for continuations. Use the
     // canonical key returned by the session row rather than requiring callers
     // to carry a duplicate channelThreadKey that can drift from it.
     const channelThreadKey = session.key.channelThreadKey;
 
+    const opened = openerChat(session);
     const conversation = resolveTurnConversation({
       agentName,
       agentSessionId: session.sessionId,
       romeSessionId: params.romeSessionId,
-      sessionConversation: session.conversation,
+      openerChat: opened,
+      sessionChat:
+        (opened ?? params.romeSessionId)
+          ? undefined
+          : await findSessionChat(this.webchatRepo, session.sessionId),
       channelThreadKey,
       threadContext,
     });
@@ -437,6 +394,7 @@ export class AgentRunner {
     // route owns live webchat persistence, but no route owns a forked turn.
     let recorder: AgentTraceRecorder | null = null;
     let forkTurnId: string | undefined;
+    let forkSessionId: string | undefined;
     let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | null = null;
     try {
       for await (const message of source.runForkedTurn({
@@ -449,7 +407,8 @@ export class AgentRunner {
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;
-          recorder = await this.createForkTraceRecorder(params, message, source.conversation?.id);
+          forkSessionId = message.sessionId;
+          recorder = await this.createForkTraceRecorder(params, message, source);
           if (this.turnStreams) {
             try {
               // Forks have their own session and trace, so publish them through
@@ -485,6 +444,19 @@ export class AgentRunner {
       }
     } finally {
       liveStream?.finish();
+      // A continuable fork's session is stored once its turn ends, also when
+      // the consumer stops early, and its chat is minted under the fork's own
+      // id. Nothing is stored for a one-shot fork.
+      if (forkSessionId && this.webchatRepo) {
+        try {
+          await this.webchatRepo.recordSessionInChat(forkSessionId, forkSessionId);
+        } catch (err) {
+          log.warn("failed to record the chat that has the fork's session", {
+            forkSessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
     }
 
     log.info("forked agent run completed", {
@@ -504,13 +476,16 @@ export class AgentRunner {
   private async createForkTraceRecorder(
     params: ForkRunParams,
     turnStart: Extract<AgentEvent, { type: "turn_start" }>,
-    sourceChatId?: string,
+    source: AgentSession,
   ): Promise<AgentTraceRecorder | null> {
     if (!this.webchatRepo) return null;
     const thread = params.threadContext;
-    // Prefer the source's conversation while it exists. Read again rather
-    // than trusting the session's cached row, which can outlive a deletion.
-    const recorded = await findRecordedConversation(this.webchatRepo, sourceChatId);
+    // Prefer the source's chat while it exists: the one its opener named, else
+    // the chat that has the source session.
+    const opened = openerChat(source);
+    const recorded = opened
+      ? await findChat(this.webchatRepo, opened)
+      : await findSessionChat(this.webchatRepo, source.sessionId);
     // The chat the fork is of, when the turn names one.
     const named = recorded?.id ?? thread?.romeSessionId;
     // A channel thread that recorded no conversation may still have its row.

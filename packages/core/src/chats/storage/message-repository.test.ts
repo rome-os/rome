@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { ChatRepository } from "./chat-repository.js";
 import { MessageRepository } from "./message-repository.js";
 import type { InboundMessage } from "./message.js";

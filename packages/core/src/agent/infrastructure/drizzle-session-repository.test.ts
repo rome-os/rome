@@ -6,7 +6,7 @@ import {
   formatArtifactId,
 } from "../../apps/artifact-id.js";
 import { sessions, sessionTurnCheckpoints } from "../../db/schema.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { ActiveSessionExistsError } from "../domain/session-repository.js";
 import { Session } from "../domain/session.js";
 import { DrizzleSessionRepository } from "./drizzle-session-repository.js";
@@ -36,7 +36,6 @@ describe("DrizzleSessionRepository", () => {
     const session = Session.create("main", {
       continuityKey: "telegram:thread-1",
       workingDir: "/w",
-      deprecatedChatId: "chat-1",
     });
     await repo.add(session);
 
@@ -243,45 +242,32 @@ describe("DrizzleSessionRepository", () => {
     expect(seconds(found.lastActiveAt)).toBe(seconds(streaming.lastActiveAt));
   });
 
-  it("save() never records a chat over one another instance recorded first", async () => {
-    const session = Session.create("main");
-    await repo.add(session);
-    const first = (await repo.session(session.id))!;
-    const second = (await repo.session(session.id))!;
-    first.deprecatedRecordChat("chat-1");
-    expect(second.deprecatedRecordChat("chat-2")).toBe(true);
-    await repo.save(first);
-    await repo.save(second);
-    expect((await repo.session(session.id))!.deprecatedChatId).toBe("chat-1");
-  });
-
-  it("replace() carries the chat over from a stale instance that never saw it recorded", async () => {
+  it("replace() carries over the chat the retired session's row names", async () => {
     const session = Session.create("main", { continuityKey: "k" });
     await repo.add(session);
-    const stale = (await repo.session(session.id))!;
-    const other = (await repo.session(session.id))!;
-    other.deprecatedRecordChat("chat-1");
-    await repo.save(other);
+    // The chat side records the link on the row after open.
+    await testDb.db.update(sessions).set({ chatId: "chat-1" }).where(eq(sessions.id, session.id));
 
-    const successor = stale.replace();
-    expect(successor.deprecatedChatId).toBeNull();
-    await repo.replace(stale, successor);
-    expect((await repo.session(successor.id))!.deprecatedChatId).toBe("chat-1");
-    expect(successor.deprecatedChatId).toBe("chat-1");
+    const successor = session.replace();
+    await repo.replace(session, successor);
+    const [row] = await testDb.db.select().from(sessions).where(eq(sessions.id, successor.id));
+    expect(row?.chatId).toBe("chat-1");
   });
 
-  it("replace() keeps the chat the caller named over the retired session's", async () => {
-    const session = Session.create("main", { continuityKey: "k", deprecatedChatId: "chat-1" });
+  it("add() and save() never write a chat", async () => {
+    const session = Session.create("main", { continuityKey: "k" });
     await repo.add(session);
-    const successor = session.replace({ deprecatedChatId: "chat-3" });
-    await repo.replace(session, successor);
-    expect((await repo.session(successor.id))!.deprecatedChatId).toBe("chat-3");
-    expect(successor.deprecatedChatId).toBe("chat-3");
+    await testDb.db.update(sessions).set({ chatId: "chat-1" }).where(eq(sessions.id, session.id));
+    session.recordTurn({ provider: "openai", modelThreadId: "t-1", model: "gpt-5" });
+    await repo.save(session);
+    const [row] = await testDb.db.select().from(sessions).where(eq(sessions.id, session.id));
+    expect(row?.chatId).toBe("chat-1");
   });
 
   it("replace() retires the session and every duplicate, and adds the successor", async () => {
-    const current = Session.create("main", { continuityKey: "k", deprecatedChatId: "chat-1" });
+    const current = Session.create("main", { continuityKey: "k" });
     await repo.add(current);
+    await testDb.db.update(sessions).set({ chatId: "chat-1" }).where(eq(sessions.id, current.id));
     // A duplicate active row, as older data can hold.
     await testDb.db.insert(sessions).values({
       id: "dup",

@@ -3,7 +3,7 @@
 // access is given again, and neither once a disconnect leaves no access.
 
 import { describe, expect, it } from "@rstest/core";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import { CredentialRejected, makePasteTalk } from "./test-fixtures.js";

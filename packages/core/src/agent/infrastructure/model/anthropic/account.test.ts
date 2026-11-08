@@ -5,6 +5,18 @@ import { describe, expect, it, rs } from "@rstest/core";
 import type { ModelAccountUsage } from "../../../domain/model-account.js";
 import { USAGE_REFUSAL_HOLD_MS } from "../refused-turn.js";
 import { ClaudeAccount } from "./account.js";
+import * as refusedCredential from "./refused-credential.js" with { rstest: "importActual" };
+
+const { clearStoredMark } = rs.hoisted(() => ({ clearStoredMark: rs.fn() }));
+
+// The real mark is a file in the home folder of whoever runs these tests.
+rs.mock("./refused-credential.js", () => ({
+  ...refusedCredential,
+  clearClaudeAuthRevoked: rs.fn(),
+  clearStoredAnthropicCompatibleAuthRevoked: clearStoredMark,
+  isAnthropicAuthRevoked: async () => false,
+  isAnthropicCompatibleAuthRevoked: async () => false,
+}));
 
 const usage = (usedPercent: number) => ({
   checkedAt: "2026-11-07T00:00:00.000Z",
@@ -16,7 +28,7 @@ describe("ClaudeAccount", () => {
   it("reads an environment credential as an available account the provider bills per use", async () => {
     const readUsage = rs.fn(async () => usage(100));
     const account = new ClaudeAccount({ env: { ANTHROPIC_API_KEY: "sk" }, readUsage });
-    await expect(account.availability()).resolves.toEqual({
+    await expect(account.report()).resolves.toEqual({
       state: "available",
       account: {
         loggedIn: true,
@@ -39,7 +51,7 @@ describe("ClaudeAccount", () => {
     });
     const changed = rs.fn();
     account.onChanged(changed);
-    await expect(account.availability()).resolves.toEqual({
+    await expect(account.report()).resolves.toEqual({
       state: "available",
       account: { loggedIn: true, authMethod: "oauth", usageLimited: true },
       usage: usage(10),
@@ -47,21 +59,21 @@ describe("ClaudeAccount", () => {
 
     account.refusedTurn({ kind: "usage", until: "2026-11-07T05:00:00.000Z" });
     expect(changed).toHaveBeenCalledTimes(1);
-    await expect(account.availability()).resolves.toMatchObject({
+    await expect(account.report()).resolves.toMatchObject({
       state: "usage_limit_reached",
       usageLimitUntil: "2026-11-07T05:00:00.000Z",
     });
 
     // With no stated end, the refusal ends five hours after it was seen.
     account.refusedTurn({ kind: "usage" });
-    await expect(account.availability()).resolves.toMatchObject({
+    await expect(account.report()).resolves.toMatchObject({
       usageLimitUntil: "2026-11-07T05:00:00.000Z",
     });
 
     // A usage read in the hold after the refusal describes the account before
     // the refused turn, so it cannot end the refusal. One after the hold does.
     now += USAGE_REFUSAL_HOLD_MS;
-    await expect(account.availability()).resolves.toMatchObject({ state: "available" });
+    await expect(account.report()).resolves.toMatchObject({ state: "available" });
   });
 
   it("drops a refusal once its end has passed, however often it is read", async () => {
@@ -74,11 +86,11 @@ describe("ClaudeAccount", () => {
     });
     account.refusedTurn({ kind: "usage" });
     now += 3 * 60 * 60 * 1000;
-    await expect(account.availability()).resolves.toMatchObject({
+    await expect(account.report()).resolves.toMatchObject({
       usageLimitUntil: "2026-11-07T05:00:00.000Z",
     });
     now += 2 * 60 * 60 * 1000;
-    await expect(account.availability()).resolves.toMatchObject({ state: "available" });
+    await expect(account.report()).resolves.toMatchObject({ state: "available" });
   });
 
   it("lets no read that began before a refusal clear it", async () => {
@@ -93,7 +105,7 @@ describe("ClaudeAccount", () => {
       readUsage: () => pending,
       now: () => now,
     });
-    const read = account.availability();
+    const read = account.report();
     now += USAGE_REFUSAL_HOLD_MS * 2;
     account.refusedTurn({ kind: "usage" });
     answer?.(usage(10));
@@ -108,7 +120,7 @@ describe("ClaudeAccount", () => {
       now: () => Date.now() - USAGE_REFUSAL_HOLD_MS,
     });
     account.refusedTurn({ kind: "usage" });
-    await expect(account.availability()).resolves.toMatchObject({
+    await expect(account.report()).resolves.toMatchObject({
       state: "usage_limit_reached",
     });
   });
@@ -126,9 +138,9 @@ describe("ClaudeAccount", () => {
       readUsage: async () => reads.shift() ?? null,
       now: () => now,
     });
-    await expect(account.availability()).resolves.toMatchObject({ usageLimitUntil: resetsAt });
+    await expect(account.report()).resolves.toMatchObject({ usageLimitUntil: resetsAt });
     now += 30 * 60 * 1000;
-    await expect(account.availability()).resolves.toMatchObject({
+    await expect(account.report()).resolves.toMatchObject({
       state: "usage_limit_reached",
       usageLimitUntil: resetsAt,
       usage: { error: "HTTP 429" },
@@ -143,7 +155,7 @@ describe("ClaudeAccount", () => {
         throw new Error("gone");
       },
     });
-    await expect(account.availability()).resolves.toMatchObject({
+    await expect(account.report()).resolves.toMatchObject({
       state: "available",
       usage: { error: "gone" },
     });
@@ -158,9 +170,9 @@ describe("ClaudeAccount", () => {
       },
       readCredentialRevoked: async () => revoked,
     });
-    await expect(account.availability()).resolves.toMatchObject({ state: "expired" });
+    await expect(account.report()).resolves.toMatchObject({ state: "expired" });
     revoked = false;
-    await expect(account.availability()).rejects.toThrow("claude timed out");
+    await expect(account.report()).rejects.toThrow("claude timed out");
   });
 
   it("still reports a held refusal when the CLI cannot be read", async () => {
@@ -174,10 +186,10 @@ describe("ClaudeAccount", () => {
       readUsage: async () => null,
       readCredentialRevoked: async () => false,
     });
-    await expect(account.availability()).resolves.toMatchObject({ state: "available" });
+    await expect(account.report()).resolves.toMatchObject({ state: "available" });
     account.refusedTurn({ kind: "usage" });
     fail = true;
-    await expect(account.availability()).resolves.toMatchObject({
+    await expect(account.report()).resolves.toMatchObject({
       state: "usage_limit_reached",
       account: { loggedIn: true, authMethod: "oauth" },
     });
@@ -197,10 +209,10 @@ describe("ClaudeAccount", () => {
       now: () => now,
     });
     account.refusedTurn({ kind: "usage" });
-    await expect(account.availability()).resolves.toMatchObject({ usageLimitUntil: resetsAt });
+    await expect(account.report()).resolves.toMatchObject({ usageLimitUntil: resetsAt });
     // After the reset, a usage read that fails does not bring the refusal back.
     now = Date.parse(resetsAt) + 30 * 60 * 1000;
-    await expect(account.availability()).resolves.toMatchObject({ state: "available" });
+    await expect(account.report()).resolves.toMatchObject({ state: "available" });
   });
 
   it("fails a logout the CLI refused, whatever it printed", async () => {
@@ -230,5 +242,50 @@ describe("ClaudeAccount", () => {
     await account.revoke();
     expect(logout).toHaveBeenCalledTimes(1);
     expect(changed).toHaveBeenCalledTimes(2);
+  });
+
+  describe("stored credential", () => {
+    const credential = { provider: "deepseek", apiKey: "k", updatedAt: "2026-11-07" } as const;
+    const settings = () => {
+      const values = new Map<string, unknown>();
+      return {
+        get: async <T>(key: string) => (values.get(key) ?? null) as T | null,
+        set: async (key: string, value: unknown) => void values.set(key, value),
+        delete: async (key: string) => values.delete(key),
+      };
+    };
+
+    it("becomes the login when stored, tells the account, and goes when removed", async () => {
+      const account = new ClaudeAccount({
+        env: {},
+        settingsRepo: settings() as never,
+        readCliStatus: async () => ({ loggedIn: false }),
+      });
+      const changed = rs.fn();
+      account.onChanged(changed);
+
+      await account.storeCredential(credential as never);
+      expect(changed).toHaveBeenCalledTimes(1);
+      expect(clearStoredMark).toHaveBeenCalledTimes(1);
+      expect(await account.status()).toMatchObject({
+        authMethod: "stored-compatible",
+        usageLimited: false,
+      });
+      expect(await account.storedCredential()).toMatchObject({
+        credential: { provider: "deepseek" },
+        expired: false,
+      });
+
+      await account.removeCredential();
+      expect(changed).toHaveBeenCalledTimes(2);
+      expect(clearStoredMark).toHaveBeenCalledTimes(2);
+      expect(await account.storedCredential()).toBeNull();
+      expect(await account.status()).toMatchObject({ loggedIn: false });
+    });
+
+    it("cannot store without settings", async () => {
+      const account = new ClaudeAccount({ env: {} });
+      await expect(account.storeCredential(credential as never)).rejects.toThrow("no settings");
+    });
   });
 });

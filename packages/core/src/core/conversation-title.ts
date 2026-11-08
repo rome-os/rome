@@ -1,7 +1,9 @@
 import { recordModelTurnMetrics } from "../telemetry.js";
 import type { ModelSession } from "./agent-runner.js";
-import { createRomeTools } from "./mcp/server.js";
-import type { ModelResolver } from "./model-resolver.js";
+import { createRomeTools, type ModelResolver, type TurnFacts } from "../agent/index.js";
+import { createLogger } from "../logger.js";
+
+const log = createLogger("conversation-title");
 
 const DEFAULT_TIMEOUT_MS = 15_000;
 export const CONVERSATION_TITLE_MAX_LENGTH = 50;
@@ -75,6 +77,21 @@ function structuredTitle(output: unknown): string {
   throw new Error("Conversation title generation returned no structured title");
 }
 
+/** A title is asked of the model alone, in no session. */
+const TITLE_TURN: TurnFacts = {
+  agentName: "conversation-title",
+  continuityKey: "",
+  sessionId: "",
+  isSubagent: false,
+  actions: [],
+  widgets: "plain_text",
+  turnId: () => undefined,
+  threadContext: () => undefined,
+  sharedContext: () => undefined,
+  pushLevel: () => undefined,
+  inTurn: (fn) => fn(),
+};
+
 export function createConversationTitleGenerator(
   modelResolver: ModelResolver,
   options: { timeoutMs?: number } = {},
@@ -88,7 +105,7 @@ export function createConversationTitleGenerator(
       let timeout: ReturnType<typeof setTimeout> | undefined;
 
       const operation = (async () => {
-        const resolution = await modelResolver.getModelProvider({ tier: "small" });
+        const resolution = await modelResolver.resolve({ kind: "tier", tier: "small" });
         const openedSession = await resolution.modelProvider.openSession({
           config: {
             model: resolution.model,
@@ -99,15 +116,23 @@ export function createConversationTitleGenerator(
             maxTurns: 1,
           },
           tools: createRomeTools({
-            getActionCatalog: () => [],
-            getSkillCatalog: () => [],
-            subagentTools: [],
-            executeAction: async () => {
-              throw new Error("Conversation title generation cannot execute actions");
+            turn: TITLE_TURN,
+            actions: {
+              list: () => [],
+              permits: () => false,
+              run: async () => {
+                throw new Error("Conversation title generation cannot execute actions");
+              },
             },
-            executeSubagent: async () => {
-              throw new Error("Conversation title generation cannot execute subagents");
+            skills: { list: () => [] },
+            subagents: {
+              list: () => [],
+              run: async () => {
+                throw new Error("Conversation title generation cannot execute subagents");
+              },
             },
+            widgetsShow: false,
+            log,
           }),
           thread: { kind: "new" },
         });

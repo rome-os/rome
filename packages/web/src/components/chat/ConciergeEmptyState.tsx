@@ -5,6 +5,7 @@ import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { RomeLogo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
+import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import {
   EmptyState,
   EmptyStateAction,
@@ -63,14 +64,7 @@ const TOPIC_STARTERS: ReadonlyArray<{ key: "life" | "work" | "trip"; icon: Lucid
  * is for, three starters that send themselves as its first message, and
  * a way back to the main chat for a one-off question.
  */
-export function ConciergeTopicEmptyState({
-  mainChatId,
-  onStart,
-}: {
-  /** The signed-in person's main Concierge chat, which the back link opens. */
-  mainChatId: string;
-  onStart: (prompt: string) => void;
-}) {
+export function ConciergeTopicEmptyState({ onStart }: { onStart: (prompt: string) => void }) {
   const { t } = useTranslation("chat");
   const titleId = useId();
   // One hero line, a description at reading size, and the starters as the
@@ -122,7 +116,7 @@ export function ConciergeTopicEmptyState({
         <p className="mt-8 text-ui text-muted-foreground">
           {t("concierge.topicEmpty.justAsk")}{" "}
           <Link
-            to={`/chat/${mainChatId}`}
+            to={MAIN_CHAT_PATH}
             className="whitespace-nowrap text-foreground underline-offset-4 hover:underline"
           >
             {t("concierge.topicEmpty.backToMain")}

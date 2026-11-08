@@ -7,7 +7,8 @@ import { canOpen } from "../concierge/privacy.js";
 import { readerOwner } from "../chats/dashboard/dashboard-account.js";
 import type { ChildProcess } from "node:child_process";
 import type { IpcCallContext, IpcRpc } from "../actions/ipc.js";
-import { type ParsedSessionKey, parseSessionKey } from "./agent-session-key.js";
+import { walkToRoot } from "../agent/index.js";
+import { parseSessionKey } from "./agent-session-key.js";
 import type {
   ChatId,
   CurrentActionContext,
@@ -22,8 +23,10 @@ import type {
   AgentSession,
   AgentTurnHandle,
   AgentTurnInput,
-} from "./agent-session.js";
+} from "../agent/index.js";
 import { createLogger } from "../logger.js";
+import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
+import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import {
@@ -39,6 +42,12 @@ import {
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
+import {
+  findSessionChat,
+  noteOpenerChat,
+  openedInChat,
+  openerChat,
+} from "./session-conversation.js";
 
 const log = createLogger("agent-session-bridge");
 
@@ -49,7 +58,13 @@ const SUMMON_ACTION = "system:summon";
 
 export interface RunTurnRequest {
   key: AgentSessionKey;
-  init?: AgentSessionInit;
+  init?: Omit<
+    AgentSessionInit,
+    "resetPolicy" | "drawsCards" | "guardianFacing" | "toolEnv" | "spanAttributes"
+  > & {
+    /** The chat the caller names, which the bridge records as having the session. */
+    romeSessionId?: string;
+  };
   input: AgentTurnInput;
   platformMessageId?: string;
   replyTo?: MessageReplyReference;
@@ -96,6 +111,12 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
      *  prompt becomes its turn's through Chats' turn links, not
      *  `webchatRepo`'s rows. */
     private runLineDeps?: RunLineDeps,
+    /** The reset policy of a connected account's chat. Absent, no session is reset. */
+    private resetPolicyOf?: ChatResetPolicy,
+    /** What this opener states for a session it opens. Absent, no channel shows cards. */
+    private openingFor: SessionOpeningFor = sessionOpeningFor({
+      channelSurface: () => null,
+    }),
   ) {}
 
   /**
@@ -114,16 +135,16 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     });
     const required: string[] = [];
     const known = new Set<string>([session.sessionId]);
-    if (session.conversation?.origin === "recorded") known.add(session.conversation.id);
-    const collect = (key: ParsedSessionKey) => {
-      if (key.kind === "webchat") required.push(key.chatId);
-      if (key.kind === "subagent") collect(key.parent);
-      if (key.kind === "fork") {
-        known.add(key.forkSessionId);
-        collect(key.parent);
-      }
-    };
-    collect(parseSessionKey(session.key.channelThreadKey));
+    // Checked only when the session's opener named no chat, as when the
+    // session held its chat itself (temporary, ZHA-157).
+    if (!openerChat(session)) {
+      const chat = await findSessionChat(repo, session.sessionId);
+      if (chat) known.add(chat.id);
+    }
+    const root = walkToRoot(session.key.channelThreadKey);
+    for (const forkSessionId of root.forkSessionIds) known.add(forkSessionId);
+    const rootKey = parseSessionKey(root);
+    if (rootKey.kind === "webchat") required.push(rootKey.chatId);
     for (const chatId of required) {
       const chat = await repo.getSession(chatId);
       if (!chat || !canOpen(chat, owner)) return false;
@@ -169,25 +190,40 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         // run an agent — a nested subagent run (e.g. blocking `summon`) by
         // construction. Mark it so `rome.session.acquire` labels these opens
         // `is_subagent=true`; the top-level manager itself is `isSubagent=false`.
-        const init = {
-          ...req.init,
-          workingDir,
-          isSubagent: true,
-          applyProviderSessionReset: Boolean(req.platformMessageId),
-        };
+        const { romeSessionId: namedChat, ...sessionInit } = req.init ?? {};
         const acquireStartedAt = Date.now();
         log.info("agent.session.manager.acquire started", baseLogFields);
 
         let session: AgentSession;
         try {
+          const openedKey = req.sessionId
+            ? await this.webchatRepo?.continuityKeyOfSession(req.sessionId)
+            : req.key.channelThreadKey;
+          const init = {
+            ...sessionInit,
+            // Stated here, never taken from the worker's request.
+            ...this.openingFor(openedKey ?? "", sessionInit.threadContext),
+            workingDir,
+            isSubagent: true,
+            // Read here, never taken from the worker's request.
+            resetPolicy: await resetPolicyOfMessage(this.resetPolicyOf, {
+              platformMessageId: req.platformMessageId,
+              sessionId: req.sessionId,
+              threadContext: sessionInit.threadContext,
+            }),
+          };
           session = req.sessionId
             ? await this.manager.acquireBySessionId(req.sessionId, req.key.agentName, init)
             : await this.manager.acquire(req.key, init);
+          noteOpenerChat(session, namedChat);
           // A session resumed by its id runs in its own chats, so the caller
           // must be one who may open them, as on the dashboard's routes.
           if (req.sessionId && !(await this.callerMayResume(session, ctx))) {
             throw new Error(`Agent session "${req.sessionId}" was not found`);
           }
+          // An action's worker may only fill a link the session lacks, never
+          // move one, and only once the check above has passed.
+          await openedInChat(this.webchatRepo, session, namedChat, { replace: false });
         } catch (err) {
           log.warn("agent.session.manager.acquire failed", {
             ...baseLogFields,
@@ -206,8 +242,12 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const conversation = resolveTurnConversation({
           agentName: req.key.agentName,
           agentSessionId: session.sessionId,
-          romeSessionId: req.init?.romeSessionId,
-          sessionConversation: session.conversation,
+          romeSessionId: namedChat,
+          openerChat: openerChat(session),
+          sessionChat:
+            (openerChat(session) ?? namedChat)
+              ? undefined
+              : await findSessionChat(this.webchatRepo, session.sessionId),
           channelThreadKey: req.key.channelThreadKey,
           threadContext: req.init?.threadContext,
           actionContext: req.actionContext,

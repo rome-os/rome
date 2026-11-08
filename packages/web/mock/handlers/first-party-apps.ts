@@ -13,7 +13,6 @@ import inboxIcon from "../../../../rome_apps/inbox/assets/icon.svg";
 import showcasesIcon from "../../../../rome_apps/showcases/src/assets/icon.svg";
 import skillsIcon from "../../../../rome_apps/skills/assets/icon.svg";
 import systemIcon from "../../../../rome_apps/system/assets/icon.svg";
-import welcomeToRomeIcon from "../../../../rome_apps/welcome-to-rome/src/assets/icon.svg";
 import workflowStudioIcon from "../../../../rome_apps/workflow-studio/src/assets/icon.svg";
 
 // One entry per rome_apps/<id>/ that has an app.yaml, which is the set
@@ -117,15 +116,6 @@ const definitions = [
     hideInLauncher: true,
     // Core refuses to disable the system app, unlike every other first-party app.
     canToggle: false,
-  },
-  {
-    id: "welcome-to-rome",
-    displayName: "Welcome to Rome",
-    version: "0.1.0",
-    description:
-      "Conversational first-run onboarding. The guardian chats with Rome in the standard Chat UI; a turn-middleware state machine confirms the names, connects an AI, asks one question, and hands off to a first chat, rendering the app's own inline cards and handing the heavy steps to specialist agents.",
-    hasFrontend: true,
-    iconUrl: welcomeToRomeIcon,
   },
   {
     id: "workflow-studio",

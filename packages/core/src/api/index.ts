@@ -54,6 +54,7 @@ import { terminalRoutes } from "./routes/terminal.js";
 import { desktopRoutes } from "./routes/desktop.js";
 import { authRoutes } from "./routes/auth.js";
 import { onboardRoutes } from "./routes/onboard.js";
+import { instanceAdoptRoutes } from "./routes/instance-adopt.js";
 import { instanceEnrollRoutes } from "./routes/instance-enroll.js";
 import { cloudLoginRoutes } from "./routes/cloud-login.js";
 import { visitorAuthRoutes } from "./routes/visitor-auth.js";
@@ -161,6 +162,7 @@ export function buildApp(
   api.route("/", authRoutes(deps));
   api.route("/", onboardRoutes(deps));
   api.route("/", instanceEnrollRoutes(deps));
+  api.route("/", instanceAdoptRoutes(deps));
   api.route("/", cloudLoginRoutes(deps));
   api.route("/", visitorAuthRoutes(deps));
   api.route("/", oauthRoutes(deps));
@@ -217,6 +219,7 @@ export function buildApp(
   const sessionQueries = new SessionQueryService({
     repository: new SessionQueryRepository(deps.db, "chats"),
     agentLoader: deps.agentLoader,
+    agentsByName: deps.agentsByName,
     appCatalog: deps.appCatalog,
     accountAgentOf: byChannel(sessionChannelRecords, (connectionId) =>
       readAccountAgent(sessionAccountAgents, deps.agentLoader, connectionId),
@@ -331,7 +334,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
       });
       const terminalServer = attachTerminalServer(server as Server, deps.db, {
         onAuthCommandExit: () => {
-          void deps.modelAvailability.refresh().catch(() => {});
+          void deps.modelAccounts.refresh().catch(() => {});
         },
       });
       const liveEvents = attachLiveEventsServer(
@@ -349,6 +352,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
           subscribeConciergeTasks: (owner, emit) =>
             deps.concierge?.deps.tasks.subscribe(emit, owner) ?? (() => {}),
         },
+        deps.phoneWatching,
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
       const desktopProxy = attachDesktopProxy(server as Server, deps.db);

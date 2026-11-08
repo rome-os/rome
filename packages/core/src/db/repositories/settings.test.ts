@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import type { DrizzleDb } from "../index.js";
 import { settings } from "../schema.js";
 import { SettingsRepository } from "./settings.js";

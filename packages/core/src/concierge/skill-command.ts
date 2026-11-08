@@ -1,4 +1,4 @@
-import type { SlashSkillInvocation } from "../core/slash-skill-command.js";
+import type { SlashSkillInvocation } from "../agent/index.js";
 
 /** Delegate an explicit skill invocation without loading it into Concierge. */
 export function buildConciergeSkillPrompt(invocation: SlashSkillInvocation): string {

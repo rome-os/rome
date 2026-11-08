@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { Account, Channel, ChatId, InboundEvent, OutgoingMessage } from "@rome-os/app-runtime";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { ChatAddresses } from "./chat-addresses.js";
 import { channelAdapter, type Inbound } from "./chat-adapter.js";
 import { EMAIL_PLATFORM, emailChatAdapter, emailOf, isEmailAdapter } from "./email-chat-adapter.js";

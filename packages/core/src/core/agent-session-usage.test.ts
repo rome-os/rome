@@ -1,3 +1,7 @@
+import { romeToolPorts } from "./rome-tool-ports.js";
+import { createLogger } from "../logger.js";
+import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5,25 +9,23 @@ import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
-import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
-import type { ModelSessionEvent } from "../agent/index.js";
+import { createTestDb, type TestDb, createActionEngineRepos } from "../test/db.js";
+import type { ModelSessionEvent, ModelSessionParams } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
-import type { UsageFunding } from "../usage/events.js";
-import type { TurnUsageFacts } from "../usage/recorder.js";
-import { AgentLoader } from "./agent-loader.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import type { ModelLoginKind } from "../agent/index.js";
+import type { TurnUsageFacts } from "../agent/index.js";
+import { AgentLoader } from "../agent/index.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
-import { CapabilityDiscovery } from "./capability-discovery.js";
-import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
-import { SkillCatalog } from "./skill-catalog.js";
+import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
+import { createModelResolver } from "../agent/index.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
+import { SkillLoader } from "../agent/index.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
-import type { ModelAvailabilityState } from "../agent/index.js";
+import type { ModelAccountReports } from "../agent/index.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
-import { testChannelSurface } from "../test/channel-surface.js";
 import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
-import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
+import { reportOf, fakeAccounts, loginsOn } from "../test/kit/model-accounts.js";
 
 /** Lets the run finish sending, so what follows happens during the turn. */
 const turnUnderway = () => new Promise<void>((resolve) => setImmediate(resolve));
@@ -54,16 +56,18 @@ describe("AgentSession turn usage", () => {
   // Each run decides whether it reaches the provider. One that does mints a
   // provider turn id, like Codex does on turn/start.
   let nextRun: () => AsyncIterable<AgentEvent | ModelSessionEvent>;
-  let funding: UsageFunding;
+  let loginKind: ModelLoginKind | undefined;
+  let forkLoginKind: ModelLoginKind | undefined;
   let beforeModelDispatch: (() => Promise<void>) | undefined;
   // Whether middleware ends the turn without reaching the model.
   let shortCircuit: boolean;
   // What the session does as it takes an input.
   let onSend: (() => void) | undefined;
-  // Whether the model resolver sees Rome credits paying.
+  // Whether the model resolver sees Rome credits as the login.
   let resolverUsesRomeCredits: boolean;
-  let state: ModelAvailabilityState;
+  let state: ModelAccountReports;
   let providerCalls: number;
+  let opened: ModelSessionParams[];
 
   beforeEach(async () => {
     directory = await mkdtemp(join(tmpdir(), "rome-agent-usage-"));
@@ -85,21 +89,26 @@ describe("AgentSession turn usage", () => {
     testDb = createTestDb();
     recorded = [];
     recordMetrics.mockClear();
-    funding = "byok";
+    loginKind = "api_credential";
+    forkLoginKind = "api_credential";
     beforeModelDispatch = undefined;
     shortCircuit = false;
     onSend = undefined;
     resolverUsesRomeCredits = false;
     providerCalls = 0;
+    opened = [];
     const provider: ModelProvider = {
       id: "openai",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
+        opened.push(params);
         if (params.thread.kind === "branch") {
-          return createSessionFromRun("openai", () => nextRun(), {
+          const fork = createSessionFromRun("openai", () => nextRun(), {
             ...params,
             thread: { kind: "new" },
           });
+          Object.defineProperty(fork, "loginKind", { get: () => forkLoginKind });
+          return fork;
         }
         const session = createSessionFromRun(
           "openai",
@@ -109,7 +118,7 @@ describe("AgentSession turn usage", () => {
           },
           params,
         );
-        Object.defineProperty(session, "funding", { get: () => funding });
+        Object.defineProperty(session, "loginKind", { get: () => loginKind });
         const send = session.sendUserInput.bind(session);
         // Like a real provider, it resolves once it accepts the input, not when
         // the turn ends.
@@ -121,12 +130,12 @@ describe("AgentSession turn usage", () => {
       },
     };
     state = {
-      openai: availabilityOf("available"),
-      anthropic: availabilityOf("unauthorized"),
+      openai: reportOf("available"),
+      anthropic: reportOf("unauthorized"),
     };
     const actionRegistry = new ActionRegistryImpl();
-    const promptBuilder = new PromptBuilder();
-    rs.spyOn(promptBuilder, "build").mockReturnValue("Usage test prompt");
+    const systemPrompts = createTestSystemPrompts();
+    rs.spyOn(systemPrompts, "build").mockReturnValue("Usage test prompt");
     const turnMiddleware: TurnMiddlewareChain = {
       loadFromCatalog: async () => [],
       run: async (_ctx, terminal) => {
@@ -139,20 +148,35 @@ describe("AgentSession turn usage", () => {
       {
         agentLoader: loader,
         sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
-        promptBuilder,
-        actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+        systemPrompts,
         modelResolver: createModelResolver({
           providers: [provider],
-          availability: fakeAvailability(() => state),
-          romeCreditsPayer: { isUsingRomeCredits: () => resolverUsesRomeCredits },
+          accounts: fakeAccounts(() => state),
+          codexLogins: { login: () => loginsOn(resolverUsesRomeCredits).login() },
         }),
-        capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
-        channelSurface: testChannelSurface,
+        networkMcpServers: () => ({}),
+        skillCatalog: new SkillLoader(artifactIdentity),
+        turnLifecycle: new TurnListeners(new AppTurnHooks()),
+        readAnswerShape,
+        folders: agentFolders(),
+        log: createLogger("agent-session"),
         turnMiddleware,
-        usageRecorder: { recordTurn: (facts) => recorded.push(facts) },
+        sessionTracing: romeSessionTracing,
+        turnUsage: new TurnUsageReporter({
+          usage: { recordTurn: (facts) => recorded.push(facts) },
+        }),
+        ...romeToolPorts({
+          actionRegistry,
+          actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+          sessionTools: async () => [
+            {
+              name: "say",
+              description: "Say something",
+              inputSchema: { type: "object" },
+              handler: async () => ({ content: [{ type: "text", text: "said" }] }),
+            },
+          ],
+        }),
       },
       { keepAliveAcrossTurns: true },
     );
@@ -165,7 +189,7 @@ describe("AgentSession turn usage", () => {
     rs.restoreAllMocks();
   });
 
-  it("records each finished turn once with its accounting, funding, and provider turn id", async () => {
+  it("records each finished turn once with its accounting, login kind, and provider turn id", async () => {
     nextRun = async function* () {
       yield { type: "model_turn_started", modelTurnId: "provider-turn-1" };
       yield {
@@ -188,7 +212,7 @@ describe("AgentSession turn usage", () => {
       agentName: `core:${AGENT}`,
       status: "completed",
       provider: "openai",
-      funding: "byok",
+      loginKind: "api_credential",
       providerTurnId: "provider-turn-1",
       accounting: { usage: { inputTokens: 10, outputTokens: 5 } },
     });
@@ -243,7 +267,7 @@ describe("AgentSession turn usage", () => {
     ]);
   });
 
-  it("keeps funding from the turn's payer when the payer changes during it", async () => {
+  it("keeps the login kind from the turn's login when the login changes during it", async () => {
     let releaseFirst!: () => void;
     const firstRelease = new Promise<void>((resolve) => {
       releaseFirst = resolve;
@@ -262,7 +286,7 @@ describe("AgentSession turn usage", () => {
     const first = session.sendTurn({ prompt: "ChatGPT-funded" });
     await firstStartedPromise;
     await turnUnderway();
-    funding = "rome_credits";
+    loginKind = "rome_credits";
     resolverUsesRomeCredits = true;
     releaseFirst();
     await drain(first.events);
@@ -284,25 +308,60 @@ describe("AgentSession turn usage", () => {
     const second = session.sendTurn({ prompt: "Credit-funded" });
     await secondStartedPromise;
     await turnUnderway();
-    funding = "subscription";
+    loginKind = "subscription";
     releaseSecond();
     await drain(second.events);
 
-    expect(recorded.map((facts) => facts.funding)).toEqual(["byok", "rome_credits"]);
+    expect(recorded.map((facts) => facts.loginKind)).toEqual(["api_credential", "rome_credits"]);
   });
 
-  it("records the payer of the query that took the input", async () => {
+  it("records the login kind of the query that took the input", async () => {
     nextRun = async function* () {
       yield { type: "result", content: "done" };
     };
-    funding = "subscription";
+    loginKind = "subscription";
     onSend = () => {
-      funding = "byok";
+      loginKind = "api_credential";
     };
     const session = await manager.acquire(key);
     await drain(session.sendTurn({ prompt: "after a reopen" }).events);
 
-    expect(recorded.map((facts) => facts.funding)).toEqual(["byok"]);
+    expect(recorded.map((facts) => facts.loginKind)).toEqual(["api_credential"]);
+  });
+
+  it("serves an exact fork its source's tools and refuses the ones that would act", async () => {
+    nextRun = async function* () {
+      yield {
+        type: "result",
+        content: "done",
+        position: { provider: "openai", modelThreadId: "source-thread", checkpointId: "turn-1" },
+      };
+    };
+    // A web chat shows cards and faces the guardian.
+    const session = await manager.acquire(key, { drawsCards: true, guardianFacing: true });
+    await drain(session.sendTurn({ prompt: "first" }).events);
+    await drain(session.runForkedTurn!({ prompt: "side question", mode: "exact" }));
+
+    const [source, fork] = opened;
+    const catalog = (params: ModelSessionParams) =>
+      params.tools.listTools("ask_user").map((tool) => tool.name);
+    expect(catalog(source)).toEqual(["ask_question", "defer", "say", "propose_routine"]);
+    expect(catalog(fork)).toEqual(catalog(source));
+
+    const say = await fork.tools.callTool("ask_user", "say", {});
+    expect(say).toMatchObject({ isError: true });
+    expect(say.content[0].text).toBe("say is unavailable in a forked turn.");
+    const propose = await fork.tools.callTool("ask_user", "propose_routine", {
+      kind: "manual",
+      sentence: "Run it.",
+      name: "Run",
+      watchLabel: "On demand",
+      thenSummary: "run it",
+      actionName: "summon",
+      args: {},
+    });
+    expect(propose).toMatchObject({ isError: true });
+    expect(propose.content[0].text).toContain("NOT shown");
   });
 
   it("leaves no position to branch at after a turn that never reached the model", async () => {
@@ -330,7 +389,7 @@ describe("AgentSession turn usage", () => {
     );
   });
 
-  it("dispatches a turn whose funding label resolves without a payer change", async () => {
+  it("dispatches a turn whose login kind resolves without a login change", async () => {
     let releasePreparation!: () => void;
     const preparationGate = new Promise<void>((resolve) => {
       releasePreparation = resolve;
@@ -346,18 +405,18 @@ describe("AgentSession turn usage", () => {
     nextRun = async function* () {
       yield { type: "result", content: "done" };
     };
-    funding = "unknown";
+    loginKind = undefined;
 
     const session = await manager.acquire(key);
     const turn = session.sendTurn({ prompt: "boot-time turn" });
     await preparationStartedPromise;
-    // The first status probe lands; Codex's payer is still ChatGPT.
-    funding = "subscription";
+    // The first status probe lands; Codex's login is still ChatGPT.
+    loginKind = "subscription";
     releasePreparation();
     await drain(turn.events);
 
     expect(providerCalls).toBe(1);
-    expect(recorded.map((facts) => facts.funding)).toEqual(["subscription"]);
+    expect(recorded.map((facts) => facts.loginKind)).toEqual(["subscription"]);
   });
 
   it("keeps a forked turn's outcome when the consumer stops at its terminal block", async () => {
@@ -396,6 +455,24 @@ describe("AgentSession turn usage", () => {
     );
   });
 
+  it("does not give a fork its source's login kind when Rome cannot tell the fork's", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const session = await manager.acquire(key);
+    const events = session.runForkedTurn!({
+      prompt: "side question",
+      sourceCheckpoint: SOURCE_CHECKPOINT,
+    });
+    forkLoginKind = undefined;
+    for await (const _event of events) {
+      // Runs the fork to its end.
+    }
+
+    expect(recorded).toHaveLength(1);
+    expect(recorded[0]?.loginKind).toBeUndefined();
+  });
+
   it("records a forked turn under its fork session", async () => {
     nextRun = async function* () {
       yield { type: "result", content: "done" };
@@ -415,7 +492,7 @@ describe("AgentSession turn usage", () => {
       romeSessionId: forkSessionId,
       romeSessionType: "fork",
       status: "completed",
-      funding: "byok",
+      loginKind: "api_credential",
     });
   });
 });

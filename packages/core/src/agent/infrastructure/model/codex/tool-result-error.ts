@@ -18,11 +18,11 @@ function hasErrorPayload(value: unknown): boolean {
  * - `commandExecution`: a `failed` or `declined` status, or a non-zero `exitCode`.
  * - `fileChange`: a `failed` or `declined` status.
  * - `mcpToolCall`: a `failed` status or a populated `error`.
- * - `dynamicToolCall` (Rome's own tools): Rome's facade result says
+ * - `dynamicToolCall` (Rome's own tools): Rome's tool result says
  *   `isError`, or codex reports `success: false` or a `failed` status.
  * - Any other item: a `failed` status.
  *
- * `romeToolIsError` is the `isError` of Rome's facade result for a dynamic
+ * `romeToolIsError` is the `isError` of Rome's tool result for a dynamic
  * tool call, when Rome still holds it.
  */
 export function codexToolItemIsError(

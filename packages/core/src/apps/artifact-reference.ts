@@ -11,16 +11,15 @@ export interface ArtifactReferenceInput {
  * selects the registry for the requested artifact kind.
  */
 export function createArtifactReferenceResolver(deps: {
-  agentLoader: {
-    getCanonicalName(name: string): string;
-  };
+  /** The agent's canonical id. Throws when no installed agent has the name. */
+  canonicalAgentName: (name: string) => string;
   actionRegistry: {
     getCanonicalName(name: string): string | undefined;
   };
 }): (input: ArtifactReferenceInput) => string {
   return (input) => {
     if (input.kind === "agent") {
-      return deps.agentLoader.getCanonicalName(input.value);
+      return deps.canonicalAgentName(input.value);
     }
 
     const actionName = deps.actionRegistry.getCanonicalName(input.value);

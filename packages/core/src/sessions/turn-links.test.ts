@@ -5,7 +5,7 @@ import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import type { InboundMessage } from "../chats/storage/message.js";
 import { type ChatRef, placeIn } from "../chats/storage/place.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { TurnLinks } from "./turn-links.js";
 
 const ALICE = { platform: "telegram", id: "alice" };

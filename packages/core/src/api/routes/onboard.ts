@@ -45,8 +45,8 @@ export function onboardRoutes(deps: ApiDeps): Hono {
   // The whole of local-first setup. Creating the seat also finishes it: the
   // username becomes the guardian display name, the agent gets a preset
   // identity, and onboarding is marked complete, so the box drops straight into
-  // the welcome conversation the way a cloud box does. The two names are
-  // confirmed there rather than in a form.
+  // the dashboard the way a cloud box does. The two names can be changed in
+  // settings rather than asked for in a form.
   app.post("/onboard/create-account", async (c) => {
     // On a cloud-default instance the guardian seat is created
     // from the Rome Cloud session by the cloud sign-in callback, not here. This

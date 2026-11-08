@@ -65,7 +65,7 @@
   },
   "overrides": [
     {
-      "includes": ["packages/core/**"],
+      "includes": ["packages/**"],
       "linter": {
         "rules": {
           "style": {

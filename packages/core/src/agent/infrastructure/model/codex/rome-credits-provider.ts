@@ -1,6 +1,5 @@
 import { ROME_CREDITS_PROXY_PATH } from "./rome-credits-proxy.js";
 import { getInternalApiBaseUrl } from "../../../../internal-api-url.js";
-import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../../../../usage/funding.js";
 
 // The Rome credits model provider on the shared `codex app-server`.
 //
@@ -10,7 +9,10 @@ import { ROME_CREDITS_MODEL_PROVIDER_ID } from "../../../../usage/funding.js";
 // Rome Cloud credential (rome-credits-proxy-route.ts). The one
 // shared app-server knows two providers: its default (the guardian's own
 // OpenAI login) and `rome_credits`. Rome restarts the app-server immediately
-// when the payer changes, so each Codex process has one payer.
+// when the login changes, so each Codex process has one login.
+
+/** The Codex model provider that bills the account's Rome credits. */
+export const ROME_CREDITS_MODEL_PROVIDER_ID = "rome_credits";
 
 /** Env var the app-server reads the proxy secret from on each request. */
 export const ROME_CREDITS_TOKEN_ENV = "ROME_CREDITS_TOKEN";
@@ -31,7 +33,7 @@ function tomlString(value: string): string {
  * Root `-c` overrides for `codex app-server`.
  *
  * The credits provider is defined only when this instance has a Rome Cloud
- * origin. `defaultProvider` selects this Codex process's payer; null retains
+ * origin. `defaultProvider` selects this Codex process's login; null retains
  * Codex's normal OpenAI-login default.
  *
  * Codex keeps `*TOKEN*` variables in agent shell commands by default, so the

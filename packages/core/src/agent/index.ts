@@ -17,7 +17,6 @@ export {
 } from "./domain/session.js";
 export type {
   ModelAccount,
-  ModelAccountAuthorization,
   ModelAccountStatus,
   ModelAccountUsage,
   ModelAuthorizationMode,
@@ -27,8 +26,88 @@ export type {
   ModelPlanType,
   ModelUsageWindow,
 } from "./domain/model-account.js";
+export type {
+  ClaudeLogins,
+  CodexLogin,
+  CodexLoginChoice,
+  CodexLogins,
+  ModelLoginKind,
+} from "./domain/model-login.js";
+export { codexLoginKind } from "./domain/model-login.js";
+export { providerAvailability } from "./domain/provider-availability.js";
+export {
+  modelResolutionRequest,
+  type ModelResolutionRequest,
+} from "./domain/model-resolution.js";
 export { ActiveSessionExistsError, type SessionRepository } from "./domain/session-repository.js";
 export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
+export { turnStatus, turnStop, type TurnEnding } from "./domain/turn-end.js";
+export { shapedResult, type AnswerShape, type ReadAnswerShape } from "./domain/answer-shape.js";
+export { catchUpPrompt } from "./domain/catch-up.js";
+export { restoresSavedSelection, type SessionSettings } from "./domain/session-settings.js";
+export {
+  evaluateProviderSessionReset,
+  type ProviderSessionGenerationFreshness,
+  type ProviderSessionResetDecision,
+} from "./domain/session-reset.js";
+export { projectPath, type AgentFolders } from "./domain/agent-folders.js";
+export type { PromptFacts, PromptMessage, UnseenMessage } from "./domain/prompt-facts.js";
+export {
+  currentMessageSection,
+  replyContextLine,
+  replyContextSection,
+  withReplyContext,
+} from "./domain/reply-context.js";
+export type {
+  ReportedAgent,
+  SessionServed,
+  TurnAttribution,
+  TurnUsageFacts,
+  TurnUsageReporting,
+} from "./domain/turn-usage-reporting.js";
+export {
+  endedTurn,
+  type AgentTurnFailedBeforeStart,
+  type TurnLifecycle,
+  type TurnLifecycleListener,
+} from "./domain/turn-lifecycle.js";
+export {
+  buildRequiredTiming,
+  createAgentTurnRef,
+  type AgentTurnParentRef,
+} from "./domain/turn-ref.js";
+export {
+  isTerminalEvent,
+  isTransientDelta,
+  type TransientDeltaType,
+} from "./domain/turn-events.js";
+export {
+  requireAgent,
+  type Agent,
+  type AgentCatalog,
+  type AgentDefinition,
+} from "./domain/agent-definition.js";
+export type { Skill, SkillCatalog } from "./domain/skill.js";
+export type { AgentAction, AgentActions } from "./domain/agent-action.js";
+export type { AgentLog } from "./domain/agent-log.js";
+export type { WakeUp } from "./domain/defer.js";
+export type { PromptAgent, PromptSources } from "./domain/system-prompt.js";
+export { showsWidgets, widgetDrawingFor, type WidgetDrawing } from "./domain/widget-drawing.js";
+export { createSystemPrompts, type SystemPrompts } from "./application/system-prompts.js";
+export { createPromptSources } from "./infrastructure/prompt-sources.js";
+export {
+  buildContinuationBlock,
+  buildDeviceFolderBlock,
+  buildThreadContextBlock,
+  buildWorkspaceContextSection,
+  FETCH_CHANNEL_HISTORY_ACTION,
+  type WorkspaceContextSnapshot,
+} from "./domain/prompt.js";
+export {
+  buildSlashSkillPrompt,
+  parseSlashSkillInvocation,
+  type SlashSkillInvocation,
+} from "./domain/slash-skill.js";
 export type { ModelTier } from "./domain/model-tier.js";
 export { matchesModelAlias, stripLegacyReasoningSuffix } from "./domain/model-alias.js";
 export {
@@ -42,14 +121,14 @@ export {
 } from "./domain/model-selection.js";
 export {
   accountAllowsModel,
-  currentAvailability,
+  currentReport,
   providerAuthorized,
   providerUsable,
   type AccountedProviderId,
-  type ModelAvailabilityState,
-  type ProviderAvailability,
+  type ModelAccountReports,
+  type ModelAccountReport,
   type ProviderAvailabilityState,
-} from "./domain/provider-availability.js";
+} from "./domain/model-account-report.js";
 export {
   sameProviderTarget,
   soleProviderAtUsageLimit,
@@ -57,14 +136,21 @@ export {
   type UsageSwitchTarget,
 } from "./domain/usage-switch.js";
 export {
-  createModelAvailability,
-  type CreateModelAvailabilityOptions,
-  type ModelAvailability,
-  type ModelAvailabilityChange,
-} from "./application/model-availability.js";
+  createModelAccounts,
+  type CreateModelAccountsOptions,
+  type ModelAccounts,
+  type ModelAccountChange,
+} from "./application/model-accounts.js";
+export {
+  createModelResolver,
+  ModelResolutionError,
+  toModelResolutionErrorPayload,
+  type ModelResolution,
+  type ModelResolutionErrorPayload,
+  type ModelResolver,
+} from "./application/model-resolver.js";
 export type {
   McpServerConfig,
-  ModelFunding,
   ModelSessionConfig,
   ModelProvider,
   ModelReasoningEffort,
@@ -79,14 +165,77 @@ export type {
 } from "./domain/model-port.js";
 export type {
   ModelToolCallContext,
+  RomeTool,
   RomeToolDefinition,
   RomeToolGroup,
   RomeToolResult,
   RomeTools,
-  ModelToolCallId,
 } from "./domain/rome-tools.js";
+export {
+  subagentRequest,
+  subagentToolName,
+  type Subagent,
+  type Subagents,
+} from "./domain/subagent.js";
 export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
+export { forkSessionTools, type SessionTools } from "./domain/session-tools.js";
+export {
+  createAgentSessionManager,
+  type AgentSession,
+  type AgentSessionInit,
+  type AgentSessionKey,
+  type AgentSessionManager,
+  type AgentTurnHandle,
+  type AgentTurnInput,
+  type SendTurnOptions,
+} from "./application/agent-session.js";
+export {
+  AgentInputQueue,
+  type AgentInputReceipt,
+  type SubmitInputOptions,
+} from "./application/agent-input-queue.js";
+export type { PushLevel, TurnFacts } from "./domain/turn-facts.js";
+export type { DeferTool } from "./application/ask-user-tools.js";
+export {
+  parentTurnSession,
+  rootSession,
+  storeForkParent,
+  storeSubagentParent,
+  walkToRoot,
+  type StoredRoot,
+} from "./domain/session-parent.js";
+export { WebChatDashboardSessions } from "./infrastructure/webchat-dashboard-sessions.js";
+export {
+  createSubagentCalls,
+  type LiveTurns,
+  type SessionPlace,
+  type SubagentCalls,
+  type SubagentSession,
+  type SubagentSessions,
+  type SubagentTurnLog,
+} from "./application/subagent-calls.js";
+export { createRomeTools } from "./application/rome-tools.js";
+export { romeToolRunner } from "./application/rome-tool-runner.js";
+export type { SessionTracing } from "./application/session-tracing.js";
+export { translateTurnSpans, type CapturedEvent } from "./application/turn-spans.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
+export { SkillLoader } from "./infrastructure/skill-loader.js";
+export { AgentLoader } from "./infrastructure/agent-loader.js";
+export { readAnswerShape } from "./infrastructure/answer-shape.js";
+export {
+  ChatSessionSettings,
+  type ChatSessionSettingsDeps,
+} from "./infrastructure/chat-session-settings.js";
+export {
+  TurnUsageReporter,
+  type TurnUsageReporterDeps,
+} from "./infrastructure/turn-usage-reporter.js";
+export { romeSessionTracing } from "./infrastructure/session-tracing.js";
+export {
+  AppTurnHooks,
+  type TurnLifecycleHookLoadFailure,
+} from "./infrastructure/app-turn-hooks.js";
+export { TurnListeners } from "./infrastructure/turn-listeners.js";
 
 // The model port's adapters, for the composition root alone. Everything else
 // reaches the context through the ports above.
@@ -96,3 +245,7 @@ export { CodexAppServerProvider } from "./infrastructure/model/codex/app-server-
 export { CodexAppServerManager } from "./infrastructure/model/codex/app-server-manager.js";
 export { SharedCodexAccountService } from "./infrastructure/model/codex/account-service.js";
 export { romeCreditsProxyRoutes } from "./infrastructure/model/codex/rome-credits-proxy-route.js";
+export {
+  createTierModelsSetting,
+  TIER_MODEL_MAPPINGS_SETTING_KEY,
+} from "./infrastructure/settings/tier-models-setting.js";

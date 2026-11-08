@@ -87,7 +87,7 @@
         "title": "项目",
         "label": "Composio 项目",
         "default": "{{name}}（默认）",
-        "switched": "请在这个项目里重新连接服务，然后让 Concierge 重新关注它们。"
+        "switched": "请在这个项目里重新连接服务，然后让 {{name}} 重新关注它们。"
       }
     },
     "loadFailedFallback": "加载连接失败。",
@@ -545,7 +545,9 @@
       "remove": "移除 {{email}}",
       "invalidEmails": "邮箱地址无效：{{emails}}",
       "savedFlash": "允许的邮箱已保存",
-      "saveFailedFallback": "保存允许的邮箱失败。"
+      "saveFailedFallback": "保存允许的邮箱失败。",
+      "tooMany": "最多允许 {{limit}} 个邮箱",
+      "emailTooLong": "邮箱超过 {{limit}} 个字符"
     }
   },
   "aiTools": {
@@ -683,14 +685,6 @@
     },
     "features": {
       "title": "功能"
-    },
-    "experimental": {
-      "badge": "实验",
-      "concierge": {
-        "title": "Concierge",
-        "description": "一个对话：代理用短消息和你聊天，较长的工作交给任务对话。",
-        "toggleLabel": "在对话中显示 Concierge"
-      }
     },
     "developerSettings": {
       "title": "开发者设置"

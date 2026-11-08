@@ -19,7 +19,7 @@ import type {
 import { projectsFilesRoutes } from "./projects-files.js";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { eq } from "drizzle-orm";
 import { romeSessions } from "../../db/schema.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";

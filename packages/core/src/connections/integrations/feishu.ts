@@ -532,6 +532,7 @@ export function createFeishuDescriptor(deps: FeishuDescriptorDeps): ConnectionDe
 
   return {
     connectionKind: "feishu",
+    label: "Feishu",
     severalAccounts: true,
     reviveProfile: (record) => reviveFeishuProfile(record),
     accountIdOf: (record) => (typeof record.appId === "string" && record.appId) || null,

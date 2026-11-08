@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { Account, ChatId } from "@rome-os/app-runtime";
 import { chatsWiring } from "./chats-wiring.js";
 import { chatKey } from "./connections/chat-ids.js";
-import { createTestDb, type TestDb } from "./test/helpers.js";
+import { createTestDb, type TestDb } from "./test/db.js";
 
 const BOT: Account = { platform: "telegram", id: "bot-1" };
 

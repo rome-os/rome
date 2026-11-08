@@ -6,7 +6,13 @@ import {
   ConnectedAccountNotFound,
   ConnectedAccountsRepository,
 } from "../../db/repositories/connected-accounts.js";
-import { createTestDb, grantReaching, type TestDb, testAccountLinkOf } from "../../test/helpers.js";
+import {
+  buildAgent,
+  createTestDb,
+  grantReaching,
+  type TestDb,
+  testAccountLinkOf,
+} from "../../test/helpers.js";
 import {
   AccountListening,
   AccountNotLinkable,
@@ -41,7 +47,7 @@ describe("accountAgentResolver", () => {
   let loaded: Set<string>;
   let held: Held;
   const sources = accountAgents(() => held);
-  const agents = { has: (name: string) => loaded.has(name) };
+  const agents = { find: (name: string) => (loaded.has(name) ? buildAgent(name) : undefined) };
 
   beforeEach(() => {
     agent = "sales:agent";

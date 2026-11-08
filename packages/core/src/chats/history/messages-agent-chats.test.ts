@@ -5,7 +5,7 @@ import type { Account } from "@rome-os/app-runtime";
 import { chatAt, directMessageAt } from "../../connections/chat-adapter.js";
 import type { ChatRef } from "../storage/place.js";
 import { chatMessages, romeAgentMessages } from "../../db/schema.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 import { speakerFixture } from "../../test/speakers.js";
 import { ChatAddresses } from "../../connections/chat-addresses.js";
 import {

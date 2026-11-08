@@ -28,6 +28,7 @@ import {
   romeAgentMessagePlatformIds,
   romeAgentMessages,
   romeAgentTraceBlocks,
+  sessions,
   webchatTurnFeedback,
   webchatWorkspaceLayouts,
 } from "../schema.js";
@@ -1691,6 +1692,63 @@ export class WebChatRepository {
   async getSession(id: string) {
     const rows = await this.db.select().from(romeSessions).where(eq(romeSessions.id, id));
     return rows[0] ? withSessionKind(rows[0]) : null;
+  }
+
+  /**
+   * The chat an agent session is in, by the session's id: the one its stored
+   * row names, while that chat still exists. A deleted chat leaves its id on
+   * the row, and recording under that id would recreate it.
+   */
+  async chatOfSession(sessionId: string) {
+    const rows = await this.db
+      .select({ chat: romeSessions })
+      .from(sessions)
+      .innerJoin(romeSessions, eq(romeSessions.id, sessions.chatId))
+      .where(eq(sessions.id, sessionId));
+    return rows[0] ? withSessionKind(rows[0].chat) : null;
+  }
+
+  /** The channel that opened chat `chatId`, or null for a chat no channel opened. */
+  channelOfChat(chatId: string): string | null {
+    return (
+      this.db
+        .select({ channel: romeSessions.sourceChannel })
+        .from(romeSessions)
+        .where(eq(romeSessions.id, chatId))
+        .get()?.channel ?? null
+    );
+  }
+
+  /** The continuity key an agent session's stored row holds, or null when no row has the id or it holds none. */
+  async continuityKeyOfSession(sessionId: string): Promise<string | null> {
+    const rows = await this.db
+      .select({ key: sessions.channelThreadKey })
+      .from(sessions)
+      .where(eq(sessions.id, sessionId));
+    return rows[0]?.key ?? null;
+  }
+
+  /**
+   * Record that a chat has an agent session, on the session's stored row.
+   * Answers the other chat it replaced, if any. With `replace: false`, a row
+   * that already names a chat keeps it.
+   */
+  async recordSessionInChat(
+    sessionId: string,
+    chatId: string,
+    options: { replace?: boolean } = {},
+  ): Promise<string | null> {
+    return this.db.transaction((tx) => {
+      const row = tx
+        .select({ chatId: sessions.chatId })
+        .from(sessions)
+        .where(eq(sessions.id, sessionId))
+        .get();
+      if (!row || row.chatId === chatId) return null;
+      if (row.chatId !== null && options.replace === false) return null;
+      tx.update(sessions).set({ chatId }).where(eq(sessions.id, sessionId)).run();
+      return row.chatId;
+    });
   }
 
   async markSessionRead(id: string) {

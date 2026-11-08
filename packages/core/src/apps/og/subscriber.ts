@@ -58,8 +58,9 @@ async function generateOgImage(app: ResolvedApp, link: string | null): Promise<B
 
 export interface AppOgImageSubscriberOptions {
   store: OgImageStore;
-  /** Public host without scheme (`jessie.romeos.cc`); null hides the link line. */
-  host: string | null;
+  /** Public host without scheme (`jessie.romeos.cc`); null hides the link line.
+   *  A getter, read per render, so an adopted instance origin applies at once. */
+  host: () => string | null;
   generate?: (app: ResolvedApp, link: string | null) => Promise<Buffer>;
 }
 
@@ -114,13 +115,17 @@ export function createAppOgImageSubscriber(opts: AppOgImageSubscriberOptions): S
     if (!isResolvedWebApp(app)) return;
 
     void (async () => {
-      const existing = await opts.store.stat(app.appId);
+      // One host per render: it is drawn on the card and names the cache file, so
+      // a host that changes while the render is pending cannot file a card drawn
+      // for the old host under the new host's name.
+      const host = opts.host();
+      const existing = await opts.store.stat(app.appId, host);
       if (existing && existing.mtimeMs > Date.parse(app.updatedAt)) return;
-      const link = opts.host ? `${opts.host}/full/apps/${appIdToPathSegment(app.appId)}` : null;
+      const link = host ? `${host}/full/apps/${appIdToPathSegment(app.appId)}` : null;
       const png = await generate(app, link);
       await enqueue(app.appId, async () => {
         if (epochs.get(app.appId) !== epoch) return;
-        await opts.store.write(app.appId, png);
+        await opts.store.write(app.appId, png, host);
         log.info("rendered social card image", { appId: app.appId });
       });
     })().catch((err: unknown) => {

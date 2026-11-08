@@ -11,14 +11,14 @@
  * followed it always threw and returned `fallback` anyway.
  */
 export async function getApiErrorMessage(response: Response, fallback: string): Promise<string> {
-  try {
-    const data = await response.json();
-    if (typeof data?.detail === "string" && data.detail.trim()) return data.detail.trim();
-    if (typeof data?.message === "string" && data.message.trim()) return data.message.trim();
-    if (typeof data?.error === "string" && data.error.trim()) return data.error.trim();
-  } catch {
-    // Ignore JSON parse failures and use the caller's fallback.
-  }
+  return apiErrorMessageFrom(await response.json().catch(() => null), fallback);
+}
 
+/** The same message, for a caller that has already parsed the body to read its error code. */
+export function apiErrorMessageFrom(data: unknown, fallback: string): string {
+  const body = data as { detail?: unknown; message?: unknown; error?: unknown } | null;
+  if (typeof body?.detail === "string" && body.detail.trim()) return body.detail.trim();
+  if (typeof body?.message === "string" && body.message.trim()) return body.message.trim();
+  if (typeof body?.error === "string" && body.error.trim()) return body.error.trim();
   return fallback;
 }

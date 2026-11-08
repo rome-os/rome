@@ -139,7 +139,6 @@ export class FollowBatcher {
 
 export interface ImportantDeliveryDeps {
   now(): number;
-  isEnabled(): Promise<boolean>;
   /** Whether Rome serves `owner` now. One who is not is told nothing, and their items stay owed. */
   isServed?(owner: string): Promise<boolean>;
   /** When `owner`'s quiet window `at` falls in ends, or null when `at` is not quiet for them. */
@@ -217,7 +216,6 @@ export class ImportantDelivery {
   }
 
   private async once(): Promise<void> {
-    if (!(await this.deps.isEnabled())) return;
     const owed = await this.deps.owed();
     if (owed.length === 0) return;
     const now = this.deps.now();

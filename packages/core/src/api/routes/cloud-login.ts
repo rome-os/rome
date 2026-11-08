@@ -15,7 +15,17 @@ import {
   getGuardianAuthState,
   setGuardianAccount,
 } from "../../lib/guardian-auth-state.js";
-import { applySetupDefaults, defaultGuardianName } from "../../lib/guardian-profile.js";
+import {
+  backgroundNote,
+  followRequest,
+  readOnboardingSurvey,
+  type OnboardingSurvey,
+} from "../../lib/cloud-onboarding.js";
+import {
+  applySetupDefaults,
+  defaultGuardianName,
+  writeGuardianBackground,
+} from "../../lib/guardian-profile.js";
 import {
   isInstanceLinked,
   isValidInstanceToken,
@@ -42,7 +52,9 @@ const log = createLogger("api:cloud-login");
 //
 // Ownership is enforced *server-side at `/authorize`* — Rome Cloud only ever
 // issues a code to the account that owns this instance — so a verified
-// `id_token`'s `sub` IS the confirmed owner. A token that fails verification
+// `id_token`'s `sub` IS the confirmed owner. The native leg still checks it
+// against an existing guardian seat. Visitors never use these endpoints: the
+// phone signs them in through the visitor grant. A token that fails verification
 // (bad signature, wrong `iss`/`aud`, nonce mismatch, expiry) fails the
 // sign-in closed; the local password fallback covers a Rome Cloud outage, so
 // the owner is never locked out of their own box.
@@ -64,13 +76,16 @@ const OAUTH_CLIENT_ID = "rome-instance";
 // never anything derived from the request — so the callback can't be turned into
 // an open redirector. Success bounces to the dashboard root (a hard navigation so
 // the SPA re-bootstraps with the new session). A sign-in that creates the seat
-// lands on the welcome conversation instead: setup is already complete, so the
-// welcome app is the first screen. Failures return to /login, the cloud-default
+// lands in the Concierge's main chat instead: setup is already complete, and
+// that chat is where it asks the Concierge to follow the services they chose.
+// Failures return to /login, the cloud-default
 // sign-in entry: whatever the instance state, the retry affordance and the error
 // banner live there.
 const SUCCESS_PATH = "/";
+const MAIN_CHAT_PATH = "/message";
 const LOGIN_PATH = "/login";
-const WELCOME_PATH = "/full/apps/welcome-to-rome";
+// How long the first sign-in waits for the signup survey before going on without it.
+const DEFAULT_SURVEY_TIMEOUT_MS = 5_000;
 
 interface PendingLogin {
   channel: "browser" | "native";
@@ -160,11 +175,14 @@ interface TokenResponse {
 // Production passes nothing and gets the real global.
 export interface CloudLoginSeams {
   fetchImpl?: typeof fetch;
+  /** How long the first sign-in waits for the signup survey. */
+  surveyTimeoutMs?: number;
 }
 
 export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Hono {
   const app = new Hono();
   const fetchImpl = seams.fetchImpl ?? globalThis.fetch;
+  const surveyTimeoutMs = seams.surveyTimeoutMs ?? DEFAULT_SURVEY_TIMEOUT_MS;
 
   // The scope encodes intent: a box with no instance token is binding for the
   // first time (`instance:enroll` mints its token at the token leg); one
@@ -285,8 +303,21 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         return c.json({ error: "unverified_identity" }, 401);
       }
 
+      // Rome Cloud issues this code only to the owner, but the instance checks
+      // the account itself: an existing seat signs in only the account it is
+      // bound to, and a refusal never rebinds it.
       const guardian = await getGuardianAuthState(deps.db);
       if (guardian.exists) {
+        if (guardian.accountId !== null && guardian.accountId !== identity.accountId) {
+          // The seat's account beside the refused one lets support tell a stale
+          // binding (the owner signs in once from a browser to repair it) from a
+          // real non-owner.
+          log.warn("native cloud login refused: account does not own this instance", {
+            accountId: identity.accountId,
+            recordedAccountId: guardian.accountId,
+          });
+          return c.json({ error: "not_owner" }, 403);
+        }
         await setGuardianAccount(deps.db, identity.accountId, identity.email, identity.avatarUrl);
       } else {
         await createGuardianSeat(identity);
@@ -299,6 +330,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
         session_token: session.token,
         expires_at: session.expiresAt,
         origin: getInstanceOrigin(),
+        role: "owner",
       });
     } catch (err) {
       log.warn("native cloud login errored", {
@@ -515,21 +547,65 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     }
   }
 
+  // The signup survey from Rome Cloud's whoami, or null. Fail-open: an older
+  // Rome Cloud, a slow or failing whoami and an old row with no answers all
+  // leave setup as it always was.
+  async function readSurvey(): Promise<OnboardingSurvey | null> {
+    if (!deps.cloudProfile) return null;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    try {
+      const outcome = await Promise.race([
+        deps.cloudProfile.get(),
+        new Promise<null>((resolve) => {
+          timer = setTimeout(() => resolve(null), surveyTimeoutMs);
+        }),
+      ]);
+      return outcome?.kind === "ok" ? readOnboardingSurvey(outcome.profile) : null;
+    } catch (err) {
+      log.warn("could not read the signup survey; using defaults", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   // On a fresh instance the cloud round trip is the sole account source, so
   // the guardian seat is created from the consenting cloud account, and setup
-  // finishes right here with defaults: the display name from the identity
-  // assertion and a preset agent identity. The welcome conversation confirms
-  // both, so the onboarding page is never shown on this path.
-  async function createGuardianSeat(identity: CloudIdentity): Promise<void> {
+  // finishes right here: the names the guardian gave Rome Cloud's signup survey,
+  // else the display name from the identity assertion and a preset agent
+  // identity. Then the Concierge is turned on, and when the survey asked Rome to
+  // follow a service, the guardian's request for it goes into the main chat, so
+  // the onboarding page is never shown on this path. Returns that chat's path,
+  // or null when the Concierge could not be started.
+  async function createGuardianSeat(identity: CloudIdentity): Promise<string | null> {
     await createCloudGuardian(deps.db, identity.accountId, identity.email, identity.avatarUrl);
-    await applySetupDefaults(defaultGuardianName(identity), {
-      db: deps.db,
-      settingsRepo: deps.settingsRepo,
-      reactivateFloating: () => deps.routineEngine.reactivateFloating(),
-    });
+    const survey = await readSurvey();
+    const guardianName = survey?.guardianName ?? defaultGuardianName(identity);
+    await applySetupDefaults(
+      guardianName,
+      {
+        db: deps.db,
+        settingsRepo: deps.settingsRepo,
+        reactivateFloating: () => deps.routineEngine.reactivateFloating(),
+      },
+      { agentName: survey?.agentName ?? undefined },
+    );
+    const background = backgroundNote(survey);
+    if (background) writeGuardianBackground(background);
     // Not awaited: the provision can take up to MAIL_REQUEST_TIMEOUT_MS, and
-    // the guardian lands on the welcome conversation without waiting for it.
+    // the guardian lands in the chat without waiting for it.
     void deps.autoConnectEmail?.();
+    try {
+      const started = await deps.concierge?.startMainChat(followRequest(survey));
+      return started ? MAIN_CHAT_PATH : null;
+    } catch (err) {
+      log.warn("could not start the Concierge's main chat", {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    }
   }
 
   // The row is created BEFORE the cookie so a session never outruns a backing
@@ -537,13 +613,13 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
   async function finishSignedIn(c: Context, identity: CloudIdentity) {
     const guardian = await getGuardianAuthState(deps.db);
     if (!guardian.exists) {
-      await createGuardianSeat(identity);
+      const conciergePath = await createGuardianSeat(identity);
       issueGuardianSession(c, identity.accountId);
       deps.loginUsage.recordLogin("rome_cloud");
       log.info("cloud login created the guardian seat and signed in", {
         accountId: identity.accountId,
       });
-      return c.redirect(WELCOME_PATH);
+      return c.redirect(conciergePath ?? SUCCESS_PATH);
     }
     issueGuardianSession(c, identity.accountId);
     deps.loginUsage.recordLogin("rome_cloud");

@@ -2,7 +2,7 @@
 // `session_turn_checkpoints`. Port: agent/domain/session-repository.ts.
 // Aggregate: agent/domain/session.ts.
 
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, desc, eq } from "drizzle-orm";
 import { resolveArtifactId, type ArtifactIdentityContext } from "../../apps/artifact-id.js";
 import type { DrizzleDb, DrizzleTx } from "../../db/index.js";
 import { sessions, sessionTurnCheckpoints } from "../../db/schema.js";
@@ -21,8 +21,11 @@ type SessionRow = typeof sessions.$inferSelect;
 
 /**
  * The Sessions repository over SQLite through Drizzle. It is the only code
- * that touches `sessions` and `session_turn_checkpoints`. The agent also
- * matches under its legacy names in `current`, through {@link deprecatedSameAgent}.
+ * that touches `sessions` and `session_turn_checkpoints`, except the
+ * `chat_id` column: the web chat side reads and records which chat has a
+ * session there (`chatOfSession`, `recordSessionInChat` in
+ * db/repositories/webchat.ts). The agent also matches under its legacy names
+ * in `current`, through {@link deprecatedSameAgent}.
  */
 export class DrizzleSessionRepository implements SessionRepository {
   constructor(
@@ -79,8 +82,8 @@ export class DrizzleSessionRepository implements SessionRepository {
    * Writes the facts the session changed since it was last saved, and the
    * checkpoints recorded since then. Only changed facts are written, so
    * two instances of one session that change different facts both keep their
-   * writes. A chat is recorded only on a session that still has none, and a
-   * completion is never undone. The session must have been added.
+   * writes. A completion is never undone, and the chat that has the session
+   * is never written here. The session must have been added.
    */
   async save(session: Session): Promise<void> {
     const state = session.snapshot();
@@ -103,8 +106,8 @@ export class DrizzleSessionRepository implements SessionRepository {
    * adds its successor from `retired.replace()`, with any turn the successor
    * recorded before the reset was written. Every other session still
    * active for the same continuity key and exact agent is completed too, so
-   * the successor is the only one. A successor that named no chat inherits
-   * the retired session's stored chat. Whoever resets serializes this per
+   * the successor is the only one. The successor's row keeps the chat the
+   * retired session's row names. Whoever resets serializes this per
    * continuity key.
    */
   async replace(retired: Session, successor: Session): Promise<void> {
@@ -130,24 +133,21 @@ export class DrizzleSessionRepository implements SessionRepository {
           .where(exactlyActive(retiredState.continuityKey, retiredState.agentName))
           .run();
       }
-      // The inherited chat is the row's, not the instance's, as today's reset
-      // reads it: the instance can predate the chat's recording.
-      if (successorState.chatId === null) {
-        successorState.chatId =
-          tx
-            .select({ chatId: sessions.chatId })
-            .from(sessions)
-            .where(eq(sessions.id, retiredState.id))
-            .get()?.chatId ?? null;
-      }
-      tx.insert(sessions).values(toRow(successorState)).run();
+      // The successor stays in the chat that has the retired session. The chat
+      // side owns that link and may change it after the reset.
+      const chatId =
+        tx
+          .select({ chatId: sessions.chatId })
+          .from(sessions)
+          .where(eq(sessions.id, retiredState.id))
+          .get()?.chatId ?? null;
+      tx.insert(sessions)
+        .values({ ...toRow(successorState), chatId })
+        .run();
       for (const checkpoint of successorPending.checkpoints) upsertCheckpoint(tx, checkpoint);
     });
     retired.markSaved();
     successor.markSaved();
-    if (successorState.chatId !== null && successor.deprecatedChatId === null) {
-      successor.deprecatedInheritChat(successorState.chatId);
-    }
   }
 
   /** @deprecated The dashboard reads a turn's checkpoint only to hand it back
@@ -226,7 +226,6 @@ function restore(row: SessionRow): Session {
     workingDir: row.workingDir,
     createdAt: row.createdAt,
     lastActiveAt: row.lastActiveAt,
-    chatId: row.chatId,
   });
 }
 
@@ -251,12 +250,6 @@ function writeChanges(
   if (Object.keys(columns).length > 0) {
     tx.update(sessions).set(columns).where(eq(sessions.id, state.id)).run();
   }
-  if (changes.has("chat") && state.chatId !== null) {
-    tx.update(sessions)
-      .set({ chatId: state.chatId })
-      .where(and(eq(sessions.id, state.id), isNull(sessions.chatId)))
-      .run();
-  }
 }
 
 function toRow(state: SessionState): SessionRow {
@@ -264,7 +257,8 @@ function toRow(state: SessionState): SessionRow {
     id: state.id,
     agentName: state.agentName,
     channelThreadKey: state.continuityKey,
-    chatId: state.chatId,
+    // Which chat has the session is the chat side's to record.
+    chatId: null,
     provider: state.provider,
     modelThreadId: state.modelThreadId,
     model: state.model,

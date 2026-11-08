@@ -9,10 +9,7 @@ import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js"
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../lib/anthropic-compatible-providers.js";
 import { settings } from "../../db/schema.js";
 import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
-import * as anthropicLoginModule from "../../lib/anthropic-login.js" with {
-  rstest: "importActual",
-};
-import { availabilityOf } from "../../test/kit/model-availability.js";
+import { reportOf } from "../../test/kit/model-accounts.js";
 
 const {
   isAnthropicAuthRevokedMock,
@@ -35,8 +32,13 @@ rs.mock("./desktop.js", () => ({
   openServerBrowserTab: openServerBrowserTabMock,
 }));
 
-rs.mock("../../lib/anthropic-login.js", () => ({
-  ...anthropicLoginModule,
+// The mark that the provider refused a credential lives on disk beside the adapter.
+rs.mock("../../agent/infrastructure/model/anthropic/refused-credential.js", () => ({
+  buildClaudeCliRevokedSource: rs.fn(),
+  buildStoredAnthropicCompatibleRevokedSource: rs.fn(),
+  clearAnthropicAuthRevoked: rs.fn(),
+  markAnthropicAuthRevoked: rs.fn(),
+  resolveAnthropicAuthRevokedSourceForQuery: rs.fn(),
   clearClaudeAuthRevoked: clearClaudeAuthRevokedMock,
   clearStoredAnthropicCompatibleAuthRevoked: clearStoredAnthropicCompatibleAuthRevokedMock,
   isAnthropicAuthRevoked: isAnthropicAuthRevokedMock,
@@ -73,11 +75,11 @@ describe("AI tools status API", () => {
     try {
       const deps = await buildTestDeps(testDb.db);
       const refreshed = {
-        openai: availabilityOf("available"),
-        anthropic: availabilityOf("unauthorized"),
+        openai: reportOf("available"),
+        anthropic: reportOf("unauthorized"),
       };
-      const refresh = rs.spyOn(deps.modelAvailability, "refresh").mockResolvedValue(undefined);
-      rs.spyOn(deps.modelAvailability, "read").mockReturnValue(refreshed);
+      const refresh = rs.spyOn(deps.modelAccounts, "refresh").mockResolvedValue(undefined);
+      rs.spyOn(deps.modelAccounts, "read").mockReturnValue(refreshed);
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       const res = await app.request("/ai-tools/refresh", { method: "POST" });
@@ -98,7 +100,7 @@ describe("AI tools status API", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      const refresh = rs.spyOn(deps.modelAvailability, "refresh").mockResolvedValue(undefined);
+      const refresh = rs.spyOn(deps.modelAccounts, "refresh").mockResolvedValue(undefined);
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       await app.request("/ai-tools/refresh?provider=anthropic", { method: "POST" });
@@ -149,7 +151,7 @@ describe("AI tools status API", () => {
       delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
 
       const deps = await buildTestDeps(testDb.db);
-      await deps.modelAvailability.refresh();
+      await deps.modelAccounts.refresh();
       await fs.writeFile(logPath, "");
       const app = new Hono().route("/", aiToolsRoutes(deps));
       const res = await app.request("/ai-tools/status");
@@ -208,7 +210,7 @@ describe("AI tools status API", () => {
       delete process.env.CLAUDE_CODE_OAUTH_TOKEN;
 
       const deps = await buildTestDeps(testDb.db);
-      await deps.modelAvailability.refresh();
+      await deps.modelAccounts.refresh();
       const app = new Hono().route("/", aiToolsRoutes(deps));
       const res = await app.request("/ai-tools/status");
       expect(res.status).toBe(200);
@@ -272,7 +274,7 @@ describe("AI tools status API", () => {
       process.env.ROME_CODEX_BIN = join(dir, "codex");
 
       const deps = await buildTestDeps(testDb.db);
-      await deps.modelAvailability.refresh();
+      await deps.modelAccounts.refresh();
       const app = new Hono().route("/", aiToolsRoutes(deps));
       const res = await app.request("/ai-tools/status");
       expect(res.status).toBe(200);
@@ -399,7 +401,7 @@ describe("Codex shared account routes", () => {
     try {
       const deps = await buildTestDeps(testDb.db);
       const logout = rs.spyOn(deps.codexAccountService, "revoke");
-      const refresh = rs.spyOn(deps.modelAvailability, "refresh").mockResolvedValue(undefined);
+      const refresh = rs.spyOn(deps.modelAccounts, "refresh").mockResolvedValue(undefined);
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       const response = await app.request("/ai-tools/codex/logout", { method: "POST" });
@@ -508,6 +510,10 @@ describe("AI tools Anthropic-compatible credentials API", () => {
     const configuredBody = await configured.json();
     expect(configuredBody.configured.env.ANTHROPIC_AUTH_TOKEN).toBe("ark-key");
 
+    const status = await (await app.request("/ai-tools/status")).json();
+    expect(status.anthropicCompatible).toMatchObject({ provider: "custom" });
+    expect(status.anthropicCompatible).not.toHaveProperty("env");
+
     const update = await app.request("/ai-tools/anthropic-compatible-credentials", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -562,7 +568,7 @@ describe("AI tools Anthropic-compatible credentials API", () => {
     const gate = new Promise<void>((resolve) => {
       releaseRefresh = resolve;
     });
-    rs.spyOn(deps.modelAvailability, "refresh").mockImplementation(async (provider) => {
+    rs.spyOn(deps.modelAccounts, "refresh").mockImplementation(async (provider) => {
       expect(provider).toBe("anthropic");
       refreshStarted();
       await gate;
@@ -636,11 +642,9 @@ describe("Claude logout API", () => {
       const refreshGate = new Promise<void>((resolve) => {
         releaseRefresh = resolve;
       });
-      const refreshSpy = rs
-        .spyOn(deps.modelAvailability, "refresh")
-        .mockImplementation(async () => {
-          await refreshGate;
-        });
+      const refreshSpy = rs.spyOn(deps.modelAccounts, "refresh").mockImplementation(async () => {
+        await refreshGate;
+      });
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       const response = Promise.resolve(app.request("/ai-tools/claude/logout", { method: "POST" }));

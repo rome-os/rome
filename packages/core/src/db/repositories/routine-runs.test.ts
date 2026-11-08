@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { RoutineRunsRepository } from "./routine-runs.js";
 import { RoutinesRepository } from "./routines.js";
 

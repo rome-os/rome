@@ -1,7 +1,7 @@
 // Anthropic-side mount of the Rome tools.
 //
-// The tool definitions and handlers are the run's (`core/mcp-facade.ts`,
-// served as `RomeTools`). This module's job is to wrap each tool into the
+// The tool definitions and handlers are the run's, served as `RomeTools`.
+// This module's job is to wrap each tool into the
 // Claude Agent SDK's `tool()` shape and group them under `createSdkMcpServer()`
 // instances, then attach any external (stdio) MCP servers the agent declared.
 //
@@ -14,9 +14,9 @@
 //     `CallToolResult`), so we pass that through unchanged.
 
 import { createSdkMcpServer, tool as sdkTool } from "@anthropic-ai/claude-agent-sdk";
-import { toMcpToolShape } from "../../../../core/mcp/json-schema-zod.js";
 import type { McpServerConfig } from "../../../domain/model-port.js";
 import type { RomeToolDefinition, RomeToolGroup, RomeTools } from "../../../domain/rome-tools.js";
+import { toMcpToolShape } from "./json-schema-zod.js";
 
 interface BuildAnthropicMcpServersParams {
   tools: RomeTools;
@@ -85,8 +85,8 @@ export function buildAnthropicMcpServers({
     skills: server("skills"),
   };
 
-  // Built-in tools that hand something back to the human to answer
-  // (ask_question, propose_routine). Registered when the run serves any.
+  // Tools that hand something back to the human to answer. Registered when the
+  // run serves any.
   if (tools.listTools("ask_user").length > 0) {
     mcpServers.ask_user = server("ask_user");
   }

@@ -95,6 +95,9 @@ export interface ConnectionView
    *  before the rename read. */
   service: string;
   label: string;
+  /** The kind's display name ("GitHub"), where `label` is the kind id until
+   *  someone renames the connection. */
+  kindLabel: string;
   /** Working or broken. Null for a placeholder, and for a connection a
    *  disconnect kept with no access. */
   state: ConnectionState | null;
@@ -120,9 +123,10 @@ interface GrantDetailView {
   tokenExpiresAt: string | null;
 }
 
-function connectHint(connectionKind: string): ConnectHint | null {
+function connectHint(connectionKind: string, state: ConnectionState | null): ConnectHint | null {
   if (!isOAuthProvider(connectionKind)) return null;
-  const link = createRomeCloudOAuthStartUrl(connectionKind);
+  // A broken connection is repaired, not started over: the link says so.
+  const link = createRomeCloudOAuthStartUrl(connectionKind, { reconnect: state === "broken" });
   return {
     url: link.connectUrl,
     available: link.available,
@@ -179,11 +183,12 @@ function buildConnectionView(
     connectionKind: conn.connectionKind,
     service: conn.connectionKind,
     label: conn.label,
+    kindLabel: registry.getDescriptor(conn.connectionKind)?.label ?? conn.connectionKind,
     state: conn.state(),
     grants,
     display,
     capabilities: wireCapabilities(conn.status()),
-    connect: connectHint(conn.connectionKind),
+    connect: connectHint(conn.connectionKind, conn.state()),
     setups: activeSetups(manager, conn.id, Object.keys(grants)),
     channel: channel?.id ?? null,
     platform: account?.platform ?? null,
@@ -255,6 +260,7 @@ function placeholderView(
     connectionKind,
     service: connectionKind,
     label: connectionKind,
+    kindLabel: descriptor.label ?? connectionKind,
     state: null,
     grants,
     display,
@@ -263,7 +269,7 @@ function placeholderView(
       act: capStatus("actor"),
       watch: capStatus("watcher"),
     }),
-    connect: connectHint(connectionKind),
+    connect: connectHint(connectionKind, null),
     setups: activeSetups(manager, connectionKind, [descriptor.grant]),
     channel: null,
     platform: null,

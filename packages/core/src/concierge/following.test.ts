@@ -3,7 +3,7 @@ import type { ConciergeWatchCapability } from "@rome/api-types/concierge";
 import type { Action } from "../actions/types.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import { ConciergeFollowItemsRepository } from "../db/repositories/concierge-follow-items.js";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import type { Routine } from "../routines/types.js";
 import {
   type ConciergeFollowing,
@@ -24,9 +24,15 @@ const repoTrigger = (type: string) => ({
 });
 
 /** A Composio service as the connector lists it. */
-const composio = (service: string, label: string, working: boolean) => ({
+const composio = (
+  service: string,
+  label: string,
+  working: boolean,
+  glyph: string | null = service,
+) => ({
   service,
   label,
+  ...(glyph === null ? {} : { glyph }),
   state: working ? ("working" as const) : null,
   connect: working
     ? null
@@ -46,7 +52,8 @@ const connectionViews = (): ConnectionView[] =>
     {
       id: "c1",
       connectionKind: "github",
-      label: "GitHub",
+      label: "github",
+      kindLabel: "GitHub",
       state: "working",
       display: { github: { displayName: null, handle: "octo-me", email: null, avatarUrl: null } },
       account: null,
@@ -60,7 +67,8 @@ const connectionViews = (): ConnectionView[] =>
     {
       id: null,
       connectionKind: "telegram_user",
-      label: "Telegram",
+      label: "telegram_user",
+      kindLabel: "Telegram",
       state: null,
       display: {},
       account: null,
@@ -347,7 +355,6 @@ function setup(
   const ownerOfChat = async (id: string | null | undefined) =>
     (id && chatOwners.get(id)) || GUARDIAN_OWNER;
   const service = {
-    isEnabled: async () => true,
     findChatId: async (owner = GUARDIAN_OWNER) => mainChatIdOf(owner),
     ownerOfChat,
     isServed: async (owner: string) => !dropped.has(owner),
@@ -1136,20 +1143,23 @@ describe("watchProvidersOf", () => {
         services: [
           composio("gmail", "Other Gmail", true),
           composio("linear", "Linear", true),
-          composio("telegram_user", "Telegram (Composio)", true),
+          composio("telegram_user", "Telegram (Composio)", true, null),
         ],
         watch: [],
       },
     });
     const { connectors } = await s.following().list();
-    // Telegram the toolkit is listed beside Telegram the channel.
-    expect(connectors.map((c) => [c.service, c.label])).toEqual([
-      ["github", "GitHub"],
-      ["gmail", "Gmail"],
-      ["telegram_user", "Telegram"],
-      ["notion", "Notion"],
-      ["linear", "Linear"],
-      ["telegram_user", "Telegram (Composio)"],
+    // Telegram the toolkit is listed beside Telegram the channel. A connection
+    // is named by its kind's display label (its own label is the kind id), and
+    // each service's mark id comes from its source: a brand for Rome's own
+    // connections, the provider's glyph for the rest, none when it names none.
+    expect(connectors.map((c) => [c.service, c.label, c.icon])).toEqual([
+      ["github", "GitHub", "brand:github"],
+      ["gmail", "Gmail", "glyph:gmail"],
+      ["telegram_user", "Telegram", "brand:telegram_user"],
+      ["notion", "Notion", "glyph:notion"],
+      ["linear", "Linear", "glyph:linear"],
+      ["telegram_user", "Telegram (Composio)", null],
     ]);
   });
 });

@@ -14,8 +14,8 @@ import type { ThreadContext } from "./types.js";
 import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
 import type { Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
-import { isTransientDelta } from "./agent-message.js";
-import type { SessionConversation } from "./session-conversation.js";
+import { isTransientDelta } from "../agent/index.js";
+import type { SessionChat } from "./session-conversation.js";
 
 export interface AgentTraceRecorderInput {
   webchatRepo: WebChatRepository;
@@ -74,8 +74,11 @@ export function resolveRomeSessionId(input: RomeSessionIdInput): string {
 }
 
 export interface TurnConversationInput extends RomeSessionIdInput {
-  /** The conversation the session serves, as it stood when the turn started. */
-  sessionConversation?: SessionConversation;
+  /** The chat the session's opener named. It wins over the one this turn's
+   *  caller names. Temporary, see `openerChat` (ZHA-157). */
+  openerChat?: string;
+  /** The chat that has the session, read when no chat is named. */
+  sessionChat?: SessionChat;
 }
 
 // Conversations whose turns only the recorder writes. A webchat conversation
@@ -107,10 +110,8 @@ export function resolveTurnConversation(input: TurnConversationInput): {
   promptPersisted: boolean;
   recorderOwned: boolean;
 } {
-  const conversation = input.sessionConversation;
-  // The opener's named conversation wins over the one this turn's caller names.
-  const named = conversation?.origin === "named" ? conversation.id : input.romeSessionId;
-  const found = !named && conversation?.origin === "recorded" ? conversation : undefined;
+  const named = input.openerChat ?? input.romeSessionId;
+  const found = named ? undefined : input.sessionChat;
   const ownedByRecorder =
     found !== undefined &&
     RECORDER_OWNED_CONVERSATION_TYPES.has(found.type) &&

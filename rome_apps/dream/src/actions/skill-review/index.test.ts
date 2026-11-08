@@ -5,7 +5,7 @@ import { fileURLToPath } from "node:url";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
-import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
+import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/db.js";
 import type { AgentRunner } from "../../../../../packages/core/src/core/agent-runner.js";
 import { resolveProjectWorkingDirWithinRoot } from "../../../../../packages/core/src/webchat/projects.js";
 import { createRunsRepository } from "../../db/repositories/runs.js";

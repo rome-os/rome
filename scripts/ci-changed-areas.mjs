@@ -3,7 +3,7 @@
 // A shard skipped by mistake reports green without having run, so every rule
 // here resolves ambiguity toward running. The areas below list the trees each
 // shard *reads*, which is wider than the package it is named for: the core
-// suite collects tests out of `rome_apps`, `scripts`, and `infra` and reads the
+// suite collects tests out of `rome_apps`, `scripts`, `lint`, and `infra` and reads the
 // bundled app templates, and the token gates in the rest shard walk the kit,
 // the dashboard, the web SDK, the app scaffolds, and every app's web bundle.
 //
@@ -30,6 +30,7 @@ export const AREA_PATHS = {
     "packages/app-template/",
     "rome_apps/",
     "scripts/",
+    "lint/",
     "infra/",
   ],
   web: [

@@ -218,7 +218,7 @@ describe("rome-cloud-origin", () => {
       clearEnv();
       // Rome Cloud's Favors allowlist rejects any return_to host outside
       // PANTHEON_DOMAIN, loopback included, and the configured origin also
-      // feeds PromptBuilder. Keeping it null preserves both.
+      // feeds the system prompt. Keeping it null preserves both.
       process.env.ROME_LOOPBACK_CALLBACK_ORIGIN = "http://127.0.0.1:47823";
       expect(getConfiguredInstanceOrigin()).toBeNull();
     });

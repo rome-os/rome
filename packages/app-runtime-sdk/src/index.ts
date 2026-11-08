@@ -674,7 +674,7 @@ export interface TurnMiddlewareContext {
   /** Emits model-shaped content. A terminal `result` produces the persisted assistant row. */
   emit(event: AgentEvent): void;
   /** Reserved for the self-loop guard when a future middleware re-injects a
-   *  turn (e.g. replay). `welcome-to-rome` does not inject. */
+   *  turn (e.g. replay). No middleware injects today. */
   meta: { synthetic?: boolean };
 }
 

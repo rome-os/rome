@@ -3,6 +3,7 @@
 // memory, one list of follows and one task list (docs/domains/chats.md#concierge-chat,
 // docs/adrs/one-concierge-with-several-chats.md). Design: rome-os/rome#1344.
 
+import type { PhoneWatching } from "../lib/phone-watching.js";
 import { CONCIERGE_CHAT_ID, type ConciergeChatRef } from "@rome/api-types/concierge";
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
@@ -12,10 +13,10 @@ import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { ApprovalsRepository } from "../db/repositories/approvals.js";
-import type { SkillCatalog } from "../core/skill-catalog.js";
+import type { SkillCatalog } from "../agent/index.js";
 import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
-import type { AgentTurnFailedBeforeStart } from "../core/agent-lifecycle.js";
-import type { AgentSessionManager } from "../core/agent-session.js";
+import type { AgentTurnFailedBeforeStart } from "../agent/index.js";
+import type { AgentSessionManager } from "../agent/index.js";
 import {
   accountAllowsModel,
   CODEX_LUNA_MODEL,
@@ -23,7 +24,7 @@ import {
   sameProviderTarget,
   soleProviderAtUsageLimit,
   usageSwitchTarget,
-  type ModelAvailability,
+  type ModelAccounts,
   type ModelSelectionId,
   type SessionRepository,
 } from "../agent/index.js";
@@ -70,8 +71,6 @@ export {
 };
 /** The dashboard language the guardian picked: `en` or `zh-CN`. */
 const GUARDIAN_LANGUAGE_SETTING_KEY = "guardianLanguage";
-/** The guardian setting that turns Concierge on. Any value but `true` is off. */
-const EXPERIMENTAL_CONCIERGE_SETTING_KEY = "experimentalConcierge";
 /** Concierge's own account on the dashboard, which says what it sends into a
  *  task chat. */
 export const CONCIERGE_ACCOUNT: Account = { platform: DASHBOARD_PLATFORM, id: CONCIERGE_AGENT_ID };
@@ -120,6 +119,8 @@ export interface TaskChats {
    */
   openSession(chatId: string): Promise<string>;
   isRunning(chatId: string): boolean;
+  /** Sends `text` into the chat as the guardian's own message, the way their composer does. */
+  sendAsGuardian(chatId: string, text: string): Promise<void>;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
   activeTurns(chatId: string): string[];
   interruptTurn(turnId: string): Promise<void>;
@@ -134,7 +135,7 @@ export interface ConciergeDashboard {
 }
 
 export interface ConciergeDeps {
-  skillCatalog: Pick<SkillCatalog, "get">;
+  skillCatalog: Pick<SkillCatalog, "find">;
   settingsRepo: Pick<SettingsRepository, "get" | "set">;
   /** Who each owner is, and whether Rome still serves them. Every owner, by role only, when left out. */
   owners?: ConciergeOwners;
@@ -156,7 +157,7 @@ export interface ConciergeDeps {
   approvals: Pick<ApprovalsRepository, "onCreated">;
   messages: Pick<MessageRepository, "recent" | "before">;
   sessionRepository: Pick<SessionRepository, "current">;
-  availability: Pick<ModelAvailability, "read">;
+  accounts: Pick<ModelAccounts, "read">;
   agentSessionManager: Pick<AgentSessionManager, "peek">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
@@ -167,13 +168,15 @@ export interface ConciergeDeps {
   ) => Promise<"completed" | "stopped" | "interrupted" | "failed" | void>;
   /** Asks Rome Cloud to push to the guardian's phone. Absent, nothing is pushed. */
   notify?: ConciergePushDeps["notify"];
+  /** The chats the guardian's phone app holds open; nothing said there is pushed. */
+  phoneWatching?: Pick<PhoneWatching, "isWatching">;
 }
 
 export interface SystemTurnOptions {
   quiet?: boolean;
   inputLabel?: string;
   /** The first message the Concierge says in the turn goes to the guardian's
-   *  phone at this level. Only a turn the guardian did not start has one. */
+   *  phone at this level. A reminder, a recovery or a notice has none. */
   pushLevel?: NotifyLevel;
 }
 
@@ -193,6 +196,7 @@ export class ConciergeService {
           notify: deps.notify,
           quietUntil: (at) => this.quietUntil(at),
           pushesFor: async (chatId) => (await this.ownerOfChat(chatId)) === GUARDIAN_OWNER,
+          watching: (chatId) => deps.phoneWatching?.isWatching(chatId) ?? false,
           language: async () => {
             const stored = await this.deps.settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
             return typeof stored === "string" ? stored : null;
@@ -227,17 +231,6 @@ export class ConciergeService {
   get dashboard(): ConciergeDashboard {
     if (!this.attached) throw new Error("The dashboard is not up yet");
     return this.attached;
-  }
-
-  async isEnabled(): Promise<boolean> {
-    try {
-      return (await this.deps.settingsRepo.get(EXPERIMENTAL_CONCIERGE_SETTING_KEY)) === true;
-    } catch (error) {
-      log.warn("concierge setting unreadable, treating it as off", {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      return false;
-    }
   }
 
   /** An owner's main Concierge chat's id, or null when it does not exist yet. */
@@ -289,6 +282,44 @@ export class ConciergeService {
     );
     log.info("concierge chat created", { chatId: id });
     return id;
+  }
+
+  /**
+   * The guardian's first sign-in: makes sure their main chat exists. With a
+   * `message`, it goes into that chat as the guardian's own, the way the
+   * composer sends it, and the Concierge answers it as any other. Answers the
+   * main chat's id. The message is not awaited, and a failure to send it (no
+   * model signed in yet) is logged, so the sign-in that calls this never fails
+   * on it.
+   */
+  async startMainChat(message: string | null): Promise<string> {
+    const chatId = await this.ensureChatId();
+    if (message) {
+      this.dashboard.chats.sendAsGuardian(chatId, message).catch((error: unknown) =>
+        log.warn("first message to the Concierge was not sent", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
+    return chatId;
+  }
+
+  /**
+   * The guardian connected `service` from a connect card in `chatId`: tells the
+   * Concierge there, quietly, so it goes on without the guardian typing. Not
+   * awaited; a failure is logged.
+   */
+  serviceConnected(chatId: string, service: string): void {
+    this.runSystemTurn(chatId, `<service_connected service="${attr(service)}"/>`, {
+      quiet: true,
+      inputLabel: "Service connected",
+    }).catch((error: unknown) =>
+      log.warn("service connected notice failed", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   }
 
   /** Who each owner is, and whether Rome still serves them. */
@@ -417,7 +448,7 @@ export class ConciergeService {
   // its own models through the tier mappings, so it keeps the tier's choice,
   // as does a chat that neither provider can serve.
   private pickModel(): ModelSelectionId | null {
-    const { anthropic: claude, openai: codex } = this.deps.availability.read();
+    const { anthropic: claude, openai: codex } = this.deps.accounts.read();
     if (claude?.state === "available" && claude.account.authMethod !== "stored-compatible") {
       return "claude-sonnet";
     }
@@ -454,7 +485,7 @@ export class ConciergeService {
     const runtime = selected
       ? null
       : await this.deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-    const state = this.deps.availability.read();
+    const state = this.deps.accounts.read();
     // An Auto chat whose first turn failed has no recorded provider yet.
     const from =
       selected?.providerId ??
@@ -469,7 +500,7 @@ export class ConciergeService {
     reason ??=
       source?.state === "usage_limit_reached"
         ? "quota"
-        : // Rome credits pay for Codex while its login is out, so that alone is no failure.
+        : // Codex runs on Rome credits while the ChatGPT account is out, so that alone is no failure.
           (from === "anthropic" && source?.state === "unauthorized") || source?.state === "expired"
           ? "login"
           : undefined;

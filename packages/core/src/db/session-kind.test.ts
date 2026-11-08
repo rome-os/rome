@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { and, desc, eq } from "drizzle-orm";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { romeSessions } from "./schema.js";
 import { isWebchatChat } from "./session-kind.js";
 

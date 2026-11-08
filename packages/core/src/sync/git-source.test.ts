@@ -16,7 +16,7 @@ import { afterAll, afterEach, describe, expect, it } from "@rstest/core";
 import type { GithubGrantProfile } from "../connections/integrations/oauth-providers.js";
 import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
 import type { DrizzleDb } from "../db/index.js";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import {
   GitSyncSource,
   getGitChangeDiff,

@@ -1,3 +1,13 @@
+import { romeToolPorts } from "./rome-tool-ports.js";
+import { createLogger } from "../logger.js";
+import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
+import {
+  ChatSessionSettings,
+  readAnswerShape,
+  romeSessionTracing,
+  TurnUsageReporter,
+} from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { ConciergeService, type ConciergeDeps } from "../concierge/service.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { randomUUID } from "node:crypto";
@@ -11,12 +21,11 @@ import {
   createEmptyLegacyArtifactBindings,
   type ArtifactIdentityContext,
 } from "../apps/artifact-id.js";
-import { testChannelSurface } from "../test/channel-surface.js";
-import { createActionEngineRepos, createTestDb, type TestDb } from "../test/helpers.js";
+import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
 import type { ModelSessionEvent } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
-import { AgentLoader } from "./agent-loader.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
+import { AgentLoader } from "../agent/index.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import {
   AgentRunner,
   createSessionFromRun,
@@ -29,16 +38,15 @@ import {
   createAgentSessionManager,
   type AgentSession,
   type AgentSessionManager,
-} from "./agent-session.js";
-import { CapabilityDiscovery } from "./capability-discovery.js";
+} from "../agent/index.js";
 import type { ModelSelectionId } from "../agent/index.js";
-import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
+import { createModelResolver } from "../agent/index.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
-import { SkillCatalog } from "./skill-catalog.js";
+import { SkillLoader } from "../agent/index.js";
 import type { ThreadContext } from "./types.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
-import { availabilityOf, fakeAvailability } from "../test/kit/model-availability.js";
+import { reportOf, fakeAccounts, loginsOn } from "../test/kit/model-accounts.js";
 
 const AGENT = "continuation_agent";
 const CHAT = "chat-continuation";
@@ -103,8 +111,8 @@ function createProvider(id: ProviderId) {
 
 function healthyState() {
   return {
-    openai: availabilityOf("available"),
-    anthropic: availabilityOf("available"),
+    openai: reportOf("available"),
+    anthropic: reportOf("available"),
   };
 }
 
@@ -139,26 +147,33 @@ describe("continuation notice through AgentSessionManager", () => {
       inputSchema: { type: "object", properties: {} },
       execute: async () => ({ status: "ok", data: {} }),
     } as never);
-    const promptBuilder = new PromptBuilder();
-    rs.spyOn(promptBuilder, "build").mockReturnValue("Continuation test prompt");
+    const systemPrompts = createTestSystemPrompts();
+    rs.spyOn(systemPrompts, "build").mockReturnValue("Continuation test prompt");
     const state = healthyState();
     const manager = createAgentSessionManager(
       {
         agentLoader: loader,
         sessionRepository,
-        webchatRepo,
-        promptBuilder,
-        actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+        sessionSettings: new ChatSessionSettings({ webchatRepo: webchatRepo }),
+        systemPrompts,
         modelResolver: createModelResolver({
           providers: [openai.provider, anthropic.provider],
-          availability: fakeAvailability(() => state),
-          romeCreditsPayer: { isUsingRomeCredits: () => false },
+          accounts: fakeAccounts(() => state),
+          codexLogins: loginsOn(false),
         }),
-        capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
-        channelSurface: testChannelSurface,
+        networkMcpServers: () => ({}),
+        skillCatalog: new SkillLoader(artifactIdentity),
+        turnLifecycle: new TurnListeners(new AppTurnHooks()),
+        readAnswerShape,
+        sessionTracing: romeSessionTracing,
+        turnUsage: new TurnUsageReporter(),
+        folders: agentFolders(),
+        log: createLogger("agent-session"),
+        ...romeToolPorts({
+          webchatRepo,
+          actionRegistry,
+          actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+        }),
       },
       { keepAliveAcrossTurns: true },
     );
@@ -170,7 +185,6 @@ describe("continuation notice through AgentSessionManager", () => {
     return manager.acquire(key, {
       workingDir: directory,
       threadContext,
-      romeSessionId: CHAT,
       ...(selectionId !== undefined ? { selectionId } : {}),
     });
   }
@@ -208,7 +222,7 @@ describe("continuation notice through AgentSessionManager", () => {
     directory = await mkdtemp(join(tmpdir(), "rome-continuation-"));
     testDb = createTestDb();
     artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-    loader = new AgentLoader(artifactIdentity);
+    loader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
     sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
     webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession(CHAT, "Continuation");
@@ -386,7 +400,7 @@ describe("continuation notice through AgentSessionManager", () => {
     await first.shutdown();
 
     const retired = (await sessionRepository.current(key.channelThreadKey, AGENT))!;
-    await sessionRepository.replace(retired, retired.replace({ deprecatedChatId: CHAT }));
+    await sessionRepository.replace(retired, retired.replace());
     await chatTurn(await acquire(createManager(), "gpt-6-luna"), "after reset");
     expect(continuationOf(openai.calls[0]?.prompt)).toBeNull();
   });
@@ -434,7 +448,7 @@ describe("continuation notice through AgentSessionManager", () => {
     const context = { ...threadContext, threadId: chatId, romeSessionId: chatId };
     const session = await manager.acquire(
       { agentName, channelThreadKey: `webchat:${chatId}` },
-      { workingDir: directory, threadContext: context, romeSessionId: chatId, selectionId: from },
+      { workingDir: directory, threadContext: context, selectionId: from },
     );
     for await (const _ of session.sendTurn(
       { prompt: "first" },
@@ -443,13 +457,13 @@ describe("continuation notice through AgentSessionManager", () => {
     }
     if (concierge) {
       const raw = healthyState();
-      raw[source] = availabilityOf("usage_limit_reached");
+      raw[source] = reportOf("usage_limit_reached");
       await webchatRepo.updateSessionLargeModelSelection(chatId, from);
       const service = new ConciergeService({
         webchatRepo,
         sessionRepository,
         agentSessionManager: manager,
-        availability: fakeAvailability(() => raw),
+        accounts: fakeAccounts(() => raw),
       } as unknown as ConciergeDeps);
       expect(await service.switchIfExhausted(chatId)).toMatchObject({ selectionId: to });
     } else await webchatRepo.updateSessionLargeModelSelection(chatId, to);
