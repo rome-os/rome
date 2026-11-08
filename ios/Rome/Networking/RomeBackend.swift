@@ -52,7 +52,7 @@ protocol RomeBackend: AnyObject, Sendable {
     func setConciergeEnabled(_ enabled: Bool) async throws
     func search(_ query: String) async throws -> [SearchHit]
     /// The guardian's display name on this instance.
-    func me() async throws -> String?
+    func me() async throws -> AccountIdentity?
     /// Whether this session is the instance's guardian, not a visitor.
     func isGuardian() async -> Bool
     /// The instance's apps, every origin; `AppLinks.mine` picks the guardian's.
@@ -184,9 +184,9 @@ final class LiveBackend: RomeBackend {
         try await client.get("/chat/sessions/search", query: [URLQueryItem(name: "q", value: query)])
     }
 
-    func me() async throws -> String? {
+    func me() async throws -> AccountIdentity? {
         let body: JSONValue = try await client.get("/auth/me")
-        return body["displayName"]?.string ?? body["email"]?.string ?? body["userId"]?.string
+        return AccountIdentity(json: body)
     }
 
     func isGuardian() async -> Bool {

@@ -259,7 +259,7 @@ struct SettingsScreen: View {
     private var accountCard: some View {
         Button(action: onInstances) {
             HStack(spacing: 14) {
-                InitialAvatar(text: workspace.accountLabel, size: 48)
+                InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, size: 48)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(workspace.accountLabel)
                         .romeFont(17, .semibold)

@@ -58,6 +58,11 @@ struct AppWebScreen: View {
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
+        // Apps keeps the apps last opened from this phone at its top.
+        .task(id: app.id) {
+            guard pageURL == nil else { return }
+            RecentApps(host: workspace.host).record(app.id)
+        }
     }
 
     private var header: some View {

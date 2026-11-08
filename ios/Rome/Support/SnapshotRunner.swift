@@ -111,6 +111,12 @@ enum SnapshotRunner {
             }
             model.debugCommand = .route([])
             try? await Task.sleep(for: .seconds(0.6))
+            // No apps opened from this phone yet: one untitled group.
+            UserDefaults.standard.removeObject(forKey: "recentApps.me.romeos.cc")
+            await capture("37a-apps-no-recent", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.apps) }
+            model.debugCommand = .section(.chat)
+            try? await Task.sleep(for: .seconds(0.4))
+            for id in ["habits", "reading", "packing"] { RecentApps(host: "me.romeos.cc").record(id) }
             await capture("37-apps", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.apps) }
             await capture("39-app-open", style: styleName, in: directory, wait: 2.5) {
                 model.debugCommand = .route([.app(InstalledApp(id: "habits", displayName: "习惯打卡", fullHref: "/full/apps/habits", origin: "local"))])

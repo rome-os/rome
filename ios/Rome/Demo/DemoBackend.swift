@@ -89,6 +89,8 @@ final class DemoBackend: RomeBackend {
 
     /// Asset URLs only, as the instance writes them: `/projects/asset/<name>?path=…`.
     func apiFile(path: String, query: String?) async throws -> Data {
+        // App icons are SVG, as apps ship them.
+        if let svg = Self.appIcons[path] { return Data(svg.utf8) }
         var components = URLComponents()
         components.percentEncodedQuery = query
         guard path.hasPrefix("/projects/asset") || path.hasPrefix("/memory/asset"),
@@ -258,7 +260,7 @@ final class DemoBackend: RomeBackend {
         return hits.sorted { $0.message.createdAt > $1.message.createdAt }
     }
 
-    func me() async throws -> String? { "lin@example.com" }
+    func me() async throws -> AccountIdentity? { AccountIdentity(name: "Lin") }
 
     /// The demo's guardian sees Apps.
     func isGuardian() async -> Bool { true }
@@ -266,8 +268,8 @@ final class DemoBackend: RomeBackend {
     func apps() async throws -> [InstalledApp] {
         try await pause(0.3)
         let few = [
-            InstalledApp(id: "habits", displayName: "习惯打卡", description: "每天的小目标，连着打卡", fullHref: "/full/apps/habits", origin: "local"),
-            InstalledApp(id: "packing", displayName: "Trip packing list", description: "What to bring to Kyoto, checked off as it goes in the bag", fullHref: "/full/apps/packing", origin: "appstore"),
+            InstalledApp(id: "habits", displayName: "习惯打卡", description: "每天的小目标，连着打卡", iconUrl: "/api/apps/habits/icon", fullHref: "/full/apps/habits", origin: "local"),
+            InstalledApp(id: "packing", displayName: "Trip packing list", description: "What to bring to Kyoto, checked off as it goes in the bag", iconUrl: "/api/apps/packing/icon", fullHref: "/full/apps/packing", origin: "appstore"),
             // Not running: it stays in the grid, dimmed.
             InstalledApp(id: "reading", displayName: "Reading log", fullHref: nil, origin: "local", status: "stopped"),
             InstalledApp(id: "browser-automation", displayName: "Browser", description: "Ships with Rome", fullHref: "/full/apps/browser-automation", origin: "builtin"),
@@ -285,6 +287,12 @@ final class DemoBackend: RomeBackend {
             return []
         }
     }
+
+    /// Self-painted SVG tiles, as the coding app's guide asks apps to ship.
+    static let appIcons: [String: String] = [
+        "/apps/habits/icon": ##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="5.5" fill="#e3efe0"/><g transform="translate(4.56 4.56) scale(0.62)" fill="none" stroke="#2f5a2a" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M3 9h18M8 2v4M16 2v4"/><path d="M8.5 14.5l2.2 2.2 4.8-4.8"/></g></svg>"##,
+        "/apps/packing/icon": ##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" rx="5.5" fill="#dfe8f5"/><g transform="translate(4.56 4.56) scale(0.62)" fill="none" stroke="#1f3f6e" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"><rect x="4" y="7" width="16" height="13" rx="2.5"/><path d="M9 7V4.5h6V7M4 12h16"/></g></svg>"##,
+    ]
 
     func sendFeedback(_ text: String) async throws {
         try await pause(0.8)

@@ -293,3 +293,33 @@ enum RomeDate {
         value.map { Date(timeIntervalSince1970: $0 / 1000) }
     }
 }
+
+// MARK: - Identity
+
+/// Who is signed in, as `GET /auth/me` names them, read the way the web
+/// dashboard's profile menu reads it: the guardian's display name, else
+/// "Guardian"; a visitor's email; the Rome Cloud picture when there is one.
+struct AccountIdentity: Equatable, Sendable {
+    let name: String
+    let avatarURL: URL?
+
+    init(name: String, avatarURL: URL? = nil) {
+        self.name = name
+        self.avatarURL = avatarURL
+    }
+
+    init?(json body: JSONValue) {
+        let picture = body["avatarUrl"]?.string.flatMap(URL.init(string:)).flatMap { $0.scheme == "https" ? $0 : nil }
+        switch body["kind"]?.string {
+        case "guardian":
+            let display = body["displayName"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            name = display.isEmpty ? String(localized: "Guardian") : display
+        case "visitor":
+            guard let email = body["email"]?.string, !email.isEmpty else { return nil }
+            name = email
+        default:
+            return nil
+        }
+        avatarURL = picture
+    }
+}

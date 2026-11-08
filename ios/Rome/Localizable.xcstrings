@@ -607,6 +607,16 @@
         }
       }
     },
+    "Guardian" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "守护者"
+          }
+        }
+      }
+    },
     "I turn bigger jobs into tasks and tell you when they're done." : {
       "localizations" : {
         "zh-Hans" : {
@@ -841,6 +851,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "我的 Rome"
+          }
+        }
+      }
+    },
+    "My apps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我的应用"
           }
         }
       }
@@ -1181,6 +1201,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "照片"
+          }
+        }
+      }
+    },
+    "Recent" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近使用"
           }
         }
       }

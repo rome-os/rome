@@ -377,18 +377,32 @@ struct TopBanner: View {
     }
 }
 
-/// Initial-letter avatar on the primary tint.
+/// The signed-in person's avatar, as the web dashboard draws it: their Rome
+/// Cloud picture, else the initial of their name on the primary tint.
 struct InitialAvatar: View {
     let text: String
+    var imageURL: URL? = nil
     var size: CGFloat = 40
 
     var body: some View {
-        Text(String(text.prefix(1)).uppercased())
+        AsyncImage(url: imageURL) { phase in
+            if let image = phase.image {
+                image.resizable().scaledToFill()
+            } else {
+                initial
+            }
+        }
+        .frame(width: size, height: size)
+        .clipShape(Circle())
+        .accessibilityHidden(true)
+    }
+
+    private var initial: some View {
+        Text(String(text.trimmingCharacters(in: .whitespacesAndNewlines).prefix(1)).uppercased())
             .font(.system(size: size * 0.4, weight: .bold))
             .foregroundStyle(Palette.primaryText)
             .frame(width: size, height: size)
             .background(Palette.primarySoft, in: Circle())
-            .accessibilityHidden(true)
     }
 }
 

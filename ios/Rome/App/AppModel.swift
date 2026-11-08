@@ -55,6 +55,8 @@ final class Workspace {
     let instanceName: String
     let host: String
     private(set) var accountLabel: String
+    /// The Rome Cloud picture of who is signed in, when they have one.
+    private(set) var avatarURL: URL?
     let tasks: TasksStore
     let concierge: TranscriptStore
     /// The topic chats, for the drawer.
@@ -182,7 +184,12 @@ final class Workspace {
         drafts.discardBlankChats()
         tasks.start()
         topics.start()
-        Task { if let name = try? await backend.me(), !name.isEmpty { accountLabel = name } }
+        Task {
+            if let identity = try? await backend.me() {
+                accountLabel = identity.name
+                avatarURL = identity.avatarURL
+            }
+        }
         Task { isGuardian = await backend.isGuardian() }
         await openConcierge()
     }

@@ -1,3 +1,4 @@
+import CoreGraphics
 import Foundation
 import Testing
 @testable import Rome
@@ -210,7 +211,7 @@ final class StubBackend: RomeBackend {
     func aiTools() async throws -> AIToolsStatus { .init() }
     func setConciergeEnabled(_ enabled: Bool) async throws {}
     func search(_ query: String) async throws -> [SearchHit] { [] }
-    func me() async throws -> String? { nil }
+    func me() async throws -> AccountIdentity? { nil }
     func sendFeedback(_ text: String) async throws {}
     func upgradeCheck() async throws -> UpgradeCheck { throw APIError.network }
     func startUpgrade(target: String) async throws -> UpgradeStarted { throw APIError.network }
@@ -527,5 +528,74 @@ final class StubBackend: RomeBackend {
         #expect(try link("https://me.romeos.cc:8443/x") == .external)
         #expect(try link("mailto:lin@example.com") == .system)
         #expect(try link("tel:+123") == .system)
+    }
+}
+
+@Suite struct RecentAppsTests {
+    private static let apps = ["a", "b", "c", "d", "e", "f"].map { InstalledApp(id: $0, displayName: $0.uppercased(), origin: "local") }
+
+    /// Newest first, each once, kept per instance.
+    @Test func newestFirstPerInstance() throws {
+        let suite = "rome-tests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let mine = RecentApps(host: "me.romeos.cc", defaults: defaults)
+        mine.record("a")
+        mine.record("b")
+        mine.record("a")
+        RecentApps(host: "team.romeos.cc", defaults: defaults).record("z")
+        #expect(mine.ids() == ["a", "b"])
+        #expect(RecentApps(host: "team.romeos.cc", defaults: defaults).ids() == ["z"])
+    }
+
+    /// At most four, only apps the list still has; none gives no group.
+    @Test func picksFourTheListHas() {
+        #expect(RecentApps.pick(["f", "gone", "a", "b", "c", "d"], from: Self.apps).map(\.id) == ["f", "a", "b", "c"])
+        #expect(RecentApps.pick([], from: Self.apps).isEmpty)
+        #expect(RecentApps.pick(["gone"], from: Self.apps).isEmpty)
+    }
+}
+
+@Suite struct AccountIdentityTests {
+    /// The guardian's display name, else "Guardian", as the web's profile menu reads it.
+    @Test func guardianNameOrGuardian() {
+        let named = AccountIdentity(json: .object(["kind": .string("guardian"), "userId": .string("0b7f9c"), "displayName": .string("Lin"), "avatarUrl": .string("https://lh3.example.com/a.png")]))
+        #expect(named == AccountIdentity(name: "Lin", avatarURL: URL(string: "https://lh3.example.com/a.png")))
+        // No name: never the user id, whose first character the avatar used to show.
+        let unnamed = AccountIdentity(json: .object(["kind": .string("guardian"), "userId": .string("0b7f9c"), "displayName": .null, "avatarUrl": .null]))
+        #expect(unnamed?.name == String(localized: "Guardian"))
+        #expect(unnamed?.avatarURL == nil)
+    }
+
+    @Test func visitorEmailAndNothingElse() {
+        #expect(AccountIdentity(json: .object(["kind": .string("visitor"), "email": .string("v@example.com"), "accountId": .string("x")]))?.name == "v@example.com")
+        #expect(AccountIdentity(json: .object(["kind": .string("anonymous")])) == nil)
+        // Only an https picture is loaded.
+        #expect(AccountIdentity(json: .object(["kind": .string("guardian"), "avatarUrl": .string("http://x/a.png")]))?.avatarURL == nil)
+    }
+}
+
+@Suite @MainActor struct AppIconImageTests {
+    @Test func recognisesSVG() {
+        #expect(AppIconImage.isSVG(Data(#"<svg xmlns="http://www.w3.org/2000/svg"/>"#.utf8)))
+        #expect(AppIconImage.isSVG(Data("\n<?xml version=\"1.0\"?>\n<svg></svg>".utf8)))
+        #expect(!AppIconImage.isSVG(Data([0x89, 0x50, 0x4E, 0x47])))
+        #expect(!AppIconImage.isSVG(Data("<html></html>".utf8)))
+    }
+}
+
+@Suite @MainActor struct SVGDrawTests {
+    /// An SVG icon draws square and in place: its top corner is the SVG's own
+    /// color, not the page under a safe-area inset.
+    @Test func drawsInPlace() async throws {
+        let svg = Data(##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><rect width="24" height="24" fill="#ff0000"/></svg>"##.utf8)
+        let image = try #require(await AppIconImage.decode(svg, side: 60))
+        #expect(image.size == CGSize(width: 60, height: 60))
+        let cgImage = try #require(image.cgImage)
+        var pixel = [UInt8](repeating: 0, count: 4)
+        let context = try #require(CGContext(data: &pixel, width: 1, height: 1, bitsPerComponent: 8, bytesPerRow: 4, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue))
+        // The top-left pixel, drawn into a 1×1 context.
+        context.draw(cgImage, in: CGRect(x: 0, y: -CGFloat(cgImage.height - 1), width: CGFloat(cgImage.width), height: CGFloat(cgImage.height)))
+        #expect(pixel[0] > 200 && pixel[1] < 60 && pixel[3] > 200, "top-left pixel \(pixel)")
     }
 }

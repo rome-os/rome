@@ -78,7 +78,7 @@ struct DrawerView: View {
 
             Button(action: onSettings) {
                 HStack(spacing: 12) {
-                    InitialAvatar(text: workspace.accountLabel)
+                    InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL)
                     VStack(alignment: .leading, spacing: 0) {
                         Text(workspace.instanceName)
                             .romeFont(16, .semibold)
