@@ -309,8 +309,12 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
       const guardian = await getGuardianAuthState(deps.db);
       if (guardian.exists) {
         if (guardian.accountId !== null && guardian.accountId !== identity.accountId) {
+          // The seat's account beside the refused one lets support tell a stale
+          // binding (the owner signs in once from a browser to repair it) from a
+          // real non-owner.
           log.warn("native cloud login refused: account does not own this instance", {
             accountId: identity.accountId,
+            recordedAccountId: guardian.accountId,
           });
           return c.json({ error: "not_owner" }, 403);
         }
