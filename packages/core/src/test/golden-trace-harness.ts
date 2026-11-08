@@ -18,7 +18,6 @@ import { createAgentSessionManager, type AgentSessionManager } from "../core/age
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./kit/model-accounts.js";
-import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { SkillLoader } from "../agent/index.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import { createTestSystemPrompts } from "./system-prompts.js";
@@ -110,7 +109,7 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
     sessionRepository,
     systemPrompts,
     modelResolver,
-    capabilityDiscovery: new CapabilityDiscovery(),
+    networkMcpServers: () => ({}),
     skillCatalog: new SkillLoader(artifactIdentity),
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
     readAnswerShape,

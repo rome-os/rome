@@ -20,7 +20,6 @@ import {
   type AgentSessionManager,
 } from "./agent-session.js";
 import { eq } from "drizzle-orm";
-import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
@@ -91,7 +90,7 @@ describe("AgentSessionManager working dirs", () => {
           providers: [provider],
           accounts: fakeAccounts(() => state),
         }),
-        capabilityDiscovery: new CapabilityDiscovery(),
+        networkMcpServers: () => ({}),
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,

@@ -35,6 +35,7 @@ import {
   type DeferTool,
   type SessionTools,
   type TurnFacts,
+  type PushLevel,
 } from "../agent/index.js";
 import {
   NO_ROME_TOOLS,
@@ -66,7 +67,6 @@ import {
   type Subagent,
   type RomeTools,
 } from "../agent/index.js";
-import type { CapabilityDiscovery } from "./capability-discovery.js";
 import type { McpServerConfig } from "../agent/index.js";
 import type {
   AgentEvent,
@@ -127,7 +127,6 @@ import {
 } from "../agent/index.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
-import type { NotifyLevel } from "../lib/notify-client.js";
 
 export interface AgentSessionKey {
   agentName: string;
@@ -253,7 +252,7 @@ export interface SendTurnOptions {
   quoted?: PromptMessage | null;
   initiatedBy?: "user" | "system";
   /** Pushes the first message said in the turn at this level (RunParams.pushLevel). */
-  pushLevel?: NotifyLevel;
+  pushLevel?: PushLevel;
 }
 
 export interface AgentSessionStatusEvent {
@@ -317,7 +316,9 @@ interface ManagerDeps {
   defer: Pick<DeferTool, "schedule">;
   /** Where each session's own tools come from. */
   sessionTools: SessionTools;
-  capabilityDiscovery: CapabilityDiscovery;
+  /** The MCP servers found on the network, served to an agent whose
+   *  definition asks for network discovery. */
+  networkMcpServers: () => Record<string, McpServerConfig>;
   skillCatalog: SkillCatalog;
   turnLifecycle: TurnLifecycle;
   /** Reads the answer shape an agent declares in its `outputSchema`. */
@@ -878,7 +879,7 @@ async function openSession(
 
   let externalMcpServers: Record<string, McpServerConfig> | undefined;
   if (config.networkDiscovery) {
-    const discovered = deps.capabilityDiscovery.getCdpMcpServers();
+    const discovered = deps.networkMcpServers();
     if (Object.keys(discovered).length > 0) {
       externalMcpServers = { ...config.mcpServers, ...discovered };
     }
@@ -917,7 +918,7 @@ async function openSession(
   // The facts the ports behind the Rome tools read, for the turns the refs run.
   const turnFacts = (
     refs: TurnExecRefs,
-    pushLevel: () => NotifyLevel | undefined = () => undefined,
+    pushLevel: () => PushLevel | undefined = () => undefined,
   ): TurnFacts => ({
     agentName: key.agentName,
     continuityKey: key.channelThreadKey,
@@ -1440,7 +1441,7 @@ interface TurnSink {
   replyTo?: MessageReplyReference;
   quoted?: PromptMessage | null;
   initiatedBy?: "user" | "system";
-  pushLevel?: NotifyLevel;
+  pushLevel?: PushLevel;
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
   subagentExecutions: Map<string, { parent: ParentSubagentRef; execution: SubagentExecution }>;
@@ -1699,7 +1700,7 @@ class AgentSessionImpl implements AgentSession {
     return this.currentSink?.threadContext ?? this.threadContext;
   }
 
-  get currentTurnPushLevelRef(): NotifyLevel | undefined {
+  get currentTurnPushLevelRef(): PushLevel | undefined {
     return this.currentSink?.pushLevel;
   }
 

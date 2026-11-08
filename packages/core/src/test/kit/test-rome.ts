@@ -285,7 +285,7 @@ async function buildHarness(
       modelResolver,
       // Real but inert collaborators: CapabilityDiscovery is never start()ed
       // (no timers, empty CDP map) and the dispatcher has no hooks loaded.
-      capabilityDiscovery: new CapabilityDiscovery(),
+      networkMcpServers: () => ({}),
       skillCatalog: new SkillLoader(artifactIdentity),
       turnLifecycle: new TurnListeners(new AppTurnHooks()),
       readAnswerShape,

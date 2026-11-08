@@ -46,7 +46,6 @@ import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registr
 import { createSubagentExecutionService } from "../core/subagent-execution.js";
 import { subagentLiveTurns, subagentTurnLog } from "../core/subagent-call-ports.js";
 import { createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
-import { CapabilityDiscovery } from "../core/capability-discovery.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
 import { ApprovalHandler } from "../actions/approval-handler.js";
@@ -675,7 +674,7 @@ export async function buildTestDeps(
     systemPrompts,
     modelResolver,
     skillCatalog,
-    capabilityDiscovery: new CapabilityDiscovery(),
+    networkMcpServers: () => ({}),
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
     readAnswerShape,
     turnUsage: new TurnUsageReporter(),

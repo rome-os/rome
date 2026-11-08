@@ -34,7 +34,6 @@ import {
   type AgentSession,
   type AgentSessionManager,
 } from "./agent-session.js";
-import { CapabilityDiscovery } from "./capability-discovery.js";
 import type { ModelSelectionId } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
@@ -157,7 +156,7 @@ describe("continuation notice through AgentSessionManager", () => {
           accounts: fakeAccounts(() => state),
           codexLogins: loginsOn(false),
         }),
-        capabilityDiscovery: new CapabilityDiscovery(),
+        networkMcpServers: () => ({}),
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,

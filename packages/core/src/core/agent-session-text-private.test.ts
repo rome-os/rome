@@ -19,7 +19,6 @@ import {
   type ModelSessionParams,
 } from "./agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
-import { CapabilityDiscovery } from "./capability-discovery.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { SkillLoader } from "../agent/index.js";
@@ -90,7 +89,7 @@ describe("AgentSessionManager textPrivate", () => {
           providers: [provider],
           accounts: fakeAccounts(() => state),
         }),
-        capabilityDiscovery: new CapabilityDiscovery(),
+        networkMcpServers: () => ({}),
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,

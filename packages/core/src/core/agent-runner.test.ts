@@ -2285,7 +2285,7 @@ describe("AgentRunner", () => {
       sessionSettings: new ChatSessionSettings({
         webchatRepo: new ChatsWebChatRepository(testDb.db),
       }),
-      capabilityDiscovery: new CapabilityDiscovery(),
+      networkMcpServers: () => ({}),
       skillCatalog: new SkillLoader(artifactIdentity),
       turnLifecycle: turnLifecycle ?? new TurnListeners(new AppTurnHooks()),
       readAnswerShape,

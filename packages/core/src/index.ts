@@ -1145,7 +1145,7 @@ async function main() {
       sessionRepository,
       systemPrompts,
       modelResolver,
-      capabilityDiscovery,
+      networkMcpServers: () => capabilityDiscovery.getCdpMcpServers(),
       skillCatalog,
       turnLifecycle: turnListeners,
       readAnswerShape,
