@@ -265,6 +265,29 @@ describe("AgentSession turn usage", () => {
     ]);
   });
 
+  it("ends a queued turn stopped before it reached the provider with no terminal", async () => {
+    let releaseFirst!: () => void;
+    const firstRelease = new Promise<void>((resolve) => {
+      releaseFirst = resolve;
+    });
+    nextRun = async function* () {
+      await firstRelease;
+      yield { type: "result", content: "done" };
+    };
+    const session = await manager.acquire(key);
+    const first = session.sendTurn({ prompt: "first" });
+    const second = session.sendTurn({ prompt: "second" });
+
+    expect(await second.stop("user-stop")).toBe("requested");
+    releaseFirst();
+    await Promise.all([drain(first.events()), drain(second.events())]);
+
+    expect(await second.ended()).toEqual({ terminal: undefined, stoppedByRome: true });
+    const said: string[] = [];
+    for await (const event of second.events()) said.push(event.type);
+    expect(said).not.toContain("result");
+  });
+
   it("keeps the login kind from the turn's login when the login changes during it", async () => {
     let releaseFirst!: () => void;
     const firstRelease = new Promise<void>((resolve) => {

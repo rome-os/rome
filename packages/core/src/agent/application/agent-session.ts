@@ -1443,6 +1443,13 @@ interface TurnSink {
   usageRecorded: boolean;
 }
 
+/**
+ * The terminal a turn stopped before it answered is closed with. The turn's
+ * status and lifecycle read it as a result; its ending carries no terminal,
+ * since none was said.
+ */
+const STOPPED_UNANSWERED: TurnResultEvent = { type: "result", content: "" };
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
@@ -2290,7 +2297,10 @@ class AgentSessionImpl implements AgentSession {
   private closeSink(sink: TurnSink, terminal: TurnResultEvent | TurnErrorEvent): void {
     if (sink.done) return;
     sink.done = true;
-    sink.writer.end({ terminal, stoppedByRome: sink.lifecycleInterrupted });
+    sink.writer.end({
+      terminal: terminal === STOPPED_UNANSWERED ? undefined : terminal,
+      stoppedByRome: sink.lifecycleInterrupted,
+    });
     this.clearSubagentLinks(sink);
     if (this.currentSink === sink) {
       this.currentSink = null;
@@ -2867,7 +2877,7 @@ class AgentSessionImpl implements AgentSession {
     if (sink.lifecycleInterrupted) {
       await this.modelSession.interrupt("user-stop");
       this.ensureTurnStart(sink);
-      this.finalizeTurn(sink, { type: "result", content: "" });
+      this.finalizeTurn(sink, STOPPED_UNANSWERED);
       span.end();
       return;
     }
@@ -3085,7 +3095,7 @@ class AgentSessionImpl implements AgentSession {
         }
         if (sink.lifecycleInterrupted) {
           await this.modelSession.interrupt("user-stop");
-          this.finalizeTurn(sink, { type: "result", content: "" });
+          this.finalizeTurn(sink, STOPPED_UNANSWERED);
           return;
         }
         modelRan = true;
