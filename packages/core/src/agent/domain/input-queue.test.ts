@@ -1,0 +1,133 @@
+import { describe, expect, it } from "@rstest/core";
+import type { AgentInputState } from "@rome-os/app-runtime";
+import {
+  arrive,
+  canSteer,
+  carryOver,
+  endTurn,
+  joinPrompts,
+  markReady,
+  nextInput,
+  retain,
+  seal,
+  steer,
+  steerOutcome,
+  startTurn,
+  supersede,
+  type InputPriority,
+} from "./input-queue.js";
+
+interface Input {
+  name: string;
+  priority: InputPriority;
+  state: AgentInputState;
+}
+
+const input = (name: string, priority: InputPriority = "next", state: AgentInputState = "queued") =>
+  ({ name, priority, state }) as Input;
+const names = (inputs: readonly Input[]) => inputs.map((i) => i.name);
+
+describe("arrive", () => {
+  it("starts a turn when none runs", () => {
+    expect(arrive(undefined, "now")).toEqual({ disposition: "started", supersede: false });
+    expect(arrive(undefined, "next")).toEqual({ disposition: "started", supersede: false });
+  });
+
+  it("steers a next input into a ready turn and queues it otherwise", () => {
+    const { turn } = startTurn(input("a"), [], []);
+    expect(arrive(turn, "next").disposition).toBe("queued");
+    expect(arrive(markReady(turn), "next").disposition).toBe("steering");
+    expect(arrive(seal(markReady(turn)), "next").disposition).toBe("queued");
+  });
+
+  it("supersedes the running turn once for now inputs", () => {
+    const { turn } = startTurn(input("a"), [], []);
+    expect(arrive(markReady(turn), "now")).toEqual({ disposition: "queued", supersede: true });
+    expect(arrive(supersede(turn), "now")).toEqual({ disposition: "queued", supersede: false });
+  });
+});
+
+describe("startTurn", () => {
+  it("puts carried inputs in front and absorbs queued now inputs into a now turn", () => {
+    const queued = [input("b"), input("c", "now"), input("d", "now")];
+    const { turn, queued: rest } = startTurn(input("a", "now"), queued, [input("x")]);
+    expect(names(turn.prompted)).toEqual(["x", "a", "c", "d"]);
+    expect(names(turn.bound)).toEqual(["x", "c", "d"]);
+    expect(names(rest)).toEqual(["b"]);
+  });
+
+  it("leaves the queue alone for a next turn", () => {
+    const { turn, queued } = startTurn(input("a"), [input("b", "now")], []);
+    expect(names(turn.prompted)).toEqual(["a"]);
+    expect(names(queued)).toEqual(["b"]);
+  });
+});
+
+describe("joinPrompts", () => {
+  it("keeps a single input as it is and joins several into one prompt", () => {
+    const a = { prompt: "a", images: ["1"] };
+    expect(joinPrompts(a, [a])).toBe(a);
+    expect(joinPrompts(a, [{ prompt: "x" }, a])).toEqual({ prompt: "x\n\na", images: ["1"] });
+  });
+});
+
+describe("steering", () => {
+  it("steers one input at a time into a ready, unsealed turn", () => {
+    const b = input("b");
+    const { turn } = startTurn(input("a"), [], []);
+    expect(canSteer(turn)).toBe(false);
+    const steered = steer(markReady(turn), b);
+    expect(canSteer(steered)).toBe(false);
+    expect(steered.pending).toBe(b);
+    expect(canSteer(markReady(supersede(turn)))).toBe(false);
+  });
+
+  it("queues a retained input once, in front, and seals the turn", () => {
+    const b = input("b");
+    const { turn } = startTurn(input("a"), [], []);
+    const retained = retain(steer(markReady(turn), b), b, [input("c")]);
+    expect(retained.turn.sealed).toBe(true);
+    expect(retained.turn.pending).toBeUndefined();
+    expect(names(retained.queued)).toEqual(["b", "c"]);
+    expect(names(retain(turn, b, retained.queued).queued)).toEqual(["b", "c"]);
+  });
+
+  it("reads a steer's answer", () => {
+    expect(steerOutcome("submitted", "accepted")).toBe("accepted");
+    expect(steerOutcome("submitted", "deferred")).toBe("deferred");
+    expect(steerOutcome("consumed", "deferred")).toBe("settled");
+  });
+});
+
+describe("ending a turn", () => {
+  it("carries over what a superseded turn's provider never consumed, in prompt order", () => {
+    const x = input("x", "next", "submitted");
+    const a = input("a", "now", "consumed");
+    const s = input("s", "next", "accepted");
+    const q = input("q", "next", "queued");
+    let { turn } = startTurn(a, [], [x]);
+    turn = steer(steer(markReady(turn), s), q);
+    expect(names(carryOver(supersede(turn), [q]))).toEqual(["x", "s"]);
+  });
+
+  it("marks unconfirmed inputs unknown and unretained queued ones failed", () => {
+    const a = input("a", "next", "submitted");
+    const b = input("b", "next", "accepted");
+    const { turn } = startTurn(a, [], []);
+    expect(endTurn(steer(markReady(turn), b), []).map(([i, s]) => [i.name, s])).toEqual([
+      ["a", "unknown"],
+      ["b", "unknown"],
+    ]);
+    const c = input("c");
+    expect(endTurn(startTurn(c, [], []).turn, []).map(([i, s]) => [i.name, s])).toEqual([
+      ["c", "failed"],
+    ]);
+    expect(endTurn(startTurn(c, [], []).turn, [c])).toEqual([]);
+  });
+
+  it("starts the next turn from the queue before the carried inputs", () => {
+    expect(nextInput([input("q")], [input("c")]).next?.name).toBe("q");
+    expect(nextInput([], [input("c")]).next?.name).toBe("c");
+    expect(nextInput([], []).next).toBeUndefined();
+  });
+});
