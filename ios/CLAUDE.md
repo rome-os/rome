@@ -16,7 +16,7 @@ The native iOS app (SwiftUI, iOS 17). It is an Xcode project, not a pnpm workspa
 - When adding text, write it in English, following [`docs/ui/VOICE.md`](../docs/ui/VOICE.md), and add its Simplified Chinese to `Rome/Localizable.xcstrings`. `LocalizationTests` fails on a key without zh-Hans text. Build once, then run `xcrun xcstringstool sync` with the build's `.stringsdata` files to list new keys.
 - When writing user-facing copy, call the main conversation Chat, never Concierge, in zh-Hans too (Chat, never Concierge or 管家). Code and type names keep Concierge.
 - When changing `Rome/Info.plist`, change `Config/Info-Debug.plist` the same way. Debug builds read the second one, which adds plain HTTP to a local Rome; Release must stay HTTPS only.
-- When reading the instance's API, rely on it staying backward compatible. The app always requires the instance's latest release (the update page in `Rome/Features/Update`) and never pins an instance version.
+- When reading the instance's API, rely on it staying backward compatible. The app works with any instance at or above `UpdateGate.minimumInstanceVersion`. Below it, the update page blocks. Above it, a newer release is only offered, through a banner and a drawer line. Raise the minimum only when the app starts calling an API that a newer release brought, to the first `v1.*` tag that has it.
 
 ## Traps
 
