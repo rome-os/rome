@@ -5,8 +5,8 @@ import {
   InMemorySpanExporter,
   SimpleSpanProcessor,
 } from "@opentelemetry/sdk-trace-base";
-import type { AgentEvent } from "../types.js";
-import { translateTurnSpans } from "./turn-span-translator.js";
+import type { AgentEvent } from "@rome-os/app-runtime";
+import { translateTurnSpans } from "./turn-spans.js";
 
 describe("translateTurnSpans tool failure", () => {
   let exporter: InMemorySpanExporter;

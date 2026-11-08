@@ -1,6 +1,6 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
-import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -130,6 +130,7 @@ describe("agent model pins through AgentSessionManager", () => {
         skillCatalog: new SkillLoader(artifactIdentity),
         turnLifecycle,
         readAnswerShape,
+        sessionTracing: romeSessionTracing,
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
         log: createLogger("agent-session"),

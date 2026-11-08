@@ -76,7 +76,7 @@ const GUARDIAN_TIMEZONE_SETTING_KEY = "guardianTimezone";
 // resulting spans land as orphan traces (no TRACEPARENT
 // auto-injection from Rome's `model.turn`), which clutters the trace store
 // without adding signal. The per-round / per-tool detail is reconstructed
-// by `turn-span-translator.ts` from the message stream instead.
+// by `agent/application/turn-spans.ts` from the message stream instead.
 // CLAUDE_CODE_ENABLE_TASKS=false keeps TodoWrite, which Rome turns into plan
 // updates. Since Claude Code 2.1.251 the default swaps it for TaskCreate.
 export const CLAUDE_AGENT_SDK_ENV = {

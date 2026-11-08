@@ -1,6 +1,6 @@
 import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { createLogger } from "../logger.js";
-import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync } from "node:fs";
@@ -501,6 +501,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
     networkMcpServers: () => ({}),
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
     readAnswerShape,
+    sessionTracing: romeSessionTracing,
     turnUsage: new TurnUsageReporter(),
     folders: agentFolders(),
     log: createLogger("agent-session"),

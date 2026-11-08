@@ -175,10 +175,7 @@ export type {
 export {
   subagentRequest,
   subagentToolName,
-  type SessionRecordId,
   type Subagent,
-  type SubagentOutcome,
-  type SubagentRequest,
   type Subagents,
 } from "./domain/subagent.js";
 export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
@@ -208,19 +205,11 @@ export {
   walkToRoot,
   type StoredRoot,
 } from "./domain/session-parent.js";
-export type {
-  DashboardSession,
-  DashboardSessions,
-  NewSubagentSession,
-} from "./domain/dashboard-sessions.js";
 export { WebChatDashboardSessions } from "./infrastructure/webchat-dashboard-sessions.js";
 export {
   createSubagentCalls,
-  type CallingTurn,
   type LiveTurns,
   type SessionPlace,
-  type SubagentCall,
-  type SubagentCallKey,
   type SubagentCalls,
   type SubagentSession,
   type SubagentSessions,
@@ -228,6 +217,8 @@ export {
 } from "./application/subagent-calls.js";
 export { createRomeTools } from "./application/rome-tools.js";
 export { romeToolRunner } from "./application/rome-tool-runner.js";
+export type { SessionTracing } from "./application/session-tracing.js";
+export { translateTurnSpans, type CapturedEvent } from "./application/turn-spans.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
 export { SkillLoader } from "./infrastructure/skill-loader.js";
 export { AgentLoader } from "./infrastructure/agent-loader.js";
@@ -240,6 +231,7 @@ export {
   TurnUsageReporter,
   type TurnUsageReporterDeps,
 } from "./infrastructure/turn-usage-reporter.js";
+export { romeSessionTracing } from "./infrastructure/session-tracing.js";
 export {
   AppTurnHooks,
   type TurnLifecycleHookLoadFailure,

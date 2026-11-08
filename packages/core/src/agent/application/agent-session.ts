@@ -95,8 +95,7 @@ import type {
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./null-model-session.js";
-import { enterSession } from "../../telemetry-context.js";
-import { getTracer, startRomeSpan, withRomeSpan } from "../../telemetry.js";
+import type { SessionTracing } from "./session-tracing.js";
 import {
   context,
   SpanStatusCode,
@@ -106,16 +105,14 @@ import {
   type Link,
   type Span,
 } from "@opentelemetry/api";
+import { subagentRequest } from "../domain/subagent.js";
 import type {
-  ActiveSubagentRegistry,
-  ParentSubagentRef,
-} from "../../core/active-subagent-registry.js";
-import type {
-  ExecuteSubagentInput,
-  SubagentExecution,
-  SubagentExecutionService,
-} from "../../core/subagent-execution.js";
-import { translateTurnSpans, type CapturedEvent } from "../../core/turn-span-translator.js";
+  SubagentCall,
+  SubagentCallKey,
+  SubagentCalls,
+  SubagentSessions,
+} from "./subagent-calls.js";
+import { translateTurnSpans, type CapturedEvent } from "./turn-spans.js";
 import { KeyedMutex } from "../../lib/keyed-mutex.js";
 
 export interface AgentSessionKey {
@@ -317,8 +314,16 @@ interface ManagerDeps {
    *  wake's catch-up reads and marks. Absent, a channel session catches up on
    *  nothing. */
   promptFacts?: PromptFacts;
-  subagentExecutionService?: SubagentExecutionService;
-  activeSubagentRegistry?: ActiveSubagentRegistry;
+  /** Answers the subagent calls a turn makes. */
+  subagentCalls?: SubagentCalls;
+  /** Where a calling session's subagent sessions open: its session manager,
+   *  under its stored parent link, with its tools' environment and span
+   *  attributes. */
+  subagentSessions?: (
+    manager: AgentSessionManager,
+    parentLink: string,
+    inherited: Pick<AgentSessionInit, "toolEnv" | "spanAttributes">,
+  ) => SubagentSessions;
   /** The middleware apps put around a turn's reply. Absent, the model replies directly. */
   turnMiddleware?: TurnMiddleware;
   /** What each chat set for its sessions. Absent, no saved model is restored. */
@@ -329,6 +334,8 @@ interface ManagerDeps {
   log: AgentLog;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
+  /** Stamps the session id on the spans a session starts and binds it for logs. */
+  sessionTracing: SessionTracing;
 }
 
 interface ManagerOptions {
@@ -544,7 +551,7 @@ export function createAgentSessionManager(
   // `recordAcquire`, mirroring the `rome.session.acquire` counter.
   const acquire = (key: AgentSessionKey, init?: AgentSessionInit): Promise<AgentSession> => {
     const canonicalKey = canonicalizeKey(key);
-    return withRomeSpan(
+    return deps.sessionTracing.withSpan(
       "session.acquire",
       { "agent.name": canonicalKey.agentName, is_subagent: init?.isSubagent ?? isSubagent },
       (span) => acquireInner(canonicalKey, span, init),
@@ -637,8 +644,8 @@ interface TurnExecRefs {
    * later.
    */
   childChannelThreadKey: string;
-  /** Attach the Child execution to this owner's provider tool call. */
-  attachSubagentExecution: (toolUseId: string, execution: SubagentExecution) => void;
+  /** Attach the subagent call to this owner's provider tool call. */
+  attachSubagentCall: (toolUseId: string, call: SubagentCall) => void;
   /** Bind an async tool callback into the owner's OTel context. */
   bindTurnCtx: <T>(fn: () => T) => T;
 }
@@ -899,8 +906,7 @@ async function openSession(
     getSharedContext: () => impl.currentTurnSharedContextRef,
     getChildManager: () => impl.childManager,
     childChannelThreadKey: key.channelThreadKey,
-    attachSubagentExecution: (toolUseId, execution) =>
-      impl.addSubagentExecution(toolUseId, execution),
+    attachSubagentCall: (toolUseId, call) => impl.addSubagentCall(toolUseId, call),
     bindTurnCtx: inCurrentTurnCtx,
   };
 
@@ -946,41 +952,41 @@ async function openSession(
         if (!parentTurnId) {
           throw new Error("execute_subagent called outside an active Parent turn");
         }
-        if (!deps.subagentExecutionService) {
-          throw new Error("SubagentExecutionService is not configured");
+        if (!deps.subagentCalls || !deps.subagentSessions) {
+          throw new Error("SubagentCalls is not configured");
         }
-        const execution = await deps.subagentExecutionService.startSubagent(
-          name,
-          input as ExecuteSubagentInput,
-          {
-            parentSessionId: refs.getRomeSessionId(),
-            parentAgentSessionId: refs.sessionId,
-            parentTurnId,
-            parentToolUseId: toolContext.toolUseId,
-            parentAgentName: key.agentName,
-            parentChannelThreadKey: refs.childChannelThreadKey,
-            childManager: refs.getChildManager(),
+        const call = await deps.subagentCalls.call(name, subagentRequest(input), {
+          key: {
+            dashboardSessionId: refs.getRomeSessionId(),
+            turnId: parentTurnId,
+            toolUseId: toolContext.toolUseId,
+          },
+          agentName: key.agentName,
+          agentSessionId: refs.sessionId,
+          sessions: deps.subagentSessions(refs.getChildManager(), refs.childChannelThreadKey, {
+            toolEnv: init.toolEnv,
+            spanAttributes: init.spanAttributes,
+          }),
+          at: {
             workingDir,
             threadContext: refs.getThreadContext(),
             sharedContext: refs.getSharedContext(),
-            toolEnv: init.toolEnv,
-            spanAttributes: init.spanAttributes,
           },
-        );
+        });
         try {
-          refs.attachSubagentExecution(toolContext.toolUseId, execution);
+          refs.attachSubagentCall(toolContext.toolUseId, call);
         } catch (err) {
-          deps.activeSubagentRegistry?.clearByParent({
-            sessionId: refs.sessionId,
+          // Forgets by the agent session id, which for a dashboard chat's own
+          // session is not the key the call is held by (ZHA-156).
+          deps.subagentCalls.forget({
+            dashboardSessionId: refs.sessionId,
             turnId: parentTurnId,
             toolUseId: toolContext.toolUseId,
           });
-          await execution
-            .interrupt("Parent turn ended before Child attachment")
-            .catch(() => undefined);
+          await call.cancel("Parent turn ended before Child attachment").catch(() => undefined);
           throw err;
         }
-        return await execution.completion;
+        return { ...(await call.outcome), sessionId: call.sessionId, turnId: call.turnId };
       });
 
   const reasoningEffort = init.reasoningEffort ?? config.reasoningEffort;
@@ -1058,7 +1064,7 @@ async function openSession(
     );
     const resumed = params.thread.kind === "resume";
     const openStartMs = Date.now();
-    const session = await withRomeSpan(
+    const session = await deps.sessionTracing.withSpan(
       "model.session.open",
       {
         provider: resolution.modelProvider.id,
@@ -1132,26 +1138,23 @@ async function openSession(
     // repeated calls to the same subagent; runForkedTurn disposes the manager
     // when the fork ends, so fork children never outlive the fork.
     let forkChildManager: AgentSessionManager | undefined;
-    const forkSubagentExecutions = new Map<
-      string,
-      { parent: ParentSubagentRef; execution: SubagentExecution }
-    >();
+    const forkSubagentCalls = new Map<string, { key: SubagentCallKey; call: SubagentCall }>();
     const forkPendingSubagentUses = new Map<string, Extract<AgentEvent, { type: "tool_use" }>>();
     const forkEmittedSubagentStarts = new Set<string>();
     const maybeEmitForkSubagentStart = (toolUseId: string): void => {
       if (forkEmittedSubagentStarts.has(toolUseId)) return;
       const use = forkPendingSubagentUses.get(toolUseId);
-      const linked = forkSubagentExecutions.get(toolUseId);
+      const linked = forkSubagentCalls.get(toolUseId);
       if (!use || !linked) return;
       forkEmittedSubagentStarts.add(toolUseId);
       forkPendingSubagentUses.delete(toolUseId);
       fork.emit({
         type: "subagent_start",
         toolUseId,
-        agentName: linked.execution.agentName,
+        agentName: linked.call.subagent,
         input: use.input,
-        sessionId: linked.execution.sessionId,
-        turnId: linked.execution.turnId,
+        sessionId: linked.call.sessionId,
+        turnId: linked.call.turnId,
         ...(use.startedAt ? { startedAt: use.startedAt } : {}),
       });
     };
@@ -1171,14 +1174,10 @@ async function openSession(
         return forkChildManager;
       },
       childChannelThreadKey: storeForkParent(key.channelThreadKey, fork.forkSessionId),
-      attachSubagentExecution: (toolUseId, execution) => {
-        forkSubagentExecutions.set(toolUseId, {
-          parent: {
-            sessionId: fork.forkSessionId,
-            turnId: fork.forkTurnId,
-            toolUseId,
-          },
-          execution,
+      attachSubagentCall: (toolUseId, call) => {
+        forkSubagentCalls.set(toolUseId, {
+          key: { dashboardSessionId: fork.forkSessionId, turnId: fork.forkTurnId, toolUseId },
+          call,
         });
         maybeEmitForkSubagentStart(toolUseId);
       },
@@ -1213,16 +1212,16 @@ async function openSession(
           return [];
         }
         if (msg.type !== "tool_result") return [msg];
-        const linked = forkSubagentExecutions.get(msg.toolUseId);
+        const linked = forkSubagentCalls.get(msg.toolUseId);
         if (linked) {
-          const completion = await linked.execution.completion;
-          deps.activeSubagentRegistry?.clearByParent(linked.parent);
+          const completion = await linked.call.outcome;
+          deps.subagentCalls?.forget(linked.key);
           const common = {
             type: "subagent_result" as const,
             toolUseId: msg.toolUseId,
-            agentName: linked.execution.agentName,
-            sessionId: completion.sessionId,
-            turnId: completion.turnId,
+            agentName: linked.call.subagent,
+            sessionId: linked.call.sessionId,
+            turnId: linked.call.turnId,
             ...(msg.endedAt ? { endedAt: msg.endedAt } : {}),
           };
           return [
@@ -1238,12 +1237,12 @@ async function openSession(
       },
       dispose: async () => {
         await Promise.allSettled(
-          [...forkSubagentExecutions.values()].map(({ execution }) =>
-            execution.interrupt("Forked Parent turn ended"),
+          [...forkSubagentCalls.values()].map(({ call }) =>
+            call.cancel("Forked Parent turn ended"),
           ),
         );
-        for (const { parent } of forkSubagentExecutions.values()) {
-          deps.activeSubagentRegistry?.clearByParent(parent);
+        for (const { key } of forkSubagentCalls.values()) {
+          deps.subagentCalls?.forget(key);
         }
         if (forkChildManager) await forkChildManager.shutdown();
       },
@@ -1433,7 +1432,7 @@ interface TurnSink {
   pushLevel?: PushLevel;
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
-  subagentExecutions: Map<string, { parent: ParentSubagentRef; execution: SubagentExecution }>;
+  subagentCallsByToolUse: Map<string, { key: SubagentCallKey; call: SubagentCall }>;
   pendingSubagentToolUses: Map<string, Extract<AgentEvent, { type: "tool_use" }>>;
   emittedSubagentStarts: Set<string>;
   subagentLinksCleared: boolean;
@@ -1815,7 +1814,7 @@ class AgentSessionImpl implements AgentSession {
 
   private async runEventsLoop(session: ModelSession): Promise<void> {
     try {
-      enterSession(this.sessionId);
+      this.deps.sessionTracing.enterSession(this.sessionId);
       for await (const event of session.events) {
         const sink = this.currentSink;
         if (!sink) {
@@ -1897,15 +1896,15 @@ class AgentSessionImpl implements AgentSession {
           continue;
         }
         if (msg.type === "tool_result") {
-          const linked = sink.subagentExecutions.get(msg.toolUseId);
+          const linked = sink.subagentCallsByToolUse.get(msg.toolUseId);
           if (linked) {
-            const completion = await linked.execution.completion;
+            const completion = await linked.call.outcome;
             const common = {
               type: "subagent_result" as const,
               toolUseId: msg.toolUseId,
-              agentName: linked.execution.agentName,
-              sessionId: completion.sessionId,
-              turnId: completion.turnId,
+              agentName: linked.call.subagent,
+              sessionId: linked.call.sessionId,
+              turnId: linked.call.turnId,
               ...(msg.endedAt ? { endedAt: msg.endedAt } : {}),
             };
             this.publishOutbound(
@@ -2315,8 +2314,8 @@ class AgentSessionImpl implements AgentSession {
   private clearSubagentLinks(sink: TurnSink): void {
     if (sink.subagentLinksCleared) return;
     sink.subagentLinksCleared = true;
-    for (const { parent } of sink.subagentExecutions.values()) {
-      this.deps.activeSubagentRegistry?.clearByParent(parent);
+    for (const { key } of sink.subagentCallsByToolUse.values()) {
+      this.deps.subagentCalls?.forget(key);
     }
   }
 
@@ -2699,12 +2698,14 @@ class AgentSessionImpl implements AgentSession {
     }
   }
 
-  addSubagentExecution(toolUseId: string, execution: SubagentExecution): void {
+  addSubagentCall(toolUseId: string, call: SubagentCall): void {
     const sink = this.currentSink;
     if (!sink) throw new Error("Cannot attach a subagent without an active Parent turn");
-    sink.subagentExecutions.set(toolUseId, {
-      parent: { sessionId: this.sessionId, turnId: sink.turnId, toolUseId },
-      execution,
+    // Held by the agent session id, which for a dashboard chat's own session
+    // is not the key the call is held by (ZHA-156).
+    sink.subagentCallsByToolUse.set(toolUseId, {
+      key: { dashboardSessionId: this.sessionId, turnId: sink.turnId, toolUseId },
+      call,
     });
     this.maybePublishSubagentStart(sink, toolUseId);
   }
@@ -2712,17 +2713,17 @@ class AgentSessionImpl implements AgentSession {
   private maybePublishSubagentStart(sink: TurnSink, toolUseId: string): void {
     if (sink.emittedSubagentStarts.has(toolUseId)) return;
     const use = sink.pendingSubagentToolUses.get(toolUseId);
-    const linked = sink.subagentExecutions.get(toolUseId);
+    const linked = sink.subagentCallsByToolUse.get(toolUseId);
     if (!use || !linked) return;
     sink.emittedSubagentStarts.add(toolUseId);
     sink.pendingSubagentToolUses.delete(toolUseId);
     this.publishOutbound(sink, {
       type: "subagent_start",
       toolUseId,
-      agentName: linked.execution.agentName,
+      agentName: linked.call.subagent,
       input: use.input,
-      sessionId: linked.execution.sessionId,
-      turnId: linked.execution.turnId,
+      sessionId: linked.call.sessionId,
+      turnId: linked.call.turnId,
       ...(use.startedAt ? { startedAt: use.startedAt } : {}),
     });
   }
@@ -2793,7 +2794,7 @@ class AgentSessionImpl implements AgentSession {
       pushLevel: options?.pushLevel,
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
-      subagentExecutions: new Map(),
+      subagentCallsByToolUse: new Map(),
       pendingSubagentToolUses: new Map(),
       emittedSubagentStarts: new Set(),
       subagentLinksCleared: false,
@@ -2822,7 +2823,7 @@ class AgentSessionImpl implements AgentSession {
     };
     sink.romeAttrs = romeAttrs;
 
-    const span = getTracer("rome").startSpan(`agent:${this.key.agentName}`, {
+    const span = trace.getTracer("rome").startSpan(`agent:${this.key.agentName}`, {
       attributes: {
         ...romeAttrs,
         "agent.tier": this.config.tier,
@@ -2932,7 +2933,7 @@ class AgentSessionImpl implements AgentSession {
     // because the pinned SDK version doesn't reliably emit them.
     sink.modelTurnStartMs = Date.now();
     const modelSpan = context.with(turnCtx, () =>
-      startRomeSpan("model.turn", {
+      this.deps.sessionTracing.startSpan("model.turn", {
         ...sink.romeAttrs,
         "model.id": this.modelSession.model,
         "system_prompt.length": this.systemPrompt.length,
@@ -3319,7 +3320,7 @@ class AgentSessionImpl implements AgentSession {
     await Promise.all([
       this.modelSession.interrupt(reason),
       Promise.allSettled(
-        [...sink.subagentExecutions.values()].map(({ execution }) => execution.interrupt(reason)),
+        [...sink.subagentCallsByToolUse.values()].map(({ call }) => call.cancel(reason)),
       ),
     ]);
   }
@@ -3337,8 +3338,8 @@ class AgentSessionImpl implements AgentSession {
       const currentSink = this.currentSink;
       if (currentSink) {
         await Promise.allSettled(
-          [...currentSink.subagentExecutions.values()].map(({ execution }) =>
-            execution.interrupt(`Parent session closed: ${reason}`),
+          [...currentSink.subagentCallsByToolUse.values()].map(({ call }) =>
+            call.cancel(`Parent session closed: ${reason}`),
           ),
         );
       }

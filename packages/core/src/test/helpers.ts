@@ -2,7 +2,7 @@ import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
-import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
+import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
 import {
@@ -41,10 +41,12 @@ import {
 import { createModelResolver } from "../agent/index.js";
 import { normalizeConversationTitle } from "../core/conversation-title.js";
 import { createAgentSessionManager } from "../agent/index.js";
-import { createActiveSubagentRegistry } from "../core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
-import { createSubagentExecutionService } from "../core/subagent-execution.js";
-import { subagentLiveTurns, subagentTurnLog } from "../core/subagent-call-ports.js";
+import {
+  subagentLiveTurns,
+  subagentSessions,
+  subagentTurnLog,
+} from "../core/subagent-call-ports.js";
 import { createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
@@ -663,11 +665,6 @@ export async function buildTestDeps(
     turnLog: subagentTurnLog(webchatRepo),
     liveTurns: subagentLiveTurns(agentTurnStreamRegistry),
   });
-  const activeSubagentRegistry = createActiveSubagentRegistry(subagentCalls);
-  const subagentExecutionService = createSubagentExecutionService({
-    calls: subagentCalls,
-    webchatRepo,
-  });
   const agentSessionManager = createAgentSessionManager({
     agentLoader,
     sessionRepository,
@@ -677,11 +674,13 @@ export async function buildTestDeps(
     networkMcpServers: () => ({}),
     turnLifecycle: new TurnListeners(new AppTurnHooks()),
     readAnswerShape,
+    sessionTracing: romeSessionTracing,
     turnUsage: new TurnUsageReporter(),
     folders: agentFolders(),
     log: createLogger("agent-session"),
-    subagentExecutionService,
-    activeSubagentRegistry,
+    subagentCalls,
+    subagentSessions: (manager, parentLink, inherited) =>
+      subagentSessions(manager, parentLink, webchatRepo, inherited),
     ...romeToolPorts({
       actionRegistry,
       actionEngine,

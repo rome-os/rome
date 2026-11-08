@@ -399,7 +399,7 @@ describe("VisitorAllowListSync — Rome Cloud ahead", () => {
     expect(await settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY)).toEqual({
       cloudEmailAccess: ["ada@example.com"],
       revision: 8,
-      signedIn: [],
+      visitorAccounts: {},
     });
 
     // The next save continues from there.
@@ -651,24 +651,64 @@ describe("DashboardAccessStore — visitor sign-ins", () => {
   const testDb = createTestDb();
   afterAll(() => testDb.close());
 
-  it("counts only a listed email's first sign-in, and forgets it when the email leaves the list", async () => {
+  it("counts a listed email's sign-in with a new account, and forgets it when the email leaves the list", async () => {
     const settingsRepo = new SettingsRepository(testDb.db);
     const store = new DashboardAccessStore(settingsRepo);
     await store.save({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] });
 
-    expect(await store.recordVisitorSignIn("Ada@Example.com")).toBe(true);
-    expect(await store.recordVisitorSignIn("ada@example.com")).toBe(false);
-    expect(await store.recordVisitorSignIn("stranger@example.com")).toBe(false);
+    expect(await store.recordVisitorSignIn("Ada@Example.com", "acct-1")).toBe(true);
+    // The same account again is not new.
+    expect(await store.recordVisitorSignIn("ada@example.com", "acct-1")).toBe(false);
+    expect(await store.recordVisitorSignIn("stranger@example.com", "acct-9")).toBe(false);
 
     // Survives a raise and a save that keeps the email.
     await store.raisePast(5);
     await store.save({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] });
-    expect(await store.recordVisitorSignIn("ada@example.com")).toBe(false);
+    expect(await store.recordVisitorSignIn("ada@example.com", "acct-1")).toBe(false);
 
-    // Removed, then added back: the next sign-in is a first one again.
+    // Removed, then added back: the next sign-in counts again.
     await store.save({ cloudEmailAccess: ["lin@example.com"] });
     await store.save({ cloudEmailAccess: ["ada@example.com", "lin@example.com"] });
-    expect(await store.recordVisitorSignIn("ada@example.com")).toBe(true);
+    expect(await store.recordVisitorSignIn("ada@example.com", "acct-1")).toBe(true);
     expect((await store.read()).emails).toEqual(["ada@example.com", "lin@example.com"]);
+  });
+
+  it("counts a re-registered account once: same email, new account id", async () => {
+    const store = new DashboardAccessStore(new SettingsRepository(testDb.db));
+    await store.save({ cloudEmailAccess: ["mo@example.com"] });
+
+    expect(await store.recordVisitorSignIn("mo@example.com", "acct-old")).toBe(true);
+    // The account was deleted and made again with the same email.
+    expect(await store.recordVisitorSignIn("mo@example.com", "acct-new")).toBe(true);
+    expect(await store.recordVisitorSignIn("mo@example.com", "acct-new")).toBe(false);
+  });
+
+  it("counts each change of the account an email belongs to", async () => {
+    const store = new DashboardAccessStore(new SettingsRepository(testDb.db));
+    await store.save({ cloudEmailAccess: ["kim@example.com"] });
+
+    expect(await store.recordVisitorSignIn("kim@example.com", "acct-a")).toBe(true);
+    // The email moved to another account, then back.
+    expect(await store.recordVisitorSignIn("kim@example.com", "acct-b")).toBe(true);
+    expect(await store.recordVisitorSignIn("kim@example.com", "acct-a")).toBe(true);
+    expect(await store.recordVisitorSignIn("kim@example.com", "acct-a")).toBe(false);
+  });
+
+  it("drops the older email-only sign-in record, so a listed visitor's next sign-in counts once", async () => {
+    const settingsRepo = new SettingsRepository(testDb.db);
+    const store = new DashboardAccessStore(settingsRepo);
+    await settingsRepo.set(DASHBOARD_ACCESS_SETTING_KEY, {
+      cloudEmailAccess: ["ada@example.com"],
+      revision: 3,
+      signedIn: ["ada@example.com"],
+    });
+
+    expect(await store.recordVisitorSignIn("ada@example.com", "acct-1")).toBe(true);
+    expect(await store.recordVisitorSignIn("ada@example.com", "acct-1")).toBe(false);
+    expect(await settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY)).toEqual({
+      cloudEmailAccess: ["ada@example.com"],
+      revision: 3,
+      visitorAccounts: { "ada@example.com": "acct-1" },
+    });
   });
 });

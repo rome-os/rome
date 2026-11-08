@@ -156,6 +156,7 @@ import {
   AppTurnMiddleware,
   readAnswerShape,
   TurnUsageReporter,
+  romeSessionTracing,
   ChatSessionSettings,
   createSubagentCalls,
   WebChatDashboardSessions,
@@ -258,10 +259,12 @@ import {
   resolveWebchatContinuationDeviceFolder,
   resolveWebchatContinuationWorkingDir,
 } from "./webchat/projects.js";
-import { createActiveSubagentRegistry } from "./core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry.js";
-import { createSubagentExecutionService } from "./core/subagent-execution.js";
-import { subagentLiveTurns, subagentTurnLog } from "./core/subagent-call-ports.js";
+import {
+  subagentLiveTurns,
+  subagentSessions,
+  subagentTurnLog,
+} from "./core/subagent-call-ports.js";
 import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/core-required.js";
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
 import { preserveRecapOptOutAtBoot } from "./apps/recap-upgrade.js";
@@ -1048,7 +1051,6 @@ async function main() {
     turnLog: subagentTurnLog(webchatRepo),
     liveTurns: subagentLiveTurns(agentTurnStreamRegistry),
   });
-  const activeSubagentRegistry = createActiveSubagentRegistry(subagentCalls);
   const chatStop: ChatStopHandler = (input) =>
     stopActiveConversationTurn(input, {
       turns: agentTurnStreamRegistry,
@@ -1060,10 +1062,6 @@ async function main() {
         return (await peopleRepo.byAccount({ platform, id: senderId }))?.bondLevel === "guardian";
       },
     });
-  const subagentExecutionService = createSubagentExecutionService({
-    calls: subagentCalls,
-    webchatRepo,
-  });
   const romeCloudAccess = (): RomeCloudAccess | null => {
     const credentialId = instanceCredentialId();
     const origin = getRomeCloudOrigin();
@@ -1156,10 +1154,12 @@ async function main() {
         channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
         channelSurface,
       }),
-      subagentExecutionService,
-      activeSubagentRegistry,
+      subagentCalls,
+      subagentSessions: (manager, parentLink, inherited) =>
+        subagentSessions(manager, parentLink, webchatRepo, inherited),
       turnMiddleware,
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
+      sessionTracing: romeSessionTracing,
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),
       log: createLogger("agent-session"),
