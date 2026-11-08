@@ -88,9 +88,12 @@ enum CachedImage {
     }
 
     /// Fetches the source and, when it differs from what is stored, draws and
-    /// stores it and answers the new image; nil when nothing changed or it failed.
+    /// stores it and answers the new image; nil when nothing changed or it
+    /// failed. `account`: whose image it is; once that account has ended, it
+    /// is neither stored nor answered.
     static func refresh(
         instance: String, key: String, version: String?,
+        account: AccountStamp = .unchecked,
         cache: ImageDiskCache = .shared,
         fetch: () async throws -> Data,
         draw: (Data) async -> UIImage?
@@ -99,7 +102,7 @@ enum CachedImage {
         let stamp = ImageDiskCache.Stamp(version: version, hash: ImageDiskCache.hash(data))
         if cache.entry(instance: instance, key: key)?.stamp == stamp { return nil }
         guard let image = await draw(data), let png = image.pngData() else { return nil }
-        cache.store(png, stamp: stamp, instance: instance, key: key)
+        guard account.ifCurrent({ cache.store(png, stamp: stamp, instance: instance, key: key) }) else { return nil }
         return image
     }
 }

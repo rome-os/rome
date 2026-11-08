@@ -296,7 +296,7 @@ struct AppIcon: View {
             // Through the instance's client: the icon needs this person's session.
             let side = size
             if let fresh = await CachedImage.refresh(
-                instance: instance, key: key, version: app.version,
+                instance: instance, key: key, version: app.version, account: backend.account,
                 fetch: { try await backend.apiFile(path: String(icon.dropFirst(4)), query: nil) },
                 draw: { await AppIconImage.decode($0, side: side) }
             ) {

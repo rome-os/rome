@@ -130,9 +130,10 @@ final class Workspace {
         self.instanceName = instanceName
         self.host = host
         self.accountLabel = accountLabel
-        self.drafts = drafts ?? DraftStore(instance: host)
+        // Kept on this phone only while the connection's account is signed in.
+        self.drafts = drafts ?? DraftStore(instance: host, account: backend.account)
         // Beside the drafts: a test's drafts in a temporary folder bring their transcripts along.
-        transcripts = TranscriptCache(root: self.drafts.root.deletingLastPathComponent().appending(path: "Transcripts", directoryHint: .isDirectory), instance: self.drafts.instance)
+        transcripts = TranscriptCache(root: self.drafts.root.deletingLastPathComponent().appending(path: "Transcripts", directoryHint: .isDirectory), instance: self.drafts.instance, account: backend.account)
         tasks = TasksStore(backend: backend)
         // The main chat's id from last time, else the guardian's until the
         // server names this person's. Its kept rows show before any fetch.
@@ -295,8 +296,10 @@ final class Workspace {
     private(set) var appsCache: [InstalledApp]?
     var apps: [InstalledApp] { appsCache ?? [] }
 
-    /// Keeps the apps list; an unchanged list leaves it as it is.
+    /// Keeps the apps list; an unchanged list leaves it as it is, and a read
+    /// that ends after its account did keeps nothing.
     func shelve(_ apps: [InstalledApp]) async {
+        guard backend.account.isCurrent else { return }
         if appsCache != apps { appsCache = apps }
     }
 
@@ -449,6 +452,9 @@ final class AppModel {
         case .success(let url):
             do {
                 try await cloud.completeSignIn(request, callback: url)
+                // Possibly another account: the last one's workspace goes now,
+                // before its data is wiped, so nothing of it writes again.
+                leaveAccount()
                 forgetAccountData()
                 await openInstance(preferring: nil, showHint: true)
             } catch {
@@ -461,8 +467,11 @@ final class AppModel {
     /// Picks and opens an instance. The one this device opened last wins, then
     /// the only running one, then the first running one.
     func openInstance(preferring id: String?, showHint: Bool) async {
+        let account = cloud.account.stamp()
         do {
             let list = try await cloud.listInstances()
+            // Signed out or into another account meanwhile: that one decides.
+            guard account.isCurrent else { return }
             take(list)
             let running = list.filter(\.isRunning)
             let remembered = UserDefaults.standard.string(forKey: Defaults.lastInstance)
@@ -481,9 +490,12 @@ final class AppModel {
                 UserDefaults.standard.set(true, forKey: Defaults.hintShown)
                 autoOpenHint = String(localized: "Opened “\(chosen.name)”. Switch instances in Settings.")
             }
-        } catch AuthError.cloudUnauthorized {
-            phase = .signedOut
         } catch {
+            guard account.isCurrent else { return }
+            if error as? AuthError == .cloudUnauthorized {
+                phase = .signedOut
+                return
+            }
             guard workspace == nil else { return }
             // Offline: the last instance opens with its stored session, so its
             // kept chats show. Without one, sign-in says what went wrong.
@@ -511,8 +523,10 @@ final class AppModel {
     private func connect(to instance: CloudInstance, keepUpdate: Bool = false) async {
         if !keepUpdate { update.reset() }
         phase = .connecting(host: instance.host)
+        let account = cloud.account.stamp()
         do {
             let session = try await cloud.session(for: instance)
+            guard account.isCurrent else { return }
             let box = TokenBox()
             box.use(session)
             tokenBox = box
@@ -525,23 +539,32 @@ final class AppModel {
                 Task { @MainActor in self?.handleUnauthorized(box: box, instance: instance) }
             }
             await open(Workspace(
-                backend: LiveBackend(client: client),
+                backend: LiveBackend(client: client, account: account),
                 instanceName: instance.name,
                 host: instance.host,
                 accountLabel: instance.name
             ))
-        } catch AuthError.instanceNotReady {
+        } catch {
+            // An older account's attempt changes nothing for the one signed in now.
+            guard account.isCurrent else { return }
+            await failedToConnect(to: instance, error: error)
+        }
+    }
+
+    private func failedToConnect(to instance: CloudInstance, error: Error) async {
+        switch error as? AuthError {
+        case .instanceNotReady:
             phase = .stopped(instanceName: instance.name)
             // Mid-upgrade the instance is down for a while: keep the update page
             // waiting and open it again once Rome Cloud reports it running.
             _ = update.waitWithoutInstance(instanceID: instance.id) { [weak self] in
                 await self?.reconnectWhenRunning(instance.id)
             }
-        } catch AuthError.cloudUnauthorized {
+        case .cloudUnauthorized:
             phase = .signedOut
-        } catch AuthError.accessRevoked {
+        case .accessRevoked:
             await lostAccess(to: instance)
-        } catch {
+        default:
             signInError = (error as? LocalizedError)?.errorDescription
             browserSignIn = error as? AuthError == .notOwner ? URL(string: instance.origin) : nil
             phase = .signedOut
@@ -604,28 +627,39 @@ final class AppModel {
     var currentInstance: CloudInstance? { instances.first { $0.id == currentInstanceID } }
 
     func signOut() async {
+        // First, so nothing still running for this account writes again.
+        cloud.endAccount()
+        leaveAccount()
+        pendingPush = nil
+        await push.signOut { await cloud.signOut() }
+        forgetAccountData()
+        browserSignIn = nil
+        phase = .signedOut
+    }
+
+    /// The account that was signed in is over: its workspace stops at once
+    /// and its connection sends no cookie. Work it began finds its account
+    /// ended (`CloudAuth.account`) and keeps nothing.
+    private func leaveAccount() {
         update.reset()
         workspace?.stop()
         workspace = nil
         tokenBox?.token = nil
         tokenBox = nil
-        pendingPush = nil
-        await push.signOut { await cloud.signOut() }
-        forgetAccountData()
         instances = []
         currentInstanceID = nil
         sessionExpired = false
-        browserSignIn = nil
-        phase = .signedOut
     }
 
     /// What this phone keeps for the signed-in account: drafts, kept chats,
-    /// pictures and the last instance. Gone on sign-out, and before a new
-    /// Cloud sign-in, which may be another account's.
+    /// pictures, the language last seen and the last instance. Gone on
+    /// sign-out, and before a new Cloud sign-in, which may be another
+    /// account's. The account has ended first, so no late write follows.
     private func forgetAccountData() {
         DraftStore.removeAll()
         TranscriptCache.removeAll()
         ImageDiskCache.shared.removeAll()
+        LanguageSync.removeAll()
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstanceRecord)
     }
@@ -671,6 +705,8 @@ final class AppModel {
         // Updating the instance is the guardian's call: a visitor never sees
         // the page, the banner or the drawer's line.
         await workspace.readRole()
+        // Signed out, or another workspace opened, while it read.
+        guard self.workspace === workspace else { return }
         if let id = currentInstanceID, Self.offersUpdates(to: workspace) {
             Task { await update.attach(backend: workspace.backend, instanceID: id) }
             // Hold the loading state briefly for the check, so a Rome below the
@@ -678,6 +714,7 @@ final class AppModel {
             // Chat first; one that is only behind gets the banner. A slow check
             // does not hold the app: the page covers Chat when the answer comes.
             await update.waitForFirstAnswer(upTo: Self.updateCheckHold)
+            guard self.workspace === workspace else { return }
         }
         phase = .ready
         if pendingPush != nil {
@@ -791,7 +828,7 @@ final class AppModel {
         let backend = workspace.backend
         let current = LanguageSync.code(Bundle.main.preferredLocalizations.first)
         Task {
-            await languageSync.check(host: workspace.host, current: current, isGuardian: { await backend.isGuardian() }) { code in
+            await languageSync.check(host: workspace.host, current: current, account: backend.account, isGuardian: { await backend.isGuardian() }) { code in
                 try await backend.setGuardianLanguage(code)
             }
         }

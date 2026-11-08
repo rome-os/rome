@@ -273,7 +273,7 @@ struct SettingsScreen: View {
     private var accountCard: some View {
         Button(action: onInstances) {
             HStack(spacing: 14) {
-                InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host, size: 48)
+                InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host, account: workspace.backend.account, size: 48)
                 VStack(alignment: .leading, spacing: 1) {
                     HStack(spacing: 6) {
                         Text(workspace.accountLabel)

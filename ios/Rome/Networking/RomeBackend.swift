@@ -21,6 +21,9 @@ struct SearchHit: Codable, Identifiable, Hashable, Sendable {
 protocol RomeBackend: AnyObject, Sendable {
     var displayOrigin: String { get }
     var events: LiveEventSource { get }
+    /// The Rome Cloud account this connection belongs to: what it fetched is
+    /// kept on this phone only while that account is signed in.
+    var account: AccountStamp { get }
 
     func conciergeSession() async throws -> ConciergeSessionInfo
     /// The main chat first, then the topic chats, oldest first.
@@ -79,11 +82,13 @@ protocol RomeBackend: AnyObject, Sendable {
 final class LiveBackend: RomeBackend {
     let client: APIClient
     let events: LiveEventSource
+    let account: AccountStamp
 
     var displayOrigin: String { client.origin.host() ?? client.origin.absoluteString }
 
-    init(client: APIClient) {
+    init(client: APIClient, account: AccountStamp = .unchecked) {
         self.client = client
+        self.account = account
         events = LiveEventsSocket(client: client)
     }
 
@@ -297,6 +302,9 @@ enum ToolCallExtractor {
 }
 
 extension RomeBackend {
+    /// Demo data and test doubles belong to no account.
+    var account: AccountStamp { .unchecked }
+
     func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply { throw APIError.notFound }
     func connectors() async throws -> [ConnectorState] { [] }
     func notifyServiceConnected(chatId: String, service: String) async {}

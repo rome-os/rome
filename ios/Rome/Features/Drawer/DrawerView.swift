@@ -86,7 +86,7 @@ struct DrawerView: View {
 
             Button(action: onSettings) {
                 HStack(spacing: 12) {
-                    InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host)
+                    InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host, account: workspace.backend.account)
                     VStack(alignment: .leading, spacing: 0) {
                         HStack(spacing: 6) {
                             Text(workspace.instanceName)

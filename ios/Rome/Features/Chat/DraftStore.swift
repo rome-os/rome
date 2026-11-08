@@ -26,18 +26,21 @@ struct SentMessage: Sendable {
 /// JPEG files beside the text, in Application Support, not backed up.
 ///
 /// All disk work runs on one serial queue, in the order it was asked for, so
-/// a late save can never bring back a draft that was sent or discarded.
+/// a late save can never bring back a draft that was sent or discarded. Disk
+/// work for an account that has since ended does nothing, so nothing comes
+/// back after the sign-out wipe either.
 @MainActor
 final class DraftStore {
     let root: URL
     let instance: String
+    let account: AccountStamp
     /// Sends of this session still going or failed: their bubble is on
     /// screen, so they are not handed back as a draft too.
     private var unsettled: Set<String> = []
     /// The latest composer of each chat not yet written.
     private var pending: [String: Draft] = [:]
     private var debounce: [String: Task<Void, Never>] = [:]
-    private let disk = DraftDisk()
+    private let disk: DraftDisk
 
     nonisolated static let saveDelay: Duration = .milliseconds(300)
     nonisolated static let photoLimit = 4
@@ -47,9 +50,11 @@ final class DraftStore {
         return base.appending(path: "Drafts", directoryHint: .isDirectory)
     }
 
-    init(root: URL = DraftStore.defaultRoot, instance: String) {
+    init(root: URL = DraftStore.defaultRoot, instance: String, account: AccountStamp = .unchecked) {
         self.root = root
         self.instance = instance
+        self.account = account
+        disk = DraftDisk(account: account)
     }
 
     // MARK: Reading
@@ -63,7 +68,7 @@ final class DraftStore {
         let others = Self.isBlank(chat) ? blankFolders(except: chat) : []
         let skip = unsettled
         let root = root
-        return await disk.value {
+        return await disk.value(nil) {
             Self.restore(into: folder, adopting: others, skip: skip, transcript: transcript, root: root)
         }
     }
@@ -85,7 +90,7 @@ final class DraftStore {
     /// Writes every pending save now, and waits for the disk.
     func flush() async {
         for chat in Array(pending.keys) { commit(chat) }
-        await disk.value {}
+        await disk.value(()) {}
     }
 
     /// A message is going out: kept until `delivered`. `fromComposer`: it
@@ -358,17 +363,30 @@ final class DraftStore {
     }
 }
 
-/// One serial queue for every draft file.
+/// One serial queue for every draft file of a store, and only while its
+/// account is signed in.
 private final class DraftDisk: @unchecked Sendable {
     private let queue = DispatchQueue(label: "cc.romeos.drafts", qos: .utility)
+    private let account: AccountStamp
 
-    func run(_ work: @escaping @Sendable () -> Void) {
-        queue.async(execute: work)
+    init(account: AccountStamp) {
+        self.account = account
     }
 
-    func value<T: Sendable>(_ work: @escaping @Sendable () -> T) async -> T {
-        await withCheckedContinuation { continuation in
-            queue.async { continuation.resume(returning: work()) }
+    func run(_ work: @escaping @Sendable () -> Void) {
+        let account = account
+        queue.async { account.ifCurrent(work) }
+    }
+
+    /// `fallback` once the account has ended.
+    func value<T: Sendable>(_ fallback: T, _ work: @escaping @Sendable () -> T) async -> T {
+        let account = account
+        return await withCheckedContinuation { continuation in
+            queue.async {
+                var result = fallback
+                account.ifCurrent { result = work() }
+                continuation.resume(returning: result)
+            }
         }
     }
 }

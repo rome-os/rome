@@ -8,10 +8,13 @@ import Foundation
 /// after the first unlock. A copy older than `maxAge`, or written in another
 /// format, is thrown away. Writes wait a moment and run on one serial queue
 /// shared by every instance, so a wipe always lands after the writes before it.
+/// A write for an account that has since ended is dropped there, so a late
+/// reload never brings a chat back after the wipe.
 @MainActor
 final class TranscriptCache {
     let root: URL
     let instance: String
+    let account: AccountStamp
     private var pending: [String: [ChatMessage]] = [:]
     private var debounce: [String: Task<Void, Never>] = [:]
 
@@ -26,9 +29,10 @@ final class TranscriptCache {
         return base.appending(path: "Transcripts", directoryHint: .isDirectory)
     }
 
-    init(root: URL = TranscriptCache.defaultRoot, instance: String) {
+    init(root: URL = TranscriptCache.defaultRoot, instance: String, account: AccountStamp = .unchecked) {
         self.root = root
         self.instance = instance
+        self.account = account
     }
 
     struct Snapshot: Codable {
@@ -75,6 +79,7 @@ final class TranscriptCache {
 
     /// Keeps the chat's newest `keep` messages; written a moment later.
     func save(chat: String, messages: [ChatMessage]) {
+        guard account.isCurrent else { return }
         pending[chat] = Array(messages.suffix(Self.keep))
         debounce[chat]?.cancel()
         debounce[chat] = Task { [weak self] in
@@ -86,10 +91,12 @@ final class TranscriptCache {
 
     func setMainChat(_ chatId: String) {
         guard !chatId.isEmpty, let data = try? JSONEncoder().encode(MainChat(chatId: chatId)) else { return }
-        let folder = folder
+        let folder = folder, account = account
         Self.queue.async {
-            Self.prepare(folder)
-            try? data.write(to: folder.appending(path: "main.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            account.ifCurrent {
+                Self.prepare(folder)
+                try? data.write(to: folder.appending(path: "main.json"), options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            }
         }
     }
 
@@ -106,13 +113,15 @@ final class TranscriptCache {
     private func commit(_ chat: String) {
         debounce[chat]?.cancel()
         debounce[chat] = nil
-        guard let messages = pending.removeValue(forKey: chat) else { return }
+        guard let messages = pending.removeValue(forKey: chat), account.isCurrent else { return }
         let snapshot = Snapshot(format: Self.format, savedAt: .now, chatId: chat, messages: messages)
         guard let data = try? JSONEncoder().encode(snapshot) else { return }
-        let folder = folder, file = file(chat)
+        let folder = folder, file = file(chat), account = account
         Self.queue.async {
-            Self.prepare(folder)
-            try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            account.ifCurrent {
+                Self.prepare(folder)
+                try? data.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
+            }
         }
     }
 

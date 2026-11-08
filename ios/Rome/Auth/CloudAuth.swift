@@ -107,14 +107,18 @@ final class CloudAuth {
     }
 
     let origin: URL
+    /// Goes up when the account ends: sign-out, or a new credential.
+    let account: AccountGeneration
     private let http: URLSession
     private let store: SecretStore
-    private var inFlight: [String: Task<InstanceSession, Error>] = [:]
+    /// One sign-in per instance at a time, for the account that started it.
+    private var inFlight: [String: (account: Int, task: Task<InstanceSession, Error>)] = [:]
 
     /// `configuration` and `store`: tests pass a stub protocol and memory.
-    init(origin: URL, configuration: URLSessionConfiguration = .ephemeral, store: SecretStore = KeychainStore()) {
+    init(origin: URL, configuration: URLSessionConfiguration = .ephemeral, store: SecretStore = KeychainStore(), account: AccountGeneration = AccountGeneration()) {
         self.origin = origin
         self.store = store
+        self.account = account
         configuration.httpShouldSetCookies = false
         http = URLSession(configuration: configuration, delegate: NoRedirects(), delegateQueue: nil)
     }
@@ -175,10 +179,29 @@ final class CloudAuth {
               body["token_type"]?.string == "Bearer",
               let device = body["device_session_id"]?.string, !device.isEmpty
         else { throw AuthError.invalidResponse }
-        // The new credential may be another account's: no instance session
-        // made under the last one survives it.
+        // The new credential may be another account's: nothing begun or kept
+        // under the last one survives it.
+        endAccount()
         forgetInstanceSessions()
         store.set(CloudCredential(accessToken: token, deviceSessionId: device), for: Key.credential)
+    }
+
+    /// The signed-in account is over: instance sign-ins still running are
+    /// cancelled, and any that finishes anyway hands back and keeps nothing.
+    func endAccount() {
+        account.end()
+        for running in inFlight.values { running.task.cancel() }
+        inFlight = [:]
+    }
+
+    /// Throws when the account changed since `stamped`.
+    private func check(_ stamped: Int) throws {
+        guard account.current == stamped else { throw AuthError.cancelled }
+    }
+
+    /// Keeps an instance session, unless the account that asked for it has ended.
+    private func keep(_ session: InstanceSession, for key: String, account stamped: Int) throws {
+        guard account.ifCurrent(stamped, { store.set(session, for: key) }) else { throw AuthError.cancelled }
     }
 
     /// Drops every instance session, guardian and visitor; each instance signs
@@ -230,22 +253,33 @@ final class CloudAuth {
         if !forceRefresh, let stored = store.value(InstanceSession.self, for: Key.session(for: instance)), stored.isFresh {
             return stored
         }
-        if let running = inFlight[instance.origin] { return try await running.value }
-        let task = Task { try await self.createSession(for: instance) }
-        inFlight[instance.origin] = task
-        defer { inFlight[instance.origin] = nil }
-        return try await task.value
+        let stamped = account.current
+        if let running = inFlight[instance.origin], running.account == stamped {
+            let session = try await running.task.value
+            try check(stamped)
+            return session
+        }
+        let task = Task { try await self.createSession(for: instance, account: stamped) }
+        inFlight[instance.origin] = (stamped, task)
+        defer { if inFlight[instance.origin]?.task == task { inFlight[instance.origin] = nil } }
+        let session = try await task.value
+        try check(stamped)
+        return session
     }
 
-    private func createSession(for instance: CloudInstance, retry: Bool = true) async throws -> InstanceSession {
+    /// `account`: the account that asked. Each step checks it is still the
+    /// one signed in, so an old account's sign-in never runs on with the new
+    /// credential or keeps a session after the wipe.
+    private func createSession(for instance: CloudInstance, account stamped: Int, retry: Bool = true) async throws -> InstanceSession {
         guard instance.isRunning else { throw AuthError.instanceNotReady }
         guard let instanceOrigin = URL(string: instance.origin) else { throw AuthError.invalidResponse }
-        if instance.isVisitor { return try await createVisitorSession(for: instance, at: instanceOrigin, retry: retry) }
+        if instance.isVisitor { return try await createVisitorSession(for: instance, at: instanceOrigin, account: stamped, retry: retry) }
 
         var start = URLRequest(url: instanceOrigin.appending(path: "api/auth/cloud/native/start"))
         start.httpMethod = "POST"
         start.setValue("application/json", forHTTPHeaderField: "Accept")
         let (startData, startStatus) = try await perform(start)
+        try check(stamped)
         guard (200..<300).contains(startStatus) else {
             throw startStatus == 404 || startStatus == 409 ? AuthError.sessionRejected : AuthError.network
         }
@@ -259,7 +293,8 @@ final class CloudAuth {
         let authorizationData = try await cloudRequest(
             "v1/instances/\(instance.id)/authorizations",
             method: "POST",
-            body: .object(["authorization_request": authorizationRequest])
+            body: .object(["authorization_request": authorizationRequest]),
+            account: stamped
         )
         guard let authorization = try? JSONDecoder().decode(JSONValue.self, from: authorizationData),
               let code = authorization["code"]?.string,
@@ -275,7 +310,8 @@ final class CloudAuth {
             "code": .string(code), "state": .string(state), "iss": .string(issuer),
         ]))
         let (sessionData, sessionStatus) = try await perform(complete)
-        if sessionStatus == 400, retry { return try await createSession(for: instance, retry: false) }
+        try check(stamped)
+        if sessionStatus == 400, retry { return try await createSession(for: instance, account: stamped, retry: false) }
         guard (200..<300).contains(sessionStatus) else {
             throw Self.completeError(status: sessionStatus, body: sessionData)
         }
@@ -287,7 +323,7 @@ final class CloudAuth {
         else { throw AuthError.invalidResponse }
         let session = InstanceSession(token: token, expiresAt: expiresAt, origin: instance.origin)
         guard session.isFresh else { throw AuthError.invalidResponse }
-        store.set(session, for: Key.session(instance.origin))
+        try keep(session, for: Key.session(instance.origin), account: stamped)
         return session
     }
 
@@ -315,11 +351,12 @@ final class CloudAuth {
     /// allow-listed account runs on the phone: the instance asks for a
     /// sign-in, Rome Cloud issues the code for this account, and the instance
     /// redeems it, checking its own allow-list, for a `rome_visitor` session.
-    private func createVisitorSession(for instance: CloudInstance, at instanceOrigin: URL, retry: Bool) async throws -> InstanceSession {
+    private func createVisitorSession(for instance: CloudInstance, at instanceOrigin: URL, account stamped: Int, retry: Bool) async throws -> InstanceSession {
         var start = URLRequest(url: instanceOrigin.appending(path: "api/auth/visitor/native/start"))
         start.httpMethod = "POST"
         start.setValue("application/json", forHTTPHeaderField: "Accept")
         let (startData, startStatus) = try await perform(start)
+        try check(stamped)
         guard (200..<300).contains(startStatus) else {
             throw Self.visitorStartError(status: startStatus, body: startData)
         }
@@ -333,7 +370,8 @@ final class CloudAuth {
         let (authorizationData, authorizationStatus) = try await cloudExchange(
             "v1/instances/\(instance.id)/visitor-authorizations",
             method: "POST",
-            body: .object(["authorization_request": authorizationRequest])
+            body: .object(["authorization_request": authorizationRequest]),
+            account: stamped
         )
         switch authorizationStatus {
         case 200..<300: break
@@ -353,8 +391,9 @@ final class CloudAuth {
         complete.setValue("application/json", forHTTPHeaderField: "Content-Type")
         complete.httpBody = try JSONEncoder().encode(JSONValue.object(["state": .string(state), "code": .string(code)]))
         let (sessionData, sessionStatus) = try await perform(complete)
+        try check(stamped)
         // A stale attempt (the instance restarted between the calls): once more.
-        if sessionStatus == 400, retry { return try await createVisitorSession(for: instance, at: instanceOrigin, retry: false) }
+        if sessionStatus == 400, retry { return try await createVisitorSession(for: instance, at: instanceOrigin, account: stamped, retry: false) }
         switch sessionStatus {
         case 200..<300: break
         case 403, 404: throw AuthError.accessRevoked
@@ -369,7 +408,7 @@ final class CloudAuth {
         else { throw AuthError.invalidResponse }
         let session = InstanceSession(token: token, expiresAt: expiresAt, origin: instance.origin, cookieName: InstanceSession.visitorCookie)
         guard session.isFresh else { throw AuthError.invalidResponse }
-        store.set(session, for: Key.visitorSession(instance.origin))
+        try keep(session, for: Key.visitorSession(instance.origin), account: stamped)
         return session
     }
 
@@ -401,6 +440,7 @@ final class CloudAuth {
     }
 
     func signOut() async {
+        endAccount()
         if let credential = store.value(CloudCredential.self, for: Key.credential) {
             var request = URLRequest(url: origin.appending(path: "v1/mobile/session"))
             request.httpMethod = "DELETE"
@@ -412,13 +452,10 @@ final class CloudAuth {
 
     // MARK: Plumbing
 
-    private func cloudRequest(_ path: String, method: String = "GET", body: JSONValue? = nil) async throws -> Data {
-        let (data, status) = try await cloudExchange(path, method: method, body: body)
+    private func cloudRequest(_ path: String, method: String = "GET", body: JSONValue? = nil, account stamped: Int? = nil) async throws -> Data {
+        let (data, status) = try await cloudExchange(path, method: method, body: body, account: stamped)
         switch status {
         case 200..<300: return data
-        case 401:
-            store.remove(Key.credential)
-            throw AuthError.cloudUnauthorized
         case 403: throw AuthError.accessDenied
         case 409: throw AuthError.instanceNotReady
         default: throw AuthError.sessionRejected
@@ -426,8 +463,13 @@ final class CloudAuth {
     }
 
     /// A call to Rome Cloud with this phone's credential, any status answered.
-    /// A 401 drops the credential: Rome Cloud's sign-in has ended.
-    private func cloudExchange(_ path: String, method: String = "GET", body: JSONValue? = nil) async throws -> (Data, Int) {
+    /// A 401 drops the credential: Rome Cloud's sign-in has ended. `account`:
+    /// the account the call is for; by default the one signed in now. Once
+    /// it has ended, the call sends nothing, and its answer, a 401 too,
+    /// changes nothing, since the credential is no longer its own.
+    private func cloudExchange(_ path: String, method: String = "GET", body: JSONValue? = nil, account stamped: Int? = nil) async throws -> (Data, Int) {
+        let stamped = stamped ?? account.current
+        try check(stamped)
         guard let credential = store.value(CloudCredential.self, for: Key.credential) else {
             throw AuthError.cloudUnauthorized
         }
@@ -440,8 +482,9 @@ final class CloudAuth {
             request.httpBody = try JSONEncoder().encode(body)
         }
         let (data, status) = try await perform(request)
+        try check(stamped)
         if status == 401 {
-            store.remove(Key.credential)
+            account.ifCurrent(stamped) { store.remove(Key.credential) }
             throw AuthError.cloudUnauthorized
         }
         return (data, status)
@@ -483,6 +526,7 @@ private final class NoRedirects: NSObject, URLSessionTaskDelegate, Sendable {
 
 extension CloudAuth: DeviceRegistry {
     var canRegisterDevice: Bool { hasCredential }
+    var accountGeneration: Int { account.current }
 
     func registerDevice(_ device: DeviceRegistration) async throws {
         try await deviceCall("POST", body: device)

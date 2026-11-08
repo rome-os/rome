@@ -130,6 +130,21 @@ import Testing
         #expect(registry.calls == ["register ab", "register cd"])
     }
 
+    /// A's Cloud sign-in expires, B signs in on the same phone: the same
+    /// APNs token is registered again, now for B.
+    @Test func anotherAccountRegistersTheSameTokenAgain() async {
+        let registry = FakeRegistry()
+        let push = center(registry)
+        await push.didRegister(deviceToken: Data([0xAB]))
+        registry.signedIn = false
+        await push.upload()
+        registry.accountGeneration += 1
+        registry.signedIn = true
+        await push.upload()
+        await push.upload()
+        #expect(registry.calls == ["register ab", "register ab"])
+    }
+
     @Test func refusedRegistrationIsRetried() async {
         let registry = FakeRegistry()
         registry.fails = true
@@ -263,6 +278,7 @@ private final class FakeRegistry: DeviceRegistry {
     var signedIn = true
     var fails = false
     var calls: [String] = []
+    var accountGeneration = 0
 
     var canRegisterDevice: Bool { signedIn }
 

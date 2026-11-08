@@ -8,6 +8,9 @@ import UserNotifications
 protocol DeviceRegistry: AnyObject {
     /// Signed in to Rome Cloud, so a registration has a device to belong to.
     var canRegisterDevice: Bool { get }
+    /// Goes up when the signed-in account ends, so a token sent for the last
+    /// account is sent again for the next one.
+    var accountGeneration: Int { get }
     func registerDevice(_ device: DeviceRegistration) async throws
     func unregisterDevice(token: String) async throws
 }
@@ -63,9 +66,11 @@ final class PushCenter {
     @ObservationIgnored private let store: PushTokenStore
     /// This launch's APNs token.
     @ObservationIgnored private var token: String?
-    /// The token Rome Cloud accepted in this launch. Each launch registers
-    /// again, so a refused registration is retried on the next one.
+    /// The token Rome Cloud accepted in this launch, and for which account.
+    /// Each launch registers again, so a refused registration is retried on
+    /// the next one; another account registers the same token again.
     @ObservationIgnored private var sentToken: String?
+    @ObservationIgnored private var sentAccount: Int?
 
     init(
         registry: DeviceRegistry,
@@ -142,10 +147,12 @@ final class PushCenter {
     /// Sends this launch's token to Rome Cloud once it accepts one. A refusal
     /// stays quiet; the next launch or sign-in tries again.
     func upload() async {
-        guard enabledByUser, let token, token != sentToken, registry.canRegisterDevice else { return }
+        let account = registry.accountGeneration
+        guard enabledByUser, let token, token != sentToken || account != sentAccount, registry.canRegisterDevice else { return }
         do {
             try await registry.registerDevice(.current(token: token))
             sentToken = token
+            sentAccount = account
             store.save(token)
         } catch {
             // Rome Cloud may not know the route yet, or is unreachable.
@@ -159,6 +166,7 @@ final class PushCenter {
             try? await registry.unregisterDevice(token: registered)
         }
         sentToken = nil
+        sentAccount = nil
         store.save(nil)
         await clear()
     }

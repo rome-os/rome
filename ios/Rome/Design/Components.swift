@@ -384,13 +384,16 @@ struct InitialAvatar: View {
     var imageURL: URL? = nil
     /// Whose disk cache the picture lives in: the open instance's host.
     var instance: String = ""
+    /// The account the picture is kept for.
+    var account: AccountStamp = .unchecked
     var size: CGFloat = 40
     @State private var image: UIImage?
 
-    init(text: String, imageURL: URL? = nil, instance: String = "", size: CGFloat = 40) {
+    init(text: String, imageURL: URL? = nil, instance: String = "", account: AccountStamp = .unchecked, size: CGFloat = 40) {
         self.text = text
         self.imageURL = imageURL
         self.instance = instance
+        self.account = account
         self.size = size
         // Last time's picture from disk, in the first frame.
         _image = State(initialValue: imageURL.flatMap { CachedImage.cached(instance: instance, key: Self.cacheKey($0)) })
@@ -416,7 +419,7 @@ struct InitialAvatar: View {
             // Checked again in the background; replaced only when it changed.
             let side = size
             if let fresh = await CachedImage.refresh(
-                instance: instance, key: key, version: nil,
+                instance: instance, key: key, version: nil, account: account,
                 fetch: { try await URLSession.shared.data(from: url).0 },
                 draw: { data in Self.drawn(data, side: side) }
             ) {

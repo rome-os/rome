@@ -22,12 +22,20 @@ final class LanguageSync {
 
     nonisolated static func key(host: String) -> String { "guardianLanguage.\(host)" }
 
+    /// Sign-out, or another account: what was seen belongs to the last one.
+    static func removeAll(defaults: UserDefaults = .standard) {
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix("guardianLanguage.") {
+            defaults.removeObject(forKey: key)
+        }
+    }
+
     /// Compares the app's language with the last one seen on this instance,
     /// and writes it when it changed. A failed write is tried again next time.
-    func check(host: String, current: String, isGuardian: () async -> Bool, write: (String) async throws -> Void) async {
+    /// `account`: whose instance it is; once that account has ended, nothing is remembered.
+    func check(host: String, current: String, account: AccountStamp = .unchecked, isGuardian: () async -> Bool, write: (String) async throws -> Void) async {
         let key = Self.key(host: host)
         guard let seen = defaults.string(forKey: key) else {
-            defaults.set(current, forKey: key)
+            if account.isCurrent { defaults.set(current, forKey: key) }
             return
         }
         guard seen != current, !writing else { return }
@@ -37,7 +45,7 @@ final class LanguageSync {
         guard await isGuardian() else { return }
         do {
             try await write(current)
-            defaults.set(current, forKey: key)
+            if account.isCurrent { defaults.set(current, forKey: key) }
         } catch {
             // Remembered as it was, so the next foreground tries again.
         }
