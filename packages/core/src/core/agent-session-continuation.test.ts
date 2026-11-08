@@ -33,7 +33,7 @@ import {
   createAgentSessionManager,
   type AgentSession,
   type AgentSessionManager,
-} from "./agent-session.js";
+} from "../agent/index.js";
 import type { ModelSelectionId } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";

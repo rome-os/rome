@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import { AgentRunner } from "./agent-runner.js";
 import type { AgentCatalog } from "../agent/index.js";
-import type { AgentSessionManager } from "./agent-session.js";
+import type { AgentSessionManager } from "../agent/index.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import type { Action } from "../actions/types.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";

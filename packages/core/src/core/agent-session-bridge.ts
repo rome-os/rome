@@ -23,7 +23,7 @@ import type {
   AgentSession,
   AgentTurnHandle,
   AgentTurnInput,
-} from "./agent-session.js";
+} from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
 import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";

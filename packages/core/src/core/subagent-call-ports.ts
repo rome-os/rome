@@ -11,7 +11,7 @@ import {
 } from "../agent/index.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
-import type { AgentSession, AgentSessionInit, AgentSessionManager } from "./agent-session.js";
+import type { AgentSession, AgentSessionInit, AgentSessionManager } from "../agent/index.js";
 import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-recorder.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { openedInChat } from "./session-conversation.js";

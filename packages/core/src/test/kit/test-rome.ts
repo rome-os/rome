@@ -48,7 +48,7 @@ import { DrizzleSessionRepository, type SessionRepository } from "../../agent/in
 import { createTestSystemPrompts } from "../system-prompts.js";
 import { createModelResolver } from "../../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./model-accounts.js";
-import { createAgentSessionManager } from "../../core/agent-session.js";
+import { createAgentSessionManager } from "../../agent/index.js";
 import { AppTurnHooks, TurnListeners } from "../../agent/index.js";
 import { SkillLoader } from "../../agent/index.js";
 import { AgentRunner } from "../../core/agent-runner.js";

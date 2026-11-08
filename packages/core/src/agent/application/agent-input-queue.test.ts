@@ -2,7 +2,7 @@ import { context } from "@opentelemetry/api";
 import { describe, expect, it, rs } from "@rstest/core";
 import type { InputStatusEvent } from "@rome-os/app-runtime";
 import type { AgentTurnHandle, AgentTurnInput } from "./agent-session.js";
-import type { ModelSession } from "./agent-runner.js";
+import type { ModelSession } from "../domain/model-port.js";
 import { AgentInputQueue } from "./agent-input-queue.js";
 
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));

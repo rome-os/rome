@@ -18,7 +18,7 @@ import {
   type ModelProvider,
   type ModelSessionParams,
 } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
+import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { SkillLoader } from "../agent/index.js";

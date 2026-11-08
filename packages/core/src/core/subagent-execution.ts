@@ -4,7 +4,7 @@
 import { subagentRequest, type SubagentCalls, type SubagentOutcome } from "../agent/index.js";
 import type { Attributes } from "@opentelemetry/api";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import type { AgentSessionManager } from "./agent-session.js";
+import type { AgentSessionManager } from "../agent/index.js";
 import { subagentSessions } from "./subagent-call-ports.js";
 import type { ThreadContext } from "./types.js";
 

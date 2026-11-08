@@ -12,7 +12,7 @@ import type {
   AgentSessionInit,
   AgentSessionManager,
   AgentTurnHandle,
-} from "./agent-session.js";
+} from "../agent/index.js";
 import type { ChatResetPolicy } from "./chat-reset-policy.js";
 import type { SessionOpeningFor } from "./session-opening.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
