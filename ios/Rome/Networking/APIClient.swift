@@ -200,7 +200,8 @@ final class APIClient: Sendable {
     }
 
     /// The session as a cookie for a web view: scoped to this origin's host
-    /// and path `/`, secure on https, so no other site ever receives it.
+    /// and path `/`, secure on https, so no other site ever receives it, and
+    /// HttpOnly as the server sets it, so no page script can read it.
     func sessionCookie() -> HTTPCookie? {
         guard let token = token(), let host = origin.host() else { return nil }
         var properties: [HTTPCookiePropertyKey: Any] = [
@@ -210,6 +211,7 @@ final class APIClient: Sendable {
             .value: token,
         ]
         if origin.scheme == "https" { properties[.secure] = "TRUE" }
+        properties[HTTPCookiePropertyKey("HttpOnly")] = "TRUE"
         return HTTPCookie(properties: properties)
     }
 

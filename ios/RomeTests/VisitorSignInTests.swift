@@ -46,6 +46,7 @@ final class MemoryStore: SecretStore, @unchecked Sendable {
     func set(_ data: Data, for key: String) { items[key] = data }
     func remove(_ key: String) { items[key] = nil }
     func removeAll() { items = [:] }
+    func keys() -> [String] { Array(items.keys) }
 }
 
 @MainActor
@@ -159,6 +160,9 @@ final class MemoryStore: SecretStore, @unchecked Sendable {
         let socket = visitor.socketRequest("/ws/events")
         #expect(socket.value(forHTTPHeaderField: "Cookie") == "rome_visitor=v")
         #expect(visitor.sessionCookie()?.name == "rome_visitor")
+        // No page script in the Apps web view can read it.
+        #expect(visitor.sessionCookie()?.isHTTPOnly == true)
+        #expect(visitor.sessionCookie()?.isSecure == true)
         #expect(APIClient(origin: origin, token: { "g" }).socketRequest("/ws/events").value(forHTTPHeaderField: "Cookie") == "rome_session=g")
         // A session stored before visitors is the guardian's.
         let old = try? JSONDecoder().decode(InstanceSession.self, from: Data(#"{"token":"t","expiresAt":"x","origin":"o"}"#.utf8))
@@ -190,6 +194,20 @@ final class MemoryStore: SecretStore, @unchecked Sendable {
         #expect(CloudAuth.visitorStartError(status: 404, body: Data("404 Not Found".utf8)) == .instanceTooOld)
         #expect(CloudAuth.visitorStartError(status: 404, body: Data(#"{"error":"dashboard_not_cloud_email_restricted"}"#.utf8)) == .accessRevoked)
         #expect(CloudAuth.visitorStartError(status: 503, body: Data()) == .network)
+    }
+
+    /// A new Cloud credential may be another account's: every instance
+    /// session goes, other secrets stay.
+    @Test func aNewSignInForgetsInstanceSessions() async throws {
+        visitorRoutes()
+        let store = MemoryStore()
+        _ = try await auth(store).session(for: Self.visitorInstance)
+        store.set(Data("t".utf8), for: "instance.session.https://me.romeos.cc")
+        store.set(Data("p".utf8), for: "push.token")
+        auth(store).forgetInstanceSessions()
+        #expect(!store.items.keys.contains { $0.hasPrefix("instance.") })
+        #expect(store.items["push.token"] != nil)
+        #expect(store.items["cloud.credential"] != nil)
     }
 
     /// Sign-out forgets visitor sessions with the rest.

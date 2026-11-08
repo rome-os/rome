@@ -368,3 +368,45 @@ final class Counter: @unchecked Sendable {
         #expect(!idle.blocking && idle.offered == nil && !idle.showsBanner)
     }
 }
+
+@MainActor
+@Suite struct UpdateFailureTests {
+    /// A relaunch resumes an update that then times out: the failure stays on
+    /// the page, which closes back to the offer for a supported instance.
+    @Test func aTimedOutUpdateAfterARelaunchIsSeen() async throws {
+        for (from, closes) in [("1.1.186", true), ("1.1.100", false)] {
+            let defaults = UserDefaults(suiteName: "UpdateFailureTests-\(UUID().uuidString)")!
+            let store = PendingUpgradeStore(defaults: defaults)
+            store.save(PendingUpgrade(target: "1.1.190", since: .now.addingTimeInterval(-UpdateGate.upgradeTimeout + 0.2), from: from), for: "i1")
+            let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults))
+            // Restarting: neither the check nor the build answers.
+            let backend = FakeBackend()
+            backend.check = .failure(APIError.network)
+            await updater.attach(backend: backend, instanceID: "i1")
+            // The poll's next look, one interval on, finds the time up.
+            for _ in 0..<80 {
+                if case .failed = updater.state { break }
+                try await Task.sleep(for: .milliseconds(100))
+            }
+            guard case .failed(.timedOut) = updater.state else { Issue.record("\(updater.state)"); continue }
+            #expect(updater.blocking)
+            #expect(updater.canClose == closes)
+            updater.closePage()
+            #expect(updater.blocking == !closes)
+            if closes { #expect(updater.offered == "1.1.190") }
+        }
+    }
+}
+
+/// The drawer's live renames stay under the server's subscription limit.
+@Suite struct SubscriptionBudgetTests {
+    @Test func onlyTheNewestChatsAreHeardLive() {
+        let chats = (0..<30).map { ConciergeChat(id: "t\($0)", name: "", main: false, unread: 0) }
+        let live = TopicChatsStore.liveIDs(chats)
+        #expect(live.count == TopicChatsStore.liveNameLimit)
+        #expect(live.contains("t29") && !live.contains("t0"))
+        #expect(TopicChatsStore.liveIDs(Array(chats.prefix(3))) == ["t0", "t1", "t2"])
+        // Status, tasks, the main chat and the chat on screen still fit.
+        #expect(TopicChatsStore.liveNameLimit + 4 <= 32)
+    }
+}

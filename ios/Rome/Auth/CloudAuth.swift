@@ -96,6 +96,8 @@ final class CloudAuth {
 
     private enum Key {
         static let credential = "cloud.credential"
+        /// What every instance session's key starts with.
+        static let instancePrefix = "instance."
         static func session(_ origin: String) -> String { "instance.session.\(origin)" }
         /// A visitor's session, apart from a guardian's: never both for one origin.
         static func visitorSession(_ origin: String) -> String { "instance.visitorSession.\(origin)" }
@@ -173,7 +175,16 @@ final class CloudAuth {
               body["token_type"]?.string == "Bearer",
               let device = body["device_session_id"]?.string, !device.isEmpty
         else { throw AuthError.invalidResponse }
+        // The new credential may be another account's: no instance session
+        // made under the last one survives it.
+        forgetInstanceSessions()
         store.set(CloudCredential(accessToken: token, deviceSessionId: device), for: Key.credential)
+    }
+
+    /// Drops every instance session, guardian and visitor; each instance signs
+    /// in again on its next open.
+    func forgetInstanceSessions() {
+        for key in store.keys() where key.hasPrefix(Key.instancePrefix) { store.remove(key) }
     }
 
     nonisolated static func code(from callback: URL, state: String, issuer: URL) throws -> String {

@@ -41,6 +41,21 @@ enum Keychain {
         SecItemDelete(query as CFDictionary)
     }
 
+    /// Every key the app keeps here.
+    static func keys() -> [String] {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+        ]
+        var result: AnyObject?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let items = result as? [[String: Any]]
+        else { return [] }
+        return items.compactMap { $0[kSecAttrAccount as String] as? String }
+    }
+
     static func removeAll() {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -66,6 +81,7 @@ protocol SecretStore: Sendable {
     func set(_ data: Data, for key: String)
     func remove(_ key: String)
     func removeAll()
+    func keys() -> [String]
 }
 
 extension SecretStore {
@@ -84,4 +100,5 @@ struct KeychainStore: SecretStore {
     func set(_ data: Data, for key: String) { Keychain.set(data, for: key) }
     func remove(_ key: String) { Keychain.remove(key) }
     func removeAll() { Keychain.removeAll() }
+    func keys() -> [String] { Keychain.keys() }
 }

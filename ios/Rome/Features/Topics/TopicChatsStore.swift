@@ -93,10 +93,22 @@ final class TopicChatsStore {
     /// This person's main chat on the server: a visitor's is not `concierge`.
     private var mainChatId: String?
 
+    /// The server holds 32 subscriptions per socket. The drawer hears renames
+    /// live only for the newest chats, the ones still getting their names,
+    /// which leaves room for the chat status, the task list, the main chat
+    /// and the chat on screen; older ones pick up a new name when the list is
+    /// read again.
+    nonisolated static let liveNameLimit = 20
+
+    /// The chats whose renames the drawer hears live: the list is oldest first.
+    nonisolated static func liveIDs(_ list: [ConciergeChat]) -> Set<String> {
+        Set(list.suffix(liveNameLimit).map(\.id))
+    }
+
     private func apply(_ list: [ConciergeChat]) {
         chats = list
         loaded = true
-        let ids = Set(list.map(\.id))
+        let ids = Self.liveIDs(list)
         for (id, token) in chatTokens where !ids.contains(id) {
             backend.events.unsubscribe(token)
             chatTokens[id] = nil

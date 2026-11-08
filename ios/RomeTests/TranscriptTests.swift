@@ -196,6 +196,21 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(backend.answeredSessions == ["topic-1"])
     }
 
+    /// A card of only optional questions goes out blank: `{answers: []}`.
+    @Test func anAllOptionalCardCanBeSentBlank() async {
+        let backend = FakeBackend()
+        let store = TranscriptStore(sessionId: "topic-1", kind: .concierge, backend: backend)
+        var question = MessagePart.QuestionPart.Question(id: "s", text: "Anything else?", multi: false, freeTextOnly: true, options: [])
+        question.optional = true
+        let part = MessagePart.QuestionPart(toolUseId: "q1", questions: [question])
+        #expect(QuestionAnswers.complete(part.questions, choices: [:], typed: [:]))
+        let answers = QuestionAnswers.answers(part.questions, choices: [:], typed: [:])
+        #expect(answers.isEmpty)
+        store.answer(part, answers: answers, sessionId: "topic-1")
+        for _ in 0..<20 where backend.answeredSessions.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(backend.answeredSessions == ["topic-1"])
+    }
+
     @Test func webOnlyCardsOpenTheirChatOnTheDashboard() {
         let origin = URL(string: "https://me.romeos.cc")!
         #expect(WebOnlyCard.url(origin: origin, sessionId: "topic-1").absoluteString == "https://me.romeos.cc/chat/topic-1")

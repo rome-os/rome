@@ -427,6 +427,7 @@ final class InstanceUpdater {
 
     func updateNow() async {
         guard let backend, let instanceID, case .required(let current, let latest, _) = state else { return }
+        presented = true
         state = .starting(current: current, latest: latest)
         let mine = generation
         do {
@@ -483,6 +484,11 @@ final class InstanceUpdater {
         poll?.cancel()
         probesSinceCheck = 0
         progress = .downloading
+        // A running update keeps the page up until the guardian closes it, so
+        // a failure, after a relaunch too, is always seen; and the release it
+        // started from decides whether the page may close.
+        presented = true
+        behindOn = pending.from ?? behindOn
         state = .updating(target: pending.target, since: pending.since)
         let mine = generation
         poll = Task { [weak self] in
@@ -553,6 +559,7 @@ final class InstanceUpdater {
         if let instanceID { store.clear(instanceID) }
         poll?.cancel()
         poll = nil
+        presented = false
         state = .upToDate
         await onFinished?()
     }

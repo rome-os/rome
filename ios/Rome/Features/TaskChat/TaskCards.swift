@@ -543,8 +543,10 @@ struct QuestionCardView: View {
     }
 
     private func submit(choices: [String: [String]]? = nil, typed: [String: String]? = nil) {
-        let answers = QuestionAnswers.answers(part.questions, choices: choices ?? self.choices, typed: typed ?? self.typed)
-        guard !answers.isEmpty else { return }
+        let choices = choices ?? self.choices, typed = typed ?? self.typed
+        // Every required question answered; a card of only optional ones may go blank.
+        guard QuestionAnswers.complete(part.questions, choices: choices, typed: typed) else { return }
+        let answers = QuestionAnswers.answers(part.questions, choices: choices, typed: typed)
         focusedQuestion = nil
         onAnswer(answers)
     }

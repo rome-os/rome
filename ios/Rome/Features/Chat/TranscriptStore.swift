@@ -458,7 +458,8 @@ final class TranscriptStore {
 
     /// `sessionId`: the question's own chat, this one unless it says otherwise.
     func answer(_ part: MessagePart.QuestionPart, answers: [JSONValue], sessionId: String? = nil) {
-        guard !answering.contains(part.toolUseId), !answers.isEmpty else { return }
+        // An empty list is an answer too: a card of only optional questions left blank.
+        guard !answering.contains(part.toolUseId) else { return }
         let output: JSONValue = .object(["answers": .array(answers)])
         answering.insert(part.toolUseId)
         localAnswers[part.toolUseId] = output

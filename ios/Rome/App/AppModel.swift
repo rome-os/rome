@@ -371,7 +371,10 @@ final class AppModel {
     var webURL: URL? {
         instances.first { $0.id == currentInstanceID }.flatMap { URL(string: $0.origin) }
     }
-    private let token = TokenBox()
+    /// The open connection's session, captured only by that connection's
+    /// client: work an instance leaves running never sends another
+    /// instance's cookie, and its late 401 is told apart from the open one.
+    private var tokenBox: TokenBox?
     private let languageSync = LanguageSync()
     private var refreshing = false
     private var foreground = ForegroundGate()
@@ -446,6 +449,7 @@ final class AppModel {
         case .success(let url):
             do {
                 try await cloud.completeSignIn(request, callback: url)
+                forgetAccountData()
                 await openInstance(preferring: nil, showHint: true)
             } catch {
                 signInError = (error as? LocalizedError)?.errorDescription ?? String(localized: "Sign-in did not finish")
@@ -509,14 +513,16 @@ final class AppModel {
         phase = .connecting(host: instance.host)
         do {
             let session = try await cloud.session(for: instance)
-            token.use(session)
+            let box = TokenBox()
+            box.use(session)
+            tokenBox = box
             UserDefaults.standard.set(instance.id, forKey: Defaults.lastInstance)
             UserDefaults.standard.set(try? JSONEncoder().encode(instance), forKey: Defaults.lastInstanceRecord)
             currentInstanceID = instance.id
             // Signed in to Rome Cloud: this launch's token, if it has one yet.
             Task { await push.upload() }
-            let client = APIClient(origin: URL(string: instance.origin)!, token: { [token] in token.token }, cookieName: { [token] in token.cookieName }) { [weak self] in
-                Task { @MainActor in self?.handleUnauthorized() }
+            let client = APIClient(origin: URL(string: instance.origin)!, token: { box.token }, cookieName: { box.cookieName }) { [weak self] in
+                Task { @MainActor in self?.handleUnauthorized(box: box, instance: instance) }
             }
             await open(Workspace(
                 backend: LiveBackend(client: client),
@@ -601,14 +607,11 @@ final class AppModel {
         update.reset()
         workspace?.stop()
         workspace = nil
-        token.token = nil
+        tokenBox?.token = nil
+        tokenBox = nil
         pendingPush = nil
         await push.signOut { await cloud.signOut() }
-        DraftStore.removeAll()
-        TranscriptCache.removeAll()
-        ImageDiskCache.shared.removeAll()
-        UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
-        UserDefaults.standard.removeObject(forKey: Defaults.lastInstanceRecord)
+        forgetAccountData()
         instances = []
         currentInstanceID = nil
         sessionExpired = false
@@ -616,23 +619,34 @@ final class AppModel {
         phase = .signedOut
     }
 
+    /// What this phone keeps for the signed-in account: drafts, kept chats,
+    /// pictures and the last instance. Gone on sign-out, and before a new
+    /// Cloud sign-in, which may be another account's.
+    private func forgetAccountData() {
+        DraftStore.removeAll()
+        TranscriptCache.removeAll()
+        ImageDiskCache.shared.removeAll()
+        UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
+        UserDefaults.standard.removeObject(forKey: Defaults.lastInstanceRecord)
+    }
+
     // MARK: Session expiry
 
-    private func handleUnauthorized() {
-        guard !refreshing, let id = currentInstanceID, let instance = instances.first(where: { $0.id == id }) else {
-            if currentInstanceID != nil { sessionExpired = true }
-            return
-        }
+    /// A 401 from a connection that is no longer the open one changes nothing.
+    private func handleUnauthorized(box: TokenBox, instance: CloudInstance) {
+        guard box === tokenBox else { return }
+        guard !refreshing else { return }
         refreshing = true
         Task {
             defer { refreshing = false }
             do {
                 // A visitor's session runs the visitor sign-in again, the guardian's the owner's.
                 let session = try await cloud.session(for: instance, forceRefresh: true)
-                token.use(session)
+                guard box === tokenBox else { return }
+                box.use(session)
                 sessionExpired = false
             } catch {
-                sessionExpired = true
+                if box === tokenBox { sessionExpired = true }
             }
         }
     }
@@ -875,13 +889,14 @@ final class AppModel {
         configuration.httpShouldSetCookies = false
         let reply = try? await URLSession(configuration: configuration).data(for: request)
         let drafts = DraftStore(instance: DraftStore.localInstance(url.host() ?? origin))
+        let box = TokenBox()
         if let http = reply?.1 as? HTTPURLResponse,
            let cookie = http.value(forHTTPHeaderField: "Set-Cookie"),
            let value = cookie.components(separatedBy: ";").first?.components(separatedBy: "rome_session=").last {
-            token.token = value
+            box.token = value
         } else if reply == nil, TranscriptCache(instance: drafts.instance).mainChat() != nil {
             // Unreachable, as the cloud path is offline: open on the kept chats.
-            token.token = nil
+            box.token = nil
         } else {
             signInError = String(localized: "Could not reach the local Rome")
             phase = .signedOut
@@ -890,7 +905,8 @@ final class AppModel {
         let local = CloudInstance(id: "local", name: String(localized: "Local Rome"), slug: "local", origin: origin, status: "running")
         instances = [local]
         currentInstanceID = local.id
-        let client = APIClient(origin: url, token: { [token] in token.token })
+        tokenBox = box
+        let client = APIClient(origin: url, token: { box.token })
         await open(Workspace(backend: LiveBackend(client: client), instanceName: String(localized: "Local Rome"), host: url.host() ?? origin, accountLabel: user, drafts: drafts))
     }
     #endif
