@@ -291,7 +291,6 @@ async function buildHarness(
       readAnswerShape,
       turnUsage: new TurnUsageReporter(),
       folders: agentFolders(),
-      channelSurface: testChannelSurface,
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },
   );

@@ -134,7 +134,6 @@ import type { SessionToolsProvider } from "./session-tools.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
-import { type ChannelSurface, surfaceOf } from "./session-opening.js";
 
 const log = createLogger("agent-session");
 
@@ -344,9 +343,6 @@ interface ManagerDeps {
   folders: AgentFolders;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
-  /** What the named channel's surface supports, or null for a name no channel
-   *  has. A null result reads as a messaging channel. */
-  channelSurface: (channel: string) => ChannelSurface | null;
   /** App-declared event sources: an event `defer` subscribes through them.
    *  When absent, an event wait is created without any check. */
   eventSources?: EventSources;
@@ -3100,19 +3096,14 @@ class AgentSessionImpl implements AgentSession {
       // that path means Rome isn't usable yet, so the loss is benign.
       let userPrompt = input.prompt;
       let unseenMessageIds: number[] = [];
-      // A channel conversation stores lines the agent never saw as turns. The
-      // surface says whether this channel does; webchat, for one, does not.
-      const channel = sink.threadContext?.channel;
-      const catchesUp =
-        sink.romeSessionType === "channel" &&
-        sink.romeSessionId &&
-        sink.threadContext &&
-        channel &&
-        surfaceOf(this.deps.channelSurface, channel).promptContext;
-      if (catchesUp && this.deps.promptFacts) {
-        // The agent catches up on the messages said where its session stands
-        // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
-        const unseen = this.deps.promptFacts.unseen(sink.romeSessionId);
+      // The agent catches up on the messages said where its session stands
+      // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
+      // The prompt facts answer null where it catches up on nothing.
+      const unseen =
+        sink.romeSessionType === "channel" && sink.romeSessionId && sink.threadContext
+          ? (this.deps.promptFacts?.unseen(sink.romeSessionId) ?? null)
+          : null;
+      if (unseen) {
         unseenMessageIds = unseen.map((message) => message.id);
         userPrompt = catchUpPrompt(userPrompt, {
           unseen,

@@ -23,7 +23,6 @@ import { SkillLoader } from "../agent/index.js";
 import type { TurnMiddlewareChain } from "./turn-middleware.js";
 import type { ModelAccountReports } from "../agent/index.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
-import { testChannelSurface } from "../test/channel-surface.js";
 import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
 import { reportOf, fakeAccounts, loginsOn } from "../test/kit/model-accounts.js";
 
@@ -161,7 +160,6 @@ describe("AgentSession turn usage", () => {
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,
         folders: agentFolders(),
-        channelSurface: testChannelSurface,
         turnMiddleware,
         turnUsage: new TurnUsageReporter({
           usage: { recordTurn: (facts) => recorded.push(facts) },

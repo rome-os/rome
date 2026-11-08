@@ -24,7 +24,6 @@ import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
 import { SkillLoader } from "../agent/index.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
-import { testChannelSurface } from "../test/channel-surface.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 import { openedInChat, openerChat } from "./session-conversation.js";
@@ -99,7 +98,6 @@ describe("AgentSessionManager working dirs", () => {
         readAnswerShape,
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
-        channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true },
     );

@@ -14,7 +14,6 @@ import {
   createEmptyLegacyArtifactBindings,
   type ArtifactIdentityContext,
 } from "../apps/artifact-id.js";
-import { testChannelSurface } from "../test/channel-surface.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
 import type { ModelSessionEvent } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
@@ -165,7 +164,6 @@ describe("continuation notice through AgentSessionManager", () => {
         readAnswerShape,
         turnUsage: new TurnUsageReporter(),
         folders: agentFolders(),
-        channelSurface: testChannelSurface,
       },
       { keepAliveAcrossTurns: true },
     );

@@ -21,8 +21,10 @@ export interface UnseenMessage extends PromptMessage {
  * a turn was shown.
  */
 export interface PromptFacts {
-  /** The messages said where session `sessionId` stands that no turn of it took, gave or saw, oldest first. */
-  unseen(sessionId: string): UnseenMessage[];
+  /** The messages said where session `sessionId` stands that no turn of it
+   *  took, gave or saw, oldest first. Null where the session catches up on
+   *  nothing, because every message said there already reaches the agent. */
+  unseen(sessionId: string): UnseenMessage[] | null;
   /** Turn `turnId` of session `sessionId` was shown `messageIds`. */
   seen(messageIds: readonly number[], sessionId: string, turnId: string): void;
 }

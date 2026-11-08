@@ -678,7 +678,6 @@ export async function buildTestDeps(
     readAnswerShape,
     turnUsage: new TurnUsageReporter(),
     folders: agentFolders(),
-    channelSurface: testChannelSurface,
     subagentExecutionService,
     activeSubagentRegistry,
   });
