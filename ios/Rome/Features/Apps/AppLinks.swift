@@ -105,11 +105,33 @@ enum AppIdea: CaseIterable, Identifiable {
     var title: LocalizedStringKey {
         switch self {
         case .own: return "Your own idea…"
-        case .habitTracker: return "A habit tracker"
-        case .packingList: return "A trip packing list"
-        case .readingLog: return "A reading log"
+        case .habitTracker: return "Habit tracker"
+        case .packingList: return "Trip packing list"
+        case .readingLog: return "Reading log"
         }
     }
+
+    /// One line on what the idea is, under its title in the New app sheet.
+    var detail: LocalizedStringKey {
+        switch self {
+        case .own: return ""
+        case .habitTracker: return "Check off habits every day"
+        case .packingList: return "Never forget the charger again"
+        case .readingLog: return "Books, pages and notes"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .own: return "plus"
+        case .habitTracker: return "checkmark.circle"
+        case .packingList: return "suitcase"
+        case .readingLog: return "book"
+        }
+    }
+
+    /// The ideas a sheet lists, without the blank start.
+    static var ideas: [AppIdea] { allCases.filter { $0 != .own } }
 
     /// What goes into Chat's composer, unsent, for the guardian to edit.
     var prompt: String {

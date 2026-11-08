@@ -97,42 +97,12 @@
         }
       }
     },
-    "A habit tracker" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "习惯打卡"
-          }
-        }
-      }
-    },
     "A newer release just came out." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "刚发布了更新的版本。"
-          }
-        }
-      }
-    },
-    "A reading log" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "读书记录"
-          }
-        }
-      }
-    },
-    "A trip packing list" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "旅行打包清单"
           }
         }
       }
@@ -173,6 +143,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "马上好了…"
+          }
+        }
+      }
+    },
+    "An app that…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一个能……的应用"
           }
         }
       }
@@ -297,6 +277,16 @@
         }
       }
     },
+    "Books, pages and notes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读过的书、页数和笔记"
+          }
+        }
+      }
+    },
     "Can't check for updates" : {
       "localizations" : {
         "zh-Hans" : {
@@ -353,6 +343,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Chat 未开启"
+          }
+        }
+      }
+    },
+    "Check off habits every day" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天打卡，养成好习惯"
           }
         }
       }
@@ -597,6 +597,16 @@
         }
       }
     },
+    "Describe your own" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "描述你自己的想法"
+          }
+        }
+      }
+    },
     "Didn't finish" : {
       "localizations" : {
         "zh-Hans" : {
@@ -677,12 +687,32 @@
         }
       }
     },
+    "Habit tracker" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "习惯打卡"
+          }
+        }
+      }
+    },
     "I turn bigger jobs into tasks and tell you when they're done." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "复杂的事我会开成任务去做，做完告诉你。"
+          }
+        }
+      }
+    },
+    "Ideas" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "灵感"
           }
         }
       }
@@ -955,12 +985,22 @@
         }
       }
     },
+    "Never forget the charger again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再也不会忘带充电器"
+          }
+        }
+      }
+    },
     "New app" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "新应用"
+            "value" : "新建应用"
           }
         }
       }
@@ -1271,6 +1311,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "照片"
+          }
+        }
+      }
+    },
+    "Reading log" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读书记录"
           }
         }
       }
@@ -1967,6 +2017,16 @@
         }
       }
     },
+    "Tell Chat what you need. Rome builds it as an app." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Chat 里说说你想要什么，Rome 会把它做成应用。"
+          }
+        }
+      }
+    },
     "The latest is %@. The app needs the latest Rome." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2093,6 +2153,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "话题聊天"
+          }
+        }
+      }
+    },
+    "Trip packing list" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "旅行打包清单"
           }
         }
       }

@@ -31,7 +31,7 @@ struct AppsScreen: View {
                     } else {
                         let recent = RecentApps.pick(recentIDs, from: apps)
                         if recent.isEmpty {
-                            AppGrid(apps: apps, backend: workspace.backend, onOpen: onOpen) { showIdeas = true }
+                            AppGrid(title: "My apps", apps: apps, backend: workspace.backend, onOpen: onOpen) { showIdeas = true }
                         } else {
                             AppGrid(title: "Recent", apps: recent, backend: workspace.backend, onOpen: onOpen)
                             AppGrid(title: "My apps", apps: apps, backend: workspace.backend, onOpen: onOpen) { showIdeas = true }
@@ -61,8 +61,9 @@ struct AppsScreen: View {
                 showIdeas = false
                 onStart(prompt)
             }
-            .presentationDetents([.height(380), .large])
-            .presentationBackground(Palette.bg)
+            .presentationDetents([.medium, .large])
+            .presentationBackground(Palette.sheet)
+            .presentationCornerRadius(22)
         }
         #if DEBUG
         .overlay {
@@ -70,9 +71,9 @@ struct AppsScreen: View {
                 ZStack(alignment: .bottom) {
                     Palette.scrim
                     AppIdeasSheet { _ in }
-                        .frame(height: 380)
+                        .frame(height: 470)
                         .frame(maxWidth: .infinity)
-                        .background(Palette.bg)
+                        .background(Palette.sheet)
                         .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
                 }
                 .ignoresSafeArea()
@@ -329,24 +330,129 @@ struct AppIdeaChips: View {
     }
 }
 
-/// "New app" with apps already there: the same choices, in a small sheet.
+/// "New app": a blank start that looks like Chat's composer, then ideas in one
+/// card, the way Chat's starters and Settings' cards look.
 private struct AppIdeasSheet: View {
     let onStart: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        VStack(spacing: 12) {
-            Text("Make a new app")
-                .romeFont(17, .semibold)
-                .padding(.top, 24)
-            Text("Tell Chat what you need. Rome builds it as an app you can open here.")
-                .romeFont(15)
-                .foregroundStyle(Palette.sub)
-                .multilineTextAlignment(.center)
-                .padding(.horizontal, 32)
-            AppIdeaChips(onStart: onStart)
-                .padding(.top, 4)
-            Spacer(minLength: 0)
+        VStack(spacing: 0) {
+            Capsule()
+                .fill(Palette.grabber)
+                .frame(width: 36, height: 5)
+                .padding(.top, 7)
+            HStack {
+                Text("New app")
+                    .romeFont(24, .bold)
+                    .tracking(-0.6)
+                    .accessibilityAddTraits(.isHeader)
+                Spacer()
+                SheetCloseButton { dismiss() }
+            }
+            .padding(.leading, 20)
+            .padding(.trailing, 12)
+            .frame(height: 54)
+            ScrollView {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Tell Chat what you need. Rome builds it as an app.")
+                        .romeFont(15)
+                        .foregroundStyle(Palette.sub)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.bottom, 10)
+                    SectionTitle("Describe your own")
+                    ownIdea
+                        .padding(.bottom, 14)
+                    SectionTitle("Ideas")
+                    ideas
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 24)
+            }
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .frame(maxWidth: .infinity)
+    }
+
+    /// Looks like the composer: the + and a placeholder on glass.
+    private var ownIdea: some View {
+        Button { onStart(AppIdea.own.prompt) } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "plus")
+                    .romeFont(17, .medium)
+                    .foregroundStyle(Palette.sub)
+                    .frame(width: 36, height: 36)
+                Text("An app that…")
+                    .romeFont(16)
+                    .foregroundStyle(Palette.sub)
+                    .lineLimit(1)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, 7)
+            .padding(.trailing, 14)
+            .frame(minHeight: 50)
+            .glassSurface(RoundedRectangle(cornerRadius: 25, style: .continuous), interactive: true, frost: Frost.composer)
+            .overlay(RoundedRectangle(cornerRadius: 25, style: .continuous).strokeBorder(Palette.hair, lineWidth: 0.5))
+            .contentShape(RoundedRectangle(cornerRadius: 25, style: .continuous))
+        }
+        .buttonStyle(PressScaleStyle(scale: 0.98))
+        .accessibilityLabel(Text("Describe your own"))
+    }
+
+    private var ideas: some View {
+        VStack(spacing: 0) {
+            ForEach(Array(AppIdea.ideas.enumerated()), id: \.element) { index, idea in
+                Button { onStart(idea.prompt) } label: {
+                    HStack(spacing: 12) {
+                        Image(systemName: idea.systemImage)
+                            .romeFont(16, .medium)
+                            .foregroundStyle(Palette.primaryText)
+                            .frame(width: 34, height: 34)
+                            .background(Palette.primarySoft, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+                            .accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(idea.title)
+                                .romeFont(16, .medium)
+                                .foregroundStyle(Palette.fg)
+                            Text(idea.detail)
+                                .romeFont(13)
+                                .foregroundStyle(Palette.sub)
+                        }
+                        .multilineTextAlignment(.leading)
+                        .fixedSize(horizontal: false, vertical: true)
+                        Spacer(minLength: 8)
+                        Image(systemName: "chevron.right")
+                            .romeFont(13, .semibold)
+                            .foregroundStyle(Palette.sub)
+                            .accessibilityHidden(true)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .frame(minHeight: 56)
+                    .contentShape(Rectangle())
+                    .overlay(alignment: .bottom) {
+                        if index < AppIdea.ideas.count - 1 {
+                            Rectangle().fill(Palette.hair).frame(height: 0.5).padding(.leading, 60)
+                        }
+                    }
+                }
+                .buttonStyle(RowPressStyle())
+            }
+        }
+        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+        .clipShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+        .hairline(radius: Metrics.groupRadius)
+    }
+}
+
+/// A section title on its card's edge, as Settings writes them.
+private struct SectionTitle: View {
+    let text: LocalizedStringKey
+    init(_ text: LocalizedStringKey) { self.text = text }
+
+    var body: some View {
+        Text(text)
+            .romeFont(13, .medium)
+            .foregroundStyle(Palette.sub)
+            .accessibilityAddTraits(.isHeader)
     }
 }
