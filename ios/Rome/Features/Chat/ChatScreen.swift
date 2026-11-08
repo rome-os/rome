@@ -493,7 +493,12 @@ struct TranscriptList<Row: View>: View {
                         .id("bottom")
                 }
                 .padding(.horizontal, Metrics.pagePadding)
-                .frame(minHeight: alignTop ? visibleHeight : nil, alignment: .top)
+                // Never shorter than the space between the bars. Content shorter
+                // than that is held at the bottom by a top inset the scroll view
+                // adds, and takes back a frame late once the rows outgrow the
+                // screen: for that frame the rows sat far below their place, a
+                // drop on every open. A list that fills its space needs no inset.
+                .frame(minHeight: visibleHeight, alignment: alignTop ? .top : .bottom)
                 .background(ScrollViewFinder(handle: scrollHandle))
                 .modifier(LegacyContentMoves(monitor: legacyScroll, space: Self.scrollSpace))
             }

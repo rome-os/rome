@@ -87,7 +87,9 @@ struct MainShell: View {
                 )
                 .frame(width: width, height: geometry.size.height)
                 .offset(x: (progress - 1) * 36)
-                .opacity(0.4 + 0.6 * progress)
+                // Closed, it is not drawn: under a page still fading in (the
+                // opening screen's hand-off) its rows showed through.
+                .opacity(progress > 0 ? 0.4 + 0.6 * progress : 0)
                 .allowsHitTesting(drawerOpen)
 
                 NavigationStack(path: $path) {
