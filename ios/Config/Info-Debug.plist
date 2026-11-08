@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleLocalizations</key>
+	<array>
+		<string>en</string>
+		<string>zh-Hans</string>
+	</array>
+	<!-- Debug builds only. Same as Rome/Info.plist, plus plain HTTP to a Rome
+	     on this Mac or the LAN (ROME_LOCAL_*). Keep the two in step. -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Rome saves photos from a chat to your library when you ask it to.</string>
+	<key>NSCameraUsageDescription</key>
+	<string>Rome uses the camera for photos you send in a chat.</string>
+	<key>RomeAPNsEnvironment</key>
+	<string>$(ROME_APS_ENVIRONMENT)</string>
+	<key>RomeCloudOrigin</key>
+	<string>$(ROME_CLOUD_ORIGIN)</string>
+	<key>UILaunchScreen</key>
+	<dict>
+		<key>UIColorName</key>
+		<string>LaunchBackground</string>
+		<key>UIImageName</key>
+		<string>LaunchLogo</string>
+		<key>UIImageRespectsSafeAreaInsets</key>
+		<false/>
+	</dict>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
+	<key>NSAppTransportSecurity</key>
+	<dict>
+		<key>NSAllowsLocalNetworking</key>
+		<true/>
+		<!-- A Rome Cloud and instances on this Mac, such as
+		     http://cloud.rome.localhost:3000: local networking does not
+		     cover names under localhost. -->
+		<key>NSExceptionDomains</key>
+		<dict>
+			<key>localhost</key>
+			<dict>
+				<key>NSIncludesSubdomains</key>
+				<true/>
+				<key>NSExceptionAllowsInsecureHTTPLoads</key>
+				<true/>
+			</dict>
+		</dict>
+	</dict>
+</dict>
+</plist>
