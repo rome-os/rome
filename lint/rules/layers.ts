@@ -74,27 +74,6 @@ export const listedCrossings: ListedCrossing[] = [
   {
     rule: "application-imports-inward",
     from: SESSION,
-    to: "telemetry-context.ts",
-    ticket: "ZHA-154",
-    why: "Turn tracing, until the session reports its turns through a tracing port.",
-  },
-  {
-    rule: "application-imports-inward",
-    from: SESSION,
-    to: "telemetry.ts",
-    ticket: "ZHA-154",
-    why: "Turn tracing, until the session reports its turns through a tracing port.",
-  },
-  {
-    rule: "application-imports-inward",
-    from: SESSION,
-    to: "core/turn-span-translator.ts",
-    ticket: "ZHA-154",
-    why: "Turn tracing, until the session reports its turns through a tracing port.",
-  },
-  {
-    rule: "application-imports-inward",
-    from: SESSION,
     to: "core/turn-middleware.ts",
     ticket: "ZHA-154",
     why: "App reply handling, until apps act on a turn through a port the agent context owns.",

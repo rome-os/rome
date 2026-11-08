@@ -2,7 +2,7 @@ import { romeToolPorts } from "../../core/rome-tool-ports.js";
 import { createLogger } from "../../logger.js";
 import { sessionOpeningFor } from "../../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../../concierge/agent-traits.js";
-import { readAnswerShape, TurnUsageReporter } from "../../agent/index.js";
+import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../../agent/index.js";
 import { agentFolders } from "../../paths.js";
 import { mkdtempSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
@@ -287,6 +287,7 @@ async function buildHarness(
       skillCatalog: new SkillLoader(artifactIdentity),
       turnLifecycle: new TurnListeners(new AppTurnHooks()),
       readAnswerShape,
+      sessionTracing: romeSessionTracing,
       turnUsage: new TurnUsageReporter(),
       folders: agentFolders(),
       log: createLogger("agent-session"),

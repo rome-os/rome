@@ -95,8 +95,7 @@ import type {
   ProviderSessionResetPolicy,
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./null-model-session.js";
-import { enterSession } from "../../telemetry-context.js";
-import { getTracer, startRomeSpan, withRomeSpan } from "../../telemetry.js";
+import type { SessionTracing } from "./session-tracing.js";
 import {
   context,
   SpanStatusCode,
@@ -115,7 +114,7 @@ import type {
   SubagentExecution,
   SubagentExecutionService,
 } from "../../core/subagent-execution.js";
-import { translateTurnSpans, type CapturedEvent } from "../../core/turn-span-translator.js";
+import { translateTurnSpans, type CapturedEvent } from "./turn-spans.js";
 import type { TurnMiddlewareChain } from "../../core/turn-middleware.js";
 import { KeyedMutex } from "../../lib/keyed-mutex.js";
 
@@ -331,6 +330,8 @@ interface ManagerDeps {
   log: AgentLog;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
+  /** Stamps the session id on the spans a session starts and binds it for logs. */
+  sessionTracing: SessionTracing;
 }
 
 interface ManagerOptions {
@@ -546,7 +547,7 @@ export function createAgentSessionManager(
   // `recordAcquire`, mirroring the `rome.session.acquire` counter.
   const acquire = (key: AgentSessionKey, init?: AgentSessionInit): Promise<AgentSession> => {
     const canonicalKey = canonicalizeKey(key);
-    return withRomeSpan(
+    return deps.sessionTracing.withSpan(
       "session.acquire",
       { "agent.name": canonicalKey.agentName, is_subagent: init?.isSubagent ?? isSubagent },
       (span) => acquireInner(canonicalKey, span, init),
@@ -1060,7 +1061,7 @@ async function openSession(
     );
     const resumed = params.thread.kind === "resume";
     const openStartMs = Date.now();
-    const session = await withRomeSpan(
+    const session = await deps.sessionTracing.withSpan(
       "model.session.open",
       {
         provider: resolution.modelProvider.id,
@@ -1817,7 +1818,7 @@ class AgentSessionImpl implements AgentSession {
 
   private async runEventsLoop(session: ModelSession): Promise<void> {
     try {
-      enterSession(this.sessionId);
+      this.deps.sessionTracing.enterSession(this.sessionId);
       for await (const event of session.events) {
         const sink = this.currentSink;
         if (!sink) {
@@ -2824,7 +2825,7 @@ class AgentSessionImpl implements AgentSession {
     };
     sink.romeAttrs = romeAttrs;
 
-    const span = getTracer("rome").startSpan(`agent:${this.key.agentName}`, {
+    const span = trace.getTracer("rome").startSpan(`agent:${this.key.agentName}`, {
       attributes: {
         ...romeAttrs,
         "agent.tier": this.config.tier,
@@ -2934,7 +2935,7 @@ class AgentSessionImpl implements AgentSession {
     // because the pinned SDK version doesn't reliably emit them.
     sink.modelTurnStartMs = Date.now();
     const modelSpan = context.with(turnCtx, () =>
-      startRomeSpan("model.turn", {
+      this.deps.sessionTracing.startSpan("model.turn", {
         ...sink.romeAttrs,
         "model.id": this.modelSession.model,
         "system_prompt.length": this.systemPrompt.length,

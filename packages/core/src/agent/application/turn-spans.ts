@@ -21,8 +21,7 @@
 // state is created and ended within one synchronous call.
 
 import { trace, type Attributes, type Context, type Span } from "@opentelemetry/api";
-import type { AgentEvent } from "../types.js";
-import { getTracer } from "../telemetry.js";
+import type { AgentEvent } from "@rome-os/app-runtime";
 
 export interface CapturedEvent {
   block: AgentEvent;
@@ -68,7 +67,7 @@ interface ToolUseRecord {
 export function translateTurnSpans(args: TranslateTurnSpansArgs): void {
   const { blocks, modelSpan, turnCtx, modelTurnStartMs, terminalTsMs, romeAttrs } = args;
 
-  const tracer = getTracer("rome");
+  const tracer = trace.getTracer("rome");
   const modelSpanCtx = trace.setSpan(turnCtx, modelSpan);
 
   const toolUses = new Map<string, ToolUseRecord>();
