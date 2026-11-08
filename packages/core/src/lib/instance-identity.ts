@@ -187,6 +187,8 @@ export async function hydrateInstanceToken(store: InstanceTokenStore): Promise<v
   cachedKeyId = typeof keyId === "string" ? keyId : null;
   clearBearerCache();
   rejectedInstanceToken = null;
+  offeredHostedTokens.clear();
+  hostedLinkUnsupported = false;
   const stored = await store.get<string>(INSTANCE_TOKEN_SETTING_KEY);
   setInstanceTokenInMemory(stored ?? null);
 }
@@ -510,6 +512,65 @@ export async function recheckInstanceIdentity(
   return result;
 }
 
+// Instance tokens this process has offered for a hosted link, so the heartbeat
+// does not offer the same one again. A 404 means this Rome Cloud has no
+// hosted-link endpoint yet, so nothing is offered again until the next boot.
+const offeredHostedTokens = new Set<string>();
+let hostedLinkUnsupported = false;
+
+// The signer already authenticates as the credential it is bound to, while an
+// instance token is still on hand. That token may be a fresh hosted enrollment
+// for this box. Rome Cloud then moves its hosted link onto the credential in
+// use, so Rome Cloud lists this hosted instance through it, and retires the
+// token. Returns whether to keep the token for a later attempt.
+async function offerHostedLink(socket: string, fetchImpl: typeof fetch): Promise<boolean> {
+  const token = unregisteredInstanceToken();
+  const origin = getRomeCloudOrigin();
+  if (!token || !origin || offeredHostedTokens.has(token)) return false;
+  // Held for the boot after Rome Cloud deploys the endpoint.
+  if (hostedLinkUnsupported) return true;
+  let response: Response;
+  try {
+    response = await fetchImpl(new URL("/api/instance/key/hosted-link", origin), {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ assertion: await requestSignerToken(socket) }),
+      cache: "no-store",
+    });
+  } catch {
+    return true;
+  }
+  if (response.status === 404) {
+    hostedLinkUnsupported = true;
+    log.info("Rome Cloud has no hosted-link endpoint yet; keeping the instance token");
+    return true;
+  }
+  if (response.status >= 500) return true;
+  if (response.status === 401 && (await isClockSkew(response.clone()))) return true;
+  offeredHostedTokens.add(token);
+  const body = (await response.json().catch(() => null)) as { error?: unknown } | null;
+  if (response.ok) {
+    log.info("hosted link moved to the credential in use");
+    return false;
+  }
+  const error = typeof body?.error === "string" ? body.error : null;
+  // The token already holds a key, or no credential holds this one: the usual
+  // registration handles both. It answers ok when the token is this box's own.
+  if (response.status === 409 && (error === "already_bound" || error === "key_not_registered")) {
+    const registered = await registerInstanceKey(socket, fetchImpl);
+    if (registered !== "registered") log.info("hosted enrollment not registered", { registered });
+    return false;
+  }
+  if (error === "account_mismatch") {
+    log.warn("security event: hosted enrollment for another account", {
+      event: "hosted_link_account_mismatch",
+    });
+  } else {
+    log.info("hosted enrollment not linked", { status: response.status, error });
+  }
+  return false;
+}
+
 async function linkSignerKey(
   store: InstanceTokenStore,
   socket: string,
@@ -521,7 +582,9 @@ async function linkSignerKey(
     await dropStoredToken(store);
   };
   if (first.status === "ok") {
-    await link();
+    const keep = await offerHostedLink(socket, opts.fetch ?? globalThis.fetch);
+    await setKeyId(store, (await signerHealth(socket)).jkt);
+    if (!keep) await dropStoredToken(store);
     return first;
   }
   if (first.status !== "unknown" && first.status !== "revoked") return first;
