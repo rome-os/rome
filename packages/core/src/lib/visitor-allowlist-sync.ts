@@ -28,7 +28,7 @@ export interface VisitorAllowListSyncDeps {
   logger?: Pick<Logger, "debug" | "info" | "warn">;
   /** Wait before each retry. The last entry repeats until a send settles. */
   retryDelaysMs?: readonly number[];
-  /** Wait after a requested resend before sending, so a burst of first sign-ins sends once. */
+  /** Wait after a requested resend before sending, so a burst of new-account sign-ins sends once. */
   resyncDelayMs?: number;
   timeoutMs?: number;
 }
@@ -79,8 +79,9 @@ export class VisitorAllowListSync {
 
   /**
    * Sends the current list again shortly, even though Rome Cloud applied it.
-   * A listed email's first visitor sign-in calls this: Rome Cloud keeps nothing
-   * for an email without an account, so the person may have just made one.
+   * A listed email's visitor sign-in with an account it has not used here
+   * calls this: Rome Cloud keeps nothing for an email without an account, so
+   * the person may have just made one, or made one again after deleting it.
    * Requests in quick succession send once. A request that lands while a send
    * is in flight sends again after it, so it is never lost.
    */
@@ -88,7 +89,7 @@ export class VisitorAllowListSync {
     if (this.resyncTimer) return;
     this.resyncTimer = setTimeout(() => {
       this.resyncTimer = null;
-      this.log.info("visitor allow-list resent after a first visitor sign-in", {
+      this.log.info("visitor allow-list resent after a visitor sign-in with a new account", {
         revision: this.latest?.revision ?? null,
       });
       this.resend();
