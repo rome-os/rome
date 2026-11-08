@@ -1,6 +1,6 @@
 // Model accounts: remembers, for each provider, what its account last
-// reported, so the resolver, the concierge and the dashboard can read it
-// without waiting on the provider's process. It reads the accounts at start,
+// reported, so its readers can read it without waiting on the provider's
+// process. It reads the accounts at start,
 // hourly, when an account says it changed and when asked, and tells its
 // listeners after each read. The accounts decide what they report
 // (domain/model-account.ts); this module decides only when to ask.

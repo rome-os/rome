@@ -1,3 +1,4 @@
+import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
 import { ChatSessionSettings, readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import { ConciergeService, type ConciergeDeps } from "../concierge/service.js";
@@ -213,7 +214,7 @@ describe("continuation notice through AgentSessionManager", () => {
     directory = await mkdtemp(join(tmpdir(), "rome-continuation-"));
     testDb = createTestDb();
     artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-    loader = new AgentLoader(artifactIdentity);
+    loader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
     sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
     webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession(CHAT, "Continuation");

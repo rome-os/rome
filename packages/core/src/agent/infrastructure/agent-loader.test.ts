@@ -214,12 +214,7 @@ describe("AgentLoader", () => {
       }
     });
 
-    it("gives the shipped Concierge a saved model that outranks its session's pinned one", async () => {
-      await loader.loadAll(join(import.meta.dirname, "..", "..", "..", "agents"));
-      expect(byId(loader).get("core:concierge")?.definition.savedSelectionOutranksPin).toBe(true);
-    });
-
-    it("lets only the Concierge's saved model outrank its session's pinned one", async () => {
+    it("lets only the agents Rome names have a saved model that outranks the pinned one", async () => {
       const root = await mkdtemp(join(tmpdir(), "rome-concierge-"));
       const agentYaml = (name: string) =>
         [
@@ -235,10 +230,18 @@ describe("AgentLoader", () => {
       await writeFile(join(root, "main.yaml"), agentYaml("main"), "utf-8");
 
       try {
-        await loader.loadAll(root);
-        const agents = byId(loader);
+        const named = new AgentLoader(
+          { legacyBindings: createEmptyLegacyArtifactBindings() },
+          { savedSelectionOutranksPin: ["core:concierge"] },
+        );
+        await named.loadAll(root);
+        const agents = byId(named);
         expect(agents.get("core:concierge")!.definition.savedSelectionOutranksPin).toBe(true);
         expect(agents.get("core:main")!.definition.savedSelectionOutranksPin).toBeUndefined();
+        await loader.loadAll(root);
+        expect(
+          byId(loader).get("core:concierge")!.definition.savedSelectionOutranksPin,
+        ).toBeUndefined();
       } finally {
         await rm(root, { recursive: true, force: true });
       }

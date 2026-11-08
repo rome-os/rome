@@ -1,6 +1,5 @@
 // Delivers what the agent context tells Rome about each turn to everyone who
-// listens: Rome's own listeners, such as the Concierge and the skill review,
-// then the apps' lifecycle hooks.
+// listens: Rome's own listeners, then the apps' lifecycle hooks.
 
 import type { AgentTurnFinishedEvent, AgentTurnStartedEvent } from "@rome-os/app-runtime";
 import {

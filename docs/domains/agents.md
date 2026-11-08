@@ -16,7 +16,7 @@ A named Rome agent, such as main, sales or support. Its definition, model select
 What an agent declares about itself in its file, in core or in an app. The fields are in [`concepts/agents.md`](../concepts/agents.md). Rome reads a definition and never stores or edits it. A session keeps the definition it opened with, which is why an agent's [policy](#agent-policy) is the same for every session of it.
 
 - In code it is `AgentDefinition` in [`packages/core/src/agent/domain/agent-definition.ts`](../../packages/core/src/agent/domain/agent-definition.ts). `AgentLoader` reads the files when apps change and fills the `AgentCatalog` port.
-- One trait comes from Rome, not the file: whether a chat's saved model outranks the session's [model pin](../concepts/sessions.md#model-pin) on a cold resume (`savedSelectionOutranksPin`). Rome sets it for the Concierge, whose [provider failover](../adrs/concierge-provider-failover.md) must reach its background turns, and the rule that reads it is `restoresSavedSelection`.
+- One trait comes from Rome, not the file: whether a chat's saved model outranks the session's [model pin](../concepts/sessions.md#model-pin) on a cold resume (`savedSelectionOutranksPin`). Rome names the agents that have it when it loads the catalog, and the rule that reads it is `restoresSavedSelection`. The agent context never names a particular agent.
 
 ## Agent policy
 
@@ -93,9 +93,9 @@ Whether the guardian's own account is authorized, expired or absent, and whether
 
 - Before Rome has read an account, it knows nothing about that provider and a run treats it as available. That is about what Rome knows, not a state of the provider, so it is not a word.
 - A run never tells an account anything. What it learns from a refused turn reaches the status through the account ([Model provider account](#model-provider-account)).
-- Rome remembers the last report so the resolver, the concierge and the dashboard can read it without waiting on the provider's process, and asks again at start, hourly, when the account says it changed and when the dashboard asks. A remembered usage limit whose end has passed reads as available.
-- The dashboard, the concierge, image generation and a tier restricted to one provider read the status, because they ask about the guardian's own account.
-- In code the words and the reader's rules are in [`packages/core/src/agent/domain/model-account-report.ts`](../../packages/core/src/agent/domain/model-account-report.ts). `ModelAccounts` in [`packages/core/src/agent/application/model-accounts.ts`](../../packages/core/src/agent/application/model-accounts.ts) remembers the accounts' reports and decides when to ask. The reading of a provider's status, usage and refused turns into a report is `account-report.ts` beside the adapters. The usage switch, which moves a chat to another provider when one is at its limit, is `usage-switch.ts` beside the rules.
+- Rome remembers the last report so its readers can read it without waiting on the provider's process, and asks again at start, hourly, when the account says it changed and when the dashboard asks. A remembered usage limit whose end has passed reads as available.
+- Whatever asks about the guardian's own account reads the status, such as the dashboard and a tier restricted to one provider.
+- In code the words and the reader's rules are in [`packages/core/src/agent/domain/model-account-report.ts`](../../packages/core/src/agent/domain/model-account-report.ts). `ModelAccounts` in [`packages/core/src/agent/application/model-accounts.ts`](../../packages/core/src/agent/application/model-accounts.ts) remembers the accounts' reports and decides when to ask. The reading of a provider's status, usage and refused turns into a report is `account-report.ts` beside the adapters. The usage switch, which says where a session may move when its provider is at its limit, is `usage-switch.ts` beside the rules.
 
 ## Model provider availability
 

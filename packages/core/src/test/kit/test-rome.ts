@@ -1,3 +1,4 @@
+import { ROME_AGENT_TRAITS } from "../../concierge/agent-traits.js";
 import { readAnswerShape, TurnUsageReporter } from "../../agent/index.js";
 import { agentFolders } from "../../paths.js";
 import { mkdtempSync } from "node:fs";
@@ -240,7 +241,7 @@ async function buildHarness(
       "utf-8",
     );
   }
-  const agentLoader = new AgentLoader(artifactIdentity);
+  const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
   await agentLoader.loadAll(agentsDir);
 
   const model = new FakeModel();
