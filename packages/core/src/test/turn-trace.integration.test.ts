@@ -34,7 +34,7 @@ async function drainOneTurn(
     { prompt: "hi" },
     opts?.linkFromSpanContext ? { links: [{ context: opts.linkFromSpanContext }] } : undefined,
   );
-  for await (const _ of handle.events) {
+  for await (const _ of handle.events()) {
     // drain
   }
   return { turnContext: handle.turnContext };

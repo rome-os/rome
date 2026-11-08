@@ -287,16 +287,16 @@ export class AgentRunner {
         ...(params.pushLevel ? { pushLevel: params.pushLevel } : {}),
       },
     );
-    this.runLineDeps?.replies?.runs(handle.turnId, agentName);
+    this.runLineDeps?.replies?.runs(handle.id, agentName);
     if (lines && this.runLineDeps) {
       if (conversation.promptPersisted && lines.prompt !== null) {
-        this.runLineDeps.links.prompt(lines.prompt, romeSessionId, handle.turnId);
+        this.runLineDeps.links.prompt(lines.prompt, romeSessionId, handle.id);
       }
     } else if (this.webchatRepo && conversation.promptPersisted && params.platformMessageId) {
       await this.webchatRepo.assignConversationMessageTurn(
         romeSessionId,
         params.platformMessageId,
-        handle.turnId,
+        handle.id,
       );
     }
 
@@ -310,7 +310,7 @@ export class AgentRunner {
             romeSessionId,
             existingSessionId: conversation.existing ? romeSessionId : undefined,
             channelThreadKey,
-            turnId: handle.turnId,
+            turnId: handle.id,
             threadContext,
             // A recorder-owned conversation has no other transcript, whatever
             // the caller's channel keeps.
@@ -321,10 +321,10 @@ export class AgentRunner {
           })
         : null;
 
-    for await (const msg of handle.events) {
+    for await (const msg of handle.events()) {
       if (recorder) {
         await recordAgentTraceBestEffort(recorder, msg, log, {
-          turnId: handle.turnId,
+          turnId: handle.id,
           source: "agent-runner",
         });
         // The turn's input, under the caller's label, right after it starts.
@@ -333,7 +333,7 @@ export class AgentRunner {
             .recordSystemInput(params.inputLabel, params.prompt)
             .catch((error: unknown) =>
               log.warn("system input not recorded", {
-                turnId: handle.turnId,
+                turnId: handle.id,
                 error: error instanceof Error ? error.message : String(error),
               }),
             );
@@ -401,9 +401,9 @@ export class AgentRunner {
         prompt: params.prompt,
         tier: params.tier,
         mode: params.mode,
-        sourceCheckpoint: params.sourceCheckpoint,
+        checkpoint: params.sourceCheckpoint,
         threadContext: params.threadContext,
-        persistThreadKey: params.persistThreadKey,
+        continuityKey: params.persistThreadKey,
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;

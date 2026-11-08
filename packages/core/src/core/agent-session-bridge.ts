@@ -280,20 +280,20 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         const turnLogFields = {
           ...baseLogFields,
           sessionId: session.sessionId,
-          turnId: handle.turnId,
+          turnId: handle.id,
         };
-        const workerWatch = interruptTurnOnWorkerDisconnect(rpc, session, handle, turnLogFields);
+        const workerWatch = interruptTurnOnWorkerDisconnect(rpc, handle, turnLogFields);
         try {
-          this.runLineDeps?.replies?.runs(handle.turnId, req.key.agentName);
+          this.runLineDeps?.replies?.runs(handle.id, req.key.agentName);
           if (lines && this.runLineDeps) {
             if (conversation.promptPersisted && lines.prompt !== null) {
-              this.runLineDeps.links.prompt(lines.prompt, romeSessionId, handle.turnId);
+              this.runLineDeps.links.prompt(lines.prompt, romeSessionId, handle.id);
             }
           } else if (this.webchatRepo && conversation.promptPersisted && req.platformMessageId) {
             await this.webchatRepo.assignConversationMessageTurn(
               romeSessionId,
               req.platformMessageId,
-              handle.turnId,
+              handle.id,
             );
           }
         } catch (err) {
@@ -314,7 +314,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                 romeSessionId,
                 existingSessionId: conversation.existing ? romeSessionId : undefined,
                 channelThreadKey: req.key.channelThreadKey,
-                turnId: handle.turnId,
+                turnId: handle.id,
                 threadContext: req.init?.threadContext,
                 actionContext: req.actionContext,
                 persistTranscript: true,
@@ -329,24 +329,26 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         log.info("agent.session.runTurn response ready", {
           ...baseLogFields,
           sessionId: session.sessionId,
-          turnId: handle.turnId,
+          turnId: handle.id,
           durationMs: Date.now() - requestStartedAt,
         });
 
-        const { interrupt } = handle;
+        const interrupt = async (reason?: string) => {
+          await handle.stop(reason);
+        };
 
-        const stream = ctx.openStream<StreamAgentEvent>(`agent.turn:${handle.turnId}`);
+        const stream = ctx.openStream<StreamAgentEvent>(`agent.turn:${handle.id}`);
         // Drain the per-turn events into the IPC stream.
         void (async () => {
           let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | null = null;
           let endChatTurn: (() => void) | null = null;
           try {
-            for await (const msg of handle.events) {
+            for await (const msg of handle.events()) {
               // Recorded first, so a turn that opens its conversation has its
               // row before its stream can be asked for.
               if (recorder) {
                 await recordAgentTraceBestEffort(recorder, msg, log, {
-                  turnId: handle.turnId,
+                  turnId: handle.id,
                   source: "agent-session-bridge",
                 });
               }
@@ -372,7 +374,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                   }
                 } catch (err) {
                   log.warn("failed to register agent turn stream", {
-                    turnId: handle.turnId,
+                    turnId: handle.id,
                     error: err instanceof Error ? err.message : String(err),
                   });
                 }
@@ -383,7 +385,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             stream.close();
           } catch (err) {
             log.warn("error draining agent turn into IPC stream", {
-              turnId: handle.turnId,
+              turnId: handle.id,
               error: err instanceof Error ? err.message : String(err),
             });
             stream.close({ error: err instanceof Error ? err : new Error(String(err)) });
@@ -394,7 +396,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           }
         })();
 
-        return { turnId: handle.turnId, sessionId: session.sessionId, romeSession };
+        return { turnId: handle.id, sessionId: session.sessionId, romeSession };
       });
     });
 
@@ -446,7 +448,6 @@ interface TurnWorkerWatch {
  */
 function interruptTurnOnWorkerDisconnect(
   rpc: IpcRpc,
-  session: AgentSession,
   handle: AgentTurnHandle,
   logFields: Record<string, unknown>,
 ): TurnWorkerWatch {
@@ -459,9 +460,7 @@ function interruptTurnOnWorkerDisconnect(
     log.info("interrupting agent turn", { ...logFields, reason });
     void (async () => {
       try {
-        await (handle.interrupt
-          ? handle.interrupt(reason)
-          : session.interrupt(reason, handle.turnId));
+        await handle.stop(reason);
       } catch (err) {
         log.warn("failed to interrupt agent turn", {
           ...logFields,

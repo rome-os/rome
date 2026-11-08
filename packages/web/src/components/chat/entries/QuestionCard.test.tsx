@@ -92,6 +92,72 @@ describe("QuestionCard — long answers", () => {
   });
 });
 
+describe("QuestionCard — single free-text", () => {
+  const SINGLE_FREE = {
+    questions: [
+      { id: "ok", question: "Proceed?", type: "single", options: ["Yes", "No"], freeText: true },
+    ],
+  };
+
+  it("keeps typed text that equals an option label instead of blanking the box", async () => {
+    const user = userEvent.setup();
+    const onSubmit = renderCard(SINGLE_FREE);
+    const input = screen.getByPlaceholderText("Or type your own…") as HTMLInputElement;
+
+    await user.type(input, "Yes");
+    expect(input.value).toBe("Yes");
+    expect(pressed("Yes")).toBe("false");
+    await user.type(input, ", but later");
+
+    expect(input.value).toBe("Yes, but later");
+    expect(pressed("Yes")).toBe("false");
+    await user.click(optionButton("Send"));
+    expect(onSubmit).toHaveBeenCalledWith(
+      "t-1",
+      { answers: [{ questionId: "ok", value: "Yes, but later" }] },
+      "Yes, but later",
+    );
+  });
+
+  it("clears the box and submits the option when an option is clicked after typing", async () => {
+    const user = userEvent.setup();
+    const onSubmit = renderCard(SINGLE_FREE);
+    const input = screen.getByPlaceholderText("Or type your own…") as HTMLInputElement;
+
+    await user.type(input, "Maybe");
+    await user.click(optionButton("No"));
+
+    expect(input.value).toBe("");
+    expect(pressed("No")).toBe("true");
+    await user.click(optionButton("Send"));
+    expect(onSubmit).toHaveBeenCalledWith(
+      "t-1",
+      { answers: [{ questionId: "ok", value: "No" }] },
+      "No",
+    );
+  });
+
+  it("restores a resolved answer as a pick when it is an option, else as typed text", () => {
+    const resolvedCard = (value: string) =>
+      render(
+        <QuestionCard
+          toolUseId="t-1"
+          props={SINGLE_FREE}
+          result={{ answers: [{ questionId: "ok", value }] }}
+          onSubmit={() => {}}
+          onDismiss={() => {}}
+        />,
+      );
+    resolvedCard("No");
+    expect(pressed("No")).toBe("true");
+    expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("");
+    cleanup();
+    resolvedCard("Sure thing");
+    expect(pressed("No")).toBe("false");
+    expect((screen.getByRole("textbox") as HTMLInputElement).value).toBe("Sure thing");
+  });
+});
+
 describe("QuestionCard — multi-choice", () => {
   it("keeps multiple options pressed at once and submits them joined", async () => {
     const user = userEvent.setup();

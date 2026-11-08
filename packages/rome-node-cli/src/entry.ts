@@ -18,6 +18,7 @@ import { commandHelp } from "./help.js";
 import { copyRequest } from "./copy.js";
 import { CLI_AUDIT_HINT, cliAuditPath, runAudit } from "./audit.js";
 import type { ConnectUi } from "./connect-ui.js";
+import { loadConnectUi } from "./load-connect-ui.js";
 
 const version = (): string | undefined => {
   try {
@@ -267,7 +268,7 @@ async function main(): Promise<void> {
       );
     else process.stderr.write(`Audit log: ${audit.path}\n`);
     // On a terminal, the status screen replaces the Connection lines once sign-in is over.
-    const screen = process.stdout.isTTY ? await import("./connect-ui.js") : undefined;
+    const screen = process.stdout.isTTY ? await loadConnectUi() : undefined;
     let ui: ConnectUi | undefined;
     const cloud = values.cloud ?? "https://romeos.cc";
     await withShutdown((signal) =>

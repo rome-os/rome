@@ -1,4 +1,5 @@
 import type { RunLineDeps } from "../connections/speaker-messages.js";
+import { testTurnHandle } from "../test/turn-handle.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -60,7 +61,8 @@ describe("AgentSessionBridge turn routing", () => {
     const session = {
       key: { agentName: "main", channelThreadKey: "discord:channel-1" },
       sessionId: "session-1",
-      sendTurn: () => ({ turnId: "turn-1", events, interrupt }) as unknown as AgentTurnHandle,
+      sendTurn: () =>
+        testTurnHandle({ turnId: "turn-1", events, interrupt }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
       acquire: async () => session,
@@ -155,7 +157,7 @@ describe("AgentSessionBridge conversation", () => {
             romeSessionId: options.romeSessionId,
             romeSessionType: options.romeSessionType,
           });
-          return {
+          return testTurnHandle({
             turnId: "turn-1",
             events: (async function* (): AsyncIterable<StreamAgentEvent> {
               yield {
@@ -168,7 +170,7 @@ describe("AgentSessionBridge conversation", () => {
               yield { type: "result", content: "Done", agent: "main" };
             })(),
             interrupt: async () => undefined,
-          } as unknown as AgentTurnHandle;
+          }) as unknown as AgentTurnHandle;
         },
       } as unknown as AgentSession;
       const manager = {
@@ -226,11 +228,11 @@ describe("AgentSessionBridge resuming a session by its id", () => {
         sessionId: "guardian-runtime",
         sendTurn: (input: unknown) => {
           sent.push(input);
-          return {
+          return testTurnHandle({
             turnId: `turn-${sent.length}`,
             events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
             interrupt: async () => undefined,
-          } as unknown as AgentTurnHandle;
+          }) as unknown as AgentTurnHandle;
         },
       } as unknown as AgentSession;
       const manager = {
@@ -315,11 +317,11 @@ describe("AgentSessionBridge chat link on resume", () => {
           sessionId: "runtime-1",
           sendTurn: (input: unknown) => {
             sent.push(input);
-            return {
+            return testTurnHandle({
               turnId: `turn-${sent.length}`,
               events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
               interrupt: async () => undefined,
-            } as unknown as AgentTurnHandle;
+            }) as unknown as AgentTurnHandle;
           },
         }) as unknown as AgentSession;
       // Each resume reopens the session, as a cold open would.
@@ -393,7 +395,7 @@ describe("AgentSessionBridge fresh run started from a chat", () => {
         key: { agentName: "main", channelThreadKey: "summon:exec-1" },
         sessionId: "summon-runtime",
         sendTurn: () =>
-          ({
+          testTurnHandle({
             turnId: "summon-turn",
             events: (async function* (): AsyncIterable<StreamAgentEvent> {
               yield {
@@ -464,7 +466,7 @@ describe("AgentSessionBridge working dir", () => {
       key: { agentName: "coder", channelThreadKey: "coder:1" },
       sessionId: "summoned-1",
       sendTurn: () =>
-        ({
+        testTurnHandle({
           turnId: "turn-1",
           events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
           interrupt: async () => undefined,
@@ -647,7 +649,7 @@ describe("AgentSessionBridge worker disconnect", () => {
       const status = await ended;
       yield { type: "turn_end", turnId, status, durationMs: 1 };
     })();
-    const handle = { turnId, events, interrupt } as unknown as AgentTurnHandle;
+    const handle = testTurnHandle({ turnId, events, interrupt }) as unknown as AgentTurnHandle;
     return { handle, interrupt, finish: () => end("completed") };
   }
 
@@ -854,7 +856,7 @@ describe("AgentSessionBridge answer recording", () => {
     const session = {
       key: { agentName: "main", channelThreadKey: "telegram:chat-1" },
       sessionId: "session-1",
-      sendTurn: () => ({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
+      sendTurn: () => testTurnHandle({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = { acquire: async () => session } as unknown as AgentSessionManager;
     const turns = createAgentTurnStreamRegistry();

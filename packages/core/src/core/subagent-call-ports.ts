@@ -23,7 +23,7 @@ function subagentSession(child: AgentSession): SubagentSession {
   return {
     id: child.sessionId,
     submit(prompt, parentTurn, context) {
-      const { turnId, events } = child.sendTurn(
+      const turn = child.sendTurn(
         { prompt },
         {
           lifecycleParent: parentTurn,
@@ -34,7 +34,7 @@ function subagentSession(child: AgentSession): SubagentSession {
           initiatedBy: "system",
         },
       );
-      return { turnId, events };
+      return { turnId: turn.id, events: turn.events() };
     },
     stop: (reason) => child.interrupt(reason),
   };

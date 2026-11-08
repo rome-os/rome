@@ -1,4 +1,5 @@
 import { ROOT_CONTEXT } from "@opentelemetry/api";
+import { testTurnHandle } from "../test/turn-handle.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -64,11 +65,11 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
           };
         },
       };
-      return {
+      return testTurnHandle({
         turnId,
         events,
         turnContext: ROOT_CONTEXT,
-      };
+      });
     },
     submitInput: rs.fn(),
     runForkedTurn: rs.fn(),
