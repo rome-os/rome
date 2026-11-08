@@ -19,7 +19,8 @@ import {
 import { context, SpanStatusCode } from "@opentelemetry/api";
 import { eq } from "drizzle-orm";
 import { romeAgentTraceBlocks, sessions } from "../db/schema.js";
-import type { RecordedConversation } from "./session-conversation.js";
+import type { DrizzleDb } from "../db/index.js";
+import { noteOpenerChat } from "./session-conversation.js";
 import type { ForkRunParams } from "./types.js";
 import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
@@ -777,13 +778,23 @@ describe("AgentRunner", () => {
   });
 
   describe("a resumed session whose caller names no conversation", () => {
-    function resumedSession(recorded?: RecordedConversation) {
+    async function resumedSession(db: DrizzleDb, chatId: string) {
+      // The chat that has the session is read from the session's stored row.
+      const now = new Date();
+      await db.insert(sessions).values({
+        id: "agent-session",
+        agentName: "main",
+        channelThreadKey: "telegram:t1",
+        chatId,
+        createdAt: now,
+        lastActiveAt: now,
+        status: "active",
+      });
       type TurnRef = { romeSessionId?: string; romeSessionType?: string };
       const turns: TurnRef[] = [];
       const session = {
         key: { agentName: "main", channelThreadKey: "telegram:t1" },
         sessionId: "agent-session",
-        conversation: recorded && { origin: "recorded" as const, ...recorded },
         status: "idle" as const,
         sendTurn: rs.fn((input: { prompt: string }, options?: TurnRef) => {
           turns.push({
@@ -816,7 +827,7 @@ describe("AgentRunner", () => {
         peek: rs.fn(),
         shutdown: rs.fn(async () => undefined),
       } as unknown as AgentSessionManager;
-      return { manager, turns };
+      return { manager, turns, session };
     }
 
     it("leaves a recorded channel conversation to the inbox", async () => {
@@ -829,11 +840,7 @@ describe("AgentRunner", () => {
           name: "Telegram thread",
           agentName: null,
         });
-        const { manager, turns } = resumedSession({
-          id: "channel:telegram:t1",
-          name: "Telegram thread",
-          type: "channel",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "channel:telegram:t1");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -858,11 +865,7 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -887,11 +890,7 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -926,11 +925,7 @@ describe("AgentRunner", () => {
           name: "researcher: Telegram thread",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Telegram thread",
-          type: "subagent",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         // A backend turn delivers its reply to the thread and records it in the
@@ -963,11 +958,7 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = resumedSession({
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         // A caller that keeps its own transcript keeps it for its channel,
@@ -1000,11 +991,7 @@ describe("AgentRunner", () => {
           name: "Side chat",
           agentName: "main",
         });
-        const { manager, turns } = resumedSession({
-          id: "side-chat",
-          name: "Side chat",
-          type: "fork",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "side-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -1038,11 +1025,7 @@ describe("AgentRunner", () => {
       try {
         const repo = new ChatsWebChatRepository(testDb.db);
         await repo.createSession("user-chat", "User chat");
-        const { manager, turns } = resumedSession({
-          id: "user-chat",
-          name: "User chat",
-          type: "webchat",
-        });
+        const { manager, turns } = await resumedSession(testDb.db, "user-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -1056,12 +1039,33 @@ describe("AgentRunner", () => {
       }
     });
 
+    it("records into the chat an open session's opener named, until it is reopened", async () => {
+      const testDb = createTestDb();
+      try {
+        const repo = new ChatsWebChatRepository(testDb.db);
+        await repo.createSession("user-chat", "User chat");
+        const { manager, turns, session } = await resumedSession(testDb.db, "user-chat");
+        // The session is still open from a caller that named the chat. A
+        // reopened one is the case above, which leaves the chat alone.
+        noteOpenerChat(session, "user-chat");
+        const runner = new AgentRunner(manager, agentLoader, repo);
+
+        await collectMessages(
+          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        );
+
+        expect(turns[0]?.romeSessionId).toBe("user-chat");
+      } finally {
+        testDb.close();
+      }
+    });
+
     it("does not recreate a recorded conversation that was deleted", async () => {
       const testDb = createTestDb();
       try {
         const repo = new ChatsWebChatRepository(testDb.db);
-        // The lookup at open found no conversation, so none is recorded.
-        const { manager, turns } = resumedSession();
+        // The session's row still names the chat, which no longer exists.
+        const { manager, turns } = await resumedSession(testDb.db, "deleted-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         await collectMessages(
@@ -1077,16 +1081,25 @@ describe("AgentRunner", () => {
     });
   });
 
-  it("links a fork to the conversation its source serves when no thread names one", async () => {
+  it("links a fork to the chat that has its source session when no thread names one", async () => {
     const testDb = createTestDb();
     try {
       const repo = new ChatsWebChatRepository(testDb.db);
       await repo.createSession("stored-chat", "Stored chat");
+      const now = new Date();
+      await testDb.db.insert(sessions).values({
+        id: "source-session",
+        agentName: "main",
+        channelThreadKey: "webchat:stored-chat",
+        chatId: "stored-chat",
+        createdAt: now,
+        lastActiveAt: now,
+        status: "active",
+      });
 
       const source = {
         key: { agentName: "main", channelThreadKey: "webchat:stored-chat" },
         sessionId: "source-session",
-        conversation: { origin: "named" as const, id: "stored-chat" },
         status: "idle" as const,
         sendTurn: rs.fn(),
         async *runForkedTurn(input: { prompt: string }) {
@@ -2840,7 +2853,6 @@ describe("AgentRunner", () => {
         acquireBySessionId: rs.fn(async () => session),
         peek: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
-        recordConversation: rs.fn(async () => undefined),
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);
@@ -2893,7 +2905,6 @@ describe("AgentRunner", () => {
         acquireBySessionId: rs.fn(async () => session),
         peek: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
-        recordConversation: rs.fn(async () => undefined),
         shutdown: rs.fn(async () => undefined),
       };
       const runner = new AgentRunner(manager, agentLoader);

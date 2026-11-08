@@ -28,6 +28,7 @@ import {
   romeAgentMessagePlatformIds,
   romeAgentMessages,
   romeAgentTraceBlocks,
+  sessions,
   webchatTurnFeedback,
   webchatWorkspaceLayouts,
 } from "../schema.js";
@@ -1691,6 +1692,31 @@ export class WebChatRepository {
   async getSession(id: string) {
     const rows = await this.db.select().from(romeSessions).where(eq(romeSessions.id, id));
     return rows[0] ? withSessionKind(rows[0]) : null;
+  }
+
+  /**
+   * The chat an agent session is in, by the session's id: the one its stored
+   * row names, while that chat still exists. A deleted chat leaves its id on
+   * the row, and recording under that id would recreate it.
+   */
+  async chatOfSession(sessionId: string) {
+    const rows = await this.db
+      .select({ chat: romeSessions })
+      .from(sessions)
+      .innerJoin(romeSessions, eq(romeSessions.id, sessions.chatId))
+      .where(eq(sessions.id, sessionId));
+    return rows[0] ? withSessionKind(rows[0].chat) : null;
+  }
+
+  /**
+   * Record that a chat has an agent session, on the session's stored row.
+   * Never overwrites a chat the row already names.
+   */
+  async recordSessionInChat(sessionId: string, chatId: string): Promise<void> {
+    await this.db
+      .update(sessions)
+      .set({ chatId })
+      .where(and(eq(sessions.id, sessionId), isNull(sessions.chatId)));
   }
 
   async markSessionRead(id: string) {

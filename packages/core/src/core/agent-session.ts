@@ -63,7 +63,6 @@ import {
   type Subagent,
   type RomeTools,
 } from "../agent/index.js";
-import { findRecordedConversation, type SessionConversation } from "./session-conversation.js";
 import type { ActionRegistry, Action, ActionResult } from "../actions/types.js";
 import type { ActionEngine } from "../actions/engine.js";
 import { validateActionArgs } from "../actions/validate-action-args.js";
@@ -140,6 +139,7 @@ import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { KeyedMutex } from "../lib/keyed-mutex.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
 import { sessionKeyChannel, webchatConversationOfKey } from "./agent-session-key.js";
+import { noteOpenerChat } from "./session-conversation.js";
 
 const log = createLogger("agent-session");
 
@@ -265,14 +265,6 @@ export type AgentSessionStatusListener = (event: AgentSessionStatusEvent) => voi
 export interface AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
-  /**
-   * The conversation this session serves: the one its opener named, else the
-   * one its row recorded. A turn picks where it records through
-   * `resolveTurnConversation`, which leaves channel and webchat ones to their
-   * owners. Kept on the session so a turn resolves where it records without an
-   * await between acquire and sendTurn.
-   */
-  readonly conversation?: SessionConversation;
   readonly status: AgentSessionStatus;
   readonly currentTurnId?: string;
   /**
@@ -307,13 +299,6 @@ export interface AgentSessionManager {
    * open session has the id. Never opens a session.
    */
   findWorkingDirBySessionId(sessionId: string): string | undefined;
-  /**
-   * Record the conversation a session serves, for callers that learn it only
-   * after acquire (a subagent's conversation is minted under its own id).
-   * Never overwrites a recorded conversation. Only sessions cached by this
-   * manager see the new value, so call it on the manager that acquired them.
-   */
-  recordConversation(sessionId: string, chatId: string): Promise<void>;
   shutdown(): Promise<void>;
 }
 
@@ -669,19 +654,6 @@ export function createAgentSessionManager(
       }
       return undefined;
     },
-    async recordConversation(sessionId, chatId) {
-      const stored = await deps.sessionRepository.session(sessionId);
-      if (!stored?.deprecatedRecordChat(chatId)) return;
-      await deps.sessionRepository.save(stored);
-      // A cached session reads the same value a cold reopen would. A session
-      // still opening is not cached yet and misses this, so callers record
-      // only after their acquire has returned.
-      for (const session of [...sessions.values()]) {
-        if (session.sessionId !== sessionId || session.conversation) continue;
-        const recorded = await findRecordedConversation(deps.webchatRepo, chatId);
-        if (recorded) session.conversation = { origin: "recorded", ...recorded };
-      }
-    },
     async shutdown() {
       if (sweeperTimer) clearInterval(sweeperTimer);
       const all = [...sessions.values()];
@@ -921,13 +893,6 @@ async function openSession(
       deprecatedChatId: requestedRomeSessionId,
     });
   const sessionId = session.id;
-  // A caller that names no conversation still serves the one the session recorded.
-  const recordedConversation = requestedRomeSessionId
-    ? undefined
-    : await findRecordedConversation(deps.webchatRepo, session.deprecatedChatId ?? undefined);
-  const conversation: SessionConversation | undefined = requestedRomeSessionId
-    ? { origin: "named", id: requestedRomeSessionId }
-    : recordedConversation && { origin: "recorded", ...recordedConversation };
   const isNewSession = !resumed;
   const modelThreadId = resumed?.modelThreadId ?? undefined;
   // The session model pin records the model that produced this history.
@@ -1545,7 +1510,6 @@ async function openSession(
   impl = new AgentSessionImpl({
     key,
     session,
-    conversation,
     modelSession,
     deps,
     config,
@@ -1576,6 +1540,9 @@ async function openSession(
     keepAlive: opts.keepAlive,
     onClosed: () => opts.onClosed(impl),
   });
+  // Temporary (ZHA-157): turns on this open session that name no chat
+  // record into the chat its opener named.
+  noteOpenerChat(impl, requestedRomeSessionId);
 
   impl.startModelSessionEvents();
 
@@ -1592,7 +1559,6 @@ async function openSession(
 interface ImplArgs {
   key: AgentSessionKey;
   session: Session;
-  conversation?: SessionConversation;
   modelSession: ModelSession;
   /** The provider of the session the run opened. Unset for a code-backed agent. */
   modelProvider?: ModelProvider;
@@ -1799,7 +1765,6 @@ class AgentSessionImpl implements AgentSession {
   readonly sessionId: string;
   /** The stored session this one runs, which each turn and touch is recorded on. */
   private readonly session: Session;
-  conversation?: SessionConversation;
   status: AgentSessionStatus = "idle";
   currentTurnId?: string;
   lastActiveAt = Date.now();
@@ -1893,7 +1858,6 @@ class AgentSessionImpl implements AgentSession {
     this.key = args.key;
     this.session = args.session;
     this.sessionId = args.session.id;
-    this.conversation = args.conversation;
     this.modelSession = args.modelSession;
     this.modelProvider = args.modelProvider;
     this.deps = args.deps;

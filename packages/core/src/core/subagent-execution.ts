@@ -123,11 +123,11 @@ export function createSubagentExecutionService(deps: {
           parentSessionId: context.parentSessionId,
           parentTurnId: context.parentTurnId,
         });
-        // A subagent's conversation is minted under its own session id.
+        // A subagent's chat is minted under its own session id.
         try {
-          await context.childManager.recordConversation(child.sessionId, child.sessionId);
+          await deps.webchatRepo.recordSessionInChat(child.sessionId, child.sessionId);
         } catch (err) {
-          log.warn("failed to record the subagent session's conversation", {
+          log.warn("failed to record the chat that has the subagent's session", {
             agentName: name,
             sessionId: child.sessionId,
             error: err instanceof Error ? err.message : String(err),

@@ -13,7 +13,7 @@ import type {
   ThreadStart,
 } from "../agent/index.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
-import type { AgentSessionManager } from "./agent-session.js";
+import type { AgentSession, AgentSessionManager } from "./agent-session.js";
 import type { AgentCatalog } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
@@ -25,7 +25,7 @@ import {
   resolveTurnConversation,
   shouldPersistAgentTrace,
 } from "./agent-trace-recorder.js";
-import { findRecordedConversation } from "./session-conversation.js";
+import { findChat, findSessionChat, openerChat } from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { adhocSessionKey } from "./agent-session-key.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
@@ -297,11 +297,16 @@ export class AgentRunner {
     // to carry a duplicate channelThreadKey that can drift from it.
     const channelThreadKey = session.key.channelThreadKey;
 
+    const opened = openerChat(session);
     const conversation = resolveTurnConversation({
       agentName,
       agentSessionId: session.sessionId,
       romeSessionId: params.romeSessionId,
-      sessionConversation: session.conversation,
+      openerChat: opened,
+      sessionChat:
+        (opened ?? params.romeSessionId)
+          ? undefined
+          : await findSessionChat(this.webchatRepo, session.sessionId),
       channelThreadKey,
       threadContext,
     });
@@ -446,7 +451,7 @@ export class AgentRunner {
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;
-          recorder = await this.createForkTraceRecorder(params, message, source.conversation?.id);
+          recorder = await this.createForkTraceRecorder(params, message, source);
           if (this.turnStreams) {
             try {
               // Forks have their own session and trace, so publish them through
@@ -501,13 +506,16 @@ export class AgentRunner {
   private async createForkTraceRecorder(
     params: ForkRunParams,
     turnStart: Extract<AgentEvent, { type: "turn_start" }>,
-    sourceChatId?: string,
+    source: AgentSession,
   ): Promise<AgentTraceRecorder | null> {
     if (!this.webchatRepo) return null;
     const thread = params.threadContext;
-    // Prefer the source's conversation while it exists. Read again rather
-    // than trusting the session's cached row, which can outlive a deletion.
-    const recorded = await findRecordedConversation(this.webchatRepo, sourceChatId);
+    // Prefer the source's chat while it exists: the one its opener named, else
+    // the chat that has the source session.
+    const opened = openerChat(source);
+    const recorded = opened
+      ? await findChat(this.webchatRepo, opened)
+      : await findSessionChat(this.webchatRepo, source.sessionId);
     // The chat the fork is of, when the turn names one.
     const named = recorded?.id ?? thread?.romeSessionId;
     // A channel thread that recorded no conversation may still have its row.
