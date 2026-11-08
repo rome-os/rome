@@ -2584,7 +2584,8 @@ class AgentSessionImpl implements AgentSession {
       // row for a branch that produced nothing.
       if (
         forkSession &&
-        opening?.continuityKey !== undefined &&
+        opening &&
+        !opening.oneShot &&
         keepsFork(opening, {
           completed: terminalSeen && status === "completed",
           modelThreadId: forkSession.modelThreadId,

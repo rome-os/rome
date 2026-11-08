@@ -26,18 +26,18 @@ export interface ForkRequest {
   continuityKey?: (forkSessionId: string) => string;
 }
 
-/** What a forked turn opens with. */
-export interface ForkOpening {
+/**
+ * What a forked turn opens with. A one-shot fork's model thread is closed
+ * after its turn, and nothing can resume it. A continuable fork is kept under
+ * its continuity key.
+ */
+export type ForkOpening = {
   /** Which tools the fork has: none when isolated, its source's when exact (`forkSessionTools`). */
   mode: ForkRunMode;
   /** Where the turn the fork branches from left the source's model thread. */
   sourceTurn: ModelPosition;
   threadContext?: ThreadContext;
-  /** A one-shot fork's model thread is closed after its turn, and nothing can resume it. */
-  oneShot: boolean;
-  /** Set only for a continuable fork. */
-  continuityKey?: string;
-}
+} & ({ oneShot: true } | { oneShot: false; continuityKey: string });
 
 /**
  * What the fork of `source` opens with. Throws when the source cannot be
@@ -71,8 +71,7 @@ export function openFork(
     mode: request.mode ?? "isolated",
     sourceTurn: at,
     threadContext: request.threadContext ?? source.threadContext,
-    oneShot: continuityKey === undefined,
-    ...(continuityKey === undefined ? {} : { continuityKey }),
+    ...(continuityKey === undefined ? { oneShot: true } : { oneShot: false, continuityKey }),
   };
 }
 
@@ -86,9 +85,5 @@ export function keepsFork(
   opening: ForkOpening,
   ran: { completed: boolean; modelThreadId?: ModelThreadId; sourceModelThreadId?: ModelThreadId },
 ): boolean {
-  return (
-    opening.continuityKey !== undefined &&
-    ran.completed &&
-    ran.modelThreadId !== ran.sourceModelThreadId
-  );
+  return !opening.oneShot && ran.completed && ran.modelThreadId !== ran.sourceModelThreadId;
 }
