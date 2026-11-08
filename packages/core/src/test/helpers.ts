@@ -1,3 +1,4 @@
+import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
 import { readAnswerShape, TurnUsageReporter } from "../agent/index.js";
 import { agentFolders } from "../paths.js";
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
@@ -574,7 +575,7 @@ export async function buildTestDeps(
 
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const actionLoader = new ActionLoader(artifactIdentity);
-  const agentLoader = new AgentLoader(artifactIdentity);
+  const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
   const skillCatalog = new SkillLoader(artifactIdentity);
   const romeCloudListings = createRomeCloudListingClient();
   const appDomainRoot = join(tmpdir(), `rome-test-deps-${process.pid}-${++testDepsSeq}`);
@@ -1100,7 +1101,7 @@ export async function createAppLifecycleHarness(
     });
     const actionRegistry = new ActionRegistryImpl(artifactIdentity);
     const actionLoader = new ActionLoader(artifactIdentity);
-    const agentLoader = new AgentLoader(artifactIdentity);
+    const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
     const skillCatalog = new SkillLoader(artifactIdentity);
 
     appCatalog.subscribe(async function agentLoaderSubscriber() {

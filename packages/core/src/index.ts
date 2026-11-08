@@ -193,7 +193,7 @@ import {
 import { startCodexLoginChoice } from "./rome-cloud/codex-login.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
-import { CONCIERGE_AGENT_ID } from "./concierge/privacy.js";
+import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
@@ -685,11 +685,7 @@ async function main() {
 
   // Subscribers ordered agentLoader → actionLoader → skillCatalog →
   // artifactLoadFailures → actionRegistry → channelHook → runtimeStatus.
-  const agentLoader = new AgentLoader(artifactIdentity, {
-    // The Concierge's provider failover must reach a resumed chat's background
-    // turns, so its chat's saved model outranks the session's pinned one.
-    savedSelectionOutranksPin: [CONCIERGE_AGENT_ID],
-  });
+  const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
   const actionLoader = new ActionLoader(artifactIdentity);
   const skillCatalog = new SkillLoader(artifactIdentity);
   const actionRegistry = new ActionRegistryImpl(artifactIdentity);
