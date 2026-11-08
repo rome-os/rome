@@ -11,12 +11,12 @@ import type {
 } from "../agent/index.js";
 import {
   createSubagentCalls,
+  subagentRequest,
   WebChatDashboardSessions,
   type SubagentCalls,
 } from "../agent/index.js";
-import { subagentLiveTurns, subagentTurnLog } from "./subagent-call-ports.js";
+import { subagentLiveTurns, subagentSessions, subagentTurnLog } from "./subagent-call-ports.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
-import { createSubagentExecutionService } from "./subagent-execution.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 function deferred() {
@@ -80,11 +80,50 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
   return { session, releases, calls, interrupt };
 }
 
-describe("SubagentExecutionService", () => {
+describe("subagent calls through the run's ports", () => {
   let db: TestDb;
   let repo: WebChatRepository;
   let calls: SubagentCalls;
-  const createService = () => createSubagentExecutionService({ calls, webchatRepo: repo });
+  // Calls the service the way the run does, from what the run knows of its turn.
+  const createService = () => ({
+    async startSubagent(
+      name: string,
+      input: unknown,
+      context: {
+        parentSessionId: string;
+        parentAgentSessionId: string;
+        parentTurnId: string;
+        parentToolUseId: string;
+        parentAgentName: string;
+        parentChannelThreadKey: string;
+        childManager: AgentSessionManager;
+        workingDir: string;
+      },
+    ) {
+      const call = await calls.call(name, subagentRequest(input), {
+        key: {
+          dashboardSessionId: context.parentSessionId,
+          turnId: context.parentTurnId,
+          toolUseId: context.parentToolUseId,
+        },
+        agentName: context.parentAgentName,
+        agentSessionId: context.parentAgentSessionId,
+        sessions: subagentSessions(context.childManager, context.parentChannelThreadKey, repo),
+        at: { workingDir: context.workingDir },
+      });
+      return {
+        sessionId: call.sessionId,
+        turnId: call.turnId,
+        agentName: call.subagent,
+        completion: call.outcome.then((outcome) => ({
+          ...outcome,
+          sessionId: call.sessionId,
+          turnId: call.turnId,
+        })),
+        interrupt: (reason?: string) => call.cancel(reason),
+      };
+    },
+  });
 
   beforeEach(async () => {
     db = createTestDb();

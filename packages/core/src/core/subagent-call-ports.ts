@@ -1,5 +1,6 @@
-// The subagent call service's ports over today's run, live turns and turn log.
-// They go once the session and the turn log move into the agent context.
+// The subagent call service's ports over the run's session manager, the live
+// turns and the turn log. They go once the session takes `submit` and `stop`
+// and the turn log moves into the agent context.
 
 import {
   storeSubagentParent,

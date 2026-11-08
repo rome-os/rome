@@ -32,10 +32,8 @@ import { romeAgentTraceBlocks, sessions } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
 import { openedInChat } from "./session-conversation.js";
 import type { ForkRunParams } from "./types.js";
-import { createActiveSubagentRegistry } from "./active-subagent-registry.js";
-import { subagentLiveTurns, subagentTurnLog } from "./subagent-call-ports.js";
+import { subagentLiveTurns, subagentSessions, subagentTurnLog } from "./subagent-call-ports.js";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
-import { createSubagentExecutionService } from "./subagent-execution.js";
 import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
 
 const recordMetrics = rs.hoisted(() => rs.fn());
@@ -92,6 +90,7 @@ import {
 import {
   createAgentSessionManager,
   type AgentSession,
+  type AgentSessionInit,
   type AgentSessionManager,
   type AgentTurnHandle,
 } from "../agent/index.js";
@@ -2255,11 +2254,12 @@ describe("AgentRunner", () => {
       turnUsage: new TurnUsageReporter({ apps: appCatalog }),
       folders: { ...agentFolders(), defaultWorkingDir: "/tmp/default-project" },
       log: createLogger("agent-session"),
-      activeSubagentRegistry: createActiveSubagentRegistry(subagentCalls),
-      subagentExecutionService: createSubagentExecutionService({
-        calls: subagentCalls,
-        webchatRepo,
-      }),
+      subagentCalls,
+      subagentSessions: (
+        manager: AgentSessionManager,
+        parentLink: string,
+        inherited: Pick<AgentSessionInit, "toolEnv" | "spanAttributes">,
+      ) => subagentSessions(manager, parentLink, webchatRepo, inherited),
       ...romeToolPorts({
         actionRegistry,
         actionEngine,

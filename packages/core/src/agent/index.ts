@@ -174,10 +174,7 @@ export type {
 export {
   subagentRequest,
   subagentToolName,
-  type SessionRecordId,
   type Subagent,
-  type SubagentOutcome,
-  type SubagentRequest,
   type Subagents,
 } from "./domain/subagent.js";
 export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
@@ -207,19 +204,11 @@ export {
   walkToRoot,
   type StoredRoot,
 } from "./domain/session-parent.js";
-export type {
-  DashboardSession,
-  DashboardSessions,
-  NewSubagentSession,
-} from "./domain/dashboard-sessions.js";
 export { WebChatDashboardSessions } from "./infrastructure/webchat-dashboard-sessions.js";
 export {
   createSubagentCalls,
-  type CallingTurn,
   type LiveTurns,
   type SessionPlace,
-  type SubagentCall,
-  type SubagentCallKey,
   type SubagentCalls,
   type SubagentSession,
   type SubagentSessions,
