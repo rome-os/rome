@@ -518,6 +518,25 @@ describe("VisitorAllowListSync — applied contract", () => {
     expect(cloud.sent).toHaveLength(sends);
   });
 
+  it("still ends with the newest list when Rome Cloud is above both the boot send and the queued save", async () => {
+    // Rome Cloud holds 3. The reset instance's boot sends 0 and a save queues 1
+    // during it, so the first answer's revision is not acted on. The save's own
+    // answer carries it again.
+    const cloud = appliedCloud({ revision: 3, emails: ["old@example.com"] });
+    const store = await storeAt(0, ["a@example.com"]);
+    const sync = linkedSync(cloud, store);
+
+    cloud.hold();
+    await syncStoredVisitorAllowList(store, sync);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    sync.push(await store.save({ cloudEmailAccess: ["c@example.com"] }));
+    cloud.release();
+    await settle(sync);
+
+    expect(cloud.sent.map((list) => list.revision)).toEqual([0, 1, 4]);
+    expect(cloud.state).toEqual({ revision: 4, emails: ["c@example.com"] });
+  });
+
   it("delivers a save whose revision equals the one Rome Cloud holds after a restore", async () => {
     // Rome Cloud holds a different list at 5. The instance was restored to 4,
     // its boot send failed, and the guardian then saves revision 5.
