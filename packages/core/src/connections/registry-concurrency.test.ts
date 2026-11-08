@@ -13,7 +13,7 @@
 // splits memory from the ledger) and green with it.
 
 import { describe, expect, it } from "@rstest/core";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import type { ConnectionsRepository } from "./repository.js";
 import { ConnectionRegistry } from "./registry.js";

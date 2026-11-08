@@ -8,7 +8,7 @@ import {
 } from "./guardian-auth-state.js";
 import type { ProveIdentityResult } from "./instance-identity.js";
 import { guardianAuth } from "../db/schema.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 
 describe("getGuardianAuthState", () => {
   let testDb: TestDb;

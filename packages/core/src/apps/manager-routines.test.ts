@@ -17,7 +17,7 @@ import { RoutinesRepository } from "../db/repositories/routines.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutineEngine } from "../routines/engine.js";
 import { systemClock } from "../lib/clock.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 
 describe("AppManager routine lifecycle", () => {
   let root: string;

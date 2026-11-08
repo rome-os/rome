@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { sql } from "drizzle-orm";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { ChatAddresses } from "./chat-addresses.js";
 
 const sales = { platform: "feishu", id: "bot-sales" };

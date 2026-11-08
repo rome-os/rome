@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import {
   type ChatPrivacyRow,

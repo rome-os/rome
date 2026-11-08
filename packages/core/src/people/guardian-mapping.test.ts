@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
-import { createTestDb, type TestDb, identityConnectionKindOf } from "../test/helpers.js";
+import { createTestDb, type TestDb, identityConnectionKindOf } from "../test/db.js";
 import { PeopleRepository } from "../db/repositories/people.js";
 import {
   applyGuardianMappingWithinTx,

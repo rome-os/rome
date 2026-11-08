@@ -66,7 +66,7 @@ rs.mock("../../lib/oauth-providers.js", () => ({
   },
 }));
 
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";

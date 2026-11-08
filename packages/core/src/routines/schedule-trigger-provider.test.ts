@@ -6,7 +6,7 @@ import {
   nextDateForLocalTime,
   ScheduleTriggerProvider,
 } from "./schedule-trigger-provider.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import type { SessionActor } from "../lib/session-actor.js";
 import type { Routine, Trigger } from "./types.js";

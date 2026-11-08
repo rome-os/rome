@@ -11,7 +11,7 @@ import { ConnectionRegistry } from "../../connections/registry.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { tokenPaste } from "../../connections/schemes.js";
 import type { Connection, ConnectionDescriptor, Talker } from "../../connections/types.js";
-import { createTestDb, kindChannelOf, type TestDb } from "../../test/helpers.js";
+import { createTestDb, kindChannelOf, type TestDb } from "../../test/db.js";
 import type { Accounts } from "../accounts/accounts.js";
 import { AccountNotConnected } from "./connected-account.js";
 import { channelList, joinLaterChannel } from "./connected-account-list.js";

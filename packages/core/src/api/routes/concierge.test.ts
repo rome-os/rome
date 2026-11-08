@@ -15,7 +15,7 @@ import {
 } from "../../lib/auth.js";
 import { sessionActorMiddleware } from "../../lib/session-actor.js";
 import type { ApiDeps } from "../deps.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { CONCIERGE_UNREAD_CAP, conciergeRoutes } from "./concierge.js";
 
 const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };

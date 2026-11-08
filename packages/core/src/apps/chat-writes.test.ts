@@ -16,7 +16,7 @@ import { SpeakerMessages } from "../connections/speaker-messages.js";
 import { SpeakerReplies } from "../sessions/speaker-replies.js";
 import { Speakers } from "../sessions/speakers.js";
 import { TurnLinks } from "../sessions/turn-links.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
 import { appChatWrites, type ChatWrites } from "./chat-writes.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";

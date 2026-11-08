@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
-import { createTestDb, type TestDb, createActionEngineRepos } from "../test/helpers.js";
+import { createTestDb, type TestDb, createActionEngineRepos } from "../test/db.js";
 import type { ModelSessionEvent, ModelSessionParams } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
 import type { ModelLoginKind } from "../agent/index.js";

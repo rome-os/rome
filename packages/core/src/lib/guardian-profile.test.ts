@@ -30,7 +30,7 @@ rs.mock("../profile-memory.js", () => ({
 import { persons, settings } from "../db/schema.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { GUARDIAN_TIMEZONE_SETTING_KEY } from "../routines/guardian-timezone.js";
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import { guardianAuth } from "../db/schema.js";
 import {
   applyGuardianProfile,

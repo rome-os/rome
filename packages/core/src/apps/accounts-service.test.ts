@@ -11,7 +11,7 @@ import {
 import { recordedChannelOf } from "../chats/connected-accounts/connection-ports.js";
 import type { RomeAccounts } from "./rome-accounts.js";
 import type { Connection } from "../connections/types.js";
-import { kindChannelOf } from "../test/helpers.js";
+import { kindChannelOf } from "../test/db.js";
 
 // The name-keyed service app actions send and read through, in the main
 // process and, over RPC, in a worker. It finds the Connection itself.

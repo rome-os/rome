@@ -2,7 +2,7 @@ import { ROOT_CONTEXT } from "@opentelemetry/api";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import type {
   AgentSession,
   AgentSessionManager,

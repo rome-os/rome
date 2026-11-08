@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { speakerFixture } from "../../test/speakers.js";
 import { romeAgentMessages, romeSessions } from "../schema.js";
 import { SessionQueryRepository } from "./session-query.js";

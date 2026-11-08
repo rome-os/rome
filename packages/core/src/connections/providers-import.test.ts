@@ -28,7 +28,7 @@ rs.mock("../lib/provider-token-files.js", () => ({
   clearProviderTokenFile: rs.fn(async () => {}),
 }));
 
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { OAuthProvider } from "../lib/oauth-providers.js";
 import type { OAuthTokenBundle } from "../lib/oauth-token-bundle.js";

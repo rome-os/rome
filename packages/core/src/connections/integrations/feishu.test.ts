@@ -19,7 +19,7 @@ import {
 } from "@larksuiteoapi/node-sdk";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import { isFeishuAuthError } from "../kinds/feishu/feishu.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
 import { ConnectionRegistry } from "../registry.js";

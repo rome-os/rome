@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { AccountProfilesRepository } from "../../db/repositories/account-profiles.js";
 import { WhatsAppStoreRepository } from "../../db/repositories/whatsapp-store.js";
 import { AccountProfiles, refreshingAfter } from "./account-profiles.js";
