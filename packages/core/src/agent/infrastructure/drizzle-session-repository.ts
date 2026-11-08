@@ -21,8 +21,11 @@ type SessionRow = typeof sessions.$inferSelect;
 
 /**
  * The Sessions repository over SQLite through Drizzle. It is the only code
- * that touches `sessions` and `session_turn_checkpoints`. The agent also
- * matches under its legacy names in `current`, through {@link deprecatedSameAgent}.
+ * that touches `sessions` and `session_turn_checkpoints`, except the
+ * `chat_id` column: the web chat side reads and records which chat has a
+ * session there (`chatOfSession`, `recordSessionInChat` in
+ * db/repositories/webchat.ts). The agent also matches under its legacy names
+ * in `current`, through {@link deprecatedSameAgent}.
  */
 export class DrizzleSessionRepository implements SessionRepository {
   constructor(
