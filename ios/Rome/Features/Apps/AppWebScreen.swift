@@ -58,11 +58,6 @@ struct AppWebScreen: View {
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .background(SwipeBackEnabler())
-        // The widget fills its spare spots with the apps opened last.
-        .task(id: app.id) {
-            guard pageURL == nil else { return }
-            WidgetShelf.recordOpen(appId: app.id, instanceId: workspace.instanceID)
-        }
     }
 
     private var header: some View {

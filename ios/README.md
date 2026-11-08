@@ -86,12 +86,6 @@ xcrun simctl push booted cc.romeos.mobile.dev push.json
 
 While the app is open the push shows no banner; the chat updates from live events. A tap opens the instance named in `rome.instanceId`, then its Concierge.
 
-## Apps widget
-
-`RomeWidget` is a small home-screen widget: a 2×2 grid of the open instance's apps. The app writes the apps list and small icons to the App Group (`group.<bundle id>`, `ROME_APP_GROUP` in `Config/Base.xcconfig`) whenever it loads the list, and records each app it opens. The widget only reads that copy. It never calls the network or holds the session. A tap opens `rome://app/<instanceId>/<appId>` (`rome-dev://` for Debug), and the app switches instance first when it has to, as a tapped push does.
-
-Device and TestFlight builds sign the widget as `<bundle id>.widget` with the App Group on both IDs, so both must exist on Rome's team. The Simulator needs neither. To try it there, run with `ROME_DEMO=1`, go home, long-press, then choose Edit → Add Widget → Rome Dev.
-
 ## Debug modes
 
 Debug builds read these environment variables (set them in the scheme's Run options):
@@ -100,7 +94,7 @@ Debug builds read these environment variables (set them in the scheme's Run opti
 |---|---|
 | `ROME_DEMO=1` | Opens built-in demo data: every task state, an approval, a question, a failed task. Also available by long-pressing "Rome" on the sign-in screen. |
 | `ROME_DEMO=update` | Opens the demo data on a Rome one release behind, so the update page shows; "Update now" finishes after a few seconds. |
-| `ROME_DEMO=many-apps` | Opens the demo data with a screenful of apps, for the Apps grid and the widget's two rows. |
+| `ROME_DEMO=many-apps` | Opens the demo data with a screenful of apps, for the Apps grid. |
 | `ROME_LOCAL_ORIGIN`, `ROME_LOCAL_USER`, `ROME_LOCAL_PASSWORD` | Signs in to a Rome on this Mac with a local test guardian instead of Rome Cloud. |
 
 To run a local Rome for this, start core with its own profile so it does not touch `~/.rome/default`:

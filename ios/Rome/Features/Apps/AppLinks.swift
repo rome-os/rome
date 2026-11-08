@@ -135,3 +135,16 @@ enum ComposerPrefill {
         return kept + "\n" + prompt
     }
 }
+
+/// The letter tile of an app with no icon.
+enum AppTile {
+    /// The tile's color in `Palette.appTiles`, the same for a name on every
+    /// launch and every phone: Swift's own hash changes per launch.
+    static func colorIndex(for name: String, count: Int = Palette.appTiles.count) -> Int {
+        var hash: UInt32 = 2_166_136_261
+        for scalar in name.lowercased().unicodeScalars {
+            hash = (hash ^ scalar.value) &* 16_777_619
+        }
+        return Int(hash % UInt32(count))
+    }
+}

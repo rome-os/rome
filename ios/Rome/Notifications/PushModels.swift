@@ -32,13 +32,8 @@ enum PushRoute: Equatable {
     case switchTo(CloudInstance)
 
     static func decide(_ target: PushTarget, currentInstanceID: String?, instances: [CloudInstance]) -> PushRoute {
-        decide(instanceId: target.instanceId, currentInstanceID: currentInstanceID, instances: instances)
-    }
-
-    /// Also the widget's links: another running instance is switched to first.
-    static func decide(instanceId: String, currentInstanceID: String?, instances: [CloudInstance]) -> PushRoute {
-        guard instanceId != currentInstanceID,
-              let instance = instances.first(where: { $0.id == instanceId }),
+        guard target.instanceId != currentInstanceID,
+              let instance = instances.first(where: { $0.id == target.instanceId }),
               instance.isRunning
         else { return .openConcierge }
         return .switchTo(instance)
@@ -55,12 +50,6 @@ extension PushRoute {
         else { return nil }
         return chatId
     }
-}
-
-/// Asks the shell to follow a widget link on the open instance.
-struct WidgetRequest: Equatable {
-    let serial: Int
-    let link: WidgetLink?
 }
 
 /// Asks the shell to show a Concierge chat: a topic chat, or the main one (nil).
