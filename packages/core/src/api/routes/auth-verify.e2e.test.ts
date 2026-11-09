@@ -25,12 +25,12 @@ import {
   VISITOR_COOKIE_NAME,
   createGuardianSession,
   createVisitorSession,
-} from "../../lib/auth.js";
+} from "../../access/auth.js";
 import type { ApiConfig, ApiDeps } from "../deps.js";
 import type { AppCatalog } from "../../apps/catalog.js";
 import type { AppView, ResolvedApp } from "../../apps/state.js";
 import { settings } from "../../db/schema.js";
-import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";
+import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 
 function buildResolvedApp(

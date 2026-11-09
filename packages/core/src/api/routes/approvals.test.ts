@@ -1,4 +1,4 @@
-import { runWithSessionActor } from "../../lib/session-actor.js";
+import { runWithSessionActor } from "../../access/session-actor.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { approvalsRoutes } from "./approvals.js";

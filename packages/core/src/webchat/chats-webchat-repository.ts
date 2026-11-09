@@ -39,7 +39,7 @@ import {
   sessions,
 } from "../db/schema.js";
 import { isWebchatChat, storedSessionType } from "../db/session-kind.js";
-import type { SessionActor } from "../lib/session-actor.js";
+import type { SessionActor } from "../access/session-actor.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { ChatReadModel, chatsSessionAwaitingGuardian } from "./chat-read-model.js";
 import {

@@ -1,6 +1,6 @@
 import { inArray } from "drizzle-orm";
-import { visitorProfiles } from "../schema.js";
-import type { DrizzleDb } from "../index.js";
+import { visitorProfiles } from "../db/schema.js";
+import type { DrizzleDb } from "../db/index.js";
 
 export interface VisitorProfile {
   email: string;

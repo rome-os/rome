@@ -1,6 +1,6 @@
 import type { DrizzleDb } from "../db/index.js";
 import { getGuardianAuthState } from "./guardian-auth-state.js";
-import { resolveInstanceSlug } from "./runtime.js";
+import { resolveInstanceSlug } from "../lib/runtime.js";
 import { checkGate } from "@rome-os/libs/feature-flags";
 
 /** Feature-gate name for the cloud-auth rollout (the cloud-auth-specific key). */

@@ -2,14 +2,19 @@ import { Hono } from "hono";
 import { getCookie } from "hono/cookie";
 import { v4 as uuidv4 } from "uuid";
 import { guardianAuth, persons } from "../../db/schema.js";
-import { COOKIE_NAME, hashPassword, issueGuardianSession, verifySession } from "../../lib/auth.js";
-import { resolveAndRecordAccount } from "../../lib/guardian-auth-state.js";
-import { resolveBootstrapState } from "../../lib/bootstrap-state.js";
-import { applySetupDefaults } from "../../lib/guardian-profile.js";
-import { resolveGuardianSession } from "../../lib/guardian-session.js";
+import {
+  COOKIE_NAME,
+  hashPassword,
+  issueGuardianSession,
+  verifySession,
+} from "../../access/auth.js";
+import { resolveAndRecordAccount } from "../../access/guardian-auth-state.js";
+import { resolveBootstrapState } from "../../access/bootstrap-state.js";
+import { applySetupDefaults } from "../../people/guardian-profile.js";
+import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { isInstanceLinked } from "../../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
-import { resolveVisitorSession } from "../../lib/visitor-session.js";
+import { resolveVisitorSession } from "../../access/visitor-session.js";
 import type { ApiDeps } from "../deps.js";
 
 export function onboardRoutes(deps: ApiDeps): Hono {

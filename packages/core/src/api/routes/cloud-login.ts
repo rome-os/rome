@@ -9,12 +9,12 @@ import {
   createGuardianSession,
   issueGuardianSession,
   shouldSecureCookie,
-} from "../../lib/auth.js";
+} from "../../access/auth.js";
 import {
   createCloudGuardian,
   getGuardianAuthState,
   setGuardianAccount,
-} from "../../lib/guardian-auth-state.js";
+} from "../../access/guardian-auth-state.js";
 import {
   backgroundNote,
   followRequest,
@@ -25,7 +25,7 @@ import {
   applySetupDefaults,
   defaultGuardianName,
   writeGuardianBackground,
-} from "../../lib/guardian-profile.js";
+} from "../../people/guardian-profile.js";
 import {
   isInstanceLinked,
   isValidInstanceToken,

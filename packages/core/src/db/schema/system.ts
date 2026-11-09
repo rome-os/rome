@@ -11,7 +11,7 @@ import {
 import { sql } from "drizzle-orm";
 import type { AgentInputState, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DeviceFolder } from "@rome/api-types/devices";
-import type { SessionActor } from "../../lib/session-actor.js";
+import type { SessionActor } from "../../access/session-actor.js";
 import type { UsageEvent } from "../../usage/events.js";
 import { TURN_FEEDBACK_RATINGS } from "@rome/api-types/trace-segments";
 import {

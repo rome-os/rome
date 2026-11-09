@@ -7,7 +7,7 @@ import {
   normalizeDashboardAccessConfig,
   type DashboardAccessConfig,
 } from "./dashboard-access-config.js";
-import { normalizePublicAccessEmail } from "../apps/public-access-config.js";
+import { normalizePublicAccessEmail } from "./public-access-config.js";
 
 /**
  * In-memory cache of dashboard visitor policy for the auth-edge probe.

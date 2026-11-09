@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { loadConfig } from "./config.js";
-import { resolveCloudAuthEnabled } from "./lib/cloud-auth-gate.js";
+import { resolveCloudAuthEnabled } from "./access/cloud-auth-gate.js";
 import { createLogger } from "./logger.js";
 import {
   cloudBearer,
@@ -27,7 +27,7 @@ import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client
 import { assembleDiagnosticBundle } from "./lib/diagnostics.js";
 import { NotifyClient } from "./lib/notify-client.js";
 import { CloudProfileClient } from "./lib/cloud-profile.js";
-import { getGuardianAuthState, recordResolvedAccount } from "./lib/guardian-auth-state.js";
+import { getGuardianAuthState, recordResolvedAccount } from "./access/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./apps/rome-cloud-relay.js";
 import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
@@ -44,7 +44,7 @@ import { createUsageAppDirectory } from "./usage/app-directory.js";
 import { SKILL_REVIEW_INITIATOR, UsageAttributionResolver } from "./usage/attribution.js";
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
-import { type SessionActor, withoutSessionActor } from "./lib/session-actor.js";
+import { type SessionActor, withoutSessionActor } from "./access/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
 import { containerUptimeMs } from "./lib/runtime.js";
@@ -208,7 +208,7 @@ import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
-import { VisitorProfilesRepository } from "./db/repositories/visitor-profiles.js";
+import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
@@ -244,10 +244,13 @@ import { SystemUpgradeService } from "./system-upgrade/service.js";
 import { HostExecutionService } from "./apps/host-execution/service.js";
 import { createHostWorkerRecovery } from "./apps/host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
-import { PublicAccessState } from "./lib/public-access-state.js";
-import { DashboardAccessState } from "./lib/dashboard-access-state.js";
-import { DashboardAccessStore } from "./lib/dashboard-access-store.js";
-import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./lib/visitor-allowlist-sync.js";
+import { PublicAccessState } from "./access/public-access-state.js";
+import { DashboardAccessState } from "./access/dashboard-access-state.js";
+import { DashboardAccessStore } from "./access/dashboard-access-store.js";
+import {
+  VisitorAllowListSync,
+  syncStoredVisitorAllowList,
+} from "./access/visitor-allowlist-sync.js";
 import { PhoneWatching } from "./lib/phone-watching.js";
 import { ApprovalHandler } from "./apps/actions/approval-handler.js";
 import { createBackendTurnRunner } from "./apps/actions/backend-turn.js";

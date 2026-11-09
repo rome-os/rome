@@ -11,11 +11,11 @@ import {
   shouldSecureCookie,
   verifyPassword,
   verifySession,
-} from "../../lib/auth.js";
-import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../lib/guardian-auth-state.js";
+} from "../../access/auth.js";
+import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "../../access/guardian-auth-state.js";
 import { isAppApiPathNoAuth } from "../../apps/no-auth.js";
-import { resolveGuardianSession } from "../../lib/guardian-session.js";
-import { resolveVisitorSession, type RomeAppViewer } from "../../lib/visitor-session.js";
+import { resolveGuardianSession } from "../../access/guardian-session.js";
+import { resolveVisitorSession, type RomeAppViewer } from "../../access/visitor-session.js";
 import type { ResolvedApp } from "../../apps/state.js";
 import { decodeAppApiPath, decodeAppIdPathSegment, InvalidAppApiPathError } from "../helpers.js";
 import type { ApiDeps } from "../deps.js";

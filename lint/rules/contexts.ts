@@ -23,6 +23,11 @@ const FORBIDDEN_DEPENDENCIES: ForbiddenDependency[] = [
     description:
       "An agent never knows which connection carries its chat, so no file in agent/ imports connections/. What an agent needs from a chat reaches it through Chats.",
   },
+  ...["agent", "chats", "connections", "people", "routines"].map((to) => ({
+    from: "access",
+    to,
+    description: `Access answers who may use this Rome, and as whom, for every other context, so no file in access/ imports ${to}/. A context that needs a sign-in decision imports access/.`,
+  })),
 ];
 
 function contextOf(path: string): string {

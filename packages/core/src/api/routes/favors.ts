@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { z } from "zod";
 import type { ApiDeps } from "../deps.js";
-import { resolveVisitorSession } from "../../lib/visitor-session.js";
+import { resolveVisitorSession } from "../../access/visitor-session.js";
 import {
   FavorServiceRequestError,
   FavorServiceUnavailableError,

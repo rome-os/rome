@@ -12,8 +12,8 @@ import {
   createSession,
   createVisitorSession,
   VISITOR_COOKIE_NAME,
-} from "../../lib/auth.js";
-import { sessionActorMiddleware } from "../../lib/session-actor.js";
+} from "../../access/auth.js";
+import { sessionActorMiddleware } from "../../access/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { CONCIERGE_UNREAD_CAP, conciergeRoutes } from "./concierge.js";

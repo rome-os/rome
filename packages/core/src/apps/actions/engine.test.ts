@@ -18,7 +18,7 @@ import {
   getCurrentHookInvocationContext,
   runWithHookInvocationContext,
 } from "../../core/hook-recursion.js";
-import { runWithSessionActor, type SessionActor } from "../../lib/session-actor.js";
+import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
 import {
   createTestRome,
   buildAction,

@@ -3,8 +3,8 @@
 // allow-list, and stops the moment they are dropped from it.
 
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { VisitorProfilesRepository } from "../db/repositories/visitor-profiles.js";
-import type { DashboardAccessState } from "../lib/dashboard-access-state.js";
+import type { VisitorProfilesRepository } from "../access/visitor-profiles.js";
+import type { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { type ConciergeOwner, GUARDIAN_OWNER } from "./owner.js";
 
 const VISITOR_PREFIX = "visitor:";

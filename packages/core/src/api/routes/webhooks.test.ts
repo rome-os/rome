@@ -7,7 +7,7 @@ import {
   currentSessionActor,
   runWithSessionActor,
   type SessionActor,
-} from "../../lib/session-actor.js";
+} from "../../access/session-actor.js";
 import type { ActionResult } from "../../apps/actions/types.js";
 import type { ApiDeps } from "../deps.js";
 import { errorHandler } from "../middleware/error-handler.js";
