@@ -1688,7 +1688,7 @@ async function main() {
     chatsWired.recordedSends(withInboundSpans(channels, "channel-message")),
   );
   // Every message the channels deliver is put on record in its chat before the
-  // hook hears it (docs/domains/participation.md#wake). It records through the
+  // hook hears it (docs/domains/chats.md#wake). It records through the
   // hook's channels, so the hook's trace covers recording as well.
   const inboundRecorder = inboundRecording(
     {

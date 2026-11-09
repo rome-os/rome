@@ -1,7 +1,6 @@
 // What an app says and hears in the chats Rome's sessions stand in, kept in
 // Chats: the writes of the SDK's `ChatRepository` over Chats' messages,
-// Agents' speakers and the turns they link. Vocabulary: docs/domains/chats.md
-// and docs/domains/participation.md.
+// Agents' speakers and the turns they link. Vocabulary: docs/domains/chats.md.
 //
 // An app names a session and the platform's ids; this file turns them into
 // the speaker, the message and its key. Nothing hands these to apps yet: the

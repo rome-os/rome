@@ -1,7 +1,7 @@
 // Where a speaker's session starts when it first stands in a chat. A
 // catch-up reads what was said after the session's second
 // (`TurnLinks.unseen`), so every way a speaker is placed starts it the same
-// way. Vocabulary: docs/domains/participation.md#speaker.
+// way. Vocabulary: docs/domains/chats.md#speaker.
 
 import { sql, type SQL } from "drizzle-orm";
 import type { DrizzleDb, DrizzleTx } from "./index.js";

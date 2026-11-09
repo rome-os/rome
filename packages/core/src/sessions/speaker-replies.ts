@@ -1,6 +1,6 @@
 // What one of Rome's speakers says into its place, recorded in Chats and linked
 // to the turn that said it. Vocabulary: docs/domains/chats.md#message and
-// docs/domains/participation.md#reply.
+// docs/domains/chats.md#reply.
 //
 // Nothing calls this yet: the Chats switch moves Agents' replies onto it.
 

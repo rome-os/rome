@@ -1,6 +1,6 @@
 import { automatedSource, speaksForGuardian } from "./automated-source.js";
 // The dashboard's repository over Chats' tables. Vocabulary:
-// docs/domains/chats.md and docs/domains/participation.md.
+// docs/domains/chats.md.
 //
 // A dashboard chat is a direct message on the `webchat` platform between
 // the guardian and the agent's dashboard account, keyed by the id of the

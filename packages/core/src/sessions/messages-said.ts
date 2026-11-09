@@ -1,5 +1,5 @@
 // Agents hearing what Chats records from the channels, and the hook's port
-// onto it. Vocabulary: docs/domains/participation.md#wake.
+// onto it. Vocabulary: docs/domains/chats.md#wake.
 //
 // A message said to Rome wakes an agent or does not, and until that is
 // decided no catch-up reads it. Agents holds it out from the moment Chats

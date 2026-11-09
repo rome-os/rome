@@ -1,6 +1,6 @@
 // Agents' link from a session's turns to the chat messages they took, gave
 // and caught up on (`agent_turn_messages`). Vocabulary:
-// docs/domains/agents.md and docs/domains/participation.md#projection.
+// docs/domains/agents.md and docs/domains/chats.md#projection.
 //
 // Chats answers a message's id when it records or sends one, and the link is
 // written after, in a write of its own. A message carries no turn and a turn

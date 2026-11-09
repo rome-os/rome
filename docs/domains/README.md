@@ -26,12 +26,13 @@ flowchart LR
     Connections -- carries messages --> Chats
     Chats -- wakes an agent, starts a turn --> Agents
     Chats -. which agent speaks through this account .-> Agents
+    People -- platform and account --> Chats
     Chats -- who is this --> People
 ```
 
 Connections carry messages between chats and Rome. Chats keeps the record, decides when a message wakes an agent, starts the agent's turn, and takes what the agent says back into the record. The dashed line is the link the guardian sets on a [connected account](chats.md#connected-account) after connecting it, as a separate step: which agent speaks through it. An account may have none. Chats follows the definitions of Connections and Agents and changes neither, and Connections never names an agent. Connections and Agents do not depend on each other.
 
-Chats asks People who a sender is, handing it the sender's platform and the platform's own id as plain values, and gets a person with their bond level, or nobody. People depends on no other context and never decides what happens to a message. Connections and People do not depend on each other, so a disconnect removes nothing from People.
+People follows Chats for platform and account and changes neither. Chats asks People who a sender is and gets a person with their bond level, or nobody. People never decides what happens to a message. That the two read each other is an open question: the recommendation is that Chats hands People a sender's platform and platform id as plain values and People depends on no other context, and this paragraph changes when it is decided. Connections and People do not depend on each other, so a disconnect removes nothing from People.
 
 ## How to read a context file
 

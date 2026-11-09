@@ -1,6 +1,6 @@
 # People
 
-Who is behind an account, and how close they are to the guardian. People depends on no other context: a sender's [platform](chats.md#platform) and the platform's own id reach it as plain values in the question, and it defines nothing of Chats' or Connections' words. [Chats](chats.md#wake) asks People one question about a sender, [who is this](#who-is-this), and People never decides what happens to a message.
+Who is behind an account, and how close they are to the guardian. People follows the definitions of [platform](chats.md#platform) and [account](chats.md#account) in Chats and changes neither. [Chats](chats.md#wake) asks People one question about a sender, [who is this](#who-is-this), and People never decides what happens to a message.
 
 ## Person
 
