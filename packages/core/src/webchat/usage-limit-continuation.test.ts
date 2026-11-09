@@ -33,18 +33,35 @@ const limitedUntil = (at: number): ModelAccountReport => ({
   account: { loggedIn: true },
 });
 
-/** An account whose next answer the test sets. */
+/** An account whose next answer the test sets. A slow one answers after a delay, as a real read does. */
 function fakeAccount(initial: ModelAccountReport) {
   let answer = initial;
+  let slow = false;
+  const listeners = new Set<() => void>();
   const account: ModelAccount = {
-    report: rs.fn(async () => answer),
-    onChanged: () => () => {},
+    report: rs.fn(async () => {
+      if (slow) await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      return answer;
+    }),
+    onChanged(listener) {
+      listeners.add(listener);
+      return () => listeners.delete(listener);
+    },
     close() {},
   };
   return {
     account,
     set(next: ModelAccountReport) {
       answer = next;
+    },
+    /** The provider refused a turn: the account says it changed, and its read is still to come. */
+    refused(next: ModelAccountReport) {
+      answer = next;
+      slow = true;
+      for (const listener of listeners) listener();
+    },
+    settleReads() {
+      slow = false;
     },
     reads: () => (account.report as ReturnType<typeof rs.fn>).mock.calls.length,
   };
@@ -168,8 +185,11 @@ describe("usage-limit continuation", () => {
     return { agent, runner };
   }
 
-  function start(runner: Pick<MainBackendTurnRunner, "runAndReport">) {
-    stop = startUsageLimitContinuation({ accounts, repo, runner });
+  function start(
+    runner: Pick<MainBackendTurnRunner, "runAndReport">,
+    from: Pick<ModelAccounts, "read" | "refresh" | "onChanged"> = accounts,
+  ) {
+    stop = startUsageLimitContinuation({ accounts: from, repo, runner });
     return stop;
   }
 
@@ -660,24 +680,55 @@ describe("usage-limit continuation", () => {
       expect(maxActive).toBe(1);
     });
 
-    it("stops the sweep when the provider is limited again, and goes on at the next reset", async () => {
+    it("stops the sweep when a continuation hits the limit again, before the next chat", async () => {
       await stopped("one");
       rs.setSystemTime(NOW + 1000);
       await stopped("two");
       const calls: string[] = [];
+      // As a real turn does: the provider refuses, the account is told, and its read has not settled.
       const runAndReport = rs.fn(async (params: { threadId: string }) => {
         calls.push(params.threadId);
-        claude.set(limitedUntil(NOW + 6 * HOUR));
-        await accounts.refresh("anthropic");
+        claude.refused(limitedUntil(NOW + 6 * HOUR));
         return "failed" as const;
       });
       start({ runAndReport });
-      await clearAndSweep();
+      await accounts.refresh("anthropic");
+      await rs.advanceTimersByTimeAsync(100);
       expect(calls).toEqual(["one"]);
 
+      claude.settleReads();
       claude.set(available);
       await rs.advanceTimersByTimeAsync(6 * HOUR + RESET_GRACE_MS);
       expect(calls).toEqual(["one", "two"]);
+    });
+
+    it("reads the account only after a continuation that failed", async () => {
+      await stopped("one");
+      rs.setSystemTime(NOW + 1000);
+      await stopped("two");
+      const refresh = rs.fn(accounts.refresh);
+      const outcomes = ["completed", "failed"] as const;
+      const runAndReport = rs.fn(async () => outcomes[runAndReport.mock.calls.length - 1]!);
+      start({ runAndReport }, { read: accounts.read, onChanged: accounts.onChanged, refresh });
+      await accounts.refresh("anthropic");
+      await settle();
+      expect(runAndReport).toHaveBeenCalledTimes(2);
+      expect(refresh).toHaveBeenCalledTimes(1);
+      expect(refresh).toHaveBeenCalledWith("anthropic");
+    });
+
+    it("stops the sweep when the read after a failed continuation fails", async () => {
+      await stopped("one");
+      rs.setSystemTime(NOW + 1000);
+      await stopped("two");
+      const runAndReport = rs.fn(async () => "failed" as const);
+      const refresh = rs.fn(async () => {
+        throw new Error("down");
+      });
+      start({ runAndReport }, { read: accounts.read, onChanged: accounts.onChanged, refresh });
+      await accounts.refresh("anthropic");
+      await settle();
+      expect(runAndReport).toHaveBeenCalledTimes(1);
     });
 
     it("tries a continuation again at the next reset when it was dropped, not run", async () => {

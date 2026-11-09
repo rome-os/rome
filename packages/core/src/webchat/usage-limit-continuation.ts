@@ -59,7 +59,7 @@ function usageLimitProviderOf(
 }
 
 export interface UsageLimitContinuationOptions {
-  accounts: Pick<ModelAccounts, "read" | "onChanged">;
+  accounts: Pick<ModelAccounts, "read" | "refresh" | "onChanged">;
   repo: Pick<
     ChatsWebChatRepository,
     | "getLatestErroredTurns"
@@ -104,7 +104,7 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
         if (!available(provider)) return;
         attempted.add(turn.messageId);
         let dropped = false;
-        await runner.runAndReport(
+        const outcome = await runner.runAndReport(
           {
             agentName: turn.agentName,
             sessionId: turn.runtimeSessionId,
@@ -126,7 +126,22 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
           },
         );
         // A turn that never ran is still stopped, and the next reset may continue it.
-        if (dropped) attempted.delete(turn.messageId);
+        if (dropped) {
+          attempted.delete(turn.messageId);
+        } else if (outcome === "failed") {
+          // A turn that fails on the limit again marks the account, but the read that
+          // shows it is still in flight, so wait for it before the next chat.
+          try {
+            await accounts.refresh(provider);
+          } catch (error) {
+            // Without the read, the next chat would be judged on state that may be stale.
+            log.warn("model account read after a failed continuation failed", {
+              provider,
+              error: String(error),
+            });
+            return;
+          }
+        }
       } catch (error) {
         log.warn("could not continue usage-limit turn", {
           sessionId: turn.sessionId,
