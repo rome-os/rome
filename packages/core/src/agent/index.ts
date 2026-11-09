@@ -183,7 +183,8 @@ export { forkSessionTools, type SessionTools } from "./domain/session-tools.js";
 export {
   createSessions,
   type AgentSession,
-  type AgentSessionInit,
+  type ResumeOpening,
+  type SessionOpening,
   type AgentSessionKey,
   type Sessions,
   type AgentTurnHandle,
