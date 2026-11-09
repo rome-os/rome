@@ -849,9 +849,6 @@ export function RecentChats({
     );
   };
 
-  const startChatInDefaultProject = () =>
-    navigate("/chat", { state: { projectPath: DEFAULT_PROJECT_NAME } });
-
   return (
     // skipDelayDuration 0 makes every row wait out the delay on its own:
     // Radix's default grace window would otherwise pop each name instantly
@@ -933,26 +930,14 @@ export function RecentChats({
           ) : null}
           <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
             {conciergeChatId ? (
-              <hr className="mx-2 my-2 border-0 border-t border-border" aria-hidden />
+              <hr className="mx-2 my-4 border-0 border-t border-border" aria-hidden />
             ) : null}
-            <div className="group/projects flex h-8 min-h-[var(--control-min-h)] items-center gap-1">
-              <h2
-                id="recent-chats-projects-heading"
-                className="min-w-0 flex-1 truncate px-2 text-aux text-subtle-foreground"
-              >
-                {t("recentChats.sectionProjects")}
-              </h2>
-              <button
-                type="button"
-                onClick={startChatInDefaultProject}
-                aria-label={t("recentChats.newChat")}
-                title={t("recentChats.newChat")}
-                data-new-chat
-                className="touch-show mr-1 shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/projects:opacity-100"
-              >
-                <Plus className="h-3.5 w-3.5" aria-hidden />
-              </button>
-            </div>
+            <h2
+              id="recent-chats-projects-heading"
+              className="flex h-8 min-h-[var(--control-min-h)] items-center px-2 text-aux text-subtle-foreground"
+            >
+              {t("recentChats.sectionProjects")}
+            </h2>
             {phase === "loading" ? (
               <div className="space-y-1 px-2 py-2" aria-hidden>
                 <Skeleton className="h-8 w-full" />

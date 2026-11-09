@@ -127,7 +127,7 @@ A chat the Concierge starts to hand one piece of work to another agent. It belon
 The dashboard's list of a person's chats, beside the rail. Every dashboard person gets the same list, with their own main chat in it.
 
 - It opens with the main chat, labelled "Main chat", and the topic chats under it, latest first: five, then a More row for the rest. The plus beside the main chat starts a topic chat.
-- Below a divider, the Projects section holds the common chats and fork chats, grouped by project or by device folder, with the default project first. A plus on the Projects heading starts a chat in the default project, and a plus on a project row starts one in that project. Each plus shows on hover, and always on a touch screen.
+- Below a divider, the Projects section holds the common chats and fork chats, grouped by project or by device folder, with the default project first. A plus on a project row starts a chat in that project, and the composer can still move it to another project before its first message. The plus shows on hover, and always on a touch screen.
 - Nothing in it is pinned, and it is not grouped by date.
 - Its status filter, active, archived or all, applies to every chat in it. Under archived the main chat is hidden, since it is never archived, and an archived topic chat stays under the main chat, not in Projects.
 

@@ -550,24 +550,16 @@ describe("RecentChats", () => {
     expect(screen.getByText("No chats yet")).toBeTruthy();
   });
 
-  it("has no New chat link, and starts a chat in the default project from the Projects heading", async () => {
+  it("has no New chat link, and no new chat button on the Projects heading", async () => {
     mockSessions([]);
-    const user = userEvent.setup();
 
     renderRecentChats("/chat/session-1");
 
     await screen.findByText("No chats yet");
     expect(screen.queryByRole("link", { name: "New chat" })).toBeNull();
-    const heading = screen.getByRole("heading", { name: "Projects" });
-    const plus = within(heading.parentElement as HTMLElement).getByRole("button", {
-      name: "New chat",
-    });
-    // Shown on hover, and always on a touch screen, which has no hover.
-    expect(plus.className).toContain("group-hover/projects:opacity-100");
-    expect(plus.className).toContain("touch-show");
-    await user.click(plus);
-    expect(screen.getByTestId("location-path").textContent).toBe("/chat");
-    expect(screen.getByTestId("location-state").textContent).toBe('{"projectPath":"default"}');
+    expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
+    // A common chat starts from a project row's plus instead.
+    expect(screen.queryByRole("button", { name: "New chat" })).toBeNull();
   });
 
   it("leaves search to the rail and keeps the list settings in its header", async () => {
