@@ -1,11 +1,11 @@
 import type { Server, IncomingMessage } from "node:http";
 import type { Duplex } from "node:stream";
 import net from "node:net";
-import type { DrizzleDb } from "./db/index.js";
-import { gateGuardianUpgrade } from "./lib/ws-guardian-gate.js";
-import { rejectUpgrade } from "./lib/ws-upgrade.js";
+import type { DrizzleDb } from "../db/index.js";
+import { gateGuardianUpgrade } from "../lib/ws-guardian-gate.js";
+import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { desktopSlot } from "./desktops.js";
-import { createLogger } from "./logger.js";
+import { createLogger } from "../logger.js";
 
 const log = createLogger("desktop-proxy");
 

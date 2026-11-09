@@ -14,7 +14,7 @@ rs.mock("@rome-os/node-core/client", () => daemon);
 
 import { createNodeCallerProvisioner } from "./rome-node-provisioning.js";
 import { createNodeDevicesService } from "./node-devices.js";
-import { hydrateInstanceToken, setInstanceTokenInMemory } from "./instance-identity.js";
+import { hydrateInstanceToken, setInstanceTokenInMemory } from "../lib/instance-identity.js";
 
 const originalEnv = { ...process.env };
 const token = "romeinst_current";

@@ -2,7 +2,7 @@ import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { WebChatDashboardSessions } from "./webchat/webchat-dashboard-sessions.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
-import { createNodeDevicesService } from "./lib/node-devices.js";
+import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/guardian-link-code.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
@@ -31,7 +31,7 @@ import { getGuardianAuthState, recordResolvedAccount } from "./lib/guardian-auth
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./apps/rome-cloud-relay.js";
 import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
-import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
+import { createNodeCallerProvisioner } from "./desktops/rome-node-provisioning.js";
 import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./lib/rome-cloud-origin.js";
 import { resolveInstanceSlug } from "./lib/runtime.js";
 import {
@@ -144,7 +144,7 @@ import { WechatApp } from "./connections/kinds/wechat-user/wechat-app.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./apps/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
-import { ComputerUseService } from "./computer-use/service.js";
+import { ComputerUseService } from "./desktops/computer-use.js";
 import { AppKeysRepository } from "./apps/repositories/app-keys.js";
 import { AppKeyInjector } from "./apps/app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
