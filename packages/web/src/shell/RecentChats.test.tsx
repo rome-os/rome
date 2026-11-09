@@ -523,7 +523,7 @@ describe("RecentChats", () => {
 
     await user.click(screen.getByRole("button", { name: "List settings" }));
     await user.click(screen.getByRole("menuitem", { name: selection }));
-    await screen.findByText("No chats yet");
+    await screen.findByRole("button", { name: "default" });
     expect(listRequests).toBe(2);
 
     await act(async () => {
@@ -547,7 +547,7 @@ describe("RecentChats", () => {
     });
     expect(screen.queryByText("Stale chat")).toBeNull();
     expect(screen.queryByText("Chats couldn't be loaded")).toBeNull();
-    expect(screen.getByText("No chats yet")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "default" })).toBeTruthy();
   });
 
   it("has no New chat link, and no new chat button on the Projects heading", async () => {
@@ -555,7 +555,7 @@ describe("RecentChats", () => {
 
     renderRecentChats("/chat/session-1");
 
-    await screen.findByText("No chats yet");
+    await screen.findByRole("button", { name: "default" });
     expect(screen.queryByRole("link", { name: "New chat" })).toBeNull();
     expect(screen.getByRole("heading", { name: "Projects" })).toBeTruthy();
     // A common chat starts from a project row's plus instead.
@@ -567,7 +567,7 @@ describe("RecentChats", () => {
 
     renderRecentChats("/chat");
 
-    await screen.findByText("No chats yet");
+    await screen.findByRole("button", { name: "default" });
     expect(screen.queryByRole("button", { name: "Search pages, apps, and chats" })).toBeNull();
     expect(screen.getByRole("button", { name: "List settings" })).toBeTruthy();
   });
@@ -658,7 +658,6 @@ describe("RecentChats", () => {
     renderRecentChats();
 
     expect(await screen.findByText("Chats couldn't be loaded")).toBeTruthy();
-    expect(screen.queryByText("No chats yet")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Try again" }));
 
@@ -1096,6 +1095,82 @@ describe("RecentChats", () => {
     await user.click(plus);
     expect(screen.getByTestId("location-path").textContent).toBe("/chat");
     expect(screen.getByTestId("location-state").textContent).toBe('{"projectPath":"alpha"}');
+  });
+
+  it("shows the default project as just its row, with its plus, when it has no chats", async () => {
+    mockSessions([
+      {
+        id: "alpha-chat",
+        name: "Alpha chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-09T10:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "Alpha project",
+        projectPath: "alpha",
+      },
+    ]);
+    const user = userEvent.setup();
+    const { container } = renderRecentChats();
+
+    const projects = await screen.findByRole("region", { name: "Projects" });
+    await within(projects).findByRole("link", { name: "Alpha chat" });
+    const groups = Array.from(container.querySelectorAll("[data-project-group]"));
+    expect(groups.map((group) => group.getAttribute("data-project-group"))).toEqual([
+      "project:default",
+      "project:alpha",
+    ]);
+    const defaultGroup = groups[0] as HTMLElement;
+    // Nothing to expand, and no empty-state text: the row alone.
+    const row = within(defaultGroup).getByRole("button", { name: "default" });
+    expect(row.getAttribute("aria-expanded")).toBeNull();
+    expect(within(defaultGroup).queryAllByRole("link")).toHaveLength(0);
+    expect(defaultGroup.textContent).toBe("default");
+
+    await user.click(
+      within(defaultGroup).getByRole("button", { name: "New chat in this project" }),
+    );
+    expect(screen.getByTestId("location-path").textContent).toBe("/chat");
+    expect(screen.getByTestId("location-state").textContent).toBe('{"projectPath":"default"}');
+  });
+
+  it("keeps the default project first under archived when it holds no archived chat", async () => {
+    localStorage.setItem("rome-recent-chats-status-filter", "archived");
+    mockSessions([
+      {
+        id: "default-live",
+        name: "Default live chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-09T10:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+      },
+      {
+        id: "alpha-old",
+        name: "Alpha old chat",
+        createdAt: "2026-07-01T00:00:00.000Z",
+        activityAt: "2026-07-09T11:00:00.000Z",
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "Alpha project",
+        projectPath: "alpha",
+        archivedAt: "2026-07-09T12:00:00.000Z",
+      },
+    ]);
+    const { container } = renderRecentChats();
+
+    await screen.findByRole("link", { name: "Alpha old chat" });
+    expect(screen.queryByText("Default live chat")).toBeNull();
+    const groups = Array.from(container.querySelectorAll("[data-project-group]"));
+    expect(groups.map((group) => group.getAttribute("data-project-group"))).toEqual([
+      "project:default",
+      "project:alpha",
+    ]);
+    expect(
+      within(groups[0] as HTMLElement).getByRole("button", { name: "New chat in this project" }),
+    ).toBeTruthy();
   });
 
   it("offers no date grouping and no pins", async () => {

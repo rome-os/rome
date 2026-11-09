@@ -45,7 +45,6 @@
     "conciergeSection": "Main chat and topic chats",
     "moreTopicChats": "{{count}} more",
     "mainChatUnavailable": "Could not load the main chat",
-    "empty": "No chats yet",
     "conciergeUnread_one": "{{name}}, {{label}} unread message",
     "conciergeUnread_other": "{{name}}, {{label}} unread messages",
     "conciergeUnreadBadge_one": "{{label}} unread message",

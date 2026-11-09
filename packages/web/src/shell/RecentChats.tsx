@@ -451,13 +451,22 @@ export function RecentChats({
       bucket.items.push(session);
       buckets.set(rawKey, bucket);
     }
+    // The default project always has a row, chats or not, since its plus is
+    // where a common chat usually starts.
+    if (!buckets.has(DEFAULT_PROJECT_NAME)) {
+      buckets.set(DEFAULT_PROJECT_NAME, {
+        label: DEFAULT_PROJECT_NAME,
+        items: [],
+        projectPath: DEFAULT_PROJECT_NAME,
+      });
+    }
     return (
       Array.from(buckets.entries())
         .map(([rawKey, { label, items, projectPath, deviceFolder }]) => ({
           key: `project:${rawKey}`,
           label,
           items,
-          latest: sessionActivityTime(items[0]),
+          latest: items[0] ? sessionActivityTime(items[0]) : 0,
           projectPath,
           deviceFolder,
         }))
@@ -718,7 +727,9 @@ export function RecentChats({
   };
 
   const renderProjectGroup = ({ key, label, items, projectPath, deviceFolder }: SessionGroup) => {
-    const collapsed = collapsedGroups.has(key);
+    // An empty group is just its row: nothing to expand or collapse.
+    const empty = items.length === 0;
+    const collapsed = empty || collapsedGroups.has(key);
     const visibleCount = visibleGroupCounts[key] ?? PROJECT_DEFAULT_VISIBLE;
     const visibleItems = items.slice(0, visibleCount);
     const remainingCount = Math.max(items.length - visibleCount, 0);
@@ -776,8 +787,8 @@ export function RecentChats({
     const groupButton = (
       <button
         type="button"
-        onClick={() => toggleGroup(key)}
-        aria-expanded={!collapsed}
+        onClick={empty ? undefined : () => toggleGroup(key)}
+        aria-expanded={empty ? undefined : !collapsed}
         aria-label={
           deviceFolder
             ? t("recentChats.folderOnDevice", { folder: label, device: deviceFolder.deviceName })
@@ -944,31 +955,28 @@ export function RecentChats({
                 <Skeleton className="h-8 w-4/5" />
                 <Skeleton className="h-8 w-3/5" />
               </div>
-            ) : projectGroups.length === 0 ? (
-              // Only reachable with nothing to show: a refetch that fails while the
-              // list already has rows keeps the rows rather than blanking them.
-              phase === "error" ? (
-                <div className="px-3 py-8 text-center" role="alert">
-                  <p className="text-aux text-subtle-foreground">
-                    {t("recentChats.searchLoadError")}
-                  </p>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="mt-3"
-                    onClick={() => void refetch()}
-                  >
-                    {t("recentChats.searchRetry")}
-                  </Button>
-                </div>
-              ) : (
-                <div className="px-3 py-6 text-center text-aux text-subtle-foreground">
-                  {t("recentChats.empty")}
-                </div>
-              )
             ) : (
-              <div className="space-y-1">{projectGroups.map(renderProjectGroup)}</div>
+              <div className="space-y-1">
+                {projectGroups.map(renderProjectGroup)}
+                {/* Only with nothing to show: a refetch that fails while the
+                    list already has rows keeps the rows rather than blanking them. */}
+                {phase === "error" && sessions.length === 0 ? (
+                  <div className="px-3 py-8 text-center" role="alert">
+                    <p className="text-aux text-subtle-foreground">
+                      {t("recentChats.searchLoadError")}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => void refetch()}
+                    >
+                      {t("recentChats.searchRetry")}
+                    </Button>
+                  </div>
+                ) : null}
+              </div>
             )}
           </section>
         </div>
