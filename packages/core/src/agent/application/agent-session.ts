@@ -123,7 +123,9 @@ export interface AgentSessionKey {
   channelThreadKey: string;
 }
 
-export interface AgentSessionInit {
+/** What an opener states about the session it opens, fixed for the session's life
+ *  unless a field says otherwise. */
+export interface SessionOpening {
   workingDir?: string;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
@@ -136,8 +138,6 @@ export interface AgentSessionInit {
    * manager-level `isSubagent`, which is false for the top-level manager).
    */
   isSubagent?: boolean;
-  /** Explicit runtime session id to resume. */
-  resumeSessionId?: string;
   /** Appended to the system prompt at open time. */
   contextSuffix?: string;
   /**
@@ -174,14 +174,20 @@ export interface AgentSessionInit {
   spanAttributes?: Attributes;
 }
 
+/** What a resume states. It carries no reset policy, since a session named by
+ *  id is resumed as it is. */
+export type ResumeOpening = Omit<SessionOpening, "resetPolicy">;
+
+/** An open as `Sessions` serves it: what the opener states, and the stored
+ *  session it names by id, if any. */
+type OpenRequest = SessionOpening & { resumeSessionId?: string };
+
 export interface AgentTurnInput {
   inputId?: string;
   prompt: string;
   /** Absolute local paths of images attached to the turn (providers without image-input support ignore them). */
   images?: string[];
   reasoningEffort?: ModelReasoningEffort;
-  /** Optional injected tool-result, for approval continuations. */
-  injectedToolResult?: { toolUseId: string; content: unknown };
 }
 
 /** A forked turn: what it says, and what the fork asks of its source (see `openFork`). */
@@ -213,7 +219,6 @@ export interface SendTurnOptions {
   links?: Link[];
   /** Turn-scoped parent ref used when this turn is launched as a subagent. */
   lifecycleParent?: AgentTurnParentRef;
-  attachmentsCount?: number;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
   /** Durable Rome session id when it differs from the runtime AgentSession id. */
@@ -237,14 +242,14 @@ export interface AgentSessionStatusEvent {
   turnId?: string;
 }
 
-export type AgentSessionSubscriber = (msg: StreamAgentEvent, turnId: string) => void;
 export type AgentSessionStatusListener = (event: AgentSessionStatusEvent) => void;
 
 export interface AgentSession {
   readonly key: AgentSessionKey;
   readonly sessionId: string;
   readonly status: AgentSessionStatus;
-  readonly currentTurnId?: string;
+  /** The turn the session is running, until it ends. */
+  readonly runningTurn?: Turn;
   /**
    * Submits an input, by default `next`. The receipt says where it landed and
    * resolves with the turn it lands in once that turn has started. An `after`
@@ -254,7 +259,6 @@ export interface AgentSession {
   submit(input: AgentTurnInput, options?: SubmitOptions): AgentInputReceipt;
   selectModel(selectionId: ModelSelectionId | null): void;
   fork(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent>;
-  subscribe(handler: AgentSessionSubscriber): () => void;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
   /** Stops the session's running turn, if it has one, and the subagent calls it waits on. */
   stop(reason?: string): Promise<void>;
@@ -269,12 +273,12 @@ export interface SessionById {
 
 export interface Sessions {
   /** The open session for this continuity key and agent, opening it when none is open. */
-  open(continuityKey: AgentSessionKey, init?: AgentSessionInit): Promise<AgentSession>;
+  open(continuityKey: AgentSessionKey, opening?: SessionOpening): Promise<AgentSession>;
   /**
    * The stored session with this id, reopened when it is not open. Fails when
    * no stored session has the id or the session cannot be resumed.
    */
-  open(session: SessionById, init?: AgentSessionInit): Promise<AgentSession>;
+  resume(session: SessionById, opening?: ResumeOpening): Promise<AgentSession>;
   /** The open session for this continuity key and agent. Never opens one. */
   find(continuityKey: AgentSessionKey): AgentSession | undefined;
   /**
@@ -322,7 +326,7 @@ interface ManagerDeps {
   subagentSessions?: (
     manager: Sessions,
     parentLink: string,
-    inherited: Pick<AgentSessionInit, "toolEnv" | "spanAttributes">,
+    inherited: Pick<SessionOpening, "toolEnv" | "spanAttributes">,
   ) => SubagentSessions;
   /** The middleware apps put around a turn's reply. Absent, the model replies directly. */
   turnMiddleware?: TurnMiddleware;
@@ -410,7 +414,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
   const acquireInner = async (
     key: AgentSessionKey,
     span: Span,
-    init?: AgentSessionInit,
+    init?: OpenRequest,
     /** Set when the reset policy already ran for this acquire. */
     resetChecked?: { prepared?: Session },
   ): Promise<AgentSession> => {
@@ -550,7 +554,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
   // summon waterfall (the open nests under it via the active-span context). The
   // outcome (reuse/cold/reopen/coalesced) is stamped on the span by
   // `recordAcquire`, mirroring the `rome.session.acquire` counter.
-  const acquire = (key: AgentSessionKey, init?: AgentSessionInit): Promise<AgentSession> => {
+  const acquire = (key: AgentSessionKey, init?: OpenRequest): Promise<AgentSession> => {
     const canonicalKey = canonicalizeKey(key);
     return deps.sessionTracing.withSpan(
       "session.acquire",
@@ -562,7 +566,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
   const acquireBySessionId = async (
     sessionId: string,
     agentName: string,
-    init?: AgentSessionInit,
+    opening?: ResumeOpening,
   ): Promise<AgentSession> => {
     const session = await resumableSession(deps, sessionId, agentName);
     if (!session?.continuityKey) {
@@ -570,13 +574,13 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     }
     return acquire(
       { agentName, channelThreadKey: session.continuityKey },
-      { ...(init ?? {}), resumeSessionId: sessionId },
+      { ...(opening ?? {}), resumeSessionId: sessionId },
     );
   };
 
   return {
-    open: (target: AgentSessionKey | SessionById, init?: AgentSessionInit) =>
-      "id" in target ? acquireBySessionId(target.id, target.agent, init) : acquire(target, init),
+    open: (continuityKey, opening) => acquire(continuityKey, opening),
+    resume: (session, opening) => acquireBySessionId(session.id, session.agent, opening),
     find(continuityKey) {
       let canonicalKey: AgentSessionKey;
       try {
@@ -735,7 +739,7 @@ function deprecatedSameAgent(
 async function openSession(
   deps: ManagerDeps,
   key: AgentSessionKey,
-  init: AgentSessionInit,
+  init: OpenRequest,
   opts: OpenOptions,
 ): Promise<AgentSessionImpl> {
   const { log } = deps;
@@ -1430,7 +1434,6 @@ interface TurnSink {
   lifecycleStartedAt?: string;
   lifecycleStartedAtMs?: number;
   lifecycleParent?: AgentTurnParentRef;
-  lifecycleAttachmentsCount?: number;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
   romeSessionId: string;
@@ -1560,6 +1563,9 @@ class AgentSessionImpl implements AgentSession {
   private readonly session: Session;
   status: AgentSessionStatus = "idle";
   currentTurnId?: string;
+  get runningTurn(): Turn | undefined {
+    return this.currentTurnId ? this.turns.find(this.currentTurnId) : undefined;
+  }
   lastActiveAt = Date.now();
   private activeForkedTurnCount = 0;
   // Forks run in this session's working dir; actions they call carry the fork's id.
@@ -1584,7 +1590,6 @@ class AgentSessionImpl implements AgentSession {
   private attribution: TurnAttribution;
   private threadContext?: ThreadContext;
   private sharedContext?: Record<string, unknown>;
-  private subscribers = new Map<string, AgentSessionSubscriber>();
   private statusListeners = new Map<string, AgentSessionStatusListener>();
   private currentSink: TurnSink | null = null;
   // Spans for the current turn. Both are opened in runOneTurn and closed in
@@ -2282,15 +2287,6 @@ class AgentSessionImpl implements AgentSession {
       sink.saidTerminal = msg;
     }
     sink.writer.record(msg);
-    for (const sub of this.subscribers.values()) {
-      try {
-        sub(msg, sink.turnId);
-      } catch (err) {
-        this.log.warn("agent session subscriber threw", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    }
   }
 
   private trackTurnMetrics(msg: AgentEvent | StreamAgentEvent): void {
@@ -2346,7 +2342,6 @@ class AgentSessionImpl implements AgentSession {
       timing: { startedAt },
       input: {
         promptLength: input.prompt.length,
-        attachmentsCount: sink.lifecycleAttachmentsCount,
       },
     });
   }
@@ -2782,7 +2777,6 @@ class AgentSessionImpl implements AgentSession {
       ttftRecorded: false,
       romeAttrs: {},
       lifecycleParent: options?.lifecycleParent,
-      lifecycleAttachmentsCount: options?.attachmentsCount,
       threadContext: options?.threadContext,
       sharedContext: options?.sharedContext,
       romeSessionId: options?.romeSessionId ?? this.sessionId,
@@ -3132,7 +3126,6 @@ class AgentSessionImpl implements AgentSession {
               text: mwInput.prompt,
               images: input.images,
               reasoningEffort: mwInput.reasoningEffort,
-              injectedToolResult: input.injectedToolResult,
             });
             // Taking the input may have replaced a Claude query, and its login kind.
             sink.loginKind = this.modelSession.loginKind;
@@ -3262,14 +3255,6 @@ class AgentSessionImpl implements AgentSession {
       this.currentTurnCtx = null;
       throw err;
     }
-  }
-
-  subscribe(handler: AgentSessionSubscriber): () => void {
-    const id = uuidv4();
-    this.subscribers.set(id, handler);
-    return () => {
-      this.subscribers.delete(id);
-    };
   }
 
   onStatusChange(listener: AgentSessionStatusListener): () => void {

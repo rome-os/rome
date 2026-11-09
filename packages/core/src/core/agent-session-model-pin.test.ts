@@ -251,10 +251,10 @@ describe("agent model pins through Sessions", () => {
     await collect((await startAfter(first, { prompt: "use selected model" })).events());
     await firstManager.shutdown();
 
-    const resumed = await createManager().open(key, {
-      workingDir: directory,
-      resumeSessionId: first.sessionId,
-    });
+    const resumed = await createManager().resume(
+      { id: first.sessionId, agent: key.agentName },
+      { workingDir: directory },
+    );
     await collect((await startAfter(resumed, { prompt: "continue" })).events());
     expect(anthropic.calls.map((call) => call.model)).toEqual([
       "claude-sonnet-5-5",

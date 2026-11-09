@@ -227,26 +227,27 @@ export class AgentRunner {
     const openedKey = explicitSessionId
       ? await this.webchatRepo?.continuityKeyOfSession(explicitSessionId)
       : requestedChannelThreadKey;
-    const init = {
+    const opening = {
       ...this.openingFor(openedKey ?? "", threadContext),
       workingDir: params.workingDir,
       threadContext,
       sharedContext: params.sharedContext,
       contextSuffix: params.contextSuffix,
-      resetPolicy: await resetPolicyOfMessage(this.resetPolicyOf, {
-        platformMessageId: params.platformMessageId,
-        sessionId: explicitSessionId,
-        threadContext,
-      }),
     };
     const session = explicitSessionId
-      ? await this.agentSessionManager.open(
+      ? await this.agentSessionManager.resume(
           { id: explicitSessionId, agent: params.agentName },
-          init,
+          opening,
         )
       : await this.agentSessionManager.open(
           { agentName: params.agentName, channelThreadKey: requestedChannelThreadKey },
-          init,
+          {
+            ...opening,
+            resetPolicy: await resetPolicyOfMessage(this.resetPolicyOf, {
+              platformMessageId: params.platformMessageId,
+              threadContext,
+            }),
+          },
         );
     await openedInChat(this.webchatRepo, session, params.romeSessionId);
     const agentName = session.key.agentName;

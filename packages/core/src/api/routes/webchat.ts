@@ -3115,8 +3115,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       agentName: stream.agentName,
       channelThreadKey: stream.channelThreadKey ?? webchatSessionKey(stream.sessionId),
     });
-    const turn = deps.agentSessionManager.turn(turnId);
-    if (!agentSess || agentSess.currentTurnId !== turnId || !turn) {
+    const turn = agentSess?.runningTurn;
+    if (!turn || turn.id !== turnId) {
       return answer({ stopped: false, reason: "turn_not_interruptible" }, 409);
     }
     stream.stopRequested = true;
@@ -3153,7 +3153,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               deps.agentSessionManager.find({
                 agentName: s.agentName,
                 channelThreadKey: s.channelThreadKey,
-              })?.currentTurnId
+              })?.runningTurn?.id
               ? "running"
               : "queued",
         })),
@@ -4332,9 +4332,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         });
         // The wrapper may outlive its provider turn. Never stop a later turn
         // merely because it reuses the same runtime session.
-        if (owner?.currentTurnId === msg.turnId) {
+        if (owner?.runningTurn?.id === msg.turnId) {
           stream.interrupt = async (reason) => {
-            if (owner.currentTurnId !== msg.turnId) return;
+            if (owner.runningTurn?.id !== msg.turnId) return;
             // Marked only when the Stop reaches this turn: one that lands
             // after a newer input ended it stops nothing.
             if (reason === "user-stop") stream.stopRequested = true;

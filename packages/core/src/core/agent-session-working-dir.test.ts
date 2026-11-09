@@ -20,7 +20,7 @@ import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { createSessionFromRun, type ModelProvider } from "./agent-runner.js";
 import {
   createSessions,
-  type AgentSessionInit,
+  type SessionOpening,
   type AgentSessionKey,
   type Sessions,
 } from "../agent/index.js";
@@ -175,7 +175,7 @@ describe("Sessions working dirs", () => {
     const sessionId = original.sessionId;
     await original.close("idle");
 
-    const resumed = await manager.open({ id: sessionId, agent: AGENT });
+    const resumed = await manager.resume({ id: sessionId, agent: AGENT });
 
     expect(resumed.sessionId).toBe(sessionId);
     expect(manager.findWorkingDirBySessionId!(sessionId)).toBe(projectDir);
@@ -205,13 +205,13 @@ describe("Sessions working dirs", () => {
     await original.close("idle");
     await rm(projectDir, { recursive: true });
 
-    await expect(manager.open!({ id: original.sessionId, agent: AGENT })).rejects.toThrow(
+    await expect(manager.resume({ id: original.sessionId, agent: AGENT })).rejects.toThrow(
       "which no longer exists",
     );
   });
 
   /** Acquires the way every opener does: the session, then the chat it names. */
-  async function open(key: AgentSessionKey, chatId?: string, init: AgentSessionInit = {}) {
+  async function open(key: AgentSessionKey, chatId?: string, init: SessionOpening = {}) {
     const session = await manager.open(key, init);
     await openedInChat(webchatRepo, session, chatId);
     return session;
@@ -250,7 +250,7 @@ describe("Sessions working dirs", () => {
     expect(byKey.sessionId).toBe(sessionId);
     await byKey.close("idle");
 
-    const byId = await manager.open({ id: sessionId, agent: AGENT });
+    const byId = await manager.resume({ id: sessionId, agent: AGENT });
     await openedInChat(webchatRepo, byId, undefined);
     expect(byId.sessionId).toBe(sessionId);
     expect(await webchatRepo.chatOfSession(sessionId)).toMatchObject({ id: "stored" });
@@ -355,7 +355,7 @@ describe("Sessions working dirs", () => {
     });
     await original.close("idle");
 
-    const resumed = await manager.open!({ id: original.sessionId, agent: AGENT });
+    const resumed = await manager.resume({ id: original.sessionId, agent: AGENT });
     await openedInChat(webchatRepo, resumed, original.sessionId);
 
     expect(await rowChat(original.sessionId)).toBe(original.sessionId);
@@ -371,7 +371,7 @@ describe("Sessions working dirs", () => {
     const sessionId = original.sessionId;
     await original.close("idle");
 
-    const byId = await manager.open!({ id: sessionId, agent: AGENT }, { workingDir: secondDir });
+    const byId = await manager.resume({ id: sessionId, agent: AGENT }, { workingDir: secondDir });
     await byId.close("idle");
     expect((await sessionRepository.session(sessionId))?.workingDir).toBe(secondDir);
 
@@ -379,7 +379,7 @@ describe("Sessions working dirs", () => {
     await byKey.close("idle");
     expect((await sessionRepository.session(sessionId))?.workingDir).toBe(thirdDir);
 
-    await manager.open({ id: sessionId, agent: AGENT });
+    await manager.resume({ id: sessionId, agent: AGENT });
     expect(manager.findWorkingDirBySessionId!(sessionId)).toBe(thirdDir);
   });
 
@@ -408,7 +408,7 @@ describe("Sessions working dirs", () => {
       Session.create(AGENT, { deprecatedId: "legacy-session", continuityKey: "action:legacy" }),
     );
 
-    await manager.open!({ id: "legacy-session", agent: AGENT });
+    await manager.resume({ id: "legacy-session", agent: AGENT });
 
     expect(manager.findWorkingDirBySessionId!("legacy-session")).toBe(
       join(directory, "projects", "default"),
@@ -426,7 +426,7 @@ describe("Sessions working dirs", () => {
       }),
     );
 
-    await expect(manager.open!({ id: "orphan-session", agent: "gone:reader" })).rejects.toThrow(
+    await expect(manager.resume({ id: "orphan-session", agent: "gone:reader" })).rejects.toThrow(
       'Agent session "orphan-session" was not found or cannot be resumed',
     );
   });
