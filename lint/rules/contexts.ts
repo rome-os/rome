@@ -53,6 +53,30 @@ const FORBIDDEN_DEPENDENCIES: ForbiddenDependency[] = [
     description:
       "Desktops never names a person or an account, so no file in desktops/ imports people/.",
   },
+  {
+    from: "desktops",
+    to: "apps",
+    description:
+      "Desktops answers whichever app asks and never knows which one it is, so no file in desktops/ imports apps/.",
+  },
+  {
+    from: "desktops",
+    to: "favors",
+    description:
+      "Desktops never knows what a favor asked for, so no file in desktops/ imports favors/.",
+  },
+  {
+    from: "desktops",
+    to: "participation",
+    description:
+      "Desktops never knows what woke an agent or where it speaks, so no file in desktops/ imports participation/.",
+  },
+  {
+    from: "instance",
+    to: "desktops",
+    description:
+      "Desktops reads this Rome's identity from Instance to reach the guardian's devices, and this Rome stays the same whichever machines it reaches, so no file in instance/ imports desktops/.",
+  },
 ];
 
 function contextOf(path: string): string {
