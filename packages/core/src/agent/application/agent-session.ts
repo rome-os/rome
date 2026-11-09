@@ -451,17 +451,24 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
       const interactionAt = new Date();
       const chatId = init.threadContext?.romeSessionId;
       return await lifecycleMutex.runExclusive(k, async () => {
-        // The whole reset decision, read now: the chat's active session,
-        // whether it is due, and whether a turn stopped midway holds it.
+        const cached = sessions.get(k);
+        // The whole reset decision, read under the lock: the chat's active
+        // session, whether it is due, and whether something holds it.
         const decide = async () => {
           const active = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-          const due = !active
-            ? { due: false as const }
-            : setup !== undefined && setupChanged(active.setup, setup)
-              ? { due: true as const, reason: "setup" as const }
-              : reset
-                ? evaluateProviderSessionReset(reset, active, interactionAt)
-                : { due: false as const };
+          // A session with a turn in progress is never replaced, whatever the
+          // reason: a send then steers or queues as it always does, and the
+          // reset happens on the next acquire that finds it idle.
+          const busy =
+            cached !== undefined && cached.status !== "closed" && cached.hasTurnInProgress;
+          const due =
+            !active || busy
+              ? { due: false as const }
+              : setup !== undefined && setupChanged(active.setup, setup)
+                ? { due: true as const, reason: "setup" as const }
+                : reset
+                  ? evaluateProviderSessionReset(reset, active, interactionAt)
+                  : { due: false as const };
           // A turn stopped midway resumes by this session's id, so the
           // session stays until that turn has ended.
           const held = due.due && active ? await deps.heldMidTurn?.(active.id) : false;
@@ -475,15 +482,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
           }
           return { active, decision: held ? { due: false as const } : due };
         };
-        let { active, decision } = await decide();
-        const cached = sessions.get(k);
-        if (decision.due && cached && cached.status !== "closed") {
-          // Waiting for the live session's turn to end can take a while, and
-          // an approval may stop that turn midway, so the decision is made
-          // again once it is quiet, before anything is closed.
-          await waitUntilQuiescent(cached);
-          ({ active, decision } = await decide());
-        }
+        const { active, decision } = await decide();
         if (decision.due) {
           log.info("provider_session.reset_due", {
             chatId,
@@ -494,7 +493,12 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
             policyMode: reset?.mode,
             elapsedMinutes: "elapsedMinutes" in decision ? decision.elapsedMinutes : undefined,
           });
-          if (cached && cached.status !== "closed") await cached.close("idle");
+          if (cached && cached.status !== "closed") {
+            // Only the cleanup of a turn that has ended is left, so this is
+            // brief, and the lock keeps a new turn from starting meanwhile.
+            await waitUntilQuiescent(cached);
+            await cached.close("idle");
+          }
         }
         let prepared: Session | undefined;
         if (decision.due && active) {
@@ -621,27 +625,37 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     agentName: string,
     opening?: ResumeOpening,
   ): Promise<AgentSession> => {
-    // A session a reset replaced is resumed as its chat's current session.
-    const session = await currentSuccessor(deps, sessionId, agentName);
-    if (!session?.continuityKey) {
+    const named = await deps.sessionRepository.session(sessionId);
+    if (!named?.continuityKey) {
       throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
     }
-    const redirected = session.id !== sessionId;
-    if (redirected) {
-      log.info("provider_session.resume_redirected", {
-        agentName,
-        requestedSessionId: sessionId,
-        sessionId: session.id,
-      });
-    }
-    const resumed = await acquire(
-      { agentName, channelThreadKey: session.continuityKey },
-      { ...(opening ?? {}), resumeSessionId: session.id },
-    );
-    // What resumes the superseded session expects the context it had there,
-    // so the turn says the chat's earlier messages are not in this one.
-    if (redirected && resumed instanceof AgentSessionImpl) resumed.continuesElsewhere();
-    return resumed;
+    // A resume is a lifecycle transition of its chat's sessions, so it takes
+    // the same per-key lock as a reset, and reads which session is current
+    // only once it holds it: no reset can replace that session in between.
+    const chatKey = canonicalizeKey({ agentName, channelThreadKey: named.continuityKey });
+    return await lifecycleMutex.runExclusive(keyOf(chatKey), async () => {
+      // A session a reset replaced is resumed as its chat's current session.
+      const session = await currentSuccessor(deps, sessionId, agentName);
+      if (!session?.continuityKey) {
+        throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
+      }
+      const redirected = session.id !== sessionId;
+      if (redirected) {
+        log.info("provider_session.resume_redirected", {
+          agentName,
+          requestedSessionId: sessionId,
+          sessionId: session.id,
+        });
+      }
+      const resumed = await acquire(
+        { agentName, channelThreadKey: session.continuityKey },
+        { ...(opening ?? {}), resumeSessionId: session.id },
+      );
+      // What resumes the superseded session expects the context it had
+      // there, so the turn says the chat's earlier messages are not in this one.
+      if (redirected && resumed instanceof AgentSessionImpl) resumed.continuesElsewhere();
+      return resumed;
+    });
   };
 
   return {
@@ -1944,6 +1958,12 @@ class AgentSessionImpl implements AgentSession {
    */
   get hasActiveForkedTurns(): boolean {
     return this.activeForkedTurnCount > 0;
+  }
+
+  /** A turn runs or waits, or a forked turn runs: the session is in use, as
+   *  opposed to only finishing the cleanup of a turn that has ended. */
+  get hasTurnInProgress(): boolean {
+    return this.status !== "idle" || this.inputs.busy || this.hasActiveForkedTurns;
   }
 
   get isQuiescentForRotation(): boolean {

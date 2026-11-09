@@ -3531,8 +3531,8 @@ describe("AgentRunner", () => {
         expect(provider.calls[2]?.prompt).toContain("Read CI run 42 for PR #7");
       });
 
-      it("decides again after the running turn ends: an approval set meanwhile keeps the session", async () => {
-        const provider = new MockModelProvider(replies(3));
+      it("never renews a session with a turn running, and renews it on the next quiet turn", async () => {
+        const provider = new MockModelProvider(replies(4));
         let release!: () => void;
         const gate = new Promise<void>((resolve) => {
           release = resolve;
@@ -3549,13 +3549,43 @@ describe("AgentRunner", () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         identity.text = "**Agent Name:** YoYo";
 
-        const waiting = turn(runner);
+        // A send while the turn runs goes to the same session, without
+        // waiting for the turn: it steers or queues as it always does.
+        const sentMeanwhile = turn(runner);
         await new Promise((resolve) => setTimeout(resolve, 20));
-        held.add(first!);
         release();
-        await running;
 
-        expect(await waiting).toBe(first);
+        expect(await running).toBe(first);
+        expect(await sentMeanwhile).toBe(first);
+        const next = await turn(runner);
+        expect(next).not.toBe(first);
+      });
+
+      it("serializes a resume with a renewal: both run on the chat's current session", async () => {
+        const provider = new MockModelProvider(replies(3));
+        const open = provider.openSession.bind(provider);
+        provider.openSession = async (params) => {
+          const session = await open(params);
+          const close = session.close.bind(session);
+          // A slow provider close widens the window between the two.
+          session.close = async () => {
+            await new Promise((resolve) => setTimeout(resolve, 30));
+            await close();
+          };
+          return session;
+        };
+        const runner = renewingRunner(provider);
+        const first = await turn(runner);
+        identity.text = "**Agent Name:** YoYo";
+
+        const [incoming, woken] = await Promise.all([
+          turn(runner),
+          turn(runner, { sessionId: first }),
+        ]);
+
+        const current = (await sessionRepository.current(key, "core:test-renewing"))?.id;
+        expect(incoming).toBe(current);
+        expect(woken).toBe(current);
       });
 
       it("keeps a session an approval holds mid-turn, and renews it once the hold ends", async () => {
