@@ -1,8 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { createLogger } from "../logger.js";
 import type { UsageAttributionResolver } from "./attribution.js";
-import type { TurnUsageFacts } from "../agent/index.js";
+import type { RomeSessionType } from "@rome-os/app-runtime";
+import type { SessionKind, TurnUsageFacts } from "../agent/index.js";
 import type { LoginMethod, TurnUsageEvent, UsageEvent } from "./events.js";
+
+/** The chat type a turn counts under when its chat's row is missing, by its
+ *  session's kind. A web chat always has its row, so a conversation without
+ *  one is a connected account's. */
+const FALLBACK_TYPE: Record<SessionKind, RomeSessionType> = {
+  conversation: "channel",
+  action: "action",
+  fork: "fork",
+  subagent: "subagent",
+};
 
 const log = createLogger("usage-recorder");
 
@@ -83,7 +94,7 @@ export class UsageRecorder implements TurnUsageSink, LoginUsageSink {
   private async writeTurn(facts: TurnUsageFacts, credential: string): Promise<void> {
     const attribution = await this.deps.attribution.forTurn({
       romeSessionId: facts.romeSessionId,
-      fallbackType: facts.romeSessionType,
+      fallbackType: FALLBACK_TYPE[facts.sessionKind],
       agentName: facts.agentName,
     });
     const { accounting } = facts;

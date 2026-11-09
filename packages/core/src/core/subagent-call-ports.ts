@@ -15,7 +15,7 @@ import { createLogger } from "../logger.js";
 import type { AgentSession, SessionOpening, Sessions } from "../agent/index.js";
 import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-recorder.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
-import { openedInChat } from "./session-conversation.js";
+import { openedInChat, withRomeSession } from "./session-conversation.js";
 
 const log = createLogger("subagent-execution");
 
@@ -31,7 +31,6 @@ function subagentSession(child: AgentSession): SubagentSession {
           threadContext: context.threadContext,
           sharedContext: context.sharedContext,
           romeSessionId: child.sessionId,
-          romeSessionType: "subagent",
           initiatedBy: "system",
         },
       );
@@ -112,9 +111,11 @@ export function subagentTurnLog(webchatRepo: WebChatRepository): SubagentTurnLog
         threadContext: turn.threadContext,
         persistTranscript: true,
       });
+      // A subagent's turns record in the chat minted under its session's id.
+      const romeSession = { _romeSessionId: turn.sessionId, _type: "subagent" as const };
       return {
         record: (event) =>
-          recordAgentTraceBestEffort(recorder, event, log, {
+          recordAgentTraceBestEffort(recorder, withRomeSession(event, romeSession), log, {
             turnId: turn.turnId,
             source: "subagent-execution",
           }),

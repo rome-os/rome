@@ -27,7 +27,13 @@ import {
   resolveTurnConversation,
   shouldPersistAgentTrace,
 } from "./agent-trace-recorder.js";
-import { findChat, findSessionChat, openedInChat, openerChat } from "./session-conversation.js";
+import {
+  findChat,
+  findSessionChat,
+  openedInChat,
+  openerChat,
+  withRomeSession,
+} from "./session-conversation.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
 import { adhocSessionKey } from "./agent-session-key.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";
@@ -229,6 +235,7 @@ export class AgentRunner {
       : requestedChannelThreadKey;
     const opening = {
       ...this.openingFor(openedKey ?? "", threadContext),
+      kind: threadContext ? ("conversation" as const) : ("action" as const),
       workingDir: params.workingDir,
       threadContext,
       sharedContext: params.sharedContext,
@@ -286,7 +293,6 @@ export class AgentRunner {
         threadContext,
         sharedContext: params.sharedContext,
         romeSessionId,
-        romeSessionType,
         replyTo: params.replyTo,
         ...(lines ? { quoted: lines.quoted } : {}),
         initiatedBy: params.initiatedBy ?? "user",
@@ -327,7 +333,9 @@ export class AgentRunner {
           })
         : null;
 
-    for await (const msg of handle.events()) {
+    const romeSession = { _romeSessionId: romeSessionId, _type: romeSessionType };
+    for await (const event of handle.events()) {
+      const msg = withRomeSession(event, romeSession);
       if (recorder) {
         await recordAgentTraceBestEffort(recorder, msg, log, {
           turnId: handle.id,

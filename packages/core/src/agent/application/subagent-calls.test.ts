@@ -78,7 +78,8 @@ const parentRow: DashboardSession = {
 
 function callingTurn(sessions: SubagentSessions, toolUseId = "tool-1"): CallingTurn {
   return {
-    key: { dashboardSessionId: "chat", turnId: "turn-1", toolUseId },
+    key: { parentSessionId: "agent-session", turnId: "turn-1", toolUseId },
+    chat: "chat",
     agentName: "core:main",
     agentSessionId: "agent-session",
     sessions,
@@ -191,7 +192,7 @@ describe("SubagentCalls", () => {
     await calls.call("core:helper", { prompt: "one" }, callingTurn(sessions));
     await expect(
       calls.call("core:helper", { prompt: "two" }, callingTurn(sessions)),
-    ).rejects.toThrow("Active subagent link already exists for parent chat/turn-1/tool-1");
+    ).rejects.toThrow("Active subagent link already exists for parent agent-session/turn-1/tool-1");
     expect(second.session.stop).toHaveBeenCalledWith("subagent registration failed");
     expect(finish).toHaveBeenCalledTimes(1);
     wait.open();

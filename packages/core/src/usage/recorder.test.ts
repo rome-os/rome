@@ -9,7 +9,7 @@ function facts(overrides: Partial<TurnUsageFacts> = {}): TurnUsageFacts {
   return {
     turnId: "turn-1",
     romeSessionId: "chat-1",
-    romeSessionType: "webchat",
+    sessionKind: "conversation",
     agentName: "main",
     status: "completed",
     provider: "openai",

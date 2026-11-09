@@ -99,10 +99,11 @@ describe("subagent calls through the run's ports", () => {
     ) {
       return calls.call(name, subagentRequest(input), {
         key: {
-          dashboardSessionId: context.parentSessionId,
+          parentSessionId: context.parentAgentSessionId,
           turnId: context.parentTurnId,
           toolUseId: context.parentToolUseId,
         },
+        chat: context.parentSessionId,
         agentName: context.parentAgentName,
         agentSessionId: context.parentAgentSessionId,
         sessions: subagentSessions(context.childManager, context.parentChannelThreadKey, repo),
@@ -161,7 +162,7 @@ describe("subagent calls through the run's ports", () => {
       workingDir: "/tmp/project-a",
     };
     const callKey = {
-      dashboardSessionId: "parent-1",
+      parentSessionId: "parent-runtime-1",
       turnId: "parent-turn-1",
       toolUseId: "tool-1",
     };

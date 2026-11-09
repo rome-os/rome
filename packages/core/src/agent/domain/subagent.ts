@@ -110,7 +110,7 @@ export function newSubagentSession(
   id: SessionId,
   subagent: AgentName,
   parent: Pick<DashboardSession, "name" | "projectName" | "projectPath"> | null,
-  from: { dashboardSessionId: SessionRecordId; turnId: string; agentName: AgentName },
+  from: { chat: SessionRecordId; turnId: string; agentName: AgentName },
 ): NewSubagentSession {
   return {
     id,
@@ -118,7 +118,7 @@ export function newSubagentSession(
     agentName: storedAgentName(subagent),
     projectName: parent?.projectName ?? null,
     projectPath: parent?.projectPath ?? null,
-    parentSessionId: from.dashboardSessionId,
+    parentSessionId: from.chat,
     parentTurnId: from.turnId,
   };
 }

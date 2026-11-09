@@ -199,7 +199,7 @@ describe("continuation notice through Sessions", () => {
     const handle = await startAfter(
       session,
       { prompt: text, inputId },
-      { threadContext, romeSessionId: CHAT, romeSessionType: "webchat" },
+      { threadContext, romeSessionId: CHAT },
     );
     for await (const _event of handle.events()) {
       // drain

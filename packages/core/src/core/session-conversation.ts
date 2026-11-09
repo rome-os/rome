@@ -1,4 +1,4 @@
-import type { RomeSessionType } from "@rome-os/app-runtime";
+import type { RomeSessionRef, RomeSessionType } from "@rome-os/app-runtime";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
 import { webchatConversationOfKey } from "./agent-session-key.js";
@@ -69,6 +69,18 @@ export async function findOwnWebChat(
   const key = await webchatRepo.continuityKeyOfSession(sessionId);
   const chatId = key ? webchatConversationOfKey(key) : undefined;
   return chatId ? await webchatRepo.getSession(chatId) : null;
+}
+
+/**
+ * The event as a turn's recorder hands it on: a session's start names the
+ * dashboard chat the turn records in. The session's own event names none,
+ * since which chat a turn records in is the chat side's to say.
+ */
+export function withRomeSession<T extends { type: string }>(
+  event: T,
+  romeSession: RomeSessionRef,
+): T {
+  return event.type === "session_init" ? { ...event, romeSession } : event;
 }
 
 /** A session as its opener holds it. */

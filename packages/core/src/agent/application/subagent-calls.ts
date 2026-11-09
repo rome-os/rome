@@ -13,9 +13,9 @@ import {
   type SubagentRequest,
 } from "../domain/subagent.js";
 
-/** Which call: the calling turn's dashboard session, its turn and its tool use. */
+/** Which call: the calling session, its turn and its tool use. */
 export interface SubagentCallKey {
-  dashboardSessionId: SessionRecordId;
+  parentSessionId: SessionId;
   turnId: string;
   toolUseId: string;
 }
@@ -30,6 +30,10 @@ export interface SessionPlace {
 /** The turn a call comes from, as the run that owns it knows it. */
 export interface CallingTurn {
   key: SubagentCallKey;
+  /** The dashboard chat the calling turn records in, which the subagent's
+   *  session is listed under. Carried with the turn while each turn picks its
+   *  own chat (ZHA-157). */
+  chat: SessionRecordId;
   agentName: AgentName;
   agentSessionId: SessionId;
   /** Where the caller's subagent sessions open, already bound to the calling
@@ -104,7 +108,7 @@ export interface LiveTurns {
 }
 
 const callKey = (key: SubagentCallKey): string =>
-  `${key.dashboardSessionId}\u0000${key.turnId}\u0000${key.toolUseId}`;
+  `${key.parentSessionId}\u0000${key.turnId}\u0000${key.toolUseId}`;
 
 export function createSubagentCalls(deps: {
   dashboard: DashboardSessions;
@@ -118,12 +122,12 @@ export function createSubagentCalls(deps: {
     request: SubagentRequest,
     from: CallingTurn,
   ): Promise<SubagentSession> => {
-    const parent = await deps.dashboard.get(from.key.dashboardSessionId);
+    const parent = await deps.dashboard.get(from.chat);
     if (request.resumeSessionId) {
       const stored = parent ? await deps.dashboard.get(request.resumeSessionId) : null;
       const refusal = refuseResume(stored, parent, {
         subagent,
-        parentRecordId: from.key.dashboardSessionId,
+        parentRecordId: from.chat,
         resumeSessionId: request.resumeSessionId,
       });
       if (refusal) throw new Error(refusal);
@@ -132,7 +136,7 @@ export function createSubagentCalls(deps: {
     const session = await from.sessions.open(subagent, from.at);
     await deps.dashboard.addSubagentSession(
       newSubagentSession(session.id, subagent, parent, {
-        dashboardSessionId: from.key.dashboardSessionId,
+        chat: from.chat,
         turnId: from.key.turnId,
         agentName: from.agentName,
       }),
@@ -172,9 +176,9 @@ export function createSubagentCalls(deps: {
       if (held.has(key)) {
         live.finish();
         await session.stop("subagent registration failed").catch(() => undefined);
-        const { dashboardSessionId, turnId, toolUseId } = from.key;
+        const { parentSessionId, turnId, toolUseId } = from.key;
         throw new Error(
-          `Active subagent link already exists for parent ${dashboardSessionId}/${turnId}/${toolUseId}`,
+          `Active subagent link already exists for parent ${parentSessionId}/${turnId}/${toolUseId}`,
         );
       }
       held.add(key);

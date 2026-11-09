@@ -147,10 +147,7 @@ describe("AgentSessionBridge conversation", () => {
         sessionId: "session-1",
         submit: submitStartingTurn,
         startTurn: (_input: unknown, options: TurnRef) => {
-          sent.push({
-            romeSessionId: options.romeSessionId,
-            romeSessionType: options.romeSessionType,
-          });
+          sent.push({ romeSessionId: options.romeSessionId });
           return testTurnHandle({
             turnId: "turn-1",
             events: (async function* (): AsyncIterable<StreamAgentEvent> {
@@ -189,8 +186,18 @@ describe("AgentSessionBridge conversation", () => {
         },
       });
 
+      await rs.waitFor(() => expect(sent).toEqual([{ romeSessionId: "child-chat" }]));
+      // The response names the chat's type the turn records under.
       await rs.waitFor(() =>
-        expect(sent).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]),
+        expect(child.sent).toContainEqual(
+          expect.objectContaining({
+            type: "rpc_response",
+            reqId: "request-1",
+            result: expect.objectContaining({
+              romeSession: { _romeSessionId: "child-chat", _type: "subagent" },
+            }),
+          }),
+        ),
       );
       await rs.waitFor(async () => {
         const roles = (await repo.getMessages("child-chat")).map((m) => m.role);

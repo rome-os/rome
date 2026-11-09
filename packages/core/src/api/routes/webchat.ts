@@ -55,7 +55,7 @@ import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositorie
 import type { AgentEvent, MessagePart } from "../../types.js";
 import { createAgentTurnRef } from "../../agent/index.js";
 import type { AgentTurnHandle } from "../../agent/index.js";
-import { openedInChat } from "../../core/session-conversation.js";
+import { openedInChat, withRomeSession } from "../../core/session-conversation.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
@@ -1486,6 +1486,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         { agentName, channelThreadKey },
         {
           ...deps.sessionOpeningFor(channelThreadKey, threadContext),
+          kind: "conversation",
           workingDir,
           threadContext,
           contextSuffix: buildWebchatContextSuffix(),
@@ -3167,11 +3168,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const turnId = c.req.param("turnId");
     const stream = streamsByTurnId.get(turnId);
     if (!stream) {
-      const turn = deps.agentTurnStreamRegistry.get(turnId)
-        ? deps.agentSessionManager.turn(turnId)
-        : undefined;
-      if (!turn) return c.json({ error: "No stream for turn" }, 404);
+      const registered = deps.agentTurnStreamRegistry.get(turnId);
+      const turn = registered ? deps.agentSessionManager.turn(turnId) : undefined;
+      if (!registered || !turn) return c.json({ error: "No stream for turn" }, 404);
       return streamSSE(c, async (sse) => {
+        // The chat the turn records in, which its session's start names.
+        const chat = await deps.webchatRepo.getSession(registered.chatId).catch(() => null);
+        const romeSession = chat
+          ? { _romeSessionId: chat.id, _type: chat.type as RomeSessionType }
+          : undefined;
         const builder = createSegmentBuilder({
           idPrefix: turnId,
           resolver: appResolver,
@@ -3227,7 +3232,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         try {
           for await (const message of turn.events()) {
             if (aborted) break;
-            project(message);
+            project(romeSession ? withRomeSession(message, romeSession) : message);
           }
           write("done", {
             success: !terminalError,
@@ -3713,6 +3718,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         },
         {
           ...deps.sessionOpeningFor(channelThreadKey, threadContext),
+          kind: "conversation",
           workingDir,
           threadContext,
           contextSuffix,
@@ -3851,7 +3857,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
             // Block id of the in-flight text block, from its deltas.
             let inFlightTextBlockId: string | undefined;
             let resultError: Extract<AgentEvent, { type: "error" }> | undefined;
-            for await (const msg of handle.events()) {
+            const romeSession = {
+              _romeSessionId: sessionId,
+              _type: session.type as RomeSessionType,
+            };
+            for await (const event of handle.events()) {
+              const msg = withRomeSession(event, romeSession);
               if (msg.type === "input_status") continue;
               // Deltas other than text have no webchat consumer yet.
               if (isTransientDelta(msg) && msg.type !== "text_delta") continue;
@@ -3957,7 +3968,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               stream.traceEvents.push(msg);
               emitTraceEvent(stream, msg);
               if (msg.type === "subagent_result") {
-                const call = { dashboardSessionId: sessionId, turnId, toolUseId: msg.toolUseId };
+                const call = {
+                  parentSessionId: agentSess.sessionId,
+                  turnId,
+                  toolUseId: msg.toolUseId,
+                };
                 if (deps.subagentCalls.forget(call)) {
                   await safePersistTrace(stream, "subagent result");
                 }
@@ -4196,7 +4211,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       priority: priority.data,
       threadContext,
       romeSessionId: sessionId,
-      romeSessionType: session.type as RomeSessionType,
       onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusEvent) => {
         await deps.webchatRepo.updateUserInput(sessionId, status);
         const stream = status.turnId ? streamsByTurnId.get(status.turnId) : undefined;
@@ -4524,6 +4538,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         { agentName: session.agentName ?? "main", channelThreadKey },
         {
           ...deps.sessionOpeningFor(channelThreadKey, threadContext),
+          kind: "conversation",
           workingDir,
           threadContext,
           contextSuffix: buildWebchatContextSuffix(),

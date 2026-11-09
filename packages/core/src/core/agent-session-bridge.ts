@@ -48,6 +48,7 @@ import {
   noteOpenerChat,
   openedInChat,
   openerChat,
+  withRomeSession,
 } from "./session-conversation.js";
 
 const log = createLogger("agent-session-bridge");
@@ -215,6 +216,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             ...sessionInit,
             // Stated here, never taken from the worker's request.
             ...this.openingFor(openedKey ?? "", sessionInit.threadContext),
+            kind: sessionInit.threadContext ? ("conversation" as const) : ("action" as const),
             workingDir,
             isSubagent: true,
           };
@@ -284,7 +286,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           threadContext: req.init?.threadContext,
           sharedContext: req.init?.sharedContext,
           romeSessionId,
-          romeSessionType,
           replyTo: req.replyTo,
           ...(lines ? { quoted: lines.quoted } : {}),
         }).turn;
@@ -350,7 +351,8 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | null = null;
           let endChatTurn: (() => void) | null = null;
           try {
-            for await (const msg of handle.events()) {
+            for await (const event of handle.events()) {
+              const msg = withRomeSession(event, romeSession);
               // Recorded first, so a turn that opens its conversation has its
               // row before its stream can be asked for.
               if (recorder) {
