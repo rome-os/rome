@@ -13,6 +13,13 @@ import {
   FakeWebSocket,
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
+import userEvent from "@testing-library/user-event";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { ChatThreadView, KEEPS_CHAT_THREAD_OPEN } from "./ChatThreadView";
 import { QuotedReply } from "./reply/QuotedReply";
 import { ReplyDraftProvider, useReplyDraftState, type ReplyDraft } from "./reply/reply-draft";
@@ -142,6 +149,33 @@ describe("ChatThreadView", () => {
     );
 
     expect(await screen.findByText("Make it tomorrow instead")).toBeTruthy();
+  });
+
+  it("stays open through a menu the composer opens, which renders outside the app's tree", async () => {
+    const onClose = rs.fn();
+    const picked = rs.fn();
+    render(
+      host(
+        <div>
+          <div {...{ [KEEPS_CHAT_THREAD_OPEN]: "" }}>
+            <DropdownMenu>
+              <DropdownMenuTrigger>Attach</DropdownMenuTrigger>
+              <DropdownMenuContent>
+                <DropdownMenuItem onSelect={picked}>From a project</DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+          <ChatThreadView sessionId="concierge" messageId="a1" onClose={onClose} />
+        </div>,
+      ),
+    );
+    await screen.findByText("Which day?");
+
+    await userEvent.click(screen.getByRole("button", { name: "Attach" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "From a project" }));
+
+    expect(picked).toHaveBeenCalledTimes(1);
+    expect(onClose).not.toHaveBeenCalled();
   });
 
   it("closes on Esc and on a click outside, but not on a click in the composer", async () => {

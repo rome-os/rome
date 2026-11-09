@@ -10,7 +10,11 @@ import { listChatThreadMessages } from "@/lib/chat-api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 
-/** Clicks inside an element with this attribute, such as the composer, keep the thread view open. */
+/**
+ * Clicks inside an element with this attribute, such as the composer, keep
+ * the thread view open. So do clicks in a floating layer portaled outside
+ * the app's tree, such as a menu, picker or dialog the composer opened.
+ */
 export const KEEPS_CHAT_THREAD_OPEN = "data-keeps-chat-thread-open";
 
 /** The query key of one chat thread, named by any of its messages. */
@@ -19,6 +23,18 @@ export function chatThreadQueryKey(sessionId: string, messageId: string) {
 }
 
 const anyEvent = z.unknown();
+
+/**
+ * The app's own tree that `element` is rendered in: its topmost ancestor
+ * below the body. A floating layer portaled to the body is outside it.
+ */
+function appTreeOf(element: Element): Element {
+  let tree = element;
+  while (tree.parentElement && tree.parentElement !== tree.ownerDocument.body) {
+    tree = tree.parentElement;
+  }
+  return tree;
+}
 
 /** A message's words as the thread view shows them: its text, and a card's title. */
 function wordsOf(message: ChatMessage): string {
@@ -79,8 +95,10 @@ export function ChatThreadView({
     };
     const onPointer = (event: PointerEvent) => {
       const target = event.target as Element | null;
-      if (!target || panelRef.current?.contains(target)) return;
+      const panel = panelRef.current;
+      if (!target || !panel || panel.contains(target)) return;
       if (target.closest?.(`[${KEEPS_CHAT_THREAD_OPEN}]`)) return;
+      if (!appTreeOf(panel).contains(target)) return;
       closeRef.current();
     };
     document.addEventListener("keydown", onKey);

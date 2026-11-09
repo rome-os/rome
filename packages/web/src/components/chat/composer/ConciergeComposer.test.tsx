@@ -260,7 +260,7 @@ describe("ConciergeComposer reply", () => {
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
   });
 
-  it("sends into the open chat thread, and keeps sending there after the reply clears", async () => {
+  it("sends into the open chat thread, then closes it and clears the reply", async () => {
     const { onSend } = renderComposer({}, reply, true, undefined, true);
 
     await userEvent.type(await screen.findByPlaceholderText("Message"), "why there?{Enter}");
@@ -269,8 +269,21 @@ describe("ConciergeComposer reply", () => {
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
 
     expect(onSend.mock.calls[0][0]).toMatchObject({ replyTo: reply, chatThread: "a1" });
-    expect(onSend.mock.calls[1][0]).toMatchObject({ chatThread: "a1" });
+    expect(onSend.mock.calls[1][0].chatThread).toBeUndefined();
     expect(onSend.mock.calls[1][0].replyTo).toBeUndefined();
+    expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+  });
+
+  it("keeps the chat thread open, with the reply, when a send from it fails", async () => {
+    const { onSend } = renderComposer({}, reply, true, undefined, true);
+    onSend.mockRejectedValueOnce(new Error("offline"));
+
+    await userEvent.type(await screen.findByPlaceholderText("Message"), "why there?{Enter}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    await userEvent.type(screen.getByPlaceholderText("Message"), "{Enter}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+
+    expect(onSend.mock.calls[1][0]).toMatchObject({ replyTo: reply, chatThread: "a1" });
   });
 
   it("puts the reply back when the send fails", async () => {
