@@ -1,5 +1,5 @@
 import type { AppCatalog } from "./catalog.js";
-import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
+import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
 import { parseListingId } from "./packaging/index.js";
 import { withRomeCloudReadAuth } from "./rome-cloud-read-auth.js";
 

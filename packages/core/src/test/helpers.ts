@@ -66,7 +66,7 @@ import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.j
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
 import { EventBus } from "../events/event-bus.js";
 import { RelayDrainer } from "../relay/drainer.js";
-import { SystemUpgradeService } from "../system-upgrade/service.js";
+import { SystemUpgradeService } from "../instance/system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
 import type {
   ChannelMessage,
@@ -134,7 +134,7 @@ import { createAppStoreService } from "../apps/store-service.js";
 import { type CatalogEvent, isResolvedApp } from "../apps/state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../lib/feedback-client.js";
-import { assembleDiagnosticBundle } from "../lib/diagnostics.js";
+import { assembleDiagnosticBundle } from "../instance/diagnostics.js";
 import type { ApiDeps } from "../api/deps.js";
 import type { FavorService } from "../favors/types.js";
 import { Hono } from "hono";

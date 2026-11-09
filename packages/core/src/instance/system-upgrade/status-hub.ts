@@ -20,7 +20,7 @@
 // after the restart window was never replaced. It returns to `idle`, so the
 // banner clears and the next nightly probe can offer the release again.
 
-import { createLogger } from "../logger.js";
+import { createLogger } from "../../logger.js";
 
 const log = createLogger("upgrade-status-hub");
 

@@ -30,7 +30,7 @@
  * never retries adopt on it, and no resumable pending state is needed.
  *
  * Read live, so they follow an adopted identity:
- *   - lib/cloud-auth-gate.ts and lib/auto-upgrade-gate.ts (statsig gates):
+ *   - lib/cloud-auth-gate.ts and instance/auto-upgrade-gate.ts (statsig gates):
  *     `resolveInstanceSlug()` at evaluation time.
  *   - index.ts `createAppOgImageSubscriber({ host })`: a getter, read per render.
  *     Social cards carry the host in their cache name (apps/og/store.ts), and the

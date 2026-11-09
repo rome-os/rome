@@ -1,5 +1,5 @@
-import { cloudBearer } from "../lib/instance-identity.js";
-import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
+import { cloudBearer } from "../instance/instance-identity.js";
+import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
 
 /**
  * Adds this instance's token to a Store read (browse, listing detail, bundle)
