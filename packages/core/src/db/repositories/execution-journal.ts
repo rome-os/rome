@@ -2,7 +2,7 @@ import { and, eq, lt, notInArray } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { executionJournal } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
-import type { JournalEntry } from "../../actions/replay.js";
+import type { JournalEntry } from "../../apps/actions/replay.js";
 
 export class ExecutionJournalRepository {
   constructor(private db: DrizzleDb) {}

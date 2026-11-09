@@ -10,8 +10,8 @@ import {
   createActionEngineRepos,
 } from "../../test/helpers.js";
 import { AppKeyInjector } from "../../app-keys/injector.js";
-import { ActionEngine } from "../../actions/engine.js";
-import { ActionRegistryImpl } from "../../actions/registry.js";
+import { ActionEngine } from "../../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import { appKeysRoutes } from "./app-keys.js";
 
 describe("appKeysRoutes", () => {

@@ -10,7 +10,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import type { AccountLink } from "@rome/api-types/account-agents";
-import type { ActionEngineRepositories } from "../actions/engine.js";
+import type { ActionEngineRepositories } from "../apps/actions/engine.js";
 import type { AccountLinkOf } from "../chats/connected-accounts/account-links.js";
 import type { ChannelOf } from "../chats/connected-accounts/connection-ports.js";
 import type { DrizzleDb } from "../db/index.js";

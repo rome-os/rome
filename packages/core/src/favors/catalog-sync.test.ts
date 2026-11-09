@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import type { Action } from "../actions/types.js";
+import type { Action } from "../apps/actions/types.js";
 import type { ArtifactMetadata } from "../apps/types.js";
 import type { AppView, ResolvedApp } from "../apps/state.js";
 import type { Logger } from "../logger.js";

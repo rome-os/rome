@@ -35,14 +35,14 @@ import { ActionExecutionsRepository } from "../../db/repositories/action-executi
 import { SettingsRepository } from "../../db/repositories/settings.js";
 import { PeopleRepository } from "../../db/repositories/people.js";
 import { PoliciesRepository } from "../../db/repositories/policies.js";
-import { ActionRegistryImpl } from "../../actions/registry.js";
-import { ActionEngine, type ApprovalCreatedEvent } from "../../actions/engine.js";
-import { ApprovalHandler } from "../../actions/approval-handler.js";
-import { createBackendTurnRunner } from "../../actions/backend-turn.js";
+import { ActionRegistryImpl } from "../../apps/actions/registry.js";
+import { ActionEngine, type ApprovalCreatedEvent } from "../../apps/actions/engine.js";
+import { ApprovalHandler } from "../../apps/actions/approval-handler.js";
+import { createBackendTurnRunner } from "../../apps/actions/backend-turn.js";
 import { chatsWiring } from "../../chats-wiring.js";
 import { openChannelChat } from "../../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
-import type { Action } from "../../actions/types.js";
+import type { Action } from "../../apps/actions/types.js";
 import { AgentLoader } from "../../agent/index.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../../agent/index.js";
 import { createTestSystemPrompts } from "../system-prompts.js";
@@ -55,7 +55,7 @@ import { AgentRunner } from "../../core/agent-runner.js";
 import type { RunParams } from "../../core/types.js";
 import type { AgentEvent } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
-import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js";
+import type { ActionSubprocessRunner } from "../../apps/actions/action-subprocess.js";
 import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
 import { testChannelSurface } from "../channel-surface.js";
 

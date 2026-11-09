@@ -11,8 +11,8 @@ import {
   toWebhookInvocationResponse,
   toWebhookInvocationStatus,
 } from "../helpers.js";
-import type { ActionEngine } from "../../actions/engine.js";
-import type { ActionResult } from "../../actions/types.js";
+import type { ActionEngine } from "../../apps/actions/engine.js";
+import type { ActionResult } from "../../apps/actions/types.js";
 import type { WebhookInvocationsRepository } from "../../db/repositories/webhook-invocations.js";
 import type { ApiDeps } from "../deps.js";
 

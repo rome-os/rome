@@ -50,8 +50,8 @@ import {
 import { createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
-import { ApprovalHandler } from "../actions/approval-handler.js";
-import { createBackendTurnRunner } from "../actions/backend-turn.js";
+import { ApprovalHandler } from "../apps/actions/approval-handler.js";
+import { createBackendTurnRunner } from "../apps/actions/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
 import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
@@ -109,13 +109,13 @@ import { ExecutionJournalRepository } from "../db/repositories/execution-journal
 import { WebhookInvocationsRepository } from "../db/repositories/webhook-invocations.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
-import { ActionEngine, type ActionEngineRepositories } from "../actions/engine.js";
-import { ActionRegistryImpl } from "../actions/registry.js";
-import { ActionLoader } from "../actions/loader.js";
+import { ActionEngine, type ActionEngineRepositories } from "../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../apps/actions/registry.js";
+import { ActionLoader } from "../apps/actions/loader.js";
 import {
   assertNoAppActionLoadFailures,
   registerAppActions,
-} from "../actions/app-actions-wiring.js";
+} from "../apps/actions/app-actions-wiring.js";
 import { appsRoutes } from "../api/routes/apps.js";
 import { migrateAppByMetadata } from "../db/migrate.js";
 import { createAppDomain } from "../apps/index.js";

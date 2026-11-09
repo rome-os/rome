@@ -5,8 +5,8 @@
 // every turn is an RPC into main where the AgentSessionManager keeps the SDK
 // CLI alive across turns.
 
-import { getWorkerIpc, type IpcRpc } from "../actions/ipc.js";
-import { callMain } from "../actions/worker-rpc-client.js";
+import { getWorkerIpc, type IpcRpc } from "../apps/actions/ipc.js";
+import { callMain } from "../apps/actions/worker-rpc-client.js";
 import { getCurrentActionContext, type StreamAgentEvent } from "@rome-os/app-runtime";
 import type { AgentEvent } from "../types.js";
 import type { AgentRunnerInterface, RunParams } from "./types.js";

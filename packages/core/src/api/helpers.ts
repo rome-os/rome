@@ -1,7 +1,7 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type { TraceEventDto } from "@rome/api-types/trace-segments";
 import type { AgentEvent } from "../types.js";
-import type { ActionResult } from "../actions/types.js";
+import type { ActionResult } from "../apps/actions/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
 import type { WebhookInvocationRecord } from "../db/repositories/webhook-invocations.js";
 import type { ApiDeps } from "./deps.js";

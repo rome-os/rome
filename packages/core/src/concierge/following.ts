@@ -24,8 +24,8 @@ import {
   type ConciergeFollowRules,
 } from "@rome/api-types/concierge";
 import type { ConnectionView } from "../api/routes/connections.js";
-import { actionExecutionContext } from "../actions/context.js";
-import type { Action } from "../actions/types.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
+import type { Action } from "../apps/actions/types.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConciergeFollowItemsRepository } from "../db/repositories/concierge-follow-items.js";
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
@@ -1464,7 +1464,7 @@ const CHANGE_SCHEMA_PROPERTIES = {
 
 /**
  * The four follow operations as actions. They run in main (the coordination
- * list in actions/engine.ts); every call to the connector goes through
+ * list in apps/actions/engine.ts); every call to the connector goes through
  * `run`, outside the action's own async context.
  */
 function registerFollowingActions(

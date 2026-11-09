@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AppStartedEvent } from "@rome-os/app-runtime";
-import type { ActionEngine } from "../actions/engine.js";
+import type { ActionEngine } from "../apps/actions/engine.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { RomeAppRuntimeServices } from "../apps/context.js";
 import { packArtifact } from "../apps/packaging/index.js";

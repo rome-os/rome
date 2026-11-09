@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "@rstest/core";
-import { actionExecutionContext } from "../actions/context.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
 import { HostExecutionService, type HostJob, type RootScriptInput } from "./service.js";
 import { createAction } from "../../../../rome_apps/system/src/actions/execute-root-script/index.js";
 

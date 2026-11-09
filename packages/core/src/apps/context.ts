@@ -1,5 +1,5 @@
 import { AsyncLocalStorage } from "node:async_hooks";
-import { actionExecutionContext } from "../actions/context.js";
+import { actionExecutionContext } from "./actions/context.js";
 import {
   type ActionDispatchReceipt,
   ActionInvocationError,
@@ -13,11 +13,11 @@ import {
   type RunActionOptions,
   type RomeAppDefinition as SdkRomeAppDefinition,
 } from "@rome-os/app-runtime";
-import type { ActionEngine } from "../actions/engine.js";
-import { callAction } from "../actions/call-action.js";
-import { sendRefusalOf } from "../actions/worker-protocol.js";
-import type { ActionInvocationObserver } from "../actions/runtime-events.js";
-import type { ActionResult } from "../actions/types.js";
+import type { ActionEngine } from "./actions/engine.js";
+import { callAction } from "./actions/call-action.js";
+import { sendRefusalOf } from "./actions/worker-protocol.js";
+import type { ActionInvocationObserver } from "./actions/runtime-events.js";
+import type { ActionResult } from "./actions/types.js";
 import type { DrizzleDb } from "../db/index.js";
 import { toRoutine } from "../db/repositories/routines.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";

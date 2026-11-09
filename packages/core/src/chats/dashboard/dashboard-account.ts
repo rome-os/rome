@@ -4,7 +4,7 @@
 // its ports itself, in-process. Channel contract: channel.ts.
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { actionExecutionContext } from "../../actions/context.js";
+import { actionExecutionContext } from "../../apps/actions/context.js";
 import { canOpenChat, privateOwnerOf } from "../../concierge/privacy.js";
 import { type SessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
 import type { ChannelSurface } from "../../core/session-opening.js";

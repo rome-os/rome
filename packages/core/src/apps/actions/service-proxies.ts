@@ -1,0 +1,432 @@
+// Worker-side typed proxies for main-process services.
+//
+// An action worker is a forked subprocess that holds no live reference to the
+// main-process singletons (RoutineEngine, EventBus, EventCatalog, AppManager) —
+// those own in-memory state (trigger timers, subscriber sets, child-process
+// handles) that cannot be duplicated across processes. Each proxy below
+// presents the action-facing surface of one service but forwards every call to
+// the main process over the worker's IPC channel (see `callMain`), where
+// the real service does the work.
+//
+// They are one half of a pair: in the main process an action receives the real
+// service; in a worker it receives the matching `*Proxy`. The naming mirrors
+// the original (`FooEngine` -> `FooEngineProxy`) so the pair is obvious at a
+// callsite. Each proxy owns the RPC method string (and timeout) for its calls,
+// keeping that stringly-typed seam in one typed place instead of scattered
+// across action bodies.
+
+import { callMain, isTransportUncertain } from "./worker-rpc-client.js";
+import { getCurrentHookInvocationContext } from "../../core/hook-recursion.js";
+import type { AgentFeedback, FeedbackOutcome, FeedbackService } from "../../lib/feedback-client.js";
+import type { CloudProfileOutcome, CloudProfileService } from "../../lib/cloud-profile.js";
+import type { AgentNameResolution, AgentNamesService } from "../../chats/accounts/agent-names.js";
+import type { NotifyContent, NotifyService, SendOutcome } from "../../lib/notify-client.js";
+import type {
+  AppStoreGetParams,
+  AppStoreListingDetailBody,
+  AppStoreListParams,
+  AppStoreListingsBody,
+  AppStoreReader,
+  AppStoreServiceResult,
+} from "../store-service.js";
+import type {
+  EmailInboundControl,
+  EmailInboundResult,
+} from "../../connections/kinds/email/email-control.js";
+import { REMOVED_SERVICE_MEMBERS, REMOVED_SUMMARY_MEMBERS } from "../accounts-service.js";
+import { withRemovedMembers } from "../../lib/removed-members.js";
+import type {
+  SystemUpgradeChecker,
+  SystemUpgradeOfferResult,
+} from "../../system-upgrade/service.js";
+import type {
+  AppLifecycle,
+  AppLifecycleCreateParams,
+  BackendTurnParams,
+  BackendTurnRunner,
+  ChatId,
+  ChatRef,
+  ChatSettingsControl,
+  ChatSettingsPage,
+  ChatSettingsSnapshot,
+  EventCatalogReader,
+  EventCatalogSearchOptions,
+  EventCatalogSearchResult,
+  EventPublisher,
+  Routine,
+  RoutineEngine,
+  Account,
+  ChannelMessage,
+  ChannelMessageQuery,
+  ChannelSummary,
+  ChannelsService,
+  MessageReceipt,
+  OutgoingMessage,
+  ListChatSettingsInput,
+  ResetChatSettingsInput,
+  UpdateChatSettingsInput,
+  AppConnectionDescription,
+  AppConnectionInvokeResult,
+  AppConnectionOperationsPage,
+  AppConnectionPage,
+} from "@rome-os/app-runtime";
+import type {
+  AppConnectionBrokerPort,
+  AppConnectionBrokerResult,
+  AppConnectionsContextFactory,
+} from "../../connections/app-connections.js";
+import { BoundAppConnections } from "../../connections/app-connections.js";
+
+/** apps.* operations install/pack on the main process — minutes, not seconds. */
+const APP_INSTALL_RPC_TIMEOUT_MS = 3 * 60 * 1000;
+/** A flag flip with no filesystem work. */
+const SHORT_RPC_TIMEOUT_MS = 30 * 1000;
+/** A backend turn runs a full agent turn in the main process and blocks until
+ * delivery finishes. The timeout does not stop that turn: main keeps running it,
+ * and only the caller (the routine run) records an error. Agentic turns that
+ * resume a session routinely pass 30 minutes, so 2 hours keeps the recorded
+ * outcome honest for nearly all of them while bounding how long the worker
+ * stays parked. */
+const BACKEND_TURN_RPC_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+/** Push notify: NotifyClient bounds the main-to-Rome Cloud request at 120s,
+ * including Rome Cloud's server-side APNs fan-out (~100s worst case). Keep this
+ * RPC timeout above that HTTP budget; 150s provides 30s headroom and overrides
+ * callMain's 30s default. */
+const NOTIFY_RPC_TIMEOUT_MS = 150 * 1000;
+
+export class AppConnectionsProxy implements AppConnectionBrokerPort, AppConnectionsContextFactory {
+  forApp(appId: string) {
+    return new BoundAppConnections(appId, this);
+  }
+
+  list(
+    _appId: string,
+    input: { cursor?: string; limit?: number } = {},
+  ): Promise<AppConnectionBrokerResult<AppConnectionPage>> {
+    return callMain("connections.app.list", input);
+  }
+
+  describe(
+    _appId: string,
+    input: { connectionId: string; identity: string },
+  ): Promise<AppConnectionBrokerResult<AppConnectionDescription>> {
+    return callMain("connections.app.describe", input);
+  }
+
+  operations(
+    _appId: string,
+    input: { connectionId: string; identity: string; cursor?: string; limit?: number },
+  ): Promise<AppConnectionBrokerResult<AppConnectionOperationsPage>> {
+    return callMain("connections.app.operations", input);
+  }
+
+  invoke(
+    _appId: string,
+    input: {
+      connectionId: string;
+      identity: string;
+      operation: string;
+      input?: unknown;
+      requestId?: string;
+    },
+  ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>> {
+    return callMain("connections.app.invoke", input, { timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS });
+  }
+}
+
+/**
+ * Worker-side stand-in for the main-process `RoutineEngine`. Implements the
+ * `RoutineEngine` surface an action depends on, so the same `deps.routineEngine`
+ * works whether the action runs in the main process (real engine) or a worker
+ * (this proxy).
+ */
+export class RoutineEngineProxy implements RoutineEngine {
+  /** Bring a persisted routine live. The main process re-reads the row by id
+   * and activates it, so only the id needs to cross the wire. */
+  async activate(routine: Routine): Promise<void> {
+    await callMain("routines.schedule", { routineId: routine.id });
+  }
+
+  /** Tear down a routine's triggers in the main process. */
+  async deactivate(routineId: string): Promise<void> {
+    await callMain("routines.cancel", { routineId });
+  }
+}
+
+/**
+ * Worker-side action existence and args checker backed by the main process's
+ * eager ActionRegistry. The worker registry may contain lazy stubs whose modules
+ * have not loaded yet, so validation paths should not treat local stub presence
+ * or a stub's missing input schema as executable truth.
+ */
+export class ActionRegistryProxy {
+  async has(actionName: string): Promise<boolean> {
+    const result = await callMain<{ hasAction: boolean }>("actions.has", { actionName });
+    return result.hasAction;
+  }
+
+  async isExplicit(actionName: string): Promise<boolean> {
+    const result = await callMain<{ explicit: boolean }>("actions.isExplicit", { actionName });
+    return result.explicit;
+  }
+
+  /** Returns an error message when args fail the action's input schema, else null. */
+  async validateArgs(actionName: string, args: Record<string, unknown>): Promise<string | null> {
+    const result = await callMain<{ error: string | null }>("actions.validateArgs", {
+      actionName,
+      args,
+    });
+    return result.error;
+  }
+}
+
+/**
+ * Worker-side stand-in for the main-process `EventBus`. Publishing a domain
+ * event also declares its type to the event catalog — both happen in
+ * the main process's `events.publish` handler.
+ */
+export class EventBusProxy implements EventPublisher {
+  async publish(event: {
+    name: string;
+    source: string;
+    payload?: Record<string, unknown>;
+  }): Promise<{ accepted: true }> {
+    // No `?? {}` here: the `events.publish` Zod schema defaults a missing
+    // payload to `{}` at the (validated) wire boundary, so defaulting again on
+    // the way in is redundant.
+    return await callMain<{ accepted: true }>("events.publish", {
+      name: event.name,
+      source: event.source,
+      payload: event.payload,
+    });
+  }
+}
+
+/** Worker-side stand-in for the main-process `EventCatalog` (read side). */
+export class EventCatalogProxy implements EventCatalogReader {
+  /** Find emittable event types matching `query`, best matches first, capped at
+   * `limit`. `total` is the full match count before truncation. */
+  async search(
+    query: string,
+    limit: number,
+    options: EventCatalogSearchOptions = {},
+  ): Promise<EventCatalogSearchResult> {
+    return await callMain<EventCatalogSearchResult>("events.searchCatalog", {
+      query,
+      limit,
+      ...(options.match ? { match: options.match } : {}),
+    });
+  }
+}
+
+/**
+ * Worker-side stand-in for the main-process app lifecycle authority. Each method
+ * owns its RPC method string and timeout. Results are app-local shapes the
+ * action knows, so they return as `unknown` and the caller narrows them —
+ * keeping those result types out of this SDK.
+ */
+export class AppManagerProxy implements AppLifecycle {
+  async create(params: AppLifecycleCreateParams): Promise<unknown> {
+    return await callMain("apps.create", params, {
+      timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS,
+    });
+  }
+
+  // install, uninstall, and setEnabled carry the caller's hook chain, so the
+  // app-started hooks they cause count against the chain's recursion budget.
+  async install(params: { source: unknown; enabled?: boolean }): Promise<unknown> {
+    return await callMain("apps.install", withHookChain(params), {
+      timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS,
+    });
+  }
+
+  async uninstall(params: { appId: string; purge?: boolean }): Promise<unknown> {
+    return await callMain("apps.uninstall", withHookChain(params), {
+      timeoutMs: APP_INSTALL_RPC_TIMEOUT_MS,
+    });
+  }
+
+  async setEnabled(params: { appId: string; enabled: boolean }): Promise<unknown> {
+    return await callMain("apps.setEnabled", withHookChain(params), {
+      timeoutMs: SHORT_RPC_TIMEOUT_MS,
+    });
+  }
+}
+
+function withHookChain<T extends object>(params: T): T {
+  const hookInvocationContext = getCurrentHookInvocationContext();
+  return hookInvocationContext ? { ...params, hookInvocationContext } : params;
+}
+
+/** Worker-side stand-in for the main-process Rome App Store read surface. */
+export class AppStoreProxy implements AppStoreReader {
+  async listListings(
+    params: AppStoreListParams = {},
+  ): Promise<AppStoreServiceResult<AppStoreListingsBody>> {
+    return await callMain<AppStoreServiceResult<AppStoreListingsBody>>(
+      "appStore.listListings",
+      params,
+      { timeoutMs: SHORT_RPC_TIMEOUT_MS },
+    );
+  }
+
+  async getListing(
+    params: AppStoreGetParams,
+  ): Promise<AppStoreServiceResult<AppStoreListingDetailBody>> {
+    return await callMain<AppStoreServiceResult<AppStoreListingDetailBody>>(
+      "appStore.getListing",
+      params,
+      { timeoutMs: SHORT_RPC_TIMEOUT_MS },
+    );
+  }
+}
+
+/** A history line as it crosses the worker RPC, its timestamp serialized. */
+type WireChannelMessage = Omit<ChannelMessage, "timestamp"> & { timestamp: Date | string };
+
+function fromWire(messages: WireChannelMessage[]): ChannelMessage[] {
+  return messages.map((message) => ({
+    ...message,
+    timestamp: message.timestamp instanceof Date ? message.timestamp : new Date(message.timestamp),
+  }));
+}
+
+/** Worker-side proxy for the main process's channels service. */
+export class ChannelsServiceProxy implements ChannelsService {
+  constructor() {
+    withRemovedMembers(this, REMOVED_SERVICE_MEMBERS);
+  }
+
+  async list(): Promise<ChannelSummary[]> {
+    const summaries = await callMain<ChannelSummary[]>("channels.list", {});
+    return summaries.map((summary) => withRemovedMembers(summary, REMOVED_SUMMARY_MEMBERS));
+  }
+
+  send(
+    channel: Account | string,
+    chatId: ChatId,
+    message: OutgoingMessage,
+  ): Promise<MessageReceipt> {
+    return callMain<MessageReceipt>("channels.send", {
+      channel,
+      chatId,
+      message,
+    });
+  }
+
+  async query(
+    channel: Account | string,
+    query: ChannelMessageQuery = {},
+  ): Promise<ChannelMessage[]> {
+    return fromWire(
+      await callMain<WireChannelMessage[]>("channels.query", {
+        channel,
+        ...query,
+        ...(query.since ? { since: query.since.toISOString() } : {}),
+      }),
+    );
+  }
+}
+
+export class ChatSettingsControlProxy implements ChatSettingsControl {
+  list(input: ListChatSettingsInput): Promise<ChatSettingsPage> {
+    return callMain("chatSettings.list", input);
+  }
+
+  get(ref: ChatRef): Promise<ChatSettingsSnapshot> {
+    return callMain("chatSettings.get", { ref });
+  }
+
+  update(input: UpdateChatSettingsInput): Promise<ChatSettingsSnapshot> {
+    return callMain("chatSettings.update", input);
+  }
+
+  reset(input: ResetChatSettingsInput): Promise<ChatSettingsSnapshot> {
+    return callMain("chatSettings.reset", input);
+  }
+}
+
+/**
+ * Worker-side stand-in for the main-process `SystemUpgradeService`. The nightly
+ * `system_upgrade` action runs in a worker, but the upgrade countdown hub and
+ * its timers live in the main process — so the probe forwards to main, where
+ * the real service checks Rome Cloud and opens the countdown.
+ */
+export class SystemUpgradeServiceProxy implements SystemUpgradeChecker {
+  async checkAndOffer(): Promise<SystemUpgradeOfferResult> {
+    return await callMain<SystemUpgradeOfferResult>("system.upgrade.checkAndOffer", {});
+  }
+}
+
+/** Worker-side stand-in for the main-process backend-turn orchestrator. The
+ * `resume_session` action runs in a worker (a routine-fired root action →
+ * subprocess), but running the turn + delivering its reply needs main-process
+ * state (the AgentSession registry, channel adapters, the webchat runtime), so
+ * the single `runAndDeliver` forwards there over one RPC. */
+export class BackendTurnRunnerProxy implements BackendTurnRunner {
+  async runAndDeliver(params: BackendTurnParams): Promise<void> {
+    await callMain("session.continue", params, {
+      timeoutMs: BACKEND_TURN_RPC_TIMEOUT_MS,
+    });
+  }
+}
+
+/** Worker-side stand-in for the main-process `NotifyClient`. The
+ * `send_notification` action runs in a worker, but the durable instance token
+ * must never leave the main process — so the whole send (token read + the
+ * `/api/notify` call) happens in main and only the `SendOutcome` returns here.
+ * A worker→main transport failure leaves delivery genuinely uncertain (the
+ * request may have reached main and Rome Cloud), so a timeout or disconnect
+ * maps to `outcome_unknown`; anything else — a no-IPC topology error or a
+ * genuine main-handler bug — keeps throwing. */
+export class NotifyServiceProxy implements NotifyService {
+  async send(content?: NotifyContent): Promise<SendOutcome> {
+    try {
+      return await callMain<SendOutcome>("notify.send", content ?? {}, {
+        timeoutMs: NOTIFY_RPC_TIMEOUT_MS,
+      });
+    } catch (err) {
+      if (isTransportUncertain(err)) return { kind: "outcome_unknown" };
+      throw err;
+    }
+  }
+}
+
+/** Worker-side stand-in for the live EmailAdapter's inbound entry point. The
+ * real adapter (inbound secret, MailProvider, onMessage pipeline) lives in the
+ * main process; `email_inbound` runs in a worker, so it forwards the raw deposit
+ * + HMAC to main where the adapter verifies and dispatches it. */
+export class EmailInboundControlProxy implements EmailInboundControl {
+  async ingest(rawBody: string, signature: string): Promise<EmailInboundResult> {
+    return callMain<EmailInboundResult>("channels.email.ingestInbound", {
+      rawBody,
+      signature,
+    });
+  }
+}
+
+/** The system-only agent-name lookup, answered in main. */
+export class AgentNamesProxy implements AgentNamesService {
+  resolve(name: string): Promise<AgentNameResolution> {
+    return callMain<AgentNameResolution>("agentNames.resolve", { name });
+  }
+}
+
+/** The instance token that reads the guardian's profile stays in main. */
+export class CloudProfileProxy implements CloudProfileService {
+  get(): Promise<CloudProfileOutcome> {
+    return callMain<CloudProfileOutcome>("cloudProfile.get", {});
+  }
+}
+
+/** Feedback leaves the instance only in main; an IPC failure can follow a send. */
+export class FeedbackServiceProxy implements FeedbackService {
+  async send(input: AgentFeedback): Promise<FeedbackOutcome> {
+    try {
+      return await callMain<FeedbackOutcome>("feedback.send", input);
+    } catch (err) {
+      if (isTransportUncertain(err)) return { kind: "unreachable" };
+      throw err;
+    }
+  }
+}

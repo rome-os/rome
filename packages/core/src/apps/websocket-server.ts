@@ -9,7 +9,7 @@ import type {
 import { createLogger } from "../logger.js";
 import { AppApiDispatcher, type RomeAppApiRequest, type RomeAppCaller } from "./api.js";
 import type { AppCatalog } from "./catalog.js";
-import type { ActionEngine } from "../actions/engine.js";
+import type { ActionEngine } from "./actions/engine.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import { decodeAppApiPath, decodeAppIdPathSegment } from "../api/helpers.js";

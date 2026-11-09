@@ -10,7 +10,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { create as tarCreate } from "tar";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { ActionEngine } from "../actions/engine.js";
+import { ActionEngine } from "./actions/engine.js";
 import { AgentLoader } from "../agent/index.js";
 import { createAgentSessionManager } from "../agent/index.js";
 import { AppTurnHooks, TurnListeners } from "../agent/index.js";

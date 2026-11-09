@@ -1,5 +1,8 @@
 import type { AgentRunnerInterface, AppLogger, RomeAppContext } from "@rome-os/app-runtime";
-import { importModuleWithCacheBuster, resolveModuleEntryPath } from "../actions/module-loader.js";
+import {
+  importModuleWithCacheBuster,
+  resolveModuleEntryPath,
+} from "../apps/actions/module-loader.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import { type ArtifactRef, isResolvedApp } from "../apps/state.js";
 import { createAppLogger } from "../logger.js";

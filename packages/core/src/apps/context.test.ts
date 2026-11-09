@@ -12,19 +12,19 @@ import { createAppRuntimeRepositories } from "./repositories.js";
 import { AppApiDispatcher } from "./api.js";
 import type { AppCatalog } from "./catalog.js";
 import type { ResolvedApp } from "./state.js";
-import type { Action, ActionConfig, ActionResult } from "../actions/types.js";
-import type { ActionLoader } from "../actions/loader.js";
-import { ActionEngine } from "../actions/engine.js";
-import { ActionRegistryImpl } from "../actions/registry.js";
+import type { Action, ActionConfig, ActionResult } from "./actions/types.js";
+import type { ActionLoader } from "./actions/loader.js";
+import { ActionEngine } from "./actions/engine.js";
+import { ActionRegistryImpl } from "./actions/registry.js";
 import {
   ActionInvocationError,
   ActionInvocationEventOverflowError,
   getCurrentActionContext,
   SendRefused,
 } from "@rome-os/app-runtime";
-import { registerAppActions, registerLazyAppActions } from "../actions/app-actions-wiring.js";
+import { registerAppActions, registerLazyAppActions } from "./actions/app-actions-wiring.js";
 import { HostExecutionService } from "../host-execution/service.js";
-import { bumpModuleEnvEpoch } from "../actions/module-loader.js";
+import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { FavorActionRequestView, FavorService } from "../favors/types.js";

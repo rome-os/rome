@@ -1,7 +1,7 @@
 import { eq } from "drizzle-orm";
 import { webhookInvocations } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
-import type { ActionResult } from "../../actions/types.js";
+import type { ActionResult } from "../../apps/actions/types.js";
 
 export type WebhookInvocationStatus =
   | "accepted"

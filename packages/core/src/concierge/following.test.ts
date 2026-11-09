@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ConciergeWatchCapability } from "@rome/api-types/concierge";
-import type { Action } from "../actions/types.js";
+import type { Action } from "../apps/actions/types.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import { ConciergeFollowItemsRepository } from "../db/repositories/concierge-follow-items.js";
 import { createTestDb } from "../test/db.js";

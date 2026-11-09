@@ -3,7 +3,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
 import { parse as parseYaml } from "yaml";
-import { ActionRegistryImpl } from "../actions/registry.js";
+import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { ActionConfigSchema } from "../apps/packaging/artifact-config.js";
 

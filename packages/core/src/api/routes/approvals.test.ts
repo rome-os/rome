@@ -10,7 +10,7 @@ import {
 } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
-import type { ApprovalHandler } from "../../actions/approval-handler.js";
+import type { ApprovalHandler } from "../../apps/actions/approval-handler.js";
 
 function stubApprovalHandler(): ApprovalHandler {
   return {

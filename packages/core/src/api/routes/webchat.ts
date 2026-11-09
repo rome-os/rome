@@ -102,7 +102,7 @@ import type {
   BackendEmitOptions,
   BackendSessionTask,
   BackendTurnOptions,
-} from "../../actions/backend-turn.js";
+} from "../../apps/actions/backend-turn.js";
 import { z } from "zod";
 import { withReplyContext } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
@@ -276,7 +276,7 @@ type WebchatEventName =
 // created with, so the card's lookup finds it and opens saved.
 async function persistRoutineDraftCard(
   webchatRepo: import("../../db/repositories/webchat.js").WebChatRepository,
-  actionRegistry: import("../../actions/types.js").ActionRegistry,
+  actionRegistry: import("../../apps/actions/types.js").ActionRegistry,
   sessionId: string,
   turnId: string,
   toolUseId: string,

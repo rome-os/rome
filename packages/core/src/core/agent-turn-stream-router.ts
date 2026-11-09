@@ -1,5 +1,5 @@
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
-import type { IpcRpc } from "../actions/ipc.js";
+import type { IpcRpc } from "../apps/actions/ipc.js";
 
 export interface AgentTurnStreamSink {
   push(message: StreamAgentEvent): void;

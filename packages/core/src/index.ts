@@ -49,7 +49,7 @@ import { containerUptimeMs } from "./lib/runtime.js";
 import {
   AppActionSchemaCache,
   appActionSchemaCacheBuild,
-} from "./actions/app-action-schema-cache.js";
+} from "./apps/actions/app-action-schema-cache.js";
 import {
   initTelemetry,
   getTracer,
@@ -131,7 +131,7 @@ import { recordedChannelOf } from "./chats/connected-accounts/connection-ports.j
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
-import { recordedCardChannels, sendApprovalCard } from "./actions/approval-card.js";
+import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./apps/accounts-service.js";
 import { createAgentNames } from "./chats/accounts/agent-names.js";
 import {
@@ -165,17 +165,17 @@ import {
   TurnListeners,
 } from "./agent/index.js";
 import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
-import { ActionRegistryImpl } from "./actions/registry.js";
-import { ActionLoader } from "./actions/loader.js";
-import { ActionEngine } from "./actions/engine.js";
-import { readMemoryHeadroom } from "./actions/memory-headroom.js";
-import { defaultWorkerCap } from "./actions/worker-cap.js";
+import { ActionRegistryImpl } from "./apps/actions/registry.js";
+import { ActionLoader } from "./apps/actions/loader.js";
+import { ActionEngine } from "./apps/actions/engine.js";
+import { readMemoryHeadroom } from "./apps/actions/memory-headroom.js";
+import { defaultWorkerCap } from "./apps/actions/worker-cap.js";
 import { isFirstPartyAction } from "./apps/first-party-action.js";
-import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
-import { ActionWorkerCoordinator } from "./actions/action-subprocess.js";
-import { endInterruptedRuns } from "./actions/restart-recovery.js";
-import { WorkerRpcServer } from "./actions/worker-rpc.js";
-import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js";
+import { bumpModuleEnvEpoch } from "./apps/actions/module-loader.js";
+import { ActionWorkerCoordinator } from "./apps/actions/action-subprocess.js";
+import { endInterruptedRuns } from "./apps/actions/restart-recovery.js";
+import { WorkerRpcServer } from "./apps/actions/worker-rpc.js";
+import { setWorkerRpcInProcessDispatcher } from "./apps/actions/worker-rpc-client.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import type { ChatResetPolicy } from "./core/chat-reset-policy.js";
 import {
@@ -249,9 +249,9 @@ import { DashboardAccessState } from "./lib/dashboard-access-state.js";
 import { DashboardAccessStore } from "./lib/dashboard-access-store.js";
 import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./lib/visitor-allowlist-sync.js";
 import { PhoneWatching } from "./lib/phone-watching.js";
-import { ApprovalHandler } from "./actions/approval-handler.js";
-import { createBackendTurnRunner } from "./actions/backend-turn.js";
-import { emitAgentMessage } from "./actions/runtime-events.js";
+import { ApprovalHandler } from "./apps/actions/approval-handler.js";
+import { createBackendTurnRunner } from "./apps/actions/backend-turn.js";
+import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { PolicyEngine } from "./core/policy-engine.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
@@ -286,7 +286,7 @@ import {
   createChannelMessageHookFromCatalog,
   createChannelMessageHookReloader,
   registerAppActions,
-} from "./actions/app-actions-wiring.js";
+} from "./apps/actions/app-actions-wiring.js";
 import type { ChannelMessageHook } from "./hooks/types.js";
 import {
   createCodexImageGenerationProvider,

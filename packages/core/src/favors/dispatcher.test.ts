@@ -1,7 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { FavorDispatchRunner } from "./dispatcher.js";
 import type { FavorActionRequestView, FavorService } from "./types.js";
-import type { ActionEngine } from "../actions/engine.js";
+import type { ActionEngine } from "../apps/actions/engine.js";
 
 function requestView(overrides: Partial<FavorActionRequestView> = {}): FavorActionRequestView {
   const now = new Date("2026-01-01T00:00:00.000Z").toISOString();
