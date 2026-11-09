@@ -6,10 +6,15 @@ import { ROME_TOOL_GROUPS, type RomeToolDefinition, type RomeToolGroup } from ".
 
 /** Value object. What a session opens with that a later change cannot reach. */
 export interface SessionSetup {
-  /** The system prompt without memory: the agent's instructions and identity. */
+  /** The system prompt without memory or the opener's context suffix: the
+   *  agent's instructions and identity. */
   systemPrompt: string;
   /** The provider's own tools the agent declares. */
   builtinTools: readonly string[];
+  /** The names of the MCP servers the agent declares. */
+  mcpServers: readonly string[];
+  /** The schema the agent's final answer follows, or null. */
+  outputSchema: unknown;
   /** Rome's tools by group, as the model reads their names and schemas. */
   tools: Readonly<Record<RomeToolGroup, readonly RomeToolDefinition[]>>;
 }
@@ -27,7 +32,13 @@ export function setupFingerprint(setup: SessionSetup): string {
       inputSchema,
     ]),
   ]);
-  const canonical = JSON.stringify([setup.systemPrompt, [...setup.builtinTools], tools]);
+  const canonical = JSON.stringify([
+    setup.systemPrompt,
+    [...setup.builtinTools],
+    [...setup.mcpServers],
+    setup.outputSchema,
+    tools,
+  ]);
   return createHash("sha256").update(canonical).digest("hex");
 }
 

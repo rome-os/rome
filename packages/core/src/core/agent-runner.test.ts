@@ -3335,11 +3335,15 @@ describe("AgentRunner", () => {
         handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
       });
 
-      async function turn(runner: AgentRunner, params: { sessionId?: string } = {}) {
+      async function turn(
+        runner: AgentRunner,
+        params: { sessionId?: string; contextSuffix?: string } = {},
+      ) {
         const messages = await collectMessages(
           runner.run({
             agentName: "test-renewing",
             prompt: "Hello",
+            ...(params.contextSuffix ? { contextSuffix: params.contextSuffix } : {}),
             ...(params.sessionId ? { sessionId: params.sessionId } : { channelThreadKey: key }),
           }),
         );
@@ -3366,6 +3370,14 @@ describe("AgentRunner", () => {
         expect((await sessionRepository.current(key, "core:test-renewing"))?.setup).toMatch(
           /^[0-9a-f]{64}$/,
         );
+      });
+
+      it("keeps the session when only the guardian's profile in the context changes", async () => {
+        const runner = renewingRunner(new MockModelProvider(replies(2)));
+        const first = await turn(runner, { contextSuffix: "## Guardian\n\nLikes tea." });
+        const second = await turn(runner, { contextSuffix: "## Guardian\n\nLikes coffee." });
+
+        expect(second).toBe(first);
       });
 
       it.each([
@@ -3443,6 +3455,28 @@ describe("AgentRunner", () => {
 
         expect(whileHeld).toBe(first);
         expect(after).not.toBe(first);
+      });
+
+      it("keeps the continuation notice for a renewed session whose first open failed", async () => {
+        const provider = new MockModelProvider(replies(2));
+        const runner = renewingRunner(provider);
+        await turn(runner);
+        identity.text = "**Agent Name:** YoYo";
+        const open = provider.openSession.bind(provider);
+        let failNext = true;
+        provider.openSession = async (params) => {
+          if (failNext) {
+            failNext = false;
+            throw new Error("provider unavailable");
+          }
+          return open(params);
+        };
+
+        await turn(runner).catch(() => undefined);
+        const retried = await turn(runner);
+
+        expect(retried).toBeDefined();
+        expect(provider.calls.at(-1)?.prompt).toContain("<continuation>");
       });
 
       it("renews a session that opened before setups were recorded", async () => {

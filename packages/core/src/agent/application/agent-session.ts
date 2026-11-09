@@ -12,6 +12,7 @@ import { afterLanding, isQueueInput } from "../domain/input-queue.js";
 import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
 import {
   requireAgent,
+  type Agent,
   type AgentCatalog,
   type AgentDefinition,
 } from "../domain/agent-definition.js";
@@ -65,10 +66,10 @@ import {
 } from "../domain/prompt.js";
 import { resolveAgentPolicy } from "../domain/agent-policy.js";
 import { createRomeTools } from "./rome-tools.js";
-import { showsWidgets, widgetDrawingFor } from "../domain/widget-drawing.js";
+import { showsWidgets, widgetDrawingFor, type WidgetDrawing } from "../domain/widget-drawing.js";
 import { type AgentAction, type AgentActions } from "../domain/agent-action.js";
 import { type WakeUp } from "../domain/defer.js";
-import { subagentToolName, type Subagent } from "../domain/subagent.js";
+import { subagentToolName, type Subagent, type Subagents } from "../domain/subagent.js";
 import { type ModelTier } from "../domain/model-tier.js";
 import { modelResolutionRequest } from "../domain/model-resolution.js";
 import {
@@ -436,7 +437,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     span: Span,
     init?: OpenRequest,
     /** Set when the reset policy and the setup check already ran for this acquire. */
-    resetChecked?: { prepared?: Session; setup?: string; renewedSetup?: boolean },
+    resetChecked?: { prepared?: Session; setup?: string },
   ): Promise<AgentSession> => {
     const k = keyOf(key);
     const reset = init?.resetPolicy;
@@ -500,13 +501,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
             result: "succeeded",
           });
         }
-        return await acquireInner(key, span, init, {
-          prepared,
-          setup,
-          // A fresh session for a changed setup continues the chat, so its
-          // first turn says the earlier messages are not in its context.
-          renewedSetup: decision.due && decision.reason === "setup" && !!active,
-        });
+        return await acquireInner(key, span, init, { prepared, setup });
       });
     }
     // `reopen` distinguishes a cold open (no live session for this key — the
@@ -581,7 +576,6 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
       const sess = await openSession(deps, key, init ?? {}, {
         prepared: resetChecked?.prepared,
         setup: resetChecked?.setup,
-        renewedSetup: resetChecked?.renewedSetup === true,
         keepAlive,
         onClosed: onSessionClosed,
         isSubagent,
@@ -674,8 +668,6 @@ interface OpenOptions {
   prepared?: Session;
   /** The fingerprint of the setup a session this open creates records. */
   setup?: string;
-  /** `prepared` replaced a session whose setup changed, in the same chat. */
-  renewedSetup: boolean;
   keepAlive: boolean;
   onClosed: (s: AgentSessionImpl) => void;
   isSubagent: boolean;
@@ -819,11 +811,140 @@ function deprecatedSameAgent(
 }
 
 /**
- * The fingerprint of the setup a session of `key`'s agent opens with now,
- * or undefined when the agent's policy keeps a session through setup
- * changes. It reads what `openSession` opens with: the system prompt without
- * memory, the provider's tools the agent declares, and Rome's tools.
+ * What a session of an agent opens with, from one place, so the session and
+ * the fingerprint of its setup cannot drift apart: the system prompt, the
+ * provider's tools the agent declares, its actions, subagents and MCP
+ * servers, whether it may `defer`, and Rome's tools for a turn.
  */
+interface SessionSetupSource {
+  widgets: WidgetDrawing;
+  /** The full system prompt, memory and the opener's context suffix included. */
+  systemPrompt(): string;
+  allowList: readonly string[];
+  subagents: Subagent[];
+  externalMcpServers: Record<string, McpServerConfig> | undefined;
+  /** The `defer` tool, or undefined for a session that may not wake itself. */
+  deferTool: DeferTool | undefined;
+  romeTools(
+    turn: TurnFacts,
+    run: Subagents["run"],
+    session: { hasSpeaker: boolean; sessionTools: readonly RomeTool[]; defers: boolean },
+  ): RomeTools;
+  /**
+   * The fingerprint of the setup, or undefined when the agent's policy keeps
+   * a session through setup changes. It leaves out memory and the opener's
+   * context suffix (the guardian's profile), which the agent itself writes.
+   */
+  fingerprint(key: AgentSessionKey, init: SessionOpening): Promise<string | undefined>;
+}
+
+function sessionSetupOf(
+  deps: ManagerDeps,
+  agent: Agent,
+  init: SessionOpening,
+  isSubagent: boolean,
+): SessionSetupSource {
+  const config = agent.definition;
+  const promptAgent = { ...config, name: agent.localName, owner: agent.ownerType };
+  const policy = resolveAgentPolicy({ name: agent.localName, policy: config.policy });
+  // Interactive inline UI (`propose_routine` cards, app components) pauses the
+  // agent for a human reply. That only works when (a) the channel's surface can
+  // render it, and (b) this session will actually receive the next user turn.
+  // Subagents fail (b): the parent turn blocks on the child, and the next user
+  // turn always routes to the main agent — so a suspended subagent call would
+  // hang forever. Where this is false, an action that returns `renderComponent`
+  // falls back to relaying its `promptText` as prose; see `actionToolOutput`.
+  // The answer feeds the cached system prompt, so the opener states it for
+  // the session's life.
+  const widgets = widgetDrawingFor({ placeDrawsCards: init.drawsCards === true, isSubagent });
+  const allowList = config.actions ?? [];
+  const subagents = subagentsOf(deps.agentLoader, config);
+  let externalMcpServers: Record<string, McpServerConfig> | undefined;
+  if (config.networkDiscovery) {
+    const discovered = deps.networkMcpServers();
+    if (Object.keys(discovered).length > 0) {
+      externalMcpServers = { ...config.mcpServers, ...discovered };
+    }
+  }
+  // `defer` schedules a one-off wakeup back into this same thread. Only wired
+  // for guardian-facing threads with a real `channelThreadKey` to wake;
+  // keyless/synthetic runs (e.g. envoy validation) and subagents (which reuse
+  // the parent's thread key) get no defer tool — a wakeup is a top-level
+  // conversation primitive.
+  const deferTool: DeferTool | undefined =
+    init.guardianFacing === true && !isSubagent
+      ? {
+          schedule: (turn, wakeUp) => deps.defer.schedule(turn, wakeUp),
+          finalText: policy.finalText,
+        }
+      : undefined;
+  const romeTools: SessionSetupSource["romeTools"] = (turn, run, session) =>
+    createRomeTools({
+      turn,
+      actions: deps.actions,
+      skills: deps.skillCatalog,
+      subagents: { list: () => subagents, run },
+      // Without a speaker, action results that hand back a widget take their
+      // plain-text forms. Otherwise the tool result claims a card was shown
+      // while nothing mounted and the fork dead-ends.
+      widgetsShow: showsWidgets(widgets, session.hasSpeaker),
+      log: deps.log,
+      defer: session.defers ? deferTool : undefined,
+      sessionTools: session.sessionTools,
+    });
+  return {
+    widgets,
+    systemPrompt: () =>
+      deps.systemPrompts.build(promptAgent, { contextSuffix: init.contextSuffix, widgets }),
+    allowList,
+    subagents,
+    externalMcpServers,
+    deferTool,
+    romeTools,
+    async fingerprint(key, opening) {
+      if (isSubagent || !policy.freshSessionOnSetupChange) return undefined;
+      // Facts of no turn: the tools only list their names and schemas here.
+      const turn: TurnFacts = {
+        agentName: key.agentName,
+        continuityKey: key.channelThreadKey,
+        sessionId: "",
+        isSubagent,
+        actions: allowList,
+        widgets,
+        turnId: () => undefined,
+        threadContext: () => opening.threadContext,
+        sharedContext: () => opening.sharedContext,
+        pushLevel: () => undefined,
+        threadAnchor: () => undefined,
+        inTurn: (fn) => fn(),
+      };
+      const tools = romeTools(
+        turn,
+        async () => {
+          throw new Error("Not a turn");
+        },
+        {
+          hasSpeaker: true,
+          sessionTools: await deps.sessionTools.forTurn(turn, true),
+          defers: true,
+        },
+      );
+      return setupFingerprint({
+        systemPrompt: deps.systemPrompts.setup(promptAgent, { widgets }),
+        builtinTools: config.tools,
+        mcpServers: Object.keys(config.mcpServers ?? {}),
+        outputSchema: config.outputSchema ?? null,
+        tools: Object.fromEntries(
+          ROME_TOOL_GROUPS.map((group) => [group, tools.listTools(group)]),
+        ) as Record<(typeof ROME_TOOL_GROUPS)[number], ReturnType<typeof tools.listTools>>,
+      });
+    },
+  };
+}
+
+/** The fingerprint of the setup a session of `key`'s agent opens with now
+ *  (SessionSetupSource.fingerprint). An agent that is gone has none here: its
+ *  session fails where it opens. */
 async function currentSetup(
   deps: ManagerDeps,
   key: AgentSessionKey,
@@ -831,65 +952,9 @@ async function currentSetup(
   isSubagent: boolean,
 ): Promise<string | undefined> {
   if (isSubagent) return undefined;
-  // An agent that is gone fails where the session opens, not here.
   const agent = deps.agentLoader.find(key.agentName);
   if (!agent) return undefined;
-  const config = agent.definition;
-  if (
-    !resolveAgentPolicy({ name: agent.localName, policy: config.policy }).freshSessionOnSetupChange
-  ) {
-    return undefined;
-  }
-  const widgets = widgetDrawingFor({ placeDrawsCards: init.drawsCards === true, isSubagent });
-  const systemPrompt = deps.systemPrompts.setup(
-    { ...config, name: agent.localName, owner: agent.ownerType },
-    { contextSuffix: init.contextSuffix, widgets },
-  );
-  // Facts of no turn: the tools only list their names and schemas here.
-  const turn: TurnFacts = {
-    agentName: key.agentName,
-    continuityKey: key.channelThreadKey,
-    sessionId: "",
-    isSubagent,
-    actions: config.actions ?? [],
-    widgets,
-    turnId: () => undefined,
-    threadContext: () => init.threadContext,
-    sharedContext: () => init.sharedContext,
-    pushLevel: () => undefined,
-    threadAnchor: () => undefined,
-    inTurn: (fn) => fn(),
-  };
-  const subagents = subagentsOf(deps.agentLoader, config);
-  const tools = createRomeTools({
-    turn,
-    actions: deps.actions,
-    skills: deps.skillCatalog,
-    subagents: {
-      list: () => subagents,
-      run: async () => {
-        throw new Error("Not a turn");
-      },
-    },
-    widgetsShow: showsWidgets(widgets, true),
-    log: deps.log,
-    defer:
-      init.guardianFacing === true
-        ? {
-            schedule: (at, wakeUp) => deps.defer.schedule(at, wakeUp),
-            finalText: resolveAgentPolicy({ name: agent.localName, policy: config.policy })
-              .finalText,
-          }
-        : undefined,
-    sessionTools: await deps.sessionTools.forTurn(turn, true),
-  });
-  return setupFingerprint({
-    systemPrompt,
-    builtinTools: config.tools,
-    tools: Object.fromEntries(
-      ROME_TOOL_GROUPS.map((group) => [group, tools.listTools(group)]),
-    ) as Record<(typeof ROME_TOOL_GROUPS)[number], ReturnType<typeof tools.listTools>>,
-  });
+  return sessionSetupOf(deps, agent, init, isSubagent).fingerprint(key, init);
 }
 
 async function openSession(
@@ -967,6 +1032,14 @@ async function openSession(
     });
   const sessionId = session.id;
   const isNewSession = !resumed;
+  // A session that replaced one of an agent renewed on setup changes
+  // continues its chat with none of it in context, until a turn of its own
+  // succeeds and records its thread. A failed open keeps that true for the
+  // next one.
+  const continuesChat =
+    session.setup !== null &&
+    !session.modelThreadId &&
+    (await deps.sessionRepository.succeeds(sessionId));
   const modelThreadId = resumed?.modelThreadId ?? undefined;
   // The session model pin records the model that produced this history.
   // Precedence: docs/concepts/sessions.md#model-pin.
@@ -1003,37 +1076,10 @@ async function openSession(
     }
   }
 
-  // Interactive inline UI (`propose_routine` cards, app components) pauses the
-  // agent for a human reply. That only works when (a) the channel's surface can
-  // render it, and (b) this session will actually receive the next user turn.
-  // Subagents fail (b): the parent turn blocks on the child, and the next user
-  // turn always routes to the main agent — so a suspended subagent call would
-  // hang forever. Where this is false, an action that returns `renderComponent`
-  // falls back to relaying its `promptText` as prose; see `actionToolOutput`.
-  // The answer feeds the cached system prompt, so the opener states it for
-  // the session's life.
-  const widgets = widgetDrawingFor({
-    placeDrawsCards: init.drawsCards === true,
-    isSubagent: !!opts.isSubagent,
-  });
-
-  const systemPrompt = deps.systemPrompts.build(
-    { ...config, name: agent.localName, owner: agent.ownerType },
-    { contextSuffix: init.contextSuffix, widgets },
-  );
-
-  // What the agent's definition lets it call, for the ports behind its tools.
-  const allowList = config.actions ?? [];
-  const subagents = subagentsOf(deps.agentLoader, config);
+  const setupSource = sessionSetupOf(deps, agent, init, !!opts.isSubagent);
+  const { widgets, allowList, subagents, externalMcpServers } = setupSource;
+  const systemPrompt = setupSource.systemPrompt();
   const subagentToolNames = new Set(subagents.map((subagent) => subagentToolName(subagent.name)));
-
-  let externalMcpServers: Record<string, McpServerConfig> | undefined;
-  if (config.networkDiscovery) {
-    const discovered = deps.networkMcpServers();
-    if (Object.keys(discovered).length > 0) {
-      externalMcpServers = { ...config.mcpServers, ...discovered };
-    }
-  }
 
   // We hold the AgentSessionImpl handle in a closure so the action
   // callback can route channel-context / shared-context from the right place.
@@ -1089,21 +1135,6 @@ async function openSession(
     () => impl.currentTurnThreadAnchorRef,
   );
 
-  // `defer`: schedule a one-off wakeup back into this same thread, through
-  // the turn's facts (`deps.defer`). Only
-  // wired for guardian-facing threads with a real `channelThreadKey` to wake;
-  // keyless/synthetic runs (e.g. envoy validation) and subagents (which reuse
-  // the parent's thread key) get no defer tool — a wakeup is a top-level
-  // conversation primitive.
-  const deferEnabled = init.guardianFacing === true && !opts.isSubagent;
-  const deferTool = (): DeferTool | undefined =>
-    deferEnabled
-      ? {
-          schedule: (turn, wakeUp) => deps.defer.schedule(turn, wakeUp),
-          finalText: resolveAgentPolicy({ name: agent.localName, policy: config.policy }).finalText,
-        }
-      : undefined;
-
   const makeExecuteSubagent =
     (refs: TurnExecRefs) =>
     async (name: string, input: unknown, toolContext: ModelToolCallContext): Promise<unknown> =>
@@ -1157,20 +1188,7 @@ async function openSession(
     refs: TurnExecRefs,
     session: { hasSpeaker: boolean; sessionTools: readonly RomeTool[]; defers: boolean },
     turn: TurnFacts = turnFacts(refs),
-  ) =>
-    createRomeTools({
-      turn,
-      actions: deps.actions,
-      skills: deps.skillCatalog,
-      subagents: { list: () => subagents, run: makeExecuteSubagent(refs) },
-      // Without a speaker, action results that hand back a widget take their
-      // plain-text forms. Otherwise the tool result claims a card was shown
-      // while nothing mounted and the fork dead-ends.
-      widgetsShow: showsWidgets(widgets, session.hasSpeaker),
-      log,
-      defer: session.defers ? deferTool() : undefined,
-      sessionTools: session.sessionTools,
-    });
+  ) => setupSource.romeTools(turn, makeExecuteSubagent(refs), session);
   const liveRomeTools = (sessionTools: readonly RomeTool[]) =>
     romeTools(sessionExecRefs, { hasSpeaker: true, sessionTools, defers: true }, liveTurn);
 
@@ -1484,7 +1502,7 @@ async function openSession(
     threadResumed,
     // The row recorded a thread this open does not resume: another provider
     // now runs the chat, and its new thread has seen none of it.
-    replacedThread: (!threadResumed && !!resumed?.modelThreadId) || opts.renewedSetup,
+    replacedThread: (!threadResumed && !!resumed?.modelThreadId) || continuesChat,
     previousModel: resumed?.model ?? undefined,
     openModelSession,
     modelProvider: initialResolution?.modelProvider,

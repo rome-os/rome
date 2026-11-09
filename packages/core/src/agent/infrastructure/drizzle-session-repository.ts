@@ -39,6 +39,15 @@ export class DrizzleSessionRepository implements SessionRepository {
     return rows[0] ? restore(rows[0]) : null;
   }
 
+  async succeeds(id: SessionId): Promise<boolean> {
+    const rows = await this.db
+      .select({ id: sessions.id })
+      .from(sessions)
+      .where(eq(sessions.supersededBy, id))
+      .limit(1);
+    return rows.length > 0;
+  }
+
   async current(continuityKey: ContinuityKey, agentName: AgentName): Promise<Session | null> {
     const rows = await this.db
       .select()

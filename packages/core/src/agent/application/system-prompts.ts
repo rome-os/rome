@@ -17,7 +17,9 @@ export interface SystemPrompts {
   build(agent: PromptAgent, options: PromptOptions): string;
   /**
    * The system prompt `build` gives, without memory, from the sources as they
-   * are now: what a session's setup holds of its prompt. When the fixed part
+   * are now: what a session's setup holds of its prompt. The caller leaves
+   * out the opener's context suffix when it is living context, such as the
+   * guardian's profile. When the fixed part
    * changed since it was held, the new one is held, so the next `build` uses
    * it too.
    */

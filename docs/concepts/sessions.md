@@ -40,14 +40,14 @@ A continuity key is the value that whatever opens a session, and comes back to i
 
 ## Setup
 
-A session's setup is what it takes when it opens and keeps for its life: its agent's instructions, its identity, and its tools with their schemas. Memory, follows and tasks are not part of it, since a session reads them while it runs.
+A session's setup is what it takes when it opens and keeps for its life: its agent's instructions, its identity (`IDENTITY.md`, which holds its name), and its tools with their schemas. Memory, follows and tasks are not part of it, since a session reads them while it runs. Nor is the guardian's profile (`GUARDIAN.md`), which the agent writes down as it learns about the guardian: a change to it does not replace a session.
 
 **Contracts:**
 
 - A change to an agent's setup reaches a session only when a fresh session opens.
 - An agent whose policy asks for it gets a fresh session in the same chat when its setup changed since its session opened. The check runs before each turn opened by continuity key. A session resumed by its id is never replaced. The Concierge's chats work this way, since one of them can run on one session for days.
 - A session that recorded no setup opened before setups were recorded, and is replaced on its next turn under such a policy.
-- A replacement for a changed setup is silent to the guardian. Its first turn carries the [continuation](#continuation) notice.
+- A replacement for a changed setup is silent to the guardian. It carries the [continuation](#continuation) notice until a turn of its own succeeds, so a first open that fails does not lose it.
 
 ## Model pin
 
@@ -80,7 +80,7 @@ Rome's transcript is the conversation, and a model thread is a cache of it. When
 - The notice goes on the first turn of a thread that replaced one holding the chat: a pick on another provider in an open chat, or a session reopened on another provider than its recorded thread. It rides on that thread's turns until one returns a result, since a turn that fails may never have reached the thread.
 - A thread that starts in a session also gets the `<thread_context>` block on its first turn.
 - The notice names no channel. The thread's channel and thread id are in its thread context.
-- A session that replaced one whose [setup](#setup) changed carries the notice on its first turn, like a thread on another provider.
+- A session that replaced another of an agent renewed on [setup](#setup) changes carries the notice until a turn of its own succeeds, like a thread on another provider.
 - A new chat, a new generation (the chat-settings reset policy), and a thread that resumes add no notice. Subagent sessions carry none.
 
 ## Turn
