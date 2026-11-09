@@ -234,6 +234,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       const clearsOptimistically = uploads.length === 0;
       const replyTo = replyDraft?.target ?? undefined;
       const chatThread = replyDraft?.thread ?? undefined;
+      // The draft's change count once this send cleared it: a failed send
+      // puts its reply back only if the guardian changed nothing since.
+      let clearedAt: number | undefined;
       if (clearsOptimistically) {
         setInputText("");
         setPendingUploads([]);
@@ -241,7 +244,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         setDraftSkill(null);
         // A send closes the reply bar and, with it, the thread view; the
         // message keeps the thread it was sent into.
-        replyDraft?.clear();
+        clearedAt = replyDraft?.clear();
       }
       try {
         await invokeOnSend(
@@ -263,7 +266,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           setPendingUploads(uploads);
           setFolder(pickedFolder);
           setDraftSkill(skill);
-          if (replyTo) replyDraft?.restore(replyTo);
+          if (replyTo) replyDraft?.restore(replyTo, clearedAt);
         }
       }
     }, [inputText, pendingUploads, folder, draftSkill, invokeOnSend, snapshotOf, replyDraft]);

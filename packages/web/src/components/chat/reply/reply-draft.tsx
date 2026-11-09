@@ -32,10 +32,17 @@ export interface ReplyDraft {
   /** Picks the reply. In a chat that keeps chat threads it also opens the
    *  thread view on the replied message's thread. */
   set: (target: ReplyTarget) => void;
-  /** Drops the reply, and closes the thread view with it. */
-  clear: () => void;
-  /** Puts a target back after a failed send, unless the guardian has picked another meanwhile. */
-  restore: (target: ReplyTarget) => void;
+  /** Drops the reply, and closes the thread view with it. Answers the
+   *  draft's change count after it, for `restore`. */
+  clear: () => number;
+  /**
+   * Puts a reply back, with its thread view, after a failed send. With
+   * `since`, the count `clear` answered when the send cleared the draft, it
+   * does so only when nothing changed the draft since: a reply picked, or
+   * picked and dropped again, meanwhile stays as the guardian left it.
+   * Without it, only when no reply is picked.
+   */
+  restore: (target: ReplyTarget, since?: number) => void;
   /** Whether the loaded transcript holds the message, so a quote can link to it. */
   has: (messageId: string) => boolean;
   jump: (messageId: string) => void;
@@ -96,8 +103,14 @@ export function useReplyDraftState({
   const { target, thread } = draft;
   const focusRef = useRef(focusComposer);
   focusRef.current = focusComposer;
+  // Counts every change to the draft, so a late restore can tell whether the
+  // guardian changed it after the send.
+  const changes = useRef(0);
 
-  useEffect(() => setDraft(CLOSED), [chatId]);
+  useEffect(() => {
+    changes.current += 1;
+    setDraft(CLOSED);
+  }, [chatId]);
 
   // The one place the reply bar and the thread view open: in a chat that
   // keeps chat threads, a reply always opens its thread too.
@@ -107,14 +120,23 @@ export function useReplyDraftState({
   );
   const set = useCallback(
     (next: ReplyTarget) => {
+      changes.current += 1;
       setDraft(opened(next));
       requestAnimationFrame(() => focusRef.current());
     },
     [opened],
   );
-  const clear = useCallback(() => setDraft(CLOSED), []);
+  const clear = useCallback(() => {
+    changes.current += 1;
+    setDraft(CLOSED);
+    return changes.current;
+  }, []);
   const restore = useCallback(
-    (next: ReplyTarget) => setDraft((current) => (current.target ? current : opened(next))),
+    (next: ReplyTarget, since?: number) => {
+      if (since !== undefined && since !== changes.current) return;
+      changes.current += 1;
+      setDraft((current) => (current.target ? current : opened(next)));
+    },
     [opened],
   );
   const openThread = set;

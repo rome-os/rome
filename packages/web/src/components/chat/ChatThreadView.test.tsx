@@ -132,6 +132,42 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     expect(draft.target).toMatchObject({ messageId: "a1", preview: "Which day?" });
   });
 
+  it("puts a failed send's reply and thread back only when nothing changed since the send", () => {
+    let draft!: ReplyDraft;
+    render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
+    const a = { messageId: "a1", author: "agent" as const, preview: "Which day?" };
+    const b = { messageId: "b1", author: "agent" as const, preview: "Flights?" };
+
+    // Sent from thread A; the guardian picks B before A's send fails.
+    act(() => draft.set(a));
+    let sentAt = 0;
+    act(() => {
+      sentAt = draft.clear();
+    });
+    act(() => draft.set(b));
+    act(() => draft.restore(a, sentAt));
+    expect([draft.target?.messageId, draft.thread]).toEqual(["b1", "b1"]);
+
+    // B picked and dropped again: the draft stays closed.
+    act(() => {
+      sentAt = draft.clear();
+    });
+    act(() => draft.set(b));
+    act(() => {
+      draft.clear();
+    });
+    act(() => draft.restore(a, sentAt));
+    expect([draft.target, draft.thread]).toEqual([null, null]);
+
+    // Nothing changed: A comes back with its thread.
+    act(() => draft.set(a));
+    act(() => {
+      sentAt = draft.clear();
+    });
+    act(() => draft.restore(a, sentAt));
+    expect([draft.target?.messageId, draft.thread]).toEqual(["a1", "a1"]);
+  });
+
   it("closes the thread view with the reply bar's ✕", () => {
     let draft!: ReplyDraft;
     render(
