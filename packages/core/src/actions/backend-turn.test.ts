@@ -129,6 +129,44 @@ describe("backend turn delivery", () => {
     ).toBe("stopped");
   });
 
+  it.each([
+    "webchat",
+    "telegram",
+  ])("an empty %s generator returns failed without delivery or an error", async (channel) => {
+    const agentRunner = createMockAgentRunner([[]]);
+    const send = rs.fn(async () => ({ messageId: "reply", chatId: "chat" }));
+    const replies = { send: rs.fn<SpeakerReplies["send"]>(async () => null) };
+    const emit = rs.fn(async () => {});
+    const shouldRun = () => true;
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: () => ({ name: channel, send: { send } }) as unknown as Channel,
+      chats: { ensureChannelChat: async () => ({ id: "chat" }) },
+      replies,
+    });
+    runner.setWebchatRuntime({
+      enqueueSessionTask: async (_id, task) => {
+        await task({ emit });
+      },
+    });
+    await expect(
+      runner.runAndReport(
+        {
+          agentName: "main",
+          sessionId: "runtime",
+          channel,
+          threadId: "chat",
+          prompt: "Continue",
+        },
+        { shouldRun },
+      ),
+    ).resolves.toBe("failed");
+    expect(agentRunner.calls[0]?.shouldRun).toBe(shouldRun);
+    expect(emit).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(replies.send).not.toHaveBeenCalled();
+  });
+
   it("reports a turn that never ran as failed", async () => {
     const agentRunner = createMockAgentRunner([[]]);
     const webchat = {
@@ -432,6 +470,25 @@ describe("backend turn delivery", () => {
       threadId: "wechat-thread-1",
       prompt: "p",
     };
+
+    it("drops a messaging turn when shouldRun is false, without running or delivering", async () => {
+      const agentRunner = answered();
+      const send = rs.fn<Send>(async (chatId) => ({ chatId }));
+      const replies = { send: rs.fn<SpeakerReplies["send"]>(async () => null) };
+      const shouldRun = rs.fn(() => false);
+      const runner = createBackendTurnRunner({
+        agentRunner,
+        channel: () => wechatWith(send),
+        chats,
+        replies,
+      });
+
+      expect(await runner.runAndReport(params, { shouldRun })).toBe("failed");
+      expect(shouldRun).toHaveBeenCalledTimes(1);
+      expect(agentRunner.calls).toHaveLength(0);
+      expect(replies.send).not.toHaveBeenCalled();
+      expect(send).not.toHaveBeenCalled();
+    });
 
     it("says the reply through the speaker, as the turn's answer", async () => {
       const send = rs.fn<Send>(async (chatId) => ({ chatId }));

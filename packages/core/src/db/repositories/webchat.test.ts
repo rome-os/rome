@@ -734,7 +734,7 @@ describe("WebChatRepository", () => {
     // Rome comes back with real timers, weeks after these traces: the window
     // counts from the newest trace, not from now.
     const day = 24 * 60 * 60 * 1000;
-    await expect(repo.endInterruptedTurns(day)).resolves.toBe(2);
+    await expect(repo.endInterruptedTurns(day)).resolves.toHaveLength(2);
 
     const blocks = async (sessionId: string) =>
       JSON.parse((await repo.getTraceContents(sessionId))[0]!.content) as Record<string, unknown>[];
@@ -765,7 +765,7 @@ describe("WebChatRepository", () => {
       "sess-done": false,
       "sess-old": false,
     });
-    await expect(repo.endInterruptedTurns(day)).resolves.toBe(0);
+    await expect(repo.endInterruptedTurns(day)).resolves.toHaveLength(0);
   });
 
   it("fails the subagents an interrupted turn was still waiting on", async () => {
@@ -807,7 +807,7 @@ describe("WebChatRepository", () => {
     });
 
     const day = 24 * 60 * 60 * 1000;
-    await expect(repo.endInterruptedTurns(day)).resolves.toBe(1);
+    await expect(repo.endInterruptedTurns(day)).resolves.toHaveLength(1);
 
     const blocks = async () =>
       JSON.parse((await repo.getTraceContents("sess-parent"))[0]!.content) as Record<
@@ -828,7 +828,7 @@ describe("WebChatRepository", () => {
       { type: "turn_end", turnId: "turn-2", status: "error", durationMs: 0, agent: "main" },
     ]);
 
-    await expect(repo.endInterruptedTurns(day)).resolves.toBe(0);
+    await expect(repo.endInterruptedTurns(day)).resolves.toHaveLength(0);
     const results = (await blocks()).filter((block) => block.type === "subagent_result");
     expect(results.map((block) => block.toolUseId)).toEqual([
       "tu-done",

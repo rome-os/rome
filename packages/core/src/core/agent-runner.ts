@@ -274,6 +274,7 @@ export class AgentRunner {
 
     // sendTurn is sync — turnId is allocated by AgentSession
     // and surfaced on the stream's turn_start event.
+    if (params.shouldRun && !params.shouldRun()) return;
     const handle = session.sendTurn(
       { prompt: params.prompt, images: params.images },
       {

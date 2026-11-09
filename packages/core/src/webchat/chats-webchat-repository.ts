@@ -23,6 +23,7 @@ import { type ChatRef, chatKey, type Place, placeIn } from "../chats/storage/pla
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import {
   type EnsureRomeSessionInput,
+  type InterruptedTurn,
   type MessagePageCursor,
   type MessagePageOptions,
   type StoredWebchatHistoryMessage,
@@ -30,7 +31,13 @@ import {
   type TraceBatch,
   WebChatRepository,
 } from "../db/repositories/webchat.js";
-import { agentTurnMessages, romeAgentMessages, romeSessions } from "../db/schema.js";
+import {
+  agentTurnMessages,
+  romeAgentMessages,
+  romeAgentTraceBlocks,
+  romeSessions,
+  sessions,
+} from "../db/schema.js";
 import { isWebchatChat, storedSessionType } from "../db/session-kind.js";
 import type { SessionActor } from "../lib/session-actor.js";
 import { TurnLinks } from "../sessions/turn-links.js";
@@ -331,6 +338,104 @@ export class ChatsWebChatRepository extends WebChatRepository {
       this.advanceActivity(sessionId, recorded.at);
       return true;
     });
+  }
+
+  /** Rechecked at dispatch: only an unchanged guardian root chat can continue. */
+  canContinueAfterRestart(turn: InterruptedTurn): boolean {
+    return (
+      this.db.get<{ eligible: number }>(sql`
+      SELECT 1 AS eligible
+      FROM ${romeSessions} s
+      JOIN ${CHATS} c ON c.id = s.chat_id AND c.platform = 'webchat'
+      JOIN ${romeAgentMessages} t ON t.id = ${turn.messageId} AND t.session_id = s.id
+      WHERE s.id = ${turn.sessionId} AND s.type = 'channel' AND s.chat_platform = 'webchat'
+        AND (s.owner_key IS NULL OR s.owner_key = 'guardian')
+        AND s.parent_session_id IS NULL AND s.parent_turn_id IS NULL
+        AND s.archived_at IS NULL AND s.trigger_kind IS NULL AND t.trigger_kind IS NULL
+        AND EXISTS (
+          SELECT 1 FROM agent_turn_messages l
+          JOIN ${CHAT_MESSAGES} m ON m.id = l.message_id
+          WHERE l.session_id = s.id AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
+            AND m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+            AND m.sender_account_id = 'guardian' AND m.sender_agent IS NULL
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM ${CHAT_MESSAGES} m
+          WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+            AND m.sender_account_id = 'guardian' AND m.sender_agent IS NULL
+            AND m.id > (
+              SELECT min(l.message_id) FROM agent_turn_messages l
+              WHERE l.session_id = s.id AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
+            )
+            AND NOT EXISTS (
+              SELECT 1 FROM agent_turn_messages l2
+              WHERE l2.message_id = m.id AND l2.session_id = s.id
+                AND l2.turn_id = ${turn.turnId} AND l2.role = 'prompt'
+            )
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM ${romeAgentMessages} n
+          WHERE n.session_id = s.id AND n.role = 'trace' AND n.id <> t.id
+            AND (n.created_at > t.created_at OR (n.created_at = t.created_at AND n.rowid > t.rowid))
+        )
+    `)?.eligible === 1
+    );
+  }
+
+  /** Latest timestamped evidence for this turn, in milliseconds, or null. Not a heartbeat or exact restart time. */
+  getRestartLastActivityAt(turn: InterruptedTurn): number | null {
+    // Trace blocks have no timestamp column, and a trace has no updated_at.
+    // Runtime sessions are touched on each non-transient model block. The
+    // other signals cover legacy sessions and preserve event-time precision.
+    // None count the cleanup's synthetic ending as activity.
+    const rows = this.db.all<{ at: number | string | null }>(sql`
+      SELECT created_at AS at FROM ${romeAgentMessages}
+      WHERE id = ${turn.messageId} AND session_id = ${turn.sessionId} AND role = 'trace'
+      UNION ALL
+      SELECT last_active_at FROM ${sessions} WHERE id = ${turn.runtimeSessionId}
+      UNION ALL
+      SELECT m.said_at FROM agent_turn_messages l
+      JOIN ${romeSessions} s ON s.id = l.session_id
+      JOIN ${CHAT_MESSAGES} m ON m.id = l.message_id
+        AND m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+      WHERE l.session_id = ${turn.sessionId} AND l.turn_id = ${turn.turnId}
+        AND l.role IN ('prompt', 'answer')
+      UNION ALL
+      SELECT coalesce(json_extract(b.content, '$.endedAt'), json_extract(b.content, '$.startedAt'))
+      FROM ${romeAgentTraceBlocks} b
+      WHERE b.message_id = ${turn.messageId}
+        AND json_extract(b.content, '$.type') IN ('tool_use', 'tool_result', 'subagent_start', 'subagent_result')
+        AND b.seq > (
+          SELECT max(seq) FROM ${romeAgentTraceBlocks}
+          WHERE message_id = ${turn.messageId} AND json_extract(content, '$.type') = 'turn_start'
+        )
+    `);
+    let latest: number | null = null;
+    for (const { at } of rows) {
+      const timestamp =
+        typeof at === "number" ? at * 1000 : typeof at === "string" ? Date.parse(at) : NaN;
+      if (Number.isFinite(timestamp))
+        latest = latest === null ? timestamp : Math.max(latest, timestamp);
+    }
+    return latest;
+  }
+
+  /** At most 1000 characters of this turn's guardian prompt lines, in chat order. Empty when none exist. */
+  getRestartGuardianPrompt(turn: InterruptedTurn): string {
+    return this.db
+      .all<{ text: string }>(sql`
+      SELECT m.text
+      FROM agent_turn_messages l
+      JOIN ${romeSessions} s ON s.id = l.session_id
+      JOIN ${CHAT_MESSAGES} m ON m.id = l.message_id
+        AND m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+      WHERE l.session_id = ${turn.sessionId} AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
+        AND m.sender_account_id = 'guardian' AND m.sender_agent IS NULL
+      ORDER BY m.id
+    `)
+      .map((row) => row.text)
+      .join("\n\n")
+      .slice(0, 1000);
   }
 
   override async recoverInterruptedInputs(): Promise<void> {

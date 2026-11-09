@@ -1,3 +1,4 @@
+import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./lib/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
@@ -145,7 +146,6 @@ import { ComputerUseService } from "./computer-use/service.js";
 import { AppKeysRepository } from "./db/repositories/app-keys.js";
 import { AppKeyInjector } from "./app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
-import { WebChatRepository } from "./db/repositories/webchat.js";
 import { ActionExecutionsRepository } from "./db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
@@ -476,7 +476,7 @@ async function main() {
   });
   const chatsEvents = new ChatsEvents();
   // The dashboard's sessions, with each dashboard chat's lines in Chats.
-  const webchatRepo: WebChatRepository = new ChatsWebChatRepository(db, {
+  const webchatRepo = new ChatsWebChatRepository(db, {
     chats: chatsWired.chats,
     lines: chatsWired.messages,
     links: chatsWired.links,
@@ -485,8 +485,8 @@ async function main() {
   // Only turns within a day of the newest one, so the stopped process's turns
   // end however long Rome was down, and traces older crashes left open stay.
   const endedTurns = await webchatRepo.endInterruptedTurns(24 * 60 * 60 * 1000);
-  if (endedTurns > 0) {
-    log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns });
+  if (endedTurns.length > 0) {
+    log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns.length });
   }
   // `routineEngine` is built further down; the closure only runs on a profile
   // write, which happens after boot.
@@ -2285,6 +2285,12 @@ async function main() {
   // Startup is known-good: record this version as the last completed boot so
   // the next boot's upgrade comparison runs against it.
   await commitBootVersion(settingsRepo, getBuildInfo());
+
+  // The API, actions and agents are ready. One continuation runs at a time,
+  // outside boot, and each rechecks its chat after waiting in the webchat queue.
+  void continueInterruptedTurns(endedTurns, webchatRepo, backendTurnRunner).catch((error) => {
+    log.warn("restart continuations failed", { error: String(error) });
+  });
 
   // Best-effort instance-identity check. Fire-and-forget: announces
   // which account this instance is bound to, reports the running version, and

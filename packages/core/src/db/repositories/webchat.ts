@@ -616,6 +616,15 @@ function mergeTraceContent(stubContent: string, blockContents: string[]): string
 
 /** Max rows per INSERT batch, keeping bound parameters well under SQLite limits. */
 const TRACE_BLOCK_INSERT_CHUNK = 200;
+export interface InterruptedTurn {
+  agentName: string;
+  messageId: string;
+  sessionId: string;
+  turnId: string;
+  runtimeSessionId: string | null;
+  prompt: string;
+}
+
 export const INTERRUPTED_TURN_ERROR =
   "Rome restarted while this was running. The task did not finish.";
 
@@ -1923,15 +1932,15 @@ export class WebChatRepository {
    * process is left to finish that subagent.
    * Counting from the newest trace, not from now, keeps the stopped process's
    * turns in range however long Rome was down. Older traces stay as they are.
-   * Returns how many turns it ended.
+   * Returns only the turns ended by this call, never historical restart notices.
    */
-  async endInterruptedTurns(windowMs: number): Promise<number> {
+  async endInterruptedTurns(windowMs: number): Promise<InterruptedTurn[]> {
     const newest = await this.db
       .select({ createdAt: sql<number | null>`max(${romeAgentMessages.createdAt})` })
       .from(romeAgentMessages)
       .where(eq(romeAgentMessages.role, "trace"))
       .get();
-    if (newest?.createdAt == null) return 0;
+    if (newest?.createdAt == null) return [];
     // `created_at` is stored in seconds.
     const since = new Date(newest.createdAt * 1000 - windowMs);
     const blockSeq = (type: string) => sql<number | null>`(
@@ -1941,6 +1950,7 @@ export class WebChatRepository {
     )`;
     const traces = await this.db
       .select({
+        agentName: romeSessions.agentName,
         id: romeAgentMessages.id,
         sessionId: romeAgentMessages.sessionId,
         turnId: romeAgentMessages.turnId,
@@ -1952,9 +1962,10 @@ export class WebChatRepository {
         )`,
       })
       .from(romeAgentMessages)
+      .leftJoin(romeSessions, eq(romeSessions.id, romeAgentMessages.sessionId))
       .where(and(eq(romeAgentMessages.role, "trace"), gte(romeAgentMessages.createdAt, since)));
 
-    let ended = 0;
+    const ended: InterruptedTurn[] = [];
     for (const trace of traces) {
       if (trace.lastStart === null || (trace.lastEnd !== null && trace.lastEnd > trace.lastStart)) {
         continue;
@@ -1970,7 +1981,12 @@ export class WebChatRepository {
         )
         .get();
       const turnStart = start
-        ? (JSON.parse(start.content) as { turnId?: string; agent?: string })
+        ? (JSON.parse(start.content) as {
+            turnId?: string;
+            agent?: string;
+            sessionId?: string;
+            userPrompt?: string;
+          })
         : {};
       const agent = turnStart.agent ? { agent: turnStart.agent } : {};
       const delegations = await this.db
@@ -2022,7 +2038,14 @@ export class WebChatRepository {
           },
         ],
       });
-      ended += 1;
+      ended.push({
+        agentName: trace.agentName ?? turnStart.agent ?? "main",
+        messageId: trace.id,
+        sessionId: trace.sessionId,
+        turnId: turnStart.turnId ?? trace.turnId ?? "",
+        runtimeSessionId: turnStart.sessionId ?? null,
+        prompt: turnStart.userPrompt ?? "",
+      });
     }
     return ended;
   }

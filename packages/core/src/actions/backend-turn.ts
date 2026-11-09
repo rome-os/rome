@@ -45,6 +45,8 @@ export interface WebchatSessionStreamHost {
 }
 
 export interface BackendTurnOptions {
+  /** Checked immediately before the turn runs. False drops a stale wake-up. */
+  shouldRun?: () => boolean;
   /** The turn is housekeeping for the agent: a chat that draws a typing
    *  indicator for a running turn holds it back until the agent speaks. */
   quiet?: boolean;
@@ -172,7 +174,8 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     trace: Pick<
       RunParams,
       "persistTrace" | "persistTranscript" | "persistAnswer" | "inputLabel" | "pushLevel"
-    > = {},
+    > &
+      Pick<RunParams, "shouldRun"> = {},
     deviceFolder?: ThreadContext["deviceFolder"],
   ): AsyncIterable<AgentEvent> => {
     return deps.agentRunner.run({
@@ -305,9 +308,11 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
         params.threadId,
         async ({ emit, stopRequested }) => {
           await deps.beforeTurn?.(params);
+          if (options?.shouldRun && !options.shouldRun()) return;
           let reply = "";
           let turnId: string | undefined;
           const trace = {
+            shouldRun: options?.shouldRun,
             persistTrace: true,
             persistTranscript: false,
             ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
@@ -334,6 +339,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     // Messaging channels: run the turn here in main, then say the reply
     // through the session's speaker. Without one the reply could not be
     // sent, so the turn is not run.
+    if (options?.shouldRun && !options.shouldRun()) return outcome;
     assertSpeaker(params.channel);
     let reply = "";
     let turnId: string | undefined;
@@ -341,6 +347,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     // the turn but writes no answer of its own: one that was never sent
     // must not read as said, and one that was must not be said twice.
     const trace = {
+      shouldRun: options?.shouldRun,
       persistAnswer: false,
       ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
     };
