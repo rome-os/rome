@@ -12,15 +12,15 @@ This folder is the source of truth for what these words mean. Other docs link he
 | **Connections** | What access Rome has to which external account | [connections.md](connections.md) |
 | **Agents** | What an agent is and how it runs | [agents.md](agents.md) |
 | **People** | Who is behind an account, and how close they are to the guardian | [people.md](people.md) |
-| **Apps** | What an installed app brings to Rome | owed; terms in [concepts/apps.md](../concepts/apps.md) for now |
-| **Routines** | What runs on a schedule or a trigger | owed; terms in [concepts/data.md](../concepts/data.md#routines) for now |
+| **Apps** | What an installed app brings to Rome | no file yet, terms in [concepts/apps.md](../concepts/apps.md) |
+| **Routines** | What runs on a schedule or a trigger | no file yet, terms in [concepts/data.md](../concepts/data.md#routines) |
 
 Apps, Routines and Connections are each a context, and Participation is not one: its words live in Chats (Ouou, 2026-11-09). Apps and Routines have no file here yet.
 
 ```mermaid
 flowchart LR
     Connections["Connections<br/><i>what access Rome has to which external account</i>"]
-    Chats["Chats<br/><i>who said what, where, and as whom; what wakes an agent, what it reads, where it speaks</i>"]
+    Chats["Chats<br/><i>who said what, where, and as whom, and what wakes an agent, what it reads, where it speaks</i>"]
     Agents["Agents<br/><i>what an agent is and how it runs</i>"]
     People["People<br/><i>who is behind an account, and how close they are</i>"]
     Connections -- carries messages --> Chats
