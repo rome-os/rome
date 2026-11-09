@@ -1,5 +1,6 @@
 import { requestSignerToken, SignerError, signerHealth } from "@rome-os/node-core/signer";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
+import { getBuildInfo } from "../build-info.js";
 import { createLogger } from "../logger.js";
 import { type CloudProfile, readCloudProfile } from "./cloud-profile.js";
 import { readEnvInstanceToken } from "./instance-env.js";
@@ -214,6 +215,9 @@ export async function seedInstanceTokenFromEnv(store: InstanceTokenStore): Promi
 // Persist a freshly-minted token (from the in-app OAuth enroll flow) and refresh
 // the cache so it takes effect without a restart. In signer mode the token is
 // only a one-time proof: it registers the signer key right away and is deleted.
+// Linking is the first time Rome Cloud sees this instance's identity in this
+// process (a warm-pool VM boots blank and links at runtime, with no restart), so
+// signer mode announces the running version with it, as the boot check would.
 // Returns the registration result in signer mode, null in legacy mode.
 export async function persistInstanceToken(
   store: InstanceTokenStore,
@@ -221,7 +225,7 @@ export async function persistInstanceToken(
 ): Promise<ProveIdentityResult | null> {
   await store.set(INSTANCE_TOKEN_SETTING_KEY, token);
   setInstanceTokenInMemory(token);
-  return signerMode() ? syncInstanceIdentity(store) : null;
+  return signerMode() ? syncInstanceIdentity(store, { bootVersion: getBuildInfo().version }) : null;
 }
 
 // Fail closed on a token Rome Cloud has rejected (revoked/unknown): drop it from
@@ -307,8 +311,9 @@ export function getIdentityIssue(): { state: IdentityIssue; message: string } | 
 export interface ProveIdentityOptions {
   /** Override fetch (tests). Defaults to global `fetch`. */
   fetch?: typeof fetch;
-  /** Present only for the one boot-time announcement. Recurring identity
-   *  heartbeats omit it, so Rome Cloud can distinguish boots from liveness. */
+  /** Present only for the one-time version announcement: at boot, or when the
+   *  instance links at runtime. Recurring identity heartbeats omit it, so Rome
+   *  Cloud can distinguish announcements from liveness. */
   bootVersion?: string | null;
 }
 

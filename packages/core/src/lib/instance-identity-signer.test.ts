@@ -16,6 +16,10 @@ import {
 } from "./instance-identity.js";
 import { startFakeSigner } from "../test/fake-signer.js";
 
+rs.mock("../build-info.js", () => ({
+  getBuildInfo: () => ({ version: "9.9.9", sha: null, builtAt: null }),
+}));
+
 const TOKEN = "romeinst_abc123def456";
 const ORIGIN = "https://rome-cloud.example";
 
@@ -292,6 +296,28 @@ describe("signer mode", () => {
     }
     expect(isInstanceLinked()).toBe(true);
     expect(store.data.has(INSTANCE_TOKEN_SETTING_KEY)).toBe(false);
+  });
+
+  it("4: announces the running version when linking at runtime", async () => {
+    const store = memoryStore();
+    let known = false;
+    const methods: string[] = [];
+    const bodies: Array<string | undefined> = [];
+    const { fetchImpl } = cloud({
+      "/api/instance/whoami": (init) => {
+        methods.push(String(init.method));
+        bodies.push(typeof init.body === "string" ? init.body : undefined);
+        return known ? Response.json(IDENTITY) : Response.json({}, { status: 401 });
+      },
+      "/api/instance/key": () => {
+        known = true;
+        return Response.json({ instanceId: "inst-1" });
+      },
+    });
+    globalThis.fetch = fetchImpl;
+    expect(await persistInstanceToken(store, TOKEN)).toMatchObject({ status: "ok" });
+    expect(methods.at(-1)).toBe("POST");
+    expect(JSON.parse(bodies.at(-1) ?? "null")).toEqual({ version: "9.9.9" });
   });
 
   it("5: keeps every credential when the signer is down, and rechecks in 30 seconds", async () => {
