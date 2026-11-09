@@ -10,5 +10,3 @@ Run every move through `pnpm move-files <from>:<to> ...` ([`scripts/move-files.t
 You own what the tool lists at the end: lines that still name an old path, which are paths built by hand in code, configs and bundler inputs. Fix each one or confirm it names something else. A path assembled from folder names, such as `join(dir, "actions")`, is not listed, so search for the old folder names yourself.
 
 The move is done when `pnpm typecheck` and `pnpm lint:imports` pass, the tests of every moved file pass, and git shows each moved file as a rename whose only edits are paths. When the tool rewrites a reference wrongly, or misses one it could find mechanically, fix the tool as well as the output.
-
-To see what a set of files imports and what imports them before deciding where they go, run `pnpm imports-of [--depth <n>] <files or folders>` ([`scripts/imports-of.ts`](../../../scripts/imports-of.ts)). It groups both directions by folder, with each import site, and names the folders with no import either way.
