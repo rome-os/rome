@@ -37,7 +37,16 @@ export function QuotedReply({ part }: { part: ReplyToPart }) {
       type="button"
       aria-label={t(opensThread ? "reply.openThread" : "reply.jump")}
       className={cn(frame, "cursor-pointer transition-colors hover:bg-border")}
-      onClick={() => (opensThread ? draft.openThread(part.messageId) : draft.jump(part.messageId))}
+      onClick={() =>
+        opensThread
+          ? draft.openThread({
+              messageId: part.messageId,
+              author: part.author,
+              ...(part.name ? { name: part.name } : {}),
+              preview: plainQuote(part.text),
+            })
+          : draft.jump(part.messageId)
+      }
     >
       {body}
     </button>

@@ -22,6 +22,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { ChatThreadView, KEEPS_CHAT_THREAD_OPEN } from "./ChatThreadView";
 import { QuotedReply } from "./reply/QuotedReply";
+import { ReplyBar } from "./reply/ReplyBar";
 import { ReplyDraftProvider, useReplyDraftState, type ReplyDraft } from "./reply/reply-draft";
 
 // The thread view of a Concierge chat (docs/domains/chats.md#chat-thread):
@@ -127,6 +128,24 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     fireEvent.click(screen.getByRole("button", { name: "Open the chat thread" }));
 
     expect(draft.thread).toBe("a1");
+    // Opening either opens both: the quote also picks the reply.
+    expect(draft.target).toMatchObject({ messageId: "a1", preview: "Which day?" });
+  });
+
+  it("closes the thread view with the reply bar's ✕", () => {
+    let draft!: ReplyDraft;
+    render(
+      <ThreadsDraft onDraft={(next) => (draft = next)}>
+        <ReplyBar />
+      </ThreadsDraft>,
+    );
+    act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
+    expect(draft.thread).toBe("a1");
+
+    fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
+
+    expect(draft.target).toBeNull();
+    expect(draft.thread).toBeNull();
   });
 });
 

@@ -239,10 +239,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         setPendingUploads([]);
         setFolder(null);
         setDraftSkill(null);
-        // A message sent from the thread view closes it; the message keeps
-        // the thread it was sent into.
-        if (chatThread) replyDraft?.closeThread();
-        else replyDraft?.clear();
+        // A send closes the reply bar and, with it, the thread view; the
+        // message keeps the thread it was sent into.
+        replyDraft?.clear();
       }
       try {
         await invokeOnSend(
@@ -250,8 +249,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         );
         failedSendRef.current = null;
         if (!clearsOptimistically) {
-          if (chatThread) replyDraft?.closeThread();
-          else replyDraft?.clear();
+          replyDraft?.clear();
           const sentIds = new Set(uploads.map((upload) => upload.id));
           setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
           setInputText((current) => (current === rawText ? "" : current));
@@ -265,7 +263,6 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           setPendingUploads(uploads);
           setFolder(pickedFolder);
           setDraftSkill(skill);
-          if (chatThread) replyDraft?.openThread(chatThread);
           if (replyTo) replyDraft?.restore(replyTo);
         }
       }
