@@ -220,14 +220,18 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           };
           session = req.sessionId
             ? await this.manager.resume({ id: req.sessionId, agent: req.key.agentName }, opening)
-            : await this.manager.open(req.key, {
-                ...opening,
-                // Read here, never taken from the worker's request.
-                resetPolicy: await resetPolicyOfMessage(this.resetPolicyOf, {
-                  platformMessageId: req.platformMessageId,
-                  threadContext: sessionInit.threadContext,
-                }),
-              });
+            : await this.manager.open(
+                // Only the key's own fields, never the rest of the worker's request.
+                { agentName: req.key.agentName, channelThreadKey: req.key.channelThreadKey },
+                {
+                  ...opening,
+                  // Read here, never taken from the worker's request.
+                  resetPolicy: await resetPolicyOfMessage(this.resetPolicyOf, {
+                    platformMessageId: req.platformMessageId,
+                    threadContext: sessionInit.threadContext,
+                  }),
+                },
+              );
           noteOpenerChat(session, namedChat);
           // A session resumed by its id runs in its own chats, so the caller
           // must be one who may open them, as on the dashboard's routes.
