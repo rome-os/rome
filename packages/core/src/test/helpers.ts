@@ -41,7 +41,7 @@ import {
 } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { normalizeConversationTitle } from "../core/conversation-title.js";
-import { createAgentSessionManager } from "../agent/index.js";
+import { createSessions } from "../agent/index.js";
 import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import {
   subagentLiveTurns,
@@ -667,7 +667,7 @@ export async function buildTestDeps(
     turnLog: subagentTurnLog(webchatRepo),
     liveTurns: subagentLiveTurns(agentTurnStreamRegistry),
   });
-  const agentSessionManager = createAgentSessionManager({
+  const agentSessionManager = createSessions({
     agentLoader,
     sessionRepository,
     systemPrompts,

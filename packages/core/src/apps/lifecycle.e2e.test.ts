@@ -13,7 +13,7 @@ import { create as tarCreate } from "tar";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { ActionEngine } from "./actions/engine.js";
 import { AgentLoader } from "./agent-loader.js";
-import { createAgentSessionManager } from "../agent/index.js";
+import { createSessions } from "../agent/index.js";
 import { TurnListeners } from "../agent/index.js";
 import { AppTurnHooks } from "./app-turn-hooks.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
@@ -472,7 +472,7 @@ function parseMcpJson<T>(result: McpToolResult): T {
 }
 
 async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Promise<{
-  manager: ReturnType<typeof createAgentSessionManager>;
+  manager: ReturnType<typeof createSessions>;
   provider: McpSessionModelProvider;
   agentName: string;
 }> {
@@ -494,7 +494,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
     { processRole: "worker" },
   );
 
-  const manager = createAgentSessionManager({
+  const manager = createSessions({
     agentLoader,
     sessionRepository,
     systemPrompts,
@@ -1390,7 +1390,7 @@ describe("App lifecycle e2e", () => {
       const actionId = "livecat-app:livecat_echo";
       const { manager, provider, agentName } = await buildSessionManagerForHarness(harness);
 
-      await manager.acquire({
+      await manager.open({
         agentName,
         channelThreadKey: `e2e:live-actions:${Date.now()}`,
       });
@@ -1428,7 +1428,7 @@ describe("App lifecycle e2e", () => {
       const skillId = "liveskill-app:liveskill-demo";
       const { manager, provider, agentName } = await buildSessionManagerForHarness(harness);
 
-      await manager.acquire({
+      await manager.open({
         agentName,
         channelThreadKey: `e2e:live-skills:${Date.now()}`,
       });

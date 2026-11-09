@@ -16,7 +16,7 @@ import type { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { SkillCatalog } from "../agent/index.js";
 import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
 import type { AgentTurnFailedBeforeStart } from "../agent/index.js";
-import type { AgentSessionManager } from "../agent/index.js";
+import type { Sessions } from "../agent/index.js";
 import {
   accountAllowsModel,
   CODEX_LUNA_MODEL,
@@ -158,7 +158,7 @@ export interface ConciergeDeps {
   messages: Pick<MessageRepository, "recent" | "before">;
   sessionRepository: Pick<SessionRepository, "current">;
   accounts: Pick<ModelAccounts, "read">;
-  agentSessionManager: Pick<AgentSessionManager, "peek">;
+  agentSessionManager: Pick<Sessions, "find">;
   /** Runs a system turn in a chat and waits for it to end. A quiet turn
    *  shows the guardian no sign that it runs, until the agent speaks. */
   /** Runs a backend turn; answers whether it ran to its end, when the runner says. */
@@ -523,7 +523,7 @@ export class ConciergeService {
     );
     if (!target) return null;
     await this.deps.webchatRepo.updateSessionLargeModelSelection(chatId, target.selectionId);
-    this.deps.agentSessionManager.peek(key)?.selectModel(target.selectionId);
+    this.deps.agentSessionManager.find(key)?.selectModel(target.selectionId);
     this.leftModels.set(modelKey(fromModel), Date.now() + 10 * 60_000);
     await this.deps.webchatRepo.addBackendMessage(chatId, uuidv7(), [
       {

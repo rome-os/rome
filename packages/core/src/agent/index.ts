@@ -186,11 +186,11 @@ export {
 export { NO_ROME_TOOLS } from "./domain/rome-tools.js";
 export { forkSessionTools, type SessionTools } from "./domain/session-tools.js";
 export {
-  createAgentSessionManager,
+  createSessions,
   type AgentSession,
   type AgentSessionInit,
   type AgentSessionKey,
-  type AgentSessionManager,
+  type Sessions,
   type AgentTurnHandle,
   type AgentTurnInput,
   type SendTurnOptions,

@@ -13,7 +13,7 @@ import type {
   ThreadStart,
 } from "../agent/index.js";
 import { type ForkRunParams, type RunParams, type ThreadContext } from "./types.js";
-import type { AgentSession, AgentSessionManager } from "../agent/index.js";
+import type { AgentSession, Sessions } from "../agent/index.js";
 import type { AgentCatalog } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
@@ -55,7 +55,7 @@ export type {
  * Legacy one-turn invocation parameters retained for tests and the
  * internal `runOneTurn` shim used by mock providers. Production code should
  * not construct `ModelRunParams` directly — use `ModelSessionParams` +
- * `sendUserInput` via `AgentSessionManager`.
+ * `sendUserInput` via `Sessions`.
  */
 export interface ModelRunParams {
   model: string;
@@ -162,13 +162,13 @@ export function createSessionFromRun(
   };
 }
 
-// AgentRunner — thin shim over AgentSessionManager: acquires the session for
+// AgentRunner — thin shim over Sessions: acquires the session for
 // a given (agentName, channelThreadKey), pushes one turn, and yields the
 // events.
 
 export class AgentRunner {
   constructor(
-    private agentSessionManager: AgentSessionManager,
+    private agentSessionManager: Sessions,
     private agentLoader: AgentCatalog,
     private webchatRepo?: WebChatRepository,
     private turnStreams?: AgentTurnStreamRegistry,
@@ -240,8 +240,11 @@ export class AgentRunner {
       }),
     };
     const session = explicitSessionId
-      ? await this.agentSessionManager.acquireBySessionId(explicitSessionId, params.agentName, init)
-      : await this.agentSessionManager.acquire(
+      ? await this.agentSessionManager.open(
+          { id: explicitSessionId, agent: params.agentName },
+          init,
+        )
+      : await this.agentSessionManager.open(
           { agentName: params.agentName, channelThreadKey: requestedChannelThreadKey },
           init,
         );
@@ -367,7 +370,7 @@ export class AgentRunner {
   }
 
   async *runForked(params: ForkRunParams): AsyncIterable<AgentEvent> {
-    const source = this.agentSessionManager.peek({
+    const source = this.agentSessionManager.find({
       agentName: params.agentName,
       channelThreadKey: params.channelThreadKey,
     });
@@ -389,7 +392,7 @@ export class AgentRunner {
     // Forked turns persist like action runs: the fork gets its own rome
     // session (type "fork", linked to its parent) and the turn's trace lands
     // there, so the trajectory shows up under /sessions. The fork mints its
-    // session/turn ids inside runForkedTurn, so the recorder can only be
+    // session/turn ids inside `fork`, so the recorder can only be
     // attached once turn_start surfaces them. Not gated on
     // shouldPersistAgentTrace: that gate exists because the webchat HTTP
     // route owns live webchat persistence, but no route owns a forked turn.
@@ -398,7 +401,7 @@ export class AgentRunner {
     let forkSessionId: string | undefined;
     let liveStream: ReturnType<AgentTurnStreamRegistry["register"]> | null = null;
     try {
-      for await (const message of source.runForkedTurn({
+      for await (const message of source.fork({
         prompt: params.prompt,
         tier: params.tier,
         mode: params.mode,

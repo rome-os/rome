@@ -1,5 +1,5 @@
 // Main-process AgentSession bridge. Session model: docs/concepts/sessions.md.
-// Exposes AgentSessionManager to forked
+// Exposes Sessions to forked
 // workers over IpcRpc. Workers call `agent.session.runTurn` and consume the
 // returned `agent.turn:<turnId>` stream.
 
@@ -20,7 +20,7 @@ import type {
 import type {
   AgentSessionInit,
   AgentSessionKey,
-  AgentSessionManager,
+  Sessions,
   AgentSession,
   AgentTurnHandle,
   AgentTurnInput,
@@ -97,7 +97,7 @@ export type TurnStartedInChat = (
 ) => () => void;
 
 /**
- * Bridge wires `AgentSessionManager` into a worker child's IPC channel.
+ * Bridge wires `Sessions` into a worker child's IPC channel.
  * Constructed once in main; call `attach(rpc, child)` for each forked worker.
  *
  * The bridge registers `agent.session.runTurn` on the child's IpcRpc. The
@@ -111,7 +111,7 @@ export type TurnStartedInChat = (
  */
 export class AgentSessionBridge implements AgentSessionChildBridge {
   constructor(
-    private manager: AgentSessionManager,
+    private manager: Sessions,
     private webchatRepo?: WebChatRepository,
     private actionWorkerCoordinator?: ActionWorkerCoordinator,
     private turnStreams?: AgentTurnStreamRegistry,
@@ -225,8 +225,12 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             }),
           };
           session = req.sessionId
-            ? await this.manager.acquireBySessionId(req.sessionId, req.key.agentName, init)
-            : await this.manager.acquire(req.key, init);
+            ? await this.manager.open({ id: req.sessionId, agent: req.key.agentName }, init)
+            : await this.manager.open(
+                // Only the key's own fields, never the rest of the worker's request.
+                { agentName: req.key.agentName, channelThreadKey: req.key.channelThreadKey },
+                init,
+              );
           noteOpenerChat(session, namedChat);
           // A session resumed by its id runs in its own chats, so the caller
           // must be one who may open them, as on the dashboard's routes.
@@ -405,9 +409,9 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
     rpc.handle<{ key: AgentSessionKey; reason?: string }, { ok: true }>(
       "agent.session.interrupt",
       async (req) => {
-        const sess = this.manager.peek(req.key);
+        const sess = this.manager.find(req.key);
         if (sess) {
-          await sess.interrupt(req.reason);
+          await sess.stop(req.reason);
         }
         return { ok: true };
       },

@@ -9,12 +9,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId, StreamAgentEvent } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createChatTurns } from "./chat-turns.js";
-import type {
-  AgentSession,
-  AgentSessionInit,
-  AgentSessionManager,
-  AgentTurnHandle,
-} from "../agent/index.js";
+import type { AgentSession, AgentSessionInit, Sessions, AgentTurnHandle } from "../agent/index.js";
 import type { ChatResetPolicy } from "./chat-reset-policy.js";
 import type { SessionOpeningFor } from "./session-opening.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
@@ -63,9 +58,9 @@ describe("AgentSessionBridge turn routing", () => {
       sendTurn: () => testTurnHandle({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
-      acquire: async () => session,
-      peek: () => session,
-    } as unknown as AgentSessionManager;
+      open: async () => session,
+      find: () => session,
+    } as unknown as Sessions;
     const turns = createAgentTurnStreamRegistry();
     const chatTurns = createChatTurns();
     const child = new FakeChild();
@@ -171,9 +166,9 @@ describe("AgentSessionBridge conversation", () => {
         },
       } as unknown as AgentSession;
       const manager = {
-        acquire: async () => session,
-        peek: () => session,
-      } as unknown as AgentSessionManager;
+        open: async () => session,
+        find: () => session,
+      } as unknown as Sessions;
       const child = new FakeChild();
       new AgentSessionBridge(manager, repo).attach(
         new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
@@ -233,10 +228,9 @@ describe("AgentSessionBridge resuming a session by its id", () => {
         },
       } as unknown as AgentSession;
       const manager = {
-        acquire: async () => session,
-        acquireBySessionId: async () => session,
-        peek: () => session,
-      } as unknown as AgentSessionManager;
+        open: async () => session,
+        find: () => session,
+      } as unknown as Sessions;
       const child = new FakeChild();
       new AgentSessionBridge(manager, repo).attach(
         new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
@@ -323,10 +317,9 @@ describe("AgentSessionBridge chat link on resume", () => {
         }) as unknown as AgentSession;
       // Each resume reopens the session, as a cold open would.
       const manager = {
-        acquire: async () => open(),
-        acquireBySessionId: async () => open(),
-        peek: () => undefined,
-      } as unknown as AgentSessionManager;
+        open: async () => open(),
+        find: () => undefined,
+      } as unknown as Sessions;
       const child = new FakeChild();
       new AgentSessionBridge(manager, repo).attach(
         new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
@@ -408,9 +401,9 @@ describe("AgentSessionBridge fresh run started from a chat", () => {
           }) as unknown as AgentTurnHandle,
       } as unknown as AgentSession;
       const manager = {
-        acquire: async () => session,
-        peek: () => session,
-      } as unknown as AgentSessionManager;
+        open: async () => session,
+        find: () => session,
+      } as unknown as Sessions;
       const child = new FakeChild();
       new AgentSessionBridge(manager, repo).attach(
         new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
@@ -470,17 +463,13 @@ describe("AgentSessionBridge working dir", () => {
         }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
-      acquire: async (_key: unknown, init: AgentSessionInit) => {
+      open: async (_key: unknown, init: AgentSessionInit) => {
         acquired.push(init);
         return session;
       },
-      acquireBySessionId: async (_id: string, _agent: string, init: AgentSessionInit) => {
-        acquired.push(init);
-        return session;
-      },
-      peek: () => undefined,
+      find: () => undefined,
       findWorkingDirBySessionId: (id: string) => callerWorkingDirs[id],
-    } as unknown as AgentSessionManager;
+    } as unknown as Sessions;
     const child = new FakeChild();
     new AgentSessionBridge(
       manager,
@@ -665,12 +654,12 @@ describe("AgentSessionBridge worker disconnect", () => {
       sendTurn: () => queue.shift()!,
     } as unknown as AgentSession;
     const manager = {
-      acquire: async () => {
+      open: async () => {
         await options.beforeAcquire?.();
         return session;
       },
-      peek: () => session,
-    } as unknown as AgentSessionManager;
+      find: () => session,
+    } as unknown as Sessions;
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
     new AgentSessionBridge(manager, options.webchatRepo, undefined, turns).attach(
@@ -851,7 +840,7 @@ describe("AgentSessionBridge answer recording", () => {
       sessionId: "session-1",
       sendTurn: () => testTurnHandle({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
-    const manager = { acquire: async () => session } as unknown as AgentSessionManager;
+    const manager = { open: async () => session } as unknown as Sessions;
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
     new AgentSessionBridge(manager, repo, undefined, turns, undefined, runLineDeps).attach(

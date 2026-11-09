@@ -46,7 +46,7 @@ import type { AppKeyInjector } from "../apps/app-keys/injector.js";
 import type { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import type { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
 import type { SessionRepository } from "../agent/index.js";
-import type { AgentSessionManager } from "../agent/index.js";
+import type { Sessions } from "../agent/index.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import type { Hono } from "hono";
 import type { ClaudeLogins, CodexLogins, ModelAccount, ModelAccounts } from "../agent/index.js";
@@ -196,7 +196,7 @@ export interface ApiDeps {
   sentinelLogRepo: SentinelLogRepository;
   actionExecutionsRepo: ActionExecutionsRepository;
   sessionRepository: SessionRepository;
-  agentSessionManager: AgentSessionManager;
+  agentSessionManager: Sessions;
   /** What a route states for a session it opens. */
   sessionOpeningFor: SessionOpeningFor;
   /** Lightweight, tool-free small-model request used to name a new chat. */

@@ -22,7 +22,7 @@ async function drainOneTurn(
   opts?: { linkFromSpanContext?: SpanContext },
 ): Promise<{ turnContext: Context }> {
   const channelThreadKey = "webchat:turn-trace-test";
-  const session = await rig.manager.acquire(
+  const session = await rig.manager.open(
     { agentName: "test-main", channelThreadKey },
     {
       ...sessionOpeningFor({ channelSurface: testChannelSurface })(channelThreadKey),

@@ -255,21 +255,30 @@ export interface AgentSession {
     input: AgentTurnInput & { inputId: string },
     options: SubmitInputOptions,
   ): AgentInputReceipt;
-  runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent>;
+  fork(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent>;
   subscribe(handler: AgentSessionSubscriber): () => void;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
-  interrupt(reason?: string, expectedTurnId?: string): Promise<void>;
+  /** Stops the session's running turn, if it has one, and the subagent calls it waits on. */
+  stop(reason?: string): Promise<void>;
   close(reason: "idle" | "shutdown" | "error" | "user"): Promise<void>;
 }
 
-export interface AgentSessionManager {
-  acquire(key: AgentSessionKey, init?: AgentSessionInit): Promise<AgentSession>;
-  acquireBySessionId(
-    sessionId: string,
-    agentName: string,
-    init?: AgentSessionInit,
-  ): Promise<AgentSession>;
-  peek(key: AgentSessionKey): AgentSession | undefined;
+/** A stored session to reopen by its id, which may have no continuity key of its own to open by. */
+export interface SessionById {
+  id: string;
+  agent: string;
+}
+
+export interface Sessions {
+  /** The open session for this continuity key and agent, opening it when none is open. */
+  open(continuityKey: AgentSessionKey, init?: AgentSessionInit): Promise<AgentSession>;
+  /**
+   * The stored session with this id, reopened when it is not open. Fails when
+   * no stored session has the id or the session cannot be resumed.
+   */
+  open(session: SessionById, init?: AgentSessionInit): Promise<AgentSession>;
+  /** The open session for this continuity key and agent. Never opens one. */
+  find(continuityKey: AgentSessionKey): AgentSession | undefined;
   /**
    * Working directory of the open session with this runtime id, searching this
    * manager's sessions and the subagent sessions they own. Undefined when no
@@ -313,7 +322,7 @@ interface ManagerDeps {
    *  under its stored parent link, with its tools' environment and span
    *  attributes. */
   subagentSessions?: (
-    manager: AgentSessionManager,
+    manager: Sessions,
     parentLink: string,
     inherited: Pick<AgentSessionInit, "toolEnv" | "spanAttributes">,
   ) => SubagentSessions;
@@ -362,10 +371,7 @@ async function waitUntilQuiescent(session: AgentSessionImpl): Promise<void> {
   });
 }
 
-export function createAgentSessionManager(
-  deps: ManagerDeps,
-  options: ManagerOptions = {},
-): AgentSessionManager {
+export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}): Sessions {
   const { log } = deps;
   const sessions = new Map<string, AgentSessionImpl>();
   const acquireLocks = new Map<string, Promise<AgentSessionImpl>>();
@@ -571,12 +577,16 @@ export function createAgentSessionManager(
   };
 
   return {
-    acquire,
-    acquireBySessionId,
-    peek(key) {
+    // A continuity key always names its conversation and a session's id never
+    // does, so a key that carries an extra `id` still opens by its key.
+    open: (target: AgentSessionKey | SessionById, init?: AgentSessionInit) =>
+      "channelThreadKey" in target
+        ? acquire(target, init)
+        : acquireBySessionId(target.id, target.agent, init),
+    find(continuityKey) {
       let canonicalKey: AgentSessionKey;
       try {
-        canonicalKey = canonicalizeKey(key);
+        canonicalKey = canonicalizeKey(continuityKey);
       } catch {
         return undefined;
       }
@@ -633,7 +643,7 @@ interface TurnExecRefs {
    * (disposed with the fork) so a fork's subagent turns never append to — or
    * create — a child session the source's turns reuse.
    */
-  getChildManager: () => AgentSessionManager;
+  getChildManager: () => Sessions;
   /**
    * channelThreadKey under which this owner's children are acquired. Forks
    * namespace it with the fork session id: splitting the in-memory manager
@@ -649,7 +659,7 @@ interface TurnExecRefs {
   bindTurnCtx: <T>(fn: () => T) => T;
 }
 
-/** Per-fork identity handed to `buildForkOpenParams` by `runForkedTurn`. */
+/** Per-fork identity handed to `buildForkOpenParams` by `fork`. */
 interface ForkTurnContext {
   opening: ForkOpening;
   forkSessionId: string;
@@ -663,7 +673,7 @@ interface ForkTurnContext {
 }
 
 /**
- * What the open-params factory hands back to `runForkedTurn`.
+ * What the open-params factory hands back to `fork`.
  */
 interface ForkOpen {
   params: ModelSessionParams;
@@ -671,7 +681,7 @@ interface ForkOpen {
   projectProviderMessage: (msg: StreamAgentEvent) => Promise<StreamAgentEvent[]>;
   /**
    * Close fork-owned resources (the per-fork subagent child manager, if the
-   * fork ran any subagents). runForkedTurn calls this from its finally, so
+   * fork ran any subagents). `fork` calls this from its finally, so
    * fork children never outlive the forked turn.
    */
   dispose: () => Promise<void>;
@@ -1074,7 +1084,7 @@ async function openSession(
   };
 
   /**
-   * Open-params factory for forked turns (see `runForkedTurn`). Both modes
+   * Open-params factory for forked turns (see `fork`). Both modes
    * inherit the source conversation's transcript; the mode decides the tool
    * surface the fork's session opens with:
    *
@@ -1131,9 +1141,9 @@ async function openSession(
     // in-memory map; the namespaced thread key isolates session-store reuse
     // (`SessionRepository.current` would otherwise resume the source child's
     // model thread). keepAlive gives one forked turn child continuity across
-    // repeated calls to the same subagent; runForkedTurn disposes the manager
+    // repeated calls to the same subagent; `fork` disposes the manager
     // when the fork ends, so fork children never outlive the fork.
-    let forkChildManager: AgentSessionManager | undefined;
+    let forkChildManager: Sessions | undefined;
     const forkSubagentCalls = new Map<string, { key: SubagentCallKey; call: SubagentCall }>();
     const forkPendingSubagentUses = new Map<string, Extract<AgentEvent, { type: "tool_use" }>>();
     const forkEmittedSubagentStarts = new Set<string>();
@@ -1162,7 +1172,7 @@ async function openSession(
       getSharedContext: () => init.sharedContext,
       getChildManager: () => {
         if (!forkChildManager) {
-          forkChildManager = createAgentSessionManager(deps, {
+          forkChildManager = createSessions(deps, {
             keepAliveAcrossTurns: true,
             isSubagent: true,
             turns: opts.turns,
@@ -1507,7 +1517,7 @@ function validateProviderStructuredResult(
 /**
  * Serialized outbound stream for one forked turn. The provider-event pump and
  * out-of-band emitters (for example exact-mode subagent relays) push
- * concurrently; `runForkedTurn` drains in arrival order. Pushes after `end()`
+ * concurrently; `fork` drains in arrival order. Pushes after `end()`
  * are dropped; anything pushed after the drain loop stops at the terminal
  * block is buffered but never read.
  */
@@ -1561,7 +1571,7 @@ class AgentSessionImpl implements AgentSession {
   // Forks run in this session's working dir; actions they call carry the fork's id.
   private activeForkSessionIds = new Set<string>();
   // Manager built lazily for subagent runs; keeps subagents owned by this session.
-  private _childManager?: AgentSessionManager;
+  private _childManager?: Sessions;
   private modelSession: ModelSession;
   private modelProvider?: ModelProvider;
   /** Where the latest turn left the thread, if it did. A fork with no checkpoint branches here. */
@@ -1734,17 +1744,17 @@ class AgentSessionImpl implements AgentSession {
   }
 
   /** The subagent manager, or undefined when this session never ran a subagent. */
-  get openedChildManager(): AgentSessionManager | undefined {
+  get openedChildManager(): Sessions | undefined {
     return this._childManager;
   }
 
-  get childManager(): AgentSessionManager {
+  get childManager(): Sessions {
     if (!this._childManager) {
       // Children share the same dep wiring + keepAlive setting. Flag the
       // child manager as subagent-only so widgets (propose_routine, inline
       // components) stay off on these sessions even when the parent's place draws
       // cards: see `widgetDrawingFor`.
-      this._childManager = createAgentSessionManager(this.deps, {
+      this._childManager = createSessions(this.deps, {
         keepAliveAcrossTurns: this.keepAlive,
         isSubagent: true,
         turns: this.turns,
@@ -2408,7 +2418,7 @@ class AgentSessionImpl implements AgentSession {
    * Runs a forked turn, which is found by id like any other turn but cannot be
    * stopped: it runs until its stream ends or its reader stops reading.
    */
-  async *runForkedTurn(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent> {
+  async *fork(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent> {
     let writer: TurnWriter | undefined;
     let said: TurnResultEvent | TurnErrorEvent | undefined;
     try {
@@ -2733,7 +2743,7 @@ class AgentSessionImpl implements AgentSession {
       sink.turnId !== receipt.turnId &&
       !this.inputs.owns(sink.turnId)
     ) {
-      void this.interrupt(SUPERSEDED_INTERRUPT_REASON, sink.turnId).catch((error) =>
+      void this.stopRunning(SUPERSEDED_INTERRUPT_REASON, sink.turnId).catch((error) =>
         this.log.warn("superseding the running turn failed", {
           sessionId: this.sessionId,
           error: error instanceof Error ? error.message : String(error),
@@ -2755,7 +2765,7 @@ class AgentSessionImpl implements AgentSession {
     const { turn, writer } = createTurn(turnId, async (reason) => {
       if (sink.done) return;
       sink.lifecycleInterrupted = true;
-      if (this.currentSink === sink) await this.interrupt(reason);
+      if (this.currentSink === sink) await this.stopRunning(reason);
     });
     const sink: TurnSink = {
       turnId,
@@ -3293,7 +3303,12 @@ class AgentSessionImpl implements AgentSession {
     }
   }
 
-  async interrupt(reason?: string, expectedTurnId?: string): Promise<void> {
+  async stop(reason?: string): Promise<void> {
+    await this.stopRunning(reason);
+  }
+
+  /** Stops the running turn, or only the turn `expectedTurnId` when one is named. */
+  private async stopRunning(reason?: string, expectedTurnId?: string): Promise<void> {
     const sink = this.currentSink;
     if (!sink || sink.done || (expectedTurnId && sink.turnId !== expectedTurnId)) return;
     sink.lifecycleInterrupted = true;

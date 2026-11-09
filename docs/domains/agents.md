@@ -70,7 +70,7 @@ One call a turn makes to a subagent. The subagent's session has that turn as its
 
 ## System prompt
 
-What the model reads before the conversation. It is built when a run opens the agent's session, and kept across reopens and forks of the model's session.
+What the model reads before the conversation. It is built when the agent's session opens, and kept across reopens and forks of the model's session.
 
 - An app's agent gets exactly the prompt it declares. A core agent gets its declared prompt, the charter, its identity and what Rome tells every core agent, with memory and project summaries when its [agent policy](#agent-policy) loads them.
 - In code, the rules are in [`packages/core/src/agent/domain/system-prompt.ts`](../../packages/core/src/agent/domain/system-prompt.ts).
@@ -92,21 +92,21 @@ Whose subscription an agent's turns run under: the guardian's Codex (ChatGPT) ac
 - The account reports its own status ([Model provider account status](#model-provider-account-status)), with the usage it read it off. Rome reads the report and derives nothing from it.
 - The account also reports what the provider lets it do: the models its plan withholds, when the provider withholds some, and whether the provider limits its usage, as a subscription is and a billed account is not. Rome keeps no table of plans.
 - A turn the provider refuses, for the credential or for usage, is learned by the provider's adapter, which tells its own account. The account shows it in its next report and holds a usage refusal until its end or until a later usage read shows capacity, since the provider's usage lags the turn it refused. Nothing else in Rome relays it.
-- In code it is the `ModelAccount` port in [`packages/core/src/agent/domain/model-account.ts`](../../packages/core/src/agent/domain/model-account.ts), implemented by the Codex and Claude adapters. It only reports. Authorizing, cancelling and revoking are on the login's ports ([Model provider login](#model-provider-login)). The dashboard calls them. An agent's run never does.
+- In code it is the `ModelAccount` port in [`packages/core/src/agent/domain/model-account.ts`](../../packages/core/src/agent/domain/model-account.ts), implemented by the Codex and Claude adapters. It only reports. Authorizing, cancelling and revoking are on the login's ports ([Model provider login](#model-provider-login)). The dashboard calls them. An agent's turn never does.
 
 ## Model provider account status
 
 Whether the guardian's own account is authorized, expired or absent, and whether it is at its usage limit. The account reports it, and Rome remembers the report. An account is **available**, **unauthorized** (no account authorized), **expired** (authorized once, and the provider stopped accepting it) or its **usage limit is reached**, until a time when one is known. Expired and unauthorized outrank a usage limit. How the account reads its provider's status and usage into one of these, and what it assumes when the provider states no end, is the adapter's, not Rome's.
 
-- Before Rome has read an account, it knows nothing about that provider and a run treats it as available. That is about what Rome knows, not a state of the provider, so it is not a word.
-- A run never tells an account anything. What it learns from a refused turn reaches the status through the account ([Model provider account](#model-provider-account)).
+- Before Rome has read an account, it knows nothing about that provider and a turn treats it as available. That is about what Rome knows, not a state of the provider, so it is not a word.
+- A turn never tells an account anything. What it learns from a refused turn reaches the status through the account ([Model provider account](#model-provider-account)).
 - Rome remembers the last report so its readers can read it without waiting on the provider's process, and asks again at start, hourly, when the account says it changed and when the dashboard asks. A remembered usage limit whose end has passed reads as available.
 - Whatever asks about the guardian's own account reads the status, such as the dashboard and a tier restricted to one provider.
 - In code the words and the reader's rules are in [`packages/core/src/agent/domain/model-account-report.ts`](../../packages/core/src/agent/domain/model-account-report.ts). `ModelAccounts` in [`packages/core/src/agent/application/model-accounts.ts`](../../packages/core/src/agent/application/model-accounts.ts) remembers the accounts' reports and decides when to ask. The reading of a provider's status, usage and refused turns into a report is `account-report.ts` beside the adapters. The usage switch, which says where a session may move when its provider is at its limit, is `usage-switch.ts` beside the rules.
 
 ## Model provider availability
 
-Whether a run can use a model provider now, read from the [login](#model-provider-login) in effect: available, expired, usage limit reached, or unauthorized only when the provider has no login at all. On Rome credits, Codex is available, whatever the guardian's account says.
+Whether a turn can use a model provider now, read from the [login](#model-provider-login) in effect: available, expired, usage limit reached, or unauthorized only when the provider has no login at all. On Rome credits, Codex is available, whatever the guardian's account says.
 
 - The resolver is its one reader. A reader that asks about the guardian's own account reads the [account status](#model-provider-account-status) instead.
 - In code it is `providerAvailability` in [`packages/core/src/agent/domain/provider-availability.ts`](../../packages/core/src/agent/domain/provider-availability.ts), a pure function over the account's report and the login.
@@ -123,7 +123,7 @@ How Rome is let in to a model provider. A login has one of three kinds, named by
 
 ## Model resolution
 
-Which provider and model a run uses. The ask is the most specific of the chat's [selection](#model-selection), the session's pin, the agent's own model and the agent's tier, and the resolution is the answer. A selection, a pin and an agent's own model are exact asks, and an exact ask resolves to exactly that model or fails, never to a substitute.
+Which provider and model a turn uses. The ask is the most specific of the chat's [selection](#model-selection), the session's pin, the agent's own model and the agent's tier, and the resolution is the answer. A selection, a pin and an agent's own model are exact asks, and an exact ask resolves to exactly that model or fails, never to a substitute.
 
 - A provider is **usable** when its [availability](#model-provider-availability) is available, or Rome has not read it yet. Resolution checks that first, and then whether the [login](#model-provider-login) in effect allows the model. So a failure is either an unavailable provider or a model the login does not allow.
 - A tier resolves on the first usable provider in order (Codex on the guardian's account, Claude, Codex on Rome credits, then the mock) to that provider's model for the tier. When the login there does not allow that model, the ask fails rather than moving on to the next provider.

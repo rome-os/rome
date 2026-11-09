@@ -289,7 +289,7 @@ function setup(
         pageOf(messages.get(place.chat.id) ?? [], place, Number(cursor.id), limit),
     },
     sessionRepository: { current: async () => ({ id: "runtime-1" }) },
-    agentSessionManager: { peek: rs.fn(() => ({ selectModel: rs.fn() })) },
+    agentSessionManager: { find: rs.fn(() => ({ selectModel: rs.fn() })) },
     accounts: fakeAccounts({
       anthropic: reportOf("available"),
       openai: reportOf("unauthorized"),
@@ -2256,7 +2256,7 @@ describe("Concierge quota failover", () => {
     s.deps.accounts = fakeAccounts(() => raw);
     s.deps.sessionRepository.current = rs.fn(async () => ({ provider: "openai" }) as never);
     const selectModel = rs.fn();
-    s.deps.agentSessionManager.peek = rs.fn(() => ({ selectModel }) as never);
+    s.deps.agentSessionManager.find = rs.fn(() => ({ selectModel }) as never);
     const inserted = rs.fn();
     s.storedChats.onMessageInserted(inserted);
     expect(await s.service.switchIfExhausted(CONCIERGE_CHAT)).toEqual({
@@ -2410,7 +2410,7 @@ describe("Concierge provider recovery", () => {
     expect(
       await s.service.switchForFailure(CONCIERGE_CHAT, failure(message, provider), reason),
     ).toMatchObject({ selectionId: target, reason });
-    expect(s.deps.agentSessionManager.peek).toHaveBeenCalled();
+    expect(s.deps.agentSessionManager.find).toHaveBeenCalled();
   });
   it("falls back on the same provider only for ambiguous quota, without marking it", async () => {
     const { s, raw } = await prepared({ startEvents: false });

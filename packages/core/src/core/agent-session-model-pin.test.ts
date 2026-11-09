@@ -25,7 +25,7 @@ import {
   type ModelSessionParams,
   type ProviderId,
 } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
+import { createSessions, type Sessions } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
@@ -86,7 +86,7 @@ async function collect(events: AsyncIterable<AgentEvent>): Promise<AgentEvent[]>
   return messages;
 }
 
-describe("agent model pins through AgentSessionManager", () => {
+describe("agent model pins through Sessions", () => {
   let directory: string;
   let testDb: TestDb;
   let loader: AgentLoader;
@@ -94,7 +94,7 @@ describe("agent model pins through AgentSessionManager", () => {
   let openai: ReturnType<typeof createProvider>;
   let anthropic: ReturnType<typeof createProvider>;
   let state: ReturnType<typeof healthyState>;
-  const managers: AgentSessionManager[] = [];
+  const managers: Sessions[] = [];
   let artifactIdentity: ArtifactIdentityContext;
 
   async function writeConfig(overrides: Record<string, unknown> = {}): Promise<void> {
@@ -108,11 +108,11 @@ describe("agent model pins through AgentSessionManager", () => {
     isSubagent = false,
     useRomeCredits: boolean | (() => boolean) = false,
     turnLifecycle: TurnLifecycle = new TurnListeners(new AppTurnHooks()),
-  ): AgentSessionManager {
+  ): Sessions {
     const actionRegistry = new ActionRegistryImpl();
     const systemPrompts = createTestSystemPrompts();
     rs.spyOn(systemPrompts, "build").mockReturnValue("Model pin test prompt");
-    const manager = createAgentSessionManager(
+    const manager = createSessions(
       {
         agentLoader: loader,
         sessionRepository,
@@ -168,7 +168,7 @@ describe("agent model pins through AgentSessionManager", () => {
   it("loads a no-tier YAML pin and uses it on the first and later turns", async () => {
     expect(loader.find(AGENT)?.definition).toMatchObject({ providerId: "openai", modelId: MODEL });
     expect(loader.find(AGENT)?.definition.tier).toBeUndefined();
-    const session = await createManager().acquire(key, { workingDir: directory });
+    const session = await createManager().open(key, { workingDir: directory });
     await collect(session.sendTurn({ prompt: "first" }).events());
     await collect(session.sendTurn({ prompt: "second" }).events());
 
@@ -188,7 +188,7 @@ describe("agent model pins through AgentSessionManager", () => {
     state.openai = reportOf("unauthorized");
     state.anthropic = reportOf("unauthorized");
     let usingRomeCredits = true;
-    const session = await createManager(false, () => usingRomeCredits).acquire(key, {
+    const session = await createManager(false, () => usingRomeCredits).open(key, {
       workingDir: directory,
     });
     await collect(session.sendTurn({ prompt: "credits" }).events());
@@ -209,12 +209,12 @@ describe("agent model pins through AgentSessionManager", () => {
   it("keeps a pinned Codex session running on credits after ChatGPT disconnects", async () => {
     await writeConfig({ provider: undefined, modelId: undefined, tier: "small" });
     const firstManager = createManager();
-    const first = await firstManager.acquire(key, { workingDir: directory });
+    const first = await firstManager.open(key, { workingDir: directory });
     await collect(first.sendTurn({ prompt: "guardian" }).events());
     await firstManager.shutdown();
 
     state.openai = reportOf("unauthorized");
-    const resumed = await createManager(false, true).acquire(key, { workingDir: directory });
+    const resumed = await createManager(false, true).open(key, { workingDir: directory });
     await collect(resumed.sendTurn({ prompt: "credits" }).events());
 
     expect(openai.calls.map((call) => call.model)).toEqual(["gpt-6-luna", "gpt-6-luna"]);
@@ -222,19 +222,19 @@ describe("agent model pins through AgentSessionManager", () => {
 
   it("resumes the saved pin after a manifest change, but uses the new pin for a new session", async () => {
     const firstManager = createManager();
-    const first = await firstManager.acquire(key, { workingDir: directory });
+    const first = await firstManager.open(key, { workingDir: directory });
     await collect(first.sendTurn({ prompt: "establish pin" }).events());
     await firstManager.shutdown();
 
     await writeConfig({ provider: "anthropic", modelId: "future-model[1m]" });
     const secondManager = createManager();
-    const resumed = await secondManager.acquire(key, { workingDir: directory });
+    const resumed = await secondManager.open(key, { workingDir: directory });
     expect(resumed.sessionId).toBe(first.sessionId);
     await collect(resumed.sendTurn({ prompt: "resume" }).events());
     expect(openai.calls.map((call) => call.model)).toEqual([MODEL, MODEL]);
     expect(anthropic.openSession).not.toHaveBeenCalled();
 
-    const fresh = await secondManager.acquire(
+    const fresh = await secondManager.open(
       { ...key, channelThreadKey: "webchat:new-model-pin-test" },
       { workingDir: directory },
     );
@@ -244,14 +244,14 @@ describe("agent model pins through AgentSessionManager", () => {
 
   it("allows a guardian override without a tier and persists the override on cold resume", async () => {
     const firstManager = createManager();
-    const first = await firstManager.acquire(key, {
+    const first = await firstManager.open(key, {
       workingDir: directory,
       selectionId: "claude-sonnet",
     });
     await collect(first.sendTurn({ prompt: "use selected model" }).events());
     await firstManager.shutdown();
 
-    const resumed = await createManager().acquire(key, {
+    const resumed = await createManager().open(key, {
       workingDir: directory,
       resumeSessionId: first.sessionId,
     });
@@ -265,7 +265,7 @@ describe("agent model pins through AgentSessionManager", () => {
 
   it("fails closed on a disconnected pinned provider even when another provider is healthy", async () => {
     state.openai = reportOf("unauthorized");
-    await expect(createManager().acquire(key, { workingDir: directory })).rejects.toMatchObject({
+    await expect(createManager().open(key, { workingDir: directory })).rejects.toMatchObject({
       code: "model_provider_unavailable",
       provider: "openai",
       reason: "not_logged_in",
@@ -275,7 +275,7 @@ describe("agent model pins through AgentSessionManager", () => {
   });
 
   it("fails a later turn on quota exhaustion and recovers on the same model", async () => {
-    const session = await createManager().acquire(key, { workingDir: directory });
+    const session = await createManager().open(key, { workingDir: directory });
     await collect(session.sendTurn({ prompt: "first" }).events());
     state.openai = reportOf("usage_limit_reached");
     const failed = await collect(session.sendTurn({ prompt: "blocked" }).events());
@@ -303,7 +303,7 @@ describe("agent model pins through AgentSessionManager", () => {
       ended: (event) => finished.push(event.turn.turnId),
       couldNotStart: (event) => failedBeforeStart.push(event),
     });
-    const session = await createManager(false, false, lifecycle).acquire(key, {
+    const session = await createManager(false, false, lifecycle).open(key, {
       workingDir: directory,
     });
     const first = session.sendTurn({ prompt: "first" });
@@ -324,7 +324,7 @@ describe("agent model pins through AgentSessionManager", () => {
   it("enforces known model entitlements instead of substituting a tier model", async () => {
     await writeConfig({ modelId: "gpt-6-astra" });
     state.openai = reportOf("available", RESTRICTED_PLAN);
-    await expect(createManager().acquire(key, { workingDir: directory })).rejects.toMatchObject({
+    await expect(createManager().open(key, { workingDir: directory })).rejects.toMatchObject({
       code: "model_unavailable",
       provider: "openai",
       reason: "model_access_denied",
@@ -334,10 +334,10 @@ describe("agent model pins through AgentSessionManager", () => {
   });
 
   it("keeps a child's tier selection independent of a parent's pin on a shared thread", async () => {
-    const parent = await createManager().acquire(key, { workingDir: directory });
+    const parent = await createManager().open(key, { workingDir: directory });
     await collect(parent.sendTurn({ prompt: "parent" }).events());
     await writeConfig({ name: "worker", modelId: undefined, tier: "medium" });
-    const child = await createManager(true).acquire(
+    const child = await createManager(true).open(
       { ...key, agentName: "worker" },
       { workingDir: directory },
     );

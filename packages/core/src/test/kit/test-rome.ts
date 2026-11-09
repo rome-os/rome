@@ -49,7 +49,7 @@ import { DrizzleSessionRepository, type SessionRepository } from "../../agent/in
 import { createTestSystemPrompts } from "../system-prompts.js";
 import { createModelResolver } from "../../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./model-accounts.js";
-import { createAgentSessionManager } from "../../agent/index.js";
+import { createSessions } from "../../agent/index.js";
 import { TurnListeners } from "../../agent/index.js";
 import { AppTurnHooks } from "../../apps/app-turn-hooks.js";
 import { SkillLoader } from "../../apps/skill-loader.js";
@@ -278,7 +278,7 @@ async function buildHarness(
   );
 
   const systemPrompts = createTestSystemPrompts();
-  const agentSessionManager = createAgentSessionManager(
+  const agentSessionManager = createSessions(
     {
       agentLoader,
       sessionRepository: repos.sessions,

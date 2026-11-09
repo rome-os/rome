@@ -20,17 +20,17 @@ import {
   type ModelProvider,
   type ModelSessionParams,
 } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
+import { createSessions, type Sessions } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { SkillLoader } from "../apps/skill-loader.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 
-describe("AgentSessionManager textPrivate", () => {
+describe("Sessions textPrivate", () => {
   let directory: string;
   let testDb: TestDb;
-  let manager: AgentSessionManager;
+  let manager: Sessions;
   let opened: ModelSessionParams[];
 
   async function writeAgent(name: string, policy?: Record<string, unknown>): Promise<void> {
@@ -79,7 +79,7 @@ describe("AgentSessionManager textPrivate", () => {
     const actionRegistry = new ActionRegistryImpl();
     const systemPrompts = createTestSystemPrompts();
     rs.spyOn(systemPrompts, "build").mockReturnValue("textPrivate test prompt");
-    manager = createAgentSessionManager(
+    manager = createSessions(
       {
         agentLoader: loader,
         sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
@@ -120,7 +120,7 @@ describe("AgentSessionManager textPrivate", () => {
     ["texter", true],
     ["worker", false],
   ])("opens %s's model session with a defer tool that asks for a confirmation line: %s", async (agentName, textPrivate) => {
-    await manager.acquire(
+    await manager.open(
       { agentName, channelThreadKey: `webchat:${agentName}` },
       // A web chat faces the guardian, so a wake-up can be scheduled into it.
       { workingDir: directory, guardianFacing: true },
