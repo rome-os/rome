@@ -1,4 +1,6 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
+import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
+import { WebChatDashboardSessions } from "./webchat/webchat-dashboard-sessions.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./lib/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
@@ -153,9 +155,7 @@ import { WebhookInvocationsRepository } from "./apps/repositories/webhook-invoca
 import {
   readAnswerShape,
   romeSessionTracing,
-  ChatSessionSettings,
   createSubagentCalls,
-  WebChatDashboardSessions,
   requireAgent,
   rootSession,
   TurnListeners,

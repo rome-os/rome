@@ -1,7 +1,8 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
+import { ChatSessionSettings } from "../webchat/chat-session-settings.js";
 import { createLogger } from "../logger.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
-import { ChatSessionSettings, readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
 import { TurnUsageReporter } from "../apps/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { ConciergeService, type ConciergeDeps } from "../concierge/service.js";

@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
-import { sessions } from "../../db/schema.js";
-import { createTestDb } from "../../test/db.js";
-import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
-import { webchatSessionKey } from "../../core/agent-session-key.js";
-import { MODEL_SELECTIONS } from "../domain/model-selection.js";
-import { storeSubagentParent } from "../domain/session-parent.js";
+import { sessions } from "../db/schema.js";
+import { createTestDb } from "../test/db.js";
+import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
+import { webchatSessionKey } from "../core/agent-session-key.js";
+import { MODEL_SELECTIONS } from "../agent/index.js";
+import { storeSubagentParent } from "../agent/index.js";
 import { ChatSessionSettings } from "./chat-session-settings.js";
 
 describe("ChatSessionSettings", () => {

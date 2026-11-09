@@ -1,16 +1,12 @@
 // The dashboard's sessions (`rome_sessions`), read and written through the
 // web chat repository, behind the DashboardSessions port in
-// ../domain/dashboard-sessions.ts.
+// ../agent/domain/dashboard-sessions.ts.
 
-import type { WebChatRepository } from "../../db/repositories/webchat.js";
-import { createLogger } from "../../logger.js";
-import type {
-  DashboardSession,
-  DashboardSessions,
-  NewSubagentSession,
-} from "../domain/dashboard-sessions.js";
-import { parentTurnSession } from "../domain/session-parent.js";
-import type { SessionRecordId } from "../domain/subagent.js";
+import type { WebChatRepository } from "../db/repositories/webchat.js";
+import { createLogger } from "../logger.js";
+import type { DashboardSession, DashboardSessions, NewSubagentSession } from "../agent/index.js";
+import { parentTurnSession } from "../agent/index.js";
+import type { SessionRecordId } from "../agent/index.js";
 
 const log = createLogger("dashboard-sessions");
 
