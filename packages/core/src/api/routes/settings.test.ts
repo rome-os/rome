@@ -7,7 +7,7 @@ import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../lib/anthropic-co
 import { GUARDIAN_TIMEZONE_SETTING_KEY } from "../../routines/guardian-timezone.js";
 import { COOKIE_NAME, createSession } from "../../lib/auth.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";
-import { PUBLIC_ACCESS_SETTING_KEY } from "../../lib/public-access-config.js";
+import { PUBLIC_ACCESS_SETTING_KEY } from "../../apps/public-access-config.js";
 
 const GUARDIAN_COOKIE = `${COOKIE_NAME}=${createSession("alex")}`;
 

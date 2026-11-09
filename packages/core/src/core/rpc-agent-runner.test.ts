@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { IpcRpc, type IpcMessage, type IpcTransport } from "../actions/ipc.js";
+import { IpcRpc, type IpcMessage, type IpcTransport } from "../apps/actions/ipc.js";
 import { RpcAgentRunner } from "./rpc-agent-runner.js";
 import type { RunTurnRequest, RunTurnResponse } from "./agent-session-bridge.js";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";

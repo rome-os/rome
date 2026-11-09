@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { RomeAppContext } from "@rome-os/app-runtime";
 
-import { validateActionArgs } from "../../../../../packages/core/src/actions/validate-action-args.js";
+import { validateActionArgs } from "../../../../../packages/core/src/apps/actions/validate-action-args.js";
 import { createCodingTaskAction } from "./index.js";
 
 describe("coding_task", () => {

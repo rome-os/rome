@@ -84,6 +84,7 @@ export {
 } from "./domain/turn-events.js";
 export {
   requireAgent,
+  resolveSubagents,
   type Agent,
   type AgentCatalog,
   type AgentDefinition,
@@ -92,10 +93,14 @@ export type { Skill, SkillCatalog } from "./domain/skill.js";
 export type { AgentAction, AgentActions } from "./domain/agent-action.js";
 export type { AgentLog } from "./domain/agent-log.js";
 export type { WakeUp } from "./domain/defer.js";
-export type { PromptAgent, PromptSources } from "./domain/system-prompt.js";
+export {
+  projectSummary,
+  type PromptAgent,
+  type PromptMemory,
+  type PromptSources,
+} from "./domain/system-prompt.js";
 export { showsWidgets, widgetDrawingFor, type WidgetDrawing } from "./domain/widget-drawing.js";
 export { createSystemPrompts, type SystemPrompts } from "./application/system-prompts.js";
-export { createPromptSources } from "./infrastructure/prompt-sources.js";
 export {
   buildContinuationBlock,
   buildDeviceFolderBlock,
@@ -221,26 +226,12 @@ export { romeToolRunner } from "./application/rome-tool-runner.js";
 export type { SessionTracing } from "./application/session-tracing.js";
 export { translateTurnSpans, type CapturedEvent } from "./application/turn-spans.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
-export { SkillLoader } from "./infrastructure/skill-loader.js";
-export { AgentLoader } from "./infrastructure/agent-loader.js";
 export { readAnswerShape } from "./infrastructure/answer-shape.js";
 export {
   ChatSessionSettings,
   type ChatSessionSettingsDeps,
 } from "./infrastructure/chat-session-settings.js";
-export {
-  TurnUsageReporter,
-  type TurnUsageReporterDeps,
-} from "./infrastructure/turn-usage-reporter.js";
 export { romeSessionTracing } from "./infrastructure/session-tracing.js";
-export {
-  AppTurnHooks,
-  type TurnLifecycleHookLoadFailure,
-} from "./infrastructure/app-turn-hooks.js";
-export {
-  AppTurnMiddleware,
-  type TurnMiddlewareLoadFailure,
-} from "./infrastructure/app-turn-middleware.js";
 export { TurnListeners } from "./infrastructure/turn-listeners.js";
 
 // The model port's adapters, for the composition root alone. Everything else

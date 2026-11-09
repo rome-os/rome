@@ -6,9 +6,9 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChannelsService, ChatId, ChatRepository } from "@rome-os/app-runtime";
 import { executeSendMessage } from "../../../../../../rome_apps/system/src/actions/send-message/index.js";
 import type { SendMessageEmailInput } from "../../../../../../rome_apps/system/src/actions/send-message/types.js";
-import { DEFAULT_RPC_TIMEOUT_MS, IpcRpcTimeoutError } from "../../../actions/ipc.js";
-import { ChannelsServiceProxy } from "../../../actions/service-proxies.js";
-import { setWorkerRpcInProcessDispatcher } from "../../../actions/worker-rpc-client.js";
+import { DEFAULT_RPC_TIMEOUT_MS, IpcRpcTimeoutError } from "../../../apps/actions/ipc.js";
+import { ChannelsServiceProxy } from "../../../apps/actions/service-proxies.js";
+import { setWorkerRpcInProcessDispatcher } from "../../../apps/actions/worker-rpc-client.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import {

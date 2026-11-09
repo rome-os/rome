@@ -6,7 +6,7 @@ import {
   instanceCredentialId,
   onInstanceTokenChanged,
 } from "./instance-identity.js";
-import { normalizePublicAccessEmail } from "./public-access-config.js";
+import { normalizePublicAccessEmail } from "../apps/public-access-config.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
 export type { VisitorAllowList } from "./dashboard-access-store.js";

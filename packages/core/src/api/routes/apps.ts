@@ -37,13 +37,13 @@ import {
   PUBLIC_ACCESS_SETTING_KEY,
   normalizePublicAccessConfig,
   type PublicAccessConfig,
-} from "../../lib/public-access-config.js";
+} from "../../apps/public-access-config.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import { resolveVisitorSession } from "../../lib/visitor-session.js";
 import type { ApiDeps } from "../deps.js";
 import { APP_MANAGER_ERROR_STATUS } from "@rome/api-types/app-manager-errors";
-import { getEmbeddedAppHref, getFullAppHref } from "../../lib/app-routes.js";
+import { getEmbeddedAppHref, getFullAppHref } from "../../apps/app-routes.js";
 
 function getErrorMessage(err: unknown): string {
   return err instanceof Error ? err.message : "Unexpected error";

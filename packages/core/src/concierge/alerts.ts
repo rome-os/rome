@@ -285,11 +285,17 @@ function attr(value: string): string {
 const text = (value: string) =>
   value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-function itemTag(item: ConciergeFollowItemRow, markImportant = false): string {
+type KindLabelLookup = (source: string, kind: string) => string | undefined;
+
+function itemTag(
+  item: ConciergeFollowItemRow,
+  markImportant = false,
+  kindLabel?: KindLabelLookup,
+): string {
   const attrs = [
     `source="${attr(item.source)}"`,
     `target="${attr(item.target)}"`,
-    `kind="${attr(item.kind)}"`,
+    `kind="${attr(kindLabel?.(item.source, item.kind) ?? item.kind)}"`,
     ...(markImportant && item.decision === "important" ? ['important="true"'] : []),
     ...(item.url ? [`url="${attr(item.url)}"`] : []),
   ].join(" ");
@@ -327,11 +333,12 @@ export function renderImportantTurn(
   items: ConciergeFollowItemRow[],
   held: boolean,
   now: string,
+  kindLabel?: KindLabelLookup,
 ): string {
   return [
     `<external_events untrusted="true" delivery="important"${held ? ' held="quiet_hours"' : ""} now="${attr(now)}">`,
     FENCE_NOTE,
-    ...items.map((item) => itemTag(item)),
+    ...items.map((item) => itemTag(item, false, kindLabel)),
     "</external_events>",
   ].join("\n");
 }
@@ -347,9 +354,11 @@ export function renderDigestTurn(
   items: ConciergeFollowItemRow[],
   now: string,
   chatOf?: (item: ConciergeFollowItemRow) => ConciergeChatRef | undefined,
+  kindLabel?: KindLabelLookup,
 ): string {
   const header = `<external_events untrusted="true" delivery="digest" count="${items.length}" now="${attr(now)}">`;
-  if (!chatOf) return [header, FENCE_NOTE, ...digestLines(items), "</external_events>"].join("\n");
+  if (!chatOf)
+    return [header, FENCE_NOTE, ...digestLines(items, kindLabel), "</external_events>"].join("\n");
   const groups = new Map<
     string,
     { chat: ConciergeChatRef | undefined; items: ConciergeFollowItemRow[] }
@@ -367,17 +376,17 @@ export function renderDigestTurn(
   );
   const lines = ordered.flatMap(({ chat, items: group }) => [
     `<chat${chat ? ` id="${attr(chat.id)}" name="${attr(chat.name)}" main="${chat.main}"` : ""}>`,
-    ...digestLines(group),
+    ...digestLines(group, kindLabel),
     "</chat>",
   ]);
   return [header, FENCE_NOTE, ...lines, "</external_events>"].join("\n");
 }
 
 /** One group's digest lines: important first, then a bounded few per source and kind. */
-function digestLines(items: ConciergeFollowItemRow[]): string[] {
+function digestLines(items: ConciergeFollowItemRow[], kindLabel?: KindLabelLookup): string[] {
   const important = items.filter((item) => item.decision === "important");
   const rest = items.filter((item) => item.decision !== "important");
-  const lines = important.map((item) => itemTag(item, true));
+  const lines = important.map((item) => itemTag(item, true, kindLabel));
   const groups = new Map<string, ConciergeFollowItemRow[]>();
   for (const item of rest) {
     const key = `${item.source}\u0000${item.kind}`;
@@ -389,11 +398,11 @@ function digestLines(items: ConciergeFollowItemRow[]): string[] {
     if (!first) continue;
     const room = items.length <= MAX_DIGEST_LINES ? group.length : DIGEST_LINES_PER_GROUP;
     const take = Math.min(room, Math.max(0, MAX_DIGEST_LINES - shown), group.length);
-    lines.push(...group.slice(0, take).map((item) => itemTag(item)));
+    lines.push(...group.slice(0, take).map((item) => itemTag(item, false, kindLabel)));
     shown += take;
     if (group.length > take) {
       lines.push(
-        `<more source="${attr(first.source)}" kind="${attr(first.kind)}" count="${group.length - take}"/>`,
+        `<more source="${attr(first.source)}" kind="${attr(kindLabel?.(first.source, first.kind) ?? first.kind)}" count="${group.length - take}"/>`,
       );
     }
   }

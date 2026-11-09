@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
+import { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { UsageOutboxRepository } from "../db/repositories/usage-outbox.js";
 import { createTestDb, type TestDb } from "../test/db.js";

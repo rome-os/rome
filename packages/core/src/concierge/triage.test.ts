@@ -6,6 +6,7 @@ import { parse as parseYaml } from "yaml";
 import type { AgentRunnerInterface } from "../core/types.js";
 import {
   buildTriagePrompt,
+  fallbackLine,
   type FollowEvent,
   parseTriage,
   runTriage,
@@ -34,7 +35,7 @@ const concierge = parseYaml(readFileSync(resolve(here, "../../agents/concierge.y
 const event = (id: string, extra: Partial<FollowEvent> = {}): FollowEvent => ({
   id,
   source: "github",
-  kind: "your_ci_failed",
+  kind: "Failed CI runs",
   target: "acme/widgets",
   account: "octo-me",
   subject: "Fix it",
@@ -53,7 +54,7 @@ const input = (events: FollowEvent[]): TriageInput => ({
     {
       source: "github",
       target: "acme/widgets",
-      kinds: ["your_ci_failed"],
+      kinds: ["Failed CI runs"],
       options: ["Ignore these people: dependabot[bot]"],
       preference: "Only billing changes",
     },
@@ -99,6 +100,12 @@ describe("the triage agent", () => {
     expect(concierge.systemPromptPrefix).toContain('`delivery="important"`');
     expect(concierge.systemPromptPrefix).toContain('`delivery="digest"`');
     expect(concierge.systemPromptPrefix).not.toMatch(/maxTurnsPerHour|minSpacing/);
+    expect(concierge.systemPromptPrefix).toContain(
+      "`kind` on `<item>` and `<more>` is a catalog label, or an id when unknown",
+    );
+    expect(concierge.systemPromptPrefix).toContain(
+      "It names the event's shape, not whom it concerns",
+    );
   });
 
   it("marks importance, and leaves telling the guardian to the Concierge", () => {
@@ -155,6 +162,15 @@ describe("the Concierge's rules for what cannot be followed", () => {
 });
 
 describe("the triage prompt", () => {
+  it("uses kind names for event shape and relationship fields for whom it concerns", () => {
+    expect(agent.systemPromptPrefix).toContain(
+      "`kind` names the shape of an event, not whom it concerns",
+    );
+    expect(agent.systemPromptPrefix).toContain(
+      "use `byYou` and `addressedTo`, especially when a follow's options ask only for what concerns the guardian",
+    );
+  });
+
   it("states goals with no service names and no label table", () => {
     const prompt = agent.systemPromptPrefix;
     for (const name of [
@@ -199,6 +215,21 @@ describe("buildTriagePrompt", () => {
   });
 });
 
+describe("fallbackLine", () => {
+  it("uses the catalog label as written", () => {
+    expect(fallbackLine(event("a", { kind: "Pull requests merged or closed" }))).toBe(
+      "Pull requests merged or closed: Fix it",
+    );
+    expect(fallbackLine(event("a", { kind: "Builds for release_candidate" }))).toBe(
+      "Builds for release_candidate: Fix it",
+    );
+  });
+
+  it("keeps an unknown kind id when no label was found", () => {
+    expect(fallbackLine(event("a", { kind: "future_kind" }))).toBe("future_kind: Fix it");
+  });
+});
+
 describe("parseTriage", () => {
   it("gives every event a decision, sending one triage missed to the digest", () => {
     const events = [event("a"), event("b"), event("c"), event("d")];
@@ -222,7 +253,7 @@ describe("parseTriage", () => {
     ]);
     expect(decisions[3]).toMatchObject({
       reason: "triage gave no decision",
-      line: "your ci failed: Fix it",
+      line: "Failed CI runs: Fix it",
     });
   });
 

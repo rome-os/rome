@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterAll, describe, expect, it } from "@rstest/core";
 import { checkImports, formatImportViolation } from "./import-rules.js";
+import { contextRules } from "./rules/contexts.js";
 import { layerRules } from "./rules/layers.js";
 
 const root = mkdtempSync(join(tmpdir(), "import-rules-"));
@@ -67,6 +68,15 @@ write(
   ].join("\n"),
 );
 
+write("src/apps/catalog.ts", "export type AppCatalog = { size: number };\n");
+write(
+  "src/agent/infrastructure/apps-probe.ts",
+  ['import type { AppCatalog } from "../../apps/catalog.js";', 'import "@/apps/catalog.js";'].join(
+    "\n",
+  ),
+);
+write("src/apps/agent-probe.ts", 'import "../agent/index.js";\n');
+
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe("checkImports with the layer rules", () => {
@@ -105,5 +115,18 @@ describe("checkImports with the layer rules", () => {
       .map((line) => line.replace(/: .*$/, ""))
       .filter((line) => line.startsWith("agent/application/"));
     expect(lines).toEqual(["agent/application/use.ts → logger.ts [stale-listing]"]);
+  });
+});
+
+describe("checkImports with the context rules", () => {
+  it("rejects every import from agent/ into apps/, type-only included, and allows the reverse", () => {
+    const lines = checkImports(join(root, "src"), join(root, "tsconfig.json"), contextRules)
+      .map(formatImportViolation)
+      .map((line) => line.replace(/: .*$/, ""))
+      .filter((line) => !line.includes("[unresolved]"));
+    expect(lines).toEqual([
+      "agent/infrastructure/apps-probe.ts:1 → ../../apps/catalog.js (apps/catalog.ts) [agent-never-imports-apps]",
+      "agent/infrastructure/apps-probe.ts:2 → @/apps/catalog.js (apps/catalog.ts) [agent-never-imports-apps]",
+    ]);
   });
 });
