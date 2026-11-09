@@ -77,6 +77,7 @@ A dashboard chat a person starts themselves, in a project. The dashboard calls i
 A chat forked from one turn of another chat, carrying that chat's history up to the turn.
 
 - A person **forks** one from a settled turn of a common chat or of a fork chat. A main chat, a topic chat and a task chat offer no fork.
+- A chat forked from a Concierge chat still talks to the Concierge, so it is a topic chat, not a fork chat: it sits under the main chat and offers no fork. A chat forked from a common chat or a fork chat is a fork chat, under Projects.
 - It is a chat of its own once forked: what is said in it does not reach the chat it came from.
 - It keeps the folder of the chat it was forked from, and the model it was forked with.
 

@@ -23,11 +23,14 @@ import { RecentChats } from "./RecentChats";
 const concierge = rs.hoisted(() => ({
   chatId: null as string | null,
   chats: [] as Array<{ id: string; name: string; main: boolean; unread: number }>,
+  // Reads the Concierge's list from the server, so a refetch shows.
+  fromServer: false,
 }));
 rs.mock("@/hooks/use-concierge", () => ({
   ...conciergeModule,
   useConciergeChatId: () => concierge.chatId,
-  useConciergeChats: () => concierge.chats,
+  useConciergeChats: () =>
+    concierge.fromServer ? conciergeModule.useConciergeChats() : concierge.chats,
 }));
 
 beforeAll(async () => {
@@ -41,6 +44,7 @@ afterEach(() => {
   rs.restoreAllMocks();
   concierge.chatId = null;
   concierge.chats = [];
+  concierge.fromServer = false;
 });
 
 interface MockSession {
@@ -1412,6 +1416,22 @@ describe("RecentChats", () => {
       ]);
     });
 
+    it("shows a renamed archived topic chat under its new name", async () => {
+      localStorage.setItem("rome-recent-chats-status-filter", "archived");
+      const user = userEvent.setup();
+      renderRecentChats();
+      await within(conciergeSection()).findByRole("link", { name: "Old topic" });
+      await user.click(screen.getByRole("button", { name: "Actions for Old topic" }));
+      await user.click(screen.getByRole("menuitem", { name: "Rename" }));
+      const input = await screen.findByRole("textbox", { name: "Chat name" });
+      await user.clear(input);
+      await user.type(input, "Renamed topic{Enter}");
+      expect(
+        await within(conciergeSection()).findByRole("link", { name: "Renamed topic" }),
+      ).toBeTruthy();
+      expect(screen.queryByText("Old topic")).toBeNull();
+    });
+
     it("shows the main chat and every topic chat under all", async () => {
       localStorage.setItem("rome-recent-chats-status-filter", "all");
       renderRecentChats();
@@ -1459,6 +1479,69 @@ describe("RecentChats", () => {
     await user.click(screen.getByRole("button", { name: "2 more" }));
     expect(screen.getByRole("link", { name: "Topic 1" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /more$/ })).toBeNull();
+  });
+
+  it("updates a topic chat folded under More when a turn in it ends", async () => {
+    concierge.chatId = "concierge";
+    concierge.fromServer = true;
+    const unread: Record<string, number> = {};
+    const topics = Array.from({ length: 6 }, (_, index) => ({
+      id: `topic-${index + 1}`,
+      name: `Topic ${index + 1}`,
+      agentName: "core:concierge",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      // Topic 1 moved first, so it is the sixth and folded under More.
+      activityAt: new Date(Date.UTC(2026, 6, 2 + index)).toISOString(),
+      lastSeenActivityAt: null,
+      unread: false,
+      projectName: "default",
+      projectPath: "default",
+    }));
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/chat/sessions")) return Response.json(topics);
+      if (url === "/api/concierge/chats") {
+        return Response.json({
+          chats: [
+            { id: "concierge", name: "Concierge", main: true, unread: 0 },
+            ...topics.map((t) => ({
+              id: t.id,
+              name: t.name,
+              main: false,
+              unread: unread[t.id] ?? 0,
+            })),
+          ],
+        });
+      }
+      if (url === "/api/concierge/session") return Response.json({ id: "concierge", unread: 0 });
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch);
+    FakeWebSocket.instances = [];
+    const user = userEvent.setup();
+    renderRecentChats("/chat", fakeSocketLiveEventsClient());
+    await screen.findByRole("button", { name: "1 more" });
+    let socket!: FakeWebSocket;
+    act(() => {
+      socket = acceptLatestSocket();
+    });
+    // No topic row holds a subscription of its own.
+    expect(
+      socket.sent.filter((m) =>
+        String((m as { topic?: string }).topic).startsWith("chat.session:topic"),
+      ),
+    ).toEqual([]);
+
+    unread["topic-1"] = 2;
+    act(() =>
+      socket.receive({
+        type: "event",
+        topic: "chat.status",
+        event: "session_running",
+        data: { sessionId: "topic-1", running: false },
+      }),
+    );
+    await user.click(screen.getByRole("button", { name: "1 more" }));
+    expect(await screen.findByRole("link", { name: "Topic 1, 2 unread messages" })).toBeTruthy();
   });
 
   it("keeps the open topic chat in view when it is past the first five", async () => {

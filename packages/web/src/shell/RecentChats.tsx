@@ -31,13 +31,15 @@ import { deleteSession, renameSession, type SessionScope } from "@/lib/chat-api"
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import type { ChatSession } from "@/lib/chat-types";
 import { deviceFolderName, pathSegments } from "@/lib/device-folder";
-import { activeSessionFromPath, MAIN_CHAT_PATH, sessionActivityTime } from "@/lib/chat-session";
-import { useChatSessions } from "@/hooks/use-chat-sessions";
 import {
-  CONCIERGE_AGENT_ID,
-  TASK_CHAT_TRIGGER_KIND,
-  useConciergeChatId,
-} from "@/hooks/use-concierge";
+  activeSessionFromPath,
+  chatKind,
+  isProjectChat,
+  MAIN_CHAT_PATH,
+  sessionActivityTime,
+} from "@/lib/chat-session";
+import { useChatSessions } from "@/hooks/use-chat-sessions";
+import { useConciergeChatId, useRefreshTopicChats } from "@/hooks/use-concierge";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { ConciergeChats } from "./ConciergeEntry";
 import { emitSessionsChanged, useArchiveSession } from "@/lib/session-events";
@@ -209,17 +211,6 @@ const PROJECT_LOAD_MORE_COUNT = 10;
 const SESSION_NAME_MAX_LENGTH = 50;
 
 /**
- * Whether a chat belongs in the Projects list: a chat a person started, not a
- * Concierge chat, which the Concierge section lists, and not a task chat,
- * which the Tasks list and its task card open.
- */
-export function isProjectListChat(
-  session: Pick<ChatSession, "agentName" | "triggerKind">,
-): boolean {
-  return session.agentName !== CONCIERGE_AGENT_ID && session.triggerKind !== TASK_CHAT_TRIGGER_KIND;
-}
-
-/**
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole.
  */
@@ -300,7 +291,6 @@ export function RecentChats({
     sessions: cachedSessions,
     isError,
     refetch,
-    invalidate,
     update: updateSessions,
   } = useChatSessions(statusFilter, scope);
   // Cached rows show at once and a failed refetch keeps them, so the skeleton
@@ -315,18 +305,17 @@ export function RecentChats({
   const sessions = useMemo(
     () =>
       (cachedSessions ?? [])
-        .filter(isProjectListChat)
+        .filter((s) => isProjectChat(chatKind(s)))
         .map((s) => withLiveRunning(s, liveRunning.current)),
     [cachedSessions],
   );
   const conciergeChatId = useConciergeChatId();
+  // Refetches the chat list and the Concierge's list together.
+  const refreshTopicChats = useRefreshTopicChats();
   // The Concierge section draws its topic chats from these: an archived one
   // is only here, and an active one takes its place in the order from here.
   const conciergeTopicSessions = useMemo(
-    () =>
-      (cachedSessions ?? []).filter(
-        (s) => s.agentName === CONCIERGE_AGENT_ID && s.id !== conciergeChatId,
-      ),
+    () => (cachedSessions ?? []).filter((s) => chatKind(s, conciergeChatId) === "topic"),
     [cachedSessions, conciergeChatId],
   );
   const activeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
@@ -370,7 +359,9 @@ export function RecentChats({
           updateSessions((prev) =>
             prev.map((s) => (s.id === sessionId ? withLiveRunning(s, liveRunning.current) : s)),
           );
-          if (!running) void invalidate();
+          // A turn's end can change any chat's unread state, a topic chat's
+          // included, whether or not its row is shown.
+          if (!running) refreshTopicChats();
           else refetchForUnknown(sessionId);
         },
       },
@@ -380,7 +371,7 @@ export function RecentChats({
       // and the snapshot the new connection sends.
       onReconnect: () => {
         liveRunning.current.clear();
-        void invalidate();
+        refreshTopicChats();
       },
     },
   );

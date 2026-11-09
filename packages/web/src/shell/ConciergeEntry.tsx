@@ -18,12 +18,12 @@ import { archiveSession, deleteSession, renameSession } from "@/lib/chat-api";
 import { Badge } from "@/components/ui/badge";
 import { RomeLogo } from "@/components/logo";
 import {
-  CONCIERGE_CHATS_QUERY_KEY,
   CONCIERGE_SESSION_QUERY_KEY,
   CONCIERGE_UNREAD_CAP,
   useConciergeChats,
   useConciergeName,
   useConciergeUnread,
+  useRefreshTopicChats,
 } from "@/hooks/use-concierge";
 import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { MAIN_CHAT_PATH, sessionActivityTime } from "@/lib/chat-session";
@@ -181,7 +181,6 @@ export function ConciergeChats({
   topicSessions: readonly ChatSession[];
 }) {
   const { t } = useTranslation("common");
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const conciergeChats = useConciergeChats();
   const topics = useMemo(
@@ -194,9 +193,10 @@ export function ConciergeChats({
     [conciergeChats, statusFilter, topicSessions],
   );
   const [expanded, setExpanded] = useState(false);
-  const refresh = useCallback(() => {
-    void queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY });
-  }, [queryClient]);
+  // A topic chat's rows read two lists, so every change refetches both. A
+  // reply in any topic chat, shown or folded under More, refetches them from
+  // the chat list's status stream, so no row subscribes on its own.
+  const refresh = useRefreshTopicChats();
   useSessionsChanged(refresh);
   // The open topic chat stays in view, even when it is past the first few.
   const activeIndex = topics.findIndex((chat) => chat.id === activeSessionId);
@@ -256,11 +256,6 @@ function ConciergeTopicEntry({
   const [editing, setEditing] = useState(false);
   const [value, setValue] = useState(chat.name);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  useLiveEvents(
-    chatSessionTopic(chat.id),
-    { message_insert: { schema: anyEvent, fn: onChanged } },
-    { onReconnect: onChanged },
-  );
   const count = active ? 0 : chat.unread;
   const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
   const rename = async () => {
@@ -269,6 +264,7 @@ function ConciergeTopicEntry({
     if (!trimmed || trimmed === chat.name) return;
     await renameSession(chat.id, trimmed).catch(() => undefined);
     onChanged();
+    emitSessionsChanged();
   };
   const retire = async (how: "archive" | "unarchive" | "delete") => {
     try {

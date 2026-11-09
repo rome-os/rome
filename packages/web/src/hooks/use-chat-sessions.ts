@@ -20,7 +20,7 @@ const pendingInvalidations = new WeakMap<QueryClient, Promise<void>>();
  * a read mark can emit several events in a row, and none of them needs its own
  * round trip.
  */
-function invalidateChatSessions(queryClient: QueryClient): Promise<void> {
+export function invalidateChatSessions(queryClient: QueryClient): Promise<void> {
   const pending = pendingInvalidations.get(queryClient);
   if (pending) return pending;
   const run = Promise.resolve().then(() => {

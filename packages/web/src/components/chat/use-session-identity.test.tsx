@@ -4,7 +4,7 @@ import { act, renderHook, waitFor } from "@testing-library/react";
 import type { AgentCatalogGroup, ChatSession } from "@/lib/chat-types";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { setPresentationMode } from "@/lib/presentation-mode";
-import { isForkableChat, useSessionIdentity } from "./use-session-identity";
+import { useSessionIdentity } from "./use-session-identity";
 
 rs.mock("@/lib/chat-api", () => ({
   getSession: rs.fn(),
@@ -44,30 +44,18 @@ afterEach(() => {
   rs.clearAllMocks();
 });
 
-describe("isForkableChat", () => {
-  it("offers the fork button in a common chat and in a fork chat only", () => {
-    expect(isForkableChat({ agentName: null, triggerKind: null })).toBe(true);
-    expect(isForkableChat({ agentName: "replay", triggerKind: null })).toBe(true);
-    // A main or topic chat runs on the Concierge.
-    expect(isForkableChat({ agentName: "core:concierge", triggerKind: null })).toBe(false);
-    // A task chat runs on main, started by the Concierge.
-    expect(isForkableChat({ agentName: null, triggerKind: "concierge" })).toBe(false);
-    // A fork chat keeps its button, whatever chat it was forked from.
-    expect(
-      isForkableChat({
-        agentName: "core:concierge",
-        triggerKind: null,
-        parentSessionId: "concierge",
-      }),
-    ).toBe(true);
-  });
-
-  it("reports the rule for the open chat", async () => {
-    rs.mocked(getSession).mockResolvedValue({ ...session, triggerKind: "concierge" });
+describe("useSessionIdentity forkable", () => {
+  it.each([
+    ["a common chat", {}, true],
+    ["a fork chat", { parentSessionId: "s0" }, true],
+    ["a task chat", { triggerKind: "concierge" }, false],
+    ["a fork of a Concierge chat", { agentName: "core:concierge", parentSessionId: "t1" }, false],
+  ])("reports whether %s can be forked", async (_label, fields, forkable) => {
+    rs.mocked(getSession).mockResolvedValue({ ...session, ...fields });
     rs.mocked(listChatAgents).mockResolvedValue(groups);
     const { result } = renderHook(() => useSessionIdentity("s1"));
     await waitFor(() => expect(result.current.loading).toBe(false));
-    expect(result.current.forkable).toBe(false);
+    expect(result.current.forkable).toBe(forkable);
   });
 });
 

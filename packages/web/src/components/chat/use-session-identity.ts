@@ -1,22 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentMention, ChatSession } from "@/lib/chat-types";
-import { CONCIERGE_AGENT_ID, TASK_CHAT_TRIGGER_KIND } from "@/hooks/use-concierge";
+import type { AgentMention } from "@/lib/chat-types";
+import { chatKind, isProjectChat } from "@/lib/chat-session";
 import { getSession, listChatAgents } from "@/lib/chat-api";
 import { artifactOwnerId } from "@/lib/artifact-name";
 import { prettyAgentName } from "@/lib/agent-name";
 import { usePresentationMode } from "@/lib/presentation-mode";
 import { useSessionsChanged } from "@/lib/session-events";
-
-/**
- * Whether a chat offers the fork button: a fork chat always does, and
- * otherwise only a common chat, not a Concierge chat or a task chat.
- */
-export function isForkableChat(
-  session: Pick<ChatSession, "parentSessionId" | "agentName" | "triggerKind">,
-): boolean {
-  if (session.parentSessionId) return true;
-  return session.agentName !== CONCIERGE_AGENT_ID && session.triggerKind !== TASK_CHAT_TRIGGER_KIND;
-}
 
 export interface SessionIdentity {
   /**
@@ -106,7 +95,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setIsForkChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
-        setForkable(!!session && isForkableChat(session));
+        setForkable(!!session && isProjectChat(chatKind(session)));
         const agentName = session?.agentName ?? null;
         if (!agentName) {
           setPinnedAgentMention(null);
@@ -163,7 +152,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setIsForkChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
-        setForkable(!!session && isForkableChat(session));
+        setForkable(!!session && isProjectChat(chatKind(session)));
       } catch {
         // Best effort; the next mount / event reconciles.
       }
