@@ -20,13 +20,27 @@
  * import and export declarations, `import()` calls and `import("…")` types,
  * `require()`, and the path argument of `rs.*` and `vi.*` module mocks.
  *
+ * In Markdown it rewrites the same way every link whose target is a moved file
+ * or folder, and every path in a code span that names one, spelled from the
+ * repo root, from the document, or from the package root for a document inside
+ * the package.
+ *
  * It cannot see a path a string builds by hand, such as a config entry, a
  * bundler input or a test that joins folder names. After the move it prints
  * every line that still names an old path, for a person to fix.
  */
 
 import { execFileSync, spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmdirSync,
+  statSync,
+  writeFileSync,
+} from "node:fs";
 import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
@@ -44,6 +58,8 @@ export interface MovePlan {
   edits: Map<string, string>;
   /** Number of specifiers rewritten across `edits`. */
   rewritten: number;
+  /** Number of paths rewritten in Markdown and in code comments across `edits`. */
+  pathReferences: number;
   /** Package specifiers that resolved to no file before the move. They are left alone. */
   unresolved: string[];
 }
@@ -196,6 +212,9 @@ export function planMoves(
   const edits = new Map<string, string>();
   const unresolved: string[] = [];
   let rewritten = 0;
+  let pathReferences = 0;
+  const movedNames = [...new Set([...renames.keys()].map((f) => basename(f)))];
+  const mentionsMovedName = (text: string): boolean => movedNames.some((n) => text.includes(n));
   const importers = trackedFiles(repoRoot, [
     "*.ts",
     "*.tsx",
@@ -237,6 +256,15 @@ export function planMoves(
       }
       if (next !== spec) changes.push({ start: lit.getStart(sf) + 1, end: lit.getEnd() - 1, next });
     }
+    if (mentionsMovedName(text)) {
+      const bases = inPackage(file) ? [repoRoot, pkgDir, srcRoot] : [repoRoot];
+      for (const [start, end] of commentRanges(sf)) {
+        for (const t of pathTokens(text.slice(start, end), bases, renames)) {
+          changes.push({ start: start + t.start, end: start + t.end, next: t.next });
+          pathReferences++;
+        }
+      }
+    }
     if (changes.length === 0) continue;
     let out = text;
     for (const c of changes.sort((a, b) => b.start - a.start)) {
@@ -245,7 +273,158 @@ export function planMoves(
     edits.set(file, out);
     rewritten += changes.length;
   }
-  return { renames, edits, rewritten, unresolved };
+  rewritten -= pathReferences;
+  pathReferences += rewriteDocs(repoRoot, pkgDir, moves, renames, edits);
+  return { renames, edits, rewritten, unresolved, pathReferences };
+}
+
+/** Every comment in the file, as [start, end) offsets. */
+function commentRanges(sf: ts.SourceFile): Array<[number, number]> {
+  const text = sf.getFullText();
+  const seen = new Map<number, number>();
+  const add = (ranges: ts.CommentRange[] | undefined): void => {
+    for (const r of ranges ?? []) seen.set(r.pos, r.end);
+  };
+  const visit = (n: ts.Node): void => {
+    add(ts.getLeadingCommentRanges(text, n.pos));
+    add(ts.getTrailingCommentRanges(text, n.end));
+    ts.forEachChild(n, visit);
+  };
+  visit(sf);
+  return [...seen];
+}
+
+/** A path written as prose: folders, then a file name with an extension. */
+const PATH_TOKEN = /(?<![\w@./-])((?:[\w@-][\w@.-]*\/)+[\w@-][\w@.-]*\.[A-Za-z0-9]+)(?![\w/-])/g;
+
+/**
+ * The prose paths in `text` that name a moved file exactly, spelled from one
+ * of `bases`, each with the same path spelled from that base after the move.
+ */
+function pathTokens(
+  text: string,
+  bases: string[],
+  renames: Map<string, string>,
+): Array<{ start: number; end: number; next: string }> {
+  const out: Array<{ start: number; end: number; next: string }> = [];
+  for (const m of text.matchAll(PATH_TOKEN)) {
+    for (const base of bases) {
+      const next = renames.get(join(base, m[1]));
+      if (!next) continue;
+      out.push({ start: m.index, end: m.index + m[1].length, next: toPosix(relative(base, next)) });
+      break;
+    }
+  }
+  return out;
+}
+
+/** Where `path` lands after the moves: its rename, or its place in a moved folder. */
+function mapPath(path: string, moves: Move[], renames: Map<string, string>): string {
+  const renamed = renames.get(path);
+  if (renamed) return renamed;
+  for (const { from, to } of moves) {
+    if (path === from || path.startsWith(from + sep)) return to + path.slice(from.length);
+  }
+  return path;
+}
+
+const MARKDOWN_LINK = /(\]\(\s*<?)([^)\s>]+)|^(\s*\[[^\]]+\]:\s*<?)([^\s>]+)/gm;
+const CODE_SPAN = /(`)([A-Za-z0-9_@.~/-]+\/[A-Za-z0-9_@.~/-]*)((?:#|:\d)[^`]*)?`/g;
+
+/**
+ * Adds to `edits` the Markdown files whose links or path code spans change,
+ * starting from any text an earlier step already planned. Returns how many
+ * references it rewrote.
+ */
+function rewriteDocs(
+  repoRoot: string,
+  pkgDir: string,
+  moves: Move[],
+  renames: Map<string, string>,
+  edits: Map<string, string>,
+): number {
+  const posix = (p: string): string => toPosix(p) || ".";
+  let count = 0;
+  for (const doc of trackedFiles(repoRoot, ["*.md", "*.mdx"])) {
+    const text = edits.get(doc) ?? readFileSync(doc, "utf8");
+    const oldDir = dirname(doc);
+    const newDir = dirname(mapPath(doc, moves, renames));
+    const docMoved = oldDir !== newDir;
+    let changed = false;
+
+    // A link resolves from the document, or from the repo root when it starts with `/`.
+    const link = (target: string): string => {
+      if (/^[a-z][a-z0-9+.-]*:|^#|^\/\//i.test(target)) return target;
+      const hash = target.indexOf("#");
+      const path = hash === -1 ? target : target.slice(0, hash);
+      const anchor = hash === -1 ? "" : target.slice(hash);
+      if (!path) return target;
+      const fromRoot = path.startsWith("/");
+      let decoded: string;
+      try {
+        decoded = decodeURIComponent(path);
+      } catch {
+        return target;
+      }
+      const abs = fromRoot ? join(repoRoot, decoded) : resolve(oldDir, decoded);
+      if (!existsSync(abs)) return target;
+      const next = mapPath(abs, moves, renames);
+      if (next === abs && !(docMoved && !fromRoot)) return target;
+      const trailing = path.endsWith("/") ? "/" : "";
+      let spelled = fromRoot
+        ? `/${posix(relative(repoRoot, next))}`
+        : posix(relative(newDir, next));
+      if (!fromRoot && path.startsWith("./") && !spelled.startsWith(".")) spelled = `./${spelled}`;
+      return spelled.replace(/\/$/, "") + trailing + anchor;
+    };
+
+    // A code span names a path from the document when it starts with `.`, and
+    // otherwise from the repo root, or from the package root inside the package.
+    const span = (path: string): string => {
+      const bases = path.startsWith(".")
+        ? [oldDir]
+        : [repoRoot, ...(doc.startsWith(pkgDir + sep) ? [pkgDir, join(pkgDir, "src")] : [])];
+      for (const base of bases) {
+        const abs = resolve(base, path);
+        if (!existsSync(abs)) continue;
+        const next = mapPath(abs, moves, renames);
+        if (next === abs && !(base === oldDir && docMoved)) return path;
+        const newBase = base === oldDir ? newDir : base;
+        let spelled = posix(relative(newBase, next));
+        if (path.startsWith("./") && !spelled.startsWith(".")) spelled = `./${spelled}`;
+        return spelled.replace(/\/$/, "") + (path.endsWith("/") ? "/" : "");
+      }
+      return path;
+    };
+
+    let out = text.replace(MARKDOWN_LINK, (whole, open, target, refOpen, refTarget) => {
+      const before = target ?? refTarget;
+      const after = link(before);
+      if (after === before) return whole;
+      changed = true;
+      count++;
+      return (open ?? refOpen) + after;
+    });
+    out = out.replace(CODE_SPAN, (whole, tick, path, suffix = "") => {
+      const after = span(path);
+      if (after === path) return whole;
+      changed = true;
+      count++;
+      return `${tick}${after}${suffix}\``;
+    });
+    const tokens = pathTokens(
+      out,
+      [repoRoot, ...(doc.startsWith(pkgDir + sep) ? [pkgDir, join(pkgDir, "src")] : [])],
+      renames,
+    );
+    for (const t of tokens.sort((a, b) => b.start - a.start)) {
+      out = out.slice(0, t.start) + t.next + out.slice(t.end);
+      changed = true;
+      count++;
+    }
+    if (changed) edits.set(doc, out);
+  }
+  return count;
 }
 
 /**
@@ -263,6 +442,15 @@ export function applyPlan(repoRoot: string, plan: MovePlan): void {
   // One `git add` per batch: a `git mv` per file costs a process each.
   for (let i = 0; i < paths.length; i += 500)
     git(repoRoot, ["add", "-A", "--", ...paths.slice(i, i + 500)]);
+  // Remove the folders the moves emptied, deepest first.
+  const emptied = new Set<string>();
+  for (const from of plan.renames.keys()) {
+    for (let dir = dirname(from); dir.startsWith(repoRoot + sep); dir = dirname(dir))
+      emptied.add(dir);
+  }
+  for (const dir of [...emptied].sort((a, b) => b.length - a.length)) {
+    if (existsSync(dir) && readdirSync(dir).length === 0) rmdirSync(dir);
+  }
 }
 
 /**
@@ -290,6 +478,9 @@ export function findMentions(repoRoot: string, moves: Move[], plan: MovePlan): s
       const belowSrc = inPkg.slice("src/".length);
       anywhere.push(`${unprefixed}(src|dist)/${pattern(belowSrc)}`);
       inPackage.push(`${unprefixed}${pattern(belowSrc)}`);
+      // A moved folder is often named by its last segment alone, as in `chat-settings/`.
+      if (isDir && belowSrc.includes("/"))
+        inPackage.push(`${unprefixed}${pattern(basename(belowSrc))}`);
     }
   }
   const grep = (patterns: string[], pathspecs: string[]): string[] => {
@@ -370,7 +561,7 @@ function main(argv: string[]): void {
     );
   }
   console.log(
-    `${dry ? "Would move" : "Moved"} ${plan.renames.size} files and rewrite ${plan.rewritten} specifiers in ${plan.edits.size} files.`,
+    `${dry ? "Would move" : "Moved"} ${plan.renames.size} files and rewrite ${plan.rewritten} import specifiers and ${plan.pathReferences} paths in docs and comments in ${plan.edits.size} files.`,
   );
   if (plan.unresolved.length > 0) {
     console.log(`\nThese specifiers resolved to no file before the move and were left alone:`);

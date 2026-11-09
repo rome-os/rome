@@ -60,6 +60,18 @@ beforeEach(() => {
     "pkg/src/b/notes.ts",
     "// The dependency lives in b/dep.ts, next to b/dep-extra.\nexport {};\n",
   );
+  write("pkg/src/b/paths.ts", 'export const built = "src/b/dep.ts";\n');
+  write("pkg/src/a/README.md", "The dependency is [dep](../b/dep.ts).\n");
+  write(
+    "docs/guide.md",
+    [
+      "See [thing](../pkg/src/a/thing.ts#L2) and [the folder](../pkg/src/a/).",
+      "The entry is `pkg/src/a/index.ts`, and pkg/src/a/thing.ts holds it.",
+      "[ref]: ../pkg/src/a/thing.ts",
+      "Not a moved file: `pkg/src/b/dep.ts`, [web](https://example.com/pkg/src/a/thing.ts).",
+      "",
+    ].join("\n"),
+  );
   write(
     "pkg/src/b/user.ts",
     [
@@ -146,17 +158,47 @@ describe("planMoves and applyPlan", () => {
     expect(read("pkg/src/b/dep.test.ts")).toContain('from "../ctx/dep.js"');
   });
 
-  it("lists comments that name an old path below src, but not a path that only ends the same", () => {
+  it("rewrites a comment that names a moved file, and lists a path built in code", () => {
     const { mentions } = move([["src/b/dep.ts", "src/ctx/dep.ts"]]);
 
-    expect(mentions).toEqual([expect.stringMatching(/^pkg\/src\/b\/notes\.ts:1:/)]);
-    expect(read("pkg/src/b/notes.ts")).toContain("b/dep.ts");
+    expect(read("pkg/src/b/notes.ts")).toBe(
+      "// The dependency lives in ctx/dep.ts, next to b/dep-extra.\nexport {};\n",
+    );
+    expect(read("pkg/src/b/paths.ts")).toContain('"src/b/dep.ts"');
+    expect(mentions).toEqual([expect.stringMatching(/^pkg\/src\/b\/paths\.ts:1:/)]);
+  });
+
+  it("rewrites Markdown links and paths that name a moved file or folder", () => {
+    const { plan } = move([["src/a", "src/ctx/a"]]);
+
+    expect(read("docs/guide.md")).toBe(
+      [
+        "See [thing](../pkg/src/ctx/a/thing.ts#L2) and [the folder](../pkg/src/ctx/a/).",
+        "The entry is `pkg/src/ctx/a/index.ts`, and pkg/src/ctx/a/thing.ts holds it.",
+        "[ref]: ../pkg/src/ctx/a/thing.ts",
+        "Not a moved file: `pkg/src/b/dep.ts`, [web](https://example.com/pkg/src/a/thing.ts).",
+        "",
+      ].join("\n"),
+    );
+    // A document that moves keeps its links pointing at files that stay.
+    expect(read("pkg/src/ctx/a/README.md")).toBe("The dependency is [dep](../../b/dep.ts).\n");
+    expect(plan.pathReferences).toBe(6);
+  });
+
+  it("removes the folder a move empties", () => {
+    move([["src/a", "src/ctx/a"]]);
+
+    expect(existsSync(pkg("src/a"))).toBe(false);
   });
 
   it("lists the hand-built paths it cannot rewrite", () => {
     const { mentions } = move([["src/a", "src/ctx/a"]]);
 
-    expect(mentions).toEqual([expect.stringMatching(/^knip\.json:1:/)]);
+    // A URL that only looks like the old path is left for a person to judge.
+    expect(mentions).toEqual([
+      expect.stringMatching(/^docs\/guide\.md:4:/),
+      expect.stringMatching(/^knip\.json:1:/),
+    ]);
   });
 
   it("refuses a destination that already exists", () => {
