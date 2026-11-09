@@ -2,10 +2,6 @@
 // listens: Rome's own listeners, then the apps' lifecycle hooks.
 
 import type { AgentTurnFinishedEvent, AgentTurnStartedEvent } from "@rome-os/app-runtime";
-import {
-  getCurrentOrCreateHookInvocationContext,
-  runWithHookInvocationContext,
-} from "../../core/hook-recursion.js";
 import { createLogger } from "../../logger.js";
 import type {
   AgentTurnFailedBeforeStart,
@@ -18,8 +14,7 @@ const log = createLogger("agent-lifecycle");
 /**
  * Rome's own listeners hear each call in the order they listened, and a
  * listener that throws is logged and skipped. A started or ended turn then
- * reaches the app hooks, all under one hook invocation context, so work a
- * listener starts and the hooks share one hook chain.
+ * reaches the app hooks.
  */
 export class TurnListeners implements TurnLifecycle {
   private readonly listeners = new Set<TurnLifecycleListener>();
@@ -37,41 +32,35 @@ export class TurnListeners implements TurnLifecycle {
   }
 
   started(event: AgentTurnStartedEvent): void {
-    const context = getCurrentOrCreateHookInvocationContext();
-    runWithHookInvocationContext(context, () => {
-      for (const listener of this.listeners) {
-        if (!listener.started) continue;
-        try {
-          listener.started(event);
-        } catch (err) {
-          log.warn("agent lifecycle started listener threw", {
-            error: err instanceof Error ? err.message : String(err),
-            sessionId: event.turn.sessionId,
-            turnId: event.turn.turnId,
-          });
-        }
+    for (const listener of this.listeners) {
+      if (!listener.started) continue;
+      try {
+        listener.started(event);
+      } catch (err) {
+        log.warn("agent lifecycle started listener threw", {
+          error: err instanceof Error ? err.message : String(err),
+          sessionId: event.turn.sessionId,
+          turnId: event.turn.turnId,
+        });
       }
-      this.appHooks.started(event);
-    });
+    }
+    this.appHooks.started(event);
   }
 
   ended(event: AgentTurnFinishedEvent): void {
-    const context = getCurrentOrCreateHookInvocationContext();
-    runWithHookInvocationContext(context, () => {
-      for (const listener of this.listeners) {
-        if (!listener.ended) continue;
-        try {
-          listener.ended(event);
-        } catch (err) {
-          log.warn("agent lifecycle finished listener threw", {
-            error: err instanceof Error ? err.message : String(err),
-            sessionId: event.turn.sessionId,
-            turnId: event.turn.turnId,
-          });
-        }
+    for (const listener of this.listeners) {
+      if (!listener.ended) continue;
+      try {
+        listener.ended(event);
+      } catch (err) {
+        log.warn("agent lifecycle finished listener threw", {
+          error: err instanceof Error ? err.message : String(err),
+          sessionId: event.turn.sessionId,
+          turnId: event.turn.turnId,
+        });
       }
-      this.appHooks.ended(event);
-    });
+    }
+    this.appHooks.ended(event);
   }
 
   couldNotStart(event: AgentTurnFailedBeforeStart): void {

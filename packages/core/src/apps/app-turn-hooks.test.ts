@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { AppTurnHooks } from "./app-turn-hooks.js";
+import { AppTurnHooks, inOneHookChain } from "./app-turn-hooks.js";
 import { TurnListeners } from "../agent/index.js";
 import type { AppCatalog } from "./catalog.js";
 import type { ArtifactRef, ResolvedApp } from "./state.js";
@@ -228,7 +228,7 @@ describe("AppTurnHooks", () => {
 
     expect(failures).toEqual([]);
 
-    listeners.ended(finishedEvent());
+    inOneHookChain(listeners).ended(finishedEvent());
     await flushHookDispatch();
 
     const listenerContext = (globalThis as LifecycleHookGlobal).__agentLifecycleListenerContext;

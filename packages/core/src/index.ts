@@ -161,7 +161,7 @@ import {
   TurnListeners,
 } from "./agent/index.js";
 import { AgentLoader } from "./apps/agent-loader.js";
-import { AppTurnHooks } from "./apps/app-turn-hooks.js";
+import { AppTurnHooks, inOneHookChain } from "./apps/app-turn-hooks.js";
 import { AppTurnMiddleware } from "./apps/app-turn-middleware.js";
 import { TurnUsageReporter } from "./apps/turn-usage-reporter.js";
 import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
@@ -1148,7 +1148,7 @@ async function main() {
       modelResolver,
       networkMcpServers: () => capabilityDiscovery.getCdpMcpServers(),
       skillCatalog,
-      turnLifecycle: turnListeners,
+      turnLifecycle: inOneHookChain(turnListeners),
       readAnswerShape,
       // Catch-up reads what was said where the session stands from Chats,
       // and nothing in a chat whose channel hands the agent every message.
