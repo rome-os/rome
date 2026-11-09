@@ -77,7 +77,8 @@
     "test:ui:radius": "scripts/test-env.sh node --test scripts/check-radius-values.test.mjs",
     "test:prose": "scripts/test-env.sh node --test scripts/check-prose.test.mjs",
     "check:ui:tailwind": "scripts/test-env.sh node scripts/check-tailwind-policy.mjs",
-    "gc:worktrees": "tsx scripts/gc-worktrees.ts"
+    "gc:worktrees": "tsx scripts/gc-worktrees.ts",
+    "move-files": "tsx scripts/move-files.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.6",
