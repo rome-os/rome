@@ -18,7 +18,7 @@ import type {
   StreamAgentEvent,
 } from "@rome-os/app-runtime";
 import type {
-  AgentSessionInit,
+  SessionOpening,
   AgentSessionKey,
   Sessions,
   AgentSession,
@@ -60,7 +60,7 @@ const SUMMON_ACTION = "system:summon";
 export interface RunTurnRequest {
   key: AgentSessionKey;
   init?: Omit<
-    AgentSessionInit,
+    SessionOpening,
     "resetPolicy" | "drawsCards" | "guardianFacing" | "toolEnv" | "spanAttributes"
   > & {
     /** The chat the caller names, which the bridge records as having the session. */
@@ -211,25 +211,26 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           const openedKey = req.sessionId
             ? await this.webchatRepo?.continuityKeyOfSession(req.sessionId)
             : req.key.channelThreadKey;
-          const init = {
+          const opening = {
             ...sessionInit,
             // Stated here, never taken from the worker's request.
             ...this.openingFor(openedKey ?? "", sessionInit.threadContext),
             workingDir,
             isSubagent: true,
-            // Read here, never taken from the worker's request.
-            resetPolicy: await resetPolicyOfMessage(this.resetPolicyOf, {
-              platformMessageId: req.platformMessageId,
-              sessionId: req.sessionId,
-              threadContext: sessionInit.threadContext,
-            }),
           };
           session = req.sessionId
-            ? await this.manager.open({ id: req.sessionId, agent: req.key.agentName }, init)
+            ? await this.manager.resume({ id: req.sessionId, agent: req.key.agentName }, opening)
             : await this.manager.open(
                 // Only the key's own fields, never the rest of the worker's request.
                 { agentName: req.key.agentName, channelThreadKey: req.key.channelThreadKey },
-                init,
+                {
+                  ...opening,
+                  // Read here, never taken from the worker's request.
+                  resetPolicy: await resetPolicyOfMessage(this.resetPolicyOf, {
+                    platformMessageId: req.platformMessageId,
+                    threadContext: sessionInit.threadContext,
+                  }),
+                },
               );
           noteOpenerChat(session, namedChat);
           // A session resumed by its id runs in its own chats, so the caller
