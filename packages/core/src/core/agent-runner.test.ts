@@ -3405,6 +3405,25 @@ describe("AgentRunner", () => {
         expect(provider.calls[0]?.prompt).not.toContain("<continuation>");
       });
 
+      it("announces the renewal, with its reason, on the fresh session's first turn only", async () => {
+        const runner = renewingRunner(new MockModelProvider(replies(3)));
+        const starts: unknown[] = [];
+        const run = async () => {
+          const messages = await collectMessages(
+            runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
+          );
+          const start = messages.find((message) => message.type === "turn_start");
+          starts.push(start && "sessionRenewal" in start ? start.sessionRenewal : undefined);
+          return start?.type === "turn_start" ? start.sessionId : undefined;
+        };
+        await run();
+        identity.text = "**Agent Name:** YoYo";
+        const renewed = await run();
+        await run();
+
+        expect(starts).toEqual([undefined, { reason: "setup", sessionId: renewed }, undefined]);
+      });
+
       it("starts a fresh session after an instruction change", async () => {
         const provider = new MockModelProvider(replies(2));
         const runner = renewingRunner(provider);

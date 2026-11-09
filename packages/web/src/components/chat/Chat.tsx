@@ -201,6 +201,7 @@ const traceSummarySchema: z.ZodType<TraceSummary> = z.lazy(() =>
     terminalError: z.string().optional(),
     plan: agentPlanSchema.optional(),
     model: z.string().optional(),
+    sessionRenewal: z.object({ reason: z.string(), sessionId: z.string() }).optional(),
   }),
 );
 

@@ -724,6 +724,17 @@ export interface TurnStartEvent {
   /** Session the turn runs on — stable across turns of a conversation. */
   sessionId: string;
   userPrompt: string;
+  /** Set on the first turn of a session that replaced the chat's earlier
+   *  one in a reset: why, and the new session's id. */
+  sessionRenewal?: SessionRenewal;
+}
+
+/** Why a reset replaced a chat's session: its agent's setup changed, its
+ *  chat's reset policy found it idle or a day old, or the folder its
+ *  transcript lived in is gone. A host may add reasons. */
+export interface SessionRenewal {
+  reason: "setup" | "idle" | "daily" | "working_dir" | (string & {});
+  sessionId: string;
 }
 
 /** Turn bracketing: the last event of a turn's stream, emitted after the

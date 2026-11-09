@@ -31,6 +31,8 @@ export interface CreateSessionOptions {
 
 export interface ReplaceSessionOptions {
   workingDir?: string;
+  /** Why the reset replaces the session (SessionRenewal reason). */
+  reason?: string;
   /** The fingerprint of the setup the successor opens with. */
   setup?: string;
 }
@@ -70,6 +72,8 @@ export interface SessionState {
   setup: string | null;
   /** The session that replaced this one in a reset, or null. */
   supersededBy: SessionId | null;
+  /** Why the reset replaced it, or null. */
+  supersededFor: string | null;
   createdAt: Date;
   lastActiveAt: Date;
 }
@@ -110,6 +114,7 @@ export class Session {
       workingDir: options.workingDir ?? null,
       setup: options.setup ?? null,
       supersededBy: null,
+      supersededFor: null,
       createdAt: now,
       lastActiveAt: now,
     });
@@ -167,6 +172,10 @@ export class Session {
    */
   get supersededBy(): SessionId | null {
     return this.state.supersededBy;
+  }
+  /** Why a reset replaced this session, or null when none did. */
+  get supersededFor(): string | null {
+    return this.state.supersededFor;
   }
   get createdAt(): Date {
     return this.state.createdAt;
@@ -244,6 +253,7 @@ export class Session {
       setup: options.setup,
     });
     this.state.supersededBy = successor.id;
+    this.state.supersededFor = options.reason ?? null;
     return successor;
   }
 

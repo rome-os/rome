@@ -217,7 +217,14 @@ export type ChatRow =
     })
   // The chat moved to another model: the turn after it ran on `model`, the
   // session's turn before it on another one.
-  | (RowBase & { kind: "model_switch"; model: string; turnId: string; sessionId: string });
+  | (RowBase & { kind: "model_switch"; model: string; turnId: string; sessionId: string })
+  // The chat's agent session was renewed before this turn, for `reason`.
+  | (RowBase & {
+      kind: "session_renewal";
+      reason: string;
+      renewedSessionId: string;
+      turnId: string;
+    });
 
 // The rows the last build made, by the message each starts from. A build hands
 // back the row object it made before when nothing the row shows has changed, so
@@ -226,6 +233,8 @@ export type ChatRow =
 const builtRows = new WeakMap<ChatMessage, ChatRow>();
 // A model-switch notice is keyed by the row it stands before.
 const builtSwitches = new WeakMap<ChatRow, ChatRow>();
+// A session-renewal notice is keyed by the row it stands before.
+const builtRenewals = new WeakMap<ChatRow, ChatRow>();
 
 function sameIdentity(a: AgentIdentity, b: AgentIdentity): boolean {
   return a === b || (a.name === b.name && a.iconUrl === b.iconUrl);
@@ -236,6 +245,9 @@ function sameRow(a: ChatRow, b: ChatRow): boolean {
   if (a.kind === "user") return true;
   if (a.kind === "model_switch") {
     return b.kind === "model_switch" && a.model === b.model && a.turnId === b.turnId;
+  }
+  if (a.kind === "session_renewal") {
+    return b.kind === "session_renewal" && a.reason === b.reason && a.turnId === b.turnId;
   }
   if (a.kind === "trace") {
     return b.kind === "trace" && a.message === b.message && sameIdentity(a.identity, b.identity);
@@ -337,7 +349,7 @@ export function buildRows(
 
 /** The turn and session a row belongs to, or null for a row with no turn. */
 function rowTurn(row: ChatRow): { turnId: string; sessionId: string } | null {
-  if (row.kind === "model_switch") return null;
+  if (row.kind === "model_switch" || row.kind === "session_renewal") return null;
   const message = row.kind === "agent" ? row.messages[0] : row.message;
   return message?.turnId ? { turnId: message.turnId, sessionId: message.sessionId } : null;
 }
@@ -351,11 +363,30 @@ function rowTurn(row: ChatRow): { turnId: string; sessionId: string } | null {
 function withModelSwitches(rows: ChatRow[], tracesByTurn: Map<string, ChatMessage>): ChatRow[] {
   const lastModelBySession = new Map<string, string>();
   const seenTurns = new Set<string>();
+  // A renewed session's first turn says so once, even when it ran again.
+  const renewedSessions = new Set<string>();
   const out: ChatRow[] = [];
   for (const row of rows) {
     const turn = rowTurn(row);
     if (turn && !seenTurns.has(turn.turnId)) {
       seenTurns.add(turn.turnId);
+      const renewal = tracesByTurn.get(turn.turnId)?.traceSummary?.sessionRenewal;
+      if (renewal && !renewedSessions.has(renewal.sessionId)) {
+        renewedSessions.add(renewal.sessionId);
+        const notice: ChatRow = {
+          kind: "session_renewal",
+          key: `session-renewal:${renewal.sessionId}`,
+          reason: renewal.reason,
+          renewedSessionId: renewal.sessionId,
+          turnId: turn.turnId,
+        };
+        const built = builtRenewals.get(row);
+        if (built && sameRow(built, notice)) out.push(built);
+        else {
+          builtRenewals.set(row, notice);
+          out.push(notice);
+        }
+      }
       const model = tracesByTurn.get(turn.turnId)?.traceSummary?.model;
       if (model) {
         const previous = lastModelBySession.get(turn.sessionId);

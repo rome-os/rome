@@ -97,6 +97,7 @@ import type {
   RomeSessionType,
   StreamAgentEvent,
   ProviderSessionResetPolicy,
+  SessionRenewal,
 } from "@rome-os/app-runtime";
 import { createNullModelSession } from "./null-model-session.js";
 import type { SessionTracing } from "./session-tracing.js";
@@ -488,7 +489,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         }
         let prepared: Session | undefined;
         if (decision.due && active) {
-          prepared = active.replace({ setup });
+          prepared = active.replace({ setup, reason: decision.reason });
           await deps.sessionRepository.replace(active, prepared);
           log.info("provider_session.rotated", {
             chatId,
@@ -1014,7 +1015,7 @@ async function openSession(
         channelThreadKey: key.channelThreadKey,
         workingDir: resumed.workingDir,
       });
-      prepared = resumed.replace({ setup: opts.setup });
+      prepared = resumed.replace({ setup: opts.setup, reason: "working_dir" });
       await deps.sessionRepository.replace(resumed, prepared);
       resumed = undefined;
     }
@@ -1036,10 +1037,14 @@ async function openSession(
   // continues its chat with none of it in context, until a turn of its own
   // succeeds and records its thread. A failed open keeps that true for the
   // next one.
-  const continuesChat =
-    session.setup !== null &&
-    !session.modelThreadId &&
-    (await deps.sessionRepository.succeeds(sessionId));
+  const predecessor = session.modelThreadId
+    ? null
+    : await deps.sessionRepository.predecessorOf(sessionId);
+  const continuesChat = session.setup !== null && predecessor !== null;
+  // The chat shows where its session changed, on this session's first turn.
+  const renewal: SessionRenewal | undefined = predecessor
+    ? { reason: predecessor.supersededFor ?? "reset", sessionId }
+    : undefined;
   const modelThreadId = resumed?.modelThreadId ?? undefined;
   // The session model pin records the model that produced this history.
   // Precedence: docs/concepts/sessions.md#model-pin.
@@ -1503,6 +1508,7 @@ async function openSession(
     // The row recorded a thread this open does not resume: another provider
     // now runs the chat, and its new thread has seen none of it.
     replacedThread: (!threadResumed && !!resumed?.modelThreadId) || continuesChat,
+    renewal,
     previousModel: resumed?.model ?? undefined,
     openModelSession,
     modelProvider: initialResolution?.modelProvider,
@@ -1563,6 +1569,9 @@ interface ImplArgs {
   threadResumed: boolean;
   /** The opened provider session starts a new thread in place of the row's. */
   replacedThread: boolean;
+  /** Set when a reset replaced the chat's earlier session with this one and
+   *  no turn of it has succeeded: the first turn_start announces it. */
+  renewal?: SessionRenewal;
   /** The model the row's thread ran on. */
   previousModel?: string;
   openModelSession: (
@@ -1814,6 +1823,8 @@ class AgentSessionImpl implements AgentSession {
    * result: a turn that fails may never have reached the thread.
    */
   private continuationPending: boolean;
+  /** Announced on the next turn_start, then cleared. */
+  private renewalPending?: SessionRenewal;
   /** The model the chat ran on before the current thread started. */
   private previousModel?: string;
   private selectionId?: ModelSelectionId;
@@ -1869,6 +1880,7 @@ class AgentSessionImpl implements AgentSession {
     this.sessionPin = args.sessionPin;
     this.threadFresh = !args.threadResumed;
     this.continuationPending = args.replacedThread;
+    this.renewalPending = args.renewal;
     this.previousModel = args.previousModel;
     this.openModelSession = args.openModelSession;
     this.toolCount = args.toolCount;
@@ -2199,11 +2211,14 @@ class AgentSessionImpl implements AgentSession {
   private ensureTurnStart(sink: TurnSink): void {
     if (sink.turnStartEmitted) return;
     sink.turnStartEmitted = true;
+    const renewal = this.renewalPending;
+    this.renewalPending = undefined;
     this.publishOutbound(sink, {
       type: "turn_start",
       turnId: sink.turnId,
       sessionId: this.sessionId,
       userPrompt: sink.userPrompt,
+      ...(renewal ? { sessionRenewal: renewal } : {}),
     });
   }
 

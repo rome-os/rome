@@ -39,13 +39,14 @@ export class DrizzleSessionRepository implements SessionRepository {
     return rows[0] ? restore(rows[0]) : null;
   }
 
-  async succeeds(id: SessionId): Promise<boolean> {
+  async predecessorOf(id: SessionId): Promise<Session | null> {
     const rows = await this.db
-      .select({ id: sessions.id })
+      .select()
       .from(sessions)
       .where(eq(sessions.supersededBy, id))
+      .orderBy(desc(sessions.lastActiveAt))
       .limit(1);
-    return rows.length > 0;
+    return rows[0] ? restore(rows[0]) : null;
   }
 
   async current(continuityKey: ContinuityKey, agentName: AgentName): Promise<Session | null> {
@@ -142,6 +143,7 @@ export class DrizzleSessionRepository implements SessionRepository {
             status: "completed",
             lastActiveAt: retiredState.lastActiveAt,
             supersededBy: successorState.id,
+            supersededFor: retiredState.supersededFor,
           })
           .where(exactlyActive(retiredState.continuityKey, retiredState.agentName))
           .run();
@@ -239,6 +241,7 @@ function restore(row: SessionRow): Session {
     workingDir: row.workingDir,
     setup: row.setup,
     supersededBy: row.supersededBy,
+    supersededFor: row.supersededFor,
     createdAt: row.createdAt,
     lastActiveAt: row.lastActiveAt,
   });
@@ -263,7 +266,10 @@ function writeChanges(
   // active never writes that belief back.
   if (changes.has("status") && state.status !== "active") {
     columns.status = state.status;
-    if (state.supersededBy) columns.supersededBy = state.supersededBy;
+    if (state.supersededBy) {
+      columns.supersededBy = state.supersededBy;
+      columns.supersededFor = state.supersededFor;
+    }
   }
   if (Object.keys(columns).length > 0) {
     tx.update(sessions).set(columns).where(eq(sessions.id, state.id)).run();
@@ -284,6 +290,7 @@ function toRow(state: SessionState): SessionRow {
     workingDir: state.workingDir,
     setup: state.setup,
     supersededBy: state.supersededBy,
+    supersededFor: state.supersededFor,
     createdAt: state.createdAt,
     lastActiveAt: state.lastActiveAt,
     status: state.status,

@@ -569,5 +569,14 @@
     "title": "对话串",
     "close": "关闭对话串",
     "loadFailed": "无法加载这个对话串。"
+  },
+  "sessionRenewal": {
+    "notice": "新会话 · {{reason}}",
+    "reasons": {
+      "setup": "设定已变",
+      "idle": "闲置后",
+      "daily": "每日重置",
+      "working_dir": "工作目录不存在"
+    }
   }
 }

@@ -855,6 +855,13 @@
       "when": 1794264485094,
       "tag": "0122_session_superseded_by",
       "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "6",
+      "when": 1794264934013,
+      "tag": "0123_session_superseded_for",
+      "breakpoints": true
     }
   ]
 }

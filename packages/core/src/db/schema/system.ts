@@ -60,6 +60,8 @@ export const sessions = sqliteTable(
      *  still active, completed another way, or replaced before the column
      *  existed. */
     supersededBy: text("superseded_by"),
+    /** Why the reset replaced it: setup, idle, daily or working_dir. */
+    supersededFor: text("superseded_for"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
     status: text("status", {

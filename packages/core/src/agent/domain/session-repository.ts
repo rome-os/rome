@@ -24,8 +24,8 @@ export interface SessionRepository {
   /** The session, or null when none has the id. Never creates one. */
   session(id: SessionId): Promise<Session | null>;
 
-  /** Whether a reset replaced another session with session `id`. */
-  succeeds(id: SessionId): Promise<boolean>;
+  /** The session a reset replaced with session `id`, or null when none. */
+  predecessorOf(id: SessionId): Promise<Session | null>;
 
   /** The active session for this continuity key and agent, or null. Idle time
    *  never retires a session. */

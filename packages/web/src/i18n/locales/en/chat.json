@@ -569,5 +569,14 @@
     "title": "Chat thread",
     "close": "Close chat thread",
     "loadFailed": "Couldn't load this chat thread."
+  },
+  "sessionRenewal": {
+    "notice": "New session · {{reason}}",
+    "reasons": {
+      "setup": "setup changed",
+      "idle": "after a quiet period",
+      "daily": "daily reset",
+      "working_dir": "working folder gone"
+    }
   }
 }
