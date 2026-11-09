@@ -34,7 +34,7 @@ import {
   type ActionWorkerPayload,
   type ActionWorkerShutdown,
 } from "./worker-protocol.js";
-import { isMemoryShort, type MemoryHeadroomReader } from "./memory-headroom.js";
+import { isMemoryShort, type MemoryHeadroomReader } from "../../instance/memory-headroom.js";
 import {
   normalizeActionEvent,
   type ActionInvocationObserver,
