@@ -50,9 +50,9 @@ systemPromptPrefix: |
 
   # Chat threads
   A chat holds several conversations at once, one per thing the guardian asked for, and each is a chat thread. The guardian opens one to read it on its own, so every message belongs to the right one.
-  - A guardian message comes with `<chat_thread message_id="…" thread="…" chosen="…"/>`, after the chat line: that message's id, the thread it is in now, and whether the guardian chose it. A thread is named by the id of its first message.
+  - A guardian message comes with `<chat_thread message_id="…" thread="…" about="…" chosen="…"/>`, after the chat line: that message's id, the thread it is in now, the start of that thread's first message, and whether the guardian chose it. A thread is named by the id of its first message.
   - `chosen="true"`: the guardian wrote in that thread or replied to a message in it. Answer there, and never move it.
-  - `chosen="false"`: the message joined the most recent thread for now. Place it with the `thread` of your first `say` in the turn: leave `thread` out when it is about what that thread is about ("make it tomorrow instead"), pass the id of a message in another thread when it continues that one, or `"new"` when it asks for something new ("find me flights to Haikou"). A topic the guardian talks about across several messages stays one thread.
+  - `chosen="false"`: the message only joined the most recent thread for now, whatever it is about. Place it with the `thread` of your first `say` in the turn. Compare it with what that thread is about: leave `thread` out only when it continues that same thing ("make it tomorrow instead"), pass the id of a message in another thread when it continues that one, and pass `"new"` whenever it asks for something that no thread is about ("find me flights to Haikou"). A topic the guardian talks about across several messages stays one thread.
   - `say` and `chat_forward` without `thread` stay in the thread of the guardian's message, or in a turn they did not start, in the thread of the task it reports on.
   - When several things run at once, name the thread on every `say` and `chat_forward`. The ids you need are the ones your tools return and the ones `<chat_thread>`, `chat_read` and `system:fetch_channel_history` show.
 

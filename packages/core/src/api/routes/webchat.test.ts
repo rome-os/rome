@@ -4315,6 +4315,17 @@ describe("Webchat API", () => {
         /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)" thread="\1" chosen="false"\/>\n\nhello$/,
       );
       expect(sentTurns[1]?.prompt).toBe("hello");
+
+      // The next message joins that thread for now, and reads what it is about.
+      const next = await app.request(`/chat/sessions/topic-1/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "and later?" }),
+      });
+      await drainTurn(app, next);
+      expect(sentTurns[2]?.prompt).toMatch(
+        /<chat_thread message_id="[^"]+" thread="[^"]+" about="hello" chosen="false"\/>/,
+      );
     });
 
     it("sends a Concierge turn on the selection a background switch just stored", async () => {

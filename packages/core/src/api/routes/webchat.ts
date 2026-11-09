@@ -107,18 +107,46 @@ import { z } from "zod";
 import { withReplyContext } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import type { ChatThreadPlacement } from "../../db/repositories/webchat.js";
+import { messageContentText } from "../../chats/history/messages-agent.js";
 
 const log = createLogger("api:webchat");
 
 const inputPrioritySchema = z.enum(["now", "next"]).optional();
 
 // Client-sent parts never carry a reply: only `replyToMessageId` builds one.
+/** How much of a chat thread's first message the Concierge reads to know what it is about. */
+const CHAT_THREAD_ABOUT_LIMIT = 80;
+
 /**
  * The line that tells the Concierge which chat thread the guardian's message
- * is in, and whether the guardian chose it, so it is never moved.
+ * is in, what that thread is about (its first message, shortened), and
+ * whether the guardian chose it, so it is never moved. A message that starts
+ * its own thread is about nothing else.
  */
-function chatThreadLine(messageId: string, thread: string, chosen: boolean): string {
-  return `<chat_thread message_id="${messageId}" thread="${thread}" chosen="${chosen}"/>`;
+function chatThreadLine(
+  messageId: string,
+  thread: string,
+  chosen: boolean,
+  firstMessage: string | null,
+): string {
+  const about =
+    thread !== messageId && firstMessage
+      ? ` about="${xmlAttr(
+          firstMessage.length > CHAT_THREAD_ABOUT_LIMIT
+            ? `${firstMessage.slice(0, CHAT_THREAD_ABOUT_LIMIT - 1)}…`
+            : firstMessage,
+        )}"`
+      : "";
+  return `<chat_thread message_id="${messageId}" thread="${thread}"${about} chosen="${chosen}"/>`;
+}
+
+function xmlAttr(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\n", " ");
 }
 
 const isReplyToPart = (part: unknown): boolean =>
@@ -3761,7 +3789,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // The Concierge reads where the message stands, so it can place it.
     const placedIn = chatThread ? await deps.webchatRepo.chatThreadOf(sessionId, inputId) : null;
     if (placedIn && conciergeHeader) {
-      const line = chatThreadLine(inputId, placedIn, !!chatThread && "chosen" in chatThread);
+      const first = await deps.webchatRepo.getReplyTarget(sessionId, placedIn);
+      const line = chatThreadLine(
+        inputId,
+        placedIn,
+        !!chatThread && "chosen" in chatThread,
+        first ? messageContentText(first.content) : null,
+      );
       promptText = `${conciergeHeader}\n${line}\n\n${noticedPrompt}`;
     }
 
