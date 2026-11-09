@@ -174,7 +174,8 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     trace: Pick<
       RunParams,
       "persistTrace" | "persistTranscript" | "persistAnswer" | "inputLabel" | "pushLevel"
-    > = {},
+    > &
+      Pick<RunParams, "shouldRun"> = {},
     deviceFolder?: ThreadContext["deviceFolder"],
   ): AsyncIterable<AgentEvent> => {
     return deps.agentRunner.run({
@@ -311,6 +312,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
           let reply = "";
           let turnId: string | undefined;
           const trace = {
+            shouldRun: options?.shouldRun,
             persistTrace: true,
             persistTranscript: false,
             ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
@@ -345,6 +347,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     // the turn but writes no answer of its own: one that was never sent
     // must not read as said, and one that was must not be said twice.
     const trace = {
+      shouldRun: options?.shouldRun,
       persistAnswer: false,
       ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
     };

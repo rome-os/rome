@@ -129,6 +129,44 @@ describe("backend turn delivery", () => {
     ).toBe("stopped");
   });
 
+  it.each([
+    "webchat",
+    "telegram",
+  ])("an empty %s generator returns failed without delivery or an error", async (channel) => {
+    const agentRunner = createMockAgentRunner([[]]);
+    const send = rs.fn(async () => ({ messageId: "reply", chatId: "chat" }));
+    const replies = { send: rs.fn<SpeakerReplies["send"]>(async () => null) };
+    const emit = rs.fn(async () => {});
+    const shouldRun = () => true;
+    const runner = createBackendTurnRunner({
+      agentRunner,
+      channel: () => ({ name: channel, send: { send } }) as unknown as Channel,
+      chats: { ensureChannelChat: async () => ({ id: "chat" }) },
+      replies,
+    });
+    runner.setWebchatRuntime({
+      enqueueSessionTask: async (_id, task) => {
+        await task({ emit });
+      },
+    });
+    await expect(
+      runner.runAndReport(
+        {
+          agentName: "main",
+          sessionId: "runtime",
+          channel,
+          threadId: "chat",
+          prompt: "Continue",
+        },
+        { shouldRun },
+      ),
+    ).resolves.toBe("failed");
+    expect(agentRunner.calls[0]?.shouldRun).toBe(shouldRun);
+    expect(emit).not.toHaveBeenCalled();
+    expect(send).not.toHaveBeenCalled();
+    expect(replies.send).not.toHaveBeenCalled();
+  });
+
   it("reports a turn that never ran as failed", async () => {
     const agentRunner = createMockAgentRunner([[]]);
     const webchat = {

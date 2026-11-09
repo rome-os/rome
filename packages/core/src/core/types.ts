@@ -8,6 +8,7 @@ import type { AgentEvent } from "../types.js";
 export type { ForkRunMode, ForkSourceCheckpoint, ThreadContext } from "@rome-os/app-runtime";
 
 export interface RunParams extends SdkRunParams {
+  shouldRun?: () => boolean;
   /** Internal continuations should not be treated as guardian-authored turns. */
   initiatedBy?: "user" | "system";
   /** The guardian did not start this turn, and the first message the agent

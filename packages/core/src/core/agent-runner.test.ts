@@ -1,3 +1,5 @@
+import { createBackendTurnRunner } from "../actions/backend-turn.js";
+import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { romeToolPorts } from "./rome-tool-ports.js";
 import { testTurnHandle } from "../test/turn-handle.js";
 import { createLogger } from "../logger.js";
@@ -2874,6 +2876,124 @@ describe("AgentRunner", () => {
         lifetime: "ephemeral",
       });
       await manager.shutdown();
+    });
+
+    it.each([
+      true,
+      false,
+    ])("cold recovery acquisition: newer guardian input = %s", async (newerInput) => {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      const chatId = "cold-recovery-chat";
+      const key = { agentName: "core:test-main", channelThreadKey: `webchat:${chatId}` };
+      await repo.createSession(
+        chatId,
+        "Recovery",
+        undefined,
+        "default",
+        null,
+        "default",
+        key.agentName,
+      );
+      const stored = Session.create(key.agentName, { continuityKey: key.channelThreadKey });
+      await sessionRepository.add(stored);
+      await repo.recordSessionInChat(stored.id, chatId);
+      await repo.recordUserInput("original-input", chatId, "[]");
+      await repo.updateUserInput(chatId, {
+        type: "input_status",
+        inputId: "original-input",
+        turnId: "cut-off",
+        state: "consumed",
+      });
+      await repo.appendTraceBlocks({
+        messageId: "cut-off-trace",
+        sessionId: chatId,
+        turnId: "cut-off",
+        startSeq: 0,
+        blocks: [
+          {
+            type: "turn_start",
+            turnId: "cut-off",
+            sessionId: stored.id,
+            userPrompt: "Continue work",
+          },
+        ],
+      });
+      const [cutOff] = await repo.endInterruptedTurns(24 * 60 * 60 * 1000);
+      const beforeTrace = await repo.getTraceContents(chatId);
+      const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
+      const manager = createAgentSessionManager(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+      );
+      const acquire = manager.acquireBySessionId.bind(manager);
+      let notifyEntered!: () => void;
+      const entered = new Promise<void>((resolve) => {
+        notifyEntered = resolve;
+      });
+      let releaseAcquire!: () => void;
+      const release = new Promise<void>((resolve) => {
+        releaseAcquire = resolve;
+      });
+      let acquired!: AgentSession;
+      let sendTurn!: ReturnType<typeof rs.spyOn<AgentSession, "sendTurn">>;
+      rs.spyOn(manager, "acquireBySessionId").mockImplementation(async (...args) => {
+        notifyEntered();
+        await release;
+        acquired = await acquire(...args);
+        sendTurn = rs.spyOn(acquired, "sendTurn");
+        return acquired;
+      });
+      const agentRunner = new AgentRunner(manager, agentLoader, repo);
+      const send = rs.fn(async () => ({ messageId: "reply", chatId }));
+      const emit = rs.fn(async () => {});
+      const backend = createBackendTurnRunner({
+        agentRunner,
+        channel: () => ({ name: "webchat", send: { send } }) as unknown as Channel,
+      });
+      backend.setWebchatRuntime({
+        enqueueSessionTask: async (_id, task) => {
+          await task({ emit });
+        },
+      });
+      const shouldRun = rs.fn(() => repo.canContinueAfterRestart(cutOff!));
+      try {
+        const running = backend.runAndReport(
+          {
+            agentName: key.agentName,
+            sessionId: stored.id,
+            channel: "webchat",
+            threadId: chatId,
+            prompt: "Recover interrupted work",
+          },
+          { shouldRun },
+        );
+        await entered;
+        expect(shouldRun).toHaveBeenCalledTimes(1);
+        if (newerInput) await repo.recordUserInput("new-guardian-input", chatId, "[]");
+        expect(shouldRun()).toBe(!newerInput);
+        releaseAcquire();
+        const outcome = await running;
+        if (newerInput) {
+          expect(sendTurn).not.toHaveBeenCalled();
+          expect(outcome).toBe("failed");
+          expect(emit).not.toHaveBeenCalled();
+          expect(send).not.toHaveBeenCalled();
+          expect(await repo.getTraceContents(chatId)).toEqual(beforeTrace);
+          expect(acquired.status).toBe("idle");
+          expect(acquired.currentTurnId).toBeUndefined();
+          expect(await manager.acquire(key)).toBe(acquired);
+          const followUp = await collectMessages(
+            acquired.sendTurn({ prompt: "Guardian follow-up" }).events(),
+          );
+          expect(followUp.some((event) => event.type === "result")).toBe(true);
+        } else {
+          expect(sendTurn).toHaveBeenCalledTimes(1);
+          expect(outcome).toBe("completed");
+          expect(send).toHaveBeenCalledTimes(1);
+        }
+      } finally {
+        releaseAcquire();
+        await manager.shutdown();
+      }
     });
 
     it("resumes an explicit sessionId without a caller-provided channelThreadKey", async () => {
