@@ -152,6 +152,22 @@
     "signOut": "Log out",
     "signOutError": "Couldn't log out. Please try again."
   },
+  "thisComputer": {
+    "label": "Let Rome use this computer",
+    "auditLog": "View audit log",
+    "tooltip": {
+      "connected": "Rome can use this computer",
+      "connecting": "Connecting…",
+      "offline": "Rome can't reach this computer right now",
+      "disabled": "Rome can't use this computer"
+    },
+    "state": {
+      "connected": "Connected",
+      "connecting": "Connecting…",
+      "offline": "Offline",
+      "disabled": "Turned off"
+    }
+  },
   "terminal": {
     "title": "Terminal",
     "close": "Close (Esc)",
