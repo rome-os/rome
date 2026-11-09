@@ -11,13 +11,13 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
   access: ["apps", "instance"],
   agent: ["instance", "routines"],
   apps: ["access", "agent", "chats", "connections", "instance", "people", "routines"],
-  chats: ["access", "agent", "apps", "connections", "participation", "people"],
-  connections: ["apps", "chats", "desktops", "instance", "participation", "people"],
+  chats: ["access", "agent", "connections", "participation", "people"],
+  connections: ["chats", "desktops", "instance", "participation", "people"],
   desktops: ["access", "instance"],
   favors: ["access", "apps", "instance"],
   instance: [],
   participation: [],
-  people: ["apps", "chats", "connections", "routines"],
+  people: ["apps", "chats", "connections"],
   routines: ["access", "agent", "apps"],
 };
 
@@ -95,8 +95,66 @@ const APP_FAVOR_CAPABILITY = [
   "apps/actions/app-actions-wiring.ts",
 ];
 
+/** One listed crossing for each `[from, to]` pair, all under one rule and ticket. */
+function crossingsOf(
+  rule: string,
+  ticket: string,
+  why: string,
+  pairs: ReadonlyArray<readonly [string, string]>,
+): ListedCrossing[] {
+  return pairs.map(([from, to]) => ({ rule, from, to, ticket, why }));
+}
+
 /** Crossings that remain until their ticket lands. */
 export const contextCrossings: ListedCrossing[] = [
+  ...crossingsOf(
+    "chats-never-imports-apps",
+    "ZHA-164",
+    "Chats matches agents under their legacy app names and reads an app's action context, until it reaches neither through Apps.",
+    [
+      ["chats/connected-accounts/account-agents.ts", "apps/artifact-id.ts"],
+      ["chats/connected-accounts/account-agents.ts", "apps/rome-accounts.ts"],
+      ["chats/dashboard/dashboard-account.ts", "apps/actions/context.ts"],
+      ["chats/dashboard/webchat.ts", "apps/artifact-id.ts"],
+    ],
+  ),
+  ...crossingsOf(
+    "connections-never-imports-apps",
+    "ZHA-165",
+    "App connections drive the app action engine from connections/, and Discord reads Apps' platform requests, until that code moves into Apps.",
+    [
+      ["connections/app-connections.ts", "apps/actions/context.ts"],
+      ["connections/app-connections.ts", "apps/actions/engine.ts"],
+      ["connections/app-connections.ts", "apps/actions/registry.ts"],
+      ["connections/app-connections.ts", "apps/state.ts"],
+      ["connections/app-connections.test.ts", "apps/actions/approval-card.ts"],
+      ["connections/app-connections.test.ts", "apps/actions/approval-handler.ts"],
+      ["connections/app-connections.test.ts", "apps/actions/backend-turn.ts"],
+      ["connections/app-connections.test.ts", "apps/actions/engine.ts"],
+      ["connections/app-connections.test.ts", "apps/actions/registry.ts"],
+      ["connections/app-connections.test.ts", "apps/catalog.ts"],
+      ["connections/app-connections.test.ts", "apps/context.ts"],
+      ["connections/app-connections.test.ts", "apps/state.ts"],
+      ["connections/integrations/discord.ts", "apps/platform-requests.ts"],
+      ["connections/integrations/discord.test.ts", "apps/platform-requests.ts"],
+      ["connections/integrations/email-setup.test.ts", "apps/repositories/approvals.ts"],
+      ["connections/kinds/discord/discord.ts", "apps/artifact-id.ts"],
+      ["connections/kinds/discord/discord.ts", "apps/platform-requests.ts"],
+      ["connections/kinds/discord/discord-rest.test.ts", "apps/platform-requests.ts"],
+      ["connections/kinds/email/email-delivery.test.ts", "apps/actions/ipc.ts"],
+      ["connections/kinds/email/email-delivery.test.ts", "apps/actions/service-proxies.ts"],
+      ["connections/kinds/email/email-delivery.test.ts", "apps/actions/worker-rpc-client.ts"],
+    ],
+  ),
+  ...crossingsOf(
+    "people-never-imports-routines",
+    "ZHA-166",
+    "The guardian profile saves the guardian's timezone through Routines, until People no longer writes a setting Routines owns.",
+    [
+      ["people/guardian-profile.ts", "routines/guardian-timezone.ts"],
+      ["people/guardian-profile.test.ts", "routines/guardian-timezone.ts"],
+    ],
+  ),
   ...APP_FAVOR_CAPABILITY.map((from) => ({
     rule: "apps-never-imports-favors",
     from,
