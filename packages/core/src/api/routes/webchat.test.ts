@@ -4461,24 +4461,24 @@ describe("Webchat API", () => {
       expect(await deps.webchatRepo.getSession(sessionId)).toMatchObject({
         largeModelSelection: null,
       });
-      // A side chat promoted to a chat keeps the model it branched with.
+      // A fork chat promoted to a chat keeps the model it branched with.
       await deps.settingsRepo.set("enableModelSelector", true);
       await deps.webchatRepo.ensureRomeSession({
-        id: "promoted-side-chat",
+        id: "promoted-fork-chat",
         parentSessionId: sessionId,
         type: "fork",
-        name: "Side chat",
+        name: "Fork chat",
         agentName: "main",
       });
-      await deps.webchatRepo.promoteForkToChat("promoted-side-chat");
-      const sideChat = await app.request("/chat/sessions/promoted-side-chat/model", {
+      await deps.webchatRepo.promoteForkToChat("promoted-fork-chat");
+      const forkChat = await app.request("/chat/sessions/promoted-fork-chat/model", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ largeModelSelection: "gpt-6-luna" }),
       });
-      expect(sideChat.status).toBe(409);
-      await expect(sideChat.json()).resolves.toEqual({
-        error: "A side chat keeps the model it branched with",
+      expect(forkChat.status).toBe(409);
+      await expect(forkChat.json()).resolves.toEqual({
+        error: "A fork chat keeps the model it branched with",
       });
       const missing = await app.request("/chat/sessions/does-not-exist/model", {
         method: "PATCH",
@@ -5517,7 +5517,7 @@ describe("Webchat API", () => {
     });
   });
 
-  describe("turn side-chat branch route", () => {
+  describe("turn fork-chat branch route", () => {
     const SESSION_ID = "sess-branch-routes";
     const TURN_ID = "turn-branch-1";
 
@@ -5554,7 +5554,7 @@ describe("Webchat API", () => {
             sessionId: "branch-fork-session",
             userPrompt: params.prompt,
           };
-          yield { type: "result", content: "Here is the side-chat answer." };
+          yield { type: "result", content: "Here is the fork-chat answer." };
           yield {
             type: "turn_end",
             turnId: "branch-fork-turn",
@@ -5617,7 +5617,7 @@ describe("Webchat API", () => {
         }),
       );
       expect(showApp).not.toHaveBeenCalled();
-      // A side chat is a conversation: it asks to be left resumable, keyed by
+      // A fork chat is a conversation: it asks to be left resumable, keyed by
       // the fork's own id with no model-selection suffix — exactly what
       // handleChatSend will derive for it on a follow-up.
       expect(forkParams!.persistThreadKey?.("branch-fork-session")).toBe(
@@ -5717,7 +5717,7 @@ describe("Webchat API", () => {
 
       expect(res.status).toBe(409);
       await expect(res.json()).resolves.toEqual({
-        error: "Couldn't start side chat from this conversation",
+        error: "Couldn't fork a chat from this conversation",
       });
     });
 
@@ -5768,7 +5768,7 @@ describe("Webchat API", () => {
             sessionId: "branch-fork-session",
             userPrompt: params.prompt,
           };
-          yield { type: "result", content: "Here is the side-chat answer." };
+          yield { type: "result", content: "Here is the fork-chat answer." };
           yield {
             type: "turn_end",
             turnId: "branch-fork-turn",
@@ -5846,7 +5846,7 @@ describe("Webchat API", () => {
             sessionId: "branch-fork-session",
             userPrompt: params.prompt,
           };
-          yield { type: "result", content: "Here is the side-chat answer." };
+          yield { type: "result", content: "Here is the fork-chat answer." };
           yield {
             type: "turn_end",
             turnId: "branch-fork-turn",
@@ -5930,7 +5930,7 @@ describe("Webchat API", () => {
     });
   });
 
-  describe("continuable side chats", () => {
+  describe("continuable fork chats", () => {
     const FORK_ID = "branch-session-continuable";
     const LEGACY_FORK_ID = "branch-session-legacy";
     // A branch as it ships now: born type "webchat" with lineage intact.
@@ -6509,8 +6509,8 @@ describe("Webchat API", () => {
       await reader.cancel();
     });
 
-    it("refuses a backend continuation on a side chat", async () => {
-      // Side chats hold no scheduled wake-ups (they get no defer tool) and do
+    it("refuses a backend continuation on a fork chat", async () => {
+      // Fork chats hold no scheduled wake-ups (they get no defer tool) and do
       // not host approval continuations. Resuming one here would reopen its
       // session without the detached surface, so the refusal is deliberate and
       // keeps the failure loud.

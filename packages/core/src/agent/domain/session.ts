@@ -149,7 +149,7 @@ export class Session {
   }
 
   /** @deprecated Whether the provider has a thread for this session, which the
-   *  dashboard reads as "this side chat can continue". Sessions should answer
+   *  dashboard reads as "this fork chat can continue". Sessions should answer
    *  that question itself. */
   get deprecatedHasModelThread(): boolean {
     return this.state.modelThreadId !== null;

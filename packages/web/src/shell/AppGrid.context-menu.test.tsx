@@ -308,7 +308,7 @@ describe("pinned built-in page context menu", () => {
   });
 
   it.each([
-    ["Chat", "/chat"],
+    ["Chat", "/message"],
     ["Projects", "/projects"],
   ])("offers no unpin on the required %s pin", async (_name, href) => {
     renderSidebar("/memory");
@@ -327,7 +327,7 @@ describe("pinned built-in page context menu", () => {
     window.rome = {};
     renderSidebar("/projects");
 
-    fireEvent.contextMenu(await findBuiltinLink("/chat"));
+    fireEvent.contextMenu(await findBuiltinLink("/message"));
 
     // A menu that would open does so synchronously on the contextmenu event.
     await new Promise((resolve) => setTimeout(resolve, 50));

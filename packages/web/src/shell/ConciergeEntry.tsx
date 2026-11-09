@@ -1,7 +1,7 @@
 import type { ConciergeChatDto } from "@rome/api-types/concierge";
 import { useQueryClient } from "@tanstack/react-query";
-import { Archive, Ellipsis, Pencil, Plus, Trash2 } from "lucide-react";
-import { useCallback, useState } from "react";
+import { Archive, ArchiveRestore, Ellipsis, Pencil, Plus, Trash2 } from "lucide-react";
+import { useCallback, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
@@ -26,14 +26,65 @@ import {
   useConciergeUnread,
 } from "@/hooks/use-concierge";
 import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
-import { MAIN_CHAT_PATH } from "@/lib/chat-session";
+import { MAIN_CHAT_PATH, sessionActivityTime } from "@/lib/chat-session";
+import type { ChatSession } from "@/lib/chat-types";
 import { emitSessionsChanged, useSessionsChanged } from "@/lib/session-events";
 import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
 
 const anyEvent = z.unknown();
 
+/** How many topic chats show before the More row. */
+export const TOPIC_CHATS_VISIBLE = 5;
+
+/** A topic chat as the sidebar lists it. */
+export interface TopicChatRow extends ConciergeChatDto {
+  archived: boolean;
+}
+
 /**
- * The sidebar's Concierge entry, with a badge counting the agent messages the
+ * The topic chats the Concierge section lists under a status filter, latest
+ * first. Active ones come from the Concierge's own list, which carries their
+ * unread counts. Archived ones are only in the chat list. A topic chat the
+ * chat list has not caught up with yet counts as the newest.
+ */
+export function topicChatRows(
+  statusFilter: "all" | "active" | "archived",
+  activeTopics: readonly ConciergeChatDto[],
+  topicSessions: readonly ChatSession[],
+): TopicChatRow[] {
+  const listed = new Map(topicSessions.map((session) => [session.id, session]));
+  const rows: Array<TopicChatRow & { at: number }> = [];
+  if (statusFilter !== "archived") {
+    // The Concierge lists them oldest first. Walking it backwards leaves the
+    // newest first among those the chat list has no time for, as the sort
+    // below keeps ties in place.
+    for (const chat of [...activeTopics].reverse()) {
+      const session = listed.get(chat.id);
+      rows.push({
+        ...chat,
+        archived: false,
+        at: session ? sessionActivityTime(session) : Number.POSITIVE_INFINITY,
+      });
+    }
+  }
+  if (statusFilter !== "active") {
+    for (const session of topicSessions) {
+      if (!session.archivedAt) continue;
+      rows.push({
+        id: session.id,
+        name: session.name,
+        main: false,
+        unread: 0,
+        archived: true,
+        at: sessionActivityTime(session),
+      });
+    }
+  }
+  return rows.sort((a, b) => b.at - a.at).map(({ at: _at, ...row }) => row);
+}
+
+/**
+ * The sidebar's main chat entry, with a badge counting the agent messages the
  * guardian has not read, and the plus that opens a blank topic chat. A new
  * message recounts, and so does a read in this tab; another tab or device
  * catches up on its next focus refetch. The open chat reads what arrives, so
@@ -51,7 +102,6 @@ export function ConciergeEntry({
   onNewTopic: () => void;
 }) {
   const { t } = useTranslation("common");
-  const name = useConciergeName();
   const queryClient = useQueryClient();
   const unread = useConciergeUnread(chatId);
   const recount = useCallback(() => {
@@ -71,7 +121,9 @@ export function ConciergeEntry({
         to={MAIN_CHAT_PATH}
         className={`${LINK_CLASS} ${active ? ACTIVE_CLASS : IDLE_CLASS}`}
         aria-label={
-          count > 0 ? t("recentChats.conciergeUnread", { name, count, label }) : undefined
+          count > 0
+            ? t("recentChats.conciergeUnread", { name: t("recentChats.mainChat"), count, label })
+            : undefined
         }
       >
         <span
@@ -80,7 +132,7 @@ export function ConciergeEntry({
         >
           <RomeLogo className="size-4 shrink-0" aria-hidden />
         </span>
-        <span className="flex-1 truncate">{name}</span>
+        <span className="flex-1 truncate">{t("recentChats.mainChat")}</span>
         {count > 0 ? (
           <Badge
             variant="destructive"
@@ -108,34 +160,60 @@ export function ConciergeEntry({
 }
 
 /**
- * The sidebar's Concierge entries: the main chat's entry, then one row per
- * topic chat, each with its unread badge and a menu to rename, archive or
- * delete it. The plus beside the main entry opens a blank topic chat, which
- * its first message creates and names.
+ * The sidebar's Concierge section: the main chat's entry, then the topic
+ * chats, latest first, the first {@link TOPIC_CHATS_VISIBLE} and a More row
+ * for the rest. Each topic chat has its unread badge and a menu to rename,
+ * archive or unarchive, and delete it. The status filter applies here too:
+ * the main chat is never archived, so the archived filter hides it. The plus
+ * beside the main entry opens a blank topic chat, which its first message
+ * creates and names.
  */
 export function ConciergeChats({
   mainChatId,
   activeSessionId,
+  statusFilter,
+  topicSessions,
 }: {
   mainChatId: string;
   activeSessionId: string | null | undefined;
+  statusFilter: "all" | "active" | "archived";
+  /** The chat list's Concierge chats other than the main chat, under the same filter. */
+  topicSessions: readonly ChatSession[];
 }) {
+  const { t } = useTranslation("common");
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const topics = useConciergeChats().filter((chat) => !chat.main);
+  const conciergeChats = useConciergeChats();
+  const topics = useMemo(
+    () =>
+      topicChatRows(
+        statusFilter,
+        conciergeChats.filter((chat) => !chat.main),
+        topicSessions,
+      ),
+    [conciergeChats, statusFilter, topicSessions],
+  );
+  const [expanded, setExpanded] = useState(false);
   const refresh = useCallback(() => {
     void queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY });
   }, [queryClient]);
   useSessionsChanged(refresh);
+  // The open topic chat stays in view, even when it is past the first few.
+  const activeIndex = topics.findIndex((chat) => chat.id === activeSessionId);
+  const showAll = expanded || activeIndex >= TOPIC_CHATS_VISIBLE;
+  const visible = showAll ? topics : topics.slice(0, TOPIC_CHATS_VISIBLE);
+  const hidden = topics.length - visible.length;
   return (
-    <>
-      <ConciergeEntry
-        chatId={mainChatId}
-        active={activeSessionId === mainChatId}
-        // A blank topic chat, as New chat opens a blank chat: its first send creates it.
-        onNewTopic={() => navigate("/chat", { state: { conciergeTopic: true } })}
-      />
-      {topics.map((chat) => (
+    <section aria-label={t("recentChats.conciergeSection")} className="pt-1" data-concierge-section>
+      {statusFilter === "archived" ? null : (
+        <ConciergeEntry
+          chatId={mainChatId}
+          active={activeSessionId === mainChatId}
+          // A blank topic chat, as a new chat opens blank: its first send creates it.
+          onNewTopic={() => navigate("/chat", { state: { conciergeTopic: true } })}
+        />
+      )}
+      {visible.map((chat) => (
         <ConciergeTopicEntry
           key={chat.id}
           chat={chat}
@@ -146,7 +224,17 @@ export function ConciergeChats({
           }}
         />
       ))}
-    </>
+      {hidden > 0 ? (
+        <button
+          type="button"
+          onClick={() => setExpanded(true)}
+          data-concierge-more
+          className="ml-8 rounded-4 border border-transparent py-1 pr-1 text-left text-aux min-h-[var(--control-min-h)] text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+        >
+          {t("recentChats.moreTopicChats", { count: hidden })}
+        </button>
+      ) : null}
+    </section>
   );
 }
 
@@ -156,7 +244,7 @@ function ConciergeTopicEntry({
   onChanged,
   onGone,
 }: {
-  chat: ConciergeChatDto;
+  chat: TopicChatRow;
   active: boolean;
   onChanged: () => void;
   onGone: () => void;
@@ -182,16 +270,17 @@ function ConciergeTopicEntry({
     await renameSession(chat.id, trimmed).catch(() => undefined);
     onChanged();
   };
-  const retire = async (how: "archive" | "delete") => {
+  const retire = async (how: "archive" | "unarchive" | "delete") => {
     try {
-      if (how === "archive") await archiveSession(chat.id, true);
-      else await deleteSession(chat.id);
+      if (how === "delete") await deleteSession(chat.id);
+      else await archiveSession(chat.id, how === "archive");
     } catch {
       toast.error(t("recentChats.topicChatRetireFailed"));
     }
     onChanged();
     emitSessionsChanged();
-    onGone();
+    // An unarchived chat stays open where it is.
+    if (how !== "unarchive") onGone();
   };
   if (editing) {
     return (
@@ -224,7 +313,9 @@ function ConciergeTopicEntry({
           count > 0 ? t("recentChats.topicChatUnread", { name, count, label }) : undefined
         }
       >
-        <span className="flex-1 truncate">{name}</span>
+        <span className={`flex-1 truncate ${chat.archived ? "text-subtle-foreground" : ""}`}>
+          {name}
+        </span>
         {count > 0 ? (
           <Badge
             variant="destructive"
@@ -256,10 +347,17 @@ function ConciergeTopicEntry({
             <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
             {t("recentChats.rename")}
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => void retire("archive")}>
-            <Archive className="h-3.5 w-3.5 shrink-0" aria-hidden />
-            {t("recentChats.archive")}
-          </DropdownMenuItem>
+          {chat.archived ? (
+            <DropdownMenuItem onSelect={() => void retire("unarchive")}>
+              <ArchiveRestore className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              {t("recentChats.unarchive")}
+            </DropdownMenuItem>
+          ) : (
+            <DropdownMenuItem onSelect={() => void retire("archive")}>
+              <Archive className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              {t("recentChats.archive")}
+            </DropdownMenuItem>
+          )}
           <DropdownMenuItem variant="destructive" onSelect={() => setConfirmDelete(true)}>
             <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
             {t("recentChats.delete")}

@@ -83,6 +83,10 @@ export interface ConciergeChat {
   chatId: string | null;
   /** Whether the chat's creation is still in flight. */
   loading: boolean;
+  /** Whether the server could not answer the chat, such as when the Concierge is off. */
+  failed: boolean;
+  /** Asks the server again after a failure. */
+  retry: () => void;
 }
 
 /**
@@ -90,8 +94,13 @@ export interface ConciergeChat {
  * first request, and asks again on every mount, which recreates a deleted chat.
  */
 export function useConciergeChat(): ConciergeChat {
-  const { data, isSuccess, isPending } = useConciergeSession();
-  return { chatId: isSuccess ? data.id : null, loading: isPending };
+  const { data, isSuccess, isPending, isError, refetch } = useConciergeSession();
+  return {
+    chatId: isSuccess ? data.id : null,
+    loading: isPending,
+    failed: isError,
+    retry: () => void refetch(),
+  };
 }
 
 /**

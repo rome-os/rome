@@ -1,10 +1,22 @@
 import { useEffect, useRef, useState } from "react";
-import type { AgentMention } from "@/lib/chat-types";
+import type { AgentMention, ChatSession } from "@/lib/chat-types";
+import { CONCIERGE_AGENT_ID, TASK_CHAT_TRIGGER_KIND } from "@/hooks/use-concierge";
 import { getSession, listChatAgents } from "@/lib/chat-api";
 import { artifactOwnerId } from "@/lib/artifact-name";
 import { prettyAgentName } from "@/lib/agent-name";
 import { usePresentationMode } from "@/lib/presentation-mode";
 import { useSessionsChanged } from "@/lib/session-events";
+
+/**
+ * Whether a chat offers the fork button: a fork chat always does, and
+ * otherwise only a common chat, not a Concierge chat or a task chat.
+ */
+export function isForkableChat(
+  session: Pick<ChatSession, "parentSessionId" | "agentName" | "triggerKind">,
+): boolean {
+  if (session.parentSessionId) return true;
+  return session.agentName !== CONCIERGE_AGENT_ID && session.triggerKind !== TASK_CHAT_TRIGGER_KIND;
+}
 
 export interface SessionIdentity {
   /**
@@ -17,16 +29,19 @@ export interface SessionIdentity {
   model: string | null;
   /** The model picked for this chat, or null when it follows its pin. */
   largeModelSelection: string | null;
-  /** A side chat promoted to a chat: it still runs on its branch. */
-  isSideChat: boolean;
+  /** A fork chat promoted to a chat: it still runs on its branch. */
+  isForkChat: boolean;
   /** Provider-reported effort of the session's last successful turn, or null when unknown. */
   reasoningEffort: string | null;
   /** The session's locked agent, resolved to its owning app's label + icon. */
   pinnedAgentMention: AgentMention | null;
   /** ISO timestamp when the session was archived, or null when not archived. */
   archivedAt: string | null;
-  /** ISO timestamp when the session was pinned, or null when not pinned. */
-  pinnedAt: string | null;
+  /**
+   * Whether a turn of this chat can be forked: in a common chat or a fork
+   * chat, and not in a main, topic or task chat.
+   */
+  forkable: boolean;
 }
 
 /**
@@ -46,12 +61,12 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
   const sessionGeneration = useRef(0);
   const [model, setModel] = useState<string | null>(null);
   const [largeModelSelection, setLargeModelSelection] = useState<string | null>(null);
-  const [isSideChat, setIsSideChat] = useState(false);
+  const [isForkChat, setIsForkChat] = useState(false);
   const [reasoningEffort, setReasoningEffort] = useState<string | null>(null);
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [pinnedAgentMention, setPinnedAgentMention] = useState<AgentMention | null>(null);
   const [archivedAt, setArchivedAt] = useState<string | null>(null);
-  const [pinnedAt, setPinnedAt] = useState<string | null>(null);
+  const [forkable, setForkable] = useState(false);
   // The session id whose first fetch has settled (success or failure). Keyed by
   // id so switching sessions is "loading" again with no reset-effect flash.
   const [settledSessionId, setSettledSessionId] = useState<string | null>(null);
@@ -62,16 +77,16 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
       setPinnedAgentMention(null);
       setModel(null);
       setLargeModelSelection(null);
-      setIsSideChat(false);
+      setIsForkChat(false);
       setReasoningEffort(null);
       setSessionName(null);
       setArchivedAt(null);
-      setPinnedAt(null);
+      setForkable(false);
       return;
     }
     setModel(null);
     setLargeModelSelection(null);
-    setIsSideChat(false);
+    setIsForkChat(false);
     setReasoningEffort(null);
     // Drop the previous session's identity so it never shows under the new id.
     setSessionName(null);
@@ -88,10 +103,10 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setSessionName(session?.name ?? null);
         setModel(session?.model ?? null);
         setLargeModelSelection(session?.largeModelSelection ?? null);
-        setIsSideChat(!!session?.parentSessionId);
+        setIsForkChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
-        setPinnedAt(session?.pinnedAt ?? null);
+        setForkable(!!session && isForkableChat(session));
         const agentName = session?.agentName ?? null;
         if (!agentName) {
           setPinnedAgentMention(null);
@@ -114,12 +129,12 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
           setSettledSessionId(sessionId);
           setModel(null);
           setLargeModelSelection(null);
-          setIsSideChat(false);
+          setIsForkChat(false);
           setReasoningEffort(null);
           setSessionName(null);
           setPinnedAgentMention(null);
           setArchivedAt(null);
-          setPinnedAt(null);
+          setForkable(false);
         }
       }
     })();
@@ -145,10 +160,10 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setSessionName(session?.name ?? null);
         setModel(session?.model ?? null);
         setLargeModelSelection(session?.largeModelSelection ?? null);
-        setIsSideChat(!!session?.parentSessionId);
+        setIsForkChat(!!session?.parentSessionId);
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
-        setPinnedAt(session?.pinnedAt ?? null);
+        setForkable(!!session && isForkableChat(session));
       } catch {
         // Best effort; the next mount / event reconciles.
       }
@@ -160,10 +175,10 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     sessionName,
     model,
     largeModelSelection,
-    isSideChat,
+    isForkChat,
     reasoningEffort,
     pinnedAgentMention: presentationMode ? null : pinnedAgentMention,
     archivedAt,
-    pinnedAt,
+    forkable,
   };
 }

@@ -48,7 +48,7 @@ rs.mock("@/components/chat/ChatComposer", () => ({
   ChatComposer: ({ onSend, disabled }: { onSend: (s: unknown) => void; disabled?: boolean }) => (
     <button
       type="button"
-      data-testid="side-chat-composer"
+      data-testid="fork-chat-composer"
       disabled={disabled}
       onClick={() =>
         onSend({
@@ -632,7 +632,7 @@ describe("SessionsPage live fork details", () => {
     renderDetail();
 
     await screen.findByTestId("session-messages");
-    expect(screen.queryByTestId("side-chat-composer")).toBeNull();
+    expect(screen.queryByTestId("fork-chat-composer")).toBeNull();
     expect(emitSessionsChanged).not.toHaveBeenCalled();
   });
 });

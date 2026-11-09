@@ -815,7 +815,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   /** Listeners told when a session starts or stops running a turn. */
   const runningListeners = new Set<(event: { sessionId: string; running: boolean }) => void>();
   // Same definition as `GET /chat/sessions/:id/turns`: chat streams here plus
-  // turns in the shared registry, such as a side chat's first answer.
+  // turns in the shared registry, such as a fork chat's first answer.
   const isSessionRunning = (sessionId: string): boolean =>
     (activeStreams.get(sessionId)?.some((stream) => !stream.finished) ?? false) ||
     deps.agentTurnStreamRegistry.listBySession(sessionId).length > 0;
@@ -882,11 +882,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   /**
-   * Session lookup for the two routes a side chat needs: the client's
+   * Session lookup for the two routes a fork chat needs: the client's
    * continuability probe and the follow-up send. A fork qualifies only once it
    * has left a resumable model thread behind (see
    * `AgentSession.persistForkThread`) — which is also how the client tells a
-   * live side chat from a read-only trajectory, since the probe 404s for one
+   * live fork chat from a read-only trajectory, since the probe 404s for one
    * and 200s for the other. A legacy branch, an errored one, and one that
    * borrowed its source's thread all stay read-only.
    *
@@ -1416,7 +1416,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     label: string;
     initiator: string;
     /**
-     * Whether the guardian is meant to keep talking to this fork. A side chat
+     * Whether the guardian is meant to keep talking to this fork. A fork chat
      * is a conversation and asks for a resumable thread; the private learning
      * fork behind turn feedback is a background errand and stays one-shot.
      */
@@ -1480,7 +1480,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // The in-memory source is intentionally short-lived (15s in production),
       // while webchat provider sessions are durable. Acquire transparently
       // resumes an evicted source from its persisted model thread, allowing
-      // side chats from settled conversations after the first fork or a
+      // fork chats from settled conversations after the first fork or a
       // backend restart.
       const source = await deps.agentSessionManager.open(
         { agentName, channelThreadKey },
@@ -1508,7 +1508,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           label: input.label,
         });
         // Distinguishable so the branch route can tell the user this turn has
-        // no branch point (a promoted side chat's own first answer is the
+        // no branch point (a promoted fork chat's own first answer is the
         // common case) rather than implying a transient failure.
         return "no_turn_checkpoint";
       }
@@ -2662,10 +2662,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
-    // A side chat promoted to a chat runs on its branch's thread; picking a
-    // model for it waits on the side-chat review (#1384).
+    // A fork chat promoted to a chat runs on its branch's thread; picking a
+    // model for it waits on the fork-chat review (#1384).
     if (lookup.session.parentSessionId) {
-      return c.json({ error: "A side chat keeps the model it branched with" }, 409);
+      return c.json({ error: "A fork chat keeps the model it branched with" }, 409);
     }
     const body = await c.req.json<unknown>().catch(() => undefined);
     const requested =
@@ -2909,7 +2909,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // Branch a settled assistant turn into a one-shot exact fork. AgentRunner
   // persists the submitted prompt and the fork's reply as a separate `fork`
   // session; the returned Sessions placement lets the web client open that
-  // side chat immediately while its response continues in the background.
+  // fork chat immediately while its response continues in the background.
   app.post("/chat/sessions/:sessionId/turns/:turnId/forks", async (c) => {
     const sessionId = c.req.param("sessionId");
     const turnId = c.req.param("turnId");
@@ -2919,7 +2919,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const turnInSession = await deps.webchatRepo.hasTurnInSession(sessionId, turnId);
     if (!turnInSession) return c.json({ error: "Turn not found in session" }, 404);
     if (!deps.agentRunner.runForked) {
-      return c.json({ error: "Side chats are unavailable" }, 503);
+      return c.json({ error: "Fork chats are unavailable" }, 503);
     }
 
     let payload: unknown;
@@ -2957,7 +2957,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "This answer has no branch point", code: "turn_not_branchable" }, 409);
     }
     if (!started) {
-      return c.json({ error: "Couldn't start side chat from this conversation" }, 409);
+      return c.json({ error: "Couldn't fork a chat from this conversation" }, 409);
     }
     // `placement` is always null for a branch (show_app is feedback-only);
     // the client places a real chat card from the session id.
@@ -3074,7 +3074,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         })
       : null;
     // The learning fork is best-effort; a turn with no branch point (e.g. a
-    // promoted side chat's first answer) just skips it.
+    // promoted fork chat's first answer) just skips it.
     const processingPlacement =
       !processing || typeof processing === "string" ? null : processing.placement;
 
@@ -3439,7 +3439,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         return answer(
           {
             error:
-              "This side chat's thread isn't ready — its first answer is still running or did not complete.",
+              "This fork chat's thread isn't ready — its first answer is still running or did not complete.",
             code: "branch_thread_missing",
           },
           409,
@@ -4285,7 +4285,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // recorded turn adds its own id as `agentTurnId` once it starts.
     const syntheticTurnId = `backend:${randomUUID()}`;
     const session = await deps.webchatRepo.getSession(sessionId);
-    // Deliberately top-level only. A side chat has no scheduled wake-ups (see
+    // Deliberately top-level only. A fork chat has no scheduled wake-ups (see
     // `deferEnabled`) and does not host approval continuations: resuming one
     // here would reopen its session without the detached surface, and a
     // continuation raised on the branch's first turn still carries the parent's
