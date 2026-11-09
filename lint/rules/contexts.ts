@@ -24,6 +24,12 @@ const FORBIDDEN_DEPENDENCIES: ForbiddenDependency[] = [
       "An agent never knows which connection carries its chat, so no file in agent/ imports connections/. What an agent needs from a chat reaches it through Chats.",
   },
   {
+    from: "apps",
+    to: "favors",
+    description:
+      "A favor request exists to run an app action, so Favors depends on Apps and no file in apps/ imports favors/.",
+  },
+  {
     from: "desktops",
     to: "agent",
     description:
@@ -64,8 +70,24 @@ export const contextRules: ImportRule[] = FORBIDDEN_DEPENDENCIES.map((dependency
 
 const SESSIONS_REPOSITORY = "agent/infrastructure/drizzle-session-repository";
 
+/** The apps/ files that give apps `ctx.favors` through Favors' `FavorService` type. */
+const APP_FAVOR_CAPABILITY = [
+  "apps/context.ts",
+  "apps/context.test.ts",
+  "apps/api.ts",
+  "apps/websocket-server.ts",
+  "apps/actions/app-actions-wiring.ts",
+];
+
 /** Crossings that remain until their ticket lands. */
 export const contextCrossings: ListedCrossing[] = [
+  ...APP_FAVOR_CAPABILITY.map((from) => ({
+    rule: "apps-never-imports-favors",
+    from,
+    to: "favors/index.ts",
+    ticket: "ZHA-163",
+    why: "Apps offers `ctx.favors` by naming Favors' `FavorService` type, until Apps reaches favor requests without it.",
+  })),
   {
     rule: "agent-never-imports-apps",
     from: `${SESSIONS_REPOSITORY}.ts`,

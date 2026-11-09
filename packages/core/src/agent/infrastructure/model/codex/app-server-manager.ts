@@ -1,5 +1,5 @@
 import { createLogger } from "../../../../logger.js";
-import { getRomeCloudOrigin } from "../../../../lib/rome-cloud-origin.js";
+import { getRomeCloudOrigin } from "../../../../instance/rome-cloud-origin.js";
 import { CODEX_ENV_ALLOWLIST } from "./common.js";
 import { ROME_CREDITS_PROXY_SECRET } from "./rome-credits-proxy.js";
 import {

@@ -1,7 +1,7 @@
 import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import type { SessionOpeningFor } from "../core/session-opening.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
-import type { CloudProfileService } from "../lib/cloud-profile.js";
+import type { CloudProfileService } from "../instance/cloud-profile.js";
 import type { createNodeDevicesService } from "../desktops/node-devices.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
 import type { ConciergeService } from "../concierge/service.js";
@@ -56,14 +56,14 @@ import type { DashboardAccessStore } from "../lib/dashboard-access-store.js";
 import type { VisitorAllowListSync } from "../lib/visitor-allowlist-sync.js";
 import type { PhoneWatching } from "../lib/phone-watching.js";
 import type { RelayDrainer } from "../relay/drainer.js";
-import type { BootVersionReport } from "../lib/boot-version-report.js";
-import type { SystemUpgradeService } from "../system-upgrade/service.js";
+import type { BootVersionReport } from "../instance/boot-version-report.js";
+import type { SystemUpgradeService } from "../instance/system-upgrade/service.js";
 import type {
   AppRuntimeRepositories,
   ChatSettingsControl,
   ChannelsService,
 } from "@rome-os/app-runtime";
-import type { FavorService } from "../favors/types.js";
+import type { FavorService } from "../favors/index.js";
 import type { ConnectionRegistry } from "../connections/index.js";
 import type { AccountListening } from "../chats/connected-accounts/account-agents.js";
 import type { SetupManager } from "../connections/setup/manager.js";

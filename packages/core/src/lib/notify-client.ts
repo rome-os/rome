@@ -1,5 +1,5 @@
-import { cloudBearer } from "./instance-identity.js";
-import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
+import { cloudBearer } from "../instance/instance-identity.js";
+import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
 
 /**
  * The outcome of one attempt to trigger a push via Rome Cloud's `/api/notify`.

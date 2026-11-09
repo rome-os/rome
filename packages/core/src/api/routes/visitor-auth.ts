@@ -11,7 +11,7 @@ import {
 } from "../../lib/auth.js";
 import { normalizePublicAccessEmail } from "../../apps/public-access-config.js";
 import { isValidAppId } from "../../apps/packaging/app-id.js";
-import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
+import { getInstanceOrigin, getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { createLogger } from "../../logger.js";
 import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
 import type { ApiDeps } from "../deps.js";

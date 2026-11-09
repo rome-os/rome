@@ -7,9 +7,9 @@
 // Both speak the instance-token contract and self-reject on an
 // unversioned build (no release identity to compare against Rome Cloud's latest).
 
-import { getBuildInfo } from "../build-info.js";
-import { cloudBearer } from "../lib/instance-identity.js";
-import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
+import { getBuildInfo } from "../../build-info.js";
+import { cloudBearer } from "../instance-identity.js";
+import { getRomeCloudOrigin } from "../rome-cloud-origin.js";
 
 const ROME_CLOUD_TIMEOUT_MS = 15_000;
 
