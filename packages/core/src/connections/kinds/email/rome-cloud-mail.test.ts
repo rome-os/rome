@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { setInstanceTokenInMemory } from "../../../lib/instance-identity.js";
+import { setInstanceTokenInMemory } from "../../../instance/instance-identity.js";
 import { MailProviderError, RomeCloudMailProvider } from "./rome-cloud-mail.js";
 
 function providerAnswering(body: unknown) {

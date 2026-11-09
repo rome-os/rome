@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { instanceEnrollRoutes } from "./instance-enroll.js";
-import { getInstanceToken, setInstanceTokenInMemory } from "../../lib/instance-identity.js";
+import { getInstanceToken, setInstanceTokenInMemory } from "../../instance/instance-identity.js";
 import { startFakeSigner } from "../../test/fake-signer.js";
 import type { ApiDeps } from "../deps.js";
 

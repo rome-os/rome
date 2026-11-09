@@ -10,10 +10,10 @@ import { Hono } from "hono";
 // the reset, rather than at the top of the file.
 async function freshApp(opts: { enrolled?: boolean } = {}) {
   rs.resetModules();
-  const { setInstanceTokenInMemory } = await import("../../lib/instance-identity.js");
+  const { setInstanceTokenInMemory } = await import("../../instance/instance-identity.js");
   setInstanceTokenInMemory(opts.enrolled === false ? null : "romeinst_test-token");
   const { systemUpgradeRoutes } = await import("./system-upgrade.js");
-  const { SystemUpgradeService } = await import("../../system-upgrade/service.js");
+  const { SystemUpgradeService } = await import("../../instance/system-upgrade/service.js");
   // The countdown verbs drive the service's real hub; the manual relay verbs
   // (/check, POST /upgrade) leave it idle. Both talk to Rome Cloud through the
   // stubbed global fetch.

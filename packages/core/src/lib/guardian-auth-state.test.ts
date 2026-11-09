@@ -6,7 +6,7 @@ import {
   resolveAndRecordAccount,
   setGuardianAccount,
 } from "./guardian-auth-state.js";
-import type { ProveIdentityResult } from "./instance-identity.js";
+import type { ProveIdentityResult } from "../instance/instance-identity.js";
 import { guardianAuth } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 

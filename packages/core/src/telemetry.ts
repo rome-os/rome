@@ -29,7 +29,7 @@ import {
   type ChannelInbound,
 } from "@rome-os/app-runtime";
 import { currentSessionId, runWithSession } from "./telemetry-context.js";
-import { resolveInstanceSlug, runningInsideDocker } from "./lib/runtime.js";
+import { resolveInstanceSlug, runningInsideDocker } from "./instance/runtime.js";
 import { createLogger } from "./logger.js";
 
 const SERVICE_NAME = "rome";

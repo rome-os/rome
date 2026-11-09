@@ -6,8 +6,8 @@ import {
 } from "@rome-os/node-core/client";
 import { createLogger } from "../logger.js";
 import { withTracingSuppressed } from "../telemetry.js";
-import { cloudBearer, isInstanceLinked, signerSocketPath } from "./instance-identity.js";
-import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
+import { cloudBearer, isInstanceLinked, signerSocketPath } from "../instance/instance-identity.js";
+import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
 
 const log = createLogger("rome-node-provisioning");
 
