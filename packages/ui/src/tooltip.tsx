@@ -42,8 +42,10 @@ function TooltipContent({
         )}
         {...props}
       >
-        {children}
-        <TooltipPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 bg-foreground fill-foreground" />
+        {/* The arrow reaches ~9px into a one-line tooltip. It comes first and the
+            content is positioned after it, so the text paints over the arrow. */}
+        <TooltipPrimitive.Arrow className="size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 bg-foreground fill-foreground" />
+        <span className="relative inline-flex items-center gap-2">{children}</span>
       </TooltipPrimitive.Content>
     </AutoPortal>
   );

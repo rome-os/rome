@@ -152,6 +152,22 @@
     "signOut": "退出登录",
     "signOutError": "退出登录失败，请重试。"
   },
+  "thisComputer": {
+    "label": "允许 Rome 操作这台电脑",
+    "auditLog": "查看操作记录",
+    "tooltip": {
+      "connected": "Rome 可以操作这台电脑",
+      "connecting": "正在连接…",
+      "offline": "Rome 暂时无法连接这台电脑",
+      "disabled": "Rome 不能操作这台电脑"
+    },
+    "state": {
+      "connected": "已连接",
+      "connecting": "正在连接…",
+      "offline": "离线",
+      "disabled": "已关闭"
+    }
+  },
   "terminal": {
     "title": "终端",
     "close": "关闭 (Esc)",

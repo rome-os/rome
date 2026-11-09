@@ -28,6 +28,7 @@ import { DesktopTitlebar } from "./DesktopTitlebar";
 import { ProfileMenu } from "./ProfileMenu";
 import { RecentChats } from "./RecentChats";
 import { RailLabelsContext } from "./sidebar-shared";
+import { ThisComputerButton } from "./ThisComputerButton";
 import { useChatPeek } from "./use-chat-peek";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { saveSetting } from "@/lib/chat-api";
@@ -345,7 +346,11 @@ export function RomeShellLayout() {
           onClick={() => setRailNamesPersisted(!railNames)}
           className={`text-subtle-foreground hover:text-foreground ${railNames ? "order-last" : ""}`}
         />
-        <ProfileMenu />
+        {/* Collapsed, the stack reads collapse, computer, avatar, so the computer sits directly above the avatar. */}
+        <div className={`flex items-center ${railNames ? "gap-1" : "flex-col-reverse gap-2"}`}>
+          <ProfileMenu />
+          <ThisComputerButton tooltipSide={railNames ? "top" : "right"} />
+        </div>
       </div>
       {isDesktop ? (
         // The edge itself, a few pixels either side of the rail's last one.
