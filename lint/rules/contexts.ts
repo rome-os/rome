@@ -17,6 +17,12 @@ const FORBIDDEN_DEPENDENCIES: ForbiddenDependency[] = [
     description:
       "The agent context defines the extension points and Apps supplies them, so no file in agent/ imports apps/. An adapter that reads what an app ships lives in apps/ and implements the agent context's interface.",
   },
+  {
+    from: "agent",
+    to: "connections",
+    description:
+      "An agent never knows which connection carries its chat, so no file in agent/ imports connections/. What an agent needs from a chat reaches it through Chats.",
+  },
 ];
 
 function contextOf(path: string): string {
