@@ -577,8 +577,12 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
   };
 
   return {
+    // A continuity key always names its conversation and a session's id never
+    // does, so a key that carries an extra `id` still opens by its key.
     open: (target: AgentSessionKey | SessionById, init?: AgentSessionInit) =>
-      "id" in target ? acquireBySessionId(target.id, target.agent, init) : acquire(target, init),
+      "channelThreadKey" in target
+        ? acquire(target, init)
+        : acquireBySessionId(target.id, target.agent, init),
     find(continuityKey) {
       let canonicalKey: AgentSessionKey;
       try {
