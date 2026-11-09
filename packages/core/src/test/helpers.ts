@@ -1,4 +1,5 @@
 import { romeToolPorts } from "../core/rome-tool-ports.js";
+import { WebChatDashboardSessions } from "../webchat/webchat-dashboard-sessions.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
@@ -48,7 +49,7 @@ import {
   subagentSessions,
   subagentTurnLog,
 } from "../core/subagent-call-ports.js";
-import { createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
+import { createSubagentCalls } from "../agent/index.js";
 import { TurnListeners } from "../agent/index.js";
 import { AppTurnHooks } from "../apps/app-turn-hooks.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
