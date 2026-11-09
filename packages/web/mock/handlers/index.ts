@@ -15,9 +15,15 @@ import type {
   TurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import { http, HttpResponse } from "msw";
+import {
+  CONCIERGE_CHAT_ID,
+  type ConciergeChatsResponse,
+  type ConciergeTasksResponse,
+} from "@rome/api-types/concierge";
 import type { Capability } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import type { SettingsMap } from "@/hooks/use-settings";
+import { CONCIERGE_AGENT_ID } from "@/hooks/use-concierge";
 import type { UpgradeStatus } from "@/hooks/use-upgrade-status";
 import type {
   AgentCatalogGroup,
@@ -307,6 +313,8 @@ const turn = (
 // chats that mention it, and "brief" matches one title *and* its transcript,
 // which is the session that keeps its title rank and gains a snippet.
 const transcripts: Record<string, ChatMessage[]> = {
+  // The main Concierge chat opens empty, on its starters.
+  [CONCIERGE_CHAT_ID]: [],
   ...Object.fromEntries(
     curatedChats.map((chat) => [
       chat.id,
@@ -758,6 +766,8 @@ const session = (
 };
 
 const chatSessions: ChatSession[] = [
+  // The guardian's main chat, which Chat and `/` open at /message.
+  session(CONCIERGE_CHAT_ID, "Concierge", "default", CONCIERGE_AGENT_ID),
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
   {
@@ -1137,6 +1147,41 @@ export const handlers = [
   http.get("/api/bootstrap", () => HttpResponse.json(bootstrap)),
   http.get("/api/auth/me", () => HttpResponse.json(identity)),
   http.get("/api/chat/sessions", () => HttpResponse.json(chatSessions)),
+  // The Concierge: the guardian's main chat, and the topic chats started here.
+  http.get("/api/concierge/session", () => HttpResponse.json({ id: CONCIERGE_CHAT_ID, unread: 0 })),
+  http.put("/api/concierge/timezone", () => new HttpResponse(null, { status: 204 })),
+  http.get("/api/concierge/chats", () =>
+    HttpResponse.json({
+      chats: chatSessions
+        .filter((s) => s.agentName === CONCIERGE_AGENT_ID && !s.archivedAt)
+        .sort(
+          (a, b) =>
+            Number(b.id === CONCIERGE_CHAT_ID) - Number(a.id === CONCIERGE_CHAT_ID) ||
+            a.createdAt.localeCompare(b.createdAt),
+        )
+        .map((s) => ({ id: s.id, name: s.name, main: s.id === CONCIERGE_CHAT_ID, unread: 0 })),
+    } satisfies ConciergeChatsResponse),
+  ),
+  http.post("/api/concierge/chats", async ({ request }) => {
+    const body = (await request.json().catch(() => ({}))) as { name?: string };
+    const id = `mock-topic-${chatSessions.length + 1}`;
+    transcripts[id] = [];
+    chatSessions.push(session(id, body.name?.trim() ?? "", "default", CONCIERGE_AGENT_ID));
+    return HttpResponse.json(
+      { id, name: body.name?.trim() ?? "", main: false, unread: 0 },
+      {
+        status: 201,
+      },
+    );
+  }),
+  http.get("/api/concierge/tasks", () =>
+    HttpResponse.json({ tasks: [] } satisfies ConciergeTasksResponse),
+  ),
+  // Held open without events: mock mode runs no tasks.
+  http.get("/api/concierge/tasks/events", () => {
+    const stream = new ReadableStream({ start() {} });
+    return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
+  }),
   // Held open without events: the fixture's running flags never change.
   http.get("/api/chat/status/events", () => {
     const stream = new ReadableStream({ start() {} });
