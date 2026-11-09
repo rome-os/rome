@@ -37,10 +37,12 @@ const limitedUntil = (at: number): ModelAccountReport => ({
 function fakeAccount(initial: ModelAccountReport) {
   let answer = initial;
   let slow = false;
+  let failing = false;
   const listeners = new Set<() => void>();
   const account: ModelAccount = {
     report: rs.fn(async () => {
       if (slow) await new Promise<void>((resolve) => setTimeout(resolve, 50));
+      if (failing) throw new Error("down");
       return answer;
     }),
     onChanged(listener) {
@@ -59,6 +61,10 @@ function fakeAccount(initial: ModelAccountReport) {
       answer = next;
       slow = true;
       for (const listener of listeners) listener();
+    },
+    /** Reads of the account fail, and keep the answer Rome last remembered. */
+    failReads(on: boolean) {
+      failing = on;
     },
     settleReads() {
       slow = false;
@@ -717,18 +723,31 @@ describe("usage-limit continuation", () => {
       expect(refresh).toHaveBeenCalledWith("anthropic");
     });
 
-    it("stops the sweep when the read after a failed continuation fails", async () => {
+    it("ends the sweep when the read after a failed continuation fails, and a later read goes on", async () => {
       await stopped("one");
       rs.setSystemTime(NOW + 1000);
       await stopped("two");
-      const runAndReport = rs.fn(async () => "failed" as const);
-      const refresh = rs.fn(async () => {
-        throw new Error("down");
+      const calls: string[] = [];
+      const runAndReport = rs.fn(async (params: { threadId: string }) => {
+        calls.push(params.threadId);
+        // The turn hit the limit again, but the account cannot be read to say so.
+        claude.failReads(true);
+        claude.refused(limitedUntil(NOW + 6 * HOUR));
+        return "failed" as const;
       });
-      start({ runAndReport }, { read: accounts.read, onChanged: accounts.onChanged, refresh });
+      start({ runAndReport });
+      await accounts.refresh("anthropic");
+      await rs.advanceTimersByTimeAsync(100);
+      // The next chat is not tried on the old answer, and the failed read starts no sweep of its own.
+      expect(accounts.read().anthropic?.state).toBe("available");
+      expect(calls).toEqual(["one"]);
+
+      claude.failReads(false);
+      claude.settleReads();
+      claude.set(available);
       await accounts.refresh("anthropic");
       await settle();
-      expect(runAndReport).toHaveBeenCalledTimes(1);
+      expect(calls).toEqual(["one", "two"]);
     });
 
     it("tries a continuation again at the next reset when it was dropped, not run", async () => {

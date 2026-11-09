@@ -130,17 +130,9 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
           attempted.delete(turn.messageId);
         } else if (outcome === "failed") {
           // A turn that fails on the limit again marks the account, but the read that
-          // shows it is still in flight, so wait for it before the next chat.
-          try {
-            await accounts.refresh(provider);
-          } catch (error) {
-            // Without the read, the next chat would be judged on state that may be stale.
-            log.warn("model account read after a failed continuation failed", {
-              provider,
-              error: String(error),
-            });
-            return;
-          }
+          // shows it is still in flight, so wait for it before the next chat. A failed
+          // read keeps the old answer, so the next chat waits for a read that works.
+          if (!(await accounts.refresh(provider))) return;
         }
       } catch (error) {
         log.warn("could not continue usage-limit turn", {
@@ -169,8 +161,14 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
     }
   };
 
-  const onRead = (provider: ProviderId, change: "authorization" | "refreshed"): void => {
-    if (!stopped && change === "refreshed" && available(provider)) {
+  // A read that failed shows nothing new, so it starts no sweep. The next one that works does.
+  // The pass over state remembered before this started has no read to report, and counts as one that worked.
+  const onRead = (
+    provider: ProviderId,
+    change: "authorization" | "refreshed",
+    succeeded?: boolean,
+  ): void => {
+    if (!stopped && change === "refreshed" && succeeded !== false && available(provider)) {
       pending.add(provider);
       void drain();
     }

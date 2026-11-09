@@ -17,16 +17,22 @@ import {
 
 /**
  * "authorization" when a provider's authorized state changed, "refreshed"
- * when a read of it settled, whether or not the read succeeded.
+ * when a read of it settled, whether or not the read succeeded. A "refreshed"
+ * listener also gets whether it did.
  */
 export type ModelAccountChange = "authorization" | "refreshed";
 
 export interface ModelAccounts {
   /** Pure. A usage limit whose end has passed reads as available. */
   read(): ModelAccountReports;
-  /** Reads every account, or one. Resolves when the reads settle, failed or not. */
-  refresh(provider?: ProviderId): Promise<void>;
-  onChanged(listener: (provider: ProviderId, change: ModelAccountChange) => void): () => void;
+  /**
+   * Reads every account, or one. Resolves when the reads settle, failed or
+   * not: true only when every read succeeded, and a failed one keeps the last answer.
+   */
+  refresh(provider?: ProviderId): Promise<boolean>;
+  onChanged(
+    listener: (provider: ProviderId, change: ModelAccountChange, succeeded?: boolean) => void,
+  ): () => void;
   close(): void;
 }
 
@@ -57,19 +63,21 @@ export function createModelAccounts(options: CreateModelAccountsOptions): ModelA
     (entry): entry is [ProviderId, ModelAccount] => entry[1] !== undefined,
   );
   const remembered: ModelAccountReports = {};
-  const listeners = new Set<(provider: ProviderId, change: ModelAccountChange) => void>();
+  const listeners = new Set<
+    (provider: ProviderId, change: ModelAccountChange, succeeded?: boolean) => void
+  >();
   // One read per provider at a time. A refresh asked during one joins it.
-  const inFlight = new Map<ProviderId, Promise<void>>();
+  const inFlight = new Map<ProviderId, Promise<boolean>>();
   // Providers whose account changed during a read: read again when it settles.
   const rereadAfter = new Set<ProviderId>();
   // One read per limited provider, timed for the end of its limit.
   const resetTimers = new Map<ProviderId, { until: number; timer: NodeJS.Timeout }>();
   let closed = false;
 
-  const emit = (provider: ProviderId, change: ModelAccountChange): void => {
+  const emit = (provider: ProviderId, change: ModelAccountChange, succeeded?: boolean): void => {
     for (const listener of listeners) {
       try {
-        listener(provider, change);
+        listener(provider, change, succeeded);
       } catch (err) {
         log?.warn("model accounts listener failed", {
           provider,
@@ -118,37 +126,41 @@ export function createModelAccounts(options: CreateModelAccountsOptions): ModelA
     if (providerAuthorized(previous) !== providerAuthorized(next)) emit(provider, "authorization");
   };
 
-  const readAccount = async (provider: ProviderId, account: ModelAccount): Promise<void> => {
+  const readAccount = async (provider: ProviderId, account: ModelAccount): Promise<boolean> => {
     try {
       const next = await account.report();
       if (!closed) {
         remember(provider, next);
         armReset(provider, account);
       }
+      return true;
     } catch (err) {
       log?.warn("model account read failed", {
         provider,
         error: err instanceof Error ? err.message : String(err),
       });
+      return false;
     }
   };
 
-  const refreshProvider = (provider: ProviderId, account: ModelAccount): Promise<void> => {
+  const refreshProvider = (provider: ProviderId, account: ModelAccount): Promise<boolean> => {
     const existing = inFlight.get(provider);
     if (existing) return existing;
-    const pending = readAccount(provider, account).finally(() => {
+    const pending = readAccount(provider, account).then((succeeded) => {
       if (inFlight.get(provider) === pending) inFlight.delete(provider);
-      if (closed) return;
-      emit(provider, "refreshed");
+      if (closed) return succeeded;
+      emit(provider, "refreshed", succeeded);
       if (rereadAfter.delete(provider)) void refreshProvider(provider, account);
+      return succeeded;
     });
     inFlight.set(provider, pending);
     return pending;
   };
 
-  const refresh = async (provider?: ProviderId): Promise<void> => {
+  const refresh = async (provider?: ProviderId): Promise<boolean> => {
     const targets = provider ? accounts.filter(([id]) => id === provider) : accounts;
-    await Promise.all(targets.map(([id, account]) => refreshProvider(id, account)));
+    const reads = await Promise.all(targets.map(([id, account]) => refreshProvider(id, account)));
+    return reads.every(Boolean);
   };
 
   // A read in flight may have asked the account before it changed, so its

@@ -100,6 +100,57 @@ describe("createModelAccounts", () => {
     accounts.close();
   });
 
+  it("says whether the read worked: false when it failed, true when it did", async () => {
+    const codex = fakeAccount(available);
+    const claude = fakeAccount(available);
+    const accounts = createModelAccounts({
+      accounts: { openai: codex.account, anthropic: claude.account },
+      startRefresh: false,
+      refreshIntervalMs: null,
+      now: () => readAt,
+    });
+    const reads: Array<[string, string, boolean | undefined]> = [];
+    accounts.onChanged((provider, change, succeeded) => reads.push([provider, change, succeeded]));
+
+    expect(await accounts.refresh("openai")).toBe(true);
+    (codex.account.report as ReturnType<typeof rs.fn>).mockRejectedValueOnce(new Error("down"));
+    expect(await accounts.refresh("openai")).toBe(false);
+    // The failed read kept the last answer, and still told the listeners it settled.
+    expect(accounts.read().openai).toBe(available);
+    expect(reads).toEqual([
+      ["openai", "refreshed", true],
+      ["openai", "refreshed", false],
+    ]);
+
+    // Every provider read must have worked.
+    (claude.account.report as ReturnType<typeof rs.fn>).mockRejectedValueOnce(new Error("down"));
+    expect(await accounts.refresh()).toBe(false);
+    expect(await accounts.refresh()).toBe(true);
+    accounts.close();
+  });
+
+  it("gives a refresh that joins a read in flight that read's result", async () => {
+    const codex = fakeAccount(available);
+    const accounts = createModelAccounts({
+      accounts: { openai: codex.account },
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    let fail!: (error: Error) => void;
+    (codex.account.report as ReturnType<typeof rs.fn>).mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    const first = accounts.refresh("openai");
+    const second = accounts.refresh("openai");
+    fail(new Error("down"));
+    expect(await Promise.all([first, second])).toEqual([false, false]);
+    expect(codex.reads()).toBe(1);
+    accounts.close();
+  });
+
   it("tells listeners when the authorized state flips and after every read", async () => {
     const codex = fakeAccount(available);
     const accounts = createModelAccounts({
