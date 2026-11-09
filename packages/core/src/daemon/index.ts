@@ -24,7 +24,7 @@ const log = createLogger("daemon");
 // Bound on `shutdownTelemetry()` so a degraded OTLP collector (e.g. `rome-obs`
 // restarting) doesn't hold the daemon open past its BatchLogRecordProcessor
 // flush timeout during shutdown. Mirrors the worker's bound in
-// `actions/worker.ts`.
+// `apps/actions/worker.ts`.
 const SHUTDOWN_FLUSH_TIMEOUT_MS = 5_000;
 // Short enough that Rome's first healthy answer is seen within a fraction of a
 // second: the hosted claim waits on this daemon's readiness.

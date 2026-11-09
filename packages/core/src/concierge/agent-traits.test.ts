@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { join } from "node:path";
-import { AgentLoader } from "../agent/index.js";
+import { AgentLoader } from "../apps/agent-loader.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { ROME_AGENT_TRAITS } from "./agent-traits.js";
 

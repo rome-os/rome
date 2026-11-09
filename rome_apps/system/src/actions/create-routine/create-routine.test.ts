@@ -2,11 +2,11 @@ import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import type { ActionConfig } from "@rome-os/app-runtime";
 import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/db.js";
 import { RoutinesRepository } from "../../../../../packages/core/src/db/repositories/routines.js";
-import { ActionRegistryImpl } from "../../../../../packages/core/src/actions/registry.js";
+import { ActionRegistryImpl } from "../../../../../packages/core/src/apps/actions/registry.js";
 // Importing the store also registers the current-action-context resolver
 // (module side effect), so `getCurrentActionContext()` inside create_routine
 // reads whatever store we wrap the call in.
-import { actionExecutionContext } from "../../../../../packages/core/src/actions/context.js";
+import { actionExecutionContext } from "../../../../../packages/core/src/apps/actions/context.js";
 import type { RoutineEngine } from "../../../../../packages/core/src/routines/engine.js";
 import type { Routine, Trigger } from "../../../../../packages/core/src/routines/types.js";
 import { resolveOneOffDate as resolveInZone } from "../../../../../packages/core/src/routines/schedule-trigger-provider.js";

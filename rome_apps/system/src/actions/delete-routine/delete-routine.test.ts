@@ -8,7 +8,7 @@ import {
 import { RoutineRunsRepository } from "../../../../../packages/core/src/db/repositories/routine-runs.js";
 // Importing the store also registers the current-action-context resolver, so
 // `getCurrentActionContext()` in delete_routine reads whatever store we wrap in.
-import { actionExecutionContext } from "../../../../../packages/core/src/actions/context.js";
+import { actionExecutionContext } from "../../../../../packages/core/src/apps/actions/context.js";
 import { RoutineEngine } from "../../../../../packages/core/src/routines/engine.js";
 import { ScheduleTriggerProvider } from "../../../../../packages/core/src/routines/schedule-trigger-provider.js";
 import type {

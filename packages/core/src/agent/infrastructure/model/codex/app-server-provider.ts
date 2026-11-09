@@ -111,7 +111,7 @@ import {
 import {
   compileOutputSchema,
   formatOutputSchemaErrors,
-} from "../../../../apps/packaging/output-schema-validator.js";
+} from "../../../../lib/output-schema-validator.js";
 
 const log = createLogger("codex-app-server-provider");
 

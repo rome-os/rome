@@ -39,7 +39,7 @@ import { PeopleRepository } from "../../db/repositories/people.js";
 import { createTestDb } from "../../test/db.js";
 import type { ApiDeps } from "../deps.js";
 import { setupsRoutes } from "./setups.js";
-import { ApprovalsRepository } from "../../db/repositories/approvals.js";
+import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
 import { connectionsRoutes } from "./connections.js";
 
 const SAME_ORIGIN = { "content-type": "application/json", "sec-fetch-site": "same-origin" };

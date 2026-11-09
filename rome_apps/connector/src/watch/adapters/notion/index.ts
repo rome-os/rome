@@ -35,13 +35,13 @@ export const NOTION_WATCHABLE: Watchable = {
   kinds: [
     {
       kind: "comment_or_mention",
-      label: "Comments that mention or reply to me",
+      label: "Comments, mentions and replies on pages",
       default: true,
       triggers: [fromComposio(NOTION_COMMENT_CREATED)],
     },
     {
       kind: "page_changed",
-      label: "Changes to my pages",
+      label: "Page changes",
       default: true,
       triggers: [
         fromComposio(NOTION_PAGE_CONTENT_UPDATED),

@@ -5,8 +5,8 @@ import { routinesRoutes } from "./routines.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
 import { RoutineRunsRepository } from "../../db/repositories/routine-runs.js";
 import { actionExecutions, routineRuns, routines } from "../../db/schema.js";
-import { ActionEngine } from "../../actions/engine.js";
-import { ActionRegistryImpl } from "../../actions/registry.js";
+import { ActionEngine } from "../../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import { RoutineEngine } from "../../routines/engine.js";
 import { EventBusTriggerProvider } from "../../routines/event-bus-trigger-provider.js";
 // The real `manual` trigger provider (distinct from the local schedule double
@@ -15,7 +15,7 @@ import { EventBusTriggerProvider } from "../../routines/event-bus-trigger-provid
 import { ManualTriggerProvider as RealManualTriggerProvider } from "../../routines/manual-trigger-provider.js";
 import { EventBus } from "../../events/event-bus.js";
 import type { TriggerProvider } from "../../routines/trigger-provider.js";
-import type { Action } from "../../actions/types.js";
+import type { Action } from "../../apps/actions/types.js";
 import type { ApiDeps } from "../deps.js";
 import type { Routine, Trigger } from "../../routines/types.js";
 import { FakeClock } from "../../test/kit/index.js";

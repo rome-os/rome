@@ -12,9 +12,9 @@ import type {
   AppConnectionsCapability,
 } from "@rome-os/app-runtime";
 import { AppConnectionError } from "@rome-os/app-runtime";
-import type { ActionEngine, ActionRunContext } from "../actions/engine.js";
-import type { ActionRegistryImpl } from "../actions/registry.js";
-import { actionExecutionContext } from "../actions/context.js";
+import type { ActionEngine, ActionRunContext } from "../apps/actions/engine.js";
+import type { ActionRegistryImpl } from "../apps/actions/registry.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
 import type { CatalogEvent } from "../apps/state.js";
 import type {
   AppConnectionAccessRecord,

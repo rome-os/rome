@@ -1,8 +1,8 @@
 import { describe, it, expect, rs } from "@rstest/core";
 import type { ActionResult } from "@rome-os/app-runtime";
 import { createSummonAction } from "./index.js";
-import { actionExecutionContext } from "../../../../../packages/core/src/actions/context.js";
-import { emitAgentMessage } from "../../../../../packages/core/src/actions/runtime-events.js";
+import { actionExecutionContext } from "../../../../../packages/core/src/apps/actions/context.js";
+import { emitAgentMessage } from "../../../../../packages/core/src/apps/actions/runtime-events.js";
 import type { AgentMessage } from "../../../../../packages/core/src/types.js";
 import type { AgentRunner } from "../../../../../packages/core/src/core/agent-runner.js";
 

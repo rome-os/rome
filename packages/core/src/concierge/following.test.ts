@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ConciergeWatchCapability } from "@rome/api-types/concierge";
-import type { Action } from "../actions/types.js";
+import type { Action } from "../apps/actions/types.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import { ConciergeFollowItemsRepository } from "../db/repositories/concierge-follow-items.js";
 import { createTestDb } from "../test/db.js";
@@ -100,19 +100,19 @@ const sources = (
       kinds: [
         {
           kind: "review_requested",
-          label: "Review requested of you",
+          label: "Review requests",
           default: true,
           triggers: [repoTrigger("pull_request")],
         },
         {
           kind: "your_pr_closed",
-          label: "Your PRs merged or closed",
+          label: "Pull requests merged or closed",
           default: true,
           triggers: [repoTrigger("pull_request")],
         },
         {
           kind: "your_ci_failed",
-          label: "Your CI runs that failed",
+          label: "Failed CI runs",
           default: true,
           triggers: [repoTrigger("workflow_run")],
         },
@@ -186,6 +186,8 @@ function setup(
     second?: ProviderSources;
     /** Triage's decision per event id; important when not named. */
     triage?: Record<string, "important" | "digest" | "ignore">;
+    triageLine?: string;
+    catalog?: ProviderSources;
   } = {},
 ) {
   /** The Concierge chats that exist and are not archived; "calendar" is a topic chat. */
@@ -229,7 +231,7 @@ function setup(
               id,
               decision: options.triage?.[id] ?? "important",
               reason: "because",
-              line: `line for ${id}`,
+              line: options.triageLine ?? `line for ${id}`,
             })),
           }),
         } as never;
@@ -299,7 +301,10 @@ function setup(
       const name = qualified.replace("connector:", "");
       calls.push([name, args]);
       if (name === "connector_watch_sources") {
-        return { status: "ok", data: sources(options.gmailStatus, options.gmailUndelivered) };
+        return {
+          status: "ok",
+          data: options.catalog ?? sources(options.gmailStatus, options.gmailUndelivered),
+        };
       }
       if (name === "connector_watch_ensure") {
         return options.refuse && args.source === "github"
@@ -313,6 +318,7 @@ function setup(
           kind?: string;
           actor?: string;
           byYou?: boolean;
+          addressedTo?: "direct" | "copy" | "other";
           failOnce?: boolean;
         };
         // A read the connector needed fails the first time it is tried.
@@ -333,7 +339,7 @@ function setup(
                   subject: "Fix it",
                   url: `https://github.com/acme/widgets/pull/${payload.id ?? "7"}`,
                   byYou: payload.byYou ?? false,
-                  addressedTo: "direct",
+                  addressedTo: payload.addressedTo ?? "direct",
                   labels: ["pull-request", "review-requested", "Bad Label!"],
                 },
               },
@@ -449,7 +455,7 @@ describe("following_list", () => {
     // The raw events behind each kind stay between core and the connector.
     expect(watchIn(list, "github")?.kinds?.[0]).toEqual({
       kind: "review_requested",
-      label: "Review requested of you",
+      label: "Review requests",
       default: true,
     });
     expect(watchIn(list, "github")?.follows).toEqual([
@@ -822,7 +828,12 @@ describe("the follow pipeline", () => {
   const fire = (
     s: ReturnType<typeof setup>,
     id: string,
-    more: { kind?: string; actor?: string; byYou?: boolean } = {},
+    more: {
+      kind?: string;
+      actor?: string;
+      byYou?: boolean;
+      addressedTo?: "direct" | "copy" | "other";
+    } = {},
   ) =>
     s.action("core:concierge_follow_event").execute(
       {
@@ -944,6 +955,100 @@ describe("the follow pipeline", () => {
     expect(prompt).toContain('"addressedTo": "direct"');
     expect(prompt).toContain('"review-requested"');
     expect(prompt).not.toContain("Bad Label");
+    s.stop();
+  });
+
+  it("gives triage catalog kind labels, but keeps ids in follows and kept items", async () => {
+    rs.useFakeTimers();
+    const catalog = sources();
+    const github = catalog.watch[0]!;
+    catalog.watch.unshift({
+      ...github,
+      service: "another-source",
+      kinds: [{ ...github.kinds[1]!, label: "A different source's label" }],
+    });
+    const s = setup({ catalog, triageLine: "" });
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    const stored = structuredClone(s.settings.get("conciergeFollowing"));
+    expect(await fire(s, "closed", { kind: "your_pr_closed", addressedTo: "other" })).toEqual({
+      status: "ok",
+      data: { queued: "your_pr_closed" },
+    });
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    const prompt = s.prompts[0]!;
+    const context = JSON.parse(prompt.split("\n\n")[2]!);
+    expect(context.follows[0].kinds).toEqual([
+      "Review requests",
+      "Pull requests merged or closed",
+      "Failed CI runs",
+    ]);
+    expect(prompt).toContain('"kind": "Pull requests merged or closed"');
+    expect(prompt).toContain('"addressedTo": "other"');
+    expect(prompt).toContain('"byYou": false');
+    expect(prompt).toContain('"What to hear about: Only what concerns me"');
+    expect(prompt).not.toContain("your_pr_closed");
+    expect(prompt).not.toContain("your");
+    expect(prompt).not.toContain("A different source's label");
+    expect(s.settings.get("conciergeFollowing")).toEqual(stored);
+    expect(await s.items.owedToDigest()).toMatchObject([
+      { kind: "your_pr_closed", line: "Pull requests merged or closed: Fix it" },
+    ]);
+    expect(s.turns[0]).toContain("Pull requests merged or closed: Fix it");
+    expect(s.turns[0]).toContain('kind="Pull requests merged or closed"');
+    expect(s.turns[0]).not.toContain("your_pr_closed");
+    await s.action("core:concierge_digest").execute({}, {} as never);
+    expect(s.turns.at(-1)).toContain('kind="Pull requests merged or closed"');
+    expect(s.turns.at(-1)).not.toContain("your_pr_closed");
+    s.stop();
+  });
+
+  it("renders catalog labels in digest overflow while keeping stored kind ids", async () => {
+    rs.useFakeTimers();
+    const ids = Array.from({ length: 41 }, (_, i) => `closed-${i}`);
+    const s = setup({ triage: Object.fromEntries(ids.map((id) => [id, "digest" as const])) });
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    for (const id of ids) await fire(s, id, { kind: "your_pr_closed", addressedTo: "other" });
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    const owed = await s.items.owedToDigest();
+    expect(owed).toHaveLength(41);
+    expect(owed.every((row) => row.kind === "your_pr_closed")).toBe(true);
+    await s.action("core:concierge_digest").execute({}, {} as never);
+    expect(s.turns.at(-1)).toContain(
+      '<more source="github" kind="Pull requests merged or closed" count="36"/>',
+    );
+    expect(s.turns.at(-1)).not.toContain("your_pr_closed");
+    s.stop();
+  });
+
+  it.each([
+    "missing kind",
+    "missing label",
+    "missing source",
+  ])("falls back to kind ids for triage and its lines with a %s", async (missing) => {
+    rs.useFakeTimers();
+    const catalog = sources();
+    const s = setup({ catalog, triageLine: "" });
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    await fire(s, "closed", { kind: "your_pr_closed", addressedTo: "other" });
+    const github = catalog.watch[0]!;
+    if (missing === "missing kind") {
+      github.kinds = github.kinds.filter((kind) => kind.kind !== "your_pr_closed");
+    } else if (missing === "missing label") {
+      Reflect.deleteProperty(github.kinds.find((kind) => kind.kind === "your_pr_closed")!, "label");
+    } else {
+      catalog.watch = [];
+    }
+    await rs.advanceTimersByTimeAsync(5 * 60_000);
+    const prompt = s.prompts[0]!;
+    const context = JSON.parse(prompt.split("\n\n")[2]!);
+    expect(context.follows[0].kinds).toContain("your_pr_closed");
+    expect(prompt).toContain('"kind": "your_pr_closed"');
+    expect(await s.items.owedToDigest()).toMatchObject([
+      { kind: "your_pr_closed", line: "your_pr_closed: Fix it" },
+    ]);
+    expect(s.turns[0]).toContain('kind="your_pr_closed"');
+    await s.action("core:concierge_digest").execute({}, {} as never);
+    expect(s.turns.at(-1)).toContain('kind="your_pr_closed"');
     s.stop();
   });
 

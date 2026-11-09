@@ -6,7 +6,7 @@
 import { canOpen } from "../concierge/privacy.js";
 import { readerOwner } from "../chats/dashboard/dashboard-account.js";
 import type { ChildProcess } from "node:child_process";
-import type { IpcCallContext, IpcRpc } from "../actions/ipc.js";
+import type { IpcCallContext, IpcRpc } from "../apps/actions/ipc.js";
 import { walkToRoot } from "../agent/index.js";
 import { parseSessionKey } from "./agent-session-key.js";
 import type {
@@ -39,7 +39,7 @@ import {
 import {
   type ActionWorkerCoordinator,
   registerActionSubprocessHost,
-} from "../actions/action-subprocess.js";
+} from "../apps/actions/action-subprocess.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { resolveProjectWorkingDirWithinRoot } from "../webchat/projects.js";
 import { runLines, type RunLineDeps } from "../connections/speaker-messages.js";

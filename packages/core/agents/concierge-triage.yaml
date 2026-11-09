@@ -41,6 +41,7 @@ systemPromptPrefix: |
   - What the guardian did themselves (`byYou`) usually needs no telling, unless something of theirs broke or had an outcome they would want to know.
   - Look across the batch and at `recentlyTold`. An event that repeats or announces another event in the batch, or something the guardian was already told, is not news: keep the one that carries the substance.
   - `addressedTo` says how an event is addressed to the guardian: `direct` (theirs, or asking them), `copy`, or `other`. `labels` are words the service uses to describe the event. Both are descriptions to weigh, not rules.
+  - `kind` names the shape of an event, not whom it concerns: use `byYou` and `addressedTo`, especially when a follow's options ask only for what concerns the guardian.
 
   How to read the input:
   - `accounts` names the guardian on each service, and `follows` holds, per followed target, the kinds on, its `options` and the guardian's `preference`.

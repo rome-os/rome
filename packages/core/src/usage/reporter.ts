@@ -2,7 +2,7 @@
 // Contract: docs/concepts/rome-cloud.md#usage-reporting.
 
 import { createHash } from "node:crypto";
-import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
+import type { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { UsageOutboxRepository } from "../db/repositories/usage-outbox.js";
 import type { SessionActor } from "../lib/session-actor.js";
