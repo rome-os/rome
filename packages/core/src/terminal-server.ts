@@ -3,7 +3,7 @@ import type { Duplex } from "node:stream";
 import { WebSocketServer, WebSocket } from "ws";
 import * as pty from "node-pty";
 import type { DrizzleDb } from "./db/index.js";
-import { gateGuardianUpgrade } from "./lib/ws-guardian-gate.js";
+import { gateGuardianUpgrade } from "./access/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
 import { ClaudeLoginCodeValidationError, formatClaudeLoginCodeInput } from "./agent/index.js";

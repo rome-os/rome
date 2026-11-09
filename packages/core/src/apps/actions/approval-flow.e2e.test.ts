@@ -25,7 +25,7 @@ import {
   createMockAgentRunner,
 } from "../../test/helpers.js";
 import { buildApp } from "../../api/index.js";
-import { COOKIE_NAME, createSession } from "../../lib/auth.js";
+import { COOKIE_NAME, createSession } from "../../access/auth.js";
 import type { Action, ActionConfig, ActionResult } from "./types.js";
 import type { ChatId } from "@rome-os/app-runtime";
 import type { OutgoingMessage } from "../../types.js";

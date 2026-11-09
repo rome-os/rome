@@ -6,8 +6,8 @@ import { createLogger } from "../logger.js";
 import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "./auth.js";
 import type { DashboardAccessState } from "./dashboard-access-state.js";
 import { resolveGuardianSessionFromMaterial } from "./guardian-session.js";
-import { isSameOriginMutationRequest } from "./mutation-origin.js";
-import { readCookie, rejectUpgrade, toOriginRequest } from "./ws-upgrade.js";
+import { isSameOriginMutationRequest } from "../lib/mutation-origin.js";
+import { readCookie, rejectUpgrade, toOriginRequest } from "../lib/ws-upgrade.js";
 
 const log = createLogger("ws-guardian-gate");
 

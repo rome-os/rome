@@ -86,7 +86,7 @@ import {
   currentSessionActor,
   sessionOwnerKey,
   type SessionActor,
-} from "../../lib/session-actor.js";
+} from "../../access/session-actor.js";
 import type { DashboardInbox } from "../../connections/send.js";
 import {
   resolveChatSenders,

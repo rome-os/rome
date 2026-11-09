@@ -42,19 +42,19 @@ rs.mock("../../connections/integrations/github-shell-integration.js", () => ({
   syncGithubShellIntegrationForProvider,
   clearGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
 }));
-rs.mock("../../lib/guardian-auth-state.js", () => ({
+rs.mock("../../access/guardian-auth-state.js", () => ({
   getGuardianAuthState: rs.fn(async () => ({
     exists: true,
     userId: "guardian-1",
     onboardingComplete: true,
   })),
 }));
-rs.mock("../../lib/auth.js", () => ({
+rs.mock("../../access/auth.js", () => ({
   COOKIE_NAME: "rome_session",
   verifySession: rs.fn(() => null),
   issueGuardianSession: rs.fn(),
 }));
-rs.mock("../../lib/guardian-session.js", () => ({ resolveGuardianSession }));
+rs.mock("../../access/guardian-session.js", () => ({ resolveGuardianSession }));
 rs.mock("../../connections/oauth/oauth-providers.js", () => ({
   OAUTH_PROVIDERS: ["google", "github", "slack"],
   getEnabledOAuthProviders: () => ["github", "slack"],
@@ -71,7 +71,7 @@ import { DrizzleConnectionsRepository } from "../../connections/repository-db.js
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";
 import type { ApiDeps } from "../deps.js";
-import { verifySession } from "../../lib/auth.js";
+import { verifySession } from "../../access/auth.js";
 import { oauthRoutes } from "./oauth.js";
 
 // A fresh drizzle-backed connections repository per test;

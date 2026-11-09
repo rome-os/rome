@@ -4,7 +4,7 @@ import { getConnInfo } from "@hono/node-server/conninfo";
 import { guardianAuth } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
 import { COOKIE_NAME, verifySession } from "./auth.js";
-import { isLoopbackAddress } from "./trusted-loopback.js";
+import { isLoopbackAddress } from "../lib/trusted-loopback.js";
 
 export interface GuardianSession {
   userId: string;

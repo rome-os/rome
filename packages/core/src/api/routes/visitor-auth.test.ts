@@ -2,12 +2,12 @@ import { createHash } from "node:crypto";
 import { afterAll, afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { Hono } from "hono";
 import { approvalsRoutes } from "./approvals.js";
-import { sessionActorMiddleware } from "../../lib/session-actor.js";
+import { sessionActorMiddleware } from "../../access/session-actor.js";
 import { visitorAuthRoutes, type VisitorAuthSeams } from "./visitor-auth.js";
-import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
-import { VISITOR_COOKIE_NAME, verifyVisitorSession } from "../../lib/auth.js";
-import { DashboardAccessState } from "../../lib/dashboard-access-state.js";
-import { PublicAccessState } from "../../lib/public-access-state.js";
+import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
+import { VISITOR_COOKIE_NAME, verifyVisitorSession } from "../../access/auth.js";
+import { DashboardAccessState } from "../../access/dashboard-access-state.js";
+import { PublicAccessState } from "../../access/public-access-state.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 
 const testDb = createTestDb();

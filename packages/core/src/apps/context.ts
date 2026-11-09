@@ -26,7 +26,7 @@ import { createAppLogger, type Logger } from "../logger.js";
 import type { AppCatalog } from "./catalog.js";
 import type { ResolvedApp } from "./state.js";
 import type { AgentRunnerInterface } from "../core/types.js";
-import type { RomeAppViewer } from "../lib/visitor-session.js";
+import type { RomeAppViewer } from "../access/visitor-session.js";
 import type { FavorService } from "../favors/index.js";
 import {
   DeniedAppConnections,

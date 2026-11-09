@@ -1,5 +1,5 @@
 import { Hono } from "hono";
-import { getGuardianAuthState } from "../../lib/guardian-auth-state.js";
+import { getGuardianAuthState } from "../../access/guardian-auth-state.js";
 import {
   type AdoptedSlug,
   applyInstanceSlug,

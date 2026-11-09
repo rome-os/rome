@@ -13,7 +13,7 @@ import {
 import { NODE_CONSOLE_PATH } from "@rome/api-types/node-console";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import type { DrizzleDb } from "../db/index.js";
-import { gateGuardianUpgrade } from "../lib/ws-guardian-gate.js";
+import { gateGuardianUpgrade } from "../access/ws-guardian-gate.js";
 import { rejectUpgrade } from "../lib/ws-upgrade.js";
 import { createLogger } from "../logger.js";
 

@@ -22,7 +22,7 @@ import { SettingsRepository } from "../../db/repositories/settings.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { eq } from "drizzle-orm";
 import { romeSessions } from "../../db/schema.js";
-import { runWithSessionActor } from "../../lib/session-actor.js";
+import { runWithSessionActor } from "../../access/session-actor.js";
 import { readArchivePaths } from "../../test/file-browser.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 

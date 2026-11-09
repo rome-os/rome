@@ -4,7 +4,7 @@ import { isResolvedApp } from "../../apps/state.js";
 import { appAccessibleOperations } from "../../connections/app-connections.js";
 import type { ApiDeps } from "../deps.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { currentSessionActor } from "../../lib/session-actor.js";
+import { currentSessionActor } from "../../access/session-actor.js";
 
 const ConstraintSchema = z
   .object({

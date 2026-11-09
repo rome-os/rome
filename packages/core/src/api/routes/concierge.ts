@@ -8,7 +8,7 @@ import {
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
-import { currentSessionActor, sessionOwnerKey } from "../../lib/session-actor.js";
+import { currentSessionActor, sessionOwnerKey } from "../../access/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 
 /** The most unread messages the Concierge entry counts; the badge reads 99+ at this. */

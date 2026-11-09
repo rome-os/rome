@@ -14,8 +14,8 @@ import { CONCIERGE_AGENT_ID, canOpenChat } from "./concierge/service.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { guardianAuth } from "./db/schema.js";
-import { createSession, createVisitorSession } from "./lib/auth.js";
-import { DashboardAccessState } from "./lib/dashboard-access-state.js";
+import { createSession, createVisitorSession } from "./access/auth.js";
+import { DashboardAccessState } from "./access/dashboard-access-state.js";
 import { PhoneWatching } from "./lib/phone-watching.js";
 import {
   attachLiveEventsServer,
