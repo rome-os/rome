@@ -13,6 +13,27 @@ import type { AgentInputState } from "@rome-os/app-runtime";
  */
 export type InputPriority = "now" | "next";
 
+/**
+ * What a submit asks for. `after` starts a turn of its own that waits behind
+ * the running turn. It is never steered into and supersedes nothing, and it is
+ * not one of the queue's inputs. Like any running turn, a `now` input
+ * supersedes it.
+ */
+export type SubmitPriority = InputPriority | "after";
+
+/** Where a submitted input landed: in a turn it started, queued for a later turn, or steered into the running turn. */
+export type Landing = "started" | "queued" | "steered";
+
+/** Whether an input goes through the input queue: every priority but `after`. */
+export function isQueueInput(priority: SubmitPriority): priority is InputPriority {
+  return priority !== "after";
+}
+
+/** An `after` input lands queued behind a running turn, and starts its turn when none runs. */
+export function afterLanding(turnRunning: boolean): Landing {
+  return turnRunning ? "queued" : "started";
+}
+
 /** The interrupt reason a `now` input ends the running turn with. */
 export const SUPERSEDED_INTERRUPT_REASON = "superseded";
 
@@ -43,7 +64,7 @@ export interface InputTurn<T> {
 
 /** What happens to an input when it is submitted. */
 export interface Arrival {
-  disposition: "started" | "queued" | "steering";
+  landing: Landing;
   /** The running turn is to be stopped, because a `now` input supersedes it. */
   supersede: boolean;
 }
@@ -54,9 +75,9 @@ export interface Arrival {
  * ready and not sealed, and waits otherwise.
  */
 export function arrive<T>(turn: InputTurn<T> | undefined, priority: InputPriority): Arrival {
-  if (!turn) return { disposition: "started", supersede: false };
-  if (priority === "now") return { disposition: "queued", supersede: !turn.superseded };
-  return { disposition: turn.ready && !turn.sealed ? "steering" : "queued", supersede: false };
+  if (!turn) return { landing: "started", supersede: false };
+  if (priority === "now") return { landing: "queued", supersede: !turn.superseded };
+  return { landing: turn.ready && !turn.sealed ? "steered" : "queued", supersede: false };
 }
 
 /**

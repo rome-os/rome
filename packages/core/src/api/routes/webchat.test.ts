@@ -1,5 +1,5 @@
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
-import { testTurnHandle } from "../../test/turn-handle.js";
+import { testReceipt, testTurnHandle } from "../../test/turn-handle.js";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -14,11 +14,7 @@ import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
 import { Session } from "../../agent/index.js";
-import {
-  AgentInputQueue,
-  type AgentInputReceipt,
-  type SubmitInputOptions,
-} from "../../agent/index.js";
+import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
 import { runWithSessionActor } from "../../lib/session-actor.js";
 import { webchatChannel, webchatCaller } from "../../chats/dashboard/dashboard-account.js";
 import {
@@ -650,8 +646,11 @@ describe("Webchat API", () => {
       sessionId: "agent-session",
       status: "running",
       currentTurnId: "input-turn",
-      sendTurn: start,
-      submitInput: (input, options) => queue.submit(input, options),
+      submit: (input, { priority, ...options } = {}) => {
+        if (!input.inputId || priority === "after")
+          throw new Error("a chat sends only queue inputs");
+        return queue.submit({ ...input, inputId: input.inputId }, { ...options, priority });
+      },
       fork: () => {
         throw new Error("not forked");
       },
@@ -730,12 +729,12 @@ describe("Webchat API", () => {
     let sequence = 0;
     const interrupt = rs.fn(async () => {});
     const stops = new Map<string, ReturnType<typeof rs.fn>>();
-    const agent = withSubmitInput({
+    const agent = withSubmit({
       key: { agentName: "main", channelThreadKey: "webchat:test" },
       sessionId: "agent-session",
       status: "running",
       currentTurnId: "stop-1",
-      sendTurn: () => {
+      startTurn: () => {
         const turnId = `stop-${++sequence}`;
         const terminal = new Promise<void>((resolve) => {
           finishers.push(resolve);
@@ -797,12 +796,12 @@ describe("Webchat API", () => {
     const finishers: (() => void)[] = [];
     const interrupt = rs.fn(async () => {});
     const stopTurn = rs.fn(async () => {});
-    const agent = withSubmitInput({
+    const agent = withSubmit({
       key: { agentName: "main", channelThreadKey: "webchat:test" },
       sessionId: "agent-session",
       status: "running",
       currentTurnId: "task-1",
-      sendTurn: () => {
+      startTurn: () => {
         const terminal = new Promise<void>((resolve) => {
           finishers.push(resolve);
         });
@@ -2035,7 +2034,7 @@ describe("Webchat API", () => {
             key: { agentName: "main", channelThreadKey: "webchat:test" },
             sessionId: "agent-session",
             status: "idle",
-            sendTurn() {
+            startTurn() {
               return testTurnHandle({
                 turnId: "turn-inbound-log",
                 events: (async function* () {
@@ -2457,7 +2456,7 @@ describe("Webchat API", () => {
         key: { agentName: "main", channelThreadKey: "webchat:test" },
         sessionId: "agent-session",
         status: "idle",
-        sendTurn(input: AgentTurnInput, options?: SendTurnOptions) {
+        startTurn(input: AgentTurnInput, options?: SendTurnOptions) {
           sentTurn = input;
           sentOptions = options;
           return testTurnHandle({
@@ -2530,7 +2529,7 @@ describe("Webchat API", () => {
           key: { agentName: "main", channelThreadKey: "webchat:test" },
           sessionId: "agent-session",
           status: "idle",
-          sendTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
+          startTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
             sentOptions = options;
             return testTurnHandle({
               turnId: "turn-1",
@@ -2989,7 +2988,7 @@ describe("Webchat API", () => {
         key: { agentName: key.agentName, channelThreadKey: "webchat:stream" },
         sessionId: "agent-session",
         status: "idle",
-        sendTurn() {
+        startTurn() {
           return testTurnHandle({
             turnId: "turn-stream-1",
             events: script(),
@@ -3204,8 +3203,8 @@ describe("Webchat API", () => {
         key: { agentName: key.agentName, channelThreadKey: "webchat:priority" },
         sessionId: "agent-session",
         status: "idle",
-        sendTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
-          priorities.push((options as SubmitInputOptions | undefined)?.priority);
+        startTurn(_input: AgentTurnInput, options?: SendTurnOptions) {
+          priorities.push((options as SubmitOptions | undefined)?.priority);
           return testTurnHandle({
             turnId: `turn-priority-${priorities.length}`,
             events: (async function* () {
@@ -3687,7 +3686,7 @@ describe("Webchat API", () => {
         key: { agentName: "main", channelThreadKey: "webchat:cancel" },
         sessionId: "runtime",
         status: "running",
-        sendTurn: () =>
+        startTurn: () =>
           testTurnHandle({
             turnId: "cancel-turn",
             interrupt,
@@ -3803,7 +3802,7 @@ describe("Webchat API", () => {
         key: { agentName: "main", channelThreadKey: "webchat:test" },
         sessionId: "agent-session",
         status: "idle",
-        sendTurn(input: AgentTurnInput) {
+        startTurn(input: AgentTurnInput) {
           sentTurn = input;
           return testTurnHandle({
             turnId: "turn-1",
@@ -3886,7 +3885,7 @@ describe("Webchat API", () => {
         key: { agentName: "main", channelThreadKey: "webchat:test" },
         sessionId: "agent-session",
         status: "idle",
-        sendTurn(input: AgentTurnInput) {
+        startTurn(input: AgentTurnInput) {
           sentTurn = input;
           return testTurnHandle({
             turnId: "turn-1",
@@ -3971,7 +3970,7 @@ describe("Webchat API", () => {
       key: { agentName, channelThreadKey: "webchat:concierge-skills" },
       sessionId: "agent-session",
       status: "idle",
-      sendTurn(input: AgentTurnInput) {
+      startTurn(input: AgentTurnInput) {
         turns.push(input);
         return testTurnHandle({
           turnId: `turn-${turns.length}`,
@@ -4045,7 +4044,7 @@ describe("Webchat API", () => {
       key: { agentName: "main", channelThreadKey: "webchat:task-skills" },
       sessionId: "agent-session",
       status: "idle",
-      sendTurn(input: AgentTurnInput) {
+      startTurn(input: AgentTurnInput) {
         turn = input;
         return testTurnHandle({
           turnId: "task-skill-turn",
@@ -4111,7 +4110,7 @@ describe("Webchat API", () => {
           key: { agentName: key.agentName, channelThreadKey: "webchat:suspend" },
           sessionId: "agent-session",
           status: "idle",
-          sendTurn(input: AgentTurnInput) {
+          startTurn(input: AgentTurnInput) {
             sentTurns.push(input);
             return testTurnHandle({
               turnId: `turn-${sentTurns.length}`,
@@ -5923,7 +5922,7 @@ describe("Webchat API", () => {
           key: { agentName: "main", channelThreadKey: "webchat:branch-fork-session" },
           sessionId: "fork-agent-session",
           status: "idle",
-          sendTurn() {
+          startTurn() {
             return testTurnHandle({
               turnId: "follow-up-turn",
               events: (async function* () {
@@ -6033,7 +6032,7 @@ describe("Webchat API", () => {
           key: { agentName: "main", channelThreadKey: `webchat:${PROMOTED_ID}` },
           sessionId: "fork-agent-session",
           status: "idle",
-          sendTurn() {
+          startTurn() {
             return testTurnHandle({
               turnId: "follow-up-turn",
               events: (async function* () {
@@ -6083,7 +6082,7 @@ describe("Webchat API", () => {
           key: { agentName: "main", channelThreadKey: `webchat:${PROMOTED_ID}` },
           sessionId: "fork-agent-session",
           status: "idle",
-          sendTurn() {
+          startTurn() {
             return testTurnHandle({
               turnId: "follow-up-turn",
               events: (async function* () {
@@ -6953,7 +6952,7 @@ describe("Webchat API", () => {
         key: { agentName: "main", channelThreadKey: "webchat:test" },
         sessionId: "agent-session",
         status: "idle",
-        sendTurn(_input: AgentTurnInput, options?: { pushLevel?: string }) {
+        startTurn(_input: AgentTurnInput, options?: { pushLevel?: string }) {
           levels.push(options?.pushLevel);
           return testTurnHandle({
             turnId: `turn-${levels.length}`,
@@ -6995,7 +6994,7 @@ describe("Webchat API", () => {
         key: { agentName: "main", channelThreadKey: "webchat:test" },
         sessionId: "agent-session",
         status: "idle",
-        sendTurn(_input: AgentTurnInput, options?: { pushLevel?: string }) {
+        startTurn(_input: AgentTurnInput, options?: { pushLevel?: string }) {
           levels.push(options?.pushLevel);
           return testTurnHandle({
             turnId: `turn-${levels.length}`,
@@ -7048,7 +7047,7 @@ describe("Webchat API", () => {
         key: { agentName: "main", channelThreadKey: "webchat:test" },
         sessionId: "agent-session",
         status: "idle",
-        sendTurn(input: AgentTurnInput) {
+        startTurn(input: AgentTurnInput) {
           prompts.push(input.prompt);
           return testTurnHandle({
             turnId: `turn-${prompts.length}`,
@@ -7587,10 +7586,13 @@ describe("Webchat API", () => {
   });
 });
 
-type FakeSession = Omit<AgentSession, "submitInput" | "fork" | "selectModel">;
+/** A fake session scripts only how it starts a turn; `withSubmit` gives it the rest. */
+type FakeSession = Omit<AgentSession, "submit" | "fork" | "selectModel"> & {
+  startTurn(input: AgentTurnInput, options?: SubmitOptions): AgentTurnHandle;
+};
 
 /**
- * A manager over fake sessions that script only `sendTurn`. Every submitted
+ * A manager over fake sessions that script only `startTurn`. Every submitted
  * input starts its own turn, so a second send while one runs is a separate
  * queued turn.
  */
@@ -7601,7 +7603,7 @@ function fakeSessionManager(
     open: rs.fn(
       async (continuityKey: AgentSessionKey | { id: string }, init?: AgentSessionInit) => {
         if ("id" in continuityKey) throw new Error("fake manager cannot resume by session id");
-        return withSubmitInput(await open(continuityKey, init));
+        return withSubmit(await open(continuityKey, init));
       },
     ) as Sessions["open"],
     find: () => undefined,
@@ -7611,22 +7613,20 @@ function fakeSessionManager(
   };
 }
 
-function withSubmitInput(fake: FakeSession): AgentSession {
+function withSubmit(fake: FakeSession): AgentSession {
   return Object.assign(fake, {
     selectModel: () => {},
-    submitInput: (
-      input: AgentTurnInput & { inputId: string },
-      options: SubmitInputOptions,
-    ): AgentInputReceipt => {
-      const handle = fake.sendTurn(input, options);
-      options.onTurn(handle);
-      void options.onInputStatus?.({
-        type: "input_status",
-        inputId: input.inputId,
-        turnId: handle.id,
-        state: "submitted",
-      });
-      return { inputId: input.inputId, turnId: handle.id, disposition: "started" };
+    submit: (input: AgentTurnInput, options: SubmitOptions = {}): AgentInputReceipt => {
+      const handle = fake.startTurn(input, options);
+      if (input.inputId) {
+        void options.onInputStatus?.({
+          type: "input_status",
+          inputId: input.inputId,
+          turnId: handle.id,
+          state: "submitted",
+        });
+      }
+      return testReceipt(handle, input.inputId);
     },
     fork: (): never => {
       throw new Error("fake session cannot fork");

@@ -23,9 +23,10 @@ function subagentSession(child: AgentSession): SubagentSession {
   return {
     id: child.sessionId,
     submit(prompt, parentTurn, context) {
-      const turn = child.sendTurn(
+      const { turnId, turn } = child.submit(
         { prompt },
         {
+          priority: "after",
           lifecycleParent: parentTurn,
           threadContext: context.threadContext,
           sharedContext: context.sharedContext,
@@ -34,7 +35,12 @@ function subagentSession(child: AgentSession): SubagentSession {
           initiatedBy: "system",
         },
       );
-      return { turnId: turn.id, events: turn.events() };
+      return {
+        turnId,
+        events: (async function* () {
+          yield* (await turn).events();
+        })(),
+      };
     },
     stop: (reason) => child.stop(reason),
   };

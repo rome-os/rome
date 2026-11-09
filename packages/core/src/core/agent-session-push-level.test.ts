@@ -27,6 +27,7 @@ import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { SkillLoader } from "../apps/skill-loader.js";
 import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { startAfter } from "../test/turn-handle.js";
 
 describe("AgentSession turn push level", () => {
   let directory: string;
@@ -127,7 +128,7 @@ describe("AgentSession turn push level", () => {
       { agentName: "worker", channelThreadKey: "webchat:worker" },
       { workingDir: directory },
     );
-    const handle = session.sendTurn({ prompt: "go" }, pushLevel ? { pushLevel } : {});
+    const handle = await startAfter(session, { prompt: "go" }, pushLevel ? { pushLevel } : {});
     let result: string | undefined;
     for await (const event of handle.events()) {
       if (event.type === "result") result = event.content;

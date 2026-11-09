@@ -180,7 +180,7 @@ export interface ActionRunContext {
   sessionId?: string;
   agentName?: string;
   channelThreadKey?: string;
-  /** Allocated by AgentSession.sendTurn; stamped on `action:*` spans so the
+  /** Allocated by the session when it starts the turn; stamped on `action:*` spans so the
    *  trace UI can group every action invocation that happened within one
    *  turn under the originating `agent:*`. */
   turnId?: string;

@@ -1,7 +1,7 @@
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { testChannelSurface } from "./channel-surface.js";
 /**
- * Direct `sendTurn` path (webchat-style, no channel adapter): the turn
+ * Direct `submit` path (webchat-style, no channel adapter): the turn
  * span is the trace root and post-turn work wrapped in `handle.turnContext`
  * parents under it. Complements `golden-trace.integration.test.ts`, which
  * covers the channel-adapter path.
@@ -16,6 +16,7 @@ import {
   makeSingleActionProvider,
   type GoldenTraceRig,
 } from "./golden-trace-harness.js";
+import { startAfter } from "./turn-handle.js";
 
 async function drainOneTurn(
   rig: GoldenTraceRig,
@@ -30,7 +31,8 @@ async function drainOneTurn(
     },
   );
 
-  const handle = session.sendTurn(
+  const handle = await startAfter(
+    session,
     { prompt: "hi" },
     opts?.linkFromSpanContext ? { links: [{ context: opts.linkFromSpanContext }] } : undefined,
   );
@@ -40,7 +42,7 @@ async function drainOneTurn(
   return { turnContext: handle.turnContext };
 }
 
-describe("turn-scoped tracing (direct sendTurn)", () => {
+describe("turn-scoped tracing (direct submit)", () => {
   let harness: SpanHarness;
   let rig: GoldenTraceRig;
 
@@ -74,7 +76,7 @@ describe("turn-scoped tracing (direct sendTurn)", () => {
     await harness.shutdown();
   });
 
-  it("turn span is the trace root when sendTurn has no enclosing context", async () => {
+  it("turn span is the trace root when submit has no enclosing context", async () => {
     await drainOneTurn(rig);
     const spans = await harness.finishedSpans();
 

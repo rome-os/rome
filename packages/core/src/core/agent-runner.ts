@@ -275,12 +275,13 @@ export class AgentRunner {
       ? await runLines(this.runLineDeps.lines, romeSessionId, params)
       : null;
 
-    // sendTurn is sync — turnId is allocated by AgentSession
-    // and surfaced on the stream's turn_start event.
+    // An action's turn waits behind the running one. Its id is allocated by
+    // AgentSession and surfaced on the stream's turn_start event.
     if (params.shouldRun && !params.shouldRun()) return;
-    const handle = session.sendTurn(
+    const handle = await session.submit(
       { prompt: params.prompt, images: params.images },
       {
+        priority: "after",
         threadContext,
         sharedContext: params.sharedContext,
         romeSessionId,
@@ -290,7 +291,7 @@ export class AgentRunner {
         initiatedBy: params.initiatedBy ?? "user",
         ...(params.pushLevel ? { pushLevel: params.pushLevel } : {}),
       },
-    );
+    ).turn;
     this.runLineDeps?.replies?.runs(handle.id, agentName);
     if (lines && this.runLineDeps) {
       if (conversation.promptPersisted && lines.prompt !== null) {

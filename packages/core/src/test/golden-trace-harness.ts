@@ -63,7 +63,7 @@ export interface GoldenTraceRig {
   actionEngine: ActionEngine;
   runner: AgentRunner;
   /** Direct Sessions handle — for tests that bypass the channel
-   * adapter path (e.g. the webchat-style direct `sendTurn` flow). */
+   * adapter path (e.g. the webchat-style direct `submit` flow). */
   manager: Sessions;
   /** Deliver one inbound message on `channel` through the real channel and
    *  instrumentation path, resolving once the rig's handler has finished

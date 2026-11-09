@@ -1,5 +1,5 @@
 import { ROOT_CONTEXT } from "@opentelemetry/api";
-import { testTurnHandle } from "../test/turn-handle.js";
+import { testReceipt, testTurnHandle } from "../test/turn-handle.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import { WebChatRepository } from "../db/repositories/webchat.js";
@@ -35,7 +35,7 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
     key: { agentName: "researcher", channelThreadKey: `subagent:${sessionId}` },
     sessionId,
     status: "idle",
-    sendTurn(input, options) {
+    submit(input, options) {
       const index = turnIndex++;
       const turnId = turnIds[index];
       calls.push({ input, options });
@@ -60,13 +60,14 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
           };
         },
       };
-      return testTurnHandle({
-        turnId,
-        events,
-        turnContext: ROOT_CONTEXT,
-      });
+      return testReceipt(
+        testTurnHandle({
+          turnId,
+          events,
+          turnContext: ROOT_CONTEXT,
+        }),
+      );
     },
-    submitInput: rs.fn(),
     fork: rs.fn(),
     subscribe: () => () => undefined,
     onStatusChange: () => () => undefined,

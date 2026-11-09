@@ -6,8 +6,9 @@ import {
   AgentInputQueue,
   type AgentInputReceipt,
   SUPERSEDED_INTERRUPT_REASON,
-  type SubmitInputOptions,
+  type SubmitOptions,
 } from "./agent-input-queue.js";
+import { afterLanding, isQueueInput } from "../domain/input-queue.js";
 import { v4 as uuidv4, v7 as uuidv7 } from "uuid";
 import {
   requireAgent,
@@ -245,16 +246,13 @@ export interface AgentSession {
   readonly status: AgentSessionStatus;
   readonly currentTurnId?: string;
   /**
-   * Synchronously allocate a turn and return its handle. The caller can read
-   * `turnId` immediately and start consuming `events` (which yields once the
-   * turn actually begins running turn-lock semantics).
+   * Submits an input, by default `next`. The receipt says where it landed and
+   * resolves with the turn it lands in once that turn has started. An `after`
+   * input starts a turn of its own behind the running one, so its turn is
+   * there when `submit` returns.
    */
-  sendTurn(input: AgentTurnInput, options?: SendTurnOptions): AgentTurnHandle;
+  submit(input: AgentTurnInput, options?: SubmitOptions): AgentInputReceipt;
   selectModel(selectionId: ModelSelectionId | null): void;
-  submitInput(
-    input: AgentTurnInput & { inputId: string },
-    options: SubmitInputOptions,
-  ): AgentInputReceipt;
   fork(input: ForkedAgentTurnInput): AsyncIterable<StreamAgentEvent>;
   subscribe(handler: AgentSessionSubscriber): () => void;
   onStatusChange(listener: AgentSessionStatusListener): () => void;
@@ -1428,7 +1426,7 @@ interface TurnSink {
   ttftRecorded: boolean;
   /**
    * Identifying attrs (agent.name, session.id, turn.id, channel.*) computed
-   * once in sendTurn and stamped on every span this turn creates. Carried
+   * once in startTurn and stamped on every span this turn creates. Carried
    * here rather than via OTel baggage so they don't leak into outbound
    * HTTP/gRPC headers via the default propagator.
    */
@@ -1647,7 +1645,7 @@ class AgentSessionImpl implements AgentSession {
   private subagentToolNames: Set<string>;
   private readonly turnMutex = new Mutex();
   private readonly inputs = new AgentInputQueue(
-    (input, options) => this.sendTurn(input, options),
+    (input, options) => this.startTurn(input, options),
     () => this.modelSession,
     (error) =>
       this.log.warn("conversational input dispatch failed", {
@@ -1837,7 +1835,7 @@ class AgentSessionImpl implements AgentSession {
         const sink = this.currentSink;
         if (!sink) {
           // No active turn — log and drop. Should not happen because
-          // sendTurn allocates the sink before sendUserInput.
+          // startTurn allocates the sink before sendUserInput.
           this.log.warn("agent session received event with no active turn", {
             type: event.type,
             sessionId: this.sessionId,
@@ -2003,7 +2001,7 @@ class AgentSessionImpl implements AgentSession {
   /**
    * Emit the sink's turn_start exactly once. The normal path calls this at
    * turn open in runOneTurn; failure paths that terminate a turn that never
-   * started (session closed, sendTurn threw) call it from failTurn so every
+   * started (session closed, startTurn threw) call it from failTurn so every
    * stream is bracketed: turn_start first, turn_end last.
    */
   private ensureTurnStart(sink: TurnSink): void {
@@ -2444,7 +2442,7 @@ class AgentSessionImpl implements AgentSession {
     this.activeForkedTurnCount++;
     this.lastActiveAt = Date.now();
     // Forked turns bracket their stream like regular turns; the ids are
-    // minted here because no sendTurn is involved. No per-turn session_init
+    // minted here because no startTurn is involved. No per-turn session_init
     // is synthesized: that re-emission is an ordinary-turn compatibility
     // shim slated for removal (step 2 of the stream-shape cleanup), and
     // forked-stream consumers read identity off turn_start.
@@ -2725,19 +2723,28 @@ class AgentSessionImpl implements AgentSession {
     });
   }
 
-  // sendTurn — FIFO-serialized via turnMutex
-
-  submitInput(
-    input: AgentTurnInput & { inputId: string },
-    options: SubmitInputOptions,
-  ): AgentInputReceipt {
+  submit(input: AgentTurnInput, options: SubmitOptions = {}): AgentInputReceipt {
     if (this.status === "closed") throw new Error(`AgentSession ${this.sessionId} is closed`);
-    const receipt = this.inputs.submit(input, options);
+    const { priority = "next", onInputStatus, ...turnOptions } = options;
+    if (!isQueueInput(priority)) {
+      const landed = afterLanding(this.turnMutex.isLocked());
+      const handle = this.startTurn(input, turnOptions);
+      return {
+        ...(input.inputId ? { inputId: input.inputId } : {}),
+        turnId: handle.id,
+        landed,
+        turn: Promise.resolve(handle),
+      };
+    }
+    const receipt = this.inputs.submit(
+      { ...input, inputId: input.inputId ?? uuidv7() },
+      { ...turnOptions, priority, ...(onInputStatus ? { onInputStatus } : {}) },
+    );
     // The queue ends its own turn. A system turn (a backend continuation) runs
     // outside the queue, so a `now` input ends it here.
     const sink = this.currentSink;
     if (
-      options.priority === "now" &&
+      priority === "now" &&
       sink &&
       !sink.done &&
       sink.turnId !== receipt.turnId &&
@@ -2753,7 +2760,8 @@ class AgentSessionImpl implements AgentSession {
     return receipt;
   }
 
-  sendTurn(input: AgentTurnInput, options?: SendTurnOptions): AgentTurnHandle {
+  /** Starts a turn behind the running one: an `after` input's, or the input queue's. */
+  private startTurn(input: AgentTurnInput, options?: SendTurnOptions): AgentTurnHandle {
     if (this.status === "closed") {
       throw new Error(`AgentSession ${this.sessionId} is closed`);
     }
@@ -2807,7 +2815,7 @@ class AgentSessionImpl implements AgentSession {
     // it spans the turnMutex async seam — external callers can then wrap
     // post-turn work in `context.with(handle.turnContext, …)` and have it
     // land on the same trace. `links` carries an inbound request span when
-    // sendTurn is invoked with no active OTel context (the webchat POST
+    // startTurn is invoked with no active OTel context (the webchat POST
     // case); when invoked inside one (channel adapter path), that span
     // becomes the parent.
     // Identifying attrs stamped on every span this turn creates. We pass
@@ -2880,7 +2888,7 @@ class AgentSessionImpl implements AgentSession {
   ): Promise<void> {
     const span = trace.getSpan(turnCtx)!;
     if (this.status === "closed") {
-      // sendTurn opened the span before this check could run; close it
+      // startTurn opened the span before this check could run; close it
       // here since no other path on this branch will.
       span.setStatus({ code: SpanStatusCode.ERROR, message: "AgentSession closed" });
       span.end();

@@ -280,16 +280,17 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           ? await runLines(this.runLineDeps.lines, romeSessionId, req)
           : null;
 
-        // sendTurn is sync — turnId returned immediately,
-        // events drain in the background as the turn runs.
-        const handle = session.sendTurn(req.input, {
+        // An app's turn waits behind the running one; its events drain in the
+        // background as it runs.
+        const handle = await session.submit(req.input, {
+          priority: "after",
           threadContext: req.init?.threadContext,
           sharedContext: req.init?.sharedContext,
           romeSessionId,
           romeSessionType,
           replyTo: req.replyTo,
           ...(lines ? { quoted: lines.quoted } : {}),
-        });
+        }).turn;
         const turnLogFields = {
           ...baseLogFields,
           sessionId: session.sessionId,
