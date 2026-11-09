@@ -1,7 +1,7 @@
 import { Hono } from "hono";
 import { describe, expect, it, rs } from "@rstest/core";
 import { VISITOR_COOKIE_NAME, createVisitorSession } from "../../lib/auth.js";
-import type { FavorService } from "../../favors/types.js";
+import type { FavorService } from "../../favors/index.js";
 import type { ApiDeps } from "../deps.js";
 import { favorRoutes } from "./favors.js";
 

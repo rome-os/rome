@@ -339,14 +339,16 @@ import {
   sanitizeDrainUrl,
   type RelayDrainSetting,
 } from "./relay/settings.js";
-import { RomeCloudFavorService } from "./favors/rome-cloud-service.js";
-import { FavorDispatchRunner } from "./favors/dispatcher.js";
+import {
+  FavorDispatchRunner,
+  FavorRequirementSync,
+  RomeCloudFavorService,
+} from "./favors/index.js";
 import { ChatEvents as ChatsEvents } from "./chats/storage/events.js";
 import { chatsWiring } from "./chats-wiring.js";
 import { inboundRecording } from "./connections/inbound-recording.js";
 import { messagesSaid } from "./sessions/messages-said.js";
 import { ChatsWebChatRepository } from "./webchat/chats-webchat-repository.js";
-import { FavorRequirementSync } from "./favors/catalog-sync.js";
 
 async function main() {
   const config = loadConfig();
