@@ -58,6 +58,53 @@ const FORBIDDEN_DEPENDENCIES: ForbiddenDependency[] = [
     description:
       "Desktops never names a person or an account, so no file in desktops/ imports people/.",
   },
+  {
+    from: "instance",
+    to: "agent",
+    description:
+      "Instance says which Rome this is and whether it is healthy, whoever runs on it, so no file in instance/ imports agent/.",
+  },
+  {
+    from: "instance",
+    to: "apps",
+    description:
+      "Apps read the instance's identity and health, never the other way round, so no file in instance/ imports apps/.",
+  },
+  {
+    from: "instance",
+    to: "chats",
+    description:
+      "Instance never names a chat or an account, so no file in instance/ imports chats/.",
+  },
+  {
+    from: "instance",
+    to: "connections",
+    description:
+      "A connection asks Instance who this Rome is when it goes through Rome Cloud. Instance never names a connection, so no file in instance/ imports connections/.",
+  },
+  {
+    from: "instance",
+    to: "desktops",
+    description:
+      "Desktops asks Instance for this Rome's identity to reach a machine, never the other way round, so no file in instance/ imports desktops/.",
+  },
+  {
+    from: "instance",
+    to: "favors",
+    description:
+      "Favors asks Rome Cloud on the instance's behalf through Instance, never the other way round, so no file in instance/ imports favors/.",
+  },
+  {
+    from: "instance",
+    to: "participation",
+    description:
+      "Instance never decides when an agent takes part in a chat, so no file in instance/ imports participation/.",
+  },
+  {
+    from: "instance",
+    to: "people",
+    description: "Instance never names a person, so no file in instance/ imports people/.",
+  },
 ];
 
 function contextOf(path: string): string {
