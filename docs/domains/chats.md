@@ -114,9 +114,9 @@ A setting on a chat, for each of Rome's accounts in it, saying when that account
 
 ## Speaker
 
-A speaker is one of Rome's accounts in a place, with the agent that speaks for it there. It is read off the agent's session, not stored.
+A speaker is one of Rome's accounts in a place, with the agent that speaks for it there. It is not stored as a thing of its own: Chats knows which chat has a session and which of Rome's accounts the agent speaks as there, and reads the speaker from that.
 
-- A session is in a chat when it has a speaker there. The session keeps its own id and never names a chat ([Agents](agents.md)). Which chat has a session is Chats' question, asked by the session's id. No table holds speakers and nothing names one by an id of its own.
+- A session is in a chat when it has a speaker there. The session keeps its own id and never names a chat ([Agents](agents.md)). Which chat has a session is Chats' question, asked by the session's id. Today the session's stored row carries the answer in columns that are Chats', until Chats holds the query itself. No table holds speakers and nothing names one by an id of its own.
 
 ## Wake
 
@@ -250,7 +250,6 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **A thread as a chat of its own.** People do not think of a thread as a chat. It is a side conversation inside one, seen by everyone in it. Letting the thread model decide the agent's memory boundary went with it. Memory is the agent's own decision.
 - **Participation as a context of its own, between Chats and Agents.** It kept no record: every word in it read Chats' record or pointed at an agent's session, and the two contexts had to be read together to understand one wake. Its words are Chats' words (Ouou, 2026-11-09).
 - **A projection setting per agent or per chat.** One default serves every chat: the place the waking message was said in. A setting would move a reading decision that belongs to the agent into chat configuration.
-- **A thread as the boundary of the agent's memory.** What the agent remembers is its own decision, in Agents. Chats says only what the agent is offered at a wake.
 - **Refusing every message outside the woken chat.** The guardian sometimes wants the agent to carry something across chats. An approval card keeps that possible and keeps the guardian in the loop.
 - **"Bot" and "linked agent" as names.** A person's identity and an agent's identity on a platform are the same kind of thing, and one name per thing is the writing rule. Unlink stays: it is the verb for taking an agent off an account.
 - **"Conversation" as the canonical word.** The guardian says chat. Conversation is kept as an alias until the rename lands.
