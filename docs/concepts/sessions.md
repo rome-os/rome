@@ -10,6 +10,7 @@ A Rome session is the durable product boundary around one continuous body of age
 - Only an explicit product boundary — New Chat, or entering another platform-native thread — creates another session. An ordinary reply never does.
 - Provider compaction manages the live context window without deleting Rome's durable transcript.
 - Usage belongs to the session that executed it: a first-class child subagent session owns its own [turns](#turn) and accounting, and the parent session does not duplicate that usage. A child's session has its parent turn's session as parent, and a child's usage is counted under its root session.
+- A session's kind is fixed when it opens: it serves a conversation, an action, a fork or a subagent call. Its opener states conversation or action, and the agent context makes fork and subagent sessions itself. Whether a conversation is a web chat or a chat on a connected account is the chat's fact, not the session's kind.
 - Project attribution matches the session's project directory (exact path or child path). A project's display name is metadata, not an attribution fallback. Forks and subagents inherit the parent's project. Sessions created without project context stay unattributed.
 
 **Not to be confused with:**
@@ -33,7 +34,7 @@ A continuity key is the value that whatever opens a session, and comes back to i
 **Not to be confused with:**
 
 - **Session id** — the id names one session. The continuity key names the run of sessions a chat has had, and finds the current one.
-- **[Chat](../domains/chats.md#chat)** — a chat is a place where messages are said. A continuity key is how that chat finds its agent's session, and a session may have one without being in any chat. A session never names a chat. Which chat has a session is [Participation](../domains/participation.md)'s question, asked by the session's id. Until Participation has that query, the web chat side answers it and records it on the session's stored row (`chatOfSession` and `recordSessionInChat` in [`packages/core/src/db/repositories/webchat.ts`](../../packages/core/src/db/repositories/webchat.ts)).
+- **[Chat](../domains/chats.md#chat)** — a chat is a place where messages are said. A continuity key is how that chat finds its agent's session, and a session may have one without being in any chat. A session never names a chat. Which chat has a session is [Participation](../domains/participation.md)'s question, asked by the session's id. Until Participation has that query, the web chat side answers it and records it on the session's stored row (`chatOfSession` and `recordSessionInChat` in [`packages/core/src/db/repositories/webchat.ts`](../../packages/core/src/db/repositories/webchat.ts)). One exception remains while each turn picks its own chat (ZHA-157): the opener names the chat a turn records in with the turn's input (`romeSessionId`), and the session hands it to the ports that ask for it. The chat side, not the session, names that chat on the session's start event (`romeSession`).
 
 ## Model pin
 

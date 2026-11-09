@@ -753,15 +753,18 @@ describe("AgentRunner", () => {
         sessionId: "agent-session",
         status: "idle" as const,
         submit: rs.fn((input: { prompt: string }, options?: TurnRef) => {
-          turns.push({
-            romeSessionId: options?.romeSessionId,
-            romeSessionType: options?.romeSessionType,
-          });
+          turns.push({ romeSessionId: options?.romeSessionId });
           return testReceipt(
             testTurnHandle({
               turnId: "resumed-turn",
               turnContext: context.active(),
               events: (async function* () {
+                yield {
+                  type: "session_init",
+                  sessionId: "agent-session",
+                  systemPrompt: "",
+                  userPrompt: input.prompt,
+                } as const;
                 yield {
                   type: "turn_start",
                   turnId: "resumed-turn",
@@ -784,7 +787,17 @@ describe("AgentRunner", () => {
         find: rs.fn(),
         shutdown: rs.fn(async () => undefined),
       } as unknown as Sessions;
-      return { manager, turns, session };
+      // The chat type a turn records under, as its runner names it on the
+      // session's start.
+      const see = (messages: { type: string; romeSession?: { _type: string } }[]) => {
+        const types = messages.flatMap((m) =>
+          m.type === "session_init" ? [m.romeSession?._type] : [],
+        );
+        types.forEach((type, ix) => {
+          if (turns[ix]) turns[ix].romeSessionType = type;
+        });
+      };
+      return { manager, turns, session, see };
     }
 
     it("leaves a recorded channel conversation to the inbox", async () => {
@@ -797,11 +810,13 @@ describe("AgentRunner", () => {
           name: "Telegram thread",
           agentName: null,
         });
-        const { manager, turns } = await resumedSession(testDb.db, "channel:telegram:t1");
+        const { manager, turns, see } = await resumedSession(testDb.db, "channel:telegram:t1");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
-        await collectMessages(
-          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        see(
+          await collectMessages(
+            runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+          ),
         );
 
         expect(turns[0]?.romeSessionId).toMatch(/^action:/);
@@ -822,11 +837,13 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
+        const { manager, turns, see } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
-        await collectMessages(
-          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        see(
+          await collectMessages(
+            runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+          ),
         );
 
         expect(turns).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]);
@@ -847,22 +864,24 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
+        const { manager, turns, see } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
-        await collectMessages(
-          runner.run({
-            agentName: "main",
-            sessionId: "agent-session",
-            prompt: "continue",
-            threadContext: {
-              channel: "webchat",
-              threadId: "parent-chat",
-              threadName: "Parent",
-              threadType: "private",
-              romeSessionId: "parent-chat",
-            },
-          }),
+        see(
+          await collectMessages(
+            runner.run({
+              agentName: "main",
+              sessionId: "agent-session",
+              prompt: "continue",
+              threadContext: {
+                channel: "webchat",
+                threadId: "parent-chat",
+                threadName: "Parent",
+                threadType: "private",
+                romeSessionId: "parent-chat",
+              },
+            }),
+          ),
         );
 
         expect(turns).toEqual([{ romeSessionId: "parent-chat", romeSessionType: "webchat" }]);
@@ -882,18 +901,20 @@ describe("AgentRunner", () => {
           name: "researcher: Telegram thread",
           agentName: "researcher",
         });
-        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
+        const { manager, turns, see } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         // A backend turn delivers its reply to the thread and records it in the
         // thread's conversation under this turn, so the trace stays there too.
-        await collectMessages(
-          runner.run({
-            agentName: "main",
-            sessionId: "agent-session",
-            prompt: "continue",
-            threadContext: { channel: "telegram", threadId: "t1", threadType: "private" },
-          }),
+        see(
+          await collectMessages(
+            runner.run({
+              agentName: "main",
+              sessionId: "agent-session",
+              prompt: "continue",
+              threadContext: { channel: "telegram", threadId: "t1", threadType: "private" },
+            }),
+          ),
         );
 
         expect(turns).toEqual([
@@ -915,19 +936,21 @@ describe("AgentRunner", () => {
           name: "researcher: Parent",
           agentName: "researcher",
         });
-        const { manager, turns } = await resumedSession(testDb.db, "child-chat");
+        const { manager, turns, see } = await resumedSession(testDb.db, "child-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         // A caller that keeps its own transcript keeps it for its channel,
         // not for this conversation.
-        await collectMessages(
-          runner.run({
-            agentName: "main",
-            sessionId: "agent-session",
-            prompt: "continue",
-            persistTrace: true,
-            persistTranscript: false,
-          }),
+        see(
+          await collectMessages(
+            runner.run({
+              agentName: "main",
+              sessionId: "agent-session",
+              prompt: "continue",
+              persistTrace: true,
+              persistTranscript: false,
+            }),
+          ),
         );
 
         expect(turns).toEqual([{ romeSessionId: "child-chat", romeSessionType: "subagent" }]);
@@ -948,24 +971,26 @@ describe("AgentRunner", () => {
           name: "Side chat",
           agentName: "main",
         });
-        const { manager, turns } = await resumedSession(testDb.db, "side-chat");
+        const { manager, turns, see } = await resumedSession(testDb.db, "side-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
-        await collectMessages(
-          runner.run({
-            agentName: "main",
-            sessionId: "agent-session",
-            prompt: "continue",
-            threadContext: {
-              channel: "webchat",
-              threadId: "side-chat",
-              threadName: "Side chat",
-              threadType: "private",
-              romeSessionId: "side-chat",
-            },
-            persistTrace: true,
-            persistTranscript: false,
-          }),
+        see(
+          await collectMessages(
+            runner.run({
+              agentName: "main",
+              sessionId: "agent-session",
+              prompt: "continue",
+              threadContext: {
+                channel: "webchat",
+                threadId: "side-chat",
+                threadName: "Side chat",
+                threadType: "private",
+                romeSessionId: "side-chat",
+              },
+              persistTrace: true,
+              persistTranscript: false,
+            }),
+          ),
         );
 
         expect(turns).toEqual([{ romeSessionId: "side-chat", romeSessionType: "webchat" }]);
@@ -982,11 +1007,13 @@ describe("AgentRunner", () => {
       try {
         const repo = new ChatsWebChatRepository(testDb.db);
         await repo.createSession("user-chat", "User chat");
-        const { manager, turns } = await resumedSession(testDb.db, "user-chat");
+        const { manager, turns, see } = await resumedSession(testDb.db, "user-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
-        await collectMessages(
-          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        see(
+          await collectMessages(
+            runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+          ),
         );
 
         expect(turns[0]?.romeSessionId).toMatch(/^action:/);
@@ -1001,14 +1028,16 @@ describe("AgentRunner", () => {
       try {
         const repo = new ChatsWebChatRepository(testDb.db);
         await repo.createSession("user-chat", "User chat");
-        const { manager, turns, session } = await resumedSession(testDb.db, "user-chat");
+        const { manager, turns, see, session } = await resumedSession(testDb.db, "user-chat");
         // The session is still open from a caller that named the chat. A
         // reopened one is the case above, which leaves the chat alone.
         await openedInChat(undefined, session, "user-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
-        await collectMessages(
-          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        see(
+          await collectMessages(
+            runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+          ),
         );
 
         expect(turns[0]?.romeSessionId).toBe("user-chat");
@@ -1022,11 +1051,13 @@ describe("AgentRunner", () => {
       try {
         const repo = new ChatsWebChatRepository(testDb.db);
         // The session's row still names the chat, which no longer exists.
-        const { manager, turns } = await resumedSession(testDb.db, "deleted-chat");
+        const { manager, turns, see } = await resumedSession(testDb.db, "deleted-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
-        await collectMessages(
-          runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+        see(
+          await collectMessages(
+            runner.run({ agentName: "main", sessionId: "agent-session", prompt: "continue" }),
+          ),
         );
 
         expect(turns[0]?.romeSessionId).toMatch(/^action:/);

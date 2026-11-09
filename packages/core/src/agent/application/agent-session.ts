@@ -39,7 +39,7 @@ import {
   type RomeTools,
   type ModelToolCallContext,
 } from "../domain/rome-tools.js";
-import { Session } from "../domain/session.js";
+import { Session, type SessionKind } from "../domain/session.js";
 import {
   type ModelSessionEvent,
   type ModelTurnStartedEvent,
@@ -126,6 +126,12 @@ export interface AgentSessionKey {
 /** What an opener states about the session it opens, fixed for the session's life
  *  unless a field says otherwise. */
 export interface SessionOpening {
+  /**
+   * What the session serves: a conversation, or an action. Absent, a session
+   * opened with a thread context serves a conversation and any other an
+   * action. A subagent's and a fork's session are their own kinds.
+   */
+  kind?: Extract<SessionKind, "conversation" | "action">;
   workingDir?: string;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
@@ -221,10 +227,13 @@ export interface SendTurnOptions {
   lifecycleParent?: AgentTurnParentRef;
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
-  /** Durable Rome session id when it differs from the runtime AgentSession id. */
+  /**
+   * The dashboard chat the turn records in, when it is not the one minted
+   * under the session's own id. The opener names it with each turn while
+   * each turn picks its own chat (ZHA-157); it is the one exception to the
+   * agent context asking Chats nothing.
+   */
   romeSessionId?: string;
-  /** Durable Rome session kind used by Rome-owned navigation. */
-  romeSessionType?: RomeSessionType;
   /** Platform message referenced by the current ordinary reply. */
   replyTo?: MessageReplyReference;
   /** The message `replyTo` names, as Rome holds it where the turn's session
@@ -954,10 +963,11 @@ async function openSession(
         }
         const call = await deps.subagentCalls.call(name, subagentRequest(input), {
           key: {
-            dashboardSessionId: refs.getRomeSessionId(),
+            parentSessionId: refs.sessionId,
             turnId: parentTurnId,
             toolUseId: toolContext.toolUseId,
           },
+          chat: refs.getRomeSessionId(),
           agentName: key.agentName,
           agentSessionId: refs.sessionId,
           sessions: deps.subagentSessions(refs.getChildManager(), refs.childChannelThreadKey, {
@@ -973,10 +983,8 @@ async function openSession(
         try {
           refs.attachSubagentCall(toolContext.toolUseId, call);
         } catch (err) {
-          // Forgets by the agent session id, which for a dashboard chat's own
-          // session is not the key the call is held by (ZHA-156).
           deps.subagentCalls.forget({
-            dashboardSessionId: refs.sessionId,
+            parentSessionId: refs.sessionId,
             turnId: parentTurnId,
             toolUseId: toolContext.toolUseId,
           });
@@ -1181,7 +1189,7 @@ async function openSession(
       childChannelThreadKey: storeForkParent(key.channelThreadKey, fork.forkSessionId),
       attachSubagentCall: (toolUseId, call) => {
         forkSubagentCalls.set(toolUseId, {
-          key: { dashboardSessionId: fork.forkSessionId, turnId: fork.forkTurnId, toolUseId },
+          key: { parentSessionId: fork.forkSessionId, turnId: fork.forkTurnId, toolUseId },
           call,
         });
         maybeEmitForkSubagentStart(toolUseId);
@@ -1314,6 +1322,9 @@ async function openSession(
     spanAttributes: init.spanAttributes,
     isNewSession,
     isSubagent: opts.isSubagent,
+    kind: opts.isSubagent
+      ? "subagent"
+      : (init.kind ?? (init.threadContext ? "conversation" : "action")),
     selectionId,
     sessionPin,
     threadResumed,
@@ -1372,6 +1383,7 @@ interface ImplArgs {
   isNewSession: boolean;
   /** Subagent sessions get no thread-context block (they get no contextSuffix today either). */
   isSubagent: boolean;
+  kind: SessionKind;
   selectionId?: ModelSelectionId;
   /** Session model pin from the resumed row, when one exists. */
   sessionPin?: { providerId: ProviderId; model: string };
@@ -1437,7 +1449,6 @@ interface TurnSink {
   threadContext?: ThreadContext;
   sharedContext?: Record<string, unknown>;
   romeSessionId: string;
-  romeSessionType: RomeSessionType;
   replyTo?: MessageReplyReference;
   quoted?: PromptMessage | null;
   initiatedBy?: "user" | "system";
@@ -1612,6 +1623,8 @@ class AgentSessionImpl implements AgentSession {
   // Captured at session open; passed through to per-turn span attrs.
   private isNewSession: boolean;
   private isSubagent: boolean;
+  /** What the session serves, fixed for its life. */
+  readonly kind: SessionKind;
   private readonly spanAttributes: Attributes;
   // One-shot guard: the `<thread_context>` block is prepended to the FIRST user
   // turn of a fresh session only. Flipped the first time runOneTurn considers it
@@ -1677,6 +1690,7 @@ class AgentSessionImpl implements AgentSession {
     this.sharedContext = args.sharedContext;
     this.isNewSession = args.isNewSession;
     this.isSubagent = args.isSubagent;
+    this.kind = args.kind;
     this.spanAttributes = args.spanAttributes ?? {};
     this.selectionId = args.selectionId;
     this.sessionPin = args.sessionPin;
@@ -2152,7 +2166,7 @@ class AgentSessionImpl implements AgentSession {
     this.deps.turnUsage.turnEnded({
       turnId: sink.turnId,
       romeSessionId: sink.romeSessionId,
-      romeSessionType: sink.romeSessionType,
+      sessionKind: this.kind,
       agentName: this.key.agentName,
       status: turnStatus({ terminal, stoppedByRome: sink.lifecycleInterrupted }),
       provider: this.modelSession.providerId,
@@ -2609,7 +2623,7 @@ class AgentSessionImpl implements AgentSession {
       this.deps.turnUsage.turnEnded({
         turnId,
         romeSessionId: forkSessionId,
-        romeSessionType: "fork",
+        sessionKind: "fork",
         agentName: this.key.agentName,
         status: terminalSeen || status !== "completed" ? status : "stopped",
         provider: forkSession?.providerId ?? this.modelSession.providerId,
@@ -2687,10 +2701,8 @@ class AgentSessionImpl implements AgentSession {
   addSubagentCall(toolUseId: string, call: SubagentCall): void {
     const sink = this.currentSink;
     if (!sink) throw new Error("Cannot attach a subagent without an active Parent turn");
-    // Held by the agent session id, which for a dashboard chat's own session
-    // is not the key the call is held by (ZHA-156).
     sink.subagentCallsByToolUse.set(toolUseId, {
-      key: { dashboardSessionId: this.sessionId, turnId: sink.turnId, toolUseId },
+      key: { parentSessionId: this.sessionId, turnId: sink.turnId, toolUseId },
       call,
     });
     this.maybePublishSubagentStart(sink, toolUseId);
@@ -2780,13 +2792,6 @@ class AgentSessionImpl implements AgentSession {
       threadContext: options?.threadContext,
       sharedContext: options?.sharedContext,
       romeSessionId: options?.romeSessionId ?? this.sessionId,
-      romeSessionType:
-        options?.romeSessionType ??
-        (options?.threadContext?.channel === "webchat"
-          ? "webchat"
-          : options?.threadContext
-            ? "channel"
-            : "action"),
       replyTo: options?.replyTo,
       quoted: options?.quoted ?? null,
       initiatedBy: options?.initiatedBy ?? "user",
@@ -2958,7 +2963,7 @@ class AgentSessionImpl implements AgentSession {
       // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
       // The prompt facts answer null where it catches up on nothing.
       const unseen =
-        sink.romeSessionType === "channel" && sink.romeSessionId && sink.threadContext
+        this.kind === "conversation" && sink.threadContext
           ? (this.deps.promptFacts?.unseen(sink.romeSessionId) ?? null)
           : null;
       if (unseen) {
@@ -3002,10 +3007,6 @@ class AgentSessionImpl implements AgentSession {
       const initMsg: AgentEvent = {
         type: "session_init",
         sessionId: this.sessionId,
-        romeSession: {
-          _romeSessionId: sink.romeSessionId,
-          _type: sink.romeSessionType,
-        } satisfies RomeSessionRef,
         systemPrompt: this.systemPrompt,
         userPrompt,
         projectPath: tc?.projectPath,

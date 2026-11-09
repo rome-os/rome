@@ -10,6 +10,7 @@ export {
   type ReplaceSessionOptions,
   type SessionChange,
   type SessionId,
+  type SessionKind,
   type SessionState,
   type SessionStatus,
   type TurnCheckpoint,

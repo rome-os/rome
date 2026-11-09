@@ -1,5 +1,6 @@
-import type { AgentAccounting, AgentTurnStatus, RomeSessionType } from "@rome-os/app-runtime";
+import type { AgentAccounting, AgentTurnStatus } from "@rome-os/app-runtime";
 import type { ModelLoginKind } from "./model-login.js";
+import type { SessionKind } from "./session.js";
 
 /** How a request for an agent's session was served: an open one, a new one, a replaced one, or one already opening. */
 export type SessionServed = "reuse" | "cold" | "reopen" | "coalesced";
@@ -20,8 +21,11 @@ export interface TurnAttribution {
 /** What the session knows about a turn when it ends. */
 export interface TurnUsageFacts {
   turnId: string;
+  /** The chat the turn recorded in. It comes with the turn while each turn
+   *  picks its own chat (ZHA-157). */
   romeSessionId: string;
-  romeSessionType: RomeSessionType;
+  /** The kind of the session that ran the turn. */
+  sessionKind: SessionKind;
   agentName: string;
   status: AgentTurnStatus;
   /** The model session that served the turn. Accounting, when present, wins. */

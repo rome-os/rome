@@ -467,7 +467,7 @@ describe("AgentSession turn usage", () => {
 
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({
-      romeSessionType: "fork",
+      sessionKind: "fork",
       status: "completed",
       providerTurnId: "fork-provider-turn",
       accounting: { usage: { inputTokens: 10, outputTokens: 5 } },
@@ -559,7 +559,7 @@ describe("AgentSession turn usage", () => {
     expect(recorded).toHaveLength(1);
     expect(recorded[0]).toMatchObject({
       romeSessionId: forkSessionId,
-      romeSessionType: "fork",
+      sessionKind: "fork",
       status: "completed",
       loginKind: "api_credential",
     });

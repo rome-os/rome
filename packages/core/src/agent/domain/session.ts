@@ -10,6 +10,12 @@ export type AgentName = string;
  *  continuity key and agent is active. docs/concepts/sessions.md#continuity-key */
 export type ContinuityKey = string;
 export type SessionStatus = "active" | "completed" | "error";
+/**
+ * What a session serves, fixed for its life: a conversation, an action, a
+ * fork or a subagent call. An opener states conversation or action; the agent
+ * context makes forks and subagents itself.
+ */
+export type SessionKind = "conversation" | "action" | "fork" | "subagent";
 
 export interface CreateSessionOptions {
   continuityKey?: ContinuityKey;

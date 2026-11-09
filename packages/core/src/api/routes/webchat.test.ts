@@ -2489,10 +2489,8 @@ describe("Webchat API", () => {
     expect(sendRes.status).toBe(200);
     expect(acquiredInit?.reasoningEffort).toBe("xhigh");
     expect(sentTurn?.reasoningEffort).toBe("xhigh");
-    expect(sentOptions).toMatchObject({
-      romeSessionId: session.id,
-      romeSessionType: "webchat",
-    });
+    expect(sentOptions).toMatchObject({ romeSessionId: session.id });
+    expect(acquiredInit?.kind).toBe("conversation");
   });
 
   describe("device folder", () => {
