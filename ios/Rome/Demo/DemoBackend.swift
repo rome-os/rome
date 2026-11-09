@@ -27,11 +27,15 @@ final class LocalEventBus: LiveEventSource {
 /// sign-in screen, so every state can be reviewed without a server.
 @MainActor
 final class DemoBackend: RomeBackend {
-    static let instances = [
-        CloudInstance(id: "demo-1", name: "我的 Rome", slug: "me", origin: "https://me.romeos.cc", status: "running"),
-        CloudInstance(id: "demo-2", name: "团队 Rome", slug: "team", origin: "https://team.romeos.cc", status: "running", role: "visitor", ownerName: "Dev User"),
-        CloudInstance(id: "demo-3", name: "测试实例", slug: "staging", origin: "https://staging.romeos.cc", status: "stopped"),
-    ]
+    /// Named in the app's language, so an English screen shows no Chinese names.
+    static var instances: [CloudInstance] {
+        let chinese = Bundle.main.preferredLocalizations.first?.hasPrefix("zh") == true
+        return [
+            CloudInstance(id: "demo-1", name: chinese ? "我的 Rome" : "My Rome", slug: "me", origin: "https://me.romeos.cc", status: "running"),
+            CloudInstance(id: "demo-2", name: chinese ? "团队 Rome" : "Team Rome", slug: "team", origin: "https://team.romeos.cc", status: "running", role: "visitor", ownerName: "Dev User"),
+            CloudInstance(id: "demo-3", name: chinese ? "测试实例" : "Staging", slug: "staging", origin: "https://staging.romeos.cc", status: "stopped"),
+        ]
+    }
 
     let displayOrigin = "me.romeos.cc"
     private let bus = LocalEventBus()
@@ -301,6 +305,11 @@ final class DemoBackend: RomeBackend {
     /// Services connected so far; GitHub is from the start.
     private var connected: [String: String] = ["github": "lin-dev"]
 
+    func routines() async throws -> [RoutineRef] {
+        if variant == .visitor { throw APIError.server(status: 403, message: nil) }
+        return [RoutineRef(id: "r-books", name: "每周读书小结", key: "chat-routine:books", enabled: true)]
+    }
+
     func connectors() async throws -> [ConnectorState] {
         try await pause(0.2)
         return ["gmail", "github", "notion", "linear", "slack"].map { service in
@@ -458,6 +467,7 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-books", name: "读书笔记", main: false, unread: 0),
             ConciergeChat(id: "topic-mail", name: "每天的邮件摘要", main: false, unread: 0),
             ConciergeChat(id: "topic-mail-setup", name: "邮件摘要设置", main: false, unread: 0),
+            ConciergeChat(id: "topic-routine", name: "每周读书提醒", main: false, unread: 0),
         ]
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false) -> ConciergeTask {
@@ -564,6 +574,29 @@ final class DemoBackend: RomeBackend {
                 card("linear", "Linear", "glyph:linear", composio("linear")),
                 card("slack", "Slack", "brand:slack", .object(["kind": .string("rome_oauth"), "url": .null, "available": .bool(false), "unavailableReason": .string("Rome Cloud 还不能连接 Slack")])),
             ], at: at(10, 3).addingTimeInterval(5), session: mail),
+        ]
+        // Routine cards (one on, one not yet), and cards only the web draws.
+        let routine = "topic-routine"
+        func routineCard(_ key: String, name: String, trigger: String, watch: String, then: String) -> JSONValue {
+            .object([
+                "type": .string("routine_draft_card"), "toolUseId": .string("tu-\(key)"), "routineKey": .string("chat-routine:\(key)"),
+                "draft": .object([
+                    "name": .string(name), "sentence": .string(""), "watchLabel": .string(watch), "thenSummary": .string(then),
+                    "trigger": .object(["type": .string(trigger)]), "actionName": .string("concierge:run_prompt"), "args": .object([:]),
+                ]),
+            ])
+        }
+        messages[routine] = [
+            user("rt1", "每周五早上提醒我这周读了多少，有新邮件来自出版社也告诉我。", at: at(11, 0), session: routine),
+            parts([
+                routineCard("books", name: "每周读书小结", trigger: "schedule", watch: "每周五 09:00", then: "汇总这周的读书笔记，在 Chat 里告诉你"),
+                routineCard("publisher", name: "出版社来信提醒", trigger: "event_bus", watch: "Gmail · 新邮件", then: "用一句话总结并提醒你"),
+            ], at: at(11, 1), session: routine),
+            parts([
+                .object(["type": .string("pending_interaction"), "toolUseId": .string("ai-1"), "appId": .string("rome"), "render": .object(["componentId": .string("ai-tools-card"), "builtin": .bool(true)])]),
+                .object(["type": .string("quota_switch"), "from": .string("claude"), "to": .string("codex"), "model": .string("GPT-5")]),
+                .object(["type": .string("poll_card"), "question": .string("?")]),
+            ], at: at(11, 2), session: routine),
         ]
         messages["topic-mail-setup"] = [
             user("ms1", "摘要按什么来整理？", at: at(10, 1), session: "topic-mail-setup"),

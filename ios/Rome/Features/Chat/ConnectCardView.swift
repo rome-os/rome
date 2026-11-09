@@ -8,7 +8,7 @@ struct ConnectCardView: View {
     let onConnect: () -> Void
 
     @Environment(AppModel.self) private var model
-    @Environment(\.openURL) private var openURL
+    @Environment(\.openInstancePage) private var openInstancePage
 
     /// Rome Cloud cannot connect it from here: say why, and point to Settings on the web.
     private var unavailable: String? {
@@ -89,7 +89,7 @@ struct ConnectCardView: View {
 
     private func openSettings() {
         guard let web = model.webURL else { return }
-        openURL(web.appending(path: String(ConnectRunner.settingsConnectionsPath.dropFirst())))
+        openInstancePage(InstancePages.connections(origin: web))
     }
 }
 

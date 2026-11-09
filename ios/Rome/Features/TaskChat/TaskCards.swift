@@ -606,35 +606,39 @@ struct QuestionCardView: View {
     }
 }
 
-/// Parts the phone does not draw: open them on the Web.
+/// A part the phone does not draw: its name, and a button that opens its
+/// chat on the dashboard, in the app.
 struct WebOnlyCard: View {
+    let kind: MessagePart.WebOnlyKind
     /// The chat it is in, opened on the dashboard.
     var sessionId: String? = nil
     @Environment(AppModel.self) private var model
-    @Environment(\.openURL) private var openURL
+    @Environment(\.openInstancePage) private var openInstancePage
 
-    /// The web dashboard's page for a chat: `/chat/<id>`. The main chat goes
-    /// by its id on the server; until that is known, `/chat`.
-    static func url(origin: URL, sessionId: String?, mainChatServerID: String? = nil) -> URL {
-        guard let sessionId, !sessionId.isEmpty else { return origin }
-        let chat = origin.appending(path: "chat")
-        guard sessionId == conciergeChatID else { return chat.appending(path: sessionId) }
-        return mainChatServerID.map { chat.appending(path: $0) } ?? chat
+    private var title: String {
+        guard case .app(let id) = kind else { return kind.title() }
+        return kind.title(appName: model.workspace?.apps.first { $0.id == id }?.name)
     }
 
     var body: some View {
         HStack(spacing: 12) {
-            Image(systemName: "safari")
+            Image(systemName: "globe")
                 .romeFont(17)
                 .foregroundStyle(Palette.fg)
                 .frame(width: 32, height: 32)
                 .background(Palette.fill, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            Text("Shown only on the web")
-                .romeFont(15)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: title)
+                    .romeFont(15)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text("Shown only on the web")
+                    .romeFont(13)
+                    .foregroundStyle(Palette.sub)
+            }
             Spacer(minLength: 0)
             Button("Open") {
                 if let origin = model.webURL {
-                    openURL(Self.url(origin: origin, sessionId: sessionId, mainChatServerID: model.workspace?.mainChatServerID))
+                    openInstancePage(InstancePages.chat(origin: origin, sessionId: sessionId, mainChatServerID: model.workspace?.mainChatServerID))
                 }
             }
             .romeFont(14, .semibold)

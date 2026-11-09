@@ -33,7 +33,8 @@ enum TranscriptRow: Identifiable, Hashable {
     case taskCard(id: String, chatId: String, title: String)
     case approval(id: String, part: MessagePart.ApprovalPart, sessionId: String)
     case question(id: String, part: MessagePart.QuestionPart, sessionId: String, answered: JSONValue?)
-    case webOnly(id: String)
+    case webOnly(id: String, kind: MessagePart.WebOnlyKind)
+    case routineDraft(id: String, part: MessagePart.RoutineDraftPart)
     case connect(id: String, part: MessagePart.ConnectCardPart, sessionId: String)
     case error(id: String, text: String)
     case tools(id: String, traceMessageId: String, count: Int)
@@ -43,7 +44,7 @@ enum TranscriptRow: Identifiable, Hashable {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _), .approval(let id, _, _), .question(let id, _, _, _),
-             .webOnly(let id), .connect(let id, _, _), .error(let id, _), .tools(let id, _, _):
+             .webOnly(let id, _), .routineDraft(let id, _), .connect(let id, _, _), .error(let id, _), .tools(let id, _, _):
             return id
         case .typing:
             return "typing"
@@ -120,8 +121,10 @@ enum TranscriptBuilder {
                     rows.append(.approval(id: id, part: approval, sessionId: message.sessionId))
                 case .question(let question):
                     rows.append(.question(id: id, part: question, sessionId: message.sessionId, answered: answers[question.toolUseId]))
-                case .webOnly:
-                    rows.append(.webOnly(id: id))
+                case .webOnly(let kind):
+                    rows.append(.webOnly(id: id, kind: kind))
+                case .routineDraft(let draft):
+                    rows.append(.routineDraft(id: id, part: draft))
                 case .connectCard(let card):
                     rows.append(.connect(id: id, part: card, sessionId: message.sessionId))
                 case .error(let text):
@@ -240,17 +243,17 @@ enum RelativeTime {
     }
 
     /// "Mon"; "周一" in Chinese.
-    static func weekday(_ date: Date, calendar: Calendar = .current) -> String {
-        date.formatted(style(calendar).weekday(.abbreviated))
+    static func weekday(_ date: Date, calendar: Calendar = .current, locale: Locale = locale) -> String {
+        date.formatted(style(calendar, locale).weekday(.abbreviated))
     }
 
     /// "Oct 27" or "Oct 27, 2025"; "10月27日" or "2025年10月27日" in Chinese.
-    static func day(_ date: Date, withYear: Bool = false, calendar: Calendar = .current) -> String {
-        let format = style(calendar).month(.abbreviated).day()
+    static func day(_ date: Date, withYear: Bool = false, calendar: Calendar = .current, locale: Locale = locale) -> String {
+        let format = style(calendar, locale).month(.abbreviated).day()
         return date.formatted(withYear ? format.year() : format)
     }
 
-    private static func style(_ calendar: Calendar) -> Date.FormatStyle {
+    private static func style(_ calendar: Calendar, _ locale: Locale) -> Date.FormatStyle {
         Date.FormatStyle(locale: locale, calendar: calendar, timeZone: calendar.timeZone)
     }
 

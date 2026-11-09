@@ -55,7 +55,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(approval.fields == [.init(label: "收件人", value: "x@y.z")])
         guard case .question(let question) = parts[2] else { Issue.record("no question"); return }
         #expect(question.questions.first?.options == ["A", "B"])
-        #expect(parts[3] == .webOnly(kind: "pricing-table"))
+        #expect(parts[3] == .webOnly(.unknown))
         #expect(parts[4] == .other(type: "tool_use"))
         #expect(parts[5] == .error("boom"))
     }
@@ -161,6 +161,18 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(RelativeTime.separator(date, now: now) == "Oct 27, 2025 14:05")
         #expect(RelativeTime.weekday(date) == "Mon")
     }
+
+    /// Chinese dates read the way a Chinese calendar writes them, whatever the region.
+    @Test func chineseDatesUseChineseFormats() {
+        var components = DateComponents()
+        components.year = 2025; components.month = 10; components.day = 27; components.hour = 14; components.minute = 5
+        let date = Calendar.current.date(from: components)!
+        for locale in [Locale(identifier: "zh-Hans_CN"), Locale(identifier: "zh-Hans_US")] {
+            #expect(RelativeTime.weekday(date, locale: locale) == "周一")
+            #expect(RelativeTime.day(date, locale: locale) == "10月27日")
+            #expect(RelativeTime.day(date, withYear: true, locale: locale) == "2025年10月27日")
+        }
+    }
 }
 
 /// Chat and topic chats draw the same answerable cards as task chats.
@@ -172,7 +184,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
              "props": ["questions": [["id": "s", "question": "Which?", "type": "single", "options": ["A", "B"], "freeText": true]]]]],
             ["type": "approval_card", "approvalId": "a1", "actionName": "calendar:create_event", "status": "pending",
              "preview": ["kind": "generic", "title": "Add event", "summary": "", "fields": []]],
-            ["type": "pending_interaction", "toolUseId": "h1", "render": ["componentId": "handoff"]],
+            ["type": "pending_interaction", "toolUseId": "h1", "appId": "pricing", "render": ["componentId": "pricing-table"]],
         ], at: 0, session: session)
         return TranscriptBuilder.rows(messages: [asked], pending: [], answers: [:], options: .init())
             .filter { if case .separator = $0 { return false } else { return true } }
@@ -225,10 +237,10 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
 
     @Test func webOnlyCardsOpenTheirChatOnTheDashboard() {
         let origin = URL(string: "https://me.romeos.cc")!
-        #expect(WebOnlyCard.url(origin: origin, sessionId: "topic-1").absoluteString == "https://me.romeos.cc/chat/topic-1")
-        #expect(WebOnlyCard.url(origin: origin, sessionId: nil) == origin)
+        #expect(InstancePages.chat(origin: origin, sessionId: "topic-1").absoluteString == "https://me.romeos.cc/chat/topic-1")
+        #expect(InstancePages.chat(origin: origin, sessionId: nil) == origin)
         // The main chat opens by its id on the server, or the dashboard's chat page.
-        #expect(WebOnlyCard.url(origin: origin, sessionId: conciergeChatID, mainChatServerID: "c-42").absoluteString == "https://me.romeos.cc/chat/c-42")
-        #expect(WebOnlyCard.url(origin: origin, sessionId: conciergeChatID).absoluteString == "https://me.romeos.cc/chat")
+        #expect(InstancePages.chat(origin: origin, sessionId: conciergeChatID, mainChatServerID: "c-42").absoluteString == "https://me.romeos.cc/chat/c-42")
+        #expect(InstancePages.chat(origin: origin, sessionId: conciergeChatID).absoluteString == "https://me.romeos.cc/chat")
     }
 }

@@ -103,6 +103,7 @@ struct MainShell: View {
                     }
                 }
                 .environment(\.chatLinkOpener, openChatLink)
+                .environment(\.openInstancePage, OpenInstancePageAction { url in path.append(.page(url)) })
                 .environment(\.isVisitor, workspace.isVisitor)
                 // Pushed aside, the page becomes a card of its own color, following the drag.
                 .environment(\.pageBackground, Palette.blend(Palette.bg, Palette.drawerPage, progress))
@@ -386,6 +387,13 @@ struct MainShell: View {
                 }
             }
         }
+        // A dashboard page opens full screen on the main stack, not inside the
+        // sheet, with the drawer the sheet rose over closed under it.
+        .environment(\.openInstancePage, OpenInstancePageAction { url in
+            showSettings = false
+            closeDrawer()
+            path.append(.page(url))
+        })
         .presentationBackground(Palette.bg)
     }
 
