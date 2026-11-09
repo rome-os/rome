@@ -7,6 +7,8 @@
 		<string>en</string>
 		<string>zh-Hans</string>
 	</array>
+	<key>NSHealthShareUsageDescription</key>
+	<string>Rome reads your Apple Health data only when your Rome asks for it, and only the types you allow here.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Rome saves photos from a chat to your library when you ask it to.</string>
 	<key>NSCameraUsageDescription</key>

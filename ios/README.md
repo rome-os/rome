@@ -118,6 +118,20 @@ xcodebuild -project Rome.xcodeproj -scheme Rome -destination 'platform=iOS Simul
 
 Debug allows plain HTTP to names under `localhost`. The app opens an `http://` instance only while Rome Cloud itself is on `http://`, which is only ever a Cloud on this Mac: Release always signs in with `https://romeos.cc`.
 
+## Apple Health (this iPhone as a device)
+
+Signed in to Rome Cloud, the app also connects the phone as a rome-node device, so an agent can read Apple Health with `health.stats` and `health.samples`. The wire protocol, arguments and audit log are in [`docs/rome-node.md`](../docs/rome-node.md#iphone). The code is in `Rome/Node` and the switches, status and recent activity are in Settings → iPhone use.
+
+The device is online only while the app is in front. HealthKit needs the `com.apple.developer.healthkit` entitlement in `Config/Rome.entitlements` and `NSHealthShareUsageDescription` in both Info plists. Both builds read only; `NSHealthUpdateUsageDescription` is in `Config/Info-Debug.plist` alone, for the Debug seeding below. A build on a physical iPhone or TestFlight also needs the HealthKit capability on the App ID `cc.romeos.mobile` (and `.dev`) in the Apple Developer portal, and the App Store privacy answers need Health data (the privacy manifest already lists it).
+
+The Simulator's Health is empty. Launch a Debug build with the argument `-RomeSeedHealth` and it writes a week of steps, heart rate, sleep (with overlapping records) and three runs, once per install:
+
+```bash
+xcrun simctl launch booted cc.romeos.mobile.dev -RomeSeedHealth
+```
+
+It asks for Health access in one system sheet (tap "Turn On All", then "Allow"). To try the actions, sign in on the Simulator, then from a Rome with rome-node run `rome-node device describe <iphone>` and `rome-node device run <iphone> health.stats --args '{"type":"stepCount","interval":"day","start":"2026-11-03","end":"2026-11-09"}'`. The phone must be unlocked and the app in front.
+
 ## Instance versions
 
 The app works with any instance at or above `UpdateGate.minimumInstanceVersion` (in `Rome/Features/Update/InstanceUpdater.swift`), the oldest release with every API the app calls. An instance below it gets the update page over the whole app, with no way past it but updating. An instance at or above it that is behind its latest release only gets an offer: a banner when the guardian opens it, which stays closed for that release once closed, and a line in the drawer until it is current. Visitors see neither.

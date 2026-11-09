@@ -89,6 +89,9 @@ enum SnapshotRunner {
             model.push.debugSet(permission: .notSet, dismissedAt: .now)
             await capture("12-instances", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .settings([.instances]) }
             model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("13-node-requests", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.requests]) }
+            model.debugCommand = .settings(nil)
             // A second command in the same pass would hide this one from the shell.
             try? await Task.sleep(for: .seconds(0.6))
             // On Mac Catalyst a pushed task chat does not pop for these runs

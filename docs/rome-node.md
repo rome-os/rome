@@ -500,6 +500,82 @@ configuration directory. `rome-node connect` on the same computer is a separate
 device. Each configuration directory holds one identity, so `ROME_NODE_CONFIG_DIR`
 lets one computer connect to several accounts.
 
+## iPhone
+
+The native iOS app (`ios/`) connects the iPhone as a device, with Apple Health
+as its first capability. It needs no server change: the app's own Rome Cloud
+sign-in (a `romemob_` token and its device session) is the device identity,
+exactly as for the Mac app. Gateway and Cloud already accept it, and the iPhone
+shows up in `rome-node device` and Settings → Devices with `platform: "ios"`.
+
+The phone ports `connectHost()` and `connectGateway()`: `GET /v1/gateway/config`,
+then a WSS connection with the token in the `Authorization` header, never in the
+URL (WS only to loopback in a Debug build against a local Cloud). The backoff is
+1 s to 60 s with jitter. Close code 4001 (revoked) and 4002 (replaced) stop it.
+`invalid_device_session` from Cloud signs the app out, as any rejected credential
+does. The phone speaks text envelopes only and ignores binary frames, so its
+`system.info` has no `frameVersion` or `transferVersion`.
+
+Signed in means connected, unless **Settings → iPhone use → Can Rome use this iPhone**
+is off (on by default, kept across launches). The device is online only while the
+app is in front: iOS suspends a background app's sockets, and Health's data is
+unreadable while the phone is locked. When the app leaves the front, requests
+under way finish their replies, then the connection closes. Signing out
+disconnects. A device that is not connected answers `target_unavailable`.
+
+`system.info` returns `{name, platform: "ios", actions, usage, audit}`. `usage`
+holds each action's argument help, which is how an agent learns them from
+`rome-node device describe`. The actions are read-only:
+
+- `health.stats` — aggregates over a window: `types` (or `type`), `start`, `end`
+  (ISO 8601 with or without an offset, where no offset means the phone's time
+  zone, or `YYYY-MM-DD` in the phone's time zone; default today from local
+  midnight to now), `interval` (`total`, `hour`, `day`, `week`, `month`, at most
+  1000 buckets), `aggregate` (`sum`, `avg`, `min`, `max`, `latest`), `unit`,
+  `activity`. HealthKit merges overlapping sources, as the Health app does.
+  `sleep` merges stages and sources so no minute counts twice and adds minutes per
+  stage; `workouts` gives `count`, `durationMinutes`, `activeEnergyKcal` and
+  `distanceMeters`.
+- `health.samples` — raw records of one `type`, newest first by default: `limit`
+  (1 to 1000, default 100), `order`, `cursor` (the previous reply's `nextCursor`),
+  `sources`, `includeMetadata`, `activity`.
+
+```sh
+rome-node device run <iphone> health.stats --args '{"types":["stepCount","sleep","restingHeartRate","workouts"]}'
+rome-node device run <iphone> health.stats --args '{"type":"stepCount","start":"2026-11-03","end":"2026-11-09","interval":"day"}'
+rome-node device run <iphone> health.samples --args '{"type":"heartRate","limit":50}'
+```
+
+Every reply carries `startISO`, `endISO` and `timeZoneIdentifier`. A metric with
+no readable value is omitted, never 0. HealthKit hides whether read access was
+denied, so a type the user did not allow looks like a type with no data. The
+allow-list has 28 types (`system.info` names them); another type is
+`unsupported_type`. Errors: `invalid_args`, `unsupported_type`, `health_unavailable`
+(no HealthKit, such as an iPad), `health_locked` (the phone is locked),
+`health_off`, `unsupported_action`, `audit_unavailable`, and `health_failed` for
+anything else.
+
+**Settings → iPhone use → Apple Health** (on by default, kept across launches, greyed
+while the phone is off limits) lets the user stop Rome reading Health without
+disconnecting the phone. Off, `health.stats` and `health.samples` fail with
+`health_off` before Health is touched, and are still recorded in the audit log;
+`system.info` still lists them, so an agent can explain. Turning it on while iOS
+has never been asked shows the system's access sheet at once; once iOS has been
+asked it shows nothing more.
+
+With the switch on, the app asks for Health access when the first health request
+arrives if the sheet has not been shown yet, with the system's own sheet, and asks
+only to read. Release builds hold no write permission.
+
+The phone keeps a light audit log like the desktop's, as JSON lines in the app's
+Application Support folder: each request is written before it runs (time, sender,
+action, args), then its outcome, result count, the window the reply named and the
+duration. It keeps 30 days and
+never holds a health value. If a record cannot be written the request is refused
+with `audit_unavailable`; `system.info` still answers and reports the log's state.
+Settings → iPhone use → Recent activity lists the last 50 in words, by day (what was
+read, the window, how many, or why it failed), without ids or JSON.
+
 ## Binary frames
 
 Gateway also relays binary WebSocket messages. One binary message is one frame,

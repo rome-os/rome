@@ -19,6 +19,24 @@
         }
       }
     },
+    "NSHealthShareUsageDescription" : {
+      "comment" : "Asked before the first Apple Health read an instance requests",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome reads your Apple Health data only when your Rome asks for it, and only the types you allow here."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只有在你的 Rome 提出请求时，Rome 才会读取你的“健康”数据，而且只读你在这里允许的类型。"
+          }
+        }
+      }
+    },
     "NSPhotoLibraryAddUsageDescription" : {
       "comment" : "Asked before saving a photo from the viewer",
       "extractionState" : "manual",

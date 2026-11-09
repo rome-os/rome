@@ -1,6 +1,16 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ +%lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 等 +%lld"
+          }
+        }
+      }
+    },
     "%@ has an update" : {
       "localizations" : {
         "zh-Hans" : {
@@ -11,12 +21,32 @@
         }
       }
     },
+    "%@ records" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@的记录"
+          }
+        }
+      }
+    },
     "%@ usage" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 用量"
+          }
+        }
+      }
+    },
+    "%@, %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@、%@"
           }
         }
       }
@@ -93,6 +123,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 分钟前"
+          }
+        }
+      }
+    },
+    "%lld records" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld record"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld records"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 条记录"
           }
         }
       }
@@ -177,6 +235,16 @@
         }
       }
     },
+    "Active energy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "活动能量"
+          }
+        }
+      }
+    },
     "Add photos" : {
       "localizations" : {
         "zh-Hans" : {
@@ -233,6 +301,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "外观"
+          }
+        }
+      }
+    },
+    "Apple Health" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 健康"
+          }
+        }
+      }
+    },
+    "Apple Health is off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 健康已关闭"
           }
         }
       }
@@ -337,6 +425,16 @@
         }
       }
     },
+    "BMI" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "体质指数"
+          }
+        }
+      }
+    },
     "Back" : {
       "localizations" : {
         "zh-Hans" : {
@@ -347,12 +445,62 @@
         }
       }
     },
+    "Blood glucose" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "血糖"
+          }
+        }
+      }
+    },
+    "Blood oxygen" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "血氧"
+          }
+        }
+      }
+    },
+    "Body fat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "体脂率"
+          }
+        }
+      }
+    },
+    "Body temperature" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "体温"
+          }
+        }
+      }
+    },
     "Books, pages and notes" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "读过的书、页数和笔记"
+          }
+        }
+      }
+    },
+    "Can Rome use this iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许 Rome 使用这台 iPhone"
           }
         }
       }
@@ -647,12 +795,42 @@
         }
       }
     },
+    "Couldn't read Health" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取健康数据"
+          }
+        }
+      }
+    },
+    "Couldn't record activity" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法记录活动"
+          }
+        }
+      }
+    },
     "Create one in Rome Cloud, then open it here." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 Rome Cloud 创建一个后再打开。"
+          }
+        }
+      }
+    },
+    "Cycling distance" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "骑行距离"
           }
         }
       }
@@ -687,12 +865,32 @@
         }
       }
     },
+    "Diastolic blood pressure" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "舒张压"
+          }
+        }
+      }
+    },
     "Didn't finish" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "未完成"
+          }
+        }
+      }
+    },
+    "Dietary energy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "膳食能量"
           }
         }
       }
@@ -737,12 +935,32 @@
         }
       }
     },
+    "Exercise minutes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "锻炼分钟数"
+          }
+        }
+      }
+    },
     "Failed" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "失败"
+          }
+        }
+      }
+    },
+    "Flights climbed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "爬楼层数"
           }
         }
       }
@@ -783,6 +1001,66 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "习惯打卡"
+          }
+        }
+      }
+    },
+    "Health isn't available" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "健康数据不可用"
+          }
+        }
+      }
+    },
+    "Health request" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "健康数据请求"
+          }
+        }
+      }
+    },
+    "Health unavailable while locked" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "锁屏时无法读取健康数据"
+          }
+        }
+      }
+    },
+    "Heart rate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "心率"
+          }
+        }
+      }
+    },
+    "Heart rate variability" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "心率变异性"
+          }
+        }
+      }
+    },
+    "Height" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "身高"
           }
         }
       }
@@ -861,6 +1139,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "实例由 Rome Cloud 管理。"
+          }
+        }
+      }
+    },
+    "Interrupted" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已中断"
+          }
+        }
+      }
+    },
+    "Invalid request" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求无效"
           }
         }
       }
@@ -1025,6 +1323,16 @@
         }
       }
     },
+    "Mindful minutes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正念时间"
+          }
+        }
+      }
+    },
     "More" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1155,6 +1463,16 @@
         }
       }
     },
+    "No activity yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有活动"
+          }
+        }
+      }
+    },
     "No matching messages" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1201,6 +1519,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暂无用量数据"
+          }
+        }
+      }
+    },
+    "Not a supported type" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不支持的数据类型"
           }
         }
       }
@@ -1275,6 +1603,16 @@
         }
       }
     },
+    "Not supported" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不支持"
+          }
+        }
+      }
+    },
     "Notifications" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1285,12 +1623,32 @@
         }
       }
     },
+    "Off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已关闭"
+          }
+        }
+      }
+    },
     "On" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "已开启"
+          }
+        }
+      }
+    },
+    "Online" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在线"
           }
         }
       }
@@ -1515,6 +1873,16 @@
         }
       }
     },
+    "Recent activity" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近活动"
+          }
+        }
+      }
+    },
     "Reject" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1571,6 +1939,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重命名聊天"
+          }
+        }
+      }
+    },
+    "Replaced" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已被替换"
           }
         }
       }
@@ -1679,12 +2057,52 @@
         }
       }
     },
+    "Respiratory rate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "呼吸频率"
+          }
+        }
+      }
+    },
     "Restarting your Rome…" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在重启你的 Rome…"
+          }
+        }
+      }
+    },
+    "Resting energy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "静息能量"
+          }
+        }
+      }
+    },
+    "Resting heart rate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "静息心率"
+          }
+        }
+      }
+    },
+    "Revoked" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已撤销"
           }
         }
       }
@@ -2097,12 +2515,62 @@
         }
       }
     },
+    "Sleep" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "睡眠"
+          }
+        }
+      }
+    },
+    "Something went wrong" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出了点问题"
+          }
+        }
+      }
+    },
+    "Stand time" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "站立时间"
+          }
+        }
+      }
+    },
     "Start it in Rome Cloud, then open it here." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 Rome Cloud 启动后再打开。"
+          }
+        }
+      }
+    },
+    "Status" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "状态"
+          }
+        }
+      }
+    },
+    "Steps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "步数"
           }
         }
       }
@@ -2183,6 +2651,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "切换实例"
+          }
+        }
+      }
+    },
+    "Systolic blood pressure" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收缩压"
           }
         }
       }
@@ -2387,6 +2865,16 @@
         }
       }
     },
+    "Today" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天"
+          }
+        }
+      }
+    },
     "Today %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2527,6 +3015,16 @@
         }
       }
     },
+    "Unsupported request" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不支持的请求"
+          }
+        }
+      }
+    },
     "Update" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2595,6 +3093,16 @@
         }
       }
     },
+    "VO₂ max" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最大摄氧量"
+          }
+        }
+      }
+    },
     "Version" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2635,6 +3143,26 @@
         }
       }
     },
+    "Walking + running distance" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "步行 + 跑步距离"
+          }
+        }
+      }
+    },
+    "Walking heart rate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "步行心率"
+          }
+        }
+      }
+    },
     "Watch my Gmail inbox for me" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2651,6 +3179,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "监听"
+          }
+        }
+      }
+    },
+    "Water" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "饮水量"
+          }
+        }
+      }
+    },
+    "Weight" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "体重"
           }
         }
       }
@@ -2711,6 +3259,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "进行中"
+          }
+        }
+      }
+    },
+    "Workouts" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "体能训练"
+          }
+        }
+      }
+    },
+    "Yesterday" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "昨天"
           }
         }
       }
@@ -2781,6 +3349,66 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自己的想法…"
+          }
+        }
+      }
+    },
+    "by day" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按天"
+          }
+        }
+      }
+    },
+    "by hour" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按小时"
+          }
+        }
+      }
+    },
+    "by month" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按月"
+          }
+        }
+      }
+    },
+    "by week" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按周"
+          }
+        }
+      }
+    },
+    "iPhone use" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 使用"
+          }
+        }
+      }
+    },
+    "next page" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下一页"
           }
         }
       }

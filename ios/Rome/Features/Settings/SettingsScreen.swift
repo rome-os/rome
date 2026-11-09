@@ -108,6 +108,7 @@ struct SettingsRow<Trailing: View>: View {
 struct SettingsScreen: View {
     let workspace: Workspace
     let onInstances: () -> Void
+    let onRequests: () -> Void
     let onClose: () -> Void
 
     @Environment(AppModel.self) private var model
@@ -132,6 +133,8 @@ struct SettingsScreen: View {
                     }
                     .padding(.horizontal, 16)
                 }
+                NodeSettingsGroup(onRequests: onRequests)
+                    .padding(.horizontal, 16)
                 SettingsGroup(header: "Other") {
                     SettingsRow(systemImage: "circle.lefthalf.filled", title: "Appearance") {
                         Menu {
