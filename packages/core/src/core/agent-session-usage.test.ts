@@ -11,6 +11,7 @@ import { ActionRegistryImpl } from "../actions/registry.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/db.js";
 import type { ModelSessionEvent, ModelSessionParams } from "../agent/index.js";
+import type { StreamAgentEvent } from "@rome-os/app-runtime";
 import type { AgentEvent } from "../types.js";
 import type { ModelLoginKind } from "../agent/index.js";
 import type { TurnUsageFacts } from "../agent/index.js";
@@ -492,6 +493,50 @@ describe("AgentSession turn usage", () => {
 
     expect(recorded).toHaveLength(1);
     expect(recorded[0]?.loginKind).toBeUndefined();
+  });
+
+  it("finds a turn by id from its start, and replays it to a reader that comes after its end", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const session = await manager.acquire(key);
+    const handle = session.sendTurn({ prompt: "hello" });
+    expect(manager.turn(handle.id)).toBe(handle);
+    await drain(handle.events());
+    await handle.ended();
+
+    const replayed: string[] = [];
+    for await (const event of manager.turn(handle.id)!.events()) replayed.push(event.type);
+    expect(replayed).toContain("result");
+    expect(manager.turn("no-such-turn")).toBeUndefined();
+  });
+
+  it("finds a forked turn by id, and refuses to stop it", async () => {
+    nextRun = async function* () {
+      yield { type: "result", content: "done" };
+    };
+    const session = await manager.acquire(key);
+    const events = session.runForkedTurn!({
+      prompt: "side question",
+      checkpoint: SOURCE_CHECKPOINT,
+    });
+    const iterator = events[Symbol.asyncIterator]();
+    const start = (await iterator.next()).value as StreamAgentEvent;
+    if (start.type !== "turn_start") throw new Error("expected turn_start");
+
+    const forked = manager.turn(start.turnId);
+    expect(forked).toBeDefined();
+    expect(await forked!.stop("user-stop")).toBe("cannot_stop");
+    while (!(await iterator.next()).done) {
+      // Read the fork to its end.
+    }
+
+    expect(forked!.hasEnded).toBe(true);
+    expect((await forked!.ended()).terminal).toMatchObject({ type: "result", content: "done" });
+    const replayed: string[] = [];
+    for await (const event of forked!.events()) replayed.push(event.type);
+    expect(replayed[0]).toBe("turn_start");
+    expect(replayed).toContain("result");
   });
 
   it("records a forked turn under its fork session", async () => {

@@ -342,10 +342,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           durationMs: Date.now() - requestStartedAt,
         });
 
-        const interrupt = async (reason?: string) => {
-          await handle.stop(reason);
-        };
-
         const stream = ctx.openStream<StreamAgentEvent>(`agent.turn:${handle.id}`);
         // Drain the per-turn events into the IPC stream.
         void (async () => {
@@ -369,8 +365,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                     // is the agent's runtime session, not a chat.
                     chatId: romeSessionId,
                     turnId: msg.turnId,
-                    agentName: session.key.agentName,
-                    interrupt,
                   });
                   if (thread?.connectionId && this.turnStartedInChat) {
                     endChatTurn = this.turnStartedInChat(
@@ -388,7 +382,6 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                   });
                 }
               }
-              liveStream?.publish(msg);
               stream.send(msg);
             }
             stream.close();

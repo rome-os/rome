@@ -342,7 +342,6 @@ describe("live events WebSocket", () => {
       sessionId: "sess-running",
       chatId: "sess-running",
       turnId: "turn-1",
-      agentName: "main",
     });
     const client = await connect();
     await client.subscribe("chat.status");

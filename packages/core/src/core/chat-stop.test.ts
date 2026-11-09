@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
-import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
+import { testTurnHandle } from "../test/turn-handle.js";
 import { createChatTurns } from "./chat-turns.js";
 import { stopActiveConversationTurn, stopSenderPlatform } from "./chat-stop.js";
 
@@ -10,37 +10,23 @@ const ref = {
 };
 
 function activeTurn(initiatorId = "user-1") {
-  const turns = createAgentTurnStreamRegistry();
   const interrupt = rs.fn(async () => undefined);
-  const stream = turns.register({
-    sessionId: "session-1",
-    chatId: "session-1",
-    turnId: "turn-1",
-    agentName: "main",
-    interrupt,
-  });
+  const turn = testTurnHandle({ turnId: "turn-1", events: (async function* () {})(), interrupt });
+  const sessions = { turn: (id: string) => (id === turn.id ? turn : undefined) };
   const chatTurns = createChatTurns();
   const end = chatTurns.start(ref, { turnId: "turn-1", initiatorId });
-  return {
-    turns,
-    chatTurns,
-    interrupt,
-    finish: () => {
-      stream.finish();
-      end();
-    },
-  };
+  return { sessions, chatTurns, interrupt, finish: end };
 }
 
 describe("stopActiveConversationTurn", () => {
   it("interrupts the active conversation turn for its initiator", async () => {
-    const { turns, chatTurns, interrupt } = activeTurn();
+    const { sessions, chatTurns, interrupt } = activeTurn();
     const isGuardian = rs.fn(async () => false);
 
     await expect(
       stopActiveConversationTurn(
         { ref, service: "discord", senderId: "user-1" },
-        { turns, chatTurns, isGuardian },
+        { sessions, chatTurns, isGuardian },
       ),
     ).resolves.toEqual({ status: "stop_requested", turnId: "turn-1" });
     expect(interrupt).toHaveBeenCalledWith("chat-stop");
@@ -48,20 +34,20 @@ describe("stopActiveConversationTurn", () => {
   });
 
   it("allows a guardian to stop another sender's turn", async () => {
-    const { turns, chatTurns, interrupt } = activeTurn("owner");
+    const { sessions, chatTurns, interrupt } = activeTurn("owner");
 
     await expect(
       stopActiveConversationTurn(
         { ref, service: "discord", senderId: "guardian" },
-        { turns, chatTurns, isGuardian: async () => true },
+        { sessions, chatTurns, isGuardian: async () => true },
       ),
     ).resolves.toMatchObject({ status: "stop_requested", turnId: "turn-1" });
     expect(interrupt).toHaveBeenCalledTimes(1);
   });
 
   it("rejects another sender and reports an idle conversation", async () => {
-    const { turns, chatTurns, interrupt, finish } = activeTurn("owner");
-    const options = { turns, chatTurns, isGuardian: async () => false };
+    const { sessions, chatTurns, interrupt, finish } = activeTurn("owner");
+    const options = { sessions, chatTurns, isGuardian: async () => false };
 
     await expect(
       stopActiveConversationTurn({ ref, service: "discord", senderId: "other" }, options),
