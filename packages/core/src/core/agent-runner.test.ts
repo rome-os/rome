@@ -15,6 +15,7 @@ import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
+import { runDefer } from "../routines/defer.js";
 import { createSubagentCalls } from "../agent/index.js";
 import { AgentLoader } from "../apps/agent-loader.js";
 import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
@@ -153,6 +154,33 @@ const MOCK_ACCOUNTING = {
   model: "mock-model",
   usage: { inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, cacheWriteTokens: 0 },
 } as const;
+
+/** The prompt and session a `defer` wake-up fires with, as runDefer stores them. */
+async function deferredWake(sessionId: string, channel: string, threadId: string) {
+  let args: Record<string, unknown> = {};
+  await runDefer(
+    {
+      kind: "time",
+      name: "Check CI",
+      note: "Read CI run 42 for PR #7 and tell the guardian whether it passed.",
+      fireAtMs: Date.now() + 5 * 60_000,
+    },
+    {
+      context: {
+        agentName: "main",
+        sessionId,
+        channelContext: { channel, threadId, channelUserId: "guardian" },
+        turnId: "turn-that-deferred",
+        scheduledAt: new Date("2026-11-09T12:00:00Z"),
+      },
+      createRoutine: async (created) => {
+        args = created.args as Record<string, unknown>;
+        return { routineId: "r-1" };
+      },
+    },
+  );
+  return { sessionId: args.sessionId as string, prompt: args.text as string };
+}
 
 describe("AgentRunner", () => {
   let testDb: TestDb;
@@ -3462,6 +3490,47 @@ describe("AgentRunner", () => {
         expect((await sessionRepository.session(scheduledFrom!))?.supersededBy).toBe(current);
       });
 
+      it("delivers a defer's note to the session that set it", async () => {
+        const provider = new MockModelProvider(replies(2));
+        const runner = renewingRunner(provider);
+        const deferredFrom = await turn(runner);
+        const wake = await deferredWake(deferredFrom!, "webchat", "renewing-chat");
+
+        await collectMessages(
+          runner.run({
+            agentName: "test-renewing",
+            prompt: wake.prompt,
+            sessionId: wake.sessionId,
+          }),
+        );
+
+        expect(provider.calls[1]?.prompt).toContain("Read CI run 42 for PR #7");
+        expect(provider.calls[1]?.prompt).toContain('turn_id="turn-that-deferred"');
+        expect(provider.calls[1]?.prompt).not.toContain("<continuation>");
+      });
+
+      it("delivers a defer's note, and the continuation, to the session that replaced its own", async () => {
+        const provider = new MockModelProvider(replies(3));
+        const runner = renewingRunner(provider);
+        const deferredFrom = await turn(runner);
+        const wake = await deferredWake(deferredFrom!, "webchat", "renewing-chat");
+        identity.text = "**Agent Name:** YoYo";
+        const current = await turn(runner);
+
+        const woken = await collectMessages(
+          runner.run({
+            agentName: "test-renewing",
+            prompt: wake.prompt,
+            sessionId: wake.sessionId,
+          }),
+        );
+
+        const start = woken.find((message) => message.type === "turn_start");
+        expect(start?.type === "turn_start" ? start.sessionId : undefined).toBe(current);
+        expect(provider.calls[2]?.prompt).toContain("<continuation>");
+        expect(provider.calls[2]?.prompt).toContain("Read CI run 42 for PR #7");
+      });
+
       it("keeps a session an approval holds mid-turn, and renews it once the hold ends", async () => {
         const runner = renewingRunner(new MockModelProvider(replies(3)));
         const first = await turn(runner);
@@ -3508,6 +3577,73 @@ describe("AgentRunner", () => {
         expect(renewed).not.toBe(legacy.id);
         expect((await sessionRepository.session(legacy.id))?.status).toBe("completed");
       });
+    });
+
+    it("delivers a defer's note when a common chat on the main agent wakes", async () => {
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Watching" }],
+        [{ type: "result", content: "Checked" }],
+      ]);
+      const runner = createRunner(provider);
+      const first = await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "Watch CI",
+          channelThreadKey: "webchat:common-1",
+        }),
+      );
+      const start = first.find((message) => message.type === "turn_start");
+      const deferredFrom = start?.type === "turn_start" ? start.sessionId : "";
+      const wake = await deferredWake(deferredFrom, "webchat", "common-1");
+
+      await collectMessages(
+        runner.run({ agentName: "test-main", prompt: wake.prompt, sessionId: wake.sessionId }),
+      );
+
+      expect(provider.calls.at(-1)?.prompt).toContain("Read CI run 42 for PR #7");
+      expect(provider.calls.at(-1)?.prompt).not.toContain("<continuation>");
+    });
+
+    it("routes a main-agent defer past an idle reset of its chat, with the note and the continuation", async () => {
+      const seeded = Session.create("core:test-main", { continuityKey: "telegram:thread-defer" });
+      await sessionRepository.add(seeded);
+      const wake = await deferredWake(seeded.id, "telegram", "thread-defer");
+      await testDb.db
+        .update(sessions)
+        .set({ lastActiveAt: new Date("2026-07-01T00:00:00Z") })
+        .where(eq(sessions.id, seeded.id));
+      const provider = new MockModelProvider([
+        [{ type: "result", content: "Fresh" }],
+        [{ type: "result", content: "Checked" }],
+      ]);
+      const runner = createRunner(provider, undefined, {
+        resetPolicy: { mode: "idle", idleMinutes: 10_080 },
+      });
+      await collectMessages(
+        runner.run({
+          agentName: "test-main",
+          prompt: "Hello again",
+          channelThreadKey: "telegram:thread-defer",
+          romeSessionId: "channel:telegram:thread-defer",
+          platformMessageId: "message-defer",
+          threadContext: {
+            channel: "telegram",
+            connectionId: "telegram-1",
+            threadId: "thread-defer",
+          },
+        }),
+      );
+      const current = await sessionRepository.current("telegram:thread-defer", "core:test-main");
+
+      const woken = await collectMessages(
+        runner.run({ agentName: "test-main", prompt: wake.prompt, sessionId: wake.sessionId }),
+      );
+
+      expect(current?.id).not.toBe(seeded.id);
+      const start = woken.find((message) => message.type === "turn_start");
+      expect(start?.type === "turn_start" ? start.sessionId : undefined).toBe(current?.id);
+      expect(provider.calls.at(-1)?.prompt).toContain("Read CI run 42 for PR #7");
+      expect(provider.calls.at(-1)?.prompt).toContain("<continuation>");
     });
 
     it("resumes a keyless run by explicit sessionId", async () => {

@@ -83,7 +83,12 @@ describe("romeToolPorts actions", () => {
 describe("romeToolPorts defer", () => {
   it("creates the wake through create_routine, owned by the dashboard chat's owner", async () => {
     const { defer, run, getSession } = ports();
-    await defer.schedule(turn(), { kind: "time", name: "check CI", fireAtMs: Date.now() + 60_000 });
+    await defer.schedule(turn(), {
+      kind: "time",
+      name: "check CI",
+      note: "Check the run and tell the guardian.",
+      fireAtMs: Date.now() + 60_000,
+    });
     expect(getSession).toHaveBeenCalledWith("chat-1");
     expect(run).toHaveBeenCalledWith(
       "create_routine",

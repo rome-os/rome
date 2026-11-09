@@ -106,6 +106,8 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
             sessionId: turn.sessionId,
             channelContext: turn.threadContext(),
             ownerKey: await dashboardChatOwner(deps.webchatRepo, turn.threadContext()),
+            turnId: turn.turnId(),
+            scheduledAt: new Date(),
           },
           createRoutine: async (createArgs) => {
             const result = await actionEngine.run(

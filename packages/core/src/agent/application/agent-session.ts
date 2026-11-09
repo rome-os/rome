@@ -617,17 +617,22 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     if (!session?.continuityKey) {
       throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
     }
-    if (session.id !== sessionId) {
+    const redirected = session.id !== sessionId;
+    if (redirected) {
       log.info("provider_session.resume_redirected", {
         agentName,
         requestedSessionId: sessionId,
         sessionId: session.id,
       });
     }
-    return acquire(
+    const resumed = await acquire(
       { agentName, channelThreadKey: session.continuityKey },
       { ...(opening ?? {}), resumeSessionId: session.id },
     );
+    // What resumes the superseded session expects the context it had there,
+    // so the turn says the chat's earlier messages are not in this one.
+    if (redirected && resumed instanceof AgentSessionImpl) resumed.continuesElsewhere();
+    return resumed;
   };
 
   return {
@@ -1905,6 +1910,12 @@ class AgentSessionImpl implements AgentSession {
 
   get currentTurnPushLevelRef(): PushLevel | undefined {
     return this.currentSink?.pushLevel;
+  }
+
+  /** The next turn resumes what an earlier session of the chat started, so
+   *  it carries the `<continuation>` notice. */
+  continuesElsewhere(): void {
+    this.continuationPending = true;
   }
 
   get currentTurnThreadAnchorRef(): string | undefined {

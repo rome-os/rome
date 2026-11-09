@@ -59,12 +59,14 @@ describe("defer session continuity", () => {
     const deferContext = {
       agentName: "main",
       sessionId: initialSessionId,
+      scheduledAt: new Date("2026-11-09T12:00:00Z"),
       channelContext,
     } satisfies DeferContext;
     await runDefer(
       {
         kind: "time",
         name: "deferred follow-up",
+        note: "Check the run and tell the guardian.",
         fireAtMs: Date.parse("2026-07-15T12:00:00.000Z") + 60_000,
       },
       {
@@ -150,10 +152,16 @@ describe("defer session continuity", () => {
       {
         kind: "event",
         name: "CI on #12",
+        note: "Check the run and tell the guardian.",
         event: { eventName: "github.check_suite", filter: [{ field: "pr", equals: "12" }] },
       },
       {
-        context: { agentName: "main", sessionId, channelContext },
+        context: {
+          agentName: "main",
+          sessionId,
+          channelContext,
+          scheduledAt: new Date("2026-11-09T12:00:00Z"),
+        },
         createRoutine: async (args) => {
           routineId = await routinesRepo.create(
             args as {
