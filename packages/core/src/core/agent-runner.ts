@@ -297,6 +297,7 @@ export class AgentRunner {
         ...(lines ? { quoted: lines.quoted } : {}),
         initiatedBy: params.initiatedBy ?? "user",
         ...(params.pushLevel ? { pushLevel: params.pushLevel } : {}),
+        ...(params.threadAnchor ? { threadAnchor: params.threadAnchor } : {}),
       },
     ).turn;
     this.runLineDeps?.replies?.runs(handle.id, agentName);

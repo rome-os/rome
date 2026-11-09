@@ -1693,6 +1693,10 @@ export interface ChannelMessage {
   timestamp: Date;
   replyTo?: MessageReplyReference;
   thread?: { kind: "dm" | "group" | "topic"; name?: string };
+  /** The chat thread the message is in, in a chat that keeps them, such as
+   *  a Concierge chat: the id of the thread's first message. Not a platform
+   *  thread. Absent when the message is in none. */
+  chatThread?: string;
   addressing?: MessageAddressing;
   raw?: unknown;
   /** Where this message sits in a channel read, as an opaque token. Set on

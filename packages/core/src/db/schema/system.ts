@@ -625,10 +625,18 @@ export const chatMessages = sqliteTable(
     parts: text("parts").notNull(), // JSON array of blocks, as composed
     // The line this one quotes, when Rome holds it.
     replyToMessageId: integer("reply_to_message_id"),
+    // The chat thread the line is in (docs/domains/chats.md#chat-thread): the
+    // key of the thread's first line. Not the platform's thread_id. Null for a
+    // line in no chat thread, as every line said before chat threads.
+    chatThreadId: text("chat_thread_id"),
+    // The sender chose the line's chat thread, so nothing moves it.
+    chatThreadChosen: integer("chat_thread_chosen", { mode: "boolean" }).notNull().default(false),
     saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [
     uniqueIndex("idx_chat_messages_key").on(table.chatId, table.key),
+    // One chat thread's lines.
+    index("idx_chat_messages_chat_thread").on(table.chatId, table.chatThreadId),
     // A place's lines by time. Within one second lines keep the order they
     // were recorded in.
     index("idx_chat_messages_page").on(table.chatId, table.threadId, table.saidAt, table.id),

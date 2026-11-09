@@ -106,12 +106,21 @@ import type {
 import { z } from "zod";
 import { withReplyContext } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
+import type { ChatThreadPlacement } from "../../db/repositories/webchat.js";
 
 const log = createLogger("api:webchat");
 
 const inputPrioritySchema = z.enum(["now", "next"]).optional();
 
 // Client-sent parts never carry a reply: only `replyToMessageId` builds one.
+/**
+ * The line that tells the Concierge which chat thread the guardian's message
+ * is in, and whether the guardian chose it, so it is never moved.
+ */
+function chatThreadLine(messageId: string, thread: string, chosen: boolean): string {
+  return `<chat_thread message_id="${messageId}" thread="${thread}" chosen="${chosen}"/>`;
+}
+
 const isReplyToPart = (part: unknown): boolean =>
   typeof part === "object" && part !== null && (part as { type?: unknown }).type === "reply_to";
 
@@ -852,10 +861,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const unsubscribeSessionName = deps.webchatRepo.onSessionNameChanged((event) => {
       if (event.sessionId === sessionId) emit("session_name", event);
     });
+    const unsubscribeChatThread = deps.webchatRepo.onChatThreadPlaced((event) => {
+      if (event.sessionId === sessionId) emit("message_chat_thread", event);
+    });
     return () => {
       runningListeners.delete(runningListener);
       unsubscribeMessages();
       unsubscribeSessionName();
+      unsubscribeChatThread();
     };
   };
 
@@ -1281,6 +1294,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     sessionId: string,
     { withLayout = false }: { withLayout?: boolean } = {},
   ) => {
+    // One chat thread, named by any of its messages, in one page: threads are short.
+    const threadParam = c.req.query("thread");
+    if (threadParam !== undefined) {
+      if (!threadParam) return c.json({ error: "thread must name a message" }, 400);
+      const messages = await deps.webchatRepo.getChatThreadMessages(sessionId, threadParam);
+      return c.json({
+        messages: await enrichStoredMessages(sessionId, messages),
+        nextCursor: null,
+      });
+    }
     const limitParam = c.req.query("limit");
     const beforeParam = c.req.query("before");
     if (limitParam === undefined && beforeParam === undefined) {
@@ -3273,6 +3296,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   type SendBody = {
     inputId?: string;
+    /**
+     * A message of the chat thread this message goes into, as the thread
+     * view sends it. Only a Concierge chat keeps chat threads.
+     */
+    chatThread?: unknown;
     automatedSource?: unknown;
     automatedActorKind?: unknown;
     threadId?: string;
@@ -3570,10 +3598,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const conciergeChat = isConciergeChat(session)
       ? await deps.concierge?.conciergeChat(sessionId)
       : null;
-    const promptText =
-      conciergeChat && deps.concierge
-        ? `${await deps.concierge.turnHeader(conciergeChat)}\n\n${noticedPrompt}`
-        : noticedPrompt;
+    const conciergeHeader =
+      conciergeChat && deps.concierge ? await deps.concierge.turnHeader(conciergeChat) : null;
+    let promptText = conciergeHeader ? `${conciergeHeader}\n\n${noticedPrompt}` : noticedPrompt;
 
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
 
@@ -3690,7 +3717,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     };
 
-    if (!(await deps.webchatRepo.recordUserInput(inputId, sessionId, userContent, actor, saidBy))) {
+    if (body.chatThread !== undefined && typeof body.chatThread !== "string") {
+      return answer({ error: "chatThread must be a message id" }, 400);
+    }
+    // In a Concierge chat a message sent into a chat thread, or as a reply,
+    // stays in that thread. Any other joins the latest thread until the
+    // Concierge places it (docs/domains/chats.md#chat-thread).
+    const chatThread: ChatThreadPlacement | undefined = !isConciergeChat(session)
+      ? undefined
+      : body.chatThread
+        ? { in: body.chatThread, chosen: true }
+        : reply
+          ? { in: body.replyToMessageId as string, chosen: true }
+          : { latest: true };
+    if (
+      !(await deps.webchatRepo.recordUserInput(
+        inputId,
+        sessionId,
+        userContent,
+        actor,
+        saidBy,
+        chatThread,
+      ))
+    ) {
       const existing = await deps.webchatRepo.getUserInput(sessionId, inputId);
       if (!existing) return answer({ error: "inputId is already in use" }, 409);
       return answer({
@@ -3708,6 +3757,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       messageId: inputId,
       text: displayText,
     });
+    // The Concierge reads where the message stands, so it can place it.
+    const placedIn = chatThread ? await deps.webchatRepo.chatThreadOf(sessionId, inputId) : null;
+    if (placedIn && conciergeHeader) {
+      const line = chatThreadLine(inputId, placedIn, !!chatThread && "chosen" in chatThread);
+      promptText = `${conciergeHeader}\n${line}\n\n${noticedPrompt}`;
+    }
 
     let agentSess;
     try {

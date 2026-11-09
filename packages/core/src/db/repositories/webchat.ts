@@ -77,7 +77,27 @@ export interface StoredWebchatMessage {
   senderName?: string | null;
   replyToPlatformMessageId?: string | null;
   contextInjectedTurnId?: string | null;
+  /** The chat thread the message is in (docs/domains/chats.md#chat-thread),
+   *  or null when it is in none. */
+  chatThreadId?: string | null;
   createdAt: Date;
+}
+
+/**
+ * Where a message goes among its chat's chat threads: into the thread of
+ * the message `in` names, with `chosen` when its sender chose it, or into
+ * the most recently active thread, or a thread of its own.
+ */
+export type ChatThreadPlacement =
+  | { in: string; chosen?: boolean }
+  | { latest: true }
+  | { starts: true };
+
+/** A message was placed in a chat thread. */
+export interface ChatThreadPlaced {
+  sessionId: string;
+  messageId: string;
+  chatThreadId: string;
 }
 
 export interface StoredSharedChat {
@@ -307,6 +327,7 @@ export interface TraceBatch {
 }
 
 export type WebchatMessageInsertedListener = (message: StoredWebchatMessage) => void;
+export type ChatThreadPlacedListener = (event: ChatThreadPlaced) => void;
 export type WebchatSessionNameChangedListener = (event: {
   sessionId: string;
   name: string;
@@ -788,6 +809,57 @@ export class WebChatRepository {
     for (const listener of this.messageInsertedListeners) {
       listener(message);
     }
+  }
+
+  private chatThreadPlacedListeners = new Set<ChatThreadPlacedListener>();
+
+  /** Told when a message is placed in a chat thread after it was said. */
+  onChatThreadPlaced(listener: ChatThreadPlacedListener): () => void {
+    this.chatThreadPlacedListeners.add(listener);
+    return () => {
+      this.chatThreadPlacedListeners.delete(listener);
+    };
+  }
+
+  protected emitChatThreadPlaced(event: ChatThreadPlaced): void {
+    for (const listener of this.chatThreadPlacedListeners) listener(event);
+  }
+
+  /**
+   * Places message `messageId` of chat `sessionId` in a chat thread. A
+   * message whose sender chose its thread is never moved. Answers the
+   * thread the message is in after, or null when the chat holds no such
+   * message or keeps no chat threads. Chat threads live in Chats, so this
+   * repository keeps none.
+   */
+  async placeInChatThread(
+    _sessionId: string,
+    _messageId: string,
+    _placement: ChatThreadPlacement,
+  ): Promise<string | null> {
+    return null;
+  }
+
+  /** The chat thread message `messageId` of chat `sessionId` is in, else the
+   *  one it would start, or null when the chat holds no such message. */
+  async chatThreadOf(_sessionId: string, _messageId: string): Promise<string | null> {
+    return null;
+  }
+
+  /**
+   * The messages of the chat thread that message `messageId` of chat
+   * `sessionId` is in, in the order they were said. A message in no chat
+   * thread is alone in its own. Empty when the chat holds no such message.
+   */
+  async getChatThreadMessages(
+    _sessionId: string,
+    _messageId: string,
+  ): Promise<
+    Array<
+      StoredWebchatMessage & { inputState: import("@rome-os/app-runtime").AgentInputState | null }
+    >
+  > {
+    return [];
   }
 
   onSessionNameChanged(listener: WebchatSessionNameChangedListener): () => void {
@@ -1886,6 +1958,7 @@ export class WebChatRepository {
     content: string,
     actor?: SessionActor,
     saidBy?: Account,
+    _chatThread?: ChatThreadPlacement,
   ): Promise<boolean> {
     return this.db.transaction((tx) => {
       const createdAt = new Date();
@@ -2134,6 +2207,7 @@ export class WebChatRepository {
     role: string,
     parts: TranscriptPart[],
     id: string = randomUUID(),
+    _chatThread?: ChatThreadPlacement,
   ): Promise<StoredWebchatMessage> {
     const message = await this.db.transaction((tx) => {
       const createdAt = new Date();
@@ -2243,8 +2317,16 @@ export class WebChatRepository {
     sessionId: string,
     turnId: string,
     parts: TranscriptPart[],
+    options: { chatThread?: ChatThreadPlacement } = {},
   ): Promise<StoredWebchatMessage> {
-    return this.insertBackendMessage(sessionId, turnId, "assistant", parts);
+    return this.insertBackendMessage(
+      sessionId,
+      turnId,
+      "assistant",
+      parts,
+      undefined,
+      options.chatThread,
+    );
   }
 
   /**

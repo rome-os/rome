@@ -30,6 +30,10 @@ export interface TurnFacts {
   sharedContext(): Record<string, unknown> | undefined;
   /** The level the running turn pushes its first message at, or undefined when it pushes none. */
   pushLevel(): PushLevel | undefined;
+  /** A message of the chat the running turn answers though no message there
+   *  started it, as a task's report answers the message that started the
+   *  task, or undefined when the turn names none. */
+  threadAnchor(): string | undefined;
   /** Runs `fn` in the turn's trace context, so the work it starts nests under the turn. */
   inTurn<T>(fn: () => T): T;
 }

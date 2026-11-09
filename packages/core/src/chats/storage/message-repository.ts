@@ -291,6 +291,58 @@ export class MessageRepository {
     );
   }
 
+  /**
+   * The chat thread of the message keyed `key` in `chat`: the thread it is
+   * in, else the one it would start, which its own key names. Null when Rome
+   * holds no such message. docs/domains/chats.md#chat-thread
+   */
+  chatThreadOf(chat: ChatRef, key: string): string | null {
+    const row = this.db.all<{ thread: string | null }>(sql`
+      SELECT chat_thread_id AS thread FROM chat_messages
+      WHERE chat_id = ${chatIdOf(chat)} AND key = ${key}
+    `)[0];
+    return row ? (row.thread ?? key) : null;
+  }
+
+  /** The chat thread of the newest message in `chat` that is in one, or null
+   *  when none is. */
+  latestChatThread(chat: ChatRef): string | null {
+    return (
+      this.db.all<{ thread: string }>(sql`
+        SELECT chat_thread_id AS thread FROM chat_messages
+        WHERE chat_id = ${chatIdOf(chat)} AND chat_thread_id IS NOT NULL
+        ORDER BY said_at DESC, id DESC LIMIT 1
+      `)[0]?.thread ?? null
+    );
+  }
+
+  /**
+   * Put the message keyed `key` in `chat` in chat thread `thread`. A message
+   * whose sender `chosen` its thread is never moved again. A message already
+   * so placed stays where it is. Answers whether the message was placed.
+   */
+  placeInChatThread(
+    chat: ChatRef,
+    key: string,
+    thread: string,
+    options: { chosen?: boolean } = {},
+  ): boolean {
+    const moved = this.db
+      .update(chatMessages)
+      .set({ chatThreadId: thread, chatThreadChosen: options.chosen === true })
+      .where(
+        and(
+          sql`${chatMessages.chatId} = ${chatIdOf(chat)}`,
+          eq(chatMessages.key, key),
+          eq(chatMessages.chatThreadChosen, false),
+          options.chosen ? undefined : sql`${chatMessages.chatThreadId} IS NOT ${thread}`,
+        ),
+      )
+      .returning({ id: chatMessages.id })
+      .all();
+    return moved.length > 0;
+  }
+
   /** The chat on `platform` that holds a message its adapter keys `key`, the
    *  oldest such message's, or null when Rome holds none. For platforms whose
    *  keys are unique across chats, as an email's message id is. */
@@ -349,7 +401,7 @@ function chatIdOf(ref: ChatRef) {
 }
 
 const MESSAGE_COLUMNS = sql.raw(`m.id, m.key, m.sender_account_id, m.sender_agent, m.sender_name,
-  m.text, m.parts, m.reply_to_message_id, m.said_at`);
+  m.text, m.parts, m.reply_to_message_id, m.said_at, m.chat_thread_id`);
 
 interface MessageRow {
   id: number;
@@ -361,6 +413,7 @@ interface MessageRow {
   parts: string;
   reply_to_message_id: number | null;
   said_at: number;
+  chat_thread_id: string | null;
 }
 
 interface PlaceRow {
@@ -395,6 +448,7 @@ function said(place: Place, row: MessageRow): SaidMessage {
     body: { text: row.text },
     parts: row.parts,
     ...(row.reply_to_message_id === null ? {} : { replyTo: row.reply_to_message_id }),
+    ...(row.chat_thread_id === null ? {} : { chatThread: row.chat_thread_id }),
     at: new Date(row.said_at * 1000),
   };
 }

@@ -9,6 +9,7 @@ import {
   type ConciergeTaskState,
 } from "@rome/api-types/concierge";
 import type { SaidMessage } from "../chats/message.js";
+import type { ChatThreadPlacement } from "../db/repositories/webchat.js";
 import type { SendResult } from "../connections/send.js";
 import type {
   ConciergeTaskWithChat,
@@ -39,6 +40,15 @@ const runTool = romeToolRunner(log);
 const TASK_STATUSES = ["running", "idle", "waiting_input", "failed"] as const;
 type TaskStatus = (typeof TASK_STATUSES)[number];
 const DEFAULT_READ_LIMIT = 6;
+
+/** The parameter that names the chat thread a message goes into. */
+const THREAD_PARAMETER = {
+  type: "string",
+  description:
+    'The chat thread this message belongs to: the id of any message in it, or "new" to start one. ' +
+    "It also places the guardian's message that started this turn there. " +
+    "Leave it out to stay in the thread of the guardian's message, or of the task this turn reports on.",
+};
 
 function requireString(args: Record<string, unknown>, field: string): string {
   const value = args[field];
@@ -306,23 +316,66 @@ export async function buildConciergeTools(
   const said = (chatId: string, turnId: string, ownWords: string | null) =>
     service.said({ turnId, chatId, ownWords, level: context.getTurnPushLevel() });
 
-  const say = async (text: string, format: "bubble" | "long") => {
+  // The chat thread a message the Concierge says goes into
+  // (docs/domains/chats.md#chat-thread). Named, it also places the guardian's
+  // messages that started the turn, unless they chose their thread. Unnamed,
+  // it is the thread of the turn's first guardian message, else of the
+  // message a turn the guardian did not start answers, else a new one.
+  const chatThreadFor = async (named: string | undefined): Promise<ChatThreadPlacement> => {
     const { chatId, turnId } = currentTurn();
-    const { id } = await webchatRepo.addBackendMessage(chatId, turnId, [
-      { type: "text", content: text, ...(format === "long" ? { format } : {}) },
-    ]);
+    const prompts = (await webchatRepo.getTurnChatMessages(chatId, turnId)).filter(
+      (row) => row.role === "user",
+    );
+    if (named === "new") {
+      const [first, ...rest] = prompts;
+      if (!first) return { starts: true };
+      await webchatRepo.placeInChatThread(chatId, first.id, { starts: true });
+      for (const prompt of rest) {
+        await webchatRepo.placeInChatThread(chatId, prompt.id, { in: first.id });
+      }
+      return { in: first.id };
+    }
+    if (named !== undefined) {
+      if (!(await webchatRepo.getReplyTarget(chatId, named))) {
+        throw new Error(
+          `No message ${named} in this chat. Pass the id of a message in the chat thread, or "new".`,
+        );
+      }
+      for (const prompt of prompts) {
+        await webchatRepo.placeInChatThread(chatId, prompt.id, { in: named });
+      }
+      return { in: named };
+    }
+    const anchor = prompts[0]?.id ?? context.getTurnThreadAnchor();
+    if (anchor && (await webchatRepo.getReplyTarget(chatId, anchor))) return { in: anchor };
+    return { starts: true };
+  };
+
+  const say = async (text: string, format: "bubble" | "long", thread?: string) => {
+    const { chatId, turnId } = currentTurn();
+    const { id } = await webchatRepo.addBackendMessage(
+      chatId,
+      turnId,
+      [{ type: "text", content: text, ...(format === "long" ? { format } : {}) }],
+      { chatThread: await chatThreadFor(thread) },
+    );
     said(chatId, turnId, text);
     return id;
   };
 
   // One message, so the lead-in and the report always arrive together. The
   // transcript still shows them as two bubbles.
-  const forward = async (text: string, from: ForwardedFrom, intro?: string) => {
+  const forward = async (text: string, from: ForwardedFrom, intro?: string, thread?: string) => {
     const { chatId, turnId } = currentTurn();
-    const { id } = await webchatRepo.addBackendMessage(chatId, turnId, [
-      ...(intro ? [{ type: "text" as const, content: intro }] : []),
-      { type: "text", content: text, format: "long", forwardedFrom: from },
-    ]);
+    const { id } = await webchatRepo.addBackendMessage(
+      chatId,
+      turnId,
+      [
+        ...(intro ? [{ type: "text" as const, content: intro }] : []),
+        { type: "text", content: text, format: "long", forwardedFrom: from },
+      ],
+      { chatThread: await chatThreadFor(thread) },
+    );
     // Forwarded text is the task's, not the Concierge's, and so are a task's
     // title and chat name, which can come from its output: none becomes the
     // push's line, which could carry a code or password onto the lock screen.
@@ -333,9 +386,12 @@ export async function buildConciergeTools(
   // A card that opens the task chat; it reads the chat's live status itself.
   const showCard = async (chatId: string, title: string) => {
     const { chatId: conciergeChatId, turnId } = currentTurn();
-    const { id } = await webchatRepo.addBackendMessage(conciergeChatId, turnId, [
-      { type: "task_chat", chatId, title },
-    ]);
+    const { id } = await webchatRepo.addBackendMessage(
+      conciergeChatId,
+      turnId,
+      [{ type: "task_chat", chatId, title }],
+      { chatThread: await chatThreadFor(undefined) },
+    );
     said(conciergeChatId, turnId, null);
     return id;
   };
@@ -356,6 +412,7 @@ export async function buildConciergeTools(
             enum: ["bubble", "long"],
             description: "bubble: a short chat line. long: one long message.",
           },
+          thread: THREAD_PARAMETER,
         },
       },
       handler: (input) =>
@@ -363,6 +420,7 @@ export async function buildConciergeTools(
           const messageId = await say(
             requireString(args, "text"),
             args.format === "long" ? "long" : "bubble",
+            optionalString(args, "thread"),
           );
           return {
             sent: "The guardian sees it. Call say again only for a new message.",
@@ -661,9 +719,12 @@ export async function buildConciergeTools(
               await findListEntry(chatId),
             ),
             messages: said.map((message) => ({
+              id: message.id,
               role: message.direction === "fromRome" ? "assistant" : "user",
               text: message.body.text,
               at: message.at.toISOString(),
+              // The chat thread a message from before chat threads would start.
+              ...(isConciergeChat(chat) ? { thread: message.chatThread ?? message.id } : {}),
             })),
           };
         }),
@@ -764,6 +825,7 @@ export async function buildConciergeTools(
         properties: {
           chatId: { type: "string" },
           intro: { type: "string", description: "Optional short line sent before it." },
+          thread: THREAD_PARAMETER,
         },
       },
       handler: (input) =>
@@ -783,6 +845,7 @@ export async function buildConciergeTools(
             answer,
             { chatId, title: chat.name },
             optionalString(args, "intro"),
+            optionalString(args, "thread"),
           );
           const task = await tasks.repo.findBySession(chatId);
           if (task) await tasks.repo.setSourceMessage(task.id, conciergeChatId, messageId);
@@ -836,16 +899,21 @@ export async function buildConciergeTools(
           if (connector.state === "working") {
             return { connected: true, note: "Already connected; no card shown." };
           }
-          const { id } = await webchatRepo.addBackendMessage(chatId, turnId, [
-            {
-              type: "connect_card",
-              service: connector.service,
-              label: connector.label,
-              icon: connector.icon,
-              // A service with no entry can only be connected from Settings.
-              connect: connector.connect ?? { kind: "dashboard" },
-            },
-          ]);
+          const { id } = await webchatRepo.addBackendMessage(
+            chatId,
+            turnId,
+            [
+              {
+                type: "connect_card",
+                service: connector.service,
+                label: connector.label,
+                icon: connector.icon,
+                // A service with no entry can only be connected from Settings.
+                connect: connector.connect ?? { kind: "dashboard" },
+              },
+            ],
+            { chatThread: await chatThreadFor(undefined) },
+          );
           said(chatId, turnId, null);
           return { sent: "Shown; the guardian sees the card.", messageId: id };
         }),

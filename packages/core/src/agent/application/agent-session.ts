@@ -244,6 +244,8 @@ export interface SendTurnOptions {
   initiatedBy?: "user" | "system";
   /** Pushes the first message said in the turn at this level (RunParams.pushLevel). */
   pushLevel?: PushLevel;
+  /** The message the turn answers though it did not start it (TurnFacts.threadAnchor). */
+  threadAnchor?: string;
 }
 
 export interface AgentSessionStatusEvent {
@@ -807,6 +809,7 @@ async function currentSetup(
     threadContext: () => init.threadContext,
     sharedContext: () => init.sharedContext,
     pushLevel: () => undefined,
+    threadAnchor: () => undefined,
     inTurn: (fn) => fn(),
   };
   const subagents = subagentsOf(deps.agentLoader, config);
@@ -1017,6 +1020,7 @@ async function openSession(
   const turnFacts = (
     refs: TurnExecRefs,
     pushLevel: () => PushLevel | undefined = () => undefined,
+    threadAnchor: () => string | undefined = () => undefined,
   ): TurnFacts => ({
     agentName: key.agentName,
     continuityKey: key.channelThreadKey,
@@ -1028,9 +1032,14 @@ async function openSession(
     threadContext: refs.getThreadContext,
     sharedContext: refs.getSharedContext,
     pushLevel,
+    threadAnchor,
     inTurn: refs.bindTurnCtx,
   });
-  const liveTurn = turnFacts(sessionExecRefs, () => impl.currentTurnPushLevelRef);
+  const liveTurn = turnFacts(
+    sessionExecRefs,
+    () => impl.currentTurnPushLevelRef,
+    () => impl.currentTurnThreadAnchorRef,
+  );
 
   // `defer`: schedule a one-off wakeup back into this same thread, through
   // the turn's facts (`deps.defer`). Only
@@ -1550,6 +1559,7 @@ interface TurnSink {
   quoted?: PromptMessage | null;
   initiatedBy?: "user" | "system";
   pushLevel?: PushLevel;
+  threadAnchor?: string;
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
   subagentCallsByToolUse: Map<string, { key: SubagentCallKey; call: SubagentCall }>;
@@ -1817,6 +1827,10 @@ class AgentSessionImpl implements AgentSession {
 
   get currentTurnPushLevelRef(): PushLevel | undefined {
     return this.currentSink?.pushLevel;
+  }
+
+  get currentTurnThreadAnchorRef(): string | undefined {
+    return this.currentSink?.threadAnchor;
   }
 
   get currentTurnSharedContextRef(): Record<string, unknown> | undefined {
@@ -2893,6 +2907,7 @@ class AgentSessionImpl implements AgentSession {
       quoted: options?.quoted ?? null,
       initiatedBy: options?.initiatedBy ?? "user",
       pushLevel: options?.pushLevel,
+      threadAnchor: options?.threadAnchor,
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
       subagentCallsByToolUse: new Map(),

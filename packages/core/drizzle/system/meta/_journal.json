@@ -834,6 +834,13 @@
       "when": 1794259109674,
       "tag": "0119_session_setup_fingerprint",
       "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "6",
+      "when": 1794259353853,
+      "tag": "0120_chat_threads",
+      "breakpoints": true
     }
   ]
 }

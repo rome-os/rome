@@ -15,6 +15,10 @@ export interface RunParams extends SdkRunParams {
    *  says to them in it goes to their phone as a push at this level. Absent,
    *  the turn pushes nothing. */
   pushLevel?: NotifyLevel;
+  /** A message of the chat this turn answers though no message there started
+   *  it, such as the one that started the task it reports on. Absent, the
+   *  turn names none. */
+  threadAnchor?: string;
   /** Whether the runner saves the turn's trace. Defaults to every channel but
    *  webchat, whose chat route saves the trace of the turns it runs. */
   persistTrace?: boolean;

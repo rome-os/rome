@@ -35,6 +35,7 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
     threadContext: () => ({ channel: "webchat", threadId: "chat-1" }),
     sharedContext: () => undefined,
     pushLevel: () => undefined,
+    threadAnchor: () => undefined,
     inTurn: (fn) => fn(),
     ...overrides,
   };

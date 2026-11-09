@@ -161,6 +161,7 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
             getTurnId: turn.turnId,
             getThreadContext: turn.threadContext,
             getTurnPushLevel: turn.pushLevel,
+            getTurnThreadAnchor: turn.threadAnchor,
           })) ?? [])
         : [];
       return [

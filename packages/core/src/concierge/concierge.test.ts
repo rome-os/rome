@@ -6,6 +6,7 @@ import type {
   BackendTurnParams,
   ChatId,
 } from "@rome-os/app-runtime";
+import type { ChatThreadPlacement } from "../db/repositories/webchat.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -68,6 +69,9 @@ interface Row {
   senderId?: string;
   /** Unset rows belong to every turn. */
   turnId?: string;
+  /** The chat thread the row is in, and whether its sender chose it. */
+  chatThread?: string;
+  chosen?: boolean;
 }
 
 const textOf = (content: string): string => {
@@ -177,8 +181,29 @@ function setup(
       },
     ],
   ]);
+  // Chat threads as Chats keeps them: a row the sender placed is never moved.
+  const placeInThread = (chatId: string, id: string, placement: ChatThreadPlacement) => {
+    const rows = messages.get(chatId) ?? [];
+    const row = rows.find((candidate) => candidate.id === id);
+    if (!row) return null;
+    if (row.chosen) return row.chatThread ?? id;
+    const threadOf = (key: string) =>
+      rows.find((candidate) => candidate.id === key)?.chatThread ?? key;
+    row.chatThread =
+      "in" in placement
+        ? threadOf(placement.in)
+        : "latest" in placement
+          ? ([...rows].reverse().find((candidate) => candidate.chatThread)?.chatThread ?? id)
+          : id;
+    row.chosen = "in" in placement && placement.chosen === true;
+    return row.chatThread;
+  };
   /** The Concierge chat the tools' turn runs in. */
-  const here = { chat: CONCIERGE_CHAT as string, pushLevel: undefined as NotifyLevel | undefined };
+  const here = {
+    chat: CONCIERGE_CHAT as string,
+    pushLevel: undefined as NotifyLevel | undefined,
+    threadAnchor: undefined as string | undefined,
+  };
   const messages = new Map<string, Row[]>();
   /** Every input posted to a task chat, by id, in order. */
   const posted: string[] = [];
@@ -250,13 +275,23 @@ function setup(
           ...(isConciergeChatId(id) && options.said !== false ? [ACKNOWLEDGEMENT] : []),
           ...(messages.get(id) ?? []),
         ].filter((row) => !row.turnId || row.turnId === turnId),
-      addBackendMessage: rs.fn(async (chatId: string, turnId: string, parts: unknown[]) => {
-        const list = messages.get(chatId) ?? [];
-        const id = `said-${++saidCount}`;
-        list.push({ id, role: "assistant", content: JSON.stringify(parts), turnId });
-        messages.set(chatId, list);
-        return { id };
-      }),
+      addBackendMessage: rs.fn(
+        async (
+          chatId: string,
+          turnId: string,
+          parts: unknown[],
+          placed: { chatThread?: ChatThreadPlacement } = {},
+        ) => {
+          const list = messages.get(chatId) ?? [];
+          const id = `said-${++saidCount}`;
+          list.push({ id, role: "assistant", content: JSON.stringify(parts), turnId });
+          messages.set(chatId, list);
+          if (placed.chatThread) placeInThread(chatId, id, placed.chatThread);
+          return { id };
+        },
+      ),
+      placeInChatThread: async (chatId: string, id: string, placement: ChatThreadPlacement) =>
+        placeInThread(chatId, id, placement),
       getReplyTarget: async (chatId: string, messageId: string) =>
         [
           ...(isConciergeChatId(chatId) && options.said !== false ? [ACKNOWLEDGEMENT] : []),
@@ -330,6 +365,7 @@ function setup(
       channelUserId: "guardian",
     }),
     getTurnPushLevel: () => here.pushLevel,
+    getTurnThreadAnchor: () => here.threadAnchor,
   });
   const listeners: Array<(event: AgentTurnFinishedEvent) => void> = [];
   const failedBeforeStartListeners: Array<(event: AgentTurnFailedBeforeStart) => void> = [];
@@ -421,6 +457,10 @@ function setup(
     pushLevel: (level: NotifyLevel | undefined) => {
       here.pushLevel = level;
     },
+    /** Runs the tools' turn as one that answers this message without having started from it. */
+    threadAnchor: (messageId: string | undefined) => {
+      here.threadAnchor = messageId;
+    },
     pushAnswers: (outcome: () => Promise<SendOutcome>) => {
       pushOutcome = outcome;
     },
@@ -487,6 +527,91 @@ describe("Concierge tools", () => {
       [{ type: "text", content: "on it" }],
       [{ type: "text", content: "# Report", format: "long" }],
     ]);
+  });
+
+  describe("chat threads", () => {
+    const threadOf = (s: ReturnType<typeof setup>, id: string) =>
+      s.messages.get(CONCIERGE_CHAT)?.find((row) => row.id === id)?.chatThread;
+    const guardianSays = (s: ReturnType<typeof setup>, row: Partial<Row> & { id: string }) => {
+      const list = s.messages.get(CONCIERGE_CHAT) ?? [];
+      list.push({ role: "user", content: "[]", turnId: "concierge-turn-1", ...row });
+      s.messages.set(CONCIERGE_CHAT, list);
+    };
+    const saidId = (result: unknown) =>
+      JSON.parse((result as { content: { text: string }[] }).content[0]!.text).messageId as string;
+
+    it("say with no thread joins the thread of the guardian's message that started the turn", async () => {
+      const s = setup();
+      guardianSays(s, { id: "g1", chatThread: "earlier", turnId: "older-turn" });
+      guardianSays(s, { id: "g2", chatThread: "earlier" });
+
+      const said = saidId(await s.tool("say", { text: "Moved to tomorrow" }));
+
+      expect(threadOf(s, said)).toBe("earlier");
+      expect(threadOf(s, "g2")).toBe("earlier");
+    });
+
+    it('say with "new" starts a thread at the guardian\'s unmarked message', async () => {
+      const s = setup();
+      guardianSays(s, { id: "g1", chatThread: "meeting" });
+
+      const said = saidId(await s.tool("say", { text: "Looking for flights", thread: "new" }));
+
+      expect(threadOf(s, "g1")).toBe("g1");
+      expect(threadOf(s, said)).toBe("g1");
+    });
+
+    it("say naming a thread moves an unmarked message there, and never one the guardian placed", async () => {
+      const s = setup();
+      guardianSays(s, { id: "flights", chatThread: "flights", turnId: "older-turn" });
+      guardianSays(s, { id: "g1", chatThread: "meeting" });
+      guardianSays(s, { id: "g2", chatThread: "meeting", chosen: true });
+
+      const said = saidId(await s.tool("say", { text: "Booked", thread: "flights" }));
+
+      expect(threadOf(s, "g1")).toBe("flights");
+      expect(threadOf(s, "g2")).toBe("meeting");
+      expect(threadOf(s, said)).toBe("flights");
+      await expect(s.tool("say", { text: "x", thread: "nowhere" })).resolves.toMatchObject({
+        isError: true,
+      });
+    });
+
+    it("a turn the guardian did not start joins the thread of the message it answers", async () => {
+      const s = setup({ said: false });
+      s.messages.set(CONCIERGE_CHAT, [
+        { id: "ack", role: "assistant", content: "[]", turnId: "older-turn", chatThread: "g0" },
+      ]);
+      s.threadAnchor("ack");
+
+      const said = saidId(await s.tool("say", { text: "The task finished" }));
+
+      expect(threadOf(s, said)).toBe("g0");
+    });
+
+    it("a task event's turn answers the message that started the first task it names", async () => {
+      const s = setup();
+      const [row] = await s.tasks.repo.upsertMany([
+        { title: "Flights", state: "doing", chatId: CONCIERGE_CHAT, sourceMessageId: "ack-1" },
+      ]);
+      const resolved = await s.service.resolveTurn({
+        agentName: CONCIERGE_AGENT_ID,
+        sessionId: "runtime-1",
+        channel: "webchat",
+        threadId: CONCIERGE_CHAT,
+        prompt: `<task_events>\n<task id="${row!.id}" title="Flights">\n</task>\n</task_events>`,
+      });
+      const woken = await s.service.resolveTurn({
+        agentName: CONCIERGE_AGENT_ID,
+        sessionId: "runtime-1",
+        channel: "webchat",
+        threadId: CONCIERGE_CHAT,
+        prompt: `⏰ Time's up: check task:${row!.id}`,
+      });
+
+      expect(resolved.threadAnchor).toBe("ack-1");
+      expect(woken.threadAnchor).toBe("ack-1");
+    });
   });
 
   it("chat_start marks the task chat before its first turn and names it after", async () => {
