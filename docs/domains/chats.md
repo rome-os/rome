@@ -33,7 +33,7 @@ One line of conversation inside a [Concierge chat](#concierge-chat) about one th
 - A chat thread is known by its chat and the id of its first message.
 - Every message the Concierge says in the chat is in a chat thread. One it does not place joins the thread of the owner's message it answers. One that answers no message of the owner, such as a task's result, joins the thread of the message that started the task.
 - An owner's message sent from the thread view, or as a reply, is in that thread at once, and nothing moves it.
-- Any other owner's message joins the chat thread of the newest message that is in one, or starts its own when none is. It moves only when the Concierge **places** it in another thread or in a new one.
+- Any other owner's message joins the chat thread of the newest message that is in one, or starts its own when none is. The first message the Concierge says after it **places** it, once and for good: in the thread that message is in, in another, or in a new one. Nothing moves it after that.
 - A message from before chat threads is in none, and its thread view shows it alone.
 - The chat's timeline shows every message in the order it was said, whatever its thread. The thread view shows one thread's messages on their own.
 

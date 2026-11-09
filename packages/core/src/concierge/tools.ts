@@ -46,9 +46,17 @@ const THREAD_PARAMETER = {
   type: "string",
   description:
     'The chat thread this message belongs to: the id of any message in it, or "new" to start one. ' +
-    "It also places the guardian's message that started this turn there. " +
-    'On your first message of a turn whose <chat_thread> says chosen="false", pass "new" when the guardian asks for something other than what its `about` says, even when you only ask a question back. ' +
+    "Your first message after a guardian message arrives also places that guardian message, once and for good: in the thread you name, in the new one, or, when you leave this out, where it already is. " +
+    "A guardian message you already placed, or one the guardian placed, never moves again. " +
+    'So on your first message after a <chat_thread chosen="false"> line, pass "new" when the guardian asks for something other than what its `about` says, even when you only ask a question back. ' +
     "Leave it out to stay in the thread of the guardian's message, or of the task this turn reports on.",
+};
+
+/** The parameter that names the one guardian message an answer places. */
+const ANSWERS_PARAMETER = {
+  type: "string",
+  description:
+    "The message_id of the guardian message this answers, from its <chat_thread> line. Give it when the guardian sent several messages about different things, so only that one is placed in this thread. Leave it out to place every guardian message of this turn that is not placed yet.",
 };
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -318,47 +326,72 @@ export async function buildConciergeTools(
     service.said({ turnId, chatId, ownWords, level: context.getTurnPushLevel() });
 
   // The chat thread a message the Concierge says goes into
-  // (docs/domains/chats.md#chat-thread). Named, it also places the guardian's
-  // messages that started the turn, unless they chose their thread. Unnamed,
-  // it is the thread of the turn's first guardian message, else of the
-  // message a turn the guardian did not start answers, else a new one.
-  const chatThreadFor = async (named: string | undefined): Promise<ChatThreadPlacement> => {
+  // (docs/domains/chats.md#chat-thread), and the placing of the guardian's
+  // messages it answers. Each guardian message is placed once, by the first
+  // message the Concierge says after it arrived: into the thread named, into
+  // a new one it starts, or, with none named, where it already is. A message
+  // already placed, by the guardian or by an earlier message, never moves.
+  // `answers` narrows the placing to one of the turn's guardian messages, so
+  // two topics that arrived together go to two threads.
+  const chatThreadFor = async (
+    named: string | undefined,
+    answers: string | undefined,
+  ): Promise<ChatThreadPlacement> => {
     const { chatId, turnId } = currentTurn();
-    const prompts = (await webchatRepo.getTurnChatMessages(chatId, turnId)).filter(
-      (row) => row.role === "user",
-    );
+    const prompts = (await webchatRepo.getTurnChatMessages(chatId, turnId))
+      .filter((row) => row.role === "user")
+      .map((row) => row.id);
+    if (answers !== undefined && !prompts.includes(answers)) {
+      throw new Error(
+        `No guardian message ${answers} in this turn. Pass a message_id from this turn's <chat_thread> lines.`,
+      );
+    }
+    if (
+      named !== undefined &&
+      named !== "new" &&
+      !(await webchatRepo.getReplyTarget(chatId, named))
+    ) {
+      throw new Error(
+        `No message ${named} in this chat. Pass the id of a message in the chat thread, or "new".`,
+      );
+    }
+    const unplaced: string[] = [];
+    for (const id of answers ? [answers] : prompts) {
+      if ((await webchatRepo.chatThreadSettled(chatId, id)) === false) unplaced.push(id);
+    }
+    const place = (id: string, placement: ChatThreadPlacement) =>
+      webchatRepo.placeInChatThread(chatId, id, { ...placement, settle: true });
     if (named === "new") {
-      const [first, ...rest] = prompts;
+      // The new thread starts at the message being placed.
+      const [first, ...rest] = unplaced;
       if (!first) return { starts: true };
-      await webchatRepo.placeInChatThread(chatId, first.id, { starts: true });
-      for (const prompt of rest) {
-        await webchatRepo.placeInChatThread(chatId, prompt.id, { in: first.id });
-      }
-      return { in: first.id };
+      await place(first, { starts: true });
+      for (const id of rest) await place(id, { in: first });
+      return { in: first };
     }
     if (named !== undefined) {
-      if (!(await webchatRepo.getReplyTarget(chatId, named))) {
-        throw new Error(
-          `No message ${named} in this chat. Pass the id of a message in the chat thread, or "new".`,
-        );
-      }
-      for (const prompt of prompts) {
-        await webchatRepo.placeInChatThread(chatId, prompt.id, { in: named });
-      }
+      for (const id of unplaced) await place(id, { in: named });
       return { in: named };
     }
-    const anchor = prompts[0]?.id ?? context.getTurnThreadAnchor();
+    // Placed where they are: the thread each joined.
+    for (const id of unplaced) await place(id, { in: id });
+    const anchor = answers ?? prompts[0] ?? context.getTurnThreadAnchor();
     if (anchor && (await webchatRepo.getReplyTarget(chatId, anchor))) return { in: anchor };
     return { starts: true };
   };
 
-  const say = async (text: string, format: "bubble" | "long", thread?: string) => {
+  const say = async (
+    text: string,
+    format: "bubble" | "long",
+    thread?: string,
+    answers?: string,
+  ) => {
     const { chatId, turnId } = currentTurn();
     const { id } = await webchatRepo.addBackendMessage(
       chatId,
       turnId,
       [{ type: "text", content: text, ...(format === "long" ? { format } : {}) }],
-      { chatThread: await chatThreadFor(thread) },
+      { chatThread: await chatThreadFor(thread, answers) },
     );
     said(chatId, turnId, text);
     return id;
@@ -366,7 +399,13 @@ export async function buildConciergeTools(
 
   // One message, so the lead-in and the report always arrive together. The
   // transcript still shows them as two bubbles.
-  const forward = async (text: string, from: ForwardedFrom, intro?: string, thread?: string) => {
+  const forward = async (
+    text: string,
+    from: ForwardedFrom,
+    intro?: string,
+    thread?: string,
+    answers?: string,
+  ) => {
     const { chatId, turnId } = currentTurn();
     const { id } = await webchatRepo.addBackendMessage(
       chatId,
@@ -375,7 +414,7 @@ export async function buildConciergeTools(
         ...(intro ? [{ type: "text" as const, content: intro }] : []),
         { type: "text", content: text, format: "long", forwardedFrom: from },
       ],
-      { chatThread: await chatThreadFor(thread) },
+      { chatThread: await chatThreadFor(thread, answers) },
     );
     // Forwarded text is the task's, not the Concierge's, and so are a task's
     // title and chat name, which can come from its output: none becomes the
@@ -391,7 +430,7 @@ export async function buildConciergeTools(
       conciergeChatId,
       turnId,
       [{ type: "task_chat", chatId, title }],
-      { chatThread: await chatThreadFor(undefined) },
+      { chatThread: await chatThreadFor(undefined, undefined) },
     );
     said(conciergeChatId, turnId, null);
     return id;
@@ -414,6 +453,7 @@ export async function buildConciergeTools(
             description: "bubble: a short chat line. long: one long message.",
           },
           thread: THREAD_PARAMETER,
+          answers: ANSWERS_PARAMETER,
         },
       },
       handler: (input) =>
@@ -422,6 +462,7 @@ export async function buildConciergeTools(
             requireString(args, "text"),
             args.format === "long" ? "long" : "bubble",
             optionalString(args, "thread"),
+            optionalString(args, "answers"),
           );
           return {
             sent: "The guardian sees it. Call say again only for a new message.",
@@ -827,6 +868,7 @@ export async function buildConciergeTools(
           chatId: { type: "string" },
           intro: { type: "string", description: "Optional short line sent before it." },
           thread: THREAD_PARAMETER,
+          answers: ANSWERS_PARAMETER,
         },
       },
       handler: (input) =>
@@ -847,6 +889,7 @@ export async function buildConciergeTools(
             { chatId, title: chat.name },
             optionalString(args, "intro"),
             optionalString(args, "thread"),
+            optionalString(args, "answers"),
           );
           const task = await tasks.repo.findBySession(chatId);
           if (task) await tasks.repo.setSourceMessage(task.id, conciergeChatId, messageId);
@@ -913,7 +956,7 @@ export async function buildConciergeTools(
                 connect: connector.connect ?? { kind: "dashboard" },
               },
             ],
-            { chatThread: await chatThreadFor(undefined) },
+            { chatThread: await chatThreadFor(undefined, undefined) },
           );
           said(chatId, turnId, null);
           return { sent: "Shown; the guardian sees the card.", messageId: id };

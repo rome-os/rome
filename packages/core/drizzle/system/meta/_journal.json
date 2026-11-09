@@ -841,6 +841,13 @@
       "when": 1794259353853,
       "tag": "0120_chat_threads",
       "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "6",
+      "when": 1794264310060,
+      "tag": "0121_chat_thread_settled",
+      "breakpoints": true
     }
   ]
 }

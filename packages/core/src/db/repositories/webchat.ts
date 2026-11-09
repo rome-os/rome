@@ -85,13 +85,13 @@ export interface StoredWebchatMessage {
 
 /**
  * Where a message goes among its chat's chat threads: into the thread of
- * the message `in` names, with `chosen` when its sender chose it, or into
- * the most recently active thread, or a thread of its own.
+ * the message `in` names, into the most recently active thread, or into a
+ * thread of its own. With `settle` it stays there for good: its sender chose
+ * the thread, or the Concierge placed it. A settled message is never moved.
  */
-export type ChatThreadPlacement =
-  | { in: string; chosen?: boolean }
-  | { latest: true }
-  | { starts: true };
+export type ChatThreadPlacement = ({ in: string } | { latest: true } | { starts: true }) & {
+  settle?: boolean;
+};
 
 /** A message was placed in a chat thread. */
 export interface ChatThreadPlaced {
@@ -843,6 +843,12 @@ export class WebChatRepository {
   /** The chat thread message `messageId` of chat `sessionId` is in, else the
    *  one it would start, or null when the chat holds no such message. */
   async chatThreadOf(_sessionId: string, _messageId: string): Promise<string | null> {
+    return null;
+  }
+
+  /** Whether message `messageId` of chat `sessionId` is settled in its chat
+   *  thread, or null when the chat holds no such message. */
+  async chatThreadSettled(_sessionId: string, _messageId: string): Promise<boolean | null> {
     return null;
   }
 

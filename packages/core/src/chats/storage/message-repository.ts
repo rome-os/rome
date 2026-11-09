@@ -317,30 +317,39 @@ export class MessageRepository {
   }
 
   /**
-   * Put the message keyed `key` in `chat` in chat thread `thread`. A message
-   * whose sender `chosen` its thread is never moved again. A message already
-   * so placed stays where it is. Answers whether the message was placed.
+   * Put the message keyed `key` in `chat` in chat thread `thread`, and, with
+   * `settle`, for good. A settled message is never moved again. Answers
+   * whether the message was placed: false for one already settled, or not held.
    */
   placeInChatThread(
     chat: ChatRef,
     key: string,
     thread: string,
-    options: { chosen?: boolean } = {},
+    options: { settle?: boolean } = {},
   ): boolean {
-    const moved = this.db
+    const placed = this.db
       .update(chatMessages)
-      .set({ chatThreadId: thread, chatThreadChosen: options.chosen === true })
+      .set({ chatThreadId: thread, chatThreadSettled: options.settle === true })
       .where(
         and(
           sql`${chatMessages.chatId} = ${chatIdOf(chat)}`,
           eq(chatMessages.key, key),
-          eq(chatMessages.chatThreadChosen, false),
-          options.chosen ? undefined : sql`${chatMessages.chatThreadId} IS NOT ${thread}`,
+          eq(chatMessages.chatThreadSettled, false),
         ),
       )
       .returning({ id: chatMessages.id })
       .all();
-    return moved.length > 0;
+    return placed.length > 0;
+  }
+
+  /** Whether the message keyed `key` in `chat` is settled in its chat
+   *  thread, or null when Rome holds no such message. */
+  chatThreadSettled(chat: ChatRef, key: string): boolean | null {
+    const row = this.db.all<{ settled: number }>(sql`
+      SELECT chat_thread_settled AS settled FROM chat_messages
+      WHERE chat_id = ${chatIdOf(chat)} AND key = ${key}
+    `)[0];
+    return row ? row.settled === 1 : null;
   }
 
   /** The chat on `platform` that holds a message its adapter keys `key`, the

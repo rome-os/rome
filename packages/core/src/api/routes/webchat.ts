@@ -3755,9 +3755,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const chatThread: ChatThreadPlacement | undefined = !isConciergeChat(session)
       ? undefined
       : body.chatThread
-        ? { in: body.chatThread, chosen: true }
+        ? { in: body.chatThread, settle: true }
         : reply
-          ? { in: body.replyToMessageId as string, chosen: true }
+          ? { in: body.replyToMessageId as string, settle: true }
           : { latest: true };
     if (
       !(await deps.webchatRepo.recordUserInput(
@@ -3793,7 +3793,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       const line = chatThreadLine(
         inputId,
         placedIn,
-        !!chatThread && "chosen" in chatThread,
+        chatThread?.settle === true,
         first ? messageContentText(first.content) : null,
       );
       promptText = `${conciergeHeader}\n${line}\n\n${noticedPrompt}`;

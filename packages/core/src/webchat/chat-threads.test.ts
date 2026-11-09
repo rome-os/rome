@@ -61,7 +61,7 @@ describe("chat threads", () => {
   it("never moves a message the guardian placed in a thread or sent as a reply", async () => {
     await guardian("m1", { latest: true });
     await guardian("m2", { starts: true });
-    await guardian("m3", { in: "m1", chosen: true });
+    await guardian("m3", { in: "m1", settle: true });
 
     await repo.placeInChatThread(CHAT, "m3", { in: "m2" });
     await repo.placeInChatThread(CHAT, "m3", { starts: true });
@@ -74,7 +74,7 @@ describe("chat threads", () => {
     const first = await concierge("t1", "Meeting at 3?", { in: "m1" });
     await guardian("m2", { starts: true });
     await concierge("t2", "Flights to Haikou", { in: "m2" });
-    await guardian("m3", { in: first, chosen: true });
+    await guardian("m3", { in: first, settle: true });
 
     const thread = await repo.getChatThreadMessages(CHAT, first);
 

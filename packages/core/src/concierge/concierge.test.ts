@@ -69,9 +69,9 @@ interface Row {
   senderId?: string;
   /** Unset rows belong to every turn. */
   turnId?: string;
-  /** The chat thread the row is in, and whether its sender chose it. */
+  /** The chat thread the row is in, and whether it is placed there for good. */
   chatThread?: string;
-  chosen?: boolean;
+  settled?: boolean;
 }
 
 const textOf = (content: string): string => {
@@ -181,12 +181,12 @@ function setup(
       },
     ],
   ]);
-  // Chat threads as Chats keeps them: a row the sender placed is never moved.
+  // Chat threads as Chats keeps them: a settled row is never moved.
   const placeInThread = (chatId: string, id: string, placement: ChatThreadPlacement) => {
     const rows = messages.get(chatId) ?? [];
     const row = rows.find((candidate) => candidate.id === id);
     if (!row) return null;
-    if (row.chosen) return row.chatThread ?? id;
+    if (row.settled) return row.chatThread ?? id;
     const threadOf = (key: string) =>
       rows.find((candidate) => candidate.id === key)?.chatThread ?? key;
     row.chatThread =
@@ -195,7 +195,7 @@ function setup(
         : "latest" in placement
           ? ([...rows].reverse().find((candidate) => candidate.chatThread)?.chatThread ?? id)
           : id;
-    row.chosen = "in" in placement && placement.chosen === true;
+    row.settled = placement.settle === true;
     return row.chatThread;
   };
   /** The Concierge chat the tools' turn runs in. */
@@ -292,6 +292,10 @@ function setup(
       ),
       placeInChatThread: async (chatId: string, id: string, placement: ChatThreadPlacement) =>
         placeInThread(chatId, id, placement),
+      chatThreadSettled: async (chatId: string, id: string) => {
+        const row = (messages.get(chatId) ?? []).find((candidate) => candidate.id === id);
+        return row ? row.settled === true : null;
+      },
       getReplyTarget: async (chatId: string, messageId: string) =>
         [
           ...(isConciergeChatId(chatId) && options.said !== false ? [ACKNOWLEDGEMENT] : []),
@@ -565,7 +569,7 @@ describe("Concierge tools", () => {
       const s = setup();
       guardianSays(s, { id: "flights", chatThread: "flights", turnId: "older-turn" });
       guardianSays(s, { id: "g1", chatThread: "meeting" });
-      guardianSays(s, { id: "g2", chatThread: "meeting", chosen: true });
+      guardianSays(s, { id: "g2", chatThread: "meeting", settled: true });
 
       const said = saidId(await s.tool("say", { text: "Booked", thread: "flights" }));
 
@@ -573,6 +577,79 @@ describe("Concierge tools", () => {
       expect(threadOf(s, "g2")).toBe("meeting");
       expect(threadOf(s, said)).toBe("flights");
       await expect(s.tool("say", { text: "x", thread: "nowhere" })).resolves.toMatchObject({
+        isError: true,
+      });
+    });
+
+    it("places a guardian message once: a later say naming another thread leaves it", async () => {
+      const s = setup();
+      guardianSays(s, {
+        id: "flights",
+        chatThread: "flights",
+        turnId: "older-turn",
+        settled: true,
+      });
+      guardianSays(s, {
+        id: "meeting",
+        chatThread: "meeting",
+        turnId: "older-turn",
+        settled: true,
+      });
+      guardianSays(s, { id: "g1", chatThread: "meeting" });
+
+      const first = saidId(await s.tool("say", { text: "Looking", thread: "flights" }));
+      const second = saidId(await s.tool("say", { text: "Meeting moved", thread: "meeting" }));
+
+      expect(threadOf(s, "g1")).toBe("flights");
+      expect(threadOf(s, first)).toBe("flights");
+      expect(threadOf(s, second)).toBe("meeting");
+    });
+
+    it("places two guardian messages of one turn in two threads, each by its answer", async () => {
+      const s = setup();
+      guardianSays(s, { id: "g1", chatThread: "older" });
+      guardianSays(s, { id: "g2", chatThread: "older" });
+
+      const flights = saidId(
+        await s.tool("say", { text: "Searching flights", thread: "new", answers: "g1" }),
+      );
+      const meeting = saidId(
+        await s.tool("say", { text: "Noted the meeting", thread: "new", answers: "g2" }),
+      );
+
+      expect([threadOf(s, "g1"), threadOf(s, flights)]).toEqual(["g1", "g1"]);
+      expect([threadOf(s, "g2"), threadOf(s, meeting)]).toEqual(["g2", "g2"]);
+    });
+
+    it('"new" starts at the message it places, and a named thread after it moves nothing', async () => {
+      const s = setup();
+      guardianSays(s, {
+        id: "flights",
+        chatThread: "flights",
+        turnId: "older-turn",
+        settled: true,
+      });
+      guardianSays(s, { id: "g1", chatThread: "flights" });
+
+      await s.tool("say", { text: "On it", thread: "new" });
+      const update = saidId(await s.tool("say", { text: "Flights update", thread: "flights" }));
+
+      expect(threadOf(s, "g1")).toBe("g1");
+      expect(threadOf(s, update)).toBe("flights");
+    });
+
+    it("places a message steered into the turn by the first answer after it arrived", async () => {
+      const s = setup();
+      guardianSays(s, { id: "g1", chatThread: "older" });
+      await s.tool("say", { text: "First answer" });
+      guardianSays(s, { id: "g2", chatThread: "g1" });
+
+      const second = saidId(await s.tool("say", { text: "Other thing", thread: "new" }));
+
+      expect(threadOf(s, "g1")).toBe("older");
+      expect(threadOf(s, "g2")).toBe("g2");
+      expect(threadOf(s, second)).toBe("g2");
+      await expect(s.tool("say", { text: "x", answers: "elsewhere" })).resolves.toMatchObject({
         isError: true,
       });
     });

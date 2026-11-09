@@ -629,8 +629,9 @@ export const chatMessages = sqliteTable(
     // key of the thread's first line. Not the platform's thread_id. Null for a
     // line in no chat thread, as every line said before chat threads.
     chatThreadId: text("chat_thread_id"),
-    // The sender chose the line's chat thread, so nothing moves it.
-    chatThreadChosen: integer("chat_thread_chosen", { mode: "boolean" }).notNull().default(false),
+    // The line is placed in its chat thread for good: its sender chose the
+    // thread, or the Concierge placed it. Nothing moves a settled line.
+    chatThreadSettled: integer("chat_thread_settled", { mode: "boolean" }).notNull().default(false),
     saidAt: integer("said_at", { mode: "timestamp" }).notNull(),
   },
   (table) => [

@@ -367,6 +367,11 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return thread;
   }
 
+  override async chatThreadSettled(sessionId: string, messageId: string): Promise<boolean | null> {
+    const standing = this.standingOf(sessionId);
+    return standing ? this.lines.chatThreadSettled(standing.place.chat, messageId) : null;
+  }
+
   override async chatThreadOf(sessionId: string, messageId: string): Promise<string | null> {
     const standing = this.standingOf(sessionId);
     return standing ? this.lines.chatThreadOf(standing.place.chat, messageId) : null;
@@ -395,9 +400,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
         : "latest" in placement
           ? (this.lines.latestChatThread(chat) ?? key)
           : key;
-    return this.lines.placeInChatThread(chat, key, thread, {
-      chosen: "in" in placement && placement.chosen === true,
-    });
+    return this.lines.placeInChatThread(chat, key, thread, { settle: placement.settle === true });
   }
 
   /** Rechecked at dispatch: only an unchanged guardian root chat can continue. */

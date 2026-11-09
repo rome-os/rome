@@ -150,6 +150,7 @@ export interface ConciergeDeps {
     | "getReplyTarget"
     | "addBackendMessage"
     | "placeInChatThread"
+    | "chatThreadSettled"
     | "setSessionTrigger"
     | "listProjects"
   >;
