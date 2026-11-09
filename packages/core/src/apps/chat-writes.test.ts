@@ -4,7 +4,7 @@ import { messageAsText } from "../connections/outbound/send-refusals.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { Channel, ChatId, ChatRecord, OutgoingMessage } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
-import { actionExecutionContext } from "../actions/context.js";
+import { actionExecutionContext } from "./actions/context.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type ChatRef } from "../chats/storage/place.js";

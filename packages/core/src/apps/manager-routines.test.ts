@@ -11,8 +11,8 @@ import {
 import { packArtifact } from "./packaging/index.js";
 import { installFirstPartyAppsAtBoot } from "./boot-upgrade.js";
 import { isResolvedApp } from "./state.js";
-import { ActionRegistryImpl } from "../actions/registry.js";
-import type { ActionEngine } from "../actions/engine.js";
+import { ActionRegistryImpl } from "./actions/registry.js";
+import type { ActionEngine } from "./actions/engine.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutineEngine } from "../routines/engine.js";

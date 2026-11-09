@@ -1,23 +1,20 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
-import {
-  ChatSessionSettings,
-  readAnswerShape,
-  romeSessionTracing,
-  TurnUsageReporter,
-} from "../agent/index.js";
+import { ChatSessionSettings, readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { TurnUsageReporter } from "../apps/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ActionEngine } from "../actions/engine.js";
-import { ActionRegistryImpl } from "../actions/registry.js";
+import { ActionEngine } from "../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
-import { AppTurnHooks, TurnListeners } from "../agent/index.js";
-import { AgentLoader } from "../agent/index.js";
+import { TurnListeners } from "../agent/index.js";
+import { AppTurnHooks } from "../apps/app-turn-hooks.js";
+import { AgentLoader } from "../apps/agent-loader.js";
 import {
   createSessionFromRun,
   type ModelProvider,
@@ -27,7 +24,7 @@ import { createSessions, type Sessions } from "../agent/index.js";
 import type { SessionToolContext } from "./session-tools.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
-import { SkillLoader } from "../agent/index.js";
+import { SkillLoader } from "../apps/skill-loader.js";
 import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { startAfter } from "../test/turn-handle.js";

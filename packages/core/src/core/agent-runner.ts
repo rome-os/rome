@@ -1,6 +1,6 @@
 import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
 import type { AgentEvent, McpServerConfig } from "../types.js";
-import type { ActionRegistry } from "../actions/types.js";
+import type { ActionRegistry } from "../apps/actions/types.js";
 import type {
   ModelReasoningEffort,
   ModelSession,
