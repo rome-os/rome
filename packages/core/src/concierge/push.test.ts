@@ -16,6 +16,7 @@ function pushWith(
     outcome?: () => Promise<SendOutcome>;
     language?: string | null;
     watching?: (chatId: string) => boolean;
+    dashboardActive?: () => boolean;
   } = {},
 ) {
   const sent: SystemNotifyContent[] = [];
@@ -30,6 +31,7 @@ function pushWith(
     pushesFor: async (chatId) => chatId !== "visitor-chat",
     language: async () => options.language ?? null,
     watching: options.watching,
+    dashboardActive: options.dashboardActive,
   });
   return { push, sent };
 }
@@ -105,6 +107,40 @@ describe("ConciergePush", () => {
     push.said({ turnId: "t3", chatId: "elsewhere", ownWords: "reply", level: "active" });
     await settle();
     expect(sent).toEqual([{ body: "reply", level: "active", chatId: "elsewhere" }]);
+  });
+
+  it("pushes nothing while a guardian dashboard is active, in any chat, and logs the hold-back", async () => {
+    let active = true;
+    const { push, sent } = pushWith({ dashboardActive: () => active });
+    logged.mockClear();
+    push.said({ turnId: "t1", chatId: "a", ownWords: "reply", level: "active" });
+    push.said({ turnId: "t2", chatId: "b", ownWords: "digest", level: "passive" });
+    await settle();
+    expect(sent).toEqual([]);
+    expect(logged).toHaveBeenCalledWith("concierge push held back: a dashboard is active", {
+      turnId: "t1",
+      chatId: "a",
+    });
+    expect(JSON.stringify(logged.mock.calls)).not.toContain("reply");
+    // Nothing held back pushes once the dashboard goes idle; the next turn does.
+    active = false;
+    await settle();
+    expect(sent).toEqual([]);
+    push.said({ turnId: "t3", chatId: "a", ownWords: "later", level: "active" });
+    await settle();
+    expect(sent).toEqual([{ body: "later", level: "active", chatId: "a" }]);
+  });
+
+  it("leaves the turn's push to a later message after the dashboard goes idle, with the fixed line", async () => {
+    let active = true;
+    const { push, sent } = pushWith({ dashboardActive: () => active });
+    push.said({ turnId: "t1", chatId: "c", ownWords: "On it, checking…", level: "active" });
+    await settle();
+    active = false;
+    push.said({ turnId: "t1", chatId: "c", ownWords: "the answer", level: "active" });
+    push.said({ turnId: "t1", chatId: "c", ownWords: "a follow-up", level: "active" });
+    await settle();
+    expect(sent).toEqual([{ body: FIXED_LINE.en, level: "active", chatId: "c" }]);
   });
 
   it("follows the phone's watch: the chat on screen skips, any other pushes, again once it moves", async () => {

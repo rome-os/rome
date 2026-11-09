@@ -12,7 +12,9 @@
 // the snapshot `chat.status` replays too. The guardian's phone app marks its
 // socket with a header and holds `chat.watch:<id>` for the chat on its screen;
 // that chat counts as watched (`PhoneWatching`), which holds back the
-// Concierge's push there. Its data subscriptions never count.
+// Concierge's push there. Its data subscriptions never count. A guardian
+// dashboard's `activity` frames count it as active or away
+// (`DashboardActivity`): while one is active, the Concierge pushes nothing.
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
@@ -31,6 +33,7 @@ import type { DrizzleDb } from "./db/index.js";
 import type { DashboardAccessState } from "./access/dashboard-access-state.js";
 import type { LiveEventEmit } from "./lib/live-event.js";
 import type { PhoneWatching } from "./lib/phone-watching.js";
+import type { DashboardActivity } from "./lib/dashboard-activity.js";
 import { gateUpgrade, type UpgradeCaller } from "./access/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
@@ -100,6 +103,7 @@ export function attachLiveEventsServer(
   dashboardAccess: Pick<DashboardAccessState, "isCloudEmailAllowed">,
   sources: LiveEventSources,
   phoneWatching?: PhoneWatching,
+  dashboardActivity?: DashboardActivity,
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
 
@@ -128,6 +132,9 @@ export function attachLiveEventsServer(
     const subscriptions = new Map<string, { unsubscribe: Unsubscribe | null }>();
     let closed = false;
     let alive = true;
+    // Only the guardian's dashboard holds back the guardian's pushes; a
+    // phone's or a visitor's activity frames count for nothing.
+    const activity = !phone && caller.kind === "guardian" ? dashboardActivity?.open() : undefined;
 
     const send = (message: LiveEventsServerMessage) => {
       if (ws.readyState !== WebSocket.OPEN) return;
@@ -231,6 +238,7 @@ export function attachLiveEventsServer(
       if (closed) return;
       closed = true;
       clearInterval(ping);
+      activity?.close();
       for (const entry of subscriptions.values()) entry.unsubscribe?.();
       subscriptions.clear();
     };
@@ -263,8 +271,11 @@ export function attachLiveEventsServer(
         sendError("Invalid message");
         return;
       }
-      if (result.data.type === "subscribe") subscribe(result.data.topic);
-      else unsubscribe(result.data.topic);
+      const message = result.data;
+      if (message.type === "subscribe") subscribe(message.topic);
+      else if (message.type === "unsubscribe") unsubscribe(message.topic);
+      else if (message.state === "active") activity?.active();
+      else activity?.away();
     });
     ws.on("close", teardown);
     ws.on("error", (err) => {

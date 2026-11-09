@@ -4,6 +4,7 @@
 // docs/adrs/one-concierge-with-several-chats.md). Design: rome-os/rome#1344.
 
 import type { PhoneWatching } from "../lib/phone-watching.js";
+import type { DashboardActivity } from "../lib/dashboard-activity.js";
 import { CONCIERGE_CHAT_ID, type ConciergeChatRef } from "@rome/api-types/concierge";
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
@@ -170,6 +171,8 @@ export interface ConciergeDeps {
   notify?: ConciergePushDeps["notify"];
   /** The chats the guardian's phone app holds open; nothing said there is pushed. */
   phoneWatching?: Pick<PhoneWatching, "isWatching">;
+  /** Whether the guardian is at a web dashboard; while they are, nothing is pushed. */
+  dashboardActivity?: Pick<DashboardActivity, "isActive">;
 }
 
 export interface SystemTurnOptions {
@@ -197,6 +200,7 @@ export class ConciergeService {
           quietUntil: (at) => this.quietUntil(at),
           pushesFor: async (chatId) => (await this.ownerOfChat(chatId)) === GUARDIAN_OWNER,
           watching: (chatId) => deps.phoneWatching?.isWatching(chatId) ?? false,
+          dashboardActive: () => deps.dashboardActivity?.isActive() ?? false,
           language: async () => {
             const stored = await this.deps.settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
             return typeof stored === "string" ? stored : null;

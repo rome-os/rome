@@ -33,11 +33,18 @@ export function chatWatchTopicName(chatId: string): string {
   return `${CHAT_WATCH_TOPIC_PREFIX}${chatId}`;
 }
 
-/** Client to server. Subscribing to a topic the socket already holds is a no-op. */
-export const liveEventsClientMessageSchema = z.object({
-  type: z.enum(["subscribe", "unsubscribe"]),
-  topic: z.string().max(256),
-});
+/**
+ * Client to server. Subscribing to a topic the socket already holds is a no-op.
+ * `activity` says whether the person is at this dashboard: `active` after
+ * input, `away` once the tab is hidden, loses focus or closes. Only a
+ * guardian dashboard's signal counts, and while one counts as active the
+ * Concierge pushes nothing to the guardian's phone. The server answers none.
+ */
+export const liveEventsClientMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("subscribe"), topic: z.string().max(256) }),
+  z.object({ type: z.literal("unsubscribe"), topic: z.string().max(256) }),
+  z.object({ type: z.literal("activity"), state: z.enum(["active", "away"]) }),
+]);
 export type LiveEventsClientMessage = z.infer<typeof liveEventsClientMessageSchema>;
 
 /**

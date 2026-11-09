@@ -16,6 +16,7 @@ import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { isElectronShell } from "@/lib/electron-shell";
 import { saveSetting } from "@/lib/chat-api";
 import { useAppCatalogChanges } from "@/hooks/use-app-catalog-events";
+import { useDashboardActivity } from "@/hooks/use-dashboard-activity";
 import { hasSession, useAuthStateSnapshot } from "@/lib/auth-state";
 import { useApps, useInvalidateApps } from "@/hooks/use-apps";
 import { useInvalidateSettings, useSettings } from "@/hooks/use-settings";
@@ -211,6 +212,9 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   useAppCatalogChanges(hasSession(bootstrap), () => {
     void invalidateApps.list();
   });
+  // The catalog stream keeps the guardian's socket open on every page, so the
+  // activity signals have a socket to ride on.
+  useDashboardActivity(hasSession(bootstrap));
 
   const { data: settings } = useSettings();
   const { apps: appsFromQuery } = useApps();

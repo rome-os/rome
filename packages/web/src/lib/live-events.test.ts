@@ -297,4 +297,63 @@ describe("LiveEventsClient", () => {
     expect(error).toHaveBeenCalledWith("Invalid live events message");
     error.mockRestore();
   });
+
+  describe("reportActivity", () => {
+    const active = { type: "activity", state: "active" };
+    const away = { type: "activity", state: "away" };
+
+    function openClient() {
+      let now = 0;
+      const live = new LiveEventsClient({
+        WebSocket: asWebSocket,
+        url: () => "ws://rome.test/ws/events",
+        reconnectDelayMs: () => 100,
+        activityIntervalMs: 30_000,
+        now: () => now,
+      });
+      live.subscribe("chat.status", listener());
+      const socket = FakeWebSocket.latest();
+      socket.open();
+      socket.sent.length = 0;
+      return { live, socket, advance: (ms: number) => (now += ms) };
+    }
+
+    it("sends active at most once every interval", () => {
+      const { live, socket, advance } = openClient();
+      live.reportActivity("active");
+      advance(29_999);
+      live.reportActivity("active");
+      expect(socket.sent).toEqual([active]);
+      advance(1);
+      live.reportActivity("active");
+      expect(socket.sent).toEqual([active, active]);
+    });
+
+    it("sends away at once after an active, and the next input is active again at once", () => {
+      const { live, socket, advance } = openClient();
+      live.reportActivity("away");
+      expect(socket.sent).toEqual([]);
+      live.reportActivity("active");
+      advance(1_000);
+      live.reportActivity("away");
+      live.reportActivity("away");
+      live.reportActivity("active");
+      expect(socket.sent).toEqual([active, away, active]);
+    });
+
+    it("sends nothing while the socket is down, and active at once on a new socket", () => {
+      const { live, socket } = openClient();
+      live.reportActivity("active");
+      socket.close();
+      live.reportActivity("active");
+      live.reportActivity("away");
+      rs.advanceTimersByTime(100);
+      const next = FakeWebSocket.latest();
+      next.open();
+      next.sent.length = 0;
+      live.reportActivity("active");
+      expect(socket.sent).toEqual([active]);
+      expect(next.sent).toEqual([active]);
+    });
+  });
 });

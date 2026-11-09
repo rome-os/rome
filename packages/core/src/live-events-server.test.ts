@@ -17,6 +17,7 @@ import { guardianAuth } from "./db/schema.js";
 import { createSession, createVisitorSession } from "./access/auth.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
 import { PhoneWatching } from "./lib/phone-watching.js";
+import { DashboardActivity } from "./lib/dashboard-activity.js";
 import {
   attachLiveEventsServer,
   type LiveEventSources,
@@ -97,6 +98,7 @@ describe("live events WebSocket", () => {
   let conciergeTasks: ConciergeTasks;
   let dashboardAccess: DashboardAccessState;
   let phoneWatching: PhoneWatching;
+  let dashboardActivity: DashboardActivity;
   const catalogHandlers = new Set<SubscriberHandler>();
   const clients: TestClient[] = [];
   const originalProjectsRoot = process.env.ROME_PROJECTS_ROOT;
@@ -158,7 +160,15 @@ describe("live events WebSocket", () => {
     dashboardAccess = new DashboardAccessState();
     dashboardAccess.setCloudEmailAccess(["visitor@example.com"]);
     phoneWatching = new PhoneWatching();
-    live = attachLiveEventsServer(server, testDb.db, dashboardAccess, sources, phoneWatching);
+    dashboardActivity = new DashboardActivity();
+    live = attachLiveEventsServer(
+      server,
+      testDb.db,
+      dashboardAccess,
+      sources,
+      phoneWatching,
+      dashboardActivity,
+    );
     port = await new Promise<number>((resolve) => {
       server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port));
     });
@@ -402,6 +412,43 @@ describe("live events WebSocket", () => {
     visitor.send({ type: "subscribe", topic: "chat.watch:sess-a" });
     await visitor.next((m) => m.topic === "chat.watch:sess-a");
     expect(phoneWatching.isWatching("sess-a")).toBe(false);
+  });
+
+  it("counts the guardian's dashboard as active from its signal until it says away", async () => {
+    const web = await connect();
+    web.send({ type: "activity", state: "active" });
+    // Frames run in order, so this ack means the signal before it is counted.
+    await web.subscribe("chat.status");
+    expect(dashboardActivity.isActive()).toBe(true);
+    web.send({ type: "activity", state: "away" });
+    await web.subscribe("apps.catalog");
+    expect(dashboardActivity.isActive()).toBe(false);
+    expect(web.messages.some((m) => m.type === "error")).toBe(false);
+  });
+
+  it("stops counting the guardian's dashboard once its socket closes", async () => {
+    const web = await connect();
+    web.send({ type: "activity", state: "active" });
+    await web.subscribe("chat.status");
+    expect(dashboardActivity.isActive()).toBe(true);
+    await web.close();
+    await rs.waitFor(() => expect(dashboardActivity.isActive()).toBe(false));
+  });
+
+  it("never counts activity from a visitor's dashboard or the phone", async () => {
+    const visitor = await connect({
+      "x-forwarded-for": "203.0.113.1",
+      "x-forwarded-host": "rome.example",
+      "x-forwarded-proto": "http",
+      cookie: `rome_visitor=${createVisitorSession("account-1", "visitor@example.com")}`,
+      origin: "http://rome.example",
+    });
+    visitor.send({ type: "activity", state: "active" });
+    await visitor.subscribe("chat.status");
+    const phone = await connect({ "x-rome-client": "phone" });
+    phone.send({ type: "activity", state: "active" });
+    await phone.subscribe("chat.status");
+    expect(dashboardActivity.isActive()).toBe(false);
   });
 
   it("forwards session events for the subscribed session only, until unsubscribed", async () => {

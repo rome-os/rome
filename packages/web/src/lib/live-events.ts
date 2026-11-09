@@ -55,6 +55,9 @@ export interface LiveEventsClientOptions {
   stableOpenMs?: number;
   /** How often the client tries the socket again while on the SSE fallback. */
   reprobeMs?: number;
+  /** The least time between two `active` signals on one socket. */
+  activityIntervalMs?: number;
+  now?: () => number;
 }
 
 const LIVE_EVENTS_PATH = "/ws/events";
@@ -95,6 +98,8 @@ export class LiveEventsClient {
   private readonly reconnectDelayMs: (attempt: number) => number;
   private readonly stableOpenMs: number;
   private readonly reprobeMs: number;
+  private readonly activityIntervalMs: number;
+  private readonly now: () => number;
 
   private readonly topics = new Map<string, TopicEntry>();
   private readonly transportListeners = new Set<() => void>();
@@ -110,6 +115,8 @@ export class LiveEventsClient {
   private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private stableTimer: ReturnType<typeof setTimeout> | null = null;
   private reprobeTimer: ReturnType<typeof setTimeout> | null = null;
+  /** When this socket generation last sent `active`, or null since it said `away`. */
+  private activeSent: { generation: number; at: number } | null = null;
 
   constructor(options: LiveEventsClientOptions = {}) {
     this.WebSocketImpl = options.WebSocket;
@@ -121,6 +128,28 @@ export class LiveEventsClient {
     this.reconnectDelayMs = options.reconnectDelayMs ?? defaultReconnectDelayMs;
     this.stableOpenMs = options.stableOpenMs ?? 5_000;
     this.reprobeMs = options.reprobeMs ?? 60_000;
+    this.activityIntervalMs = options.activityIntervalMs ?? 30_000;
+    this.now = options.now ?? Date.now;
+  }
+
+  /**
+   * Tells the server whether the person is at this dashboard. `active` is sent
+   * at most once per `activityIntervalMs` on one socket, and at once on a new
+   * one. `away` is sent only after an `active` on the same socket. Nothing is
+   * sent, or queued, while the socket is not open.
+   */
+  reportActivity(state: "active" | "away"): void {
+    if (!this.socketOpen) return;
+    const sent = this.activeSent?.generation === this.generation ? this.activeSent : null;
+    if (state === "away") {
+      this.activeSent = null;
+      if (sent) this.send({ type: "activity", state });
+      return;
+    }
+    const now = this.now();
+    if (sent && now - sent.at < this.activityIntervalMs) return;
+    this.activeSent = { generation: this.generation, at: now };
+    this.send({ type: "activity", state });
   }
 
   getTransport = (): LiveEventsTransport =>

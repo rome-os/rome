@@ -252,6 +252,7 @@ import {
   syncStoredVisitorAllowList,
 } from "./access/visitor-allowlist-sync.js";
 import { PhoneWatching } from "./lib/phone-watching.js";
+import { DashboardActivity } from "./lib/dashboard-activity.js";
 import { ApprovalHandler } from "./apps/actions/approval-handler.js";
 import { createBackendTurnRunner } from "./apps/actions/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
@@ -1118,6 +1119,9 @@ async function main() {
   // The chats the guardian's phone app holds open, from the live-events socket;
   // the Concierge does not push what it says in one of them.
   const phoneWatching = new PhoneWatching();
+  // Whether the guardian is at a web dashboard, from the same socket; while
+  // they are, the Concierge pushes nothing to the phone.
+  const dashboardActivity = new DashboardActivity();
   const concierge = new ConciergeService({
     skillCatalog,
     settingsRepo,
@@ -1137,6 +1141,7 @@ async function main() {
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
     notify: notifyClient,
     phoneWatching,
+    dashboardActivity,
   });
   const channelSurface: ChannelSurfaces = (channel) => {
     if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
@@ -2127,6 +2132,7 @@ async function main() {
       dashboardAccessStore,
       visitorAllowListSync,
       phoneWatching,
+      dashboardActivity,
       relayDrainer,
       bootVersionReport,
       favorService,

@@ -1,6 +1,7 @@
 // A Concierge turn with a push level, proactive or the reply to the guardian's
 // own message, sends one push to the guardian's phone, on the first message it
-// says while the phone app does not show the chat. Its words come only from
+// says while the phone app does not show the chat and no guardian dashboard is
+// active. Its words come only from
 // the turn's first message: a push on a later one says a fixed line
 // (docs/adrs/proactive-concierge-push-without-per-message-consent.md).
 
@@ -79,6 +80,8 @@ export interface ConciergePushDeps {
   pushesFor: (chatId: string) => Promise<boolean>;
   /** Whether the guardian's phone app shows this chat now: then it is read there, not pushed. */
   watching?: (chatId: string) => boolean;
+  /** Whether the guardian is at one of their web dashboards now: then nothing pushes, in any chat. */
+  dashboardActive?: () => boolean;
   /** The guardian's dashboard language, as its setting holds it, or null. */
   language: () => Promise<string | null>;
   now?: () => number;
@@ -117,17 +120,23 @@ export class ConciergePush {
 
   /**
    * Pushes the first message of a turn that has a push level, skipping any the
-   * phone shows as it is said. Answers at once: the push never holds or fails
+   * phone shows or said while a guardian dashboard is active. A skipped
+   * message is dropped, never pushed later. Answers at once: the push never holds or fails
    * the turn, and the message stays in the chat whatever happens to it.
    */
   said(said: SaidInTurn): void {
     const { turnId, chatId, level } = said;
     if (!level || this.pushed.has(turnId)) return;
     const first = remember(this.spoken, turnId);
-    // A message read on the phone leaves the turn's push to a later message,
-    // so an answer that comes after the guardian leaves the chat still pushes.
+    // A message read on the phone or at the dashboard leaves the turn's push
+    // to a later message, so an answer that comes after the guardian leaves
+    // still pushes.
     if (this.deps.watching?.(chatId)) {
       log.info("concierge push skipped: the phone shows the chat", { turnId, chatId });
+      return;
+    }
+    if (this.deps.dashboardActive?.()) {
+      log.info("concierge push held back: a dashboard is active", { turnId, chatId });
       return;
     }
     remember(this.pushed, turnId);
