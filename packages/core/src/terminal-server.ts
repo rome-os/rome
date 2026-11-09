@@ -6,8 +6,8 @@ import type { DrizzleDb } from "./db/index.js";
 import { gateGuardianUpgrade } from "./lib/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
-import { ClaudeLoginCodeValidationError, formatClaudeLoginCodeInput } from "./claude-login-code.js";
-import { createClaudeLoginWatcher } from "./claude-login-watch.js";
+import { ClaudeLoginCodeValidationError, formatClaudeLoginCodeInput } from "./agent/index.js";
+import { createClaudeLoginWatcher } from "./agent/index.js";
 
 const log = createLogger("terminal-server");
 

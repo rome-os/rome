@@ -1,4 +1,4 @@
-import type { SettingsRepository } from "../db/repositories/settings.js";
+import type { SettingsRepository } from "../../../../db/repositories/settings.js";
 import { validateCustomAnthropicEnv } from "@rome/api-types/anthropic-compatible-env";
 import {
   ANTHROPIC_COMPATIBLE_PROVIDERS,

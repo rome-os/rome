@@ -18,10 +18,10 @@ import {
 import {
   summarizeAnthropicCompatibleCredentials,
   summarizeAnthropicCompatibleCredentialsForEditing,
-} from "../../lib/anthropic-compatible-providers.js";
+} from "../../agent/index.js";
 import { closeAuthTabs, openServerBrowserTab } from "./desktop.js";
 import { getErrorMessage } from "../../lib/provider-usage.js";
-import { fetchRomeCredits } from "../../lib/rome-credits.js";
+import { fetchRomeCredits } from "../../agent/index.js";
 import type { RomeCreditsResponse } from "@rome/api-types/rome-credits";
 
 const log = createLogger("api:ai-tools");

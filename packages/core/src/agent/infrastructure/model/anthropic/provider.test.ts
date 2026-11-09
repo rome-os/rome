@@ -13,7 +13,7 @@ import type {
   ModelSessionConfig,
   ModelSessionParams,
 } from "../../../domain/model-port.js";
-import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../../../lib/anthropic-compatible-providers.js";
+import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "./anthropic-compatible-providers.js";
 
 const { AbortError } = claudeAgentSdkModule;
 

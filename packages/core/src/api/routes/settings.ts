@@ -4,7 +4,7 @@ import type { ApiDeps } from "../deps.js";
 import {
   ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING,
   redactAnthropicCompatibleCredentialsSetting,
-} from "../../lib/anthropic-compatible-providers.js";
+} from "../../agent/index.js";
 import { RELAY_SETTING_KEY, redactRelaySetting } from "../../relay/settings.js";
 import {
   GUARDIAN_TIMEZONE_SETTING_KEY,

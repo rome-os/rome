@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { setInstanceTokenInMemory } from "./instance-identity.js";
+import { setInstanceTokenInMemory } from "../../../../lib/instance-identity.js";
 import { fetchRomeCredits, RomeCreditsUnavailableError } from "./rome-credits.js";
 
 const TOKEN = "romeinst_credits_test";

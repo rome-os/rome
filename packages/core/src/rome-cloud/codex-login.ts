@@ -14,7 +14,7 @@ import {
 } from "../agent/index.js";
 import { instanceCredentialId, onInstanceTokenChanged } from "../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
-import { fetchRomeCredits } from "../lib/rome-credits.js";
+import { fetchRomeCredits } from "../agent/index.js";
 
 /** Credits are used only while the account can spend them. */
 function canSpend(view: RomeCreditsView | null): boolean {
