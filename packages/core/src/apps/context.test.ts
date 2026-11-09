@@ -23,7 +23,7 @@ import {
   SendRefused,
 } from "@rome-os/app-runtime";
 import { registerAppActions, registerLazyAppActions } from "./actions/app-actions-wiring.js";
-import { HostExecutionService } from "../host-execution/service.js";
+import { HostExecutionService } from "./host-execution/service.js";
 import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";

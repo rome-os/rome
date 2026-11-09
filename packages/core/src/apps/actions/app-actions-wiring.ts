@@ -2,7 +2,7 @@ import type { ActionLoader } from "./loader.js";
 import type { ActionRegistryImpl } from "./registry.js";
 import type { ActionEngine } from "./engine.js";
 import type { Action, ActionConfig } from "./types.js";
-import type { ChannelMessageHook } from "../../hooks/types.js";
+import type { ChannelMessageHook } from "../hooks/types.js";
 import { createLogger, type Logger } from "../../logger.js";
 import type { DrizzleDb } from "../../db/index.js";
 import type { RoutinesRepository } from "../../db/repositories/routines.js";
@@ -26,7 +26,7 @@ import {
   resolveModuleEntryPath,
 } from "./module-loader.js";
 import type { FavorService } from "../../favors/types.js";
-import type { HostExecutionService } from "../../host-execution/service.js";
+import type { HostExecutionService } from "../host-execution/service.js";
 import type { FeedbackService } from "../../lib/feedback-client.js";
 import type { CloudProfileService } from "../../lib/cloud-profile.js";
 import type { AgentNamesService } from "../../chats/accounts/agent-names.js";

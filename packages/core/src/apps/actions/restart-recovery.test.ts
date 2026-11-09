@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
-import { ActionExecutionsRepository } from "../../db/repositories/action-executions.js";
+import { ActionExecutionsRepository } from "../repositories/action-executions.js";
 import { RoutineRunsRepository } from "../../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../../db/repositories/routines.js";
-import { hostJobId } from "../../host-execution/service.js";
+import { hostJobId } from "../host-execution/service.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import {
   endInterruptedRuns,

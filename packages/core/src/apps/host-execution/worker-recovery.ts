@@ -1,6 +1,6 @@
-import type { InterruptedAction } from "../apps/actions/engine.js";
-import type { ActionResult } from "../apps/actions/types.js";
-import type { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
+import type { InterruptedAction } from "../actions/engine.js";
+import type { ActionResult } from "../actions/types.js";
+import type { ActionExecutionsRepository } from "../repositories/action-executions.js";
 import { hostJobId } from "./service.js";
 
 export const HOST_ACTION = "system:execute_root_script";

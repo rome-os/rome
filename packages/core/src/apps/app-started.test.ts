@@ -3,15 +3,18 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import type { AppStartedEvent } from "@rome-os/app-runtime";
-import type { ActionEngine } from "../apps/actions/engine.js";
-import type { AppCatalog } from "../apps/catalog.js";
-import type { RomeAppRuntimeServices } from "../apps/context.js";
-import { packArtifact } from "../apps/packaging/index.js";
-import type { ArtifactRef, ResolvedApp } from "../apps/state.js";
-import { createTestApps } from "../apps/test-helpers.js";
+import type { ActionEngine } from "./actions/engine.js";
+import type { AppCatalog } from "./catalog.js";
+import type { RomeAppRuntimeServices } from "./context.js";
+import { packArtifact } from "./packaging/index.js";
+import type { ArtifactRef, ResolvedApp } from "./state.js";
+import { createTestApps } from "./test-helpers.js";
 import { createAppStartedDispatcher } from "./app-started.js";
-import type { HookInvocationContext } from "./hook-recursion.js";
-import { getCurrentHookInvocationContext, runWithHookInvocationContext } from "./hook-recursion.js";
+import type { HookInvocationContext } from "../core/hook-recursion.js";
+import {
+  getCurrentHookInvocationContext,
+  runWithHookInvocationContext,
+} from "../core/hook-recursion.js";
 
 interface StartedCall {
   appId: string;

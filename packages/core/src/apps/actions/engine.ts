@@ -19,9 +19,9 @@ import type {
 import type {
   ActionExecutionStatus,
   ActionExecutionsRepository,
-} from "../../db/repositories/action-executions.js";
-import type { ApprovalsRepository } from "../../db/repositories/approvals.js";
-import type { ExecutionJournalRepository } from "../../db/repositories/execution-journal.js";
+} from "../repositories/action-executions.js";
+import type { ApprovalsRepository } from "../repositories/approvals.js";
+import type { ExecutionJournalRepository } from "../repositories/execution-journal.js";
 import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 import { replayContext, hashArgs, type JournalEntry, type ReplayStore } from "./replay.js";
 import { createLogger } from "../../logger.js";

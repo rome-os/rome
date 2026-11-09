@@ -1,4 +1,4 @@
-import type { AppCatalog } from "../apps/catalog.js";
+import type { AppCatalog } from "./catalog.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { RelayDrainer } from "../relay/drainer.js";
 import {
@@ -8,8 +8,8 @@ import {
   sanitizeDrainUrl,
   type RelayDrainSetting,
 } from "../relay/settings.js";
-import { cloudBearer } from "./instance-identity.js";
-import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
+import { cloudBearer } from "../lib/instance-identity.js";
+import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("rome-cloud-relay");

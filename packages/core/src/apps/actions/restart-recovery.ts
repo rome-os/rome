@@ -1,9 +1,9 @@
 // Ends the runs a stopped Rome process left `running`. Restart contract:
 // docs/concepts/actions.md and docs/concepts/data.md#routines.
-import type { ActionExecutionsRepository } from "../../db/repositories/action-executions.js";
+import type { ActionExecutionsRepository } from "../repositories/action-executions.js";
 import type { RoutineRunsRepository } from "../../db/repositories/routine-runs.js";
-import { hostJobId } from "../../host-execution/service.js";
-import { HOST_ACTION } from "../../host-execution/worker-recovery.js";
+import { hostJobId } from "../host-execution/service.js";
+import { HOST_ACTION } from "../host-execution/worker-recovery.js";
 
 export const INTERRUPTED_EXECUTION_ERROR = "Rome stopped before this execution finished";
 export const INTERRUPTED_ROUTINE_RUN_ERROR = "Rome stopped before this run finished";

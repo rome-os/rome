@@ -9,7 +9,7 @@ import {
   type TestDeps,
   createActionEngineRepos,
 } from "../../test/helpers.js";
-import { AppKeyInjector } from "../../app-keys/injector.js";
+import { AppKeyInjector } from "../../apps/app-keys/injector.js";
 import { ActionEngine } from "../../apps/actions/engine.js";
 import { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import { appKeysRoutes } from "./app-keys.js";

@@ -1,7 +1,7 @@
 import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import { actionExecutions } from "../schema.js";
-import type { DrizzleDb } from "../index.js";
+import { actionExecutions } from "../../db/schema.js";
+import type { DrizzleDb } from "../../db/index.js";
 import type { SessionActor } from "../../lib/session-actor.js";
 
 export type ActionExecutionStatus =

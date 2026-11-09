@@ -3,7 +3,7 @@ import type { TraceEventDto } from "@rome/api-types/trace-segments";
 import type { AgentEvent } from "../types.js";
 import type { ActionResult } from "../apps/actions/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
-import type { WebhookInvocationRecord } from "../db/repositories/webhook-invocations.js";
+import type { WebhookInvocationRecord } from "../apps/repositories/webhook-invocations.js";
 import type { ApiDeps } from "./deps.js";
 import { isValidAppId } from "../apps/packaging/app-id.js";
 import type { TransientDeltaType } from "../agent/index.js";

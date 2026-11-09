@@ -27,7 +27,7 @@ import { NotifyClient } from "./lib/notify-client.js";
 import { CloudProfileClient } from "./lib/cloud-profile.js";
 import { getGuardianAuthState, recordResolvedAccount } from "./lib/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
-import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
+import { provisionRelayMailboxAtBoot } from "./apps/rome-cloud-relay.js";
 import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
 import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
 import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./lib/rome-cloud-origin.js";
@@ -140,16 +140,16 @@ import {
 } from "./connections/kinds/wechat-user/wechat-user.js";
 import { WechatApp } from "./desktop-apps/wechat-app.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
-import { ApprovalsRepository } from "./db/repositories/approvals.js";
+import { ApprovalsRepository } from "./apps/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
 import { ComputerUseService } from "./computer-use/service.js";
-import { AppKeysRepository } from "./db/repositories/app-keys.js";
-import { AppKeyInjector } from "./app-keys/injector.js";
+import { AppKeysRepository } from "./apps/repositories/app-keys.js";
+import { AppKeyInjector } from "./apps/app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
-import { ActionExecutionsRepository } from "./db/repositories/action-executions.js";
-import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
+import { ActionExecutionsRepository } from "./apps/repositories/action-executions.js";
+import { ExecutionJournalRepository } from "./apps/repositories/execution-journal.js";
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
-import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
+import { WebhookInvocationsRepository } from "./apps/repositories/webhook-invocations.js";
 import {
   AgentLoader,
   AppTurnHooks,
@@ -217,7 +217,7 @@ import { startConciergeEvents } from "./concierge/events.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
 import { listConnectionViews } from "./api/routes/connections.js";
 import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
-import { createAppStartedDispatcher } from "./core/app-started.js";
+import { createAppStartedDispatcher } from "./apps/app-started.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
 import { stopActiveConversationTurn, stopSenderPlatform } from "./core/chat-stop.js";
 import { createChatTurns } from "./core/chat-turns.js";
@@ -241,8 +241,8 @@ import { linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
 import { SystemUpgradeService } from "./system-upgrade/service.js";
-import { HostExecutionService } from "./host-execution/service.js";
-import { createHostWorkerRecovery } from "./host-execution/worker-recovery.js";
+import { HostExecutionService } from "./apps/host-execution/service.js";
+import { createHostWorkerRecovery } from "./apps/host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
 import { PublicAccessState } from "./lib/public-access-state.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
@@ -287,7 +287,7 @@ import {
   createChannelMessageHookReloader,
   registerAppActions,
 } from "./apps/actions/app-actions-wiring.js";
-import type { ChannelMessageHook } from "./hooks/types.js";
+import type { ChannelMessageHook } from "./apps/hooks/types.js";
 import {
   createCodexImageGenerationProvider,
   createImageGenerationService,

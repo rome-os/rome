@@ -11,7 +11,7 @@ import type {
 import type { AppCatalog } from "../../apps/catalog.js";
 import type { RomeAppRuntimeServices } from "../../apps/context.js";
 import type { ArtifactRef } from "../../apps/state.js";
-import { loadAppHook } from "../../core/hook-loader.js";
+import { loadAppHook } from "../../apps/hook-loader.js";
 import {
   createHookDispatchResult,
   evaluateHookInvocation,

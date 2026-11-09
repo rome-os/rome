@@ -1,7 +1,7 @@
 import { and, eq, or, desc } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
-import { approvals } from "../schema.js";
-import type { DrizzleDb } from "../index.js";
+import { approvals } from "../../db/schema.js";
+import type { DrizzleDb } from "../../db/index.js";
 import { APPROVAL_TYPES, type ApprovalStatus, type ApprovalType } from "@rome/api-types/approvals";
 
 type ApprovalRow = typeof approvals.$inferSelect;

@@ -5,7 +5,7 @@ import { SettingsRepository } from "../db/repositories/settings.js";
 import { RELAY_SETTING_KEY, type RelayDrainSetting } from "../relay/settings.js";
 import type { RelayDrain } from "../relay/drainer.js";
 import { ensureRelayMailbox } from "./rome-cloud-relay.js";
-import { setInstanceTokenInMemory } from "./instance-identity.js";
+import { setInstanceTokenInMemory } from "../lib/instance-identity.js";
 
 // ensureRelayMailbox is the instance-token relay provisioning seam:
 // the instance presents its durable token to Rome Cloud's mint endpoint and ends

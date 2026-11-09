@@ -29,9 +29,9 @@ import { channelList } from "../../chats/connected-accounts/connected-account-li
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
 import type { DrizzleDb } from "../../db/index.js";
-import { ApprovalsRepository } from "../../db/repositories/approvals.js";
-import { ExecutionJournalRepository } from "../../db/repositories/execution-journal.js";
-import { ActionExecutionsRepository } from "../../db/repositories/action-executions.js";
+import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
+import { ExecutionJournalRepository } from "../../apps/repositories/execution-journal.js";
+import { ActionExecutionsRepository } from "../../apps/repositories/action-executions.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
 import { PeopleRepository } from "../../db/repositories/people.js";
 import { PoliciesRepository } from "../../db/repositories/policies.js";

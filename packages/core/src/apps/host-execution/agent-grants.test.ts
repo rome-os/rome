@@ -3,14 +3,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "@rstest/core";
 import { parse as parseYaml } from "yaml";
-import { ActionRegistryImpl } from "../apps/actions/registry.js";
-import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
-import { ActionConfigSchema } from "../apps/packaging/artifact-config.js";
+import { ActionRegistryImpl } from "../actions/registry.js";
+import { createEmptyLegacyArtifactBindings } from "../artifact-id.js";
+import { ActionConfigSchema } from "../packaging/artifact-config.js";
 
 // Root-on-host actions must reach only the main agent. A wildcard allow-list
 // (`actions: ["*"]`) is held by triage, validation and exploration agents,
 // some of which read untrusted input, so these actions must be explicit (#679).
-const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../../..");
+const REPO = join(dirname(fileURLToPath(import.meta.url)), "../../../../..");
 const HOST_ACTIONS = ["execute-root-script", "manage-root-script"];
 
 async function agentManifests(): Promise<Array<{ id: string; actions: string[] }>> {

@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ActionEngine } from "./engine.js";
-import { ApprovalsRepository } from "../../db/repositories/approvals.js";
-import { ExecutionJournalRepository } from "../../db/repositories/execution-journal.js";
-import { ActionExecutionsRepository } from "../../db/repositories/action-executions.js";
+import { ApprovalsRepository } from "../repositories/approvals.js";
+import { ExecutionJournalRepository } from "../repositories/execution-journal.js";
+import { ActionExecutionsRepository } from "../repositories/action-executions.js";
 import { hashArgs } from "./replay.js";
 import { callAction } from "./call-action.js";
 import type { Action, ActionConfig, ActionRegistry, ActionResult } from "./types.js";

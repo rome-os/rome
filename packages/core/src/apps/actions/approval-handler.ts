@@ -1,5 +1,5 @@
-import type { ApprovalsRepository } from "../../db/repositories/approvals.js";
-import type { ExecutionJournalRepository } from "../../db/repositories/execution-journal.js";
+import type { ApprovalsRepository } from "../repositories/approvals.js";
+import type { ExecutionJournalRepository } from "../repositories/execution-journal.js";
 import type { ActionEngine, ActionRunContext } from "./engine.js";
 import type { ActionResult } from "./types.js";
 import type { AgentRunnerInterface, ThreadContext } from "../../core/types.js";

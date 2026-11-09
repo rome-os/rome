@@ -2,8 +2,8 @@ import { createHash } from "node:crypto";
 import { request } from "node:http";
 import { setTimeout as delay } from "node:timers/promises";
 import { z } from "zod";
-import { actionExecutionContext } from "../apps/actions/context.js";
-import { createLogger } from "../logger.js";
+import { actionExecutionContext } from "../actions/context.js";
+import { createLogger } from "../../logger.js";
 
 const log = createLogger("host-execution");
 const admissionRejections = new Set(["busy", "retention_limit", "unavailable"]);

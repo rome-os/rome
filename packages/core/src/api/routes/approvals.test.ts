@@ -9,7 +9,7 @@ import {
   identityConnectionKindOf,
 } from "../../test/helpers.js";
 import { seedBaseline, type BaselineIds } from "../../test/seeds.js";
-import { ApprovalsRepository } from "../../db/repositories/approvals.js";
+import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
 import type { ApprovalHandler } from "../../apps/actions/approval-handler.js";
 
 function stubApprovalHandler(): ApprovalHandler {

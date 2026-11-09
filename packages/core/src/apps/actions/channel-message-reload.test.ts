@@ -10,7 +10,7 @@ import {
 } from "./app-actions-wiring.js";
 import { bumpModuleEnvEpoch } from "./module-loader.js";
 import type { AppCatalog } from "../catalog.js";
-import type { ChannelMessageHook } from "../../hooks/types.js";
+import type { ChannelMessageHook } from "../hooks/types.js";
 
 const TEST_KEY = "CHANNEL_MESSAGE_RELOAD_PROBE";
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ApprovalsRepository } from "./approvals.js";
-import { approvals } from "../schema.js";
+import { approvals } from "../../db/schema.js";
 
 describe("ApprovalsRepository", () => {
   let testDb: TestDb;

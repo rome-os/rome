@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { webhookInvocationsRoutes } from "./webhook-invocations.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
 import { seedBaseline, seedFailedCallbackWebhook, type BaselineIds } from "../../test/seeds.js";
-import { WebhookInvocationsRepository } from "../../db/repositories/webhook-invocations.js";
+import { WebhookInvocationsRepository } from "../../apps/repositories/webhook-invocations.js";
 
 describe("Webhook-invocations API", () => {
   let testDb: TestDb;

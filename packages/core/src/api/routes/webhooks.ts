@@ -13,7 +13,7 @@ import {
 } from "../helpers.js";
 import type { ActionEngine } from "../../apps/actions/engine.js";
 import type { ActionResult } from "../../apps/actions/types.js";
-import type { WebhookInvocationsRepository } from "../../db/repositories/webhook-invocations.js";
+import type { WebhookInvocationsRepository } from "../../apps/repositories/webhook-invocations.js";
 import type { ApiDeps } from "../deps.js";
 
 const log = createLogger("api:webhooks");

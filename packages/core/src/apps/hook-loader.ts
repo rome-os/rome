@@ -1,12 +1,9 @@
 import type { AgentRunnerInterface, AppLogger, RomeAppContext } from "@rome-os/app-runtime";
-import {
-  importModuleWithCacheBuster,
-  resolveModuleEntryPath,
-} from "../apps/actions/module-loader.js";
-import type { AppCatalog } from "../apps/catalog.js";
-import { type ArtifactRef, isResolvedApp } from "../apps/state.js";
+import { importModuleWithCacheBuster, resolveModuleEntryPath } from "./actions/module-loader.js";
+import type { AppCatalog } from "./catalog.js";
+import { type ArtifactRef, isResolvedApp } from "./state.js";
 import { createAppLogger } from "../logger.js";
-import { createRomeAppContext, type RomeAppRuntimeServices } from "../apps/context.js";
+import { createRomeAppContext, type RomeAppRuntimeServices } from "./context.js";
 
 /**
  * Deps handed to every app hook's `createHook(deps)` factory. The lifecycle

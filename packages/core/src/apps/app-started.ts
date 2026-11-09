@@ -2,15 +2,15 @@
 // Boot ordering: docs/architecture/app-lifecycle.md#app-start.
 import type { AppStartedEvent, AppStartedHook } from "@rome-os/app-runtime";
 import { Mutex } from "async-mutex";
-import type { AppCatalog } from "../apps/catalog.js";
-import type { RomeAppRuntimeServices } from "../apps/context.js";
+import type { AppCatalog } from "./catalog.js";
+import type { RomeAppRuntimeServices } from "./context.js";
 import {
   type AppId,
   type AppView,
   type ArtifactRef,
   isResolvedApp,
   type ResolvedApp,
-} from "../apps/state.js";
+} from "./state.js";
 import { createLogger } from "../logger.js";
 import { wrapHookSpan } from "../telemetry.js";
 import { loadAppHook } from "./hook-loader.js";
@@ -23,7 +23,7 @@ import {
   runWithHookInvocationContext,
   type HookIdentity,
   type HookInvocationContext,
-} from "./hook-recursion.js";
+} from "../core/hook-recursion.js";
 
 const log = createLogger("app-started");
 

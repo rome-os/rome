@@ -1,4 +1,4 @@
-import { appIdToPathSegment } from "../apps/packaging/app-id.js";
+import { appIdToPathSegment } from "./packaging/app-id.js";
 
 export type RomeAppShellMode = "embedded" | "full";
 

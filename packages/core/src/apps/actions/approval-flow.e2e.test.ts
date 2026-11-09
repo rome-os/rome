@@ -15,9 +15,9 @@ import { ActionEngine, type ApprovalCreatedEvent } from "./engine.js";
 import { ActionRegistryImpl } from "./registry.js";
 import { ApprovalHandler } from "./approval-handler.js";
 import { createBackendTurnRunner } from "./backend-turn.js";
-import { ApprovalsRepository } from "../../db/repositories/approvals.js";
-import { ExecutionJournalRepository } from "../../db/repositories/execution-journal.js";
-import { ActionExecutionsRepository } from "../../db/repositories/action-executions.js";
+import { ApprovalsRepository } from "../repositories/approvals.js";
+import { ExecutionJournalRepository } from "../repositories/execution-journal.js";
+import { ActionExecutionsRepository } from "../repositories/action-executions.js";
 import {
   createTestDb,
   buildTestDeps,

@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
-import { appKeys } from "../schema.js";
-import type { DrizzleDb } from "../index.js";
+import { appKeys } from "../../db/schema.js";
+import type { DrizzleDb } from "../../db/index.js";
 
 export interface AppKeyRow {
   name: string;

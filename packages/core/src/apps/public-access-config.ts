@@ -1,4 +1,4 @@
-import { isValidAppId } from "../apps/packaging/app-id.js";
+import { isValidAppId } from "./packaging/app-id.js";
 
 export interface PublicAccessConfig {
   allowedApps: string[];

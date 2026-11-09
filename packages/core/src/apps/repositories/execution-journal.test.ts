@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ExecutionJournalRepository } from "./execution-journal.js";
-import { executionJournal } from "../schema.js";
-import type { JournalEntry } from "../../apps/actions/replay.js";
+import { executionJournal } from "../../db/schema.js";
+import type { JournalEntry } from "../actions/replay.js";
 
 describe("ExecutionJournalRepository", () => {
   let testDb: TestDb;
