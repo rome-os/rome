@@ -403,11 +403,17 @@ struct Composer: View {
     let onSend: () -> Void
     var onStop: () -> Void = {}
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var choosingPhotos = false
     @State private var takingPhoto = false
     @State private var picked: [PhotosPickerItem] = []
     /// The text without what an input method is still composing (pinyin).
     @State private var committedText = ""
+
+    /// The + and Send sit on the text's last line, 36 pt tall.
+    private var controlPadding: CGFloat {
+        ComposerTextView.controlBottomPadding(height: 36, size: dynamicTypeSize)
+    }
 
     private var hasPhotos: Bool { !(attachments?.images.isEmpty ?? true) }
     private var canSend: Bool {
@@ -426,7 +432,7 @@ struct Composer: View {
             HStack(alignment: .bottom, spacing: 8) {
                 if let attachments {
                     plusMenu(attachments)
-                        .padding(.bottom, 7)
+                        .padding(.bottom, controlPadding)
                 }
                 ComposerTextView(
                     text: $text,
@@ -465,12 +471,12 @@ struct Composer: View {
                     }
                 }
                 .buttonStyle(PressScaleStyle(scale: 0.9))
-                .padding(.bottom, 7)
+                .padding(.bottom, controlPadding)
             }
             .padding(.leading, attachments == nil ? 18 : 7)
             .padding(.trailing, 7)
         }
-        .frame(minHeight: 50)
+        .frame(minHeight: ComposerTextView.minHeight)
         // Frosted glass: the transcript behind blurs out so the placeholder
         // reads. In light the glass alone barely parts from the page, so it
         // keeps an edge.
