@@ -30,6 +30,30 @@ const FORBIDDEN_DEPENDENCIES: ForbiddenDependency[] = [
       "A favor request exists to run an app action, so Favors depends on Apps and no file in apps/ imports favors/.",
   },
   {
+    from: "favors",
+    to: "agent",
+    description:
+      "A favor request runs an app action for a visitor, and no agent takes part in it, so no file in favors/ imports agent/.",
+  },
+  {
+    from: "favors",
+    to: "chats",
+    description:
+      "A favor request never names a chat or an account, so no file in favors/ imports chats/.",
+  },
+  {
+    from: "favors",
+    to: "connections",
+    description:
+      "A favor request never names a connection, so no file in favors/ imports connections/.",
+  },
+  {
+    from: "favors",
+    to: "people",
+    description:
+      "A favor request knows its visitor by their Rome Cloud account, not as a person, so no file in favors/ imports people/.",
+  },
+  {
     from: "desktops",
     to: "agent",
     description:
