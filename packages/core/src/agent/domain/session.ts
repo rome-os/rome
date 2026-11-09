@@ -20,6 +20,8 @@ export type SessionKind = "conversation" | "action" | "fork" | "subagent";
 export interface CreateSessionOptions {
   continuityKey?: ContinuityKey;
   workingDir?: string;
+  /** The fingerprint of the setup the session opens with ({@link Session.setup}). */
+  setup?: string;
   /** @deprecated A persisted fork's session must have the id the fork minted
    *  when its turn started, because the fork's chat and the turn's events
    *  already carry it. Every other caller leaves it out and Sessions mints
@@ -29,6 +31,8 @@ export interface CreateSessionOptions {
 
 export interface ReplaceSessionOptions {
   workingDir?: string;
+  /** The fingerprint of the setup the successor opens with. */
+  setup?: string;
 }
 
 /** What one turn ran on. */
@@ -63,6 +67,7 @@ export interface SessionState {
   model: string | null;
   reasoningEffort: string | null;
   workingDir: string | null;
+  setup: string | null;
   createdAt: Date;
   lastActiveAt: Date;
 }
@@ -101,6 +106,7 @@ export class Session {
       model: null,
       reasoningEffort: null,
       workingDir: options.workingDir ?? null,
+      setup: options.setup ?? null,
       createdAt: now,
       lastActiveAt: now,
     });
@@ -140,6 +146,16 @@ export class Session {
   }
   get workingDir(): string | null {
     return this.state.workingDir;
+  }
+  /**
+   * A fingerprint of the setup the session opened with: its agent's
+   * instructions and identity, and its tools. Fixed for the session's life.
+   * Null when the session was opened before setups were recorded, or for an
+   * agent whose policy does not replace a session on a setup change.
+   * docs/concepts/sessions.md#setup
+   */
+  get setup(): string | null {
+    return this.state.setup;
   }
   get createdAt(): Date {
     return this.state.createdAt;
@@ -214,6 +230,7 @@ export class Session {
     return Session.create(this.state.agentName, {
       continuityKey: this.state.continuityKey ?? undefined,
       workingDir: options.workingDir,
+      setup: options.setup,
     });
   }
 

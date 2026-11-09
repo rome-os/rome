@@ -51,6 +51,11 @@ export const sessions = sqliteTable(
      *  provider where its transcript lives. Null for legacy rows, which resume
      *  in the default project. */
     workingDir: text("working_dir"),
+    /** A fingerprint of the setup the session opened with: its agent's
+     *  instructions and identity, and its tools. Null for rows written before
+     *  the column existed and for agents that never replace a session on a
+     *  setup change. */
+    setup: text("setup_fingerprint"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
     status: text("status", {

@@ -73,7 +73,12 @@ rs.mock("../paths.js", () => ({
   getProfileInstalledAppsDir: rs.fn(() => "/tmp/agent-runner-test/installed-apps"),
 }));
 
-import type { SystemPrompts } from "../agent/index.js";
+import {
+  createSystemPrompts,
+  type PromptSources,
+  type RomeTool,
+  type SystemPrompts,
+} from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { createSessionFromRun } from "./agent-runner.js";
 import type {
@@ -3264,6 +3269,160 @@ describe("AgentRunner", () => {
       ).toMatchObject({
         id: sessionInit?.type === "session_init" ? sessionInit.sessionId : undefined,
         status: "active",
+      });
+    });
+
+    describe("a session whose agent renews it when its setup changes", () => {
+      const key = "webchat:renewing-chat";
+      const identity = { text: "**Agent Name:** Yo" };
+      const charter = { text: "Be kind." };
+      let sessionTools: RomeTool[];
+      const managers: Sessions[] = [];
+
+      afterEach(async () => {
+        await Promise.all(managers.splice(0).map((manager) => manager.shutdown()));
+      });
+
+      function renewingRunner(provider: MockModelProvider): AgentRunner {
+        const sources: PromptSources = {
+          material: () => ({
+            charter: charter.text,
+            identity: identity.text,
+            runtime: {
+              profileDir: "/profile",
+              profileMemoryDir: "/profile/memory",
+              customAppAuthoringDir: "/profile/projects/apps",
+              installedAppsDir: "/profile/apps/installed",
+              repoAppsDir: "/repo/rome_apps",
+              internalApiBaseUrl: "http://127.0.0.1:4141",
+              docsDir: null,
+            },
+            installedApps: [],
+          }),
+          // Memory is not part of the setup.
+          memory: () => ({ index: `Memory read at ${Math.random()}`, projects: [] }),
+          onChanged: () => {},
+        };
+        // As in production, a session stays open between turns.
+        const manager = createSessions(
+          {
+            ...managerDeps(createTestModelResolver({ providers: [provider] })),
+            systemPrompts: createSystemPrompts({ sources }),
+            sessionTools: { forTurn: async () => sessionTools },
+          },
+          { keepAliveAcrossTurns: true },
+        );
+        managers.push(manager);
+        return new AgentRunner(
+          manager,
+          agentLoader,
+          new ChatsWebChatRepository(testDb.db),
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          sessionOpeningFor({ channelSurface: testChannelSurface }),
+        );
+      }
+
+      const tool = (description: string): RomeTool => ({
+        name: "say",
+        description,
+        inputSchema: { type: "object", properties: { text: { type: "string" } } },
+        handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
+      });
+
+      async function turn(runner: AgentRunner, params: { sessionId?: string } = {}) {
+        const messages = await collectMessages(
+          runner.run({
+            agentName: "test-renewing",
+            prompt: "Hello",
+            ...(params.sessionId ? { sessionId: params.sessionId } : { channelThreadKey: key }),
+          }),
+        );
+        const init = messages.find((message) => message.type === "session_init");
+        return init?.type === "session_init" ? init.sessionId : undefined;
+      }
+
+      const replies = (count: number) =>
+        Array.from({ length: count }, () => [{ type: "result" as const, content: "ok" }]);
+
+      beforeEach(() => {
+        identity.text = "**Agent Name:** Yo";
+        charter.text = "Be kind.";
+        sessionTools = [tool("Send one message.")];
+      });
+
+      it("keeps the session while the setup is unchanged", async () => {
+        const runner = renewingRunner(new MockModelProvider(replies(2)));
+        const first = await turn(runner);
+        const second = await turn(runner);
+
+        expect(second).toBe(first);
+        expect((await sessionRepository.current(key, "core:test-renewing"))?.setup).toMatch(
+          /^[0-9a-f]{64}$/,
+        );
+      });
+
+      it.each([
+        ["a rename", () => (identity.text = "**Agent Name:** YoYo")],
+        ["a tool change", () => (sessionTools = [tool("Send one message, in a thread.")])],
+        [
+          "a new tool",
+          () => (sessionTools = [tool("Send one message."), { ...tool("x"), name: "x" }]),
+        ],
+      ])("starts a fresh session in the same chat after %s", async (_change, change) => {
+        const provider = new MockModelProvider(replies(2));
+        const runner = renewingRunner(provider);
+        const first = await turn(runner);
+        change();
+        const second = await turn(runner);
+
+        expect(second).not.toBe(first);
+        expect((await sessionRepository.session(first!))?.status).toBe("completed");
+        expect(await sessionRepository.current(key, "core:test-renewing")).toMatchObject({
+          id: second,
+          status: "active",
+        });
+        // The fresh session continues the chat, so it reads the earlier messages.
+        expect(provider.calls[1]?.prompt).toContain("<continuation>");
+        expect(provider.calls[0]?.prompt).not.toContain("<continuation>");
+      });
+
+      it("starts a fresh session after an instruction change", async () => {
+        const provider = new MockModelProvider(replies(2));
+        const runner = renewingRunner(provider);
+        const first = await turn(runner);
+        const before = provider.sessions[0]?.config.systemPrompt;
+        charter.text = "Be kind. Always answer in one line.";
+        const second = await turn(runner);
+
+        expect(second).not.toBe(first);
+        expect(provider.sessions.at(-1)?.config.systemPrompt).not.toBe(before);
+        expect(provider.sessions.at(-1)?.config.systemPrompt).toContain(
+          "Always answer in one line.",
+        );
+      });
+
+      it("never renews a session resumed by its id", async () => {
+        const runner = renewingRunner(new MockModelProvider(replies(2)));
+        const first = await turn(runner);
+        identity.text = "**Agent Name:** YoYo";
+        const resumed = await turn(runner, { sessionId: first });
+
+        expect(resumed).toBe(first);
+        expect((await sessionRepository.session(first!))?.status).toBe("active");
+      });
+
+      it("renews a session that opened before setups were recorded", async () => {
+        const legacy = Session.create("core:test-renewing", { continuityKey: key });
+        await sessionRepository.add(legacy);
+        const runner = renewingRunner(new MockModelProvider(replies(1)));
+
+        const renewed = await turn(runner);
+
+        expect(renewed).not.toBe(legacy.id);
+        expect((await sessionRepository.session(legacy.id))?.status).toBe("completed");
       });
     });
 

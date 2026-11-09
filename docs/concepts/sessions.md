@@ -36,6 +36,17 @@ A continuity key is the value that whatever opens a session, and comes back to i
 - **Session id** — the id names one session. The continuity key names the run of sessions a chat has had, and finds the current one.
 - **[Chat](../domains/chats.md#chat)** — a chat is a place where messages are said. A continuity key is how that chat finds its agent's session, and a session may have one without being in any chat. A session never names a chat. Which chat has a session is [Participation](../domains/participation.md)'s question, asked by the session's id. Until Participation has that query, the web chat side answers it and records it on the session's stored row (`chatOfSession` and `recordSessionInChat` in [`packages/core/src/db/repositories/webchat.ts`](../../packages/core/src/db/repositories/webchat.ts)). One exception remains while each turn picks its own chat (ZHA-157): the opener names the chat a turn records in with the turn's input (`romeSessionId`), and the session hands it to the ports that ask for it. The chat side, not the session, names that chat on the session's start event (`romeSession`).
 
+## Setup
+
+A session's setup is what it takes when it opens and keeps for its life: its agent's instructions, its identity, and its tools with their schemas. Memory, follows and tasks are not part of it, since a session reads them while it runs.
+
+**Contracts:**
+
+- A change to an agent's setup reaches a session only when a fresh session opens.
+- An agent whose policy asks for it gets a fresh session in the same chat when its setup changed since its session opened. The check runs before each turn opened by continuity key. A session resumed by its id is never replaced. The Concierge's chats work this way, since one of them can run on one session for days.
+- A session that recorded no setup opened before setups were recorded, and is replaced on its next turn under such a policy.
+- A replacement for a changed setup is silent to the guardian. Its first turn carries the [continuation](#continuation) notice.
+
 ## Model pin
 
 A session remembers the concrete model that produced its history — the **session model pin** — and requests exactly that model on every later turn and resume ([ADR](../adrs/pinned-session-model-fails-closed.md)). Except for [Concierge provider failover](../adrs/concierge-provider-failover.md), a pinned session does not move to another model on its own. Its prompt cache survives an entitlement or setting change mid-thread.
@@ -67,6 +78,7 @@ Rome's transcript is the conversation, and a model thread is a cache of it. When
 - The notice goes on the first turn of a thread that replaced one holding the chat: a pick on another provider in an open chat, or a session reopened on another provider than its recorded thread. It rides on that thread's turns until one returns a result, since a turn that fails may never have reached the thread.
 - A thread that starts in a session also gets the `<thread_context>` block on its first turn.
 - The notice names no channel. The thread's channel and thread id are in its thread context.
+- A session that replaced one whose [setup](#setup) changed carries the notice on its first turn, like a thread on another provider.
 - A new chat, a new generation (the chat-settings reset policy), and a thread that resumes add no notice. Subagent sessions carry none.
 
 ## Turn

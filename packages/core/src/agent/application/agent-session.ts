@@ -24,6 +24,8 @@ import { shapedResult, type AnswerShape, type ReadAnswerShape } from "../domain/
 import { type TurnAttribution, type TurnUsageReporting } from "../domain/turn-usage-reporting.js";
 import { type SessionSettings, restoresSavedSelection } from "../domain/session-settings.js";
 import { evaluateProviderSessionReset } from "../domain/session-reset.js";
+import { setupChanged, setupFingerprint } from "../domain/session-setup.js";
+import { ROME_TOOL_GROUPS } from "../domain/rome-tools.js";
 import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
 import { catchUpPrompt } from "../domain/catch-up.js";
 import { type PromptFacts, type PromptMessage } from "../domain/prompt-facts.js";
@@ -424,19 +426,28 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     key: AgentSessionKey,
     span: Span,
     init?: OpenRequest,
-    /** Set when the reset policy already ran for this acquire. */
-    resetChecked?: { prepared?: Session },
+    /** Set when the reset policy and the setup check already ran for this acquire. */
+    resetChecked?: { prepared?: Session; setup?: string; renewedSetup?: boolean },
   ): Promise<AgentSession> => {
     const k = keyOf(key);
     const reset = init?.resetPolicy;
-    if (reset && !init.resumeSessionId && !resetChecked) {
+    // A session resumed by id is resumed as it is, so neither applies to it.
+    const setup =
+      init && !init.resumeSessionId && !resetChecked
+        ? await currentSetup(deps, key, init, isSubagent)
+        : undefined;
+    if ((reset || setup !== undefined) && init && !init.resumeSessionId && !resetChecked) {
       const interactionAt = new Date();
       const chatId = init.threadContext?.romeSessionId;
       return await lifecycleMutex.runExclusive(k, async () => {
         const active = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-        const decision = active
-          ? evaluateProviderSessionReset(reset, active, interactionAt)
-          : { due: false as const };
+        const decision = !active
+          ? { due: false as const }
+          : setup !== undefined && setupChanged(active.setup, setup)
+            ? { due: true as const, reason: "setup" as const }
+            : reset
+              ? evaluateProviderSessionReset(reset, active, interactionAt)
+              : { due: false as const };
         const cached = sessions.get(k);
         if (decision.due) {
           log.info("provider_session.reset_due", {
@@ -445,8 +456,8 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
             provider: active?.provider ?? undefined,
             oldSessionId: active?.id,
             resetReason: decision.reason,
-            policyMode: reset.mode,
-            elapsedMinutes: decision.elapsedMinutes,
+            policyMode: reset?.mode,
+            elapsedMinutes: "elapsedMinutes" in decision ? decision.elapsedMinutes : undefined,
           });
           if (cached && cached.status !== "closed") {
             await waitUntilQuiescent(cached);
@@ -455,7 +466,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         }
         let prepared: Session | undefined;
         if (decision.due && active) {
-          prepared = active.replace();
+          prepared = active.replace({ setup });
           await deps.sessionRepository.replace(active, prepared);
           log.info("provider_session.rotated", {
             chatId,
@@ -464,11 +475,17 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
             oldSessionId: active.id,
             newSessionId: prepared.id,
             resetReason: decision.reason,
-            policyMode: reset.mode,
+            policyMode: reset?.mode,
             result: "succeeded",
           });
         }
-        return await acquireInner(key, span, init, { prepared });
+        return await acquireInner(key, span, init, {
+          prepared,
+          setup,
+          // A fresh session for a changed setup continues the chat, so its
+          // first turn says the earlier messages are not in its context.
+          renewedSetup: decision.due && decision.reason === "setup" && !!active,
+        });
       });
     }
     // `reopen` distinguishes a cold open (no live session for this key — the
@@ -542,6 +559,8 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     const promise = (async () => {
       const sess = await openSession(deps, key, init ?? {}, {
         prepared: resetChecked?.prepared,
+        setup: resetChecked?.setup,
+        renewedSetup: resetChecked?.renewedSetup === true,
         keepAlive,
         onClosed: onSessionClosed,
         isSubagent,
@@ -624,6 +643,10 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
 interface OpenOptions {
   /** The successor the reset path already wrote, which this open serves. */
   prepared?: Session;
+  /** The fingerprint of the setup a session this open creates records. */
+  setup?: string;
+  /** `prepared` replaced a session whose setup changed, in the same chat. */
+  renewedSetup: boolean;
   keepAlive: boolean;
   onClosed: (s: AgentSessionImpl) => void;
   isSubagent: boolean;
@@ -745,6 +768,79 @@ function deprecatedSameAgent(
   return stored !== undefined && requested !== undefined && stored.name === requested.name;
 }
 
+/**
+ * The fingerprint of the setup a session of `key`'s agent opens with now,
+ * or undefined when the agent's policy keeps a session through setup
+ * changes. It reads what `openSession` opens with: the system prompt without
+ * memory, the provider's tools the agent declares, and Rome's tools.
+ */
+async function currentSetup(
+  deps: ManagerDeps,
+  key: AgentSessionKey,
+  init: SessionOpening,
+  isSubagent: boolean,
+): Promise<string | undefined> {
+  if (isSubagent) return undefined;
+  // An agent that is gone fails where the session opens, not here.
+  const agent = deps.agentLoader.find(key.agentName);
+  if (!agent) return undefined;
+  const config = agent.definition;
+  if (
+    !resolveAgentPolicy({ name: agent.localName, policy: config.policy }).freshSessionOnSetupChange
+  ) {
+    return undefined;
+  }
+  const widgets = widgetDrawingFor({ placeDrawsCards: init.drawsCards === true, isSubagent });
+  const systemPrompt = deps.systemPrompts.setup(
+    { ...config, name: agent.localName, owner: agent.ownerType },
+    { contextSuffix: init.contextSuffix, widgets },
+  );
+  // Facts of no turn: the tools only list their names and schemas here.
+  const turn: TurnFacts = {
+    agentName: key.agentName,
+    continuityKey: key.channelThreadKey,
+    sessionId: "",
+    isSubagent,
+    actions: config.actions ?? [],
+    widgets,
+    turnId: () => undefined,
+    threadContext: () => init.threadContext,
+    sharedContext: () => init.sharedContext,
+    pushLevel: () => undefined,
+    inTurn: (fn) => fn(),
+  };
+  const subagents = subagentsOf(deps.agentLoader, config);
+  const tools = createRomeTools({
+    turn,
+    actions: deps.actions,
+    skills: deps.skillCatalog,
+    subagents: {
+      list: () => subagents,
+      run: async () => {
+        throw new Error("Not a turn");
+      },
+    },
+    widgetsShow: showsWidgets(widgets, true),
+    log: deps.log,
+    defer:
+      init.guardianFacing === true
+        ? {
+            schedule: (at, wakeUp) => deps.defer.schedule(at, wakeUp),
+            finalText: resolveAgentPolicy({ name: agent.localName, policy: config.policy })
+              .finalText,
+          }
+        : undefined,
+    sessionTools: await deps.sessionTools.forTurn(turn, true),
+  });
+  return setupFingerprint({
+    systemPrompt,
+    builtinTools: config.tools,
+    tools: Object.fromEntries(
+      ROME_TOOL_GROUPS.map((group) => [group, tools.listTools(group)]),
+    ) as Record<(typeof ROME_TOOL_GROUPS)[number], ReturnType<typeof tools.listTools>>,
+  });
+}
+
 async function openSession(
   deps: ManagerDeps,
   key: AgentSessionKey,
@@ -802,7 +898,7 @@ async function openSession(
         channelThreadKey: key.channelThreadKey,
         workingDir: resumed.workingDir,
       });
-      prepared = resumed.replace();
+      prepared = resumed.replace({ setup: opts.setup });
       await deps.sessionRepository.replace(resumed, prepared);
       resumed = undefined;
     }
@@ -816,6 +912,7 @@ async function openSession(
     Session.create(key.agentName, {
       continuityKey: key.channelThreadKey || undefined,
       workingDir,
+      setup: opts.setup,
     });
   const sessionId = session.id;
   const isNewSession = !resumed;
@@ -1330,7 +1427,7 @@ async function openSession(
     threadResumed,
     // The row recorded a thread this open does not resume: another provider
     // now runs the chat, and its new thread has seen none of it.
-    replacedThread: !threadResumed && !!resumed?.modelThreadId,
+    replacedThread: (!threadResumed && !!resumed?.modelThreadId) || opts.renewedSetup,
     previousModel: resumed?.model ?? undefined,
     openModelSession,
     modelProvider: initialResolution?.modelProvider,

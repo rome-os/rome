@@ -1,0 +1,10 @@
+name: test-renewing
+description: Test agent whose sessions renew when its setup changes.
+model: opus
+permissionMode: acceptEdits
+tools:
+  - Read
+policy:
+  freshSessionOnSetupChange: true
+systemPromptPrefix: |
+  You are a test agent whose setup changes in tests.

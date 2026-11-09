@@ -224,6 +224,7 @@ function restore(row: SessionRow): Session {
     model: row.model,
     reasoningEffort: row.reasoningEffort,
     workingDir: row.workingDir,
+    setup: row.setup,
     createdAt: row.createdAt,
     lastActiveAt: row.lastActiveAt,
   });
@@ -264,6 +265,7 @@ function toRow(state: SessionState): SessionRow {
     model: state.model,
     reasoningEffort: state.reasoningEffort,
     workingDir: state.workingDir,
+    setup: state.setup,
     createdAt: state.createdAt,
     lastActiveAt: state.lastActiveAt,
     status: state.status,
