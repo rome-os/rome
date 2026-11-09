@@ -1,5 +1,5 @@
 import type { AgentReporter } from "./feedback-client.js";
-import type { DiagnosticBundle } from "./diagnostics.js";
+import type { DiagnosticBundle } from "../instance/diagnostics.js";
 
 // Shared shape + limits for the "share feedback" feature.
 //

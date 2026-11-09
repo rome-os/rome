@@ -15,7 +15,7 @@
  * lockfile (see manager.ts).
  */
 import { createLogger } from "../logger.js";
-import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
+import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
 import type { BundleFetcher } from "./store-bundle.js";
 import { resolveBundleUrl } from "./rome-cloud-urls.js";
 import { withRomeCloudReadAuth } from "./rome-cloud-read-auth.js";

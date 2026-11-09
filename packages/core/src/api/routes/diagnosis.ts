@@ -3,9 +3,9 @@ import {
   getIdentityIssue,
   proveIdentity,
   type ProveIdentityResult,
-} from "../../lib/instance-identity.js";
-import { assembleDiagnosticBundle, type DiagnosticsDeps } from "../../lib/diagnostics.js";
-import { readResourceReadings, type ResourceProbes } from "../../lib/resource-readings.js";
+} from "../../instance/instance-identity.js";
+import { assembleDiagnosticBundle, type DiagnosticsDeps } from "../../instance/diagnostics.js";
+import { readResourceReadings, type ResourceProbes } from "../../instance/resource-readings.js";
 
 // One-shot triage endpoint: a single GET that answers "is this Rome instance
 // healthy, and which exact build/identity am I looking at?" without the

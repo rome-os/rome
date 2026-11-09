@@ -2,7 +2,7 @@ import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import { guardianAuth, persons } from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
-import { proveIdentity, type ProveIdentityResult } from "../lib/instance-identity.js";
+import { proveIdentity, type ProveIdentityResult } from "../instance/instance-identity.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("guardian-account");

@@ -17,7 +17,7 @@ import {
   type RomeAppContext,
 } from "./context.js";
 import type { RomeAppViewer } from "../access/visitor-session.js";
-import type { FavorService } from "../favors/types.js";
+import type { FavorService } from "../favors/index.js";
 import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
 
 export type { RomeAppApiHandler, RomeAppApiRequest, RomeAppCaller } from "@rome-os/app-runtime";

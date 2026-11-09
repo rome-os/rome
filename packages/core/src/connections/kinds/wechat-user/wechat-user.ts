@@ -13,7 +13,7 @@ import {
   type DesktopSlot,
   desktopSlot,
   startDesktopArgs,
-} from "../../../desktops.js";
+} from "../../../desktops/desktops.js";
 import { createLogger } from "../../../logger.js";
 
 const log = createLogger("wechat-user");

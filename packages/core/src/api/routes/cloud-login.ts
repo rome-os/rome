@@ -20,7 +20,7 @@ import {
   followRequest,
   readOnboardingSurvey,
   type OnboardingSurvey,
-} from "../../lib/cloud-onboarding.js";
+} from "../../instance/cloud-onboarding.js";
 import {
   applySetupDefaults,
   defaultGuardianName,
@@ -30,8 +30,8 @@ import {
   isInstanceLinked,
   isValidInstanceToken,
   persistInstanceToken,
-} from "../../lib/instance-identity.js";
-import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
+} from "../../instance/instance-identity.js";
+import { getInstanceOrigin, getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 import { beginDashboardVisitorFlow } from "./visitor-auth.js";

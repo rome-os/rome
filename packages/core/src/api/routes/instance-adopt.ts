@@ -7,15 +7,15 @@ import {
   INSTANCE_SLUG_SETTING_KEY,
   isInstanceHosted,
   isInstanceSlug,
-} from "../../lib/instance-env.js";
+} from "../../instance/instance-env.js";
 import {
   clearInstanceToken,
   isInstanceLinked,
   isValidInstanceToken,
   persistInstanceToken,
   signerMode,
-} from "../../lib/instance-identity.js";
-import { resolveInstanceSlug } from "../../lib/runtime.js";
+} from "../../instance/instance-identity.js";
+import { resolveInstanceSlug } from "../../instance/runtime.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 

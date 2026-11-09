@@ -6,7 +6,7 @@ import { Parser } from "tar";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { hashArtifact, packBundle } from "./packaging/index.js";
 import { isPublishableSource, publishAppBundle } from "./publish.js";
-import { setInstanceTokenInMemory } from "../lib/instance-identity.js";
+import { setInstanceTokenInMemory } from "../instance/instance-identity.js";
 
 // A packed source artifact dir — app.yaml at the root, build output beside
 // it. node_modules is present to prove the pack/hash excludes it (it never

@@ -24,7 +24,7 @@ import {
   type SessionActor,
 } from "../access/session-actor.js";
 import type { RomeAppViewer } from "../access/visitor-session.js";
-import type { FavorService } from "../favors/types.js";
+import type { FavorService } from "../favors/index.js";
 import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
 
 const log = createLogger("app-websocket");

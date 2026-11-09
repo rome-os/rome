@@ -6,7 +6,7 @@ import {
   hydrateInstanceToken,
   type ProveIdentityResult,
   setInstanceTokenInMemory,
-} from "../../lib/instance-identity.js";
+} from "../../instance/instance-identity.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import type { ApiDeps } from "../deps.js";
 import { instanceAdoptRoutes } from "./instance-adopt.js";

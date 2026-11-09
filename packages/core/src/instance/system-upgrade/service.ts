@@ -10,7 +10,7 @@
 // relay's outcome — `updating` after Rome Cloud accepts, unchanged (button path)
 // or back to idle (deadline path) when it doesn't.
 
-import { createLogger } from "../logger.js";
+import { createLogger } from "../../logger.js";
 import {
   applyUpgrade as defaultApplyUpgrade,
   checkUpgrade as defaultCheckUpgrade,

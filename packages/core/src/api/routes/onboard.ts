@@ -12,8 +12,8 @@ import { resolveAndRecordAccount } from "../../access/guardian-auth-state.js";
 import { resolveBootstrapState } from "../../access/bootstrap-state.js";
 import { applySetupDefaults } from "../../people/guardian-profile.js";
 import { resolveGuardianSession } from "../../access/guardian-session.js";
-import { isInstanceLinked } from "../../lib/instance-identity.js";
-import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
+import { isInstanceLinked } from "../../instance/instance-identity.js";
+import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { resolveVisitorSession } from "../../access/visitor-session.js";
 import type { ApiDeps } from "../deps.js";
 

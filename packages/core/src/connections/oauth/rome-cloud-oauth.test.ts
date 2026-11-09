@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { DrizzleDb } from "../../db/index.js";
 import { oauthPendingAttempts } from "../../db/schema.js";
 import { createTestDb } from "../../test/db.js";
-import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
+import { setInstanceTokenInMemory } from "../../instance/instance-identity.js";
 import {
   createRomeCloudOAuthStartRedirect,
   createRomeCloudOAuthStartUrl,

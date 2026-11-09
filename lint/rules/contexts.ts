@@ -28,6 +28,36 @@ const FORBIDDEN_DEPENDENCIES: ForbiddenDependency[] = [
     to,
     description: `Access answers who may use this Rome, and as whom, for every other context, so no file in access/ imports ${to}/. A context that needs a sign-in decision imports access/.`,
   })),
+  {
+    from: "apps",
+    to: "favors",
+    description:
+      "A favor request exists to run an app action, so Favors depends on Apps and no file in apps/ imports favors/.",
+  },
+  {
+    from: "desktops",
+    to: "agent",
+    description:
+      "Desktops says which machines Rome can reach and what it can do on them, whoever asks, so no file in desktops/ imports agent/.",
+  },
+  {
+    from: "desktops",
+    to: "chats",
+    description:
+      "Desktops never names a chat or an account, so no file in desktops/ imports chats/.",
+  },
+  {
+    from: "desktops",
+    to: "connections",
+    description:
+      "A connection that needs a screen, such as WeChat's own-account connection, asks Desktops for one. Desktops never names a connection, so no file in desktops/ imports connections/.",
+  },
+  {
+    from: "desktops",
+    to: "people",
+    description:
+      "Desktops never names a person or an account, so no file in desktops/ imports people/.",
+  },
 ];
 
 function contextOf(path: string): string {
@@ -45,8 +75,24 @@ export const contextRules: ImportRule[] = FORBIDDEN_DEPENDENCIES.map((dependency
 
 const SESSIONS_REPOSITORY = "agent/infrastructure/drizzle-session-repository";
 
+/** The apps/ files that give apps `ctx.favors` through Favors' `FavorService` type. */
+const APP_FAVOR_CAPABILITY = [
+  "apps/context.ts",
+  "apps/context.test.ts",
+  "apps/api.ts",
+  "apps/websocket-server.ts",
+  "apps/actions/app-actions-wiring.ts",
+];
+
 /** Crossings that remain until their ticket lands. */
 export const contextCrossings: ListedCrossing[] = [
+  ...APP_FAVOR_CAPABILITY.map((from) => ({
+    rule: "apps-never-imports-favors",
+    from,
+    to: "favors/index.ts",
+    ticket: "ZHA-163",
+    why: "Apps offers `ctx.favors` by naming Favors' `FavorService` type, until Apps reaches favor requests without it.",
+  })),
   {
     rule: "agent-never-imports-apps",
     from: `${SESSIONS_REPOSITORY}.ts`,

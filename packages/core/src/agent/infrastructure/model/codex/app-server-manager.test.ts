@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { CodexLoginChoice } from "../../../domain/model-login.js";
-import { setInstanceTokenInMemory } from "../../../../lib/instance-identity.js";
+import { setInstanceTokenInMemory } from "../../../../instance/instance-identity.js";
 import { ROME_CREDITS_PROXY_SECRET } from "./rome-credits-proxy.js";
 import type { AppServerClientOptions } from "./app-server-client.js";
 import { SharedCodexAccountService } from "./account-service.js";
