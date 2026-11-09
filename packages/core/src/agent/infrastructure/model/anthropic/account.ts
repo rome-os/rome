@@ -11,7 +11,7 @@ import {
   ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING,
   getStoredAnthropicCompatibleCredentials,
   summarizeAnthropicCompatibleCredentials,
-} from "../../../../lib/anthropic-compatible-providers.js";
+} from "./anthropic-compatible-providers.js";
 import { getErrorMessage, readClaudeOAuthUsage } from "../../../../lib/provider-usage.js";
 import { createLogger } from "../../../../logger.js";
 import type {

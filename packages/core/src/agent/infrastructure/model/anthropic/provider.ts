@@ -37,7 +37,7 @@ import { parseTimeZone } from "../../../../lib/timezone.js";
 import {
   buildAnthropicCompatibleProviderEnv,
   getStoredAnthropicCompatibleCredentials,
-} from "../../../../lib/anthropic-compatible-providers.js";
+} from "./anthropic-compatible-providers.js";
 import { CUSTOM_ANTHROPIC_PROVIDER_ID } from "@rome/api-types/anthropic-compatible-providers";
 import {
   clearAnthropicAuthRevoked,

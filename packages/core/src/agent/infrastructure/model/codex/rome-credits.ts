@@ -1,6 +1,6 @@
 import type { RomeCreditsView } from "@rome/api-types/rome-credits";
-import { cloudBearer } from "./instance-identity.js";
-import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
+import { cloudBearer } from "../../../../lib/instance-identity.js";
+import { getRomeCloudOrigin } from "../../../../lib/rome-cloud-origin.js";
 
 const REQUEST_TIMEOUT_MS = 10_000;
 

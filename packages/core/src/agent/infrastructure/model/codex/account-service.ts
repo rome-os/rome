@@ -14,7 +14,7 @@ import {
   readLiveOrCachedUsage,
   type AIToolUsageStatus,
 } from "../../../../lib/provider-usage.js";
-import { fetchRomeCredits } from "../../../../lib/rome-credits.js";
+import { fetchRomeCredits } from "./rome-credits.js";
 import type {
   ModelAccount,
   ModelAccountStatus,

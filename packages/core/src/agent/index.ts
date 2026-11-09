@@ -247,3 +247,18 @@ export {
   createTierModelsSetting,
   TIER_MODEL_MAPPINGS_SETTING_KEY,
 } from "./infrastructure/settings/tier-models-setting.js";
+
+// What the dashboard's login and settings routes and Rome Cloud's Codex
+// login use from the model adapters.
+export {
+  ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING,
+  redactAnthropicCompatibleCredentialsSetting,
+  summarizeAnthropicCompatibleCredentials,
+  summarizeAnthropicCompatibleCredentialsForEditing,
+} from "./infrastructure/model/anthropic/anthropic-compatible-providers.js";
+export {
+  ClaudeLoginCodeValidationError,
+  formatClaudeLoginCodeInput,
+} from "./infrastructure/model/anthropic/claude-login-code.js";
+export { createClaudeLoginWatcher } from "./infrastructure/model/anthropic/claude-login-watch.js";
+export { fetchRomeCredits } from "./infrastructure/model/codex/rome-credits.js";
