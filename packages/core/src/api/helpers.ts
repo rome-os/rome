@@ -182,6 +182,7 @@ export function toTraceEvent(msg: TraceableEvent & { agent?: string }): TraceEve
         turnId: msg.turnId,
         sessionId: msg.sessionId,
         userPrompt: msg.userPrompt,
+        ...(msg.sessionRenewal ? { sessionRenewal: { ...msg.sessionRenewal } } : {}),
         agent: msg.agent,
       };
     case "turn_end":
