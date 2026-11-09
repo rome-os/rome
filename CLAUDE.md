@@ -18,6 +18,7 @@ A pnpm monorepo. All TypeScript code lives under `packages/*` and `rome_apps/*`;
 - Before explaining a concept or asserting how a surface behaves, check [`docs/`](docs/README.md) and link instead of re-deriving.
 - Before naming a chat, thread, account, agent, connection or their operations in code, UI copy or docs, use the words in [`docs/domains/`](docs/domains/README.md). When a rule there changes, change the word's entry in the same PR as the code.
 - Before building or editing an app, read [`rome_apps/CLAUDE.md`](rome_apps/CLAUDE.md).
+- When moving or renaming source files, use the `move-code` skill ([`.claude/skills/move-code`](.claude/skills/move-code/SKILL.md)).
 - When handling code review on an open PR, use the `/babysit-pr` skill ([`.claude/skills/babysit-pr`](.claude/skills/babysit-pr/SKILL.md)). It answers review feedback through `respond-to-review`, fixes failing CI, and resolves merge conflicts until the PR is clean.
 - When writing prose (docs, PR text), follow [`docs/authoring/WRITING.md`](docs/authoring/WRITING.md).
 - When writing or editing code comments, follow [`docs/authoring/comments.md`](docs/authoring/comments.md).
