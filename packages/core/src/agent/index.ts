@@ -239,6 +239,8 @@ export { TurnListeners } from "./infrastructure/turn-listeners.js";
 // reaches the context through the ports above.
 export { AnthropicProvider } from "./infrastructure/model/anthropic/provider.js";
 export { ClaudeAccount } from "./infrastructure/model/anthropic/account.js";
+// How Claude words an exhausted subscription, for a stored error that carries no code.
+export { isAnthropicUsageLimitError } from "./infrastructure/model/anthropic/usage-limit.js";
 export { CodexAppServerProvider } from "./infrastructure/model/codex/app-server-provider.js";
 export { CodexAppServerManager } from "./infrastructure/model/codex/app-server-manager.js";
 export { SharedCodexAccountService } from "./infrastructure/model/codex/account-service.js";

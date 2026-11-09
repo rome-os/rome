@@ -4,7 +4,7 @@ import { createLogger } from "../logger.js";
 import type { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
 const log = createLogger("restart-continuation");
-const MAX_RESTART_INACTIVITY_MS = 24 * 60 * 60 * 1000;
+export const MAX_RESTART_INACTIVITY_MS = 24 * 60 * 60 * 1000;
 const RESTART_MARKER = "<restart_recovery>";
 
 export const RESTART_CONTINUATION_PROMPT =
@@ -14,6 +14,17 @@ export const RESTART_CONTINUATION_PROMPT =
   "Check the actual state of the work and verify anything uncertain. Do only what remains. " +
   "If a side-effecting action cannot be confirmed, ask the guardian rather than redo it. " +
   "</restart_recovery>";
+
+/** Whether a turn's last timestamped activity is less than a day before `now`. */
+export function isRecentActivity(lastActivityAt: number | null, now: number): boolean {
+  return (
+    typeof lastActivityAt === "number" &&
+    Number.isFinite(lastActivityAt) &&
+    Number.isFinite(now) &&
+    lastActivityAt <= now &&
+    now - lastActivityAt < MAX_RESTART_INACTIVITY_MS
+  );
+}
 
 /** Call once after startup, with only this boot's cleanup results. Runs sequentially, without retries. */
 export async function continueInterruptedTurns(
@@ -31,15 +42,7 @@ export async function continueInterruptedTurns(
     if (!turn.runtimeSessionId || turn.prompt.includes(RESTART_MARKER)) continue;
     try {
       if (!repo.canContinueAfterRestart(turn)) continue;
-      const lastActivityAt = repo.getRestartLastActivityAt(turn);
-      if (
-        typeof lastActivityAt !== "number" ||
-        !Number.isFinite(lastActivityAt) ||
-        !Number.isFinite(now) ||
-        lastActivityAt > now ||
-        now - lastActivityAt >= MAX_RESTART_INACTIVITY_MS
-      )
-        continue;
+      if (!isRecentActivity(repo.getRestartLastActivityAt(turn), now)) continue;
       const excerpt = repo.getRestartGuardianPrompt(turn);
       await runner.runAndReport(
         {
