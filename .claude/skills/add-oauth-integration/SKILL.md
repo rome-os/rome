@@ -58,7 +58,7 @@ Two halves: (a) obtain consent + exchange the token (the broker, in Pantheon + c
 
 - **Pantheon adapter** — `packages/pantheon/src/lib/oauth/<provider>.ts` implementing `OAuthProviderAdapter` (`createAuthorizationUrl`, `exchangeCode`, `fetchProfile`). Copy `oauth/slack.ts` (two-token, no PKCE) or `oauth/google.ts` (PKCE, refresh) as the closer match. Map the primary token to `bundle.accessToken`; stash the full provider response (any extra tokens, team/workspace id) in `bundle.raw` — it survives the broker→instance handoff. `fetchProfile` must return a verified email.
 - **Register the provider**: add `"<provider>"` to `OAUTH_PROVIDERS` in `packages/pantheon/src/lib/oauth-providers.ts`, to `PROVIDER_ADAPTERS` in `packages/pantheon/src/lib/oauth/providers.ts`, and document the env vars in `packages/pantheon/.env.example`.
-- **Core provider list**: add `"<provider>"` + a descriptor to `packages/core/src/lib/oauth-providers.ts`. The broker, token storage, `/api/integrations`, connect/disconnect, and the per-tenant handoff are all provider-agnostic and light up automatically.
+- **Core provider list**: add `"<provider>"` + a descriptor to `packages/core/src/connections/oauth/oauth-providers.ts`. The broker, token storage, `/api/integrations`, connect/disconnect, and the per-tenant handoff are all provider-agnostic and light up automatically.
 - **Deliver the token to the runtime** (only if the connector/agent needs it): `packages/core/src/lib/<provider>-shell-integration.ts` writes the token(s) to `/run/rome/<provider>-oauth-token` on connect and clears on disconnect (single string like GitHub, or JSON for multiple tokens like Slack). Wire `sync…ForProvider` into `packages/core/src/api/routes/oauth.ts` (redeem) and `clear…ForProvider` into `packages/core/src/api/routes/integrations.ts` (disconnect). Reference `slack-shell-integration.ts` / `github-shell-integration.ts`.
 
 ### 4b. Consume the token for API calls
@@ -75,7 +75,7 @@ packages/pantheon/src/lib/oauth/<provider>.ts            NEW  adapter
 packages/pantheon/src/lib/oauth-providers.ts             +    OAUTH_PROVIDERS
 packages/pantheon/src/lib/oauth/providers.ts             +    adapter map
 packages/pantheon/.env.example                           +    <PROVIDER>_OAUTH_CLIENT_ID/SECRET
-packages/core/src/lib/oauth-providers.ts                 +    provider + descriptor
+packages/core/src/connections/oauth/oauth-providers.ts                 +    provider + descriptor
 packages/core/src/lib/<provider>-shell-integration.ts    NEW  token-file write/clear (if runtime needs the token)
 packages/core/src/api/routes/oauth.ts                    +    sync…ForProvider on redeem
 packages/core/src/api/routes/integrations.ts             +    clear…ForProvider on disconnect
@@ -95,7 +95,7 @@ rome_apps/connector/app.yaml                             +    component + versio
 
 Run the **validate-oauth-integration** skill — it owns the full recipe (static + unit → a token-only smoke that proves Rome can *use* a token → the real consent round-trip that proves Rome can *obtain* one) and the local-only blockers. Report honestly which layers actually ran; the real round-trip needs a registered app, creds, and a human at the consent screen, so it's often where the human takes over.
 
-One build-coupled heads-up before you hand off: adding the provider trips drift guards — the enabled-provider lists in `packages/core/src/lib/oauth-providers.test.ts` and the Rome-managed lists in `rome_apps/connector/src/web/lib/connections.test.ts`. Update both, and switch any test that used the service as a stand-in *Composio* toolkit to a still-Composio one (e.g. `notion`).
+One build-coupled heads-up before you hand off: adding the provider trips drift guards — the enabled-provider lists in `packages/core/src/connections/oauth/oauth-providers.test.ts` and the Rome-managed lists in `rome_apps/connector/src/web/lib/connections.test.ts`. Update both, and switch any test that used the service as a stand-in *Composio* toolkit to a still-Composio one (e.g. `notion`).
 
 ---
 

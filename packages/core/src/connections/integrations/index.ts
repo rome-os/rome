@@ -7,13 +7,13 @@ import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { LinkedInSyncSink } from "../kinds/linkedin/linkedin-sync.js";
 import type { WechatUserRuntime } from "../kinds/wechat-user/wechat-user.js";
 import type { WhatsAppSyncSink } from "../kinds/whatsapp/whatsapp-sync.js";
-import type { MailProvider } from "../../lib/rome-cloud-mail.js";
-import { OAUTH_PROVIDERS, ROME_CLOUD_REFRESHABLE_PROVIDERS } from "../../lib/oauth-providers.js";
+import type { MailProvider } from "../kinds/email/rome-cloud-mail.js";
+import { OAUTH_PROVIDERS, ROME_CLOUD_REFRESHABLE_PROVIDERS } from "../oauth/oauth-providers.js";
 import {
   createRomeCloudOAuthStartRedirect,
   redeemRomeCloudOAuthHandoff,
   refreshRomeCloudOAuthGrant,
-} from "../../lib/rome-cloud-oauth.js";
+} from "../oauth/rome-cloud-oauth.js";
 import { credentialFromBundle, grantProfileFromBundle } from "../providers-import.js";
 import type { ConnectionRegistry } from "../registry.js";
 import type { ChatSettingsService } from "../../chat-settings/service.js";

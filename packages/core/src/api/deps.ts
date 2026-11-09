@@ -7,7 +7,7 @@ import type { ActionEngine } from "../apps/actions/engine.js";
 import type { ConciergeService } from "../concierge/service.js";
 import type { ActionLoader } from "../apps/actions/loader.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
+import type { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type {
   Channels,
@@ -70,7 +70,7 @@ import type { SetupManager } from "../connections/setup/manager.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
 import type { ComputerUseService } from "../computer-use/service.js";
-import type { WechatApp } from "../desktop-apps/wechat-app.js";
+import type { WechatApp } from "../connections/kinds/wechat-user/wechat-app.js";
 import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
 
 export interface ApiConfig {

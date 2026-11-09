@@ -1,4 +1,4 @@
-// The WeChat app on WeChat's own desktop (desktop-apps/wechat-app.ts). The
+// The WeChat app on WeChat's own desktop (connections/kinds/wechat-user/wechat-app.ts). The
 // /desktop/wechat page reads its state and asks for the client to be installed
 // or started. No WeChat connection is involved.
 //   GET  /api/wechat/app          — state
@@ -6,7 +6,7 @@
 //   POST /api/wechat/app/start    — open the downloaded client
 
 import { Hono, type Context } from "hono";
-import { WechatAppNotInstalled } from "../../desktop-apps/wechat-app.js";
+import { WechatAppNotInstalled } from "../../connections/kinds/wechat-user/wechat-app.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
 import { currentSessionActor } from "../../lib/session-actor.js";
 import type { ApiDeps } from "../deps.js";

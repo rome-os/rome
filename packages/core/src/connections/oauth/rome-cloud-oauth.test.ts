@@ -1,15 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { DrizzleDb } from "../db/index.js";
-import { oauthPendingAttempts } from "../db/schema.js";
-import { createTestDb } from "../test/db.js";
-import { setInstanceTokenInMemory } from "./instance-identity.js";
+import type { DrizzleDb } from "../../db/index.js";
+import { oauthPendingAttempts } from "../../db/schema.js";
+import { createTestDb } from "../../test/db.js";
+import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
 import {
   createRomeCloudOAuthStartRedirect,
   createRomeCloudOAuthStartUrl,
   redeemRomeCloudOAuthHandoff,
   refreshRomeCloudOAuthGrant,
 } from "./rome-cloud-oauth.js";
-import { RenewalUnavailable } from "../connections/errors.js";
+import { RenewalUnavailable } from "../errors.js";
 
 describe("Rome Cloud OAuth brokering", () => {
   const savedEnv = { ...process.env };

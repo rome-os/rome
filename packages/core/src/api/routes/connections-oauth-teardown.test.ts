@@ -26,15 +26,15 @@ const {
 
 // Both the sync and clear halves are stubbed: `makeAuthorizedRegistry` imports a
 // bundle (→ custody sync fires) before the test tears down (→ custody clear).
-rs.mock("../../lib/provider-token-files.js", () => ({
+rs.mock("../../connections/oauth/provider-token-files.js", () => ({
   syncProviderTokenFile,
   clearProviderTokenFile,
 }));
-rs.mock("../../lib/github-shell-integration.js", () => ({
+rs.mock("../../connections/integrations/github-shell-integration.js", () => ({
   syncGithubShellIntegrationForProvider,
   clearGithubShellIntegrationForProvider,
 }));
-rs.mock("../../lib/oauth-providers.js", () => ({
+rs.mock("../../connections/oauth/oauth-providers.js", () => ({
   OAUTH_PROVIDERS: ["google", "github", "slack"],
   isOAuthProvider: (value: string) => ["google", "github", "slack"].includes(value),
   getEnabledOAuthProviders: () => ["github", "slack", "google"],

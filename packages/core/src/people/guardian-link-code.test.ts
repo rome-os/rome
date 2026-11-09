@@ -4,7 +4,7 @@ import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import { PeopleRepository } from "../db/repositories/people.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { MailProvider } from "../lib/rome-cloud-mail.js";
+import type { MailProvider } from "../connections/kinds/email/rome-cloud-mail.js";
 import { createTestDb, identityConnectionKindOf, type TestDb } from "../test/db.js";
 import { persons } from "../db/schema.js";
 import { EmailAdapter } from "../connections/kinds/email/email.js";

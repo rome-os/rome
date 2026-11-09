@@ -22,7 +22,7 @@ import type {
   RomeMailMessage,
   SendMailInput,
   SendMailResult,
-} from "../../lib/rome-cloud-mail.js";
+} from "../kinds/email/rome-cloud-mail.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
 import type { EmailInboundResult } from "../kinds/email/email-control.js";

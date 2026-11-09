@@ -1,4 +1,4 @@
-import type { MailProvider, RomeMailListItem } from "../../../lib/rome-cloud-mail.js";
+import type { MailProvider, RomeMailListItem } from "./rome-cloud-mail.js";
 
 const PAGE_SIZE = 100;
 const MAX_MESSAGES = 2000;

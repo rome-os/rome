@@ -15,11 +15,11 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 // the grant off the real disk / `gh` binary AND deterministic — an un-mocked
 // `gh` spawn (ENOENT) is slow enough on a loaded CI runner to push the `done`
 // transition past the poll's default timeout (the terminal write awaits custody).
-rs.mock("../../lib/github-shell-integration.js", () => ({
+rs.mock("../../connections/integrations/github-shell-integration.js", () => ({
   syncGithubShellIntegrationForProvider: rs.fn(async () => {}),
   clearGithubShellIntegrationForProvider: rs.fn(async () => {}),
 }));
-rs.mock("../../lib/provider-token-files.js", () => ({
+rs.mock("../../connections/oauth/provider-token-files.js", () => ({
   syncProviderTokenFile: rs.fn(async () => {}),
   clearProviderTokenFile: rs.fn(async () => {}),
 }));

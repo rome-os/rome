@@ -4,9 +4,9 @@ import type {
   OAuthProviderGrantProfile,
   ShopifyGrantProfile,
   SlackGrantProfile,
-} from "../connections/integrations/oauth-providers.js";
-import type { SecretRecord } from "../connections/types.js";
-import { createLogger } from "../logger.js";
+} from "../integrations/oauth-providers.js";
+import type { SecretRecord } from "../types.js";
+import { createLogger } from "../../logger.js";
 import type { OAuthProvider } from "./oauth-providers.js";
 
 const log = createLogger("provider-token-files");

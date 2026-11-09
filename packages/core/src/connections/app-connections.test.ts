@@ -10,7 +10,7 @@ import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { createRomeAppContext, type RomeAppRuntimeServices } from "../apps/context.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ResolvedApp } from "../apps/state.js";
-import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
+import { AppConnectionAccessRepository } from "./app-connection-access.js";
 import { appConnectionAccess, appConnectionInvocations, connectionGrants } from "../db/schema.js";
 import { createActionEngineRepos, createTestDb } from "../test/db.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";

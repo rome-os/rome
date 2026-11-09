@@ -20,7 +20,7 @@ import type {
   AppConnectionAccessRecord,
   AppConnectionAccessRepository,
   AppConnectionInvocationRecord,
-} from "../db/repositories/app-connection-access.js";
+} from "./app-connection-access.js";
 import type { GrantValue } from "./grant.js";
 import type { ConnectionRegistry } from "./registry.js";
 import type { Connection, OperationDescriptor, ProfileDisplay } from "./types.js";

@@ -15,7 +15,7 @@ import juice from "juice";
 import { marked, type Tokens } from "marked";
 import { Readability } from "@mozilla/readability";
 import type TurndownService from "turndown";
-import { requireOnFirstUse } from "./require-on-first-use.js";
+import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
 import type { RomeMailBody } from "./rome-cloud-mail.js";
 
 // jsdom takes about a second of CPU to load on a small VM, and most boots never

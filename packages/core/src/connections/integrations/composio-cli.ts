@@ -3,7 +3,7 @@ import { constants as fsConstants } from "node:fs";
 import { access, readFile, stat } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 import type { Readable } from "node:stream";
-import { KeyedMutex } from "./keyed-mutex.js";
+import { KeyedMutex } from "../../lib/keyed-mutex.js";
 
 const COMPOSIO_INSTALL_PATHS = ["/home/rome/.composio", "/usr/local/lib/composio"];
 const LOGIN_URL_RE = /https:\/\/dashboard\.composio\.dev\/\?[^\s"'<>]*cliKey=[^\s"'<>]+/i;

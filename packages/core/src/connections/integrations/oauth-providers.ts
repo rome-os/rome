@@ -25,13 +25,13 @@ import { z } from "zod";
 import {
   clearGithubShellIntegrationForProvider,
   syncGithubShellIntegrationForProvider,
-} from "../../lib/github-shell-integration.js";
+} from "./github-shell-integration.js";
 import {
   normalizeShopifyShopDomain,
   OAUTH_PROVIDER_DESCRIPTORS,
   type OAuthProvider,
-} from "../../lib/oauth-providers.js";
-import { clearProviderTokenFile, syncProviderTokenFile } from "../../lib/provider-token-files.js";
+} from "../oauth/oauth-providers.js";
+import { clearProviderTokenFile, syncProviderTokenFile } from "../oauth/provider-token-files.js";
 import { romeCloudOAuth } from "../schemes.js";
 import type { SetupFn } from "../setup/types.js";
 import type {

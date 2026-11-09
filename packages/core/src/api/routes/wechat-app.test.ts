@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { Hono } from "hono";
-import { WechatAppNotInstalled } from "../../desktop-apps/wechat-app.js";
+import { WechatAppNotInstalled } from "../../connections/kinds/wechat-user/wechat-app.js";
 import { runWithSessionActor, type SessionActor } from "../../lib/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 import { wechatAppRoutes } from "./wechat-app.js";

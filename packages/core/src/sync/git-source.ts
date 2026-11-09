@@ -7,7 +7,7 @@ import {
   type GithubGrantProfile,
 } from "../connections/integrations/oauth-providers.js";
 import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
-import { readGithubAccessTokenFile } from "../lib/provider-token-files.js";
+import { readGithubAccessTokenFile } from "../connections/oauth/provider-token-files.js";
 import { createLogger } from "../logger.js";
 import type { DrizzleDb } from "../db/index.js";
 import type {

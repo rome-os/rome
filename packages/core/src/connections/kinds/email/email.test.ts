@@ -11,8 +11,8 @@ import type {
   RomeMailMessage,
   SendMailInput,
   SendMailResult,
-} from "../../../lib/rome-cloud-mail.js";
-import { MailProviderError } from "../../../lib/rome-cloud-mail.js";
+} from "./rome-cloud-mail.js";
+import { MailProviderError } from "./rome-cloud-mail.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
 

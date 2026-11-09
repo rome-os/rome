@@ -20,7 +20,7 @@ import type {
 import { stripHostOnlyPartsFromContent } from "../chats/host-only-parts.js";
 import { v7 as uuidv7 } from "uuid";
 import { messageContentText } from "../chats/history/messages-agent.js";
-import { htmlToMarkdown } from "../lib/email-markdown.js";
+import { htmlToMarkdown } from "../connections/kinds/email/email-markdown.js";
 import type { ChatRepository as Chats } from "../chats/storage/chat-repository.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { type ChatRef, placeIn } from "../chats/storage/place.js";

@@ -1,13 +1,13 @@
 import { and, asc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { AppConnectionErrorBody, AppConnectionResourceConstraint } from "@rome-os/app-runtime";
-import { KeyedMutex } from "../../lib/keyed-mutex.js";
+import { KeyedMutex } from "../lib/keyed-mutex.js";
 import {
   appConnectionAccess,
   appConnectionAudit,
   appConnectionInvocations,
   connectionGrants,
-} from "../schema.js";
-import type { DrizzleDb, DrizzleTx } from "../index.js";
+} from "../db/schema.js";
+import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 
 export type AppConnectionApproval = "required" | "not_required";
 export type AppConnectionSideEffects = "read-only" | "write";
