@@ -151,11 +151,7 @@ import { ExecutionJournalRepository } from "./apps/repositories/execution-journa
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./apps/repositories/webhook-invocations.js";
 import {
-  AgentLoader,
-  AppTurnHooks,
-  AppTurnMiddleware,
   readAnswerShape,
-  TurnUsageReporter,
   romeSessionTracing,
   ChatSessionSettings,
   createSubagentCalls,
@@ -164,6 +160,10 @@ import {
   rootSession,
   TurnListeners,
 } from "./agent/index.js";
+import { AgentLoader } from "./apps/agent-loader.js";
+import { AppTurnHooks } from "./apps/app-turn-hooks.js";
+import { AppTurnMiddleware } from "./apps/app-turn-middleware.js";
+import { TurnUsageReporter } from "./apps/turn-usage-reporter.js";
 import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
 import { ActionRegistryImpl } from "./apps/actions/registry.js";
 import { ActionLoader } from "./apps/actions/loader.js";
@@ -189,12 +189,12 @@ import {
   DrizzleSessionRepository,
   codexLoginKind,
   SharedCodexAccountService,
-  SkillLoader,
   romeCreditsProxyRoutes,
   resolveAgentPolicy,
-  createPromptSources,
   createSystemPrompts,
 } from "./agent/index.js";
+import { SkillLoader } from "./apps/skill-loader.js";
+import { createPromptSources } from "./apps/prompt-sources.js";
 import { startCodexLoginChoice } from "./rome-cloud/codex-login.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createAgentSessionManager } from "./agent/index.js";

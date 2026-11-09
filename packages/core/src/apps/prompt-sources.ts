@@ -1,7 +1,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
-import type { AppCatalog } from "../../apps/catalog.js";
-import { getInternalApiBaseUrl } from "../../internal-api-url.js";
+import type { AppCatalog } from "./catalog.js";
+import { getInternalApiBaseUrl } from "../internal-api-url.js";
 import {
   getCoreRoot,
   getCustomAppAuthoringRoot,
@@ -11,9 +11,9 @@ import {
   getProjectRoot,
   getRepoAppsDir,
   getRepoDocsDir,
-} from "../../paths.js";
-import { resolveWebchatProjectPath } from "../../webchat/projects.js";
-import { projectSummary, type PromptMemory, type PromptSources } from "../domain/system-prompt.js";
+} from "../paths.js";
+import { resolveWebchatProjectPath } from "../webchat/projects.js";
+import { projectSummary, type PromptMemory, type PromptSources } from "../agent/index.js";
 
 /**
  * Reads a system prompt's material from the profile, the repo and the app catalog.

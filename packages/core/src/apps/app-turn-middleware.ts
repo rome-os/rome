@@ -3,13 +3,13 @@
 // root reloads them on every app catalog event.
 
 import type { TurnMiddlewareContext, TurnMiddlewareHook } from "@rome-os/app-runtime";
-import type { AppCatalog } from "../../apps/catalog.js";
-import type { RomeAppRuntimeServices } from "../../apps/context.js";
-import type { ArtifactRef } from "../../apps/state.js";
-import { loadAppHook } from "../../apps/hook-loader.js";
-import { createLogger } from "../../logger.js";
-import { wrapHookSpan } from "../../telemetry.js";
-import type { TurnMiddleware } from "../domain/turn-middleware.js";
+import type { AppCatalog } from "./catalog.js";
+import type { RomeAppRuntimeServices } from "./context.js";
+import type { ArtifactRef } from "./state.js";
+import { loadAppHook } from "./hook-loader.js";
+import { createLogger } from "../logger.js";
+import { wrapHookSpan } from "../telemetry.js";
+import type { TurnMiddleware } from "../agent/index.js";
 
 const log = createLogger("middleware-chain");
 

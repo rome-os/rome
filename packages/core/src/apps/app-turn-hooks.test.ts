@@ -3,13 +3,13 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AppTurnHooks } from "./app-turn-hooks.js";
-import { TurnListeners } from "./turn-listeners.js";
-import type { AppCatalog } from "../../apps/catalog.js";
-import type { ArtifactRef, ResolvedApp } from "../../apps/state.js";
+import { TurnListeners } from "../agent/index.js";
+import type { AppCatalog } from "./catalog.js";
+import type { ArtifactRef, ResolvedApp } from "./state.js";
 import type { AgentTurnFinishedEvent } from "@rome-os/app-runtime";
-import type { RomeAppRuntimeServices } from "../../apps/context.js";
-import type { ActionEngine } from "../../apps/actions/engine.js";
-import { getCurrentHookInvocationContext } from "../../core/hook-recursion.js";
+import type { RomeAppRuntimeServices } from "./context.js";
+import type { ActionEngine } from "./actions/engine.js";
+import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
 
 type LifecycleHookGlobal = typeof globalThis & {
   __agentLifecycleHookEvents?: Array<{ appId: string; event: AgentTurnFinishedEvent }>;

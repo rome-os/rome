@@ -10,9 +10,8 @@ import {
   feedbackInputSchema as actionSchema,
 } from "../../../../../rome_apps/system/src/actions/send-feedback/index.js";
 
-type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
-  ? true
-  : false;
+type Equal<A, B> =
+  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
 const inputInSync: Equal<CoreInput, ActionInput> = true;
 const outcomeInSync: Equal<CoreOutcome, ActionOutcome> = true;
 
