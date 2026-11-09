@@ -10,8 +10,9 @@ import type {
   CloudProfileOutcome as ActionOutcome,
 } from "../../../../rome_apps/system/src/actions/get-guardian-cloud-profile/index.js";
 
-type Equal<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
+  ? true
+  : false;
 const profileInSync: Equal<CoreProfile, ActionProfile> = true;
 const outcomeInSync: Equal<CoreOutcome, ActionOutcome> = true;
 

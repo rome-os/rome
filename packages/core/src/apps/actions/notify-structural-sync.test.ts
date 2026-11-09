@@ -19,8 +19,9 @@ import type {
 // field or variant, optional or required, on either side) resolves to `false`
 // and fails `tsc --noEmit`. Compile-time guard; Rstest only runs the trivial
 // assertion below.
-type Equal<A, B> =
-  (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2 ? true : false;
+type Equal<A, B> = (<T>() => T extends A ? 1 : 2) extends <T>() => T extends B ? 1 : 2
+  ? true
+  : false;
 
 const _sendOutcomeInSync: Equal<CoreSendOutcome, ActionSendOutcome> = true;
 const _notifyContentInSync: Equal<CoreNotifyContent, ActionNotifyContent> = true;
