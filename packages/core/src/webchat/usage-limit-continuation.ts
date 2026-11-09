@@ -131,8 +131,12 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
         } else if (outcome === "failed") {
           // A turn that fails on the limit again marks the account, but the read that
           // shows it is still in flight, so wait for it before the next chat. A failed
-          // read keeps the old answer, so the next chat waits for a read that works.
-          if (!(await accounts.refresh(provider))) return;
+          // read keeps the old answer, so the next chat waits for a read that works, and
+          // a sweep that a read queued during this turn must not start it sooner.
+          if (!(await accounts.refresh(provider))) {
+            pending.delete(provider);
+            return;
+          }
         }
       } catch (error) {
         log.warn("could not continue usage-limit turn", {

@@ -750,6 +750,33 @@ describe("usage-limit continuation", () => {
       expect(calls).toEqual(["one", "two"]);
     });
 
+    it("keeps a sweep queued by a read during a failed continuation from going on after a failed read", async () => {
+      await stopped("one");
+      rs.setSystemTime(NOW + 1000);
+      await stopped("two");
+      const calls: string[] = [];
+      const runAndReport = rs.fn(async (params: { threadId: string }) => {
+        calls.push(params.threadId);
+        // A read that works and shows the provider available lands during the turn, which queues a sweep.
+        await accounts.refresh("anthropic");
+        // The turn then hits the limit again, and the account cannot be read to say so.
+        claude.failReads(true);
+        claude.refused(limitedUntil(NOW + 6 * HOUR));
+        return "failed" as const;
+      });
+      start({ runAndReport });
+      await accounts.refresh("anthropic");
+      await rs.advanceTimersByTimeAsync(100);
+      expect(calls).toEqual(["one"]);
+
+      claude.failReads(false);
+      claude.settleReads();
+      claude.set(available);
+      await accounts.refresh("anthropic");
+      await settle();
+      expect(calls).toEqual(["one", "two"]);
+    });
+
     it("tries a continuation again at the next reset when it was dropped, not run", async () => {
       await stopped();
       let limitedOnce = false;
