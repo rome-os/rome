@@ -4019,6 +4019,23 @@ describe("AgentRunner", () => {
       ]);
     });
 
+    it("opens a continuity key by its key even when it carries an id", async () => {
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: async (params) => createClosableModelSession(params),
+      };
+      const manager = createSessions(
+        managerDeps(createTestModelResolver({ providers: [provider] })),
+        { keepAliveAcrossTurns: true },
+      );
+      const continuityKey = { agentName: "test-main", channelThreadKey: "webchat:extra-id" };
+      const opened = await manager.open(continuityKey);
+      const withId = { ...continuityKey, id: "some-other-session" };
+      expect(await manager.open(withId)).toBe(opened);
+      await manager.shutdown();
+    });
+
     it("does not dispatch finished lifecycle events for turns that never started", async () => {
       const lifecycle = createLifecycleRecorder();
       const provider: ModelProvider = {
