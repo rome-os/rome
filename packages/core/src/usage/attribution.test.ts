@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { parentTurnSession, rootSession } from "../agent/index.js";
-import type { SessionActor } from "../lib/session-actor.js";
+import type { SessionActor } from "../access/session-actor.js";
 import {
   SKILL_REVIEW_INITIATOR,
   UsageAttributionResolver,

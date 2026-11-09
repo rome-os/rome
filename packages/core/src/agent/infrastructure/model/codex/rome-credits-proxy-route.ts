@@ -1,8 +1,8 @@
 import { timingSafeEqual } from "node:crypto";
 import { Hono } from "hono";
 import { ROME_CREDITS_PROXY_PATH, ROME_CREDITS_PROXY_SECRET } from "./rome-credits-proxy.js";
-import { cloudBearer } from "../../../../lib/instance-identity.js";
-import { getRomeCloudOrigin } from "../../../../lib/rome-cloud-origin.js";
+import { cloudBearer } from "../../../../instance/instance-identity.js";
+import { getRomeCloudOrigin } from "../../../../instance/rome-cloud-origin.js";
 import { isLoopbackInternalApiHost } from "../../../../lib/loopback-host.js";
 
 // Headers that describe the Codex-to-core hop or carry a credential.

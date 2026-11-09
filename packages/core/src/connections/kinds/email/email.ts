@@ -45,8 +45,8 @@ import {
   isAttachmentTooLargeError,
   type IncomingAttachmentPayload,
 } from "../../inbound/attachment-files.js";
-import { proveIdentity } from "../../../lib/instance-identity.js";
-import { getConfiguredInstanceOrigin } from "../../../lib/rome-cloud-origin.js";
+import { proveIdentity } from "../../../instance/instance-identity.js";
+import { getConfiguredInstanceOrigin } from "../../../instance/rome-cloud-origin.js";
 
 const log = createLogger("channel-email");
 

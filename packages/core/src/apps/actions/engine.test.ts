@@ -10,7 +10,7 @@ import {
 import { actionExecutionContext, type ActionExecutionStore } from "./context.js";
 import { hashArgs, replayContext, type JournalEntry } from "./replay.js";
 import { ActionRegistryImpl } from "./registry.js";
-import type { MemoryHeadroom } from "./memory-headroom.js";
+import type { MemoryHeadroom } from "../../instance/memory-headroom.js";
 import type { Action, ActionResult } from "./types.js";
 import { callAction } from "./call-action.js";
 import { emitAgentMessage, type ActionRuntimeEvent } from "./runtime-events.js";
@@ -18,7 +18,7 @@ import {
   getCurrentHookInvocationContext,
   runWithHookInvocationContext,
 } from "../../core/hook-recursion.js";
-import { runWithSessionActor, type SessionActor } from "../../lib/session-actor.js";
+import { runWithSessionActor, type SessionActor } from "../../access/session-actor.js";
 import {
   createTestRome,
   buildAction,

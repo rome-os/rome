@@ -5,8 +5,8 @@ import { AppApiDispatcher, type RomeAppCaller } from "../../apps/api.js";
 import { InvalidAppApiPathError, decodeAppApiPath, decodeAppIdPathSegment } from "../helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { stripInternalHeaders } from "../../relay/protocol.js";
-import { resolveGuardianSession } from "../../lib/guardian-session.js";
-import { resolveVisitorSession } from "../../lib/visitor-session.js";
+import { resolveGuardianSession } from "../../access/guardian-session.js";
+import { resolveVisitorSession } from "../../access/visitor-session.js";
 
 type AppApiEnv = Record<string, never>;
 

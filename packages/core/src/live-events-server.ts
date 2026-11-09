@@ -28,10 +28,10 @@ import {
   type LiveEventsServerMessage,
 } from "@rome/api-types/live-events";
 import type { DrizzleDb } from "./db/index.js";
-import type { DashboardAccessState } from "./lib/dashboard-access-state.js";
+import type { DashboardAccessState } from "./access/dashboard-access-state.js";
 import type { LiveEventEmit } from "./lib/live-event.js";
 import type { PhoneWatching } from "./lib/phone-watching.js";
-import { gateUpgrade, type UpgradeCaller } from "./lib/ws-guardian-gate.js";
+import { gateUpgrade, type UpgradeCaller } from "./access/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
 

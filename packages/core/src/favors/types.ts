@@ -1,5 +1,5 @@
 import type { ResolvedApp } from "../apps/state.js";
-import type { RomeAppViewer } from "../lib/visitor-session.js";
+import type { RomeAppViewer } from "../access/visitor-session.js";
 import type { FavorRequiredActionDefinition } from "@rome-os/app-runtime";
 
 // The HTTP-facing shapes live in @rome/api-types so the dashboard and its mock

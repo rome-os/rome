@@ -181,6 +181,7 @@ export type {
 export {
   subagentRequest,
   subagentToolName,
+  type SessionRecordId,
   type Subagent,
   type Subagents,
 } from "./domain/subagent.js";
@@ -212,7 +213,11 @@ export {
   walkToRoot,
   type StoredRoot,
 } from "./domain/session-parent.js";
-export { WebChatDashboardSessions } from "./infrastructure/webchat-dashboard-sessions.js";
+export type {
+  DashboardSession,
+  DashboardSessions,
+  NewSubagentSession,
+} from "./domain/dashboard-sessions.js";
 export {
   createSubagentCalls,
   type LiveTurns,
@@ -228,10 +233,6 @@ export type { SessionTracing } from "./application/session-tracing.js";
 export { translateTurnSpans, type CapturedEvent } from "./application/turn-spans.js";
 export { DrizzleSessionRepository } from "./infrastructure/drizzle-session-repository.js";
 export { readAnswerShape } from "./infrastructure/answer-shape.js";
-export {
-  ChatSessionSettings,
-  type ChatSessionSettingsDeps,
-} from "./infrastructure/chat-session-settings.js";
 export { romeSessionTracing } from "./infrastructure/session-tracing.js";
 export { TurnListeners } from "./infrastructure/turn-listeners.js";
 
@@ -249,3 +250,18 @@ export {
   createTierModelsSetting,
   TIER_MODEL_MAPPINGS_SETTING_KEY,
 } from "./infrastructure/settings/tier-models-setting.js";
+
+// What the dashboard's login and settings routes and Rome Cloud's Codex
+// login use from the model adapters.
+export {
+  ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING,
+  redactAnthropicCompatibleCredentialsSetting,
+  summarizeAnthropicCompatibleCredentials,
+  summarizeAnthropicCompatibleCredentialsForEditing,
+} from "./infrastructure/model/anthropic/anthropic-compatible-providers.js";
+export {
+  ClaudeLoginCodeValidationError,
+  formatClaudeLoginCodeInput,
+} from "./infrastructure/model/anthropic/claude-login-code.js";
+export { createClaudeLoginWatcher } from "./infrastructure/model/anthropic/claude-login-watch.js";
+export { fetchRomeCredits } from "./infrastructure/model/codex/rome-credits.js";

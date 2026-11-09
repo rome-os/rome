@@ -6,9 +6,9 @@ import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { aiToolsRoutes } from "./ai-tools.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
-import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../lib/anthropic-compatible-providers.js";
+import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../agent/index.js";
 import { settings } from "../../db/schema.js";
-import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
+import { setInstanceTokenInMemory } from "../../instance/instance-identity.js";
 import { reportOf } from "../../test/kit/model-accounts.js";
 
 const {

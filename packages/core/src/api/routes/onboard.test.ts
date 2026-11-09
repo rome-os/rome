@@ -11,7 +11,7 @@ rs.mock("../../profile-memory.js", () => ({
 
 import { onboardRoutes } from "./onboard.js";
 import { AGENT_PRESETS } from "../../lib/agent-presets.js";
-import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
+import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { guardianAuth, persons, settings } from "../../db/schema.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 

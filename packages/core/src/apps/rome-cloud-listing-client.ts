@@ -15,7 +15,7 @@
  * migration.
  */
 import { createLogger } from "../logger.js";
-import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
+import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
 import { resolveListingDetailUrl } from "./rome-cloud-urls.js";
 import { withRomeCloudReadAuth } from "./rome-cloud-read-auth.js";
 

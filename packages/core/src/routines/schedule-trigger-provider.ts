@@ -2,7 +2,7 @@ import { Cron } from "croner";
 import type { TriggerProvider } from "./trigger-provider.js";
 import type { Routine, ScheduleTrigger, Trigger } from "./types.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
-import { withoutSessionActor } from "../lib/session-actor.js";
+import { withoutSessionActor } from "../access/session-actor.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("schedule-trigger");

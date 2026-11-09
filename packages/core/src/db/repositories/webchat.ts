@@ -56,7 +56,7 @@ import type { Account, RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { agentMessageOutbound } from "../../chats/history/messages-agent.js";
-import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
+import { sessionOwnerKey, type SessionActor } from "../../access/session-actor.js";
 import type { ChatRef } from "../../chats/storage/place.js";
 
 export interface StoredTurnFeedback {

@@ -18,7 +18,7 @@
 import { callMain, isTransportUncertain } from "./worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../../core/hook-recursion.js";
 import type { AgentFeedback, FeedbackOutcome, FeedbackService } from "../../lib/feedback-client.js";
-import type { CloudProfileOutcome, CloudProfileService } from "../../lib/cloud-profile.js";
+import type { CloudProfileOutcome, CloudProfileService } from "../../instance/cloud-profile.js";
 import type { AgentNameResolution, AgentNamesService } from "../../chats/accounts/agent-names.js";
 import type { NotifyContent, NotifyService, SendOutcome } from "../../lib/notify-client.js";
 import type {
@@ -38,7 +38,7 @@ import { withRemovedMembers } from "../../lib/removed-members.js";
 import type {
   SystemUpgradeChecker,
   SystemUpgradeOfferResult,
-} from "../../system-upgrade/service.js";
+} from "../../instance/system-upgrade/service.js";
 import type {
   AppLifecycle,
   AppLifecycleCreateParams,

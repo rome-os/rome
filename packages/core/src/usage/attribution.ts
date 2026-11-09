@@ -1,5 +1,5 @@
 import type { RomeSessionType } from "@rome-os/app-runtime";
-import type { SessionActor } from "../lib/session-actor.js";
+import type { SessionActor } from "../access/session-actor.js";
 import type { UsageKind, UsageTrigger } from "./events.js";
 
 /** The initiator of the skill review core starts after a main-agent turn. */

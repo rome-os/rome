@@ -1,6 +1,7 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
+import { ChatSessionSettings } from "../webchat/chat-session-settings.js";
 import { createLogger } from "../logger.js";
-import { ChatSessionSettings, readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
 import { TurnUsageReporter } from "../apps/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";

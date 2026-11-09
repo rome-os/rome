@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { createLogger } from "../../logger.js";
-import { withoutSessionActor } from "../../lib/session-actor.js";
+import { withoutSessionActor } from "../../access/session-actor.js";
 import { createWebhookAuth } from "../middleware/webhook-auth.js";
 import {
   InvalidAppApiPathError,

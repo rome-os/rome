@@ -25,7 +25,7 @@ import {
 } from "../core/hook-recursion.js";
 import { createLogger, type Logger } from "../logger.js";
 import { wrapHookSpan } from "../telemetry.js";
-import type { TurnLifecycleListener } from "../agent/index.js";
+import type { TurnLifecycle, TurnLifecycleListener } from "../agent/index.js";
 
 const log = createLogger("agent-lifecycle");
 
@@ -191,4 +191,22 @@ function logHookFailure(
     turnId: event.turn.turnId,
     error: err instanceof Error ? err.message : String(err),
   });
+}
+
+/**
+ * Runs each started and ended turn's calls under one hook invocation context,
+ * so work Rome's own listeners start and the app hooks share one hook chain.
+ */
+export function inOneHookChain(lifecycle: TurnLifecycle): TurnLifecycle {
+  return {
+    started: (event) =>
+      runWithHookInvocationContext(getCurrentOrCreateHookInvocationContext(), () =>
+        lifecycle.started(event),
+      ),
+    ended: (event) =>
+      runWithHookInvocationContext(getCurrentOrCreateHookInvocationContext(), () =>
+        lifecycle.ended(event),
+      ),
+    couldNotStart: (event) => lifecycle.couldNotStart(event),
+  };
 }

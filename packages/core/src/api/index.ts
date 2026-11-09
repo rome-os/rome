@@ -11,14 +11,14 @@ import { buildAppIdentity } from "./app-home-screen.js";
 import { buildAppSocialCard } from "./app-social-card.js";
 import { attachTerminalServer } from "../terminal-server.js";
 import { attachLiveEventsServer } from "../live-events-server.js";
-import { attachNodeConsoleServer } from "../node-console-server.js";
-import { attachDesktopProxy } from "../desktop-proxy-server.js";
+import { attachNodeConsoleServer } from "../desktops/node-console-server.js";
+import { attachDesktopProxy } from "../desktops/desktop-proxy-server.js";
 import { attachAppWebSocket } from "../apps/websocket-server.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
 import { wechatAppRoutes } from "./routes/wechat-app.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
-import { sessionActorMiddleware } from "../lib/session-actor.js";
+import { sessionActorMiddleware } from "../access/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
 import { aiToolsRoutes } from "./routes/ai-tools.js";
 import { actionsRoutes } from "./routes/actions.js";
@@ -148,7 +148,7 @@ export function buildApp(
 
   // Annotate-only (never gates): expose the request's session actor ambiently
   // so any action run during the request is stamped with who triggered it —
-  // see lib/session-actor.ts and `action_executions.actor`.
+  // see access/session-actor.ts and `action_executions.actor`.
   api.use("*", sessionActorMiddleware(deps.db));
 
   api.route("/", healthRoutes(deps));

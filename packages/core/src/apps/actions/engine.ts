@@ -34,7 +34,7 @@ import {
   type ActionWorkerPayload,
   type ActionWorkerShutdown,
 } from "./worker-protocol.js";
-import { isMemoryShort, type MemoryHeadroomReader } from "./memory-headroom.js";
+import { isMemoryShort, type MemoryHeadroomReader } from "../../instance/memory-headroom.js";
 import {
   normalizeActionEvent,
   type ActionInvocationObserver,
@@ -57,7 +57,7 @@ import {
   ActionWorkerCapacityError,
   ActionWorkerExitError,
 } from "./action-errors.js";
-import { currentSessionActor, type SessionActor } from "../../lib/session-actor.js";
+import { currentSessionActor, type SessionActor } from "../../access/session-actor.js";
 import {
   ActionWorkerCoordinator,
   DelegatedActionClient,

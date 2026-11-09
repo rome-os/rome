@@ -1,4 +1,5 @@
 import { romeToolPorts } from "../core/rome-tool-ports.js";
+import { WebChatDashboardSessions } from "../webchat/webchat-dashboard-sessions.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
@@ -48,7 +49,7 @@ import {
   subagentSessions,
   subagentTurnLog,
 } from "../core/subagent-call-ports.js";
-import { createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
+import { createSubagentCalls } from "../agent/index.js";
 import { TurnListeners } from "../agent/index.js";
 import { AppTurnHooks } from "../apps/app-turn-hooks.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
@@ -57,15 +58,15 @@ import { createBackendTurnRunner } from "../apps/actions/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
 import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
-import { PublicAccessState } from "../lib/public-access-state.js";
-import { DashboardAccessState } from "../lib/dashboard-access-state.js";
-import { DashboardAccessStore } from "../lib/dashboard-access-store.js";
-import { VisitorAllowListSync } from "../lib/visitor-allowlist-sync.js";
+import { PublicAccessState } from "../access/public-access-state.js";
+import { DashboardAccessState } from "../access/dashboard-access-state.js";
+import { DashboardAccessStore } from "../access/dashboard-access-store.js";
+import { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
 import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.js";
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
 import { EventBus } from "../events/event-bus.js";
 import { RelayDrainer } from "../relay/drainer.js";
-import { SystemUpgradeService } from "../system-upgrade/service.js";
+import { SystemUpgradeService } from "../instance/system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
 import type {
   ChannelMessage,
@@ -133,9 +134,9 @@ import { createAppStoreService } from "../apps/store-service.js";
 import { type CatalogEvent, isResolvedApp } from "../apps/state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../lib/feedback-client.js";
-import { assembleDiagnosticBundle } from "../lib/diagnostics.js";
+import { assembleDiagnosticBundle } from "../instance/diagnostics.js";
 import type { ApiDeps } from "../api/deps.js";
-import type { FavorService } from "../favors/types.js";
+import type { FavorService } from "../favors/index.js";
 import { Hono } from "hono";
 import { mkdtempSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";

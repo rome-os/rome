@@ -15,16 +15,16 @@ import type { RoutinesRepository } from "../db/repositories/routines.js";
 import { decodeAppApiPath, decodeAppIdPathSegment } from "../api/helpers.js";
 import { isSameOriginMutationRequest } from "../lib/mutation-origin.js";
 import { stripInternalHeaders } from "../relay/protocol.js";
-import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "../lib/auth.js";
-import { resolveGuardianSessionFromMaterial } from "../lib/guardian-session.js";
+import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "../access/auth.js";
+import { resolveGuardianSessionFromMaterial } from "../access/guardian-session.js";
 import { readCookie, rejectUpgrade, toOriginRequest } from "../lib/ws-upgrade.js";
 import {
   enrichGuardianActor,
   runWithSessionActor,
   type SessionActor,
-} from "../lib/session-actor.js";
-import type { RomeAppViewer } from "../lib/visitor-session.js";
-import type { FavorService } from "../favors/types.js";
+} from "../access/session-actor.js";
+import type { RomeAppViewer } from "../access/visitor-session.js";
+import type { FavorService } from "../favors/index.js";
 import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
 
 const log = createLogger("app-websocket");

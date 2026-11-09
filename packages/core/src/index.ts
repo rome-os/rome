@@ -1,7 +1,9 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
+import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
+import { WebChatDashboardSessions } from "./webchat/webchat-dashboard-sessions.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
-import { createNodeDevicesService } from "./lib/node-devices.js";
+import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/guardian-link-code.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
@@ -9,7 +11,7 @@ import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { loadConfig } from "./config.js";
-import { resolveCloudAuthEnabled } from "./lib/cloud-auth-gate.js";
+import { resolveCloudAuthEnabled } from "./access/cloud-auth-gate.js";
 import { createLogger } from "./logger.js";
 import {
   cloudBearer,
@@ -20,33 +22,33 @@ import {
   seedInstanceTokenFromEnv,
   proveIdentity,
   onInstanceLinked,
-} from "./lib/instance-identity.js";
-import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
+} from "./instance/instance-identity.js";
+import { startInstanceIdentityHeartbeat } from "./instance/instance-identity-heartbeat.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
-import { assembleDiagnosticBundle } from "./lib/diagnostics.js";
+import { assembleDiagnosticBundle } from "./instance/diagnostics.js";
 import { NotifyClient } from "./lib/notify-client.js";
-import { CloudProfileClient } from "./lib/cloud-profile.js";
-import { getGuardianAuthState, recordResolvedAccount } from "./lib/guardian-auth-state.js";
+import { CloudProfileClient } from "./instance/cloud-profile.js";
+import { getGuardianAuthState, recordResolvedAccount } from "./access/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./apps/rome-cloud-relay.js";
 import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
-import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
-import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./lib/rome-cloud-origin.js";
-import { resolveInstanceSlug } from "./lib/runtime.js";
+import { createNodeCallerProvisioner } from "./desktops/rome-node-provisioning.js";
+import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./instance/rome-cloud-origin.js";
+import { resolveInstanceSlug } from "./instance/runtime.js";
 import {
   applyInstanceSlug,
   decideAdoptedSlug,
   INSTANCE_SLUG_SETTING_KEY,
-} from "./lib/instance-env.js";
+} from "./instance/instance-env.js";
 import { UsageOutboxRepository } from "./db/repositories/usage-outbox.js";
 import { createUsageAppDirectory } from "./usage/app-directory.js";
 import { SKILL_REVIEW_INITIATOR, UsageAttributionResolver } from "./usage/attribution.js";
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
-import { type SessionActor, withoutSessionActor } from "./lib/session-actor.js";
-import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
+import { type SessionActor, withoutSessionActor } from "./access/session-actor.js";
+import { reportBootVersion, commitBootVersion } from "./instance/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
-import { containerUptimeMs } from "./lib/runtime.js";
+import { containerUptimeMs } from "./instance/runtime.js";
 import {
   AppActionSchemaCache,
   appActionSchemaCacheBuild,
@@ -143,7 +145,7 @@ import { WechatApp } from "./connections/kinds/wechat-user/wechat-app.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./apps/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
-import { ComputerUseService } from "./computer-use/service.js";
+import { ComputerUseService } from "./desktops/computer-use.js";
 import { AppKeysRepository } from "./apps/repositories/app-keys.js";
 import { AppKeyInjector } from "./apps/app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
@@ -154,22 +156,20 @@ import { WebhookInvocationsRepository } from "./apps/repositories/webhook-invoca
 import {
   readAnswerShape,
   romeSessionTracing,
-  ChatSessionSettings,
   createSubagentCalls,
-  WebChatDashboardSessions,
   requireAgent,
   rootSession,
   TurnListeners,
 } from "./agent/index.js";
 import { AgentLoader } from "./apps/agent-loader.js";
-import { AppTurnHooks } from "./apps/app-turn-hooks.js";
+import { AppTurnHooks, inOneHookChain } from "./apps/app-turn-hooks.js";
 import { AppTurnMiddleware } from "./apps/app-turn-middleware.js";
 import { TurnUsageReporter } from "./apps/turn-usage-reporter.js";
 import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
 import { ActionRegistryImpl } from "./apps/actions/registry.js";
 import { ActionLoader } from "./apps/actions/loader.js";
 import { ActionEngine } from "./apps/actions/engine.js";
-import { readMemoryHeadroom } from "./apps/actions/memory-headroom.js";
+import { readMemoryHeadroom } from "./instance/memory-headroom.js";
 import { defaultWorkerCap } from "./apps/actions/worker-cap.js";
 import { isFirstPartyAction } from "./apps/first-party-action.js";
 import { bumpModuleEnvEpoch } from "./apps/actions/module-loader.js";
@@ -209,7 +209,7 @@ import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
-import { VisitorProfilesRepository } from "./db/repositories/visitor-profiles.js";
+import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
@@ -241,14 +241,17 @@ import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
 import { linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
-import { SystemUpgradeService } from "./system-upgrade/service.js";
+import { SystemUpgradeService } from "./instance/system-upgrade/service.js";
 import { HostExecutionService } from "./apps/host-execution/service.js";
 import { createHostWorkerRecovery } from "./apps/host-execution/worker-recovery.js";
-import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
-import { PublicAccessState } from "./lib/public-access-state.js";
-import { DashboardAccessState } from "./lib/dashboard-access-state.js";
-import { DashboardAccessStore } from "./lib/dashboard-access-store.js";
-import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./lib/visitor-allowlist-sync.js";
+import { resolveAutoUpgradeEnabled } from "./instance/auto-upgrade-gate.js";
+import { PublicAccessState } from "./access/public-access-state.js";
+import { DashboardAccessState } from "./access/dashboard-access-state.js";
+import { DashboardAccessStore } from "./access/dashboard-access-store.js";
+import {
+  VisitorAllowListSync,
+  syncStoredVisitorAllowList,
+} from "./access/visitor-allowlist-sync.js";
 import { PhoneWatching } from "./lib/phone-watching.js";
 import { ApprovalHandler } from "./apps/actions/approval-handler.js";
 import { createBackendTurnRunner } from "./apps/actions/backend-turn.js";
@@ -340,14 +343,16 @@ import {
   sanitizeDrainUrl,
   type RelayDrainSetting,
 } from "./relay/settings.js";
-import { RomeCloudFavorService } from "./favors/rome-cloud-service.js";
-import { FavorDispatchRunner } from "./favors/dispatcher.js";
+import {
+  FavorDispatchRunner,
+  FavorRequirementSync,
+  RomeCloudFavorService,
+} from "./favors/index.js";
 import { ChatEvents as ChatsEvents } from "./chats/storage/events.js";
 import { chatsWiring } from "./chats-wiring.js";
 import { inboundRecording } from "./connections/inbound-recording.js";
 import { messagesSaid } from "./sessions/messages-said.js";
 import { ChatsWebChatRepository } from "./webchat/chats-webchat-repository.js";
-import { FavorRequirementSync } from "./favors/catalog-sync.js";
 
 async function main() {
   const config = loadConfig();
@@ -1149,7 +1154,7 @@ async function main() {
       modelResolver,
       networkMcpServers: () => capabilityDiscovery.getCdpMcpServers(),
       skillCatalog,
-      turnLifecycle: turnListeners,
+      turnLifecycle: inOneHookChain(turnListeners),
       readAnswerShape,
       // Catch-up reads what was said where the session stands from Chats,
       // and nothing in a chat whose channel hands the agent every message.

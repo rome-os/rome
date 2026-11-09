@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { Hono } from "hono";
 import { publicAccessRoutes } from "./public-access.js";
 import { generateCaddyfile } from "../../lib/caddyfile-generator.js";
-import { PublicAccessState } from "../../lib/public-access-state.js";
+import { PublicAccessState } from "../../access/public-access-state.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 
