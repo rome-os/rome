@@ -3531,6 +3531,33 @@ describe("AgentRunner", () => {
         expect(provider.calls[2]?.prompt).toContain("Read CI run 42 for PR #7");
       });
 
+      it("decides again after the running turn ends: an approval set meanwhile keeps the session", async () => {
+        const provider = new MockModelProvider(replies(3));
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        const run = provider.run.bind(provider);
+        provider.run = async function* (params) {
+          // The second turn runs until the test lets it end.
+          if (provider.calls.length === 1) await gate;
+          yield* run(params);
+        };
+        const runner = renewingRunner(provider);
+        const first = await turn(runner);
+        const running = turn(runner);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        identity.text = "**Agent Name:** YoYo";
+
+        const waiting = turn(runner);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        held.add(first!);
+        release();
+        await running;
+
+        expect(await waiting).toBe(first);
+      });
+
       it("keeps a session an approval holds mid-turn, and renews it once the hold ends", async () => {
         const runner = renewingRunner(new MockModelProvider(replies(3)));
         const first = await turn(runner);
@@ -3577,6 +3604,25 @@ describe("AgentRunner", () => {
         expect(renewed).not.toBe(legacy.id);
         expect((await sessionRepository.session(legacy.id))?.status).toBe("completed");
       });
+    });
+
+    it("resumes a session replaced 34 times in a row as its chat's current session", async () => {
+      const first = Session.create("core:test-main", { continuityKey: "webchat:long-chain" });
+      await sessionRepository.add(first);
+      let latest = first;
+      for (let i = 0; i < 34; i++) {
+        const next = latest.replace({ reason: "setup" });
+        await sessionRepository.replace(latest, next);
+        latest = next;
+      }
+      const runner = createRunner(new MockModelProvider([[{ type: "result", content: "ok" }]]));
+
+      const woken = await collectMessages(
+        runner.run({ agentName: "test-main", prompt: "Wake", sessionId: first.id }),
+      );
+
+      const start = woken.find((message) => message.type === "turn_start");
+      expect(start?.type === "turn_start" ? start.sessionId : undefined).toBe(latest.id);
     });
 
     it("delivers a defer's note when a common chat on the main agent wakes", async () => {

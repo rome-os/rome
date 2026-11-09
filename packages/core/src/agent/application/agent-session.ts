@@ -451,27 +451,39 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
       const interactionAt = new Date();
       const chatId = init.threadContext?.romeSessionId;
       return await lifecycleMutex.runExclusive(k, async () => {
-        const active = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-        const due = !active
-          ? { due: false as const }
-          : setup !== undefined && setupChanged(active.setup, setup)
-            ? { due: true as const, reason: "setup" as const }
-            : reset
-              ? evaluateProviderSessionReset(reset, active, interactionAt)
-              : { due: false as const };
-        // A turn stopped midway resumes by this session's id, so the session
-        // stays until that turn has ended.
-        const held = due.due && active ? await deps.heldMidTurn?.(active.id) : false;
-        if (held && active && due.due) {
-          log.info("provider_session.reset_held", {
-            chatId,
-            agentName: key.agentName,
-            oldSessionId: active.id,
-            resetReason: due.reason,
-          });
-        }
-        const decision = held ? { due: false as const } : due;
+        // The whole reset decision, read now: the chat's active session,
+        // whether it is due, and whether a turn stopped midway holds it.
+        const decide = async () => {
+          const active = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
+          const due = !active
+            ? { due: false as const }
+            : setup !== undefined && setupChanged(active.setup, setup)
+              ? { due: true as const, reason: "setup" as const }
+              : reset
+                ? evaluateProviderSessionReset(reset, active, interactionAt)
+                : { due: false as const };
+          // A turn stopped midway resumes by this session's id, so the
+          // session stays until that turn has ended.
+          const held = due.due && active ? await deps.heldMidTurn?.(active.id) : false;
+          if (held && active && due.due) {
+            log.info("provider_session.reset_held", {
+              chatId,
+              agentName: key.agentName,
+              oldSessionId: active.id,
+              resetReason: due.reason,
+            });
+          }
+          return { active, decision: held ? { due: false as const } : due };
+        };
+        let { active, decision } = await decide();
         const cached = sessions.get(k);
+        if (decision.due && cached && cached.status !== "closed") {
+          // Waiting for the live session's turn to end can take a while, and
+          // an approval may stop that turn midway, so the decision is made
+          // again once it is quiet, before anything is closed.
+          await waitUntilQuiescent(cached);
+          ({ active, decision } = await decide());
+        }
         if (decision.due) {
           log.info("provider_session.reset_due", {
             chatId,
@@ -482,10 +494,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
             policyMode: reset?.mode,
             elapsedMinutes: "elapsedMinutes" in decision ? decision.elapsedMinutes : undefined,
           });
-          if (cached && cached.status !== "closed") {
-            await waitUntilQuiescent(cached);
-            await cached.close("idle");
-          }
+          if (cached && cached.status !== "closed") await cached.close("idle");
         }
         let prepared: Session | undefined;
         if (decision.due && active) {
@@ -782,24 +791,22 @@ async function resumableSession(
 }
 
 /**
- * The session an explicit id names, or the one that superseded it when a
- * reset replaced it, followed to the chat's current session, when this agent
- * can resume that. A session completed any other way is not resumable.
+ * The session an explicit id names, while it is active, or, when a reset
+ * superseded it, its chat's current session: the active one under the same
+ * continuity key, however many resets came between. A session completed any
+ * other way is not resumable.
  */
 async function currentSuccessor(
   deps: ManagerDeps,
   sessionId: string,
   agentName: string,
 ): Promise<Session | undefined> {
-  let id: string | null = sessionId;
-  // A chain longer than this is a cycle no reset can write.
-  for (let hop = 0; id && hop < 32; hop++) {
-    const session: Session | null = await deps.sessionRepository.session(id);
-    if (!session) return undefined;
-    if (session.status === "active") return resumableSession(deps, session.id, agentName);
-    id = session.supersededBy;
-  }
-  return undefined;
+  const session = await deps.sessionRepository.session(sessionId);
+  if (!session) return undefined;
+  if (session.status === "active") return resumableSession(deps, session.id, agentName);
+  if (!session.supersededBy || session.continuityKey === null) return undefined;
+  const current = await deps.sessionRepository.current(session.continuityKey, agentName);
+  return current ? resumableSession(deps, current.id, agentName) : undefined;
 }
 
 /** @deprecated Matches an agent under its legacy names, which a stored
