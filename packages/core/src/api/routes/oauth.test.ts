@@ -29,16 +29,16 @@ const {
   syncGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
 }));
 
-rs.mock("../../lib/rome-cloud-oauth.js", () => ({
+rs.mock("../../connections/oauth/rome-cloud-oauth.js", () => ({
   redeemRomeCloudOAuthHandoff,
   createRomeCloudOAuthStartRedirect: rs.fn(),
   createRomeCloudOAuthStartUrl: rs.fn(() => ({ connectUrl: "", available: true })),
 }));
-rs.mock("../../lib/provider-token-files.js", () => ({
+rs.mock("../../connections/oauth/provider-token-files.js", () => ({
   syncProviderTokenFile,
   clearProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
 }));
-rs.mock("../../lib/github-shell-integration.js", () => ({
+rs.mock("../../connections/integrations/github-shell-integration.js", () => ({
   syncGithubShellIntegrationForProvider,
   clearGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
 }));
@@ -55,7 +55,7 @@ rs.mock("../../lib/auth.js", () => ({
   issueGuardianSession: rs.fn(),
 }));
 rs.mock("../../lib/guardian-session.js", () => ({ resolveGuardianSession }));
-rs.mock("../../lib/oauth-providers.js", () => ({
+rs.mock("../../connections/oauth/oauth-providers.js", () => ({
   OAUTH_PROVIDERS: ["google", "github", "slack"],
   getEnabledOAuthProviders: () => ["github", "slack"],
   isEnabledOAuthProvider: () => true,

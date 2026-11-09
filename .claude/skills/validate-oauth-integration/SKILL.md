@@ -23,8 +23,8 @@ dashboard ──▶ core /api/oauth/<provider>/start ──▶ Pantheon /start
 ## Layer 0 — Static + unit (host, fast)
 
 - `pnpm typecheck` (all workspaces).
-- Touched suites: the Pantheon adapter (`pnpm --filter rome-pantheon exec vitest run src/lib/oauth`), the core provider lists (`pnpm --filter @rome/core exec vitest run src/lib/oauth-providers.test.ts`), and the connector (`pnpm --filter @rome/app-connector exec vitest run`) if the token-consumer half exists.
-- **Update the drift guards** the new provider trips: the enabled-provider lists in `packages/core/src/lib/oauth-providers.test.ts` and the Rome-managed lists in `rome_apps/connector/src/web/lib/connections.test.ts`. Any test that used the service as a stand-in *Composio* toolkit must switch to a still-Composio one (e.g. `notion`).
+- Touched suites: the Pantheon adapter (`pnpm --filter rome-pantheon exec vitest run src/lib/oauth`), the core provider lists (`pnpm --filter @rome/core exec vitest run src/connections/oauth/oauth-providers.test.ts`), and the connector (`pnpm --filter @rome/app-connector exec vitest run`) if the token-consumer half exists.
+- **Update the drift guards** the new provider trips: the enabled-provider lists in `packages/core/src/connections/oauth/oauth-providers.test.ts` and the Rome-managed lists in `rome_apps/connector/src/web/lib/connections.test.ts`. Any test that used the service as a stand-in *Composio* toolkit must switch to a still-Composio one (e.g. `notion`).
 
 ## Layer 1 — Token usage, no OAuth dance (fast confidence in the consumer code)
 

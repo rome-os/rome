@@ -1,4 +1,4 @@
-import type { OAuthProvider } from "../lib/oauth-providers.js";
+import type { OAuthProvider } from "../connections/oauth/oauth-providers.js";
 
 /**
  * Source-agnostic sync abstraction.

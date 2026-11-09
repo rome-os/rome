@@ -1,6 +1,6 @@
-import { cloudBearer } from "./instance-identity.js";
-import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
-import { createLogger } from "../logger.js";
+import { cloudBearer } from "../../../lib/instance-identity.js";
+import { getRomeCloudOrigin } from "../../../lib/rome-cloud-origin.js";
+import { createLogger } from "../../../logger.js";
 
 const log = createLogger("rome-cloud-mail");
 

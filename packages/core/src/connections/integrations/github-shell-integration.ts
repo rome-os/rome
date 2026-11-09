@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import type { SecretRecord } from "../connections/types.js";
-import { createLogger } from "../logger.js";
-import type { OAuthProvider } from "./oauth-providers.js";
+import type { SecretRecord } from "../types.js";
+import { createLogger } from "../../logger.js";
+import type { OAuthProvider } from "../oauth/oauth-providers.js";
 
 const log = createLogger("github-shell-integration");
 

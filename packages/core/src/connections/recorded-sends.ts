@@ -19,7 +19,7 @@ import { EMAIL_MESSAGE_ID, replyToShaped } from "./outbound/send-refusals.js";
 import type { MessageRepository } from "../chats/storage/message-repository.js";
 import { placeIn, type ChatRef, type Place } from "../chats/storage/place.js";
 import { partsWithText } from "../chats/storage/message.js";
-import { htmlToMarkdown } from "../lib/email-markdown.js";
+import { htmlToMarkdown } from "./kinds/email/email-markdown.js";
 import { createLogger } from "../logger.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { MessagePart } from "../types.js";

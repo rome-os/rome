@@ -8,7 +8,7 @@ import type {
   MailProvider,
   RomeMailEvent,
   RomeMailListItem,
-} from "../../../lib/rome-cloud-mail.js";
+} from "../../../connections/kinds/email/rome-cloud-mail.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import { EmailAdapter } from "../../../connections/kinds/email/email.js";

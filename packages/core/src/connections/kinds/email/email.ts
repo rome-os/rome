@@ -32,13 +32,13 @@ import type {
   SendMailResult,
   EmailAddress,
   EmailBodyPart,
-} from "../../../lib/rome-cloud-mail.js";
-import { MailProviderError } from "../../../lib/rome-cloud-mail.js";
+} from "./rome-cloud-mail.js";
+import { MailProviderError } from "./rome-cloud-mail.js";
 import {
   inboundBodyToMarkdown,
   markdownToEmailHtml,
   htmlToEmailMultipart,
-} from "../../../lib/email-markdown.js";
+} from "./email-markdown.js";
 import {
   readAttachmentResponseBody,
   saveIncomingAttachmentPayloads,

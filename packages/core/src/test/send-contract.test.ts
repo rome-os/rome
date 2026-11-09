@@ -18,7 +18,7 @@ import { FakeTelegramApi } from "./kit/fake-telegram.js";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import type { MailProvider, SendMailInput } from "../lib/rome-cloud-mail.js";
+import type { MailProvider, SendMailInput } from "../connections/kinds/email/rome-cloud-mail.js";
 import type { LarkChannel } from "@larksuiteoapi/node-sdk";
 import { DiscordAdapter } from "../connections/kinds/discord/discord.js";
 import { EmailAdapter } from "../connections/kinds/email/email.js";

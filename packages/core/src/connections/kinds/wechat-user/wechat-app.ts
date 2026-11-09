@@ -7,8 +7,8 @@ import type {
   WechatAppState,
   WechatAppStatus as WechatAppResponse,
 } from "@rome/api-types/wechat-app";
-import type { WechatUserRuntime } from "../connections/kinds/wechat-user/wechat-user.js";
-import { createLogger } from "../logger.js";
+import type { WechatUserRuntime } from "./wechat-user.js";
+import { createLogger } from "../../../logger.js";
 
 const log = createLogger("wechat-app");
 

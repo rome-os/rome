@@ -45,7 +45,7 @@ A client that was already running on the shared desktop stays there until it nex
 
 ### The WeChat app
 
-`/desktop/wechat` works without a connection ([`wechat-app.ts`](../packages/core/src/desktop-apps/wechat-app.ts)):
+`/desktop/wechat` works without a connection ([`wechat-app.ts`](../packages/core/src/connections/kinds/wechat-user/wechat-app.ts)):
 
 - **Not installed:** the page offers **Install WeChat**. It downloads the pinned client, which takes a few minutes, then opens it. The download runs in Rome, so the guardian can leave the page.
 - **Installed but not running:** opening the page starts the client, once per visit. A start that failed waits for **Try again**, so it cannot loop.

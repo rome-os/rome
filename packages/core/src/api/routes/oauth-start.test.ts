@@ -12,11 +12,11 @@ const { syncProviderTokenFile } = rs.hoisted(() => ({
   syncProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
 }));
 
-rs.mock("../../lib/provider-token-files.js", () => ({
+rs.mock("../../connections/oauth/provider-token-files.js", () => ({
   syncProviderTokenFile,
   clearProviderTokenFile: rs.fn(async (..._a: unknown[]) => {}),
 }));
-rs.mock("../../lib/github-shell-integration.js", () => ({
+rs.mock("../../connections/integrations/github-shell-integration.js", () => ({
   syncGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
   clearGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
 }));
@@ -33,7 +33,7 @@ import { oauthPendingAttempts } from "../../db/schema.js";
 import { createTestDb } from "../../test/db.js";
 import { COOKIE_NAME, createGuardianSession } from "../../lib/auth.js";
 import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
-import { SHOPIFY_INSTALL_URL } from "../../lib/oauth-providers.js";
+import { SHOPIFY_INSTALL_URL } from "../../connections/oauth/oauth-providers.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";
 import { makeOAuthProviderDescriptor } from "../../connections/integrations/oauth-providers.js";

@@ -4,8 +4,8 @@
 // `grantProfileFromBundle`) turn a provider's OAuth bundle into the grant's
 // material and profile shapes.
 
-import { normalizeShopifyShopDomain, type OAuthProvider } from "../lib/oauth-providers.js";
-import { normalizeScopes, type OAuthTokenBundle } from "../lib/oauth-token-bundle.js";
+import { normalizeShopifyShopDomain, type OAuthProvider } from "./oauth/oauth-providers.js";
+import { normalizeScopes, type OAuthTokenBundle } from "./oauth/oauth-token-bundle.js";
 import {
   OAUTH_PROVIDER_GRANTS,
   githubGrantProfileSchema,

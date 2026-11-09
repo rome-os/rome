@@ -12,8 +12,11 @@
 import type { AccountValue, ConnectionAccountFields } from "@rome/api-types/connected-accounts";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { isEnabledOAuthProvider, isOAuthProvider } from "../../lib/oauth-providers.js";
-import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
+import {
+  isEnabledOAuthProvider,
+  isOAuthProvider,
+} from "../../connections/oauth/oauth-providers.js";
+import { createRomeCloudOAuthStartUrl } from "../../connections/oauth/rome-cloud-oauth.js";
 import type { ConnectionRegistry } from "../../connections/index.js";
 import type { GrantValue } from "../../connections/grant.js";
 import { reachedAccount } from "../../connections/connection.js";

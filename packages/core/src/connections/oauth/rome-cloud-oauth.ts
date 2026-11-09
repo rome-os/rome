@@ -1,10 +1,10 @@
 import { createHash, randomBytes } from "node:crypto";
-import { RenewalUnavailable } from "../connections/errors.js";
+import { RenewalUnavailable } from "../errors.js";
 import { eq, lt } from "drizzle-orm";
-import { type OAuthAttemptIntent, oauthPendingAttempts } from "../db/schema.js";
-import type { DrizzleDb } from "../db/index.js";
-import { cloudBearer } from "./instance-identity.js";
-import { getInstanceOrigin, getRomeCloudOrigin } from "./rome-cloud-origin.js";
+import { type OAuthAttemptIntent, oauthPendingAttempts } from "../../db/schema.js";
+import type { DrizzleDb } from "../../db/index.js";
+import { cloudBearer } from "../../lib/instance-identity.js";
+import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { isOAuthProvider, SHOPIFY_INSTALL_URL, type OAuthProvider } from "./oauth-providers.js";
 import type { OAuthTokenBundle } from "./oauth-token-bundle.js";
 

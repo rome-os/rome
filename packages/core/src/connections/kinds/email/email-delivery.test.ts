@@ -16,7 +16,7 @@ import {
   type MailProvider,
   type RomeMailEvent,
   type RomeMailListItem,
-} from "../../../lib/rome-cloud-mail.js";
+} from "./rome-cloud-mail.js";
 import { EmailAdapter } from "./email.js";
 import { REPLY_LOOKUP_BUDGET_MS } from "./email-reply-target.js";
 

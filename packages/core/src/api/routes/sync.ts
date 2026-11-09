@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { createRomeCloudOAuthStartUrl } from "../../lib/rome-cloud-oauth.js";
+import { createRomeCloudOAuthStartUrl } from "../../connections/oauth/rome-cloud-oauth.js";
 import {
   ensureWebchatProjectWorkspace,
   getWebchatProjectsRoot,

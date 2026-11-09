@@ -75,7 +75,7 @@ import type {
 } from "@rome-os/app-runtime";
 import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
-import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
+import { AppConnectionAccessRepository } from "../connections/app-connection-access.js";
 import { PeopleRepository } from "../db/repositories/people.js";
 import { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import { ChannelRecordsRepository } from "../db/repositories/channel-records.js";

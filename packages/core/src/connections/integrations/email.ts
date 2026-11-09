@@ -40,7 +40,7 @@ import {
 } from "../kinds/email/email.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import type { SettingsRepository } from "../../db/repositories/settings.js";
-import type { MailProvider } from "../../lib/rome-cloud-mail.js";
+import type { MailProvider } from "../kinds/email/rome-cloud-mail.js";
 import { z } from "zod";
 import type { SetupFn } from "../setup/types.js";
 import { CredentialRejected, Disconnected } from "../errors.js";

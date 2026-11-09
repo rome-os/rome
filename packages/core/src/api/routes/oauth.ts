@@ -9,12 +9,12 @@ import {
   normalizeShopifyShopDomain,
   OAUTH_PROVIDER_DESCRIPTORS,
   SHOPIFY_INSTALL_URL,
-} from "../../lib/oauth-providers.js";
+} from "../../connections/oauth/oauth-providers.js";
 import {
   createRomeCloudOAuthStartRedirect,
   createRomeCloudOAuthStartUrl,
   redeemRomeCloudOAuthHandoff,
-} from "../../lib/rome-cloud-oauth.js";
+} from "../../connections/oauth/rome-cloud-oauth.js";
 import { importProviderBundle } from "../../connections/providers-import.js";
 import type { OAuthAttemptIntent } from "../../db/schema.js";
 import type { ApiDeps } from "../deps.js";

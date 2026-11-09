@@ -138,7 +138,7 @@ import {
   WechatUserReader,
   WechatUserRuntime,
 } from "./connections/kinds/wechat-user/wechat-user.js";
-import { WechatApp } from "./desktop-apps/wechat-app.js";
+import { WechatApp } from "./connections/kinds/wechat-user/wechat-app.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./apps/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
@@ -148,7 +148,7 @@ import { AppKeyInjector } from "./apps/app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
 import { ActionExecutionsRepository } from "./apps/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "./apps/repositories/execution-journal.js";
-import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
+import { AppConnectionAccessRepository } from "./connections/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./apps/repositories/webhook-invocations.js";
 import {
   readAnswerShape,
@@ -1589,7 +1589,7 @@ async function main() {
   // that predates accounts.
   const channelAgentOf = byChannel(channelRecords, accountAgentOf);
   const hookAgentOf = byAccount(accounts, accountAgentOf, channelAgentOf);
-  const { RomeCloudMailProvider } = await import("./lib/rome-cloud-mail.js");
+  const { RomeCloudMailProvider } = await import("./connections/kinds/email/rome-cloud-mail.js");
   const mailProvider = new RomeCloudMailProvider();
   registerBuiltinConnections(connectionRegistry, {
     settingsRepo,

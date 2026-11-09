@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import type { MailProvider, RomeMailListItem } from "../../../lib/rome-cloud-mail.js";
+import type { MailProvider, RomeMailListItem } from "./rome-cloud-mail.js";
 import { type ResolvedEmailReplyTarget, resolveEmailReplyTarget } from "./email-reply-target.js";
 
 function item(
