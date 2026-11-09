@@ -4,13 +4,13 @@
 
 import type { ImportRule, ListedCrossing } from "../import-rules.js";
 
-export interface ForbiddenDependency {
+interface ForbiddenDependency {
   from: string;
   to: string;
   description: string;
 }
 
-export const FORBIDDEN_DEPENDENCIES: ForbiddenDependency[] = [
+const FORBIDDEN_DEPENDENCIES: ForbiddenDependency[] = [
   {
     from: "agent",
     to: "apps",
@@ -25,8 +25,7 @@ export const FORBIDDEN_DEPENDENCIES: ForbiddenDependency[] = [
   },
 ];
 
-/** The context a path under src/ belongs to: its first folder, or the file name for a file at the top of src/. */
-export function contextOf(path: string): string {
+function contextOf(path: string): string {
   return path.split("/")[0];
 }
 
