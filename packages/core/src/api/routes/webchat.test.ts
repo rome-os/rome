@@ -4310,8 +4310,9 @@ describe("Webchat API", () => {
         expect(sent.status).toBe(200);
         await drainTurn(app, sent);
       }
-      expect(sentTurns[0]?.prompt).toBe(
-        '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n<concierge_owner role="visitor" email="ann@example.com"/>\n\nhello',
+      // The guardian's message starts its chat thread, which the Concierge reads.
+      expect(sentTurns[0]?.prompt).toMatch(
+        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)" thread="\1" chosen="false"\/>\n\nhello$/,
       );
       expect(sentTurns[1]?.prompt).toBe("hello");
     });

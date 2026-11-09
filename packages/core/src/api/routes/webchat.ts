@@ -3389,6 +3389,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         priority: getString("priority"),
         replyToMessageId: getString("replyToMessageId"),
         replyQuote: getString("replyQuote"),
+        chatThread: getString("chatThread"),
       };
     }
     return await c.req.json<SendBody>().catch(() => ({}) as SendBody);

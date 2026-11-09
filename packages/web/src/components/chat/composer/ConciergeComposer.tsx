@@ -197,6 +197,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         replyTo?: ReplyTarget,
         pickedFolder: FolderSelection | null = null,
         skillName?: string,
+        chatThread?: string,
       ): ChatComposerSnapshot => ({
         text: appendFolderLine(text, pickedFolder),
         uploads,
@@ -206,6 +207,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         inputId,
         replyTo,
         skillName,
+        ...(chatThread ? { chatThread } : {}),
       }),
       [reasoningEffort],
     );
@@ -231,6 +233,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       // the text on screen until the server accepts the upload.
       const clearsOptimistically = uploads.length === 0;
       const replyTo = replyDraft?.target ?? undefined;
+      const chatThread = replyDraft?.thread ?? undefined;
       if (clearsOptimistically) {
         setInputText("");
         setPendingUploads([]);
@@ -239,7 +242,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         replyDraft?.clear();
       }
       try {
-        await invokeOnSend(snapshotOf(text, uploads, inputId, replyTo, pickedFolder, skill?.name));
+        await invokeOnSend(
+          snapshotOf(text, uploads, inputId, replyTo, pickedFolder, skill?.name, chatThread),
+        );
         failedSendRef.current = null;
         if (!clearsOptimistically) {
           replyDraft?.clear();

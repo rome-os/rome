@@ -97,6 +97,7 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
+import { ChatThreadView, KEEPS_CHAT_THREAD_OPEN } from "@/components/chat/ChatThreadView";
 import {
   ConciergeEmptyState,
   ConciergeTopicEmptyState,
@@ -211,6 +212,7 @@ const chatMessageSchema: z.ZodType<ChatMessage> = z.object({
   content: z.string(),
   createdAt: z.string(),
   traceSummary: traceSummarySchema.nullable().optional(),
+  chatThreadId: z.string().nullable().optional(),
 });
 
 const sessionNameSchema = z.object({
@@ -715,6 +717,8 @@ export function Chat({
     messageIds: displayedMessageIds,
     jump: jumpToMessage,
     focusComposer: () => composerRef.current?.focus(),
+    // A Concierge chat keeps chat threads: Reply and a quote open the thread view.
+    threads: concierge,
   });
 
   const enterShareMode = useCallback(() => {
@@ -1710,6 +1714,7 @@ export function Chat({
               formData.set(name, value);
             }
           }
+          if (snapshot.chatThread) formData.set("chatThread", snapshot.chatThread);
           for (const upload of snapshot.uploads) {
             formData.append("files", upload.file);
           }
@@ -2296,7 +2301,19 @@ export function Chat({
                     !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
                   )}
                 />
-                <div className="pointer-events-auto relative mx-auto max-w-5xl">
+                <div
+                  className="pointer-events-auto relative mx-auto max-w-5xl"
+                  {...{ [KEEPS_CHAT_THREAD_OPEN]: "" }}
+                >
+                  {concierge && mainSessionId && replyDraft.thread ? (
+                    <ChatThreadView
+                      key={replyDraft.thread}
+                      sessionId={mainSessionId}
+                      messageId={replyDraft.thread}
+                      onClose={replyDraft.closeThread}
+                      className="absolute inset-x-0 bottom-full z-10 mb-2"
+                    />
+                  ) : null}
                   {/* Sits on the composer's top-right corner, clear of the
                       centered jump to latest. */}
                   {mainSessionId && (

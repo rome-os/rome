@@ -24,6 +24,7 @@ function renderComposer(
   reply?: ReplyTarget,
   selector = true,
   ref?: React.Ref<ChatComposerHandle>,
+  threads = false,
 ) {
   rs.spyOn(globalThis, "fetch").mockImplementation(
     (async (input: RequestInfo | URL) =>
@@ -74,7 +75,7 @@ function renderComposer(
   });
   render(
     <QueryClientProvider client={client}>
-      <ReplyDraftHarness initial={reply}>
+      <ReplyDraftHarness initial={reply} threads={threads}>
         <ConciergeComposer ref={ref} onSend={onSend} {...props} />
       </ReplyDraftHarness>
     </QueryClientProvider>,
@@ -257,6 +258,19 @@ describe("ConciergeComposer reply", () => {
       replyTo: reply,
     });
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+  });
+
+  it("sends into the open chat thread, and keeps sending there after the reply clears", async () => {
+    const { onSend } = renderComposer({}, reply, true, undefined, true);
+
+    await userEvent.type(await screen.findByPlaceholderText("Message"), "why there?{Enter}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
+    await userEvent.type(screen.getByPlaceholderText("Message"), "and the hotel?{Enter}");
+    await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
+
+    expect(onSend.mock.calls[0][0]).toMatchObject({ replyTo: reply, chatThread: "a1" });
+    expect(onSend.mock.calls[1][0]).toMatchObject({ chatThread: "a1" });
+    expect(onSend.mock.calls[1][0].replyTo).toBeUndefined();
   });
 
   it("puts the reply back when the send fails", async () => {

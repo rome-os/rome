@@ -207,6 +207,23 @@ export async function listSessionMessagePage(
   return jsonOrThrow<ChatMessagePage>(res);
 }
 
+/**
+ * The messages of the chat thread `messageId` is in, oldest first, in one
+ * page. A message in no chat thread comes back alone. `null` when the
+ * session does not exist.
+ */
+export async function listChatThreadMessages(
+  sessionId: string,
+  messageId: string,
+): Promise<ChatMessage[] | null> {
+  const params = new URLSearchParams({ thread: messageId });
+  const res = await fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, {
+    credentials: "include",
+  });
+  if (res.status === 404) return null;
+  return (await jsonOrThrow<ChatMessagePage>(res)).messages;
+}
+
 export interface ListRomeSessionsOptions {
   agentName?: string;
   limit?: number;

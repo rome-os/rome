@@ -7,13 +7,15 @@ import { plainQuote } from "./reply-source";
 
 /**
  * The quote a reply carries, inside the reply's bubble: a gray left edge, a
- * reply arrow, and the first two lines of what was quoted. It jumps to the original when the
+ * reply arrow, and the first two lines of what was quoted. In a chat that keeps chat
+ * threads it opens the thread view. Elsewhere it jumps to the original when the
  * loaded transcript holds it, and is plain text otherwise.
  */
 export function QuotedReply({ part }: { part: ReplyToPart }) {
   const { t } = useTranslation("chat");
   const draft = useReplyDraft();
-  const jumpable = draft?.has(part.messageId) === true;
+  const opensThread = draft?.threads === true;
+  const jumpable = opensThread || draft?.has(part.messageId) === true;
   const body = (
     <>
       <span className="flex h-5 shrink-0 items-center" role="img" aria-label={t("reply.action")}>
@@ -33,9 +35,9 @@ export function QuotedReply({ part }: { part: ReplyToPart }) {
   return (
     <button
       type="button"
-      aria-label={t("reply.jump")}
+      aria-label={t(opensThread ? "reply.openThread" : "reply.jump")}
       className={cn(frame, "cursor-pointer transition-colors hover:bg-border")}
-      onClick={() => draft.jump(part.messageId)}
+      onClick={() => (opensThread ? draft.openThread(part.messageId) : draft.jump(part.messageId))}
     >
       {body}
     </button>

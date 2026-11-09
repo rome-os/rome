@@ -107,7 +107,8 @@
   "reply": {
     "action": "Reply",
     "dismiss": "Cancel reply",
-    "jump": "Go to the original message"
+    "jump": "Go to the original message",
+    "openThread": "Open the chat thread"
   },
   "senderGuardian": "Guardian",
   "inputState": {
@@ -563,5 +564,10 @@
       "label": "Morning brief",
       "prompt": "Build a morning brief app with frontend design to read my Gmail from the last 24 hours and my upcoming Google Calendar events. Update the dashboard every day at 8:00 AM with the latest priorities, urgent emails, key meetings, deadlines, and recommended next actions. Identify what needs my attention most and send me a short summary on Telegram after each daily update."
     }
+  },
+  "thread": {
+    "title": "Chat thread",
+    "close": "Close chat thread",
+    "loadFailed": "Couldn't load this chat thread."
   }
 }

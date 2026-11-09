@@ -36,6 +36,13 @@ export interface ReplyDraft {
   /** Whether the loaded transcript holds the message, so a quote can link to it. */
   has: (messageId: string) => boolean;
   jump: (messageId: string) => void;
+  /** Whether the chat keeps chat threads, so a reply or a quote opens its thread view. */
+  threads: boolean;
+  /** A message of the chat thread the thread view shows, or null when it is closed. While it is open, the composer sends into that thread. */
+  thread: string | null;
+  openThread: (messageId: string) => void;
+  /** Closes the thread view, and drops the reply with it. */
+  closeThread: () => void;
 }
 
 /** The form fields that carry a reply to the server. */
@@ -64,29 +71,57 @@ export function useReplyDraftState({
   messageIds,
   jump,
   focusComposer,
+  threads = false,
 }: {
   chatId: string | undefined;
   sessionId: string | null;
   messageIds: ReadonlySet<string>;
   jump: (messageId: string) => void;
   focusComposer: () => void;
+  /** The chat keeps chat threads: a reply opens its thread view. */
+  threads?: boolean;
 }): ReplyDraft {
   const [target, setTarget] = useState<ReplyTarget | null>(null);
+  const [thread, setThread] = useState<string | null>(null);
   const focusRef = useRef(focusComposer);
   focusRef.current = focusComposer;
 
-  useEffect(() => setTarget(null), [chatId]);
+  useEffect(() => {
+    setTarget(null);
+    setThread(null);
+  }, [chatId]);
 
-  const set = useCallback((next: ReplyTarget) => {
-    setTarget(next);
-    requestAnimationFrame(() => focusRef.current());
+  const set = useCallback(
+    (next: ReplyTarget) => {
+      setTarget(next);
+      if (threads) setThread(next.messageId);
+      requestAnimationFrame(() => focusRef.current());
+    },
+    [threads],
+  );
+  const openThread = useCallback((messageId: string) => setThread(messageId), []);
+  const closeThread = useCallback(() => {
+    setThread(null);
+    setTarget(null);
   }, []);
   const clear = useCallback(() => setTarget(null), []);
   const restore = useCallback((next: ReplyTarget) => setTarget((current) => current ?? next), []);
   const has = useCallback((messageId: string) => messageIds.has(messageId), [messageIds]);
 
   return useMemo(
-    () => ({ sessionId, target, set, clear, restore, has, jump }),
-    [sessionId, target, set, clear, restore, has, jump],
+    () => ({
+      sessionId,
+      target,
+      set,
+      clear,
+      restore,
+      has,
+      jump,
+      threads,
+      thread,
+      openThread,
+      closeThread,
+    }),
+    [sessionId, target, set, clear, restore, has, jump, threads, thread, openThread, closeThread],
   );
 }
