@@ -63,7 +63,7 @@ import type {
   ChatSettingsControl,
   ChannelsService,
 } from "@rome-os/app-runtime";
-import type { FavorService } from "../favors/types.js";
+import type { FavorService } from "../favors/index.js";
 import type { ConnectionRegistry } from "../connections/index.js";
 import type { AccountListening } from "../chats/connected-accounts/account-agents.js";
 import type { SetupManager } from "../connections/setup/manager.js";

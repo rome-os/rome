@@ -25,7 +25,7 @@ import {
   instantiateActionFromDirectory,
   resolveModuleEntryPath,
 } from "./module-loader.js";
-import type { FavorService } from "../../favors/types.js";
+import type { FavorService } from "../../favors/index.js";
 import type { HostExecutionService } from "../host-execution/service.js";
 import type { FeedbackService } from "../../lib/feedback-client.js";
 import type { CloudProfileService } from "../../instance/cloud-profile.js";

@@ -136,7 +136,7 @@ import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../lib/feedback-client.js";
 import { assembleDiagnosticBundle } from "../instance/diagnostics.js";
 import type { ApiDeps } from "../api/deps.js";
-import type { FavorService } from "../favors/types.js";
+import type { FavorService } from "../favors/index.js";
 import { Hono } from "hono";
 import { mkdtempSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
