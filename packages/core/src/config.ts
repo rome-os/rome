@@ -1,7 +1,7 @@
 import "dotenv/config";
 import { z } from "zod";
 import { DEFAULT_SQLITE_PATH } from "./db/index.js";
-import { desktopSlot, WECHAT_DEFAULT_DISPLAY, wechatUserDisplay } from "./desktops.js";
+import { desktopSlot, WECHAT_DEFAULT_DISPLAY, wechatUserDisplay } from "./desktops/desktops.js";
 
 /**
  * A relay drain URL must be a parseable ws/wss URL pointing at a `/c/{mailboxId}`

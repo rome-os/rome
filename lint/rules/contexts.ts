@@ -29,6 +29,30 @@ const FORBIDDEN_DEPENDENCIES: ForbiddenDependency[] = [
     description:
       "A favor request exists to run an app action, so Favors depends on Apps and no file in apps/ imports favors/.",
   },
+  {
+    from: "desktops",
+    to: "agent",
+    description:
+      "Desktops says which machines Rome can reach and what it can do on them, whoever asks, so no file in desktops/ imports agent/.",
+  },
+  {
+    from: "desktops",
+    to: "chats",
+    description:
+      "Desktops never names a chat or an account, so no file in desktops/ imports chats/.",
+  },
+  {
+    from: "desktops",
+    to: "connections",
+    description:
+      "A connection that needs a screen, such as WeChat's own-account connection, asks Desktops for one. Desktops never names a connection, so no file in desktops/ imports connections/.",
+  },
+  {
+    from: "desktops",
+    to: "people",
+    description:
+      "Desktops never names a person or an account, so no file in desktops/ imports people/.",
+  },
 ];
 
 function contextOf(path: string): string {

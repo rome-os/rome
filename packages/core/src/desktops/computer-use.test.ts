@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { ComputerUseService } from "./service.js";
+import { ComputerUseService } from "./computer-use.js";
 
 const FIRST_SEEN = Date.parse("2026-09-13T09:00:00.000Z");
 
