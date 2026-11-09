@@ -27,6 +27,7 @@ const runtimePackages = [
   "packages/web-content",
   "packages/core",
   "packages/discord-cli",
+  "packages/signer",
   "packages/rome-node-cli",
   "packages/rome-node-core",
   "packages/rome-node-ui",
@@ -58,6 +59,7 @@ const runtimeWorkspacePackagesYaml = `packages:
   - "packages/web-content"
   - "packages/core"
   - "packages/discord-cli"
+  - "packages/signer"
   - "packages/rome-node-cli"
   - "packages/rome-node-core"
   - "packages/rome-node-ui"
@@ -184,7 +186,7 @@ async function main() {
   await copyPath("example_apps");
   copiedTopLevelPaths.add("example_apps");
 
-  // OpenCLI plugins ship as plain source too: rome-init.sh registers
+  // OpenCLI plugins ship as plain source too: rome-init-tools.sh registers
   // every /app/opencli-plugins/<site>/ dir with the in-container opencli at
   // boot, and silently skips registration when the dir is absent — so leaving
   // this out of the context ships an image that quietly falls back to the

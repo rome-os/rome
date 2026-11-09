@@ -1,3 +1,4 @@
+import { isSendRefused } from "@rome-os/app-runtime";
 import { fork } from "node:child_process";
 import { EventEmitter } from "node:events";
 import type { ChildProcess, ForkOptions } from "node:child_process";
@@ -31,7 +32,7 @@ import {
 } from "../apps/context.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ResolvedApp } from "../apps/state.js";
-import { createActionEngineRepos } from "../test/helpers.js";
+import { createActionEngineRepos } from "../test/db.js";
 
 interface TransportPair {
   a: IpcTransport;
@@ -158,7 +159,7 @@ describe("main-owned action subprocess", () => {
     const program = `
       import { ActionEngine } from ${moduleUrl("./engine.js")};
       import { ActionRegistryImpl } from ${moduleUrl("./registry.js")};
-      import { createActionEngineRepos, createTestDb } from ${moduleUrl("../test/helpers.js")};
+      import { createActionEngineRepos, createTestDb } from ${moduleUrl("../test/db.js")};
       import { getCurrentActionContext } from "@rome-os/app-runtime";
       const db = createTestDb();
       const registry = new ActionRegistryImpl();
@@ -262,6 +263,53 @@ describe("main-owned action subprocess", () => {
       { type: "agent_message", message: { type: "text", content: "from-w2" } },
     ]);
     expect(child.sent[0]).toMatchObject({ actionName: "delegated-w2" });
+  });
+
+  it("rebuilds a send the worker's action refused as a refusal, with its reason", async () => {
+    class RefusingChild extends EventEmitter {
+      pid = 987_655;
+      connected = true;
+      exitCode: number | null = null;
+      signalCode: NodeJS.Signals | null = null;
+
+      send(message: unknown, callback?: (error: Error | null) => void): boolean {
+        callback?.(null);
+        if ((message as { actionName?: string }).actionName) {
+          queueMicrotask(() =>
+            this.emit("message", {
+              type: "error",
+              error: {
+                name: "ChannelSendRefused",
+                message: "whatsapp cannot quote a message",
+                refusal: "reply_unaddressable",
+              },
+            }),
+          );
+        }
+        return true;
+      }
+    }
+
+    const child = new RefusingChild();
+    const engine = new ActionEngine(new ActionRegistryImpl(), createActionEngineRepos(), {
+      processRole: "main",
+      memoryHeadroom: () => null,
+      workerWarmPoolSize: 0,
+      actionWorkerFork: () => child as unknown as ChildProcess,
+    });
+    engine.setWorkerRpcServer({ register: rs.fn() } as never);
+    engine.setAgentSessionBridge({ attach: rs.fn() } as never);
+
+    const failure = await engine
+      .startDelegatedAction(payload("send-refused"), {})
+      .result.catch((err: unknown) => err);
+
+    expect(isSendRefused(failure)).toBe(true);
+    expect(failure).toMatchObject({
+      name: "ChannelSendRefused",
+      reason: "reply_unaddressable",
+      message: "whatsapp cannot quote a message",
+    });
   });
 
   it("runs action A -> cancellable B -> agent turn directly against main and returns B's result", async () => {

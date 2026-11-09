@@ -1,6 +1,6 @@
 import { describe, expect, it, afterEach, beforeEach, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { type Message, type RecordedMessage } from "../chats/storage/message.js";
 import { romeAgentMessages, romeAgentTraceBlocks, romeSessions } from "../db/schema.js";
@@ -73,7 +73,7 @@ describe("AgentTraceRecorder", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new WebChatRepository(testDb.db);
+    repo = new ChatsWebChatRepository(testDb.db);
   });
 
   afterEach(() => {

@@ -1,10 +1,19 @@
-import { Section, SectionHeader, SectionTitle } from "@rome-os/ui/page";
+import {
+  FormRow,
+  FormRowControl,
+  FormRowDescription,
+  FormRowHeading,
+  FormRowLabel,
+  FormRows,
+} from "@rome-os/ui/layout-form";
+import { X } from "lucide-react";
 import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { IconButton } from "@/components/ui/icon-button";
+import { Sheet, SheetTitle } from "@/components/ui/sheet";
 import { fetchJson } from "@/lib/fetch-json";
 import { beginInstanceEnroll } from "@/lib/instance-enroll";
 
@@ -54,8 +63,11 @@ const AUTH_BADGE: Record<AuthStatus, "success" | "warning" | "destructive" | "mu
 // `unconfigured` is a source build, so neither offers a reconnect.
 const NEEDS_RECONNECT: ReadonlySet<AuthStatus> = new Set(["revoked", "unknown", "no_token"]);
 
-export function SystemDiagnosisSection() {
+/** One row with the overall health. The checks open in a side sheet, along
+ *  with `details`, which mounts only while the sheet is open. */
+export function SystemDiagnosisSection({ details }: { details?: ReactNode }) {
   const { t } = useTranslation("settings");
+  const [open, setOpen] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
   const [reconnectError, setReconnectError] = useState("");
 
@@ -83,32 +95,61 @@ export function SystemDiagnosisSection() {
   const d = query.data ?? null;
 
   return (
-    <Section>
-      <SectionHeader>
-        <SectionTitle>{t("advanced.diagnosis.title")}</SectionTitle>
-        {d && (
-          <Badge variant={d.status === "ok" ? "success" : "destructive"}>
-            {t(`advanced.diagnosis.status.${d.status}`)}
-          </Badge>
-        )}
-      </SectionHeader>
-
-      {query.isLoading ? (
-        <p className="text-ui text-muted-foreground">{t("advanced.diagnosis.loading")}</p>
-      ) : !d ? (
-        <div className="flex items-center gap-2">
-          <p className="text-ui text-destructive-fg">
-            {query.error instanceof Error
-              ? query.error.message
-              : t("advanced.diagnosis.loadFailed")}
-          </p>
-          <Button variant="outline" size="xs" onClick={() => void query.refetch()}>
-            {t("advanced.diagnosis.refresh")}
+    <FormRows>
+      <FormRow>
+        <FormRowHeading>
+          <FormRowLabel>{t("advanced.diagnosis.title")}</FormRowLabel>
+          <FormRowDescription>
+            {query.isLoading
+              ? t("advanced.diagnosis.loading")
+              : !d
+                ? t("advanced.diagnosis.loadFailed")
+                : t(`advanced.diagnosis.summary.${d.status}`)}
+          </FormRowDescription>
+        </FormRowHeading>
+        <FormRowControl>
+          {d && (
+            <Badge variant={d.status === "ok" ? "success" : "destructive"}>
+              {t(`advanced.diagnosis.status.${d.status}`)}
+            </Badge>
+          )}
+          <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+            {t("advanced.diagnosis.details")}
           </Button>
+        </FormRowControl>
+      </FormRow>
+      <Sheet
+        open={open}
+        onClose={() => setOpen(false)}
+        ariaLabel={t("advanced.diagnosis.title")}
+        widthClassName="w-full max-w-md"
+      >
+        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 pt-safe">
+          <SheetTitle className="flex-1 truncate text-title text-foreground">
+            {t("advanced.diagnosis.title")}
+          </SheetTitle>
+          <IconButton
+            size="sm"
+            label={t("advanced.diagnosis.close")}
+            icon={<X />}
+            onClick={() => setOpen(false)}
+          />
         </div>
-      ) : (
-        <Card>
-          <CardContent>
+        <div className="min-h-0 flex-1 space-y-6 overflow-y-auto p-4">
+          {query.isLoading ? (
+            <p className="text-ui text-muted-foreground">{t("advanced.diagnosis.loading")}</p>
+          ) : !d ? (
+            <div className="flex items-center gap-2">
+              <p className="text-ui text-destructive-fg">
+                {query.error instanceof Error
+                  ? query.error.message
+                  : t("advanced.diagnosis.loadFailed")}
+              </p>
+              <Button variant="outline" size="xs" onClick={() => void query.refetch()}>
+                {t("advanced.diagnosis.refresh")}
+              </Button>
+            </div>
+          ) : (
             <dl className="space-y-3 text-ui">
               <DiagRow label={t("advanced.diagnosis.version")}>
                 {d.build.version ?? (
@@ -225,10 +266,11 @@ export function SystemDiagnosisSection() {
                 />
               )}
             </dl>
-          </CardContent>
-        </Card>
-      )}
-    </Section>
+          )}
+          {details}
+        </div>
+      </Sheet>
+    </FormRows>
   );
 }
 

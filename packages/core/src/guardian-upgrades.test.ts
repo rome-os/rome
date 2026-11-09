@@ -8,7 +8,7 @@ import { attachNodeConsoleServer } from "./node-console-server.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
 import { attachTerminalServer } from "./terminal-server.js";
 import { guardianAuth } from "./db/schema.js";
-import { createTestDb, type TestDb } from "./test/helpers.js";
+import { createTestDb, type TestDb } from "./test/db.js";
 import { createSession } from "./lib/auth.js";
 import { createNodeConfig } from "@rome-os/node-core/client";
 import { tmpdir } from "node:os";

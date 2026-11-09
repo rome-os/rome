@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Boot-lifecycle smoke test for the container's s6 services and the one-time
-// setup in rome-init.sh, run by hand against a built image. No CI job runs it.
+// setup in rome-init.sh and rome-init-tools.sh, run by hand against a built
+// image. No CI job runs it.
 //
 // Usage:
 //   node scripts/docker/entrypoint-smoke.mts <image>
@@ -12,7 +13,9 @@
 //   FROM zoolsher/rome:main
 //   COPY scripts/docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
 //   COPY scripts/docker/rome-init.sh /etc/s6-overlay/scripts/rome-init
-//   COPY scripts/docker/rome-tailscale-setup.sh /etc/s6-overlay/scripts/rome-tailscale-setup
+//   COPY scripts/docker/rome-init-lib.sh /etc/s6-overlay/scripts/rome-init-lib
+//   COPY scripts/docker/rome-init-tools.sh /etc/s6-overlay/scripts/rome-init-tools
+//   COPY scripts/docker/rome-wait-for-rome.sh /etc/s6-overlay/scripts/rome-wait-for-rome
 //   COPY scripts/docker/rome-run-as.sh /usr/local/bin/rome-run-as
 //   EOF
 //   node scripts/docker/entrypoint-smoke.mts rome-entrypoint-smoke
@@ -126,8 +129,14 @@ function closedServicePorts(name: string): [string, number][] {
   );
 }
 
-function assertServicesListening(name: string): void {
-  const closed = closedServicePorts(name);
+/** The desktop services start only after Rome is healthy, so ports get a short grace period. */
+async function assertServicesListening(name: string): Promise<void> {
+  const deadline = Date.now() + RECOVERY_TIMEOUT_MS;
+  let closed = closedServicePorts(name);
+  while (closed.length > 0 && Date.now() < deadline) {
+    await sleep(1000);
+    closed = closedServicePorts(name);
+  }
   if (closed.length > 0) {
     fail(
       name,
@@ -154,7 +163,7 @@ function stopGracefully(name: string): number {
 async function checkBootStopRestart(name: string): Promise<void> {
   startContainer(name);
   await waitForStarted(name, 1);
-  assertServicesListening(name);
+  await assertServicesListening(name);
   console.log("  boot: every service listening");
 
   const elapsedS = stopGracefully(name);
@@ -168,13 +177,15 @@ async function checkBootStopRestart(name: string): Promise<void> {
   if (!logs(name, restartedAt).includes("Application already synced for this image")) {
     fail(name, "restart re-synced /app although the image did not change");
   }
-  assertServicesListening(name);
+  await assertServicesListening(name);
   console.log("  restart: every service listening, /app sync skipped");
 }
 
 async function checkKilledServicesRestart(name: string): Promise<void> {
   startContainer(name);
   await waitForStarted(name, 1);
+  // The desktop starts after Rome is healthy, so it may not run yet.
+  await assertServicesListening(name);
   // Killing the X server also takes down openbox and Chrome, which need it.
   const processNames = ["sshd", "websockify", "caddy", "Xtigervnc"];
   docker(["exec", name, "pkill", "-KILL", "-f", "^bash .*/rome-start-chrome-cdp\\.sh"]);
@@ -182,11 +193,7 @@ async function checkKilledServicesRestart(name: string): Promise<void> {
     docker(["exec", name, "pkill", "-KILL", "-x", processName]);
   }
 
-  const deadline = Date.now() + RECOVERY_TIMEOUT_MS;
-  while (closedServicePorts(name).length > 0 && Date.now() < deadline) {
-    await sleep(2000);
-  }
-  assertServicesListening(name);
+  await assertServicesListening(name);
   if (!state(name).running) fail(name, "container stopped after its services were killed");
   if (logs(name).split(STARTED_MARKER).length - 1 !== 1) {
     fail(name, "the daemon restarted although only other services were killed");

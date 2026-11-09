@@ -1,103 +1,331 @@
-import { and, asc, eq, isNull, like, sql } from "drizzle-orm";
-import type { ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
+// Reply rules, kept on each of Rome's speakers. Vocabulary:
+// docs/domains/participation.md#speaker and docs/domains/chats.md#chat.
+
+import { and, asc, desc, eq, isNotNull, isNull, like, or, sql, type SQL } from "drizzle-orm";
+import type { Account, ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
-import { withoutRouting, withRoutingOf, type ChatRepository } from "../chats/chat-repository.js";
-import { chatKey } from "../chats/place.js";
-import { chatMessages, romeAgentMessages, romeSessions } from "../db/schema/system.js";
+import { chatIdsOn, type ChatRepository } from "../chats/storage/chat-repository.js";
+import type { Chat, ChatKind } from "../chats/storage/chat.js";
+import { placeIn, type ChatKey, type ChatRef } from "../chats/storage/place.js";
+import { startChannelChat } from "../connections/channel-chat.js";
+import { addressOf, type ChatAdapters, kindNamedBy } from "../connections/chat-adapter.js";
+import type { ChatAddresses } from "../connections/chat-addresses.js";
+import { chatMessages, chats, romeAgentMessages, romeSessions } from "../db/schema/system.js";
 import { channelChatId, isChannelConversation } from "../db/session-kind.js";
+import { firstPlacementSecond, placedCreatedAt } from "../db/speaker-placement.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../webchat/constants.js";
 
-export type StoredChatRow = typeof romeSessions.$inferSelect;
+type SpeakerRow = typeof romeSessions.$inferSelect;
 
-function rowByAddress(exec: DrizzleDb | DrizzleTx, channel: string, chatId: ChatId) {
-  return exec
-    .select()
-    .from(romeSessions)
-    .where(
-      and(
-        isChannelConversation,
-        eq(romeSessions.sourceChannel, channel),
-        eq(romeSessions.sourceThreadId, chatId),
-      ),
-    )
-    .limit(1)
-    .get();
+/** A speaker as chat settings read it: its row, the kind of place it stands
+ *  in (a topic when it stands in a thread), the name of that place, the
+ *  channel it speaks through and the platform address that channel reaches
+ *  it at. Channel and address are null when no channel is its account. */
+export type StoredChatRow = SpeakerRow & {
+  kind: "dm" | "group" | "topic";
+  channel: string | null;
+  /** The chat's name, or the row's own for a thread, null while the
+   *  platform has given none. */
+  placeName: string | null;
+  address: ChatId | null;
+};
+
+export interface ChatSettingsRepositoryDeps {
+  /** Where a chat is started when a rule is set before anything was said. */
+  chats: Pick<ChatRepository, "start" | "rename" | "byKey" | "find">;
+  /** The chat adapters, which name the chat at an address and the channel
+   *  that is one of Rome's accounts. */
+  adapters: Pick<
+    ChatAdapters,
+    "chatAt" | "accountOn" | "knownAccountOn" | "channelOf" | "addressAt" | "openedDirectMessageAt"
+  >;
+  /** Where each of Rome's accounts reaches its chats: one chat's for one
+   *  row, and all of an account's once in a listing. */
+  addresses: Pick<ChatAddresses, "addressOf" | "addressesOf">;
 }
 
+/**
+ * Reply rules, kept on each of Rome's speakers (`rome_sessions.channel_settings`).
+ * A group's rule is the group's whichever of Rome's accounts set it, so it is
+ * written to every speaker in the chat; each speaker keeps its own routing
+ * marker. A speaker is found by its chat and Rome's account, never by the
+ * channel's name.
+ */
 export class ChatSettingsRepository {
   constructor(
     private readonly db: DrizzleDb,
-    private readonly chats: ChatRepository,
+    private readonly deps: ChatSettingsRepositoryDeps,
   ) {}
 
+  /** The account `channel` speaks as. Throws for a channel whose record
+   *  knows none, which is not active. */
+  private accountOn(channel: string): Account {
+    const account = this.deps.adapters.knownAccountOn(channel);
+    if (!account) throw new Error(`Channel ${channel} knows no account, so it is not active`);
+    return account;
+  }
+
+  /** The adapter's key for the chat at address `chatId` as `channel`'s
+   *  account sees it. */
+  private keyOf(channel: string, chatId: ChatId, kind: ChatDescriptor["kind"]): ChatKey {
+    return this.deps.adapters.chatAt(channel, chatId, kind === "dm" ? "dm" : "group");
+  }
+
+  /** The chat at address `chatId` as `channel`'s account sees it, or null
+   *  when Rome holds none there. */
+  private chatOf(channel: string, chatId: ChatId, kind: ChatDescriptor["kind"]): ChatRef | null {
+    return this.deps.chats.byKey(this.keyOf(channel, chatId, kind))?.ref ?? null;
+  }
+
+  /**
+   * The speaker `channel`'s account holds at address `address`: in the group
+   * there, else the direct message there, else the thread the address names.
+   * None for a channel that knows no account.
+   */
+  private speakerAt(
+    exec: DrizzleDb | DrizzleTx,
+    channel: string,
+    address: ChatId,
+  ): SpeakerRow | undefined {
+    const account = this.deps.adapters.knownAccountOn(channel);
+    if (!account) return undefined;
+    const first = (reached: string, ...where: SQL[]) =>
+      exec
+        .select()
+        .from(romeSessions)
+        .where(and(isChannelConversation, eq(romeSessions.accountId, account.id), ...where))
+        // The session messages through `channel` reach there, when the
+        // account holds more than one, as after a reconnect, or at a direct
+        // message it reached at another address before.
+        .orderBy(
+          desc(sql`${romeSessions.id} = ${reached}`),
+          desc(sql`${romeSessions.id} = ${channelChatId(channel, address)}`),
+          asc(romeSessions.createdAt),
+          asc(romeSessions.id),
+        )
+        .limit(1)
+        .get();
+    for (const kind of ["group", "dm"] as const) {
+      const chat = this.chatOf(channel, address, kind);
+      const row =
+        chat &&
+        first(
+          channelChatId(channel, this.reachedAt(channel, chat, address)),
+          eq(romeSessions.chatId, chat.id),
+          isNull(romeSessions.threadId),
+        );
+      if (row) return row;
+    }
+    return first(
+      channelChatId(channel, address),
+      eq(romeSessions.threadId, address),
+      sql`${romeSessions.chatId} in ${chatIdsOn(account.platform)}`,
+    );
+  }
+
+  /** The address messages through `channel` reach `chat` at, which Rome
+   *  holds at `address`. A direct message is reached at the address its
+   *  platform last placed it, which an address the account reached it at
+   *  before, as a person's id, is not. */
+  private reachedAt(channel: string, chat: ChatRef, address: ChatId): ChatId {
+    if (this.deps.chats.find(chat.id)?.kind !== "dm") return address;
+    return this.deps.adapters.addressAt(channel, placeIn(chat));
+  }
+
+  /** The channel the speaker `row` speaks through: the one that is its
+   *  account on its chat's platform, or null when none is. */
+  private channelOf(row: SpeakerRow): string | null {
+    if (!row.chatPlatform || !row.accountId) return null;
+    return this.deps.adapters.channelOf({ platform: row.chatPlatform, id: row.accountId });
+  }
+
+  /** Speaker `row` with the kind and name of the place it stands in, the
+   *  channel it speaks through, and its address. `seen` holds the chats and
+   *  channels already read, across the rows of one listing. */
+  private stored(row: SpeakerRow, listed?: StoredLookups): StoredChatRow {
+    // A listing reads each account's addresses once; one row reads its own.
+    const listing = listed !== undefined;
+    const seen = listed ?? newLookups();
+    let chat: Chat | null = null;
+    if (row.chatId) {
+      if (!seen.chats.has(row.chatId)) seen.chats.set(row.chatId, this.deps.chats.find(row.chatId));
+      chat = seen.chats.get(row.chatId) ?? null;
+    }
+    const kind = row.threadId !== null ? "topic" : chat?.kind === "dm" ? "dm" : "group";
+    const speaking = `${row.chatPlatform}\0${row.accountId}`;
+    if (!seen.channels.has(speaking)) seen.channels.set(speaking, this.channelOf(row));
+    const channel = seen.channels.get(speaking) ?? null;
+    // Where the channel reaches the place, as `ChatAdapters.addressAt` reads
+    // it: a thread at its own address, a chat where the account last heard
+    // it, else at its key. Read from the account's addresses, once a listing.
+    let address: ChatId | null = null;
+    if (chat && channel && row.accountId) {
+      if (row.threadId !== null) {
+        address = row.threadId as ChatId;
+      } else {
+        const account = { platform: chat.ref.platform, id: row.accountId };
+        let heard: string | null;
+        if (listing) {
+          if (!seen.addresses.has(speaking)) {
+            seen.addresses.set(speaking, this.deps.addresses.addressesOf(account));
+          }
+          heard = seen.addresses.get(speaking)?.get(chat.key) ?? null;
+        } else {
+          heard = this.deps.addresses.addressOf(account, chat.key);
+        }
+        const key = { platform: chat.ref.platform, externalId: chat.key as ChatId };
+        address = (heard ?? addressOf(key)) as ChatId;
+      }
+    }
+    const placeName = row.threadId !== null ? row.name : (chat?.name ?? null);
+    return { ...row, kind, channel, placeName, address };
+  }
+
+  /** Speaker `sessionId`, whether or not a channel is its account now. */
+  byId(sessionId: string): StoredChatRow | null {
+    const row = this.db
+      .select()
+      .from(romeSessions)
+      .where(and(isChannelConversation, eq(romeSessions.id, sessionId)))
+      .get();
+    return row ? this.stored(row) : null;
+  }
+
   find(channel: string, chatId: ChatId): StoredChatRow | null {
-    return rowByAddress(this.db, channel, chatId) ?? null;
+    const row = this.speakerAt(this.db, channel, chatId);
+    return row ? this.stored(row) : null;
   }
 
   listKnown(input: { channel?: string; query?: string }): StoredChatRow[] {
     const predicates = [isChannelConversation];
     if (input.channel) {
-      predicates.push(eq(romeSessions.sourceChannel, input.channel));
+      // The channel's speakers: its account's, in chats on its platform.
+      const account = this.deps.adapters.knownAccountOn(input.channel);
+      if (!account) return [];
+      predicates.push(
+        eq(romeSessions.accountId, account.id),
+        sql`${romeSessions.chatId} in ${chatIdsOn(account.platform)}`,
+      );
     }
     if (input.query?.trim()) {
-      predicates.push(like(romeSessions.sourceThreadName, `%${input.query.trim()}%`));
+      // The name a listing shows: the chat's, or a thread's own.
+      const pattern = `%${input.query.trim()}%`;
+      predicates.push(
+        or(
+          sql`${romeSessions.chatId} in (SELECT ${chats.id} FROM ${chats} WHERE ${chats.name} LIKE ${pattern})`,
+          and(isNotNull(romeSessions.threadId), like(romeSessions.name, pattern)),
+          // A chat its platform has not named shows its speaker's own name.
+          and(
+            isNull(romeSessions.threadId),
+            sql`${romeSessions.chatId} in (SELECT ${chats.id} FROM ${chats} WHERE ${chats.name} IS NULL)`,
+            like(romeSessions.name, pattern),
+          ),
+        )!,
+      );
     }
-    return this.db
+    const rows = this.db
       .select()
       .from(romeSessions)
       .where(and(...predicates))
-      .orderBy(asc(romeSessions.sourceChannel), asc(romeSessions.sourceThreadName))
+      .orderBy(asc(romeSessions.accountId), asc(romeSessions.name))
       .all();
+    const seen = newLookups();
+    return rows.map((row) => this.stored(row, seen));
   }
 
   /** The reply rule of the chat at `chatId` as the account `channel` speaks
    *  as sees it: the group's, whichever of Rome's accounts set it, or the
-   *  account's own direct message's. A row stored with no type reads as the
-   *  `kind` its platform described, as `mutate` will store it, and alone when
-   *  `kind` is null. An address the account has no row at reads a group's
-   *  rule only when `kind` names a group or channel. The routing marker is
-   *  the account's own row's. Null when none is set. */
+   *  account's own direct message's. An address the account holds no
+   *  speaker at reads a group's rule only when `kind` names a group or
+   *  channel. The routing marker is the account's own speaker's. Null when
+   *  none is set. */
   ruleOf(
     channel: string,
     chatId: ChatId,
     kind: ChatDescriptor["kind"] | null,
   ): StoredChatSettings | null {
-    const own = rowByAddress(this.db, channel, chatId);
+    const own = this.speakerAt(this.db, channel, chatId);
     if (own === undefined && !isShared(kind)) return null;
-    const via = this.chats.accountOn(channel);
-    return withRoutingOf(
-      own?.channelSettings ?? null,
-      this.chats.byKey(chatKey(via.platform, chatId), via, isShared(kind))?.replyRule ?? null,
-    );
-  }
-
-  /**
-   * Mark the row of the group or channel `descriptor` names on `channel` with
-   * that kind when its row was stored with none, so it reads as one chat with
-   * the rows of Rome's other accounts in it. Changes no other row.
-   */
-  private classify(exec: DrizzleTx, descriptor: ChatDescriptor, channel: string): void {
-    if (!isShared(descriptor.kind)) return;
-    exec
-      .update(romeSessions)
-      .set({ sourceThreadType: descriptor.kind })
+    if (!isShared(kind) && (own === undefined || this.stored(own).kind !== "group")) {
+      return own ? this.directRuleOf(own) : null;
+    }
+    if (!this.deps.adapters.knownAccountOn(channel)) return own?.channelSettings ?? null;
+    // The group's rule is the newest any of Rome's speakers there holds,
+    // whichever of them set it.
+    const chat = this.chatOf(channel, chatId, "group");
+    if (!chat) return own?.channelSettings ?? null;
+    const held = this.db
+      .select({ settings: romeSessions.channelSettings })
+      .from(romeSessions)
       .where(
         and(
-          eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)),
-          isNull(romeSessions.parentSessionId),
-          isNull(romeSessions.sourceThreadType),
+          eq(romeSessions.chatId, chat.id),
+          isNull(romeSessions.threadId),
+          isNotNull(romeSessions.channelSettings),
         ),
       )
-      .run();
+      .all()
+      .map((row) => row.settings as StoredChatSettings)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    const rule = held[0] ?? null;
+    return withRoutingOf(own?.channelSettings ?? null, rule && withoutRouting(rule));
   }
 
-  /** The platform channel `channel`'s accounts live on. */
+  /** The rule of the direct message or thread speaker `own` stands in: in a
+   *  direct message, the newest its account holds there, as one set at an
+   *  address the account reached it at before its platform placed it at
+   *  another. */
+  private directRuleOf(own: SpeakerRow): StoredChatSettings | null {
+    if (own.threadId !== null || own.chatId === null || own.accountId === null) {
+      return own.channelSettings ?? null;
+    }
+    const held = this.db
+      .select({ settings: romeSessions.channelSettings })
+      .from(romeSessions)
+      .where(
+        and(
+          isChannelConversation,
+          eq(romeSessions.chatId, own.chatId),
+          isNull(romeSessions.threadId),
+          eq(romeSessions.accountId, own.accountId),
+          isNotNull(romeSessions.channelSettings),
+        ),
+      )
+      .all()
+      .map((row) => row.settings as StoredChatSettings)
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return held[0] ?? null;
+  }
+
+  /** The kind platform address `chatId` names by itself on `channel`'s
+   *  platform ({@link kindNamedBy}), or null where it names none or the
+   *  channel knows no account. */
+  namedKind(channel: string, chatId: ChatId): "group" | "dm" | null {
+    const account = this.deps.adapters.knownAccountOn(channel);
+    return account ? kindNamedBy(account.platform, chatId) : null;
+  }
+
+  /** The kind of the chat Rome holds at address `chatId` on `channel`'s
+   *  platform, whose kind is then fixed: the group there, through any of its
+   *  accounts, else the channel's account's direct message with the party
+   *  the address names; else null. An address bound to a direct message
+   *  holds that one, though asked for a group. */
+  heldKind(channel: string, chatId: ChatId): ChatKind | null {
+    if (!this.deps.adapters.knownAccountOn(channel)) return null;
+    for (const kind of ["group", "dm"] as const) {
+      const held = this.deps.chats.byKey(this.keyOf(channel, chatId, kind));
+      if (held) return held.kind;
+    }
+    return null;
+  }
+
+  /** The platform channel `channel`'s account lives on. */
   platformOf(channel: string): string {
-    return this.chats.accountOn(channel).platform;
+    return this.accountOn(channel).platform;
   }
 
-  /** Whether anything was said where session `sessionId` stands: a line in
-   *  its chat and thread, or a row of its own. */
+  /** Whether anything was said where session `sessionId` stands: a message
+   *  in its chat and thread, or a row of its own. */
   hasMessageHistory(sessionId: string): boolean {
     return (
       this.db.all(sql`
@@ -112,11 +340,10 @@ export class ChatSettingsRepository {
 
   /**
    * Set the reply rule of the conversation `descriptor` names, through the
-   * account `channel` speaks as, starting the chat when Rome holds none there
-   * yet, and bind its row to `agentName` unless that is undefined. One SQLite
-   * transaction. Callers serialize by address before entering this method.
-   * `channel` is the name of the channel the conversation belongs to, which a
-   * connection kind's later channels do not share with it.
+   * account `channel` speaks as, starting the chat and the account's speaker
+   * there when Rome holds none yet, and bind the speaker to `agentName`
+   * unless that is undefined. One SQLite transaction. Callers serialize by
+   * address before entering this method.
    */
   mutate(
     descriptor: ChatDescriptor,
@@ -124,9 +351,10 @@ export class ChatSettingsRepository {
     input: {
       settings: StoredChatSettings | null;
       agentName: string | null | undefined;
-      /** False when `descriptor.kind` is only a guess, made for a row stored
-       *  with no type that its platform has never described. The row then
-       *  keeps no type, and joins no group. */
+      /** False when `descriptor.kind` is only a guess: nothing Rome holds
+       *  and nothing its platform listed states it. The rule is then refused,
+       *  since such an address has no speaker yet and its chat cannot be
+       *  started on a guess. */
       kindKnown?: boolean;
     },
   ): void {
@@ -138,52 +366,141 @@ export class ChatSettingsRepository {
       this.mutateThread(descriptor, channel, input);
       return;
     }
-    // Immediate, as the chat repository's writes are: it reads before it
-    // writes, and another connection may commit in between.
+    // Immediate: it reads before it writes, and another connection may
+    // commit in between.
     this.db.transaction(
       (tx) => {
-        // A row stored before its type was known joins its group's other rows
-        // first, so the rule below is written to the whole group.
         const kindKnown = input.kindKnown ?? true;
-        if (kindKnown) this.classify(tx, descriptor, channel);
-        const via = this.chats.accountOn(channel);
-        const key = chatKey(via.platform, descriptor.ref.chatId);
-        const sourceThreadType = !kindKnown
-          ? null
-          : descriptor.kind === "dm"
-            ? "private"
-            : descriptor.kind;
-        this.chats.startIfMissing(
-          key,
-          descriptor.kind === "dm" ? "dm" : "group",
-          via,
-          descriptor.displayName,
-          { threadType: sourceThreadType },
+        const via = this.accountOn(channel);
+        const existing = this.speakerAt(tx, channel, descriptor.ref.chatId);
+        const chat =
+          (existing?.chatId ? this.deps.chats.find(existing.chatId)?.ref : null) ??
+          this.startChat(descriptor, channel, kindKnown);
+        // The session messages through `channel` reach the chat at: its id
+        // and its stored address name the same address, as the session the
+        // first message there opens would.
+        const at = this.reachedAt(channel, chat, descriptor.ref.chatId);
+        // An address standing in for a name the platform has not given is no
+        // name: the first message there names the chat. That covers every
+        // address the chat was reached at, as a direct message's first one,
+        // which its key names, once a send placed it at another.
+        const held = this.deps.chats.find(chat.id);
+        const keyed = held
+          ? addressOf({ platform: chat.platform, externalId: held.key as ChatId })
+          : null;
+        const placeholder = isPlaceholderName(
+          channel,
+          descriptor,
+          keyed === null ? [at] : [at, keyed],
         );
-        this.chats.update(
-          key,
-          (chat) => {
-            chat.rename(descriptor.displayName);
-            chat.setReplyRule(via, input.settings && withoutRouting(input.settings));
-          },
-          via,
+        if (!placeholder) this.deps.chats.rename(chat, descriptor.displayName);
+        const id = channelChatId(channel, at);
+        const name = placeholder ? at : descriptor.displayName;
+        const now = new Date();
+        // Placed as a message placing the speaker would place it.
+        const startSecond = firstPlacementSecond(
+          tx,
+          { chatId: chat.id, threadId: null, accountId: via.id },
+          now,
         );
+        const placedAt = new Date((startSecond - 1) * 1000);
+        tx.insert(romeSessions)
+          .values({
+            id,
+            name,
+            personaId: null,
+            projectName: DEFAULT_WEBCHAT_PROJECT_NAME,
+            projectPath: null,
+            largeModelSelection: null,
+            agentName: null,
+            type: "channel",
+            chatId: chat.id,
+            chatPlatform: chat.platform,
+            accountId: via.id,
+            createdAt: placedAt,
+            activityAt: now,
+            lastSeenActivityAt: null,
+          })
+          .onConflictDoNothing({ target: romeSessions.id })
+          .run();
         tx.update(romeSessions)
           .set({
-            ...(sourceThreadType === null ? {} : { sourceThreadType }),
+            // A placeholder leaves the name the session has.
+            ...(placeholder ? {} : { name }),
+            // The row is this account's speaker in this chat. One stored
+            // before it stood in a chat stands here now, and one left by the
+            // account the channel was paired as before moves here, as the
+            // first message after a re-pairing moves it.
+            createdAt: placedCreatedAt(startSecond),
+            chatId: chat.id,
+            chatPlatform: chat.platform,
+            accountId: via.id,
             // The routing marker is this account's alone, so only its row holds it.
             channelSettings: input.settings,
             ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
           })
-          .where(eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)))
+          .where(eq(romeSessions.id, id))
           .run();
+        // A direct message's rule is its account's there: a speaker the
+        // account stood in it at another address takes it too, so a rule
+        // cleared here is cleared there.
+        if (this.deps.chats.find(chat.id)?.kind === "dm") {
+          tx.update(romeSessions)
+            .set({ channelSettings: input.settings })
+            .where(
+              and(
+                eq(romeSessions.chatId, chat.id),
+                isNull(romeSessions.threadId),
+                eq(romeSessions.accountId, via.id),
+              ),
+            )
+            .run();
+        }
+        // A group's rule is the group's: every other speaker there takes it,
+        // keeping its own routing marker.
+        if (isShared(descriptor.kind)) {
+          const rule = input.settings && withoutRouting(input.settings);
+          const others = tx
+            .select({ id: romeSessions.id, channelSettings: romeSessions.channelSettings })
+            .from(romeSessions)
+            .where(and(eq(romeSessions.chatId, chat.id), isNull(romeSessions.threadId)))
+            .all()
+            .filter((row) => row.id !== id);
+          for (const row of others) {
+            tx.update(romeSessions)
+              .set({ channelSettings: withRoutingOf(row.channelSettings, rule) })
+              .where(eq(romeSessions.id, row.id))
+              .run();
+          }
+        }
       },
       { behavior: "immediate" },
     );
   }
 
-  /** A native thread's row. A thread is no chat of its own, so its row is
-   *  written as it stands until threads have a home in the chat. */
+  /**
+   * The chat at the address `descriptor` names, started as an incoming
+   * message there would start it ({@link startChannelChat}), of the kind
+   * `descriptor` states. Refuses when that kind is only a guess (`kindKnown`
+   * false), since a chat's kind never changes and a wrong one would hold the
+   * session the first message opens.
+   */
+  private startChat(descriptor: ChatDescriptor, channel: string, kindKnown: boolean): ChatRef {
+    const address = descriptor.ref.chatId;
+    if (!kindKnown) {
+      throw new Error(
+        `Rome cannot tell whether the chat at ${address} on ${channel} is a group or a direct message: no message there has reached Rome and its platform has not listed it. Its rule can be set once either happens`,
+      );
+    }
+    return startChannelChat(this.deps, {
+      channel,
+      threadId: address,
+      ...(isPlaceholderName(channel, descriptor) ? {} : { threadName: descriptor.displayName }),
+      threadType: descriptor.kind === "dm" ? "private" : "group",
+    }).chat;
+  }
+
+  /** A native thread's speaker, which stands in its parent's chat. */
   private mutateThread(
     descriptor: ChatDescriptor,
     channel: string,
@@ -193,10 +510,21 @@ export class ChatSettingsRepository {
     },
   ): void {
     this.db.transaction((tx) => {
-      const sourceThreadType = descriptor.kind === "dm" ? "private" : descriptor.kind;
-      const parentSessionId = descriptor.parent
-        ? (rowByAddress(tx, channel, descriptor.parent.chatId)?.id ?? null)
-        : null;
+      const via = this.accountOn(channel);
+      const parent = descriptor.parent
+        ? this.speakerAt(tx, channel, descriptor.parent.chatId)
+        : undefined;
+      const parentSessionId = parent?.id ?? null;
+      // A thread whose parent Rome holds no speaker for stands in no chat. The
+      // legacy chats backfill places it later, by these source columns.
+      const legacy = parent?.chatId
+        ? {}
+        : {
+            sourceChannel: channel,
+            sourceThreadId: descriptor.ref.chatId,
+            sourceThreadName: descriptor.displayName,
+            sourceThreadType: descriptor.kind === "dm" ? "private" : descriptor.kind,
+          };
       const now = new Date();
       tx.insert(romeSessions)
         .values({
@@ -208,12 +536,13 @@ export class ChatSettingsRepository {
           largeModelSelection: null,
           agentName: null,
           type: "channel",
-          sourceChannel: channel,
-          sourceThreadId: descriptor.ref.chatId,
-          sourceThreadName: descriptor.displayName,
-          sourceThreadType,
+          ...legacy,
           channelSettings: null,
           parentSessionId,
+          chatId: parent?.chatId ?? null,
+          chatPlatform: parent?.chatPlatform ?? null,
+          threadId: descriptor.ref.chatId,
+          accountId: via.id,
           createdAt: now,
           activityAt: now,
           lastSeenActivityAt: null,
@@ -221,7 +550,12 @@ export class ChatSettingsRepository {
         .onConflictDoNothing({ target: romeSessions.id })
         .run();
 
-      const current = rowByAddress(tx, channel, descriptor.ref.chatId);
+      // As in `mutate`, the session messages through `channel` reach.
+      const current = tx
+        .select()
+        .from(romeSessions)
+        .where(eq(romeSessions.id, channelChatId(channel, descriptor.ref.chatId)))
+        .get();
       if (!current) {
         throw new Error(`Failed to resolve conversation ${channel}:${descriptor.ref.chatId}`);
       }
@@ -229,10 +563,13 @@ export class ChatSettingsRepository {
       tx.update(romeSessions)
         .set({
           name: descriptor.displayName,
-          sourceChannel: channel,
-          sourceThreadName: descriptor.displayName,
-          sourceThreadType,
+          ...legacy,
           parentSessionId,
+          // As in `mutate`, the row is this account's speaker, in its
+          // parent's chat when Rome holds that parent.
+          ...(parent?.chatId ? { chatId: parent.chatId, chatPlatform: parent.chatPlatform } : {}),
+          threadId: descriptor.ref.chatId,
+          accountId: via.id,
           channelSettings: input.settings,
           ...(input.agentName !== undefined ? { agentName: input.agentName } : {}),
         })
@@ -242,6 +579,53 @@ export class ChatSettingsRepository {
   }
 }
 
+interface StoredLookups {
+  chats: Map<number, Chat | null>;
+  channels: Map<string, string | null>;
+  /** Each account's addresses, by chat key. */
+  addresses: Map<string, Map<string, string>>;
+}
+
+function newLookups(): StoredLookups {
+  return { chats: new Map(), channels: new Map(), addresses: new Map() };
+}
+
 function isShared(kind: ChatDescriptor["kind"] | null): boolean {
   return kind === "group" || kind === "channel";
+}
+
+/**
+ * `rule` without its routing marker. A speaker's routing (`overrides.routing`)
+ * pins the agent of the one of Rome's accounts the speaker is, as its
+ * `agent_name` does, so it is no part of the group's rule.
+ */
+export function withoutRouting(rule: StoredChatSettings): StoredChatSettings {
+  if (rule.overrides.routing === undefined) return rule;
+  const { routing: _routing, ...overrides } = rule.overrides;
+  return { ...rule, overrides };
+}
+
+/** `rule` with the routing marker of `stored`, the settings one speaker
+ *  already holds, since that marker is its account's alone. */
+export function withRoutingOf(
+  stored: StoredChatSettings | null,
+  rule: StoredChatSettings | null,
+): StoredChatSettings | null {
+  const routing = stored?.overrides.routing;
+  if (routing === undefined) return rule;
+  const base = rule ?? { ...stored!, overrides: {} };
+  return { ...base, overrides: { ...base.overrides, routing } };
+}
+
+/** Whether a conversation's name only stands in for one the platform has not
+ *  given: its address, or the `channel:address` name a session opened with no
+ *  name takes, as `backfillChannelConversationName` reads them. */
+function isPlaceholderName(
+  channel: string,
+  descriptor: ChatDescriptor,
+  otherAddresses: readonly string[] = [],
+): boolean {
+  return [descriptor.ref.chatId, ...otherAddresses].some((address) =>
+    [address, `${channel}:${address}`].includes(descriptor.displayName),
+  );
 }

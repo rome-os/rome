@@ -1,1 +1,0 @@
-ALTER TABLE `welcome_to_rome__progress` ADD `ai_connected` integer;

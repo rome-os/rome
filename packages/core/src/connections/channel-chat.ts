@@ -36,7 +36,8 @@ export function startChannelChat(
     : kindNamedBy(deps.adapters.accountOn(input.channel).platform, input.threadId);
   const kind = named ?? (input.threadType === "private" ? "dm" : "group");
   const key = deps.adapters.chatAt(input.channel, parent ?? input.threadId, kind);
-  const chat = deps.chats.start(key, kind, parent ? null : (input.threadName ?? null));
+  const name = parent ? null : (input.threadName ?? null);
+  const chat = deps.chats.start(key, kind, name);
   // Opened at its address, the direct message is kept there, so the other
   // end's first message finds it.
   if (kind === "dm") deps.adapters.openedDirectMessageAt(input.channel, input.threadId, key);

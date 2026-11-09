@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { ChatRepository, chatIdsOfKind, chatIdsOn } from "./chat-repository.js";
 import { MessageRepository } from "./message-repository.js";
 import { placeIn, type ChatKey } from "./place.js";
@@ -30,6 +30,13 @@ describe("ChatRepository", () => {
     expect(first).toMatchObject({ key: "oc_group", kind: "group", name: "Launch" });
     expect(first.ref).toEqual({ platform: "feishu", id: expect.any(Number) });
     expect(again).toEqual(first);
+  });
+
+  it("names a chat started with no name by the first name a later start gives", () => {
+    const unnamed = chats.start(DM, "dm", null);
+    expect(chats.start(DM, "dm", "Alice").name).toBe("Alice");
+    expect(chats.start(DM, "dm", "Bob").name).toBe("Alice");
+    expect(chats.start(DM, "dm", null)).toEqual({ ...unnamed, name: "Alice" });
   });
 
   it("gives the same key on two platforms two chats", () => {

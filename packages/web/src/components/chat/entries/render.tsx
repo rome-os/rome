@@ -5,8 +5,10 @@ import { ChatBubble } from "@/components/chat/ChatBubble";
 import { TranscriptEntry } from "@/components/chat/TranscriptEntry";
 import { ApprovalCard } from "../approval/ApprovalCard";
 import { AgentCallView } from "./AgentCallView";
+import { SystemInputView } from "./SystemInputView";
 import { AiToolsCard } from "./AiToolsCard";
 import { AppComponentView } from "./AppComponentView";
+import { ConnectCard } from "./ConnectCard";
 import { ErrorRunView } from "./ErrorEventView";
 import { QuestionCard } from "./QuestionCard";
 import { RoutineDraftCard } from "./RoutineDraftCard";
@@ -86,6 +88,8 @@ export function renderSingleEntry(
           userPrompt={block.userPrompt}
         />
       );
+    case "system_input":
+      return <SystemInputView key={key} label={block.label} content={block.content} />;
     case "thinking":
       return <ThinkingBlock key={key} content={block.content} />;
     case "tool_use":
@@ -234,6 +238,17 @@ export function renderSingleEntry(
       );
     case "task_chat":
       return <TaskChatCard key={key} chatId={block.chatId} title={block.title} />;
+    case "connect_card":
+      return (
+        <ConnectCard
+          key={key}
+          service={block.service}
+          label={block.label}
+          icon={block.icon}
+          connect={block.connect}
+          chatId={sid}
+        />
+      );
     case "result":
       return block.accounting ? <UsageSummaryView key={key} accounting={block.accounting} /> : null;
     case "error":

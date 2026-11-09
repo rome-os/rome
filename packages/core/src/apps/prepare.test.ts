@@ -1,10 +1,13 @@
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
-import { readFile, rm } from "node:fs/promises";
+import { readFile, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import type { AppCatalog } from "./catalog.js";
+import type { AppManager } from "./manager.js";
 import { packArtifact } from "./packaging/index.js";
 import { buildProductionInstallArgs, prepare } from "./prepare.js";
+import { remixApp } from "./remix.js";
 
 const VALID_ACTION_YAML = [
   "name: ping",
@@ -201,6 +204,156 @@ describe("prepare", () => {
       const entries = await readdir(appInstalledRoot);
       expect(entries.filter((e) => !e.startsWith("."))).toHaveLength(0);
     }
+  });
+
+  /**
+   * Packs an app whose devDependency cannot be resolved: pnpm fails if it
+   * ever sees it. `includeSource` lets the installed root be remixed.
+   */
+  async function packDevDepsFixture(appId: string): Promise<string> {
+    const depRoot = join(sourceRoot, "dist", "runtime-dep");
+    mkdirSync(depRoot, { recursive: true });
+    writeFileSync(
+      join(depRoot, "package.json"),
+      JSON.stringify({ name: "rome-fixture-runtime-dep", version: "1.0.0" }),
+      "utf-8",
+    );
+    writeFileSync(
+      join(sourceRoot, "app.yaml"),
+      [
+        `formatVersion: 1`,
+        `id: ${appId}`,
+        `version: 0.0.1`,
+        `description: test app`,
+        `appRoot: dist`,
+        `includeSource: true`,
+        `actions:`,
+        `  - actions/ping`,
+        ``,
+      ].join("\n"),
+      "utf-8",
+    );
+    writeFileSync(
+      join(sourceRoot, "package.json"),
+      JSON.stringify(
+        {
+          name: appId,
+          version: "0.0.1",
+          packageManager: "pnpm@11.6.0",
+          dependencies: { "rome-fixture-runtime-dep": "file:dist/runtime-dep" },
+          devDependencies: { "rome-fixture-missing-dev-dep": "file:does-not-exist" },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    mkdirSync(join(sourceRoot, "dist", "actions", "ping"), { recursive: true });
+    writeFileSync(
+      join(sourceRoot, "dist", "actions", "ping", "action.yaml"),
+      VALID_ACTION_YAML,
+      "utf-8",
+    );
+    mkdirSync(join(sourceRoot, "src"), { recursive: true });
+    writeFileSync(join(sourceRoot, "src", "index.ts"), "export {};\n", "utf-8");
+    await packArtifact(sourceRoot, packedRoot);
+    return readFile(join(packedRoot, "package.json"), "utf-8");
+  }
+
+  it("hides devDependencies from pnpm but keeps them in the installed package.json for Remix", async () => {
+    const packedPkg = await packDevDepsFixture("prep-dev-deps");
+    const installed = await prepare(
+      { kind: "artifact", appId: "prep-dev-deps", artifactRoot: packedRoot },
+      { installedRoot },
+    );
+
+    expect(existsSync(join(installed.root, "node_modules", "rome-fixture-runtime-dep"))).toBe(true);
+    expect(existsSync(join(installed.root, "node_modules", "rome-fixture-missing-dev-dep"))).toBe(
+      false,
+    );
+    expect(await readFile(join(installed.root, "package.json"), "utf-8")).toBe(packedPkg);
+    expect(existsSync(join(installed.root, "pnpm-lock.yaml"))).toBe(false);
+
+    // Remix copies the installed root; the remix must keep the authored toolchain.
+    await symlink(installed.hash, join(installedRoot, "prep-dev-deps", "active"));
+    const entry = {
+      source: {
+        mode: "appstore" as const,
+        listingId: "@alice/prep-dev-deps",
+        version: "0.0.1",
+        contentHash: installed.hash,
+      },
+      enabled: true,
+      firstParty: false,
+      state: "installed" as const,
+      installedHash: installed.hash,
+      installedVersion: "0.0.1",
+      lastError: null,
+      updatedAt: new Date(0).toISOString(),
+    };
+    const remix = await remixApp(
+      { appId: "ray-prep-dev-deps", name: "@ray/prep-dev-deps", from: { appId: "prep-dev-deps" } },
+      {
+        appManager: { readLockfileEntry: async () => entry } as unknown as AppManager,
+        appCatalog: { get: () => null } as unknown as AppCatalog,
+        bundleFetcher: async () => {
+          throw new Error("remix must copy the installed root");
+        },
+        installedRoot,
+        authoringRoot: join(workDir, "authoring"),
+      },
+    );
+    const remixPkg = JSON.parse(await readFile(join(remix.rootPath, "package.json"), "utf-8"));
+    expect(remixPkg.devDependencies).toEqual({
+      "rome-fixture-missing-dev-dep": "file:does-not-exist",
+    });
+  });
+
+  it("restores an artifact's own lockfile after installing prod deps", async () => {
+    await packDevDepsFixture("prep-own-lock");
+    const lockfile = [
+      "lockfileVersion: '9.0'",
+      "",
+      "settings:",
+      "  autoInstallPeers: true",
+      "  excludeLinksFromLockfile: false",
+      "",
+      "importers:",
+      "",
+      "  .:",
+      "    dependencies:",
+      "      rome-fixture-runtime-dep:",
+      "        specifier: file:dist/runtime-dep",
+      "        version: file:dist/runtime-dep",
+      "    devDependencies:",
+      "      rome-fixture-missing-dev-dep:",
+      "        specifier: file:does-not-exist",
+      "        version: file:does-not-exist",
+      "",
+      "packages:",
+      "",
+      "  rome-fixture-missing-dev-dep@file:does-not-exist:",
+      "    resolution: {directory: does-not-exist, type: directory}",
+      "",
+      "  rome-fixture-runtime-dep@file:dist/runtime-dep:",
+      "    resolution: {directory: dist/runtime-dep, type: directory}",
+      "",
+      "snapshots:",
+      "",
+      "  rome-fixture-missing-dev-dep@file:does-not-exist: {}",
+      "",
+      "  rome-fixture-runtime-dep@file:dist/runtime-dep: {}",
+      "",
+    ].join("\n");
+    writeFileSync(join(packedRoot, "pnpm-lock.yaml"), lockfile, "utf-8");
+
+    const installed = await prepare(
+      { kind: "artifact", appId: "prep-own-lock", artifactRoot: packedRoot },
+      { installedRoot },
+    );
+
+    expect(existsSync(join(installed.root, "node_modules", "rome-fixture-runtime-dep"))).toBe(true);
+    expect(await readFile(join(installed.root, "pnpm-lock.yaml"), "utf-8")).toBe(lockfile);
   });
 
   it("honors app-local allowBuilds approvals during the prod deps reinstall", async () => {

@@ -1,13 +1,24 @@
+import { romeToolPorts } from "../core/rome-tool-ports.js";
+import { createLogger } from "../logger.js";
+import { sessionOpeningFor } from "../core/session-opening.js";
+import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
+import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
-import { writeFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
-import { dirname, resolve } from "node:path";
-import Database from "better-sqlite3";
-import { drizzle } from "drizzle-orm/better-sqlite3";
-import { migrate } from "drizzle-orm/better-sqlite3/migrator";
+import {
+  createActionEngineRepos,
+  createTestDb,
+  kindChannelOf,
+  testAccountLinkOf,
+  type TestDb,
+} from "./db.js";
 import * as schema from "../db/schema.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { AgentEvent, AgentConfig, OutgoingMessage } from "../types.js";
+import { givenGrant } from "../connections/connection.js";
+import type { GrantValue } from "../connections/grant.js";
+import type { Credential } from "../connections/types.js";
+import type { AgentEvent, OutgoingMessage } from "../types.js";
+import type { Agent, AgentDefinition } from "../agent/index.js";
 import type { AgentRunnerInterface, RunParams } from "../core/types.js";
 import type {
   ModelProvider,
@@ -16,20 +27,29 @@ import type {
   ModelSessionParams,
 } from "../core/agent-runner.js";
 import { AgentRunner, createSessionFromRun } from "../core/agent-runner.js";
-import { AgentLoader } from "../core/agent-loader.js";
-import { SkillCatalog } from "../core/skill-catalog.js";
-import { PromptBuilder } from "../core/prompt-builder.js";
-import { createAIToolState } from "../core/ai-tool-state.js";
-import type { CodexAccountService } from "../core/codex/account-service.js";
-import { createModelResolver } from "../core/model-resolver.js";
+import { AgentLoader } from "../agent/index.js";
+import { agentsByLegacyName } from "../apps/agents-by-legacy-name.js";
+import { SkillLoader } from "../agent/index.js";
+import { createTestSystemPrompts } from "./system-prompts.js";
+import {
+  createModelAccounts,
+  ClaudeAccount,
+  type ModelAccount,
+  type CodexLogins,
+  romeCreditsProxyRoutes,
+} from "../agent/index.js";
+import { createModelResolver } from "../agent/index.js";
 import { normalizeConversationTitle } from "../core/conversation-title.js";
-import { createAgentSessionManager } from "../core/agent-session.js";
-import { createActiveSubagentRegistry } from "../core/active-subagent-registry.js";
+import { createAgentSessionManager } from "../agent/index.js";
 import { createAgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
-import { createSubagentExecutionService } from "../core/subagent-execution.js";
-import { CapabilityDiscovery } from "../core/capability-discovery.js";
-import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
-import { SessionManager } from "../core/session-manager.js";
+import {
+  subagentLiveTurns,
+  subagentSessions,
+  subagentTurnLog,
+} from "../core/subagent-call-ports.js";
+import { createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
+import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
 import { ApprovalHandler } from "../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../actions/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
@@ -37,6 +57,8 @@ import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
 import { PublicAccessState } from "../lib/public-access-state.js";
 import { DashboardAccessState } from "../lib/dashboard-access-state.js";
+import { DashboardAccessStore } from "../lib/dashboard-access-store.js";
+import { VisitorAllowListSync } from "../lib/visitor-allowlist-sync.js";
 import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.js";
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
 import { EventBus } from "../events/event-bus.js";
@@ -51,7 +73,6 @@ import type {
 } from "@rome-os/app-runtime";
 import type { Talker } from "../connections/types.js";
 import type { ConnectionRegistry } from "../connections/registry.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
 import { AppConnectionAccessRepository } from "../db/repositories/app-connection-access.js";
 import { PeopleRepository } from "../db/repositories/people.js";
 import { GuardianLinkCodes } from "../people/guardian-link-code.js";
@@ -63,8 +84,6 @@ import { WhatsAppAccounts } from "../chats/accounts/whatsapp.js";
 import { createAccountNames } from "../chats/accounts/account-names.js";
 import type { Accounts } from "../chats/accounts/accounts.js";
 import type { Channel, Channels } from "../chats/connected-accounts/connected-account.js";
-import { ChatEvents } from "../chats/events.js";
-import { StoredMessages } from "../chats/message-repository.js";
 import type {
   ChannelOf,
   ConnectionPortsDeps,
@@ -83,6 +102,7 @@ import { AppKeyInjector } from "../app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { chatsWiring } from "../chats-wiring.js";
+import { openChannelChat, type OpenSpeakerDeps } from "../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { ActionExecutionsRepository } from "../db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "../db/repositories/execution-journal.js";
@@ -100,7 +120,6 @@ import { appsRoutes } from "../api/routes/apps.js";
 import { migrateAppByMetadata } from "../db/migrate.js";
 import { createAppDomain } from "../apps/index.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
-import { ChatRepository } from "../chats/chat-repository.js";
 import type { BundleFetcher } from "../apps/installer.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { AppManager } from "../apps/manager.js";
@@ -121,54 +140,27 @@ import { mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-// createTestDb — in-memory SQLite with real Drizzle migrations applied
+export * from "./db.js";
 
-export interface TestDb {
-  db: DrizzleDb;
-  close: () => void;
+/** Chats over `db` as Rome wires it, reading the channel records `db`
+ *  holds. Every channel is active: one its record names no account for is
+ *  the account named like it, so tests need not record one per channel. */
+export function testChatsWiring(db: DrizzleDb) {
+  const records = new ChannelRecordsRepository(db, testAccountLinkOf);
+  return chatsWiring(db, {
+    accountOf: (channel) =>
+      records.accountOf(channel) ?? { platform: records.platformOfChannel(channel), id: channel },
+    platformOfChannel: (name) => records.platformOfChannel(name),
+    channelsOn: (platform) => [...new Set([...records.namesOn(platform), platform])],
+  });
 }
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const SYSTEM_MIGRATIONS_DIR = resolve(__dirname, "../../drizzle/system");
-
-// Running the migrations costs ~11ms against ~0.15ms to deserialize their
-// result, and a core run opens well over a thousand test databases.
-let migratedImage: Buffer | undefined;
-
-function migratedSystemImage(): Buffer {
-  if (!migratedImage) {
-    const sqlite = new Database(":memory:");
-    migrate(drizzle(sqlite, { schema }), {
-      migrationsFolder: SYSTEM_MIGRATIONS_DIR,
-      migrationsTable: "__drizzle_migrations_system",
-    });
-    migratedImage = sqlite.serialize();
-    sqlite.close();
-  }
-  return migratedImage;
+/** What opens a speaker over `db`: {@link testChatsWiring}'s chats,
+ *  adapters and speakers. */
+export function testOpenSpeakerDeps(db: DrizzleDb): OpenSpeakerDeps {
+  const wired = testChatsWiring(db);
+  return { chats: wired.chats, adapters: wired.adapters, speakers: wired.speakers };
 }
-
-/** The kinds of link the built-in descriptors declare, for tests that build a
- *  channel record without a registry. `connections/integrations/index.test.ts`
- *  keeps it in step with the descriptors. */
-export const BUILTIN_ACCOUNT_LINKS: Readonly<Record<string, AccountLink>> = {
-  feishu: "own_account",
-  telegram: "own_account",
-  discord: "own_account",
-  slack_bot: "own_account",
-  telegram_user: "delegate",
-};
-
-/** {@link BUILTIN_ACCOUNT_LINKS} as a lookup. */
-export const testAccountLinkOf: AccountLinkOf = (kind) => BUILTIN_ACCOUNT_LINKS[kind] ?? null;
-
-/** The chats by key over `db`, reading the channel records `db` holds. */
-export function testChatRepository(db: DrizzleDb): ChatRepository {
-  return new ChatRepository(db, new ChannelRecordsRepository(db, testAccountLinkOf));
-}
-
-/** Maps every channel to itself. Valid only where no connection kind has a later channel. */
-export const identityConnectionKindOf: ConnectionKindOfChannel = (channel) => channel;
 
 /** Maps a channel to its connection kind through `db`'s channel records, as Rome does. */
 export function recordedConnectionKindOf(db: DrizzleDb): ConnectionKindOfChannel {
@@ -176,79 +168,10 @@ export function recordedConnectionKindOf(db: DrizzleDb): ConnectionKindOfChannel
   return (channel) => records.connectionKindOf(channel);
 }
 
-/** Opens a private in-memory database at the latest system schema. Each call
- *  starts from the same freshly migrated state, unaffected by writes to any
- *  other instance. */
-export function createTestDb(): TestDb {
-  const sqlite = new Database(migratedSystemImage());
-  sqlite.pragma("journal_mode = WAL");
-  sqlite.pragma("foreign_keys = ON");
-
-  const db = drizzle(sqlite, { schema }) as unknown as DrizzleDb;
-
-  return {
-    db,
-    close: () => sqlite.close(),
-  };
-}
-
-/** Writes a database at the latest system schema to `path`, and returns a
- *  way to open further connections to it, as Rome's main process and its
- *  action workers each hold one. */
-export function createTestDbFile(path: string): () => TestDb & { sqlite: Database.Database } {
-  writeFileSync(path, migratedSystemImage());
-  return () => {
-    const sqlite = new Database(path);
-    sqlite.pragma("journal_mode = WAL");
-    sqlite.pragma("foreign_keys = ON");
-    return {
-      db: drizzle(sqlite, { schema }) as unknown as DrizzleDb,
-      sqlite,
-      close: () => sqlite.close(),
-    };
-  };
-}
-
-/** The repositories an `ActionEngine` records into, backed by `db` or a fresh test DB. */
-export function createActionEngineRepos(
-  db: DrizzleDb = createTestDb().db,
-): ActionEngineRepositories {
-  return {
-    executions: new ActionExecutionsRepository(db),
-    approvals: new ApprovalsRepository(db),
-    journal: new ExecutionJournalRepository(db),
-  };
-}
-
-// countingDb — a database that records how many passes are made over it
-
-/**
- * `db` with every read counted, for a test that asserts how many times a store
- * was walked rather than what it answered.
- *
- * Only `all` is counted, which is the one verb a read-only SQL adapter uses.
- * Everything else — the inserts a test seeds with, the schema it seeds into —
- * passes through untouched and uncounted.
- */
-export function countingDb(db: DrizzleDb): { db: DrizzleDb; passes: () => number } {
-  let passes = 0;
-  const counted = new Proxy(db, {
-    get(target, property, receiver) {
-      if (property !== "all") return Reflect.get(target, property, receiver);
-      return (...args: Parameters<DrizzleDb["all"]>) => {
-        passes += 1;
-        return target.all(...args);
-      };
-    },
-  });
-  return { db: counted as DrizzleDb, passes: () => passes };
-}
-
 // MockModelProvider — returns predetermined AgentEvent sequences
 
 export class MockModelProvider implements ModelProvider {
   readonly id = "mock" as const;
-  readonly displayName = "Mock";
   builtinTools: ReadonlySet<string> = new Set();
   private responses: AgentEvent[][];
   private callIndex = 0;
@@ -326,10 +249,6 @@ export class FakeTransport {
     return message;
   }
 }
-
-/** Every Connection backs the channel named after its connection kind, as when each
- *  connection kind holds one Connection. */
-export const kindChannelOf: ChannelOf = (connection) => connection.connectionKind;
 
 /** What a test Connection's live talker offers: sending and its features. */
 export type TestTalker = Omit<Talker, "start" | "stop">;
@@ -483,9 +402,12 @@ export function buildMessage(overrides: Partial<ChannelMessage> = {}): ChannelMe
   };
 }
 
-// buildAgentConfig — AgentConfig factory with defaults
+// buildAgentConfig — an agent file's contents, with defaults
 
-export function buildAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig {
+/** What an agent's file holds: its definition and its local name. */
+export type TestAgentFile = AgentDefinition & { name: string };
+
+export function buildAgentConfig(overrides?: Partial<TestAgentFile>): TestAgentFile {
   return {
     name: "test-agent",
     description: "A test agent",
@@ -496,6 +418,15 @@ export function buildAgentConfig(overrides?: Partial<AgentConfig>): AgentConfig 
     permissionMode: "default",
     ...overrides,
   };
+}
+
+/** An installed core agent, for tests that stub the catalog. Its local name is the id's last part unless `name` says otherwise. */
+export function buildAgent(id: string, overrides?: Partial<TestAgentFile>): Agent {
+  const { name: localName, ...definition } = buildAgentConfig({
+    name: id.split(":").pop() ?? id,
+    ...overrides,
+  });
+  return { name: id, localName, ownerType: "core", ownerId: "core", definition };
 }
 
 // buildTestDeps — wires real repos from a test DB plus mock channels
@@ -513,7 +444,7 @@ export interface TestDeps extends ApiDeps {
    *  the list against a different database handle. */
   whatsAppAccounts: WhatsAppAccounts;
   linkedInAccounts: LinkedInAccounts;
-  sessionsRepo: SessionsRepository;
+  sessionRepository: SessionRepository;
   policiesRepo: PoliciesRepository;
   executionJournalRepo: ExecutionJournalRepository;
   /** The platform end of each channel `connections` backs, by channel name. */
@@ -584,7 +515,6 @@ export async function buildTestDeps(
     transports.set(name, new FakeTransport(name));
   }
 
-  const sessionsRepo = new SessionsRepository(db);
   const appConnectionAccessRepo = new AppConnectionAccessRepository(db);
   const peopleRepo = new PeopleRepository(db);
   const channelRecords = new ChannelRecordsRepository(db, testAccountLinkOf);
@@ -630,8 +560,11 @@ export async function buildTestDeps(
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
-    chatRepo: new ChatRepository(db, channelRecords),
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
+    speakers: {
+      chats: chatsWired.chats,
+      adapters: chatsWired.adapters,
+      speakers: chatsWired.speakers,
+    },
     guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
@@ -650,8 +583,8 @@ export async function buildTestDeps(
 
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const actionLoader = new ActionLoader(artifactIdentity);
-  const agentLoader = new AgentLoader(artifactIdentity);
-  const skillCatalog = new SkillCatalog(artifactIdentity);
+  const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
+  const skillCatalog = new SkillLoader(artifactIdentity);
   const romeCloudListings = createRomeCloudListingClient();
   const appDomainRoot = join(tmpdir(), `rome-test-deps-${process.pid}-${++testDepsSeq}`);
   const { catalog: appCatalog, manager: appManager } = createAppDomain({
@@ -668,17 +601,22 @@ export async function buildTestDeps(
   // before startApi. Tests that exercise agent turns load fixture agents
   // explicitly (src/test/fixtures/agents/); a test that hits the default agent
   // path without doing so fails loudly with `Agent "main" not found`.
-  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
-  const promptBuilder = new PromptBuilder(appCatalog);
+  const sessionRepository = new DrizzleSessionRepository(db, artifactIdentity);
+  const systemPrompts = createTestSystemPrompts({ apps: appCatalog });
   const codexAccountChangedListeners = new Set<() => void>();
-  const codexAccountService: CodexAccountService = {
-    async getStatus() {
-      return { loggedIn: true, authMode: "chatgpt", planType: "plus", accountType: "plus" };
+  const codexAccountService: ModelAccount & CodexLogins = {
+    async report() {
+      return {
+        state: "available" as const,
+        account: {
+          loggedIn: true,
+          authMode: "chatgpt" as const,
+          planType: "plus" as const,
+          accountType: "plus",
+        },
+      };
     },
-    async getUsage() {
-      return null;
-    },
-    getLoginState() {
+    authorizationState() {
       return {
         running: false,
         mode: null,
@@ -687,19 +625,21 @@ export async function buildTestDeps(
         lastError: null,
       };
     },
-    async startBrowserLogin() {
-      return { loginId: "test-browser-login", authUrl: "https://auth.openai.com/test" };
+    async startBrowserAuthorization() {
+      return { authorizationId: "test-browser-login", authUrl: "https://auth.openai.com/test" };
     },
-    async startDeviceLogin() {
+    async startDeviceAuthorization() {
       return {
-        loginId: "test-device-login",
+        authorizationId: "test-device-login",
         userCode: "TEST-CODE",
         verificationUrl: "https://auth.openai.com/codex/device",
       };
     },
-    async cancelLogin() {},
-    async logout() {},
-    onAccountChanged(listener) {
+    async cancelAuthorization() {},
+    async revoke() {},
+    login: () => ({ kind: "subscription" }),
+    useLogin() {},
+    onChanged(listener) {
       codexAccountChangedListeners.add(listener);
       return () => codexAccountChangedListeners.delete(listener);
     },
@@ -707,45 +647,75 @@ export async function buildTestDeps(
       codexAccountChangedListeners.clear();
     },
   };
-  const aiToolState = createAIToolState({
-    settingsRepo,
-    probes: {
-      codexStatus: () => codexAccountService.getStatus(),
-      codexUsage: () => codexAccountService.getUsage(),
-    },
+  // The real adapter: the dashboard route tests put a fake `claude` binary on
+  // PATH and mock the revoked marker, and read status through it.
+  const claudeAccount = new ClaudeAccount({ settingsRepo });
+  const modelAccounts = createModelAccounts({
+    accounts: { openai: codexAccountService, anthropic: claudeAccount },
     startRefresh: false,
     refreshIntervalMs: null,
   });
   const modelResolver = createModelResolver({
     providers: [new MockModelProvider()],
-    aiToolState,
+    accounts: modelAccounts,
   });
-  const activeSubagentRegistry = createActiveSubagentRegistry();
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
-  const subagentExecutionService = createSubagentExecutionService({
-    webchatRepo,
-    activeRegistry: activeSubagentRegistry,
-    turnStreams: agentTurnStreamRegistry,
+  const subagentCalls = createSubagentCalls({
+    dashboard: new WebChatDashboardSessions(webchatRepo),
+    turnLog: subagentTurnLog(webchatRepo),
+    liveTurns: subagentLiveTurns(agentTurnStreamRegistry),
   });
   const agentSessionManager = createAgentSessionManager({
     agentLoader,
-    sessionManager,
-    sessionsRepo,
-    promptBuilder,
-    actionRegistry,
+    sessionRepository,
+    systemPrompts,
     modelResolver,
-    actionEngine,
     skillCatalog,
-    capabilityDiscovery: new CapabilityDiscovery(),
-    lifecycleDispatcher: createAgentLifecycleDispatcher(),
-    channelSurface: testChannelSurface,
-    subagentExecutionService,
-    activeSubagentRegistry,
+    networkMcpServers: () => ({}),
+    turnLifecycle: new TurnListeners(new AppTurnHooks()),
+    readAnswerShape,
+    sessionTracing: romeSessionTracing,
+    turnUsage: new TurnUsageReporter(),
+    folders: agentFolders(),
+    log: createLogger("agent-session"),
+    subagentCalls,
+    subagentSessions: (manager, parentLink, inherited) =>
+      subagentSessions(manager, parentLink, webchatRepo, inherited),
+    ...romeToolPorts({
+      actionRegistry,
+      actionEngine,
+    }),
   });
-  const agentRunner = new AgentRunner(agentSessionManager, agentLoader);
+  const agentRunner = new AgentRunner(
+    agentSessionManager,
+    agentLoader,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    sessionOpeningFor({ channelSurface: testChannelSurface }),
+  );
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),
+    // Opened as production opens an app's chat, so the session stands in
+    // Chats as the speaker of the channel's account.
+    chats: {
+      ensureChannelChat: (input) =>
+        openChannelChat(
+          {
+            webchatRepo,
+            speakers: {
+              chats: chatsWired.chats,
+              adapters: chatsWired.adapters,
+              speakers: chatsWired.speakers,
+            },
+          },
+          input,
+        ),
+    },
+    replies: chatsWired.replies,
   });
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,
@@ -777,6 +747,12 @@ export async function buildTestDeps(
   await publicAccessState.load(db);
   const dashboardAccessState = new DashboardAccessState();
   await dashboardAccessState.load(db);
+  // Not linked, so a test that saves the allow-list never reaches the network.
+  const dashboardAccessStore = new DashboardAccessStore(settingsRepo);
+  const visitorAllowListSync = new VisitorAllowListSync({
+    getEnrollmentId: () => null,
+    onLinkChanged: () => () => {},
+  });
 
   const ogImageStore = createOgImageStore(mkdtempSync(join(tmpdir(), "rome-og-test-")));
   const channelsService = createChannelsService({
@@ -793,7 +769,7 @@ export async function buildTestDeps(
     actionLoader,
     db,
     appConnectionAccessRepo,
-    sessionsRepo,
+    sessionRepository,
     peopleRepo,
     guardianLinkCodes: new GuardianLinkCodes(),
     whatsAppStoreRepo,
@@ -806,7 +782,6 @@ export async function buildTestDeps(
     sendersOn: (platform: string) => channelRecords.sendersOn(platform),
     // The same account Chats reads each test channel as.
     accountOf,
-    transcript: "chats",
     accountNames,
     assistants: options.assistants ?? { connected: () => false, list: async () => [] },
     sentinelLogRepo,
@@ -843,23 +818,28 @@ export async function buildTestDeps(
     appStore,
     actionRegistry,
     agentLoader,
+    agentsByName: () => agentsByLegacyName(agentLoader.list(), artifactIdentity.legacyBindings),
     accountListening: { changed: () => {} },
     skillCatalog,
     appsRoot: join(appDomainRoot, "apps"),
-    sessionManager,
     agentSessionManager,
+    sessionOpeningFor: sessionOpeningFor({ channelSurface: testChannelSurface }),
     conversationTitleGenerator: {
       async generate(firstMessage) {
         return normalizeConversationTitle(firstMessage) ?? "New Chat";
       },
     },
     agentRunner,
-    activeSubagentRegistry,
+    subagentCalls,
     agentTurnStreamRegistry,
-    aiToolState,
+    modelAccounts,
     codexAccountService,
+    claudeAccount,
+    romeCreditsProxy: romeCreditsProxyRoutes("127.0.0.1"),
     publicAccessState,
     dashboardAccessState,
+    dashboardAccessStore,
+    visitorAllowListSync,
     relayDrainer: new RelayDrainer([], async () => ({ status: 200 })),
     nodeDevices: {
       start: async () => {},
@@ -1102,7 +1082,7 @@ export interface AppLifecycleHarness {
   actionRegistry: ActionRegistryImpl;
   actionLoader: ActionLoader;
   agentLoader: AgentLoader;
-  skillCatalog: SkillCatalog;
+  skillCatalog: SkillLoader;
   fetch(path: string, init?: RequestInit): Promise<Response>;
   hasAction(name: string): boolean;
   /** Bypasses the ActionEngine subprocess fork — tests don't need a worker entry. */
@@ -1124,7 +1104,7 @@ interface HarnessRuntime {
   actionRegistry: ActionRegistryImpl;
   actionLoader: ActionLoader;
   agentLoader: AgentLoader;
-  skillCatalog: SkillCatalog;
+  skillCatalog: SkillLoader;
   router: Hono;
 }
 
@@ -1150,8 +1130,8 @@ export async function createAppLifecycleHarness(
     });
     const actionRegistry = new ActionRegistryImpl(artifactIdentity);
     const actionLoader = new ActionLoader(artifactIdentity);
-    const agentLoader = new AgentLoader(artifactIdentity);
-    const skillCatalog = new SkillCatalog(artifactIdentity);
+    const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
+    const skillCatalog = new SkillLoader(artifactIdentity);
 
     appCatalog.subscribe(async function agentLoaderSubscriber() {
       try {
@@ -1196,8 +1176,7 @@ export async function createAppLifecycleHarness(
     const appRuntimeRepositories = createAppRuntimeRepositories({
       settingsRepo,
       webchatRepo,
-      chatRepo: testChatRepository(db),
-      chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
+      speakers: testOpenSpeakerDeps(db),
     });
     const appActionDeps = { actionRegistry, actionEngine, db };
     appCatalog.subscribe(async function appActionsSubscriber(event: CatalogEvent) {
@@ -1345,4 +1324,16 @@ export function ownedByGuardian(
       .run();
     peopleRepo.linkStated(account, guardianId);
   }
+}
+
+/** A grant, as a fix or a connect leaves it, that reaches the account
+ *  `accountId` on `platform`. */
+export function grantReaching(platform: string, accountId: string): GrantValue {
+  return givenGrant(
+    new Date("2026-01-01T00:00:00.000Z"),
+    { material: { token: "test" } } as unknown as Credential,
+    "test-epoch",
+    undefined,
+    { platform, accountId },
+  );
 }

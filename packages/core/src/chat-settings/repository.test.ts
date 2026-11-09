@@ -4,7 +4,7 @@ import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { chatKey, placeIn } from "../chats/storage/place.js";
 import { romeSessions } from "../db/schema/system.js";
-import { createTestDb, testChatRepository, type TestDb } from "../test/helpers.js";
+import { createTestDb, testChatsWiring, type TestDb } from "../test/helpers.js";
 import { ChatSettingsRepository } from "./repository.js";
 
 describe("ChatSettingsRepository.hasMessageHistory", () => {
@@ -44,7 +44,7 @@ describe("ChatSettingsRepository.hasMessageHistory", () => {
     });
     session("channel:telegram:7", said.ref.id);
     session("channel:telegram:8", quiet.ref.id);
-    const repository = new ChatSettingsRepository(testDb.db, testChatRepository(testDb.db));
+    const repository = new ChatSettingsRepository(testDb.db, testChatsWiring(testDb.db));
 
     expect(repository.hasMessageHistory("channel:telegram:7")).toBe(true);
     expect(repository.hasMessageHistory("channel:telegram:8")).toBe(false);

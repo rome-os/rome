@@ -140,7 +140,7 @@ describe("SystemUpgradeSection", () => {
     expect(await screen.findByText(/Unknown — source build or pre-versioned image/)).toBeTruthy();
     // Core rejects both upgrade verbs on an unversioned build, so the
     // dashboard must not offer the check at all.
-    expect(screen.getByText(/upgrades aren't supported/)).toBeTruthy();
+    expect(screen.getByText(/can't be upgraded here/)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Check for updates" })).toBeNull();
   });
 

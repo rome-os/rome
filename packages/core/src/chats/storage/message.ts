@@ -7,6 +7,7 @@
 import type { Account, Attachment } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import type { Place } from "./place.js";
+import { widgetText } from "../widget-text.js";
 
 /** Every message goes one way: to Rome, or from Rome. */
 export type Direction = "toRome" | "fromRome";
@@ -50,7 +51,7 @@ export interface InboundMessage {
   readonly at: Date;
 }
 
-/** A message for {@link MessageRepository.record}. */
+/** A message for `MessageRepository.record` (message-repository.ts). */
 export type Message = InboundMessage;
 
 /** A message once it is on record: the id Chats gave it, and the id of the
@@ -132,13 +133,26 @@ export function plainText(body: Body): string {
   return [text, lines.join("\n")].filter(Boolean).join("\n\n").trim();
 }
 
-/** The plain text of composed `parts`: their text parts, one per line. A
- *  turn's narration on its way to the answer (a commentary part) is no line
- *  of the chat. */
+/** `parts` as they go on record beside `text`: text that says anything in
+ *  place of the text parts, as a platform shows it, ahead of every other part.
+ *  Without such text, the parts as given. */
+export function partsWithText(
+  text: string | undefined,
+  parts: readonly MessagePart[],
+): MessagePart[] {
+  if (!text?.trim()) return [...parts];
+  return [{ type: "text", content: text }, ...parts.filter((part) => part.type !== "text")];
+}
+
+/** The plain text of composed `parts`: their text parts and each widget's
+ *  own plain-text line, one per line. A turn's narration on its way to the
+ *  answer (a commentary part) is no line of the chat. */
 export function partsText(parts: readonly MessagePart[]): string {
   return parts
-    .flatMap((part) =>
-      part.type === "text" && part.turnPhase !== "commentary" ? [part.content] : [],
-    )
+    .flatMap((part) => {
+      if (part.type === "text") return part.turnPhase === "commentary" ? [] : [part.content];
+      const line = widgetText(part);
+      return line === undefined ? [] : [line];
+    })
     .join("\n");
 }

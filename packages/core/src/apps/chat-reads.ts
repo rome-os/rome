@@ -3,9 +3,8 @@
 // docs/domains/chats.md and docs/domains/participation.md.
 //
 // Apps read these instead of querying Rome's tables, so a change to how
-// Chats stores a line changes this file and not an app. Nothing hands them
-// to apps yet: the Chats switch adds them to the app repositories and moves
-// Dream, Briefing and Showcases onto them.
+// Chats stores a line changes this file and not an app. The app
+// repositories hand them to every app.
 
 import type { ChatLine, ChatReads, RecentChat, SessionTrace } from "@rome-os/app-runtime/chats";
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
@@ -103,7 +102,8 @@ function recentChats(
           [...new Set(where.accountKinds.map((kind) => platformOf(kind)))],
         )}))))`;
   const rows = db.all<RecentRow>(sql`
-    SELECT s.id, s.name, s.chat_id, c.platform, s.source_thread_name AS thread_name,
+    SELECT s.id, s.name, s.chat_id, c.platform,
+      CASE WHEN s.thread_id IS NOT NULL THEN s.name ELSE c.name END AS thread_name,
       s.owner_key, s.archived_at IS NOT NULL AS archived,
       ch.id AS channel, ch.connection_kind, ${ANSWERING_AGENT} AS agent_name,
       s.project_name, s.project_path, s.created_at
@@ -111,7 +111,7 @@ function recentChats(
     JOIN ${CHATS} c ON c.id = s.chat_id
     LEFT JOIN channels ch ON ch.platform = c.platform
       AND coalesce(ch.platform_account_id, ch.id) = s.account_id
-    LEFT JOIN connected_accounts ca ON ca.connection_id = ch.connection_id
+    LEFT JOIN connected_accounts ca ON ca.platform = c.platform AND ca.account_id = s.account_id
     JOIN ${CHAT_MESSAGES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
     WHERE ${scope} AND m.said_at >= max(${cutoff}, s.created_at)
     GROUP BY s.id

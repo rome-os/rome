@@ -1,3 +1,9 @@
+import { romeToolPorts } from "../../core/rome-tool-ports.js";
+import { createLogger } from "../../logger.js";
+import { sessionOpeningFor } from "../../core/session-opening.js";
+import { ROME_AGENT_TRAITS } from "../../concierge/agent-traits.js";
+import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../../agent/index.js";
+import { agentFolders } from "../../paths.js";
 import { mkdtempSync } from "node:fs";
 import { mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -10,6 +16,7 @@ import type { Tracer } from "@opentelemetry/api";
 import {
   createTestDb,
   buildAgentConfig,
+  type TestAgentFile,
   channelNamed,
   createTestConnections,
   noAccounts,
@@ -22,7 +29,6 @@ import { channelList } from "../../chats/connected-accounts/connected-account-li
 import { FakeModel } from "./fake-model.js";
 import { FakeChannelEndpoint } from "./fake-channel.js";
 import type { DrizzleDb } from "../../db/index.js";
-import { SessionsRepository } from "../../db/repositories/sessions.js";
 import { ApprovalsRepository } from "../../db/repositories/approvals.js";
 import { ExecutionJournalRepository } from "../../db/repositories/execution-journal.js";
 import { ActionExecutionsRepository } from "../../db/repositories/action-executions.js";
@@ -33,18 +39,21 @@ import { ActionRegistryImpl } from "../../actions/registry.js";
 import { ActionEngine, type ApprovalCreatedEvent } from "../../actions/engine.js";
 import { ApprovalHandler } from "../../actions/approval-handler.js";
 import { createBackendTurnRunner } from "../../actions/backend-turn.js";
+import { chatsWiring } from "../../chats-wiring.js";
+import { openChannelChat } from "../../connections/open-chat.js";
+import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import type { Action } from "../../actions/types.js";
-import { AgentLoader } from "../../core/agent-loader.js";
-import { SessionManager } from "../../core/session-manager.js";
-import { PromptBuilder } from "../../core/prompt-builder.js";
-import { createModelResolver } from "../../core/model-resolver.js";
-import { createAgentSessionManager } from "../../core/agent-session.js";
-import { createAgentLifecycleDispatcher } from "../../core/agent-lifecycle.js";
-import { CapabilityDiscovery } from "../../core/capability-discovery.js";
-import { SkillCatalog } from "../../core/skill-catalog.js";
+import { AgentLoader } from "../../agent/index.js";
+import { DrizzleSessionRepository, type SessionRepository } from "../../agent/index.js";
+import { createTestSystemPrompts } from "../system-prompts.js";
+import { createModelResolver } from "../../agent/index.js";
+import { bothAvailable, fakeAccounts } from "./model-accounts.js";
+import { createAgentSessionManager } from "../../agent/index.js";
+import { AppTurnHooks, TurnListeners } from "../../agent/index.js";
+import { SkillLoader } from "../../agent/index.js";
 import { AgentRunner } from "../../core/agent-runner.js";
 import type { RunParams } from "../../core/types.js";
-import type { AgentConfig, AgentEvent } from "../../types.js";
+import type { AgentEvent } from "../../types.js";
 import type { Clock } from "../../lib/clock.js";
 import type { ActionSubprocessRunner } from "../../actions/action-subprocess.js";
 import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
@@ -59,7 +68,7 @@ import { testChannelSurface } from "../channel-surface.js";
 export interface TestRomeOptions {
   /** Agent configs to load (written as YAML and loaded by the real AgentLoader).
    *  Defaults to a single agent named "main". */
-  agents?: AgentConfig[];
+  agents?: TestAgentFile[];
   /** Actions registered into the real ActionRegistry / ActionEngine. */
   actions?: Action[];
   /** Channel names to expose as FakeChannelEndpoints. */
@@ -67,7 +76,7 @@ export interface TestRomeOptions {
   /** Forwarded to the agent session manager (Phase 4 keep-alive). */
   keepAliveAcrossTurns?: boolean;
   /**
-   * "real" (default) keeps the caller's project/core roots, so PromptBuilder
+   * "real" (default) keeps the caller's project/core roots, so SystemPrompts
    * reads the production repo context (CHARTER.md, repo apps) — versioned
    * content, deterministic everywhere. "empty" points them at the sandbox for
    * tests that want a bare repo view.
@@ -92,7 +101,7 @@ export interface TestRomeOptions {
 }
 
 export interface TestRomeRepos {
-  sessions: SessionsRepository;
+  sessions: SessionRepository;
   approvals: ApprovalsRepository;
   executionJournal: ExecutionJournalRepository;
   actionExecutions: ActionExecutionsRepository;
@@ -167,7 +176,7 @@ export async function createTestRome(options: TestRomeOptions = {}): Promise<Tes
   // data, lockfiles) — resolves under `root` and is deleted on cleanup, never
   // under the developer's real ~/.rome; projects root likewise. Read-only
   // repo roots (project/core: CHARTER.md, repo apps) stay real by default so
-  // PromptBuilder produces the production system prompt — they're versioned
+  // SystemPrompts produces the production system prompt — they're versioned
   // content, equally deterministic everywhere.
   const savedEnv = new Map<string, string | undefined>(
     SCOPED_ENV_KEYS.map((key) => [key, process.env[key]]),
@@ -208,9 +217,10 @@ async function buildHarness(
   const testDb = createTestDb();
   const db = testDb.db;
 
+  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const people = new PeopleRepository(db);
   const repos: TestRomeRepos = {
-    sessions: new SessionsRepository(db),
+    sessions: new DrizzleSessionRepository(db, artifactIdentity),
     approvals: new ApprovalsRepository(db),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),
@@ -233,23 +243,13 @@ async function buildHarness(
       "utf-8",
     );
   }
-  const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-  const agentLoader = new AgentLoader(artifactIdentity);
+  const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
   await agentLoader.loadAll(agentsDir);
 
   const model = new FakeModel();
   const modelResolver = createModelResolver({
     providers: [model],
-    aiToolState: {
-      get: () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-      refresh: async () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-    },
+    accounts: fakeAccounts(bothAvailable()),
   });
 
   const actionRegistry = new ActionRegistryImpl();
@@ -275,27 +275,39 @@ async function buildHarness(
     },
   );
 
-  const sessionManager = new SessionManager(repos.sessions, artifactIdentity);
-  const promptBuilder = new PromptBuilder();
+  const systemPrompts = createTestSystemPrompts();
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
-      sessionManager,
-      sessionsRepo: repos.sessions,
-      promptBuilder,
-      actionRegistry,
+      sessionRepository: repos.sessions,
+      systemPrompts,
       modelResolver,
-      actionEngine,
-      // Real but inert collaborators: CapabilityDiscovery is never start()ed
-      // (no timers, empty CDP map) and the dispatcher has no hooks loaded.
-      capabilityDiscovery: new CapabilityDiscovery(),
-      skillCatalog: new SkillCatalog(artifactIdentity),
-      lifecycleDispatcher: createAgentLifecycleDispatcher(),
-      channelSurface: testChannelSurface,
+      // No network MCP servers, and the dispatcher has no hooks loaded.
+      networkMcpServers: () => ({}),
+      skillCatalog: new SkillLoader(artifactIdentity),
+      turnLifecycle: new TurnListeners(new AppTurnHooks()),
+      readAnswerShape,
+      sessionTracing: romeSessionTracing,
+      turnUsage: new TurnUsageReporter(),
+      folders: agentFolders(),
+      log: createLogger("agent-session"),
+      ...romeToolPorts({
+        actionRegistry,
+        actionEngine,
+      }),
     },
     { keepAliveAcrossTurns: options.keepAliveAcrossTurns ?? false },
   );
-  const agentRunner = new AgentRunner(agentSessionManager, agentLoader);
+  const agentRunner = new AgentRunner(
+    agentSessionManager,
+    agentLoader,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    sessionOpeningFor({ channelSurface: testChannelSurface }),
+  );
 
   const channelEndpoints = new Map<string, FakeChannelEndpoint>();
   for (const name of options.channels ?? ["telegram", "webchat"]) {
@@ -309,9 +321,38 @@ async function buildHarness(
     connections: { registry: connections, channelOf: kindChannelOf },
   });
 
+  // Chats as production wires it, so a continuation's reply is said through
+  // its session's speaker. Each test channel is its own platform, and Rome's
+  // account on it is named like it.
+  const chatsWired = chatsWiring(db, {
+    accountOf: (channel) => ({ platform: channel, id: channel }),
+    platformOfChannel: (channel) => channel,
+    channelsOn: (platform) => [platform],
+  });
   const backendTurnRunner = createBackendTurnRunner({
     agentRunner,
     channel: channelNamed(channels),
+    // Opened as production opens an app's chat, so the session stands in
+    // Chats as the speaker of the channel's account.
+    chats: {
+      ensureChannelChat: (input) =>
+        openChannelChat(
+          {
+            webchatRepo: new ChatsWebChatRepository(db, {
+              chats: chatsWired.chats,
+              lines: chatsWired.messages,
+              links: chatsWired.links,
+            }),
+            speakers: {
+              chats: chatsWired.chats,
+              adapters: chatsWired.adapters,
+              speakers: chatsWired.speakers,
+            },
+          },
+          input,
+        ),
+    },
+    replies: chatsWired.replies,
   });
   const approvalHandler = new ApprovalHandler(
     repos.approvals,

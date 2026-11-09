@@ -1,6 +1,6 @@
 import type { AppCatalog } from "../apps/catalog.js";
 import type { ArtifactOwnership } from "../apps/types.js";
-import type { AgentLoader } from "../core/agent-loader.js";
+import type { AgentCatalog } from "../agent/index.js";
 import type { UsageAppDirectory } from "./attribution.js";
 
 /**
@@ -9,7 +9,7 @@ import type { UsageAppDirectory } from "./attribution.js";
  * guardian built or installed by hand never leaves the instance.
  */
 export function createUsageAppDirectory(deps: {
-  agentLoader: Pick<AgentLoader, "getRecord">;
+  agentLoader: Pick<AgentCatalog, "find">;
   actionRegistry: { getMetadata(actionName: string): ArtifactOwnership | undefined };
   appCatalog: Pick<AppCatalog, "get">;
 }): UsageAppDirectory {
@@ -24,13 +24,7 @@ export function createUsageAppDirectory(deps: {
   return {
     forApp,
     forAction: (actionName) => forOwner(deps.actionRegistry.getMetadata(actionName)),
-    forAgent: (agentName) => {
-      try {
-        return forOwner(deps.agentLoader.getRecord(agentName).metadata);
-      } catch {
-        // The agent was unloaded after its turn ran.
-        return null;
-      }
-    },
+    // An agent unloaded after its turn ran reports no app.
+    forAgent: (agentName) => forOwner(deps.agentLoader.find(agentName)),
   };
 }

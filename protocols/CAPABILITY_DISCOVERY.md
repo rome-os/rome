@@ -1,37 +1,24 @@
 # Rome Capability Discovery Protocol
 
-**Version:** 1.1
+**Version:** 2.0
 **Port:** 9368
-**Transport:** HTTP/1.1 over Tailscale private network
+**Transport:** HTTP/1.1 over a private network
 
 ## Overview
 
-The Capability Discovery Protocol allows Rome instances on the same Tailscale network to advertise and discover each other's capabilities. Each instance runs an HTTP server on port **9368** that exposes what services it offers. Current capability types are:
+The Capability Discovery Protocol allows Rome instances on the same private network to advertise their capabilities to each other. Each instance runs an HTTP server on port **9368** that exposes what services it offers. Current capability types are:
 
 - `agent`: a Rome daemon serving the dashboard and agent runtime
 - `cdp_servers`: Chrome DevTools Protocol sessions exposed by Rome Desktop
 - `mcp_servers`: MCP servers exposed by Rome Desktop
 
-This enables the Rome backend and AI agents to discover available browser automation endpoints and tool servers across all machines belonging to the same user, without manual configuration.
+This enables the Rome backend and AI agents to discover available browser automation endpoints and tool servers across machines belonging to the same user.
 
 ## Network Model
 
-```
-┌─────────────────┐         Tailscale          ┌─────────────────┐
-│  Rome Desktop A │◄──── private network ──────►│  Rome Desktop B │
-│  100.64.x.x     │                             │  100.64.y.y     │
-│  :9368           │                             │  :9368           │
-└─────────────────┘                             └─────────────────┘
-        ▲                                               ▲
-        │           ┌─────────────────┐                 │
-        └───────────│  Rome Backend   │─────────────────┘
-                    │  (agent runner) │
-                    └─────────────────┘
-```
-
 - Rome Desktop instances and Rome daemons listen on `0.0.0.0:9368`.
-- Discovery relies on Tailscale: peers are enumerated via `tailscale status --json`, then each online peer is probed on port 9368.
-- Traffic stays within the Tailscale network — not exposed to the public internet.
+- A caller reaches a peer at a host address it already knows and probes port 9368.
+- Traffic stays within the private network. Do not expose port 9368 to the public internet.
 
 ## Endpoints
 
@@ -42,7 +29,7 @@ Returns the full capability manifest for this instance.
 **Request:**
 ```
 GET / HTTP/1.1
-Host: <tailscale-ip>:9368
+Host: <host>:9368
 ```
 
 **Response:** `200 OK`
@@ -51,13 +38,12 @@ Host: <tailscale-ip>:9368
   "name": "rome-desktop",
   "version": "0.1.0",
   "hostname": "macbook-pro",
-  "tailscale_ip": "100.64.1.42",
   "capabilities": {
     "agent": {
       "status": "running",
-      "dashboard_url": "http://100.64.1.42",
-      "dashboard_status_url": "http://100.64.1.42/api/health",
-      "api_base_url": "http://100.64.1.42:4141",
+      "dashboard_url": "http://192.168.1.42",
+      "dashboard_status_url": "http://192.168.1.42/api/health",
+      "api_base_url": "http://192.168.1.42:4141",
       "last_health_check": "2026-03-10T10:00:00.000Z"
     },
     "cdp_servers": [
@@ -99,7 +85,7 @@ Lightweight liveness probe.
 **Request:**
 ```
 GET /health HTTP/1.1
-Host: <tailscale-ip>:9368
+Host: <host>:9368
 ```
 
 **Response:** `200 OK`
@@ -129,7 +115,6 @@ Implementations may return `503` with `{ "status": "degraded" }` when the capabi
 | `name`            | string              | yes      | Application identifier (e.g. `"rome-desktop"`)    |
 | `version`         | string              | yes      | Semantic version of the application               |
 | `hostname`        | string              | yes      | OS hostname of this machine                       |
-| `tailscale_ip`    | string \| null      | yes      | Tailscale IP, or `null` if not connected          |
 | `capabilities`    | Capabilities        | yes      | Advertised capabilities                           |
 | `uptime_seconds`  | number              | yes      | Seconds since the capability server started       |
 
@@ -161,7 +146,7 @@ New capability types may be added as additional keys in the future.
 | `port`   | number | yes      | Local port where CDP WebSocket is listening (e.g. 9222) |
 | `status` | string | yes      | `"running"` when present                   |
 
-To connect from a remote peer: `ws://<tailscale_ip>:<port>`. The CDP port is on the same machine as the capability server. Multiple CDP servers may be running simultaneously (one per browser profile).
+To connect from a remote peer: `ws://<host>:<port>`. The CDP port is on the same machine as the capability server. Multiple CDP servers may be running simultaneously (one per browser profile).
 
 ### McpServerInfo
 
@@ -173,15 +158,9 @@ To connect from a remote peer: `ws://<tailscale_ip>:<port>`. The CDP port is on 
 | `status`     | string         | yes      | `"healthy"`, `"unhealthy"`, or `"unknown"`     |
 | `last_check` | string \| null | yes      | ISO 8601 timestamp of last health check, or `null` if never checked |
 
-## Peer Discovery
+## Probing a Peer
 
-### Step 1: Enumerate Peers
-
-Run `tailscale status --json`. Extract online peers from the `Peer` object. Each peer has a Tailscale IP in `TailscaleIPs[0]`.
-
-### Step 2: Probe Port 9368
-
-For each online peer, `GET http://<peer-ip>:9368/` with a **3-second timeout**.
+`GET http://<peer-host>:9368/` with a **3-second timeout**.
 
 | Outcome                     | Interpretation                          |
 |-----------------------------|-----------------------------------------|
@@ -189,11 +168,9 @@ For each online peer, `GET http://<peer-ip>:9368/` with a **3-second timeout**.
 | Connection refused / timeout | Peer is not running Rome                |
 | 200 + invalid JSON          | Something else on port 9368, ignore     |
 
-### Step 3: Use Capabilities
-
 From a successful response:
 - **Agent**: If `capabilities.agent` is present, the desktop app should prefer `capabilities.agent.dashboard_url` over any localhost default. If no peer advertises `agent`, the desktop app should warn the user instead of silently assuming `localhost:3000`.
-- **CDP**: Each entry in `capabilities.cdp_servers` is an independent browser. Connect via `ws://<tailscale_ip>:<cdp_server.port>` for browser automation. Use the `name` field to identify the right browser profile.
+- **CDP**: Each entry in `capabilities.cdp_servers` is an independent browser. Connect via `ws://<peer-host>:<cdp_server.port>` for browser automation. Use the `name` field to identify the right browser profile.
 - **MCP servers**: Connect via `http://<host>:<port>` for tool access.
 
 ## Daemon Extensions
@@ -221,5 +198,4 @@ Recommended timeout: **5 seconds**.
 
 - **Protocol versioning**: Add `"protocol_version": 1` to the root response for forward compatibility.
 - **Additional capabilities**: New capability types can be added as keys under `capabilities` without breaking existing consumers.
-- **Authentication**: Currently relies on Tailscale network-level auth. If exposed beyond the tailnet, add token-based auth.
-- **mDNS fallback**: For networks without Tailscale, mDNS/Bonjour could serve as an alternative discovery mechanism.
+- **Authentication**: Currently relies on network-level isolation. If exposed beyond the private network, add token-based auth.

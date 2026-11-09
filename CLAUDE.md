@@ -1,6 +1,6 @@
 # Rome
 
-A pnpm monorepo. All code lives under `packages/*` and `rome_apps/*`. Runtime dependencies are declared in `packages/core` — the root `package.json` holds only the dev toolchain, and its scripts delegate to the right workspace via `pnpm --filter`.
+A pnpm monorepo. All TypeScript code lives under `packages/*` and `rome_apps/*`; the native iOS app lives in `ios/`. Runtime dependencies are declared in `packages/core` — the root `package.json` holds only the dev toolchain, and its scripts delegate to the right workspace via `pnpm --filter`.
 
 - `packages/core/` (`@rome/core`) — backend runtime: Hono server, agent/action/event subsystems, DB, channel adapters. `src/index.ts` wires the object graph via dependency injection.
 - `packages/web/` (`rome-web`) — Rsbuild SPA dashboard, served by the backend. Guardian-only.
@@ -9,6 +9,7 @@ A pnpm monorepo. All code lives under `packages/*` and `rome_apps/*`. Runtime de
 - `packages/desktop/` (`rome-desktop`) — Electron shell.
 - `packages/cdp-client/` (`rome-cdp-client`) — standalone CDP client.
 - `rome_apps/*` — runtime-loaded apps (plugins), each a workspace package.
+- `ios/` — native iOS app (SwiftUI, Xcode project). Not a pnpm workspace member; read [`ios/CLAUDE.md`](ios/CLAUDE.md) before working in it.
 
 ## Playbook
 
@@ -28,6 +29,7 @@ A pnpm monorepo. All code lives under `packages/*` and `rome_apps/*`. Runtime de
 - When adding a runtime dependency, declare it in `packages/core`.
 - When bumping `@playwright/test`, re-pin the `layout-invariants` container image in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) to the matching release's digest (`docker buildx imagetools inspect mcr.microsoft.com/playwright:v<version>-noble` prints it). The image ships the browsers, the pin decides the client, and they are separate edits. Check the guard step's parse of `playwright install --dry-run` in the same pass, since it reads a CLI label that upstream can reword. The guard fails readably when the image and the client disagree.
 - When accessing the database, go through a repository. Core schema is `packages/core/src/db/schema.ts`, app schemas are `rome_apps/*/db/schema.ts`.
+- When changing an API route or event that the iOS app reads (calls in `ios/Rome/Networking`), keep it backward compatible: add fields, never rename or remove them, and never change a field's type. Older app builds stay installed on phones, and the app runs against older instances.
 - When adding config, validate it with Zod in `packages/core/src/config.ts` and add it to `packages/core/.env.example`.
 - When logging, use `createLogger(component)` from `packages/core/src/logger.ts`.
 

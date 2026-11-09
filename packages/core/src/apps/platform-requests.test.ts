@@ -1,10 +1,10 @@
 import { describe, expect, it } from "@rstest/core";
-import { filterChannelApiResponseHeaders } from "./platform-requests.js";
+import { filterConnectionApiResponseHeaders } from "./platform-requests.js";
 
 describe("channel provider API response projection", () => {
   it("filters and sorts unsafe response headers", () => {
     expect(
-      filterChannelApiResponseHeaders([
+      filterConnectionApiResponseHeaders([
         ["X-RateLimit-Remaining", "4"],
         ["Set-Cookie", "secret"],
         ["Content-Type", "application/json"],

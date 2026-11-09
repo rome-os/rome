@@ -27,6 +27,7 @@ Projects are working directories where the agent does its work — writing code,
 - Detailed notes remain available on demand and stay out of the automatic project context.
 - A blocking `summon` starts its agent in the project of the session that called it. The summon can name another project instead, but only a directory inside the projects root. The host rejects any other path before the agent starts. Agents that other actions run start in the default project unless the action names a directory.
 - A resumed agent session reopens in the directory it last ran in, because the model provider keeps its transcript per directory. A caller that names another directory moves the session there. When the recorded directory is missing, resuming that session by id fails, and a thread that reuses its session implicitly starts a fresh session in the default project.
+- A session learns the default project and the projects root when Rome starts. In code, they are `AgentFolders` in [`packages/core/src/agent/domain/agent-folders.ts`](../../packages/core/src/agent/domain/agent-folders.ts), with the rule for a project's path under the root.
 - The Projects browser and shared-project views skip dependency folders named `node_modules` and dot entries in listings, live updates, uploads, and folder downloads. Build outputs such as `build`, `coverage`, and `dist` remain browsable, editable, and downloadable, and a top-level folder with one of those names is a project. Search still omits build outputs. These filters are not access controls.
 
 **Not to be confused with:**
@@ -42,6 +43,7 @@ A routine is a durable binding from a trigger to an [action](actions.md): when t
 **Contracts:**
 
 - Every fire is recorded as a routine run linked to its action execution, so a routine's history is inspectable.
+- A routine may opt out of keeping its trigger payload in that history. Its runs and its action's execution record then hold only the payload's size, while the action still receives the whole payload. Routines keep the payload unless they opt out.
 - Creating a routine fails when its stored arguments do not satisfy the bound action's input schema, so no routine is saved with arguments that fail on every fire.
 - A routine with an active run (executing, or parked awaiting [guardian approval](messaging.md#approvals)) cannot be deleted out from under it. The active-run check and the delete are atomic.
 - A run still executing when Rome stops is recorded as an error at the next start, so it does not block a delete. A run awaiting approval stays active.

@@ -1,3 +1,7 @@
+import { romeToolPorts } from "../core/rome-tool-ports.js";
+import { createLogger } from "../logger.js";
+import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { createHash } from "node:crypto";
 import { existsSync, mkdtempSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -7,15 +11,14 @@ import { fileURLToPath } from "node:url";
 import { create as tarCreate } from "tar";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { ActionEngine } from "../actions/engine.js";
-import { AgentLoader } from "../core/agent-loader.js";
-import { createAgentSessionManager } from "../core/agent-session.js";
-import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
-import { CapabilityDiscovery } from "../core/capability-discovery.js";
-import { PromptBuilder } from "../core/prompt-builder.js";
-import { createRomeMcpServer, type RomeMcpGroup, type RomeMcpServer } from "../core/mcp/server.js";
-import { createModelResolver } from "../core/model-resolver.js";
-import { SessionManager } from "../core/session-manager.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
+import { AgentLoader } from "../agent/index.js";
+import { createAgentSessionManager } from "../agent/index.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
+import type { RomeToolGroup, RomeTools } from "../agent/index.js";
+import { createModelResolver } from "../agent/index.js";
+import { bothAvailable, fakeAccounts } from "../test/kit/model-accounts.js";
+import { DrizzleSessionRepository } from "../agent/index.js";
 import {
   createAppLifecycleHarness,
   MockModelProvider,
@@ -27,7 +30,6 @@ import type { AppstoreSource } from "./lockfile.js";
 import { AppLifecycleService } from "./lifecycle-service.js";
 import { appIdToPathSegment, packArtifact } from "./packaging/index.js";
 import { createEmptyLegacyArtifactBindings } from "./artifact-id.js";
-import { testChannelSurface } from "../test/channel-surface.js";
 
 const FIXTURES_AGENTS_DIR = join(
   dirname(fileURLToPath(import.meta.url)),
@@ -432,21 +434,14 @@ async function writeAppWithSkillFixture(
 }
 
 class McpSessionModelProvider extends MockModelProvider {
-  readonly mcpServers: RomeMcpServer[] = [];
+  readonly mcpServers: RomeTools[] = [];
 
   override async openSession(params: ModelSessionParams) {
-    const server = createRomeMcpServer({
-      getActionCatalog: params.getActionCatalog,
-      getSkillCatalog: params.getSkillCatalog,
-      subagentTools: params.subagentTools,
-      executeAction: params.executeAction,
-      executeSubagent: params.executeSubagent,
-    });
-    this.mcpServers.push(server);
+    this.mcpServers.push(params.tools);
     return await super.openSession(params);
   }
 
-  lastMcpServer(): RomeMcpServer {
+  lastMcpServer(): RomeTools {
     const server = this.mcpServers[this.mcpServers.length - 1];
     if (!server) throw new Error("no MCP server opened yet");
     return server;
@@ -459,8 +454,8 @@ interface McpToolResult {
 }
 
 async function callMcpTool(
-  server: RomeMcpServer,
-  group: RomeMcpGroup,
+  server: RomeTools,
+  group: RomeToolGroup,
   name: string,
   args: Record<string, unknown> = {},
 ): Promise<McpToolResult> {
@@ -484,22 +479,12 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
   await agentLoader.loadAll(FIXTURES_AGENTS_DIR);
   const agentName = "test-all-actions";
 
-  const sessionsRepo = new SessionsRepository(harness.db);
-  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
-  const promptBuilder = new PromptBuilder();
+  const sessionRepository = new DrizzleSessionRepository(harness.db, artifactIdentity);
+  const systemPrompts = createTestSystemPrompts();
   const provider = new McpSessionModelProvider();
   const modelResolver = createModelResolver({
     providers: [provider],
-    aiToolState: {
-      get: () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-      refresh: async () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-    },
+    accounts: fakeAccounts(bothAvailable()),
   });
   const actionEngine = new ActionEngine(
     harness.actionRegistry,
@@ -509,16 +494,21 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
 
   const manager = createAgentSessionManager({
     agentLoader,
-    sessionManager,
-    sessionsRepo,
-    promptBuilder,
-    actionRegistry: harness.actionRegistry,
+    sessionRepository,
+    systemPrompts,
     modelResolver,
-    actionEngine,
     skillCatalog: harness.skillCatalog,
-    capabilityDiscovery: new CapabilityDiscovery(),
-    lifecycleDispatcher: createAgentLifecycleDispatcher(),
-    channelSurface: testChannelSurface,
+    networkMcpServers: () => ({}),
+    turnLifecycle: new TurnListeners(new AppTurnHooks()),
+    readAnswerShape,
+    sessionTracing: romeSessionTracing,
+    turnUsage: new TurnUsageReporter(),
+    folders: agentFolders(),
+    log: createLogger("agent-session"),
+    ...romeToolPorts({
+      actionRegistry: harness.actionRegistry,
+      actionEngine,
+    }),
   });
 
   return { manager, provider, agentName };
@@ -1462,7 +1452,7 @@ describe("App lifecycle e2e", () => {
       // The skill catalog subscriber runs after the action loader; wait on
       // the skill itself, not just the action — otherwise we might race the
       // catalog refresh and assert before skillCatalog.loadFromCatalog has run.
-      await waitFor(() => harness.skillCatalog.getMcpDefinitions().some((s) => s.name === skillId));
+      await waitFor(() => harness.skillCatalog.list().some((s) => s.name === skillId));
 
       const skills = parseMcpJson<Array<{ name: string; description: string; tools?: string[] }>>(
         await callMcpTool(server, "skills", "list_skills"),

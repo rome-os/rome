@@ -31,7 +31,7 @@ browser ──every request──► edge proxy ──consults──► verify p
 
 The edge consults the probe on routes configured with `forward_auth` and forwards or rejects on its answer. For a gated path, the probe passes a guardian session or an allow-listed [visitor](../concepts/people.md#visitor) and rejects everything else.
 
-`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, and `/ws/node` bypass the edge probe. Rome checks guardian identity and browser origin before accepting any of these WebSocket upgrades, including requests that arrive through Tailnet Serve. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. `/ws/events` also admits a visitor on the dashboard allow-list, who gets the chat topics but not the app catalog, as on the matching SSE routes. Ordinary HTTP requests to `/desktop-proxy` return 404.
+`/desktop-proxy/*`, `/ws/terminal`, `/ws/events`, and `/ws/node` bypass the edge probe. Rome checks guardian identity and browser origin before accepting any of these WebSocket upgrades. The origin check also covers a direct loopback caller that sends an Origin, because a page open in the in-container browser reaches loopback with no cookie. `/ws/events` also admits a visitor on the dashboard allow-list, who gets the chat topics but not the app catalog, as on the matching SSE routes. Ordinary HTTP requests to `/desktop-proxy` return 404.
 
 ### Invariants
 
@@ -52,3 +52,6 @@ A visitor gets their credential by signing in to their [Rome Cloud](../concepts/
 - The callback keeps the visitor's profile only after a sign-in succeeds. A refused sign-in leaves no record.
 - The instance normalizes the post-sign-in redirect: an app-scoped sign-in returns only into that app, and a dashboard sign-in never lands on an API path.
 - An account that does not own the instance can never leave the flow holding a guardian credential. The refusal downgrades to a visitor credential or an error, never upgrades.
+- The native app signs a dashboard visitor in through the same visitor grant, with the same re-check. It gets the same visitor credential as JSON instead of a cookie, so a native visitor reaches exactly what a browser visitor reaches ([decision](../adrs/visitor-grant-for-native-visitors.md)).
+- A browser attempt finishes only at the browser callback, and a native attempt only at the native endpoint.
+- Rome Cloud's copy of the dashboard allow-list decides only which instances a visitor sees listed. The instance's own allow-list decides every sign-in and every request ([decision](../adrs/instance-syncs-visitor-allow-list-to-rome-cloud.md)).

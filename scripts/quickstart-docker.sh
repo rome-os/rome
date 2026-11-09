@@ -12,10 +12,13 @@ Usage: quickstart-docker.sh [options]
 
 Check for a local Docker install, pull the published Rome image, and start it.
 Rome's state lives in named Docker volumes, so re-running the script replaces
-the container (picking up a newer image) without losing data.
+the container (picking up a newer image) without losing data. It also runs a
+signer container (NAME-signer), which Rome Cloud requires, and re-running the
+script adds or updates it.
 
 Options:
-  --name NAME       Container name; also prefixes the data volumes (default: rome)
+  --name NAME       Container name; also names the signer container and prefixes
+                    the data volumes (default: rome)
   --port PORT       Host port for the web dashboard (default: 7663 — "ROME"
                     on a phone keypad, chosen to dodge the crowd on 8080)
   --bind ADDR       Host address the published ports bind to (default:
@@ -186,7 +189,6 @@ docker_run_args=(
   -v "${container_name}-user-home:/home/user"
   -v "${container_name}-rome-home:/home/rome"
   -v "${container_name}-ssh-host-keys:/etc/ssh/ssh_host_keys"
-  -v "${container_name}-tailscale:/var/lib/tailscale"
   # SYS_ADMIN + fuse: the runtime mounts host-project sshfs aliases in-container.
   --cap-add SYS_ADMIN
   --device /dev/fuse:/dev/fuse
@@ -218,13 +220,20 @@ fi
 # -e even when empty (empty means "feature off" and must beat an env-file
 # pin); when the shell is silent, an env file pinning the var owns it; the
 # default rides -e only when neither spoke.
+# The winning value is also left in resolved_<VAR> for the signer below.
 default_container_env() {
-  local var="$1" default="$2"
+  local var="$1" default="$2" value
   if [[ -n "${!var+set}" ]]; then
-    docker_run_args+=(-e "${var}=${!var}")
+    value="${!var}"
+    docker_run_args+=(-e "${var}=${value}")
   elif [[ -z "$env_file" ]] || ! grep -q "^${var}=" "$env_file"; then
-    docker_run_args+=(-e "${var}=${default}")
+    value="$default"
+    docker_run_args+=(-e "${var}=${value}")
+  else
+    value="$(grep "^${var}=" "$env_file" | tail -n 1)"
+    value="${value#*=}"
   fi
+  printf -v "resolved_${var}" '%s' "$value"
 }
 
 # The control-plane origin unlocks the app store, connector OAuth, the webhook
@@ -239,6 +248,37 @@ default_container_env PANTHEON_BASE_ORIGIN "https://romeos.cc"
 # cookie lives on the localhost origin the script prints, and cookies do not
 # cross hostnames.
 default_container_env ROME_LOOPBACK_CALLBACK_ORIGIN "http://localhost:${host_port}"
+
+# ─── Signer ─────────────────────────────────────────────────────────────────
+# Holds the instance's signing key and issues the short-lived tokens Rome uses
+# to authenticate to Rome Cloud. It runs from the same image with no network,
+# and shares only its socket with Rome. It starts before Rome so that Docker
+# creates its volumes from the image, which owns /keys and /run/rome-signer as
+# the signer's uid. Without a Rome Cloud origin there is nothing to sign for.
+signer_name="${container_name}-signer"
+stop_targets="$container_name"
+if [[ -n "$(docker ps -aq --filter "name=^/${signer_name}$")" ]]; then
+  echo "quickstart-docker: replacing existing container ${signer_name} (its key volume is kept)"
+  docker rm -f "$signer_name" >/dev/null
+fi
+if [[ -n "$resolved_PANTHEON_BASE_ORIGIN" ]]; then
+  docker run -d --name "$signer_name" --restart unless-stopped \
+    --user 10001:10001 --read-only --cap-drop ALL \
+    --security-opt no-new-privileges:true --network none \
+    -e "SIGNER_AUDIENCE=${resolved_PANTHEON_BASE_ORIGIN}" \
+    -e SIGNER_KEY_DIR=/keys \
+    -e SIGNER_SOCKET=/run/rome-signer/signer.sock \
+    -v "${container_name}-signer-key:/keys" \
+    -v "${container_name}-signer-sock:/run/rome-signer" \
+    --entrypoint node "$image" /opt/rome/packages/signer/dist/main.js >/dev/null
+  docker_run_args+=(
+    -v "${container_name}-signer-sock:/run/rome-signer:ro"
+    -e ROME_SIGNER_SOCKET=/run/rome-signer/signer.sock
+  )
+  stop_targets="$container_name $signer_name"
+else
+  echo "quickstart-docker: PANTHEON_BASE_ORIGIN is empty, so Rome Cloud is off and no signer is started."
+fi
 
 docker_run_args+=("$image")
 docker run "${docker_run_args[@]}" >/dev/null
@@ -285,7 +325,7 @@ echo ""
 echo "Rome is running."
 echo "  Dashboard : http://localhost:${host_port}"
 echo "  Logs      : docker logs -f ${container_name}"
-echo "  Stop      : docker stop ${container_name}"
+echo "  Stop      : docker stop ${stop_targets}"
 echo ""
 echo "If it looks good, could you star the repo so more people can find it?"
 echo "  ${ROME_REPO_URL}"

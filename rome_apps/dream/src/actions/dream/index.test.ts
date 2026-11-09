@@ -15,8 +15,9 @@ import { migrate } from "drizzle-orm/better-sqlite3/migrator";
 import { afterEach, beforeEach, describe, it, expect, rs } from "@rstest/core";
 import type { ActionResult, AppActionRuntimeDeps } from "@rome-os/app-runtime";
 import type { AgentRunner } from "../../../../../packages/core/src/core/agent-runner.js";
-import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
+import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/db.js";
 import { createRunsRepository } from "../../db/repositories/runs.js";
+import { type FakeChat, fakeChatReads } from "../../test-support/fake-chat-reads.js";
 import { createAction, type DreamDeps } from "./index.js";
 
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../db/migrations");
@@ -33,8 +34,11 @@ const actionConfig = {
 
 let testDb: TestDb;
 let carrierDir: string;
+// The chats a test seeds, as Chats lists them.
+let chats: FakeChat[];
 
 beforeEach(() => {
+  chats = [];
   carrierDir = join(mkdtempSync(join(tmpdir(), "dream-")), "user-skills");
   testDb = createTestDb();
   migrate(testDb.db as never, {
@@ -47,29 +51,39 @@ beforeEach(() => {
 
 let seededSessions = 0;
 
+/** A session with one line in it, in the chat Chats lists it in. A
+ *  background run stands in no chat, so Chats never lists one, and Chats
+ *  reads every line Rome sent as `assistant`. */
 function seedMessage(input: {
   sessionType: string;
-  role: string;
+  role: "user" | "assistant" | "notification";
   hoursAgo: number;
   /** The channel a `channel` session is on. */
   channel?: string;
   senderId?: string;
 }): void {
+  if (input.sessionType !== "webchat" && input.sessionType !== "channel") return;
   const sessionId = `session-${++seededSessions}`;
-  const createdAt = Math.floor((Date.now() - input.hoursAgo * 60 * 60 * 1000) / 1000);
-  testDb.db.run(sql`
-    INSERT INTO rome_sessions (id, name, type, source_channel, created_at, activity_at)
-    VALUES (${sessionId}, ${sessionId}, ${input.sessionType}, ${input.channel ?? null}, ${createdAt}, ${createdAt})
-  `);
-  testDb.db.run(sql`
-    INSERT INTO rome_agent_messages (id, session_id, role, content, sender_id, created_at)
-    VALUES (${`${sessionId}-message`}, ${sessionId}, ${input.role}, '"hi"', ${input.senderId ?? null}, ${createdAt})
-  `);
+  const role =
+    input.role === "notification" && input.senderId === "rome" ? "assistant" : input.role;
+  chats.push({
+    chat: {
+      sessionId,
+      ...(input.channel ? { channel: { name: input.channel, kind: input.channel } } : {}),
+    },
+    lines: [
+      {
+        role,
+        content: '"hi"',
+        createdAt: new Date(Date.now() - input.hoursAgo * 60 * 60 * 1000),
+        senderId: input.senderId ?? null,
+      },
+    ],
+  });
 }
 
 function clearChats(): void {
-  testDb.db.run(sql`DELETE FROM rome_agent_messages`);
-  testDb.db.run(sql`DELETE FROM rome_sessions`);
+  chats.length = 0;
 }
 
 afterEach(() => {
@@ -105,6 +119,7 @@ function makeDeps(
     } as unknown as AgentRunner,
     appContext: {
       db: appDb(),
+      repositories: { chats: fakeChatReads(chats) },
       runAction: overrides?.runAction ?? rs.fn().mockResolvedValue({ status: "ok" }),
       listRoutines: overrides?.listRoutines ?? rs.fn().mockResolvedValue([]),
     },

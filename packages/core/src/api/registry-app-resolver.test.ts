@@ -30,9 +30,7 @@ function createResolver() {
         return actionName === "calendar_create_event" ? appMetadata : undefined;
       },
     },
-    agentLoader: {
-      getAllRecords: () => new Map(),
-    },
+    agentLoader: { list: () => [], find: () => undefined },
   });
 }
 

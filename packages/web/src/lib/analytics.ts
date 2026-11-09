@@ -9,8 +9,7 @@
 // The measurement ID arrives via the boot-written /runtime-config.js asset
 // (window.__ROME_RUNTIME_CONFIG__ — packages/core/src/lib/runtime-config.ts):
 // Caddy serves the production shell straight from disk, so runtime config must
-// be a real file next to it, and one runtime env var then governs the SPA and
-// the gateway page alike.
+// be a real file next to it.
 
 // A GA4 session expires after 30 idle minutes.
 const REENGAGE_AFTER_MS = 30 * 60 * 1000;

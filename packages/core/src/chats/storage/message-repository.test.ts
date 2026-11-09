@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { sql } from "drizzle-orm";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { ChatRepository } from "./chat-repository.js";
 import { MessageRepository } from "./message-repository.js";
 import type { InboundMessage } from "./message.js";
@@ -134,6 +135,30 @@ describe("MessageRepository", () => {
         },
       ),
     ).rejects.toThrow("refused");
+    expect(messages.read(placeIn(chat)).messages).toEqual([]);
+  });
+
+  it("answers a delivered send with no id when recording it fails, rather than failing it", async () => {
+    // A send reported as failed invites a second real one, so once the
+    // platform took the message a failed record does not reach the caller.
+    const sent = await messages.send(
+      {
+        direction: "fromRome",
+        place: placeIn(chat),
+        saidBy: { account: ROME, agent: "main" },
+        parts: [{ type: "text", content: "delivered" }],
+      },
+      async () => {
+        testDb.db.run(
+          sql.raw(
+            "CREATE TRIGGER refuse_record BEFORE INSERT ON chat_messages BEGIN SELECT RAISE(ABORT, 'disk full'); END",
+          ),
+        );
+        return { key: "tg-9" };
+      },
+    );
+
+    expect(sent).toMatchObject({ id: null, key: "tg-9", recorded: false });
     expect(messages.read(placeIn(chat)).messages).toEqual([]);
   });
 

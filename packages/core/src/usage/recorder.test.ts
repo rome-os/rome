@@ -1,6 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { UsageEvent } from "./events.js";
-import { UsageRecorder, type TurnUsageFacts } from "./recorder.js";
+import type { TurnUsageFacts } from "../agent/index.js";
+import { UsageRecorder } from "./recorder.js";
 
 const finishedAt = new Date("2026-10-06T12:00:00.000Z");
 
@@ -13,7 +14,7 @@ function facts(overrides: Partial<TurnUsageFacts> = {}): TurnUsageFacts {
     status: "completed",
     provider: "openai",
     model: "gpt-6-sol",
-    funding: "rome_credits",
+    loginKind: "rome_credits",
     providerTurnId: "codex-turn-1",
     accounting: {
       provider: "openai",
@@ -44,7 +45,7 @@ function setup(credential: string | null = "cred-a") {
 }
 
 describe("UsageRecorder", () => {
-  it("queues one turn event carrying the accounting, funding, and provider turn id", async () => {
+  it("queues one turn event carrying the accounting, login kind, and provider turn id", async () => {
     const { recorder, queued } = setup();
     recorder.recordTurn(facts());
     await recorder.flush();
@@ -58,7 +59,7 @@ describe("UsageRecorder", () => {
         status: "completed",
         provider: "openai",
         model: "gpt-6-sol",
-        funding: "rome_credits",
+        loginKind: "rome_credits",
         providerTurnId: "codex-turn-1",
         inputTokens: 1200,
         outputTokens: 300,
@@ -77,7 +78,7 @@ describe("UsageRecorder", () => {
       facts({
         status: "error",
         accounting: undefined,
-        funding: undefined,
+        loginKind: undefined,
         providerTurnId: undefined,
       }),
     );
@@ -86,11 +87,11 @@ describe("UsageRecorder", () => {
       status: "error",
       provider: "openai",
       model: "gpt-6-sol",
-      funding: "unknown",
       providerTurnId: null,
       inputTokens: 0,
       estimatedCostMicros: null,
     });
+    expect(JSON.parse(JSON.stringify(queued[0]))).not.toHaveProperty("loginKind");
   });
 
   it("queues the turn under the credential current when it ended", async () => {

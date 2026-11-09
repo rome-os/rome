@@ -1,3 +1,5 @@
+import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
+import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./lib/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/guardian-link-code.js";
@@ -9,12 +11,14 @@ import { loadConfig } from "./config.js";
 import { resolveCloudAuthEnabled } from "./lib/cloud-auth-gate.js";
 import { createLogger } from "./logger.js";
 import {
-  getInstanceToken,
+  cloudBearer,
   hydrateInstanceToken,
+  instanceCredentialId,
+  isInstanceLinked,
   logInstanceIdentityAtBoot,
   seedInstanceTokenFromEnv,
-  onInstanceTokenChanged,
   proveIdentity,
+  onInstanceLinked,
 } from "./lib/instance-identity.js";
 import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
@@ -27,15 +31,25 @@ import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
 import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
 import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
 import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./lib/rome-cloud-origin.js";
+import { resolveInstanceSlug } from "./lib/runtime.js";
+import {
+  applyInstanceSlug,
+  decideAdoptedSlug,
+  INSTANCE_SLUG_SETTING_KEY,
+} from "./lib/instance-env.js";
 import { UsageOutboxRepository } from "./db/repositories/usage-outbox.js";
 import { createUsageAppDirectory } from "./usage/app-directory.js";
 import { SKILL_REVIEW_INITIATOR, UsageAttributionResolver } from "./usage/attribution.js";
-import { codexFunding } from "./usage/funding.js";
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
 import { type SessionActor, withoutSessionActor } from "./lib/session-actor.js";
 import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
+import { containerUptimeMs } from "./lib/runtime.js";
+import {
+  AppActionSchemaCache,
+  appActionSchemaCacheBuild,
+} from "./actions/app-action-schema-cache.js";
 import {
   initTelemetry,
   getTracer,
@@ -49,7 +63,7 @@ import {
   legacyChatIdSettingsChange,
   legacyChatIdStop,
 } from "./apps/legacy-chat-id.js";
-import type { ChatStopHandler } from "@rome-os/app-runtime";
+import type { Channel, ChatStopHandler } from "@rome-os/app-runtime";
 
 const log = createLogger("startup");
 
@@ -78,7 +92,6 @@ async function flushTelemetryThenExit(exitCode: number): Promise<never> {
 }
 import { getDb, type DrizzleDb } from "./db/index.js";
 import { runMigrations } from "./db/migrate.js";
-import { SessionsRepository } from "./db/repositories/sessions.js";
 import { PeopleRepository } from "./db/repositories/people.js";
 import { appPersonMapping } from "./people/app-person-mapping.js";
 import { appPeople } from "./people/app-people.js";
@@ -89,13 +102,16 @@ import { WhatsAppAccounts } from "./chats/accounts/whatsapp.js";
 import { createAccountNames } from "./chats/accounts/account-names.js";
 import { AccountProfiles, refreshingAfter } from "./chats/accounts/account-profiles.js";
 import { AccountProfilesRepository } from "./db/repositories/account-profiles.js";
+import {
+  backfillOwnAccountProfiles,
+  rememberOwnAccountProfile,
+} from "./chats/accounts/own-account-profiles.js";
 import { platformOf } from "@rome/api-types/platform";
 import { agentsAccounts, externalAgents } from "./chats/accounts/agents-accounts.js";
 import {
   channelList,
   joinLaterChannel,
 } from "./chats/connected-accounts/connected-account-list.js";
-import { storedOn } from "./chats/connected-accounts/connected-account.js";
 import {
   WEBCHAT_CHANNEL,
   WEBCHAT_SURFACE,
@@ -115,10 +131,7 @@ import { recordedChannelOf } from "./chats/connected-accounts/connection-ports.j
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
-import { ConnectionPacing } from "./participation/reply-delivery/connection-pacing.js";
-import { ReplyStreams } from "./participation/reply-delivery/streams.js";
-import { replyStreamingSwitch } from "./participation/reply-delivery/streaming-switch.js";
-import { sendApprovalCard } from "./actions/approval-card.js";
+import { recordedCardChannels, sendApprovalCard } from "./actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./apps/accounts-service.js";
 import { createAgentNames } from "./chats/accounts/agent-names.js";
 import {
@@ -133,14 +146,25 @@ import { ComputerUseService } from "./computer-use/service.js";
 import { AppKeysRepository } from "./db/repositories/app-keys.js";
 import { AppKeyInjector } from "./app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
-import { WebChatRepository } from "./db/repositories/webchat.js";
 import { ActionExecutionsRepository } from "./db/repositories/action-executions.js";
 import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
 import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
-import { AgentLoader } from "./core/agent-loader.js";
-import { SessionManager } from "./core/session-manager.js";
-import { PromptBuilder } from "./core/prompt-builder.js";
+import {
+  AgentLoader,
+  AppTurnHooks,
+  AppTurnMiddleware,
+  readAnswerShape,
+  TurnUsageReporter,
+  romeSessionTracing,
+  ChatSessionSettings,
+  createSubagentCalls,
+  WebChatDashboardSessions,
+  requireAgent,
+  rootSession,
+  TurnListeners,
+} from "./agent/index.js";
+import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
 import { ActionRegistryImpl } from "./actions/registry.js";
 import { ActionLoader } from "./actions/loader.js";
 import { ActionEngine } from "./actions/engine.js";
@@ -153,28 +177,50 @@ import { endInterruptedRuns } from "./actions/restart-recovery.js";
 import { WorkerRpcServer } from "./actions/worker-rpc.js";
 import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js";
 import { AgentRunner } from "./core/agent-runner.js";
-import { AnthropicProvider } from "./core/anthropic-provider.js";
-import { CodexAppServerProvider } from "./core/codex-app-server-provider.js";
-import { CodexAppServerManager } from "./core/codex/app-server-manager.js";
-import { SharedCodexAccountService } from "./core/codex/account-service.js";
-import { createAIToolState } from "./core/ai-tool-state.js";
-import { createModelResolver } from "./core/model-resolver.js";
-import { createRomeCreditsPayer } from "./core/rome-credits-payer.js";
+import type { ChatResetPolicy } from "./core/chat-reset-policy.js";
+import {
+  AnthropicProvider,
+  ClaudeAccount,
+  CodexAppServerManager,
+  CodexAppServerProvider,
+  createModelAccounts,
+  createModelResolver,
+  createTierModelsSetting,
+  DrizzleSessionRepository,
+  codexLoginKind,
+  SharedCodexAccountService,
+  SkillLoader,
+  romeCreditsProxyRoutes,
+  resolveAgentPolicy,
+  createPromptSources,
+  createSystemPrompts,
+} from "./agent/index.js";
+import { startCodexLoginChoice } from "./rome-cloud/codex-login.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
-import { createAgentSessionManager, talkerChannelSurface } from "./core/agent-session.js";
-import { resolveSessionPolicy } from "./core/session-policy.js";
+import { createAgentSessionManager } from "./agent/index.js";
+import {
+  type ChannelSurfaces,
+  sessionOpeningFor,
+  talkerChannelSurface,
+} from "./core/session-opening.js";
+import { chatPromptFacts } from "./core/chat-prompt-facts.js";
+import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
+import { VisitorProfilesRepository } from "./db/repositories/visitor-profiles.js";
+import { createConciergeOwners } from "./concierge/owners.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { startConciergeEvents } from "./concierge/events.js";
-import { createAgentLifecycleDispatcher } from "./core/agent-lifecycle.js";
+import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
+import { listConnectionViews } from "./api/routes/connections.js";
+import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
 import { createAppStartedDispatcher } from "./core/app-started.js";
-import { createTurnMiddlewareChain } from "./core/turn-middleware.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
 import { stopActiveConversationTurn, stopSenderPlatform } from "./core/chat-stop.js";
+import { createChatTurns } from "./core/chat-turns.js";
 import { CapabilityDiscovery } from "./core/capability-discovery.js";
 import { EventBus } from "./events/event-bus.js";
 import { EventService } from "./events/event-service.js";
@@ -191,7 +237,7 @@ import type { Trigger } from "./routines/types.js";
 import { resolveGuardianTimezone } from "./routines/guardian-timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
-import { mapGuardianToChannel } from "./people/guardian-mapping.js";
+import { linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
 import { SystemUpgradeService } from "./system-upgrade/service.js";
@@ -199,8 +245,10 @@ import { HostExecutionService } from "./host-execution/service.js";
 import { createHostWorkerRecovery } from "./host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
 import { PublicAccessState } from "./lib/public-access-state.js";
-import { reconcilePublicAccessAtStartup } from "./lib/public-access.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
+import { DashboardAccessStore } from "./lib/dashboard-access-store.js";
+import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./lib/visitor-allowlist-sync.js";
+import { PhoneWatching } from "./lib/phone-watching.js";
 import { ApprovalHandler } from "./actions/approval-handler.js";
 import { createBackendTurnRunner } from "./actions/backend-turn.js";
 import { emitAgentMessage } from "./actions/runtime-events.js";
@@ -212,10 +260,12 @@ import {
   resolveWebchatContinuationDeviceFolder,
   resolveWebchatContinuationWorkingDir,
 } from "./webchat/projects.js";
-import { SkillCatalog } from "./core/skill-catalog.js";
-import { createActiveSubagentRegistry } from "./core/active-subagent-registry.js";
 import { createAgentTurnStreamRegistry } from "./core/agent-turn-stream-registry.js";
-import { createSubagentExecutionService } from "./core/subagent-execution.js";
+import {
+  subagentLiveTurns,
+  subagentSessions,
+  subagentTurnLog,
+} from "./core/subagent-call-ports.js";
 import { assertCoreRequiredAppsPacked, deriveCoreRequiredApps } from "./apps/core-required.js";
 import { installFirstPartyAppsAtBoot } from "./apps/boot-upgrade.js";
 import { preserveRecapOptOutAtBoot } from "./apps/recap-upgrade.js";
@@ -223,7 +273,9 @@ import { createRomeCloudListingClient } from "./apps/rome-cloud-listing-client.j
 import { createArtifactReferenceResolver } from "./apps/artifact-reference.js";
 import { createArtifactLoadFailureReporter } from "./apps/artifact-load-failure-reporter.js";
 import {
+  agentFolders,
   ensureProfileDevAppsDirInitialized,
+  getProfileAppActionSchemaCachePath,
   getProfileAppsLockfilePath,
   getProfileInstalledAppsDir,
   getProjectRoot,
@@ -251,7 +303,6 @@ import { createAppDomain, createBundleFetcher } from "./apps/index.js";
 import { createAppStoreService } from "./apps/store-service.js";
 import { AppLifecycleService } from "./apps/lifecycle-service.js";
 import { createAppRuntimeRepositories } from "./apps/repositories.js";
-import { ChatRepository } from "./chats/chat-repository.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   isCoreMainAgentId,
@@ -290,17 +341,12 @@ import {
 } from "./relay/settings.js";
 import { RomeCloudFavorService } from "./favors/rome-cloud-service.js";
 import { FavorDispatchRunner } from "./favors/dispatcher.js";
-import { ChatEvents } from "./chats/events.js";
 import { ChatEvents as ChatsEvents } from "./chats/storage/events.js";
 import { chatsWiring } from "./chats-wiring.js";
 import { inboundRecording } from "./connections/inbound-recording.js";
 import { messagesSaid } from "./sessions/messages-said.js";
 import { ChatsWebChatRepository } from "./webchat/chats-webchat-repository.js";
-import { StoredMessages } from "./chats/message-repository.js";
-import {
-  syncFavorActionRequirementsForCatalogEvent,
-  syncFavorActionRequirementsFromCatalog,
-} from "./favors/catalog-sync.js";
+import { FavorRequirementSync } from "./favors/catalog-sync.js";
 
 async function main() {
   const config = loadConfig();
@@ -339,7 +385,6 @@ async function main() {
     throw err;
   }
 
-  const sessionsRepo = new SessionsRepository(db);
   // Read on each call, so the registry built below answers it.
   const channelRecords = new ChannelRecordsRepository(db, (kind) =>
     accountLinkOf(connectionRegistry)(kind),
@@ -369,7 +414,8 @@ async function main() {
   const sentinelLogRepo = new SentinelLogRepository(db, platformOfChannel);
   // What each platform says about the accounts Rome meets. The two address
   // books fill it after each sync and once now, so a dropped cache is rebuilt.
-  const accountProfiles = new AccountProfiles(new AccountProfilesRepository(db));
+  const accountProfilesRepo = new AccountProfilesRepository(db);
+  const accountProfiles = new AccountProfiles(accountProfilesRepo);
   const refreshWhatsAppProfiles = () =>
     accountProfiles.refresh(platformOf("whatsapp"), whatsAppAccounts);
   const refreshLinkedInProfiles = () =>
@@ -387,6 +433,18 @@ async function main() {
   const approvalsRepo = new ApprovalsRepository(db);
   const settingsRepo = new SettingsRepository(db);
   const computerUse = new ComputerUseService(settingsRepo);
+
+  // A slug adopted at runtime (POST /api/instance/adopt) outlives a crash of
+  // this process: the daemon respawns it with the container's original env (the
+  // pool slug), so while the env still holds that slug the adopted one wins. A
+  // container recreated with a newer .env keeps its env, and the record is
+  // dropped. Before the API and apps start.
+  const adopted = decideAdoptedSlug(
+    await settingsRepo.get(INSTANCE_SLUG_SETTING_KEY),
+    resolveInstanceSlug(),
+  );
+  if (adopted.action === "apply") applyInstanceSlug(adopted.slug);
+  else if (adopted.action === "discard") await settingsRepo.delete(INSTANCE_SLUG_SETTING_KEY);
 
   // Instance token: the DB is the single runtime read path. A cloud VM
   // gets ROME_INSTANCE_TOKEN injected into its env — seed it into the DB so the
@@ -419,7 +477,7 @@ async function main() {
   });
   const chatsEvents = new ChatsEvents();
   // The dashboard's sessions, with each dashboard chat's lines in Chats.
-  const webchatRepo: WebChatRepository = new ChatsWebChatRepository(db, {
+  const webchatRepo = new ChatsWebChatRepository(db, {
     chats: chatsWired.chats,
     lines: chatsWired.messages,
     links: chatsWired.links,
@@ -428,19 +486,9 @@ async function main() {
   // Only turns within a day of the newest one, so the stopped process's turns
   // end however long Rome was down, and traces older crashes left open stay.
   const endedTurns = await webchatRepo.endInterruptedTurns(24 * 60 * 60 * 1000);
-  if (endedTurns > 0) {
-    log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns });
+  if (endedTurns.length > 0) {
+    log.warn("Ended turns a stopped Rome process left running", { turns: endedTurns.length });
   }
-  const chatRepo = new ChatRepository(db, channelRecords);
-  // What was said in each place (docs/domains/chats.md#message). Reads find a
-  // platform's chats under every channel it is kept under, built or released.
-  // `channels` is built further down, before anything reads.
-  const chatEvents = new ChatEvents();
-  const chatMessages = new StoredMessages(webchatRepo, chatEvents, {
-    channelsOn: (platform) =>
-      storedOn(channels, platformOfChannel, platform, (name) => channelRecords.namesOn(name)),
-    accountOf: (channel) => channelRecords.accountOf(channel),
-  });
   // `routineEngine` is built further down; the closure only runs on a profile
   // write, which happens after boot.
   const appSpeakers = {
@@ -451,8 +499,6 @@ async function main() {
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
-    chatRepo,
-    chatMessages,
     speakers: appSpeakers,
     // Apps read and write their chats in Chats. A speaker sends through the
     // raw channel, so its send goes on record once.
@@ -515,6 +561,13 @@ async function main() {
           const claimed = { ...record, domain: domainOf(event.profile), account: event.account };
           channelRecords.claim(tx, claimed, record.createdAt);
           connectedAccounts.add(tx, record.id);
+          rememberOwnAccountProfile(
+            accountProfilesRepo,
+            tx,
+            connectionRegistry.getDescriptor(record.connectionKind),
+            event.account,
+            event.profile,
+          );
           // A channel that now knows its account moves its legacy chats
           // before it hears anything.
           backfillLegacyChatsIn(tx);
@@ -524,15 +577,27 @@ async function main() {
           if (!talks(connection.connectionKind) || !event.account) return;
           channelRecords.ensureAccount(tx, connection, event.account, new Date());
           connectedAccounts.add(tx, connection.id);
+          rememberOwnAccountProfile(
+            accountProfilesRepo,
+            tx,
+            connectionRegistry.getDescriptor(connection.connectionKind),
+            event.account,
+            event.profile,
+          );
           backfillLegacyChatsIn(tx);
           return;
         case "revoked":
           channelRecords.forget();
           return;
-        case "disconnected":
+        case "disconnected": {
+          // The connected account and its agent stay: a disconnect removes
+          // only Rome's reach (docs/domains/chats.md#connected-account). A
+          // link the move to account keys never placed has no account to stay
+          // on, so it goes with the connection.
           channelRecords.vacate(tx, connection.id);
-          connectedAccounts.remove(tx, connection.id);
+          connectedAccounts.forgetUnplaced(tx, connection.id);
           return;
+        }
       }
     },
   });
@@ -562,24 +627,10 @@ async function main() {
   // channels by name. The channel list is built further down, and the connection kind
   // answers from the Connections alone until then (startup hooks, approvals).
   let builtChannels: ReturnType<typeof channelList> | undefined;
-  // Reply streaming is off until the guardian turns it on under
-  // Experimental features in Advanced settings. Off, sends go out unpaced and
-  // replies go out whole. On, a channel that can stream paces every write of its
-  // Connection, and the session bridge streams a guardian's direct replies
-  // through its replies port.
-  const replyStreamingOn = replyStreamingSwitch(settingsRepo);
-  const replyPacing = new ConnectionPacing(systemClock, replyStreamingOn);
-  const replyStreams = new ReplyStreams({
-    streaming: replyStreamingOn,
-    replies: (name) => builtChannels?.find((channel) => channel.name === name)?.send?.replies,
-    clock: systemClock,
-    // A reply is said through its session's speaker, on the platform's own
-    // send port, so it is recorded once.
-    speakers: {
-      channel: (name) => builtChannels?.find((channel) => channel.name === name),
-      replies: chatsWired.replies,
-    },
-  });
+  // The built channels, and each that joins later, recording what is sent on
+  // them in Chats. An approval's card goes out on these, so it is on record as
+  // the platform shows it.
+  const recordedChannels: Channel[] = [];
   // The dashboard chat is Rome's own channel, which no Connection backs.
   const webchat = webchatChannel(webchatRepo);
   const channelsService = createChannelsService({
@@ -588,9 +639,9 @@ async function main() {
     registry: connectionRegistry,
     channelOf,
     platformOf: (name: string) => channelRecords.platformOf(name),
-    pacing: replyPacing,
     accounts,
   });
+  const approvalCardChannels = recordedCardChannels(channelsService, () => recordedChannels);
   // The agents this Rome can message, one read for the People page and for
   // sending by name.
   const listedAgents = externalAgents({
@@ -613,7 +664,7 @@ async function main() {
 
   // Every Talk channel is owned by the ConnectionRegistry, which starts each
   // transport from its grant. Only `emailSettings` is read here, for the
-  // prompt-builder's "our own provisioned inbox address" hint (the
+  // system prompt's "our own provisioned inbox address" hint (the
   // emailAdapterRef fallback below).
   const emailSettings = await settingsRepo.get<EmailSettings>("email");
   if (emailSettings?.enabled) {
@@ -650,9 +701,9 @@ async function main() {
 
   // Subscribers ordered agentLoader → actionLoader → skillCatalog →
   // artifactLoadFailures → actionRegistry → channelHook → runtimeStatus.
-  const agentLoader = new AgentLoader(artifactIdentity);
+  const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
   const actionLoader = new ActionLoader(artifactIdentity);
-  const skillCatalog = new SkillCatalog(artifactIdentity);
+  const skillCatalog = new SkillLoader(artifactIdentity);
   const actionRegistry = new ActionRegistryImpl(artifactIdentity);
   const favorService = new RomeCloudFavorService();
 
@@ -717,13 +768,10 @@ async function main() {
   appCatalog.subscribe(createAppConnectionAccessLifecycle(appConnectionAccessRepo));
   // Social card image per installed web app. Registered before boot() so the
   // replay covers apps installed while the daemon was down.
-  const ogImageStore = createOgImageStore();
-  appCatalog.subscribe(
-    createAppOgImageSubscriber({
-      store: ogImageStore,
-      host: getConfiguredInstanceOrigin()?.replace(/^https?:\/\//, "") ?? null,
-    }),
-  );
+  const ogHost = () => getConfiguredInstanceOrigin()?.replace(/^https?:\/\//, "") ?? null;
+  const ogImageStore = createOgImageStore(undefined, ogHost);
+  const ogImageSubscriber = createAppOgImageSubscriber({ store: ogImageStore, host: ogHost });
+  appCatalog.subscribe(ogImageSubscriber);
   let appBootConverged = false;
   let appConnectionAccessReady = false;
   try {
@@ -776,32 +824,20 @@ async function main() {
   });
   artifactLoadFailuresBooted = true;
   artifactLoadFailureReporter.report("boot");
-  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(db, artifactIdentity);
 
   // Set once the email adapter is created (further down). Lets the main-agent
   // runtime context surface Rome's own provisioned inbox address, which is read
   // live when the prefix is cached on the first turn (after boot/provision).
   let emailAdapterRef: EmailAdapter | null = null;
-  const promptBuilder = new PromptBuilder(
-    appCatalog,
-    // The provisioned inbox address lives on the live adapter (built from the
-    // `inbox` grant); no settings fallback — the row carries pure config only.
-    () => emailAdapterRef?.getAddress() || undefined,
-    getConfiguredInstanceOrigin() ?? undefined,
-  );
-
-  // The cached system-prompt prefix bakes in app-derived context — the
-  // "# Installed Apps" list (from `appCatalog.listResolved()`, which already
-  // excludes disabled apps), each app's description carrying its key
-  // actions/skills. That snapshot is taken on the first turn and never
-  // recomputed on its own, so a runtime enable/disable/install/uninstall would
-  // otherwise linger in the prompt until the next restart (e.g. a disabled app
-  // staying in "# Installed Apps"). Drop the cache on every catalog change so
-  // the next turn rebuilds the prefix from the current resolved set. Registered
-  // after boot on purpose: the prefix isn't cached until the first turn, so the
-  // boot-time refresh storm needs no invalidation.
-  appCatalog.subscribe(function promptPrefixCacheInvalidator() {
-    promptBuilder.invalidateAll();
+  const systemPrompts = createSystemPrompts({
+    sources: createPromptSources({
+      apps: appCatalog,
+      // The provisioned inbox address lives on the live adapter (built from the
+      // `inbox` grant); no settings fallback — the row carries pure config only.
+      emailAddress: () => emailAdapterRef?.getAddress() || undefined,
+      publicOrigin: () => getConfiguredInstanceOrigin() ?? undefined,
+    }),
   });
 
   const policyEngine = new PolicyEngine(policiesRepo, settingsRepo, connectionKindOfChannel);
@@ -831,7 +867,7 @@ async function main() {
       // first-party; the action's own manifest is never trusted for this.
       isFirstPartyAction: (actionName) => isFirstPartyAction(appCatalog, actionName),
       actionWorkerFork: (entryPath, options) => fork(entryPath, [], options),
-      onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
+      onApprovalCreated: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
   );
   const appConnections = new AppConnectionBroker(
@@ -872,57 +908,32 @@ async function main() {
   // (agentMessage `phase` → turnPhase + streaming deltas).
   const codexAppServerManager = new CodexAppServerManager();
   const codexAccountService = new SharedCodexAccountService(codexAppServerManager);
-  let syncRomeCreditsPayer = (): void => {};
-  let refreshRomeCredits = (): void => {};
-  const aiToolState = createAIToolState({
-    settingsRepo,
-    probes: {
-      codexStatus: () => codexAccountService.getStatus(),
-      codexUsage: () => codexAccountService.getUsage(),
-    },
-    onCodexLoginChanged: () => syncRomeCreditsPayer(),
-    onCodexRefreshed: () => refreshRomeCredits(),
+  const claudeAccount = new ClaudeAccount({ settingsRepo });
+  const modelAccounts = createModelAccounts({
+    accounts: { openai: codexAccountService, anthropic: claudeAccount },
+    // The first read spawns the Codex app-server, which competes with boot
+    // for CPU on a small VM. It runs once Rome has started, with the warmup.
+    startRefresh: false,
+    log: createLogger("model-accounts"),
   });
-  const romeCreditsPayer = createRomeCreditsPayer({
-    aiToolState,
-    appServerManager: codexAppServerManager,
+  const stopCodexLoginChoice = startCodexLoginChoice({
+    accounts: modelAccounts,
+    logins: codexAccountService,
+    log: createLogger("codex-login"),
   });
-  syncRomeCreditsPayer = () => romeCreditsPayer.sync();
-  refreshRomeCredits = () => void romeCreditsPayer.refresh();
-  const unsubscribeInstanceTokenChanged = onInstanceTokenChanged(syncRomeCreditsPayer);
-  romeCreditsPayer.sync();
-  const unsubscribeCodexAccountChanged = codexAccountService.onAccountChanged(() => {
-    void aiToolState.refresh("openai").catch((err) => {
-      log.warn("Codex account change refresh failed", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    });
-  });
-  const anthropicProvider = new AnthropicProvider({
-    settingsRepo,
-    onAuthRevoked: () => aiToolState.markAuthRevoked("anthropic"),
-    onQuotaExhausted: (until) => aiToolState.markQuotaExhausted("anthropic", until),
-  });
+  const anthropicProvider = new AnthropicProvider({ settingsRepo, account: claudeAccount });
   const codexProvider = new CodexAppServerProvider({
     appServerManager: codexAppServerManager,
-    onAuthRevoked: () => aiToolState.markAuthRevoked("openai"),
-    onQuotaExhausted: () => aiToolState.markQuotaExhausted("openai"),
-    isUsingRomeCredits: () => romeCreditsPayer.isUsingRomeCredits(),
-    onRomeCreditsModelNotServed: () => romeCreditsPayer.refresh(),
-    funding: () => {
-      const account = aiToolState.get().codex;
-      return codexFunding({
-        defaultProvider: codexAppServerManager.getDefaultProvider(),
-        accountType: account.accountType,
-        loggedIn: account.loggedIn,
-      });
-    },
+    account: codexAccountService,
+    warmup: false,
+    loginKind: () => codexLoginKind(codexAccountService.login(), modelAccounts.read().openai),
   });
   const modelResolver = createModelResolver({
-    aiToolState,
+    accounts: modelAccounts,
     providers: [anthropicProvider, codexProvider],
-    settingsRepo,
-    romeCreditsPayer,
+    tierModels: createTierModelsSetting(settingsRepo),
+    codexLogins: codexAccountService,
+    log: createLogger("model-resolver"),
   });
   const conversationTitleGenerator = createConversationTitleGenerator(modelResolver);
   const lifecycleAppRuntimeServices: RomeAppRuntimeServices = {
@@ -934,14 +945,14 @@ async function main() {
     favorService,
     appConnections,
   };
-  const lifecycleDispatcher = createAgentLifecycleDispatcher({
-    appRuntimeServices: lifecycleAppRuntimeServices,
-  });
+  const appTurnHooks = new AppTurnHooks({ appRuntimeServices: lifecycleAppRuntimeServices });
+  // Rome's own listeners hear each turn before the app hooks do.
+  const turnListeners = new TurnListeners(appTurnHooks);
   // Turn-middleware onion. Shares the same app-runtime services as the
-  // lifecycle dispatcher (the `agentRunner` field is filled in below, before
+  // app lifecycle hooks (the `agentRunner` field is filled in below, before
   // any hook is loaded), so a scripted-conversation middleware can summon real
   // agents and reach its own app DB.
-  const turnMiddlewareChain = createTurnMiddlewareChain({
+  const turnMiddleware = new AppTurnMiddleware({
     appRuntimeServices: lifecycleAppRuntimeServices,
   });
   const appStartedDispatcher = createAppStartedDispatcher({
@@ -997,11 +1008,11 @@ async function main() {
     run: (name, args) => actionEngine.run(name, args, { initiator: "system:event-catalog" }),
   });
   const chatSettings = new ChatSettingsService({
-    repository: new ChatSettingsRepository(db, chatRepo),
+    repository: new ChatSettingsRepository(db, chatsWired),
     connections: connectionRegistry,
     channelOf,
     channels: () => builtChannels,
-    listAgents: () => agentLoader.getAll().keys(),
+    listAgents: () => agentLoader.list().map((agent) => agent.name),
     onChanged: async ({ ref, actor, fields, reset }) => {
       await eventService.publish({
         name: "conversation-settings.changed",
@@ -1022,7 +1033,7 @@ async function main() {
     countdownMs: config.systemUpgradeCountdownMinutes * 60_000,
     // Gated behind the `auto_upgrade` rollout (keyed on instance slug). Resolved
     // live on each nightly probe so a flip takes effect without a restart.
-    isEnabled: () => resolveAutoUpgradeEnabled(config),
+    isEnabled: () => resolveAutoUpgradeEnabled(),
   });
 
   const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);
@@ -1034,11 +1045,18 @@ async function main() {
     });
   }
 
-  const activeSubagentRegistry = createActiveSubagentRegistry();
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
+  const chatTurns = createChatTurns();
+  const dashboardSessions = new WebChatDashboardSessions(webchatRepo);
+  const subagentCalls = createSubagentCalls({
+    dashboard: dashboardSessions,
+    turnLog: subagentTurnLog(webchatRepo),
+    liveTurns: subagentLiveTurns(agentTurnStreamRegistry),
+  });
   const chatStop: ChatStopHandler = (input) =>
     stopActiveConversationTurn(input, {
-      turns: agentTurnStreamRegistry,
+      chatTurns,
+      sessions: { turn: (id) => agentSessionManager.turn(id) },
       isGuardian: async (service, senderId) => {
         const platform = stopSenderPlatform(input.ref, service, {
           accountOf: (connectionId) => accounts.accountOf(connectionId),
@@ -1047,19 +1065,15 @@ async function main() {
         return (await peopleRepo.byAccount({ platform, id: senderId }))?.bondLevel === "guardian";
       },
     });
-  const subagentExecutionService = createSubagentExecutionService({
-    webchatRepo,
-    activeRegistry: activeSubagentRegistry,
-    turnStreams: agentTurnStreamRegistry,
-  });
   const romeCloudAccess = (): RomeCloudAccess | null => {
-    const token = getInstanceToken();
+    const credentialId = instanceCredentialId();
     const origin = getRomeCloudOrigin();
-    return token && origin ? { token, origin } : null;
+    return credentialId && origin ? { credentialId, bearer: cloudBearer, origin } : null;
   };
   const usageAttribution = new UsageAttributionResolver(
     {
       getSession: (id) => webchatRepo.getSession(id),
+      rootSession: (id) => rootSession(dashboardSessions, id),
       getExecution: async (id) => {
         const row = await actionExecutionsRepo.findById(id);
         return row
@@ -1083,70 +1097,99 @@ async function main() {
     attribution: usageAttribution,
     credential: () => {
       const access = romeCloudAccess();
-      return access ? credentialFingerprint(access.token) : null;
+      return access ? credentialFingerprint(access.credentialId) : null;
     },
   });
+  // Real push sender in the main process (holds the durable instance token);
+  // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
+  // `notify.send` back to this same instance. The Concierge pushes through it too.
+  const notifyClient = new NotifyClient();
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
   // created below, by the time any turn finishes. The API layer attaches the
   // dashboard it runs task chats on.
+  // Made here so the Concierge can tell whether a visitor is still served;
+  // it is loaded with the other access settings further down.
+  const dashboardAccessState = new DashboardAccessState();
+  // The chats the guardian's phone app holds open, from the live-events socket;
+  // the Concierge does not push what it says in one of them.
+  const phoneWatching = new PhoneWatching();
   const concierge = new ConciergeService({
+    skillCatalog,
     settingsRepo,
+    owners: createConciergeOwners({
+      settingsRepo,
+      visitorProfiles: new VisitorProfilesRepository(db),
+      dashboardAccess: dashboardAccessState,
+    }),
     webchatRepo,
-    sessionManager,
-    aiToolState,
+    sessionRepository,
+    accounts: modelAccounts,
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { peek: (key) => agentSessionManager.peek(key) },
     tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
     approvals: approvalsRepo,
-    runBackendTurn: (params, options) => backendTurnRunner.runAndDeliver(params, options),
+    runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
+    notify: notifyClient,
+    phoneWatching,
   });
+  const channelSurface: ChannelSurfaces = (channel) => {
+    if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
+    const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))?.capabilities
+      .talker;
+    return talker ? talkerChannelSurface(talker) : null;
+  };
+  const openingFor = sessionOpeningFor({ channelSurface, connectionKindOfChannel });
   const agentSessionManager = createAgentSessionManager(
     {
       agentLoader,
-      appCatalog,
-      sessionManager,
-      sessionsRepo,
-      promptBuilder,
-      actionRegistry,
+      sessionRepository,
+      systemPrompts,
       modelResolver,
-      actionEngine,
-      capabilityDiscovery,
+      networkMcpServers: () => capabilityDiscovery.getCdpMcpServers(),
       skillCatalog,
-      lifecycleDispatcher,
-      webchatRepo,
-      chatMessages,
-      // Catch-up reads what was said where the session stands from Chats.
-      turnLinks: chatsWired.links,
-      platformOfChannel,
-      subagentExecutionService,
-      activeSubagentRegistry,
-      turnMiddleware: turnMiddlewareChain,
-      resolveProviderSessionReset: async (ref) =>
-        (await chatSettings.get(ref)).effective.session.reset,
-      usageRecorder,
-      channelSurface: (channel) => {
-        if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
-        const talker = connectionRegistry.getDescriptor(connectionKindOfChannel(channel))
-          ?.capabilities.talker;
-        return talker ? talkerChannelSurface(talker) : null;
-      },
-      connectionKindOfChannel,
-      eventSources,
-      sessionTools: (context) => buildConciergeTools(concierge, context),
+      turnLifecycle: turnListeners,
+      readAnswerShape,
+      // Catch-up reads what was said where the session stands from Chats,
+      // and nothing in a chat whose channel hands the agent every message.
+      promptFacts: chatPromptFacts({
+        facts: chatsWired.links,
+        channelOfChat: (chatId) => webchatRepo.channelOfChat(chatId),
+        channelSurface,
+      }),
+      subagentCalls,
+      subagentSessions: (manager, parentLink, inherited) =>
+        subagentSessions(manager, parentLink, webchatRepo, inherited),
+      turnMiddleware,
+      sessionSettings: new ChatSessionSettings({ webchatRepo }),
+      sessionTracing: romeSessionTracing,
+      turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
+      folders: agentFolders(),
+      log: createLogger("agent-session"),
+      ...romeToolPorts({
+        actionRegistry,
+        actionEngine,
+        webchatRepo,
+        eventSources,
+        sessionTools: (context) => buildConciergeTools(concierge, context),
+      }),
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
   const actionWorkerCoordinator = new ActionWorkerCoordinator(actionEngine);
   actionEngine.setActionWorkerCoordinator(actionWorkerCoordinator);
+  const chatResetPolicy: ChatResetPolicy = async (chat) =>
+    (await chatSettings.get(chat)).effective.session.reset;
   const agentSessionBridge = new AgentSessionBridge(
     agentSessionManager,
     webchatRepo,
     actionWorkerCoordinator,
     agentTurnStreamRegistry,
     undefined,
-    replyStreams,
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
+    chatResetPolicy,
+    openingFor,
+    (chat, turn) => chatTurns.start(chat, turn),
   );
   actionEngine.setAgentSessionBridge(agentSessionBridge);
 
@@ -1157,25 +1200,29 @@ async function main() {
     agentTurnStreamRegistry,
     actionRegistry,
     { lines: chatsWired.speakerMessages, links: chatsWired.links, replies: chatsWired.replies },
+    chatResetPolicy,
+    openingFor,
   );
   lifecycleAppRuntimeServices.agentRunner = agentRunner;
 
   const skillReviewInterval = Number(process.env.SKILL_REVIEW_INTERVAL ?? 10);
   if (skillReviewInterval > 0) {
-    lifecycleDispatcher.onFinished((event) => {
-      if (
-        isCoreMainAgentId(event.turn.agentName) &&
-        event.metrics.toolCallCount >= skillReviewInterval &&
-        !event.metrics.skillWritten
-      ) {
-        // No person asked for the review, so it runs outside the finished
-        // turn's request scope and carries no actor.
-        withoutSessionActor(() =>
-          actionEngine.run("skill_review", {}, { initiator: SKILL_REVIEW_INITIATOR }),
-        ).catch((err) => {
-          log.warn("skill review failed", { error: String(err) });
-        });
-      }
+    turnListeners.listen({
+      ended: (event) => {
+        if (
+          isCoreMainAgentId(event.turn.agentName) &&
+          event.metrics.toolCallCount >= skillReviewInterval &&
+          !event.metrics.skillWritten
+        ) {
+          // No person asked for the review, so it runs outside the finished
+          // turn's request scope and carries no actor.
+          withoutSessionActor(() =>
+            actionEngine.run("skill_review", {}, { initiator: SKILL_REVIEW_INITIATOR }),
+          ).catch((err) => {
+            log.warn("skill review failed", { error: String(err) });
+          });
+        }
+      },
     });
   }
 
@@ -1194,6 +1241,7 @@ async function main() {
     resolveWebchatContinuationWorkingDir(channel, threadId, webchatRepo);
 
   const backendTurnRunner = createBackendTurnRunner({
+    resolveTurn: (params) => concierge.resolveTurn(params),
     beforeTurn: ({ threadId }) => concierge.switchIfExhausted(threadId),
     agentRunner,
     // `channels` is built once every descriptor is registered, further down;
@@ -1204,12 +1252,35 @@ async function main() {
       resolveWebchatContinuationDeviceFolder(channel, threadId, webchatRepo),
     chats: appRuntimeRepositories.chats!,
     replies: chatsWired.replies,
-    isTextPrivate: (agentName) =>
-      agentLoader.has(agentName) &&
-      resolveSessionPolicy(agentLoader.get(agentName)).finalText === "private",
+    isTextPrivate: (agentName) => {
+      const agent = agentLoader.find(agentName);
+      return (
+        agent !== undefined &&
+        resolveAgentPolicy({ name: agent.localName, policy: agent.definition.policy }).finalText ===
+          "private"
+      );
+    },
   });
 
-  startConciergeEvents(concierge, lifecycleDispatcher);
+  startConciergeEvents(concierge, turnListeners);
+  // The Concierge reaches the connector's watch actions as itself.
+  startConciergeFollowing(concierge, {
+    routines: routinesRepo,
+    routineEngine,
+    actions: actionRegistry,
+    // Every enabled app that declares `watchProvider`, read live so an install
+    // or disable takes effect without a restart. Core names no provider.
+    providers: () =>
+      watchProvidersOf(appCatalog.listResolved(), (name) => actionRegistry.getMetadata(name)),
+    runAction: (name, args, options) =>
+      actionEngine.run(name, args, { initiator: "agent:core:concierge", ...options }),
+    settings: settingsRepo,
+    // The same projection `GET /connections` serves, so both read one model.
+    connections: () => listConnectionViews({ connectionRegistry, setupManager, db }),
+    items: new ConciergeFollowItemsRepository(db),
+    agentRunner,
+    triageRecord: webchatRepo,
+  });
 
   const approvalHandler = new ApprovalHandler(
     approvalsRepo,
@@ -1221,10 +1292,6 @@ async function main() {
     appConnections,
   );
 
-  // Real push sender in the main process (holds the durable instance token);
-  // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
-  // `notify.send` back to this same instance.
-  const notifyClient = new NotifyClient();
   // Learn whether this boot's release version differs from the last completed
   // boot's — the dashboard reads the result via /api/build-info. The stored
   // version is committed after "Rome started" below.
@@ -1236,7 +1303,7 @@ async function main() {
   });
   const cloudProfileClient = new CloudProfileClient(() => proveIdentity());
   const resolveArtifactReference = createArtifactReferenceResolver({
-    agentLoader,
+    canonicalAgentName: (name) => requireAgent(agentLoader, name).name,
     actionRegistry,
   });
   // What apps get of the chat settings, with the chat ids an app built for
@@ -1293,13 +1360,13 @@ async function main() {
     // Real push sender in main; the worker gets a NotifyServiceProxy.
     notify: notifyClient,
     // Image generation capability: provider-neutral registry the generate_image
-    // action consumes. Codex is the only provider today; its availability reads
-    // the same AiToolState the model resolver gates on.
+    // action consumes. Codex is the only provider today; its report reads
+    // the same model accounts the model resolver gates on.
     imageGeneration: createImageGenerationService({
       providers: [
         createCodexImageGenerationProvider({
           agentRunner,
-          getCodexState: () => aiToolState.get().codex,
+          getCodexReport: () => modelAccounts.read().openai,
         }),
       ],
     }),
@@ -1308,6 +1375,13 @@ async function main() {
     socketPath: config.hostExecutionSocket,
     enabled: config.hostExecutionEnabled,
   });
+  // Importing every app action module costs seconds of CPU on a small VM, and
+  // boot needs only their schemas. A warm-pool VM boots once before a claim, so
+  // the claim boot finds every schema here.
+  const appActionSchemaCache = await AppActionSchemaCache.load(
+    getProfileAppActionSchemaCachePath(),
+    appActionSchemaCacheBuild(getBuildInfo()),
+  );
   const appActionReload = await registerAppActions(
     actionLoader,
     actionRegistry,
@@ -1325,26 +1399,43 @@ async function main() {
       cloudProfile: cloudProfileClient,
       agentNames: agentNameResolver,
     },
+    { schemaCache: appActionSchemaCache },
   );
 
   appCatalog.subscribe(
-    createAppActionsSubscriber(actionLoader, actionRegistry, appCatalog, appActionDeps, {
-      db,
-      actionEngine,
-      routinesRepo,
-      repositories: appRuntimeRepositories,
-      favorService,
-      appConnections,
-      hostExecution,
-      feedback: feedbackClient,
-      cloudProfile: cloudProfileClient,
-      agentNames: agentNameResolver,
-    }),
+    createAppActionsSubscriber(
+      actionLoader,
+      actionRegistry,
+      appCatalog,
+      appActionDeps,
+      {
+        db,
+        actionEngine,
+        routinesRepo,
+        repositories: appRuntimeRepositories,
+        favorService,
+        appConnections,
+        hostExecution,
+        feedback: feedbackClient,
+        cloudProfile: cloudProfileClient,
+        agentNames: agentNameResolver,
+      },
+      undefined,
+      appActionSchemaCache,
+    ),
   );
-  appCatalog.subscribe(async function favorActionRequirementsSubscriber(event) {
-    await syncFavorActionRequirementsForCatalogEvent(favorService, event, actionRegistry, appsLog);
+  const favorRequirementSync = new FavorRequirementSync({
+    favorService,
+    appCatalog,
+    actionCatalog: actionRegistry,
+    log: appsLog,
   });
-  await syncFavorActionRequirementsFromCatalog(favorService, appCatalog, actionRegistry, appsLog);
+  appCatalog.subscribe(async function favorActionRequirementsSubscriber(event) {
+    await favorRequirementSync.sync(event.appId);
+  });
+  // Boot does not wait: each app costs a Rome Cloud round trip, and Rome Cloud
+  // still holds the requirements the previous boot sent.
+  void favorRequirementSync.syncAll();
 
   // Webhook relay drainer: hold a persistent WS to the Cloudflare relay,
   // replaying buffered webhooks into a local app handler in-process via the
@@ -1445,7 +1536,7 @@ async function main() {
   const reloadLifecycleHooks = await registerCatalogHookLoad({
     sourcePrefix: "lifecycle",
     warnMessage: "some agent lifecycle hooks failed to initialize",
-    load: () => lifecycleDispatcher.loadFromCatalog(appCatalog),
+    load: () => appTurnHooks.loadFromCatalog(appCatalog),
     failureSource: (failure) => `lifecycle:${failure.hookName}:${failure.path}`,
   });
 
@@ -1453,7 +1544,7 @@ async function main() {
   const reloadTurnMiddlewareHooks = await registerCatalogHookLoad({
     sourcePrefix: "turn-middleware",
     warnMessage: "some turn-middleware hooks failed to initialize",
-    load: () => turnMiddlewareChain.loadFromCatalog(appCatalog),
+    load: () => turnMiddleware.loadFromCatalog(appCatalog),
     failureSource: (failure) => `turn-middleware:${failure.path}`,
   });
 
@@ -1523,19 +1614,19 @@ async function main() {
       minIntervalMs: config.linkedinPollMinMinutes * 60_000,
       maxIntervalMs: config.linkedinPollMaxMinutes * 60_000,
     },
-    listAgents: () => Array.from(agentLoader.getAll().keys()),
-    hasAgent: (name) => agentLoader.has(name),
+    listAgents: () => agentLoader.list().map((agent) => agent.name),
+    hasAgent: (name) => agentLoader.find(name) !== undefined,
     accountAgentOf: (connectionId) => accountAgentOf(connectionId) ?? null,
     // Auto-map the guardian onto their own WhatsApp account on connect.
     onWhatsAppGuardianConnected: (selfJid) => {
-      mapGuardianToChannel(peopleRepo, "whatsapp", selfJid).catch((err) => {
+      linkGuardianToAccount(peopleRepo, "whatsapp", selfJid).catch((err) => {
         log.error("failed to auto-map guardian on WhatsApp connect", {
           error: err instanceof Error ? err.message : String(err),
         });
       });
     },
     mailProvider,
-    // Keep the prompt-builder's "our own inbox address" ref pointed at the
+    // Keep the system prompt's "our own inbox address" ref pointed at the
     // current email epoch (birth, relock/re-authorize, Disconnected rebuild).
     onEmailAdapterBuilt: (adapter) => {
       emailAdapterRef = adapter;
@@ -1559,7 +1650,6 @@ async function main() {
       registry: connectionRegistry,
       admit,
       channelOf,
-      pacing: replyPacing,
       listening: accountListening,
       accountOf: (connectionId) => accounts.accountOf(connectionId),
       heard: (message) => accountProfiles.heard(message),
@@ -1582,6 +1672,7 @@ async function main() {
     own: [webchat],
   });
   builtChannels = channels;
+  recordedChannels.push(...chatsWired.recordedSends(channels));
   const accountNames = createAccountNames({
     channels,
     sentinelLogRepo,
@@ -1695,7 +1786,6 @@ async function main() {
         registry: connectionRegistry,
         admit,
         channelOf,
-        pacing: replyPacing,
         listening: accountListening,
         accountOf: (connectionId) => accounts.accountOf(connectionId),
         heard: (message) => accountProfiles.heard(message),
@@ -1704,6 +1794,7 @@ async function main() {
       connection,
     );
     if (!channel) return;
+    recordedChannels.push(...chatsWired.recordedSends([channel]));
     const added = legacyChatIdChannels(
       chatsWired.recordedSends(withInboundSpans([channel], "channel-message")),
     );
@@ -1751,6 +1842,18 @@ async function main() {
   // A grant from before grants named their account learns it now, so the next
   // connect of that account is refused.
   await recordGrantAccounts(connectionRegistry);
+  // The account profile cache learns each held chat grant's account name, as
+  // a connect does, so an account connected before it learned from grants
+  // keeps its name after a disconnect.
+  backfillOwnAccountProfiles(
+    accountProfilesRepo,
+    db,
+    (await connectionsRepository.all()).filter((c) => talks(c.connectionKind)),
+    (kind) => connectionRegistry.getDescriptor(kind),
+  );
+  // Agent links the move to account keys could not place go to the accounts
+  // their connections now reach.
+  connectedAccounts.placeUnplaced();
   // Connections minted before channels were recorded get theirs now. Each
   // connection kind held one, so each takes its connection kind's name.
   await claimChannels(
@@ -1819,7 +1922,7 @@ async function main() {
     appLifecycle,
     appStore,
     systemUpgrade: systemUpgradeService,
-    hasAgent: (name) => agentLoader.has(name),
+    hasAgent: (name) => agentLoader.find(name) !== undefined,
     hasRegisteredAction: (name) => actionRegistry.has(name),
     isExplicitAction: (name) => actionRegistry.isExplicit(name),
     validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
@@ -1835,6 +1938,7 @@ async function main() {
       const metadata = actionRegistry.getMetadata(actionName);
       return metadata?.ownerType === "app" ? metadata.ownerId : null;
     },
+    sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
   });
   actionEngine.setWorkerRpcServer(workerRpcServer);
   actionEngine.startWorkerWarmPool();
@@ -1872,20 +1976,16 @@ async function main() {
   };
   const publicAccessState = new PublicAccessState();
   try {
-    const config = await publicAccessState.load(db);
-    try {
-      await reconcilePublicAccessAtStartup(db, config);
-    } catch (err) {
-      log.warn("Failed to reconcile publicAccess settings with Caddy at startup; continuing", {
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
+    await publicAccessState.load(db);
   } catch (err) {
     log.warn("Failed to load publicAccess settings; starting with empty allow-list", {
       error: err instanceof Error ? err.message : String(err),
     });
   }
-  const dashboardAccessState = new DashboardAccessState();
+  const dashboardAccessStore = new DashboardAccessStore(settingsRepo);
+  const visitorAllowListSync = new VisitorAllowListSync({
+    raiseRevisionPast: (floor) => dashboardAccessStore.raisePast(floor),
+  });
   try {
     await dashboardAccessState.load(db);
   } catch (err) {
@@ -1922,9 +2022,9 @@ async function main() {
   }
   const { installEnvGateOverrides } = await import("@rome-os/libs/feature-flags/env-overrides");
   const gateOverrides = installEnvGateOverrides(process.env);
-  const isCloudAuthEnabled = () => resolveCloudAuthEnabled(config, db);
+  const isCloudAuthEnabled = () => resolveCloudAuthEnabled(db);
   log.info("Cloud-auth gating configured", {
-    slug: config.instanceSlug ?? null,
+    slug: resolveInstanceSlug() ?? null,
     gateConfigured: shutdownFeatureFlags !== undefined,
     gateOverrides,
   });
@@ -1945,14 +2045,17 @@ async function main() {
     }
   };
 
+  // Bound once the favor runner exists, below.
+  let provisionAfterLink = async (): Promise<void> => {};
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,
-      provisionNodeCaller,
+      provisionAfterLink: () => provisionAfterLink(),
       autoConnectEmail: () => connectEmailWithoutClick("seat-created"),
+      cloudProfile: cloudProfileClient,
       nodeDevices,
       channelsService,
       chatSettings,
@@ -1965,7 +2068,6 @@ async function main() {
       recordedOn: (platform: string) => channelRecords.namesOn(platform),
       sendersOn: (platform: string) => channelRecords.sendersOn(platform),
       accountOf: (channel: string) => channelRecords.accountOf(channel),
-      transcript: "chats",
       accountNames,
       assistants: listedAgents,
       webchatRepo,
@@ -1985,6 +2087,7 @@ async function main() {
       routinesRepo,
       routineRunsRepo,
       appCatalog,
+      agentsByName: () => agentsByLegacyName(agentLoader.list(), artifactIdentity.legacyBindings),
       appManager,
       romeCloudListings,
       appStore,
@@ -2003,17 +2106,22 @@ async function main() {
       appRuntimeRepositories,
       sentinelLogRepo,
       actionExecutionsRepo,
-      sessionManager,
-      sessionsRepo,
+      sessionRepository,
       agentSessionManager,
+      sessionOpeningFor: openingFor,
       conversationTitleGenerator,
       agentRunner,
-      activeSubagentRegistry,
+      subagentCalls,
       agentTurnStreamRegistry,
-      aiToolState,
+      modelAccounts,
       codexAccountService,
+      claudeAccount,
+      romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
       publicAccessState,
       dashboardAccessState,
+      dashboardAccessStore,
+      visitorAllowListSync,
+      phoneWatching,
       relayDrainer,
       bootVersionReport,
       favorService,
@@ -2034,12 +2142,43 @@ async function main() {
   const favorDispatchRunner = new FavorDispatchRunner({
     favorService,
     actionEngine,
-    canSync: () => getInstanceToken() !== null,
+    canSync: () => isInstanceLinked(),
   });
 
   await routineEngine.start();
 
   favorDispatchRunner.start();
+
+  // Everything that needs a linked instance: the node caller, the self-provisioned
+  // relay mailbox (re-minted with a full-TTL drain key each time), the first
+  // favor sync, and the dashboard allow-list Rome Cloud lists visitors from. Run
+  // after the boot identity check, after a sign-in links, and when a background
+  // check links an instance that was not linked. Each step is idempotent and
+  // handles a missing credential, so one failing never stops the next.
+  provisionAfterLink = async () => {
+    const steps = [
+      // A card prints the instance host, and an adopted instance has a new one:
+      // render the cards the store no longer has under the current host. First,
+      // as it only starts the renders.
+      async () => {
+        for (const app of appCatalog.listResolved()) {
+          await ogImageSubscriber({ appId: app.appId, change: "changed", current: app });
+        }
+      },
+      provisionNodeCaller,
+      () => provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer }),
+      () => favorDispatchRunner.runOnce(),
+      () => syncStoredVisitorAllowList(dashboardAccessStore, visitorAllowListSync),
+    ];
+    for (const step of steps) {
+      await step().catch((err) => {
+        log.warn("provisioning after link failed", {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      });
+    }
+  };
+  const unsubscribeInstanceLinked = onInstanceLinked(() => void provisionAfterLink());
 
   // Rome reserves 3:00–3:30am local for upgrades; the probe runs at the start
   // of that window. There is no bespoke scheduler — the routine cron *is* the
@@ -2107,23 +2246,24 @@ async function main() {
     .filter((channel) => channel.sendable)
     .map((channel) => channel.name);
   const allRoutines = await routinesRepo.findEnabled();
-  const agentNames = Array.from(agentLoader.getAll().keys());
+  const agentNames = agentLoader.list().map((agent) => agent.name);
   const discoveredServers = Object.keys(capabilityDiscovery.getCdpMcpServers());
   const appIds = appCatalog.listResolved().map((app: ResolvedApp) => app.appId);
   const actionOwners = actionRegistry.list().map((name) => {
     const metadata = actionRegistry.getMetadata(name);
     return metadata ? `${name}:${metadata.ownerType === "app" ? metadata.ownerId : "core"}` : name;
   });
-  const agentOwners = Array.from(agentLoader.getAllRecords().entries()).map(
-    ([name, record]) =>
-      `${name}:${record.metadata.ownerType === "app" ? record.metadata.ownerId : "core"}`,
-  );
+  const agentOwners = agentLoader
+    .list()
+    .map((agent) => `${agent.name}:${agent.ownerType === "app" ? agent.ownerId : "core"}`);
   // Every boot step above is done, so app-started hooks can rely on actions,
   // routines, and agents. The API already serves requests, so an install may
   // be mid-refresh: open between refreshes, never inside one.
   await appCatalog.whenIdle(() => appStartedDispatcher.open(appCatalog));
 
   log.info("Rome started", {
+    processUptimeMs: Math.round(process.uptime() * 1000),
+    containerUptimeMs: containerUptimeMs(),
     apps: appIds.length > 0 ? appIds : ["none"],
     channels: activeChannels.length > 0 ? activeChannels : ["none"],
     agents: agentNames,
@@ -2135,9 +2275,26 @@ async function main() {
     discoveredCdpServers: discoveredServers.length > 0 ? discoveredServers : ["none"],
   });
 
+  void codexAppServerManager.warmup().catch((err) => {
+    log.warn("codex app-server warmup failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+  void modelAccounts.refresh().catch((err) => {
+    log.warn("initial model accounts refresh failed", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  });
+
   // Startup is known-good: record this version as the last completed boot so
   // the next boot's upgrade comparison runs against it.
   await commitBootVersion(settingsRepo, getBuildInfo());
+
+  // The API, actions and agents are ready. One continuation runs at a time,
+  // outside boot, and each rechecks its chat after waiting in the webchat queue.
+  void continueInterruptedTurns(endedTurns, webchatRepo, backendTurnRunner).catch((error) => {
+    log.warn("restart continuations failed", { error: String(error) });
+  });
 
   // Best-effort instance-identity check. Fire-and-forget: announces
   // which account this instance is bound to, reports the running version, and
@@ -2148,9 +2305,11 @@ async function main() {
   // It also gates connecting email for a seat created before sign-in connected
   // it: only an enrolled instance can provision an inbox, and a warm-pool
   // instance with no seat has no owner to provision one for.
-  void logInstanceIdentityAtBoot(getBuildInfo().version)
+  void logInstanceIdentityAtBoot(settingsRepo, getBuildInfo().version)
     .then(async (identity) => {
       await recordResolvedAccount(db, identity);
+      // Signer mode links the instance during this check, so provisioning waits for it.
+      await provisionAfterLink();
       if (identity.status !== "ok") return;
       if (!(await getGuardianAuthState(db)).exists) return;
       await connectEmailWithoutClick("boot");
@@ -2176,14 +2335,6 @@ async function main() {
     access: romeCloudAccess,
   });
   usageReporter.start();
-
-  // Self-provision the webhook-relay mailbox using the durable instance token
-  //: present it to Rome Cloud, store the returned credential, and point
-  // the live drainer at it. Fire-and-forget and idempotent — it re-mints a
-  // full-TTL drain key on every boot, and no-ops when the instance is not
-  // enrolled (leaving any manually-pasted relay setting untouched).
-  void provisionRelayMailboxAtBoot({ settingsRepo, appCatalog, relayDrainer });
-  void provisionNodeCaller();
 
   process.on("unhandledRejection", (reason) => {
     const shutdownLog = createLogger("shutdown");
@@ -2253,14 +2404,14 @@ async function main() {
     capabilityDiscovery.stop();
     shutdownLog.info("capability discovery stopped");
 
-    unsubscribeCodexAccountChanged();
-    unsubscribeInstanceTokenChanged();
-    romeCreditsPayer.close();
+    stopCodexLoginChoice();
+    unsubscribeInstanceLinked();
+    visitorAllowListSync.stop();
+    modelAccounts.close();
+    shutdownLog.info("model accounts stopped");
     codexAccountService.close();
-    shutdownLog.info("Codex account service stopped");
-
-    aiToolState.close();
-    shutdownLog.info("AI tool state stopped");
+    claudeAccount.close();
+    shutdownLog.info("model accounts stopped");
 
     codexProvider.close();
     shutdownLog.info("Codex app-server stopped");

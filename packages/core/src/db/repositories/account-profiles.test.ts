@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { AccountProfilesRepository } from "./account-profiles.js";
 
 const ADA = { platform: "telegram", id: "1001" };
@@ -51,6 +51,51 @@ describe("AccountProfilesRepository", () => {
 
     const [profile] = await repo.profilesOf([ADA]);
     expect(profile).toEqual({ displayName: "Ada Lovelace", handle: null, avatarUrl: null });
+  });
+
+  it("keeps the name a grant reported until an address book speaks for the account", async () => {
+    repo.fromConnection(testDb.db, ADA, {
+      displayName: "Ada bot",
+      handle: "ada_bot",
+      avatarUrl: null,
+    });
+    expect((await repo.profilesOf([ADA]))[0]).toEqual({
+      displayName: "Ada bot",
+      handle: "ada_bot",
+      avatarUrl: null,
+    });
+
+    await repo.fromAddressBook([
+      { account: ADA, displayName: "Ada Lovelace", handle: null, avatarUrl: null },
+    ]);
+    repo.fromConnection(testDb.db, ADA, {
+      displayName: "Ada bot 2",
+      handle: null,
+      avatarUrl: null,
+    });
+
+    expect((await repo.profilesOf([ADA]))[0]).toEqual({
+      displayName: "Ada Lovelace",
+      handle: null,
+      avatarUrl: null,
+    });
+  });
+
+  it("lets a message and a grant each take the newer name over the other's", async () => {
+    repo.fromConnection(testDb.db, ADA, {
+      displayName: "Ada bot",
+      handle: "ada_bot",
+      avatarUrl: null,
+    });
+    await repo.fromMessage(ADA, { displayName: "Ada", handle: null, avatarUrl: null });
+    expect((await repo.profilesOf([ADA]))[0]).toEqual({
+      displayName: "Ada",
+      handle: "ada_bot",
+      avatarUrl: null,
+    });
+
+    repo.fromConnection(testDb.db, ADA, { displayName: "Ada bot", handle: null, avatarUrl: null });
+    expect((await repo.profilesOf([ADA]))[0]?.displayName).toBe("Ada bot");
   });
 
   it("writes and reads an address book larger than one batch", async () => {

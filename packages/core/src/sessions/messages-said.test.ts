@@ -15,9 +15,10 @@ import { chatKey, placeIn } from "../chats/storage/place.js";
 import { inboundRecording } from "../connections/inbound-recording.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { chatMessages, romeSessions } from "../db/schema.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { messagesSaid } from "./messages-said.js";
 import type { TurnLinks } from "./turn-links.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 // Recording what reaches Rome in Chats' tables, then Agents hearing it. What
 // these pin: a message is on record in its chat before the hook hears it, the
@@ -105,7 +106,7 @@ describe("messagesSaid", () => {
     );
     return messagesSaid({
       chats: wiring.chats,
-      sessions: overrides.sessions ?? new WebChatRepository(testDb.db),
+      sessions: overrides.sessions ?? new ChatsWebChatRepository(testDb.db),
       recording,
       events,
       wakes: overrides.wakes ?? wiring.links,
@@ -504,7 +505,7 @@ describe("messagesSaid", () => {
   it("hands nothing to a hook that left while its session opened", async () => {
     const opening = gate();
     const opened = gate();
-    const sessions = new WebChatRepository(testDb.db);
+    const sessions = new ChatsWebChatRepository(testDb.db);
     const slow = build({
       sessions: {
         ensureChannelChat: async (input) => {

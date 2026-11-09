@@ -7,7 +7,7 @@ import {
   type LinkedInPollerOptions,
 } from "./linkedin.js";
 import { OpencliAuthError, type OpencliResult } from "./linkedin-cli.js";
-import { createTestDb } from "../../../test/helpers.js";
+import { createTestDb } from "../../../test/db.js";
 import { LinkedInStoreRepository } from "../../../db/repositories/linkedin-store.js";
 import type {
   LinkedInMessageInput,
@@ -584,6 +584,26 @@ describe("LinkedInInboxPoller participant sync", () => {
 });
 
 describe("LinkedInInboxPoller fault handling", () => {
+  it("retries soon, without degrading, when the browser is not up yet after start", async () => {
+    const sink = new FakeSink();
+    let inboxCalls = 0;
+    const run = rs.fn(async (args: string[]): Promise<OpencliResult> => {
+      if (args[1] !== "inbox") return ok([]);
+      inboxCalls++;
+      if (inboxCalls === 1) return { code: 1, stdout: "", stderr: "cdp unreachable" };
+      return ok([]);
+    });
+    // The normal cadence is minutes, so only the startup retry can reach a second poll.
+    const poller = makePoller(sink, run, { startupRetryDelayMs: 20 });
+    const onAuthRejected = rs.fn();
+
+    poller.start({ onAuthRejected });
+    await rs.waitFor(() => expect(inboxCalls).toBe(2));
+    expect(poller.getRuntimeDegradation()).toBeNull();
+    expect(onAuthRejected).not.toHaveBeenCalled();
+    poller.stop();
+  });
+
   it("routes an auth failure to onAuthRejected", async () => {
     const sink = new FakeSink();
     const run = rs.fn(
@@ -610,7 +630,11 @@ describe("LinkedInInboxPoller fault handling", () => {
       if (args[1] === "inbox") return ok([]);
       return ok([]);
     });
-    const poller = makePoller(sink, run, { minIntervalMs: 1, maxIntervalMs: 2 });
+    const poller = makePoller(sink, run, {
+      minIntervalMs: 1,
+      maxIntervalMs: 2,
+      startupRetryDelayMs: 1,
+    });
     const onAuthRejected = rs.fn();
 
     poller.start({ onAuthRejected });

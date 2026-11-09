@@ -6,7 +6,17 @@ import {
   useRef,
   useState,
 } from "react";
-import { ArrowUp, Cpu, MoreHorizontal, Paperclip, Plus, X } from "lucide-react";
+import {
+  ArrowUp,
+  Cpu,
+  Folder,
+  FolderOpen,
+  Laptop,
+  MoreHorizontal,
+  Paperclip,
+  Plus,
+  X,
+} from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import {
@@ -25,6 +35,8 @@ import type {
   ChatComposerSendControls,
   ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
+import { ProjectSelector } from "@/components/project-selector";
+import { useChatLocations } from "@/hooks/use-chat-locations";
 import { useSettings } from "@/hooks/use-settings";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import {
@@ -39,11 +51,16 @@ import { extractFilesFromClipboard } from "@/lib/clipboard-files";
 import { shouldSubmitOnEnter } from "@/lib/keyboard-submit";
 import { randomUUID } from "@/lib/random-uuid";
 import type { ChatErrorNotice, PendingUpload } from "@/lib/chat-types";
+import { appendFolderLine, deviceFolderLabel, type FolderSelection } from "@/lib/device-folder";
 import { cn } from "@/lib/utils";
 import { ErrorEventView } from "../entries/ErrorEventView";
 import { ReplyBar } from "../reply/ReplyBar";
 import { useReplyDraft } from "../reply/reply-draft";
+import { ComposerChip } from "./ComposerChip";
 import { PendingUploadsList } from "./PendingUploadsList";
+import { useSlashSkill } from "./use-slash-skill";
+import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
+import { SlashSkillMenu } from "./SlashSkillMenu";
 import type { ReplyTarget } from "../reply/reply-draft";
 
 const TEXTAREA_MAX_HEIGHT = 240;
@@ -84,27 +101,52 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     const replyDraft = useReplyDraft();
     const { data: settings } = useSettings();
     const coarsePointer = useCoarsePointer();
-    const modelSelectorEnabled = settings?.enableModelSelector === true;
     // Turns carry the dashboard's reasoning effort, as in every other chat.
     const reasoningEffort = isReasoningEffort(settings?.webchatReasoningEffort)
       ? settings.webchatReasoningEffort
       : DEFAULT_REASONING_EFFORT;
 
     const [inputText, setInputText] = useState("");
+    const [draftSkill, setDraftSkill] = useState<SkillSelection | null>(null);
     const [pendingUploads, setPendingUploads] = useState<PendingUpload[]>([]);
     const [uploadInFlight, setUploadInFlight] = useState(false);
     const [uploadProgress, setUploadProgress] = useState<number | null>(null);
+    // One folder for the next message only; it goes out as a line of text.
+    const [folder, setFolder] = useState<FolderSelection | null>(null);
+    const [folderPickerOpen, setFolderPickerOpen] = useState(false);
+    const [folderSearch, setFolderSearch] = useState("");
+    // Set by the menu item, read once the menu has closed and returned focus.
+    const openPickerAfterCloseRef = useRef(false);
+    const locations = useChatLocations(folderPickerOpen);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaFocusedAtPressRef = useRef(false);
     // The ref closes the same-event gap before React commits the state.
     const uploadInFlightRef = useRef(false);
+    const {
+      slashMenuOpen,
+      setSlashMenuOpen,
+      slashQuery,
+      setSlashQuery,
+      slashMenuRef,
+      reevaluateSlashContext,
+      acceptSlashSkill,
+      handleSlashKeyDown,
+    } = useSlashSkill({
+      inputText,
+      setInputText,
+      setDraftSkill,
+      textareaRef,
+      uploadInFlightRef,
+    });
     const uploadAbortRef = useRef<AbortController | null>(null);
     // The last failed send, so a retry of the same input reuses its inputId.
     const failedSendRef = useRef<{
       inputId: string;
       text: string;
       uploads: PendingUpload[];
+      folder: FolderSelection | null;
+      skill: SkillSelection | null;
     } | null>(null);
 
     // Programmatic clears fire no `input` event, so resize on every change.
@@ -153,14 +195,17 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         uploads: PendingUpload[],
         inputId?: string,
         replyTo?: ReplyTarget,
+        pickedFolder: FolderSelection | null = null,
+        skillName?: string,
       ): ChatComposerSnapshot => ({
-        text,
+        text: appendFolderLine(text, pickedFolder),
         uploads,
         reasoningEffort,
         // A session keeps its project; the field is only read for a draft.
         projectPath: DEFAULT_PROJECT_NAME,
         inputId,
         replyTo,
+        skillName,
       }),
       [reasoningEffort],
     );
@@ -170,10 +215,16 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       const text = inputText.trim();
       const rawText = inputText;
       const uploads = pendingUploads;
-      if (!text && uploads.length === 0) return;
+      const pickedFolder = folder;
+      const skill = draftSkill;
+      if (!text && uploads.length === 0 && !pickedFolder && !skill) return;
       const failed = failedSendRef.current;
       const inputId =
-        failed && failed.text === text && failed.uploads === uploads
+        failed &&
+        failed.text === text &&
+        failed.uploads === uploads &&
+        failed.folder === pickedFolder &&
+        failed.skill === skill
           ? failed.inputId
           : randomUUID();
       // Text alone clears at once and comes back on failure. Attachments keep
@@ -183,26 +234,32 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       if (clearsOptimistically) {
         setInputText("");
         setPendingUploads([]);
+        setFolder(null);
+        setDraftSkill(null);
         replyDraft?.clear();
       }
       try {
-        await invokeOnSend(snapshotOf(text, uploads, inputId, replyTo));
+        await invokeOnSend(snapshotOf(text, uploads, inputId, replyTo, pickedFolder, skill?.name));
         failedSendRef.current = null;
         if (!clearsOptimistically) {
           replyDraft?.clear();
           const sentIds = new Set(uploads.map((upload) => upload.id));
           setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
           setInputText((current) => (current === rawText ? "" : current));
+          setFolder((current) => (current === pickedFolder ? null : current));
+          setDraftSkill((current) => (current === skill ? null : current));
         }
       } catch {
-        failedSendRef.current = { inputId, text, uploads };
+        failedSendRef.current = { inputId, text, uploads, folder: pickedFolder, skill };
         if (clearsOptimistically) {
           setInputText(text);
           setPendingUploads(uploads);
+          setFolder(pickedFolder);
+          setDraftSkill(skill);
           if (replyTo) replyDraft?.restore(replyTo);
         }
       }
-    }, [inputText, pendingUploads, invokeOnSend, snapshotOf, replyDraft]);
+    }, [inputText, pendingUploads, folder, draftSkill, invokeOnSend, snapshotOf, replyDraft]);
 
     useImperativeHandle(
       ref,
@@ -218,14 +275,20 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             el.setSelectionRange(text.length, text.length);
           });
         },
-        // Concierge has no skills.
-        setSkillSelection: () => {},
+        setSkillSelection: (skill) => {
+          if (uploadInFlightRef.current) return;
+          setDraftSkill(skill);
+          setSlashMenuOpen(false);
+          setSlashQuery("");
+        },
         addFiles: addPendingFiles,
-        submit: (text) => {
+        submit: (text, options) => {
           const trimmed = text.trim();
-          if (uploadInFlightRef.current || (!trimmed && pendingUploads.length === 0)) return;
+          const skillName = options?.skillName ?? draftSkill?.name;
+          if (uploadInFlightRef.current || (!trimmed && pendingUploads.length === 0 && !skillName))
+            return;
           const uploads = pendingUploads;
-          void invokeOnSend(snapshotOf(trimmed, uploads))
+          void invokeOnSend(snapshotOf(trimmed, uploads, undefined, undefined, null, skillName))
             .then(() => {
               const sentIds = new Set(uploads.map((upload) => upload.id));
               setPendingUploads((current) => current.filter((upload) => !sentIds.has(upload.id)));
@@ -236,12 +299,21 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         },
         getMetadataSnapshot: () => ({ reasoningEffort }),
       }),
-      [addPendingFiles, pendingUploads, invokeOnSend, snapshotOf, reasoningEffort],
+      [
+        addPendingFiles,
+        pendingUploads,
+        invokeOnSend,
+        snapshotOf,
+        reasoningEffort,
+        draftSkill,
+        setSlashMenuOpen,
+        setSlashQuery,
+      ],
     );
 
-    const empty = !inputText.trim() && pendingUploads.length === 0;
+    const empty = !inputText.trim() && pendingUploads.length === 0 && !folder && !draftSkill;
     const sendLabel = isStreaming ? t("composer.sendWhileRunningTitle") : t("composer.sendTitle");
-    const showModel = !!modelSelection && modelSelectorEnabled;
+    const showModel = !!modelSelection;
     const [showAllModels, setShowAllModels] = useState(false);
     // Like the model picker in other chats: the common models and the chat's
     // own pick first, every model after "show all".
@@ -283,6 +355,14 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
             }}
           />
           <ReplyBar />
+          {draftSkill && (
+            <div className="mb-2 flex min-w-0">
+              <SkillCommandChip
+                skill={draftSkill}
+                onRemove={uploadInFlight ? undefined : () => setDraftSkill(null)}
+              />
+            </div>
+          )}
           <div className="flow-root empty:hidden">
             <PendingUploadsList
               uploads={pendingUploads}
@@ -293,72 +373,159 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               disabled={uploadInFlight}
               uploadProgress={uploadInFlight ? uploadProgress : undefined}
             />
+            {folder ? (
+              <div className="mb-2">
+                <ComposerChip
+                  icon={
+                    folder.kind === "device" ? (
+                      <Laptop className="size-3.5" aria-hidden />
+                    ) : (
+                      <Folder className="size-3.5" aria-hidden />
+                    )
+                  }
+                  title={folder.kind === "device" ? folder.folder.path : folder.path}
+                  removeLabel={t("concierge.removeFolder")}
+                  onRemove={uploadInFlight ? undefined : () => setFolder(null)}
+                >
+                  {folder.kind === "device" ? deviceFolderLabel(folder.folder) : folder.name}
+                </ComposerChip>
+              </div>
+            ) : null}
           </div>
           <div className="flex items-end gap-2">
-            <DropdownMenu
-              onOpenChange={(open) => {
-                // Each open starts on the short model list.
-                if (!open) setShowAllModels(false);
-              }}
-            >
-              <DropdownMenuTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon-sm"
-                  disabled={uploadInFlight}
-                  aria-label={t("concierge.composerMenu")}
-                  title={t("concierge.composerMenu")}
-                  className="touch-target"
+            {/* The selector anchors to this box: the popover opens above the +. */}
+            <div className="relative flex">
+              <DropdownMenu
+                onOpenChange={(open) => {
+                  // Each open starts on the short model list.
+                  if (!open) setShowAllModels(false);
+                }}
+              >
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon-sm"
+                    disabled={uploadInFlight}
+                    aria-label={t("concierge.composerMenu")}
+                    title={t("concierge.composerMenu")}
+                    className="touch-target"
+                  >
+                    <Plus aria-hidden />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent
+                  side="top"
+                  align="start"
+                  sideOffset={8}
+                  className="w-44"
+                  // The menu hands focus back to the +, which the popover would
+                  // read as a click outside and close at once. Skip that return
+                  // and open the selector instead.
+                  onCloseAutoFocus={(event) => {
+                    if (!openPickerAfterCloseRef.current) return;
+                    openPickerAfterCloseRef.current = false;
+                    event.preventDefault();
+                    setFolderPickerOpen(true);
+                  }}
                 >
-                  <Plus aria-hidden />
-                </Button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-44">
-                <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
-                  <Paperclip aria-hidden />
-                  {t("composer.uploadFiles")}
-                </DropdownMenuItem>
-                {showModel && modelSelection ? (
-                  <DropdownMenuSub>
-                    {/* The trigger's own chevron is its last svg; `ml-0` lets the
+                  <DropdownMenuItem onSelect={() => fileInputRef.current?.click()}>
+                    <Paperclip aria-hidden />
+                    {t("composer.uploadFiles")}
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={() => {
+                      openPickerAfterCloseRef.current = true;
+                    }}
+                  >
+                    <FolderOpen aria-hidden />
+                    {t("concierge.chooseFolder")}
+                  </DropdownMenuItem>
+                  {showModel && modelSelection ? (
+                    <DropdownMenuSub>
+                      {/* The trigger's own chevron is its last svg; `ml-0` lets the
                         current model, not a split gap, take the free space. */}
-                    <DropdownMenuSubTrigger className="[&>svg:last-child]:ml-0">
-                      <Cpu aria-hidden />
-                      {t("modelSelector.label")}
-                      <span className="ml-auto truncate text-muted-foreground">
-                        {modelLabel(modelSelection.value)}
-                      </span>
-                    </DropdownMenuSubTrigger>
-                    <DropdownMenuSubContent className="max-h-80 w-48 overflow-y-auto">
-                      <DropdownMenuRadioGroup
-                        value={modelSelection.value}
-                        onValueChange={modelSelection.onChange}
-                      >
-                        {modelRows(modelSelection.value).map((option) => (
-                          <DropdownMenuRadioItem key={option.id} value={option.id}>
-                            {t(option.labelKey)}
-                          </DropdownMenuRadioItem>
-                        ))}
-                      </DropdownMenuRadioGroup>
-                      {showAllModels ? null : (
-                        <DropdownMenuItem
-                          className="text-muted-foreground"
-                          // Expands the list in place instead of closing the menu.
-                          onSelect={(event) => {
-                            event.preventDefault();
-                            setShowAllModels(true);
-                          }}
+                      <DropdownMenuSubTrigger className="[&>svg:last-child]:ml-0">
+                        <Cpu aria-hidden />
+                        {t("modelSelector.label")}
+                        <span className="ml-auto truncate text-muted-foreground">
+                          {modelLabel(modelSelection.value)}
+                        </span>
+                      </DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="max-h-80 w-48 overflow-y-auto">
+                        <DropdownMenuRadioGroup
+                          value={modelSelection.value}
+                          onValueChange={modelSelection.onChange}
                         >
-                          <MoreHorizontal aria-hidden />
-                          {t("modelSelector.showAll", { count: LARGE_MODEL_OPTIONS.length })}
-                        </DropdownMenuItem>
-                      )}
-                    </DropdownMenuSubContent>
-                  </DropdownMenuSub>
-                ) : null}
-              </DropdownMenuContent>
-            </DropdownMenu>
+                          {modelRows(modelSelection.value).map((option) => (
+                            <DropdownMenuRadioItem key={option.id} value={option.id}>
+                              {t(option.labelKey)}
+                            </DropdownMenuRadioItem>
+                          ))}
+                        </DropdownMenuRadioGroup>
+                        {showAllModels ? null : (
+                          <DropdownMenuItem
+                            className="text-muted-foreground"
+                            // Expands the list in place instead of closing the menu.
+                            onSelect={(event) => {
+                              event.preventDefault();
+                              setShowAllModels(true);
+                            }}
+                          >
+                            <MoreHorizontal aria-hidden />
+                            {t("modelSelector.showAll", {
+                              count: LARGE_MODEL_OPTIONS.length,
+                            })}
+                          </DropdownMenuItem>
+                        )}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+              <ProjectSelector
+                hideTrigger
+                t={t}
+                projectCatalog={locations.query.data?.projects ?? null}
+                projectsLoading={locations.query.isPending}
+                projectsError={
+                  locations.query.error && !locations.query.data
+                    ? t("project.errors.loadFailed")
+                    : null
+                }
+                devices={locations.query.data?.devices ?? null}
+                draftProjectName={folder?.kind === "project" ? folder.name : DEFAULT_PROJECT_NAME}
+                draftProjectLabel={folder?.kind === "project" ? folder.name : DEFAULT_PROJECT_NAME}
+                defaultProjectName={DEFAULT_PROJECT_NAME}
+                deviceFolder={folder?.kind === "device" ? folder.folder : null}
+                menuOpen={folderPickerOpen}
+                searchQuery={folderSearch}
+                setSearchQuery={setFolderSearch}
+                onToggleMenu={() => {
+                  setFolderPickerOpen((open) => !open);
+                  setFolderSearch("");
+                }}
+                onPickProject={(name) => {
+                  const project = locations.query.data?.projects.projects.find(
+                    (candidate) => candidate.name === name,
+                  );
+                  // The default project is "no project": it clears the pick.
+                  // `path` is the project's absolute folder.
+                  setFolder(
+                    project && name !== DEFAULT_PROJECT_NAME
+                      ? { kind: "project", name, path: project.path }
+                      : null,
+                  );
+                  setFolderPickerOpen(false);
+                  setFolderSearch("");
+                }}
+                onPickDeviceFolder={(picked) => {
+                  setFolder({ kind: "device", folder: picked });
+                  setFolderPickerOpen(false);
+                  setFolderSearch("");
+                }}
+              />
+            </div>
             {/* At least as tall as the buttons beside it, with one line of text
                 centered, so the text sits on their center line until it wraps.
                 `--row-h` follows the buttons: `icon-sm`, raised to the touch
@@ -367,37 +534,62 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
               className="flex min-w-0 flex-1 items-center [--row-h:var(--control-h-sm)] [@media(hover:none)]:[--row-h:max(var(--control-h-sm),var(--rome-size-44,2.75rem))]"
               style={{ minHeight: "var(--row-h)" }}
             >
-              <textarea
-                ref={textareaRef}
-                value={inputText}
-                onChange={(event) => setInputText(event.target.value)}
-                onInput={(event) => clampTextareaHeight(event.currentTarget)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape" && replyDraft?.target) {
-                    event.preventDefault();
-                    replyDraft.clear();
-                    return;
-                  }
-                  if (shouldSubmitOnEnter(event, { enterSends: !coarsePointer })) {
-                    event.preventDefault();
-                    void runSend();
-                  }
+              <SlashSkillMenu
+                ref={slashMenuRef}
+                open={slashMenuOpen && !uploadInFlight}
+                onOpenChange={(next) => {
+                  if (uploadInFlightRef.current) return;
+                  setSlashMenuOpen(next);
+                  if (!next) setSlashQuery("");
                 }}
-                onPaste={(event) => {
-                  const files = extractFilesFromClipboard(event.clipboardData);
-                  if (files.length === 0) return;
-                  event.preventDefault();
-                  addPendingFiles(files);
-                }}
-                placeholder={
-                  pendingUploads.length > 0
-                    ? t("composer.placeholderWithUploads")
-                    : t("concierge.placeholder")
+                query={slashQuery}
+                onSelect={acceptSlashSkill}
+                anchor={
+                  <textarea
+                    ref={textareaRef}
+                    value={inputText}
+                    onChange={(event) => {
+                      if (uploadInFlightRef.current) return;
+                      setInputText(event.target.value);
+                      reevaluateSlashContext(event.target.value, event.target.selectionEnd);
+                    }}
+                    onSelect={(event) => {
+                      const el = event.currentTarget;
+                      reevaluateSlashContext(el.value, el.selectionEnd);
+                    }}
+                    onInput={(event) => clampTextareaHeight(event.currentTarget)}
+                    onKeyDown={(event) => {
+                      if (handleSlashKeyDown(event)) return;
+                      if (event.key === "Escape" && replyDraft?.target) {
+                        event.preventDefault();
+                        replyDraft.clear();
+                        return;
+                      }
+                      if (shouldSubmitOnEnter(event, { enterSends: !coarsePointer })) {
+                        event.preventDefault();
+                        void runSend();
+                      }
+                    }}
+                    onPaste={(event) => {
+                      const files = extractFilesFromClipboard(event.clipboardData);
+                      if (files.length === 0) return;
+                      event.preventDefault();
+                      addPendingFiles(files);
+                    }}
+                    placeholder={
+                      pendingUploads.length > 0
+                        ? t("composer.placeholderWithUploads")
+                        : t("concierge.placeholder")
+                    }
+                    rows={1}
+                    className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none"
+                    style={{
+                      minHeight: "1lh",
+                      maxHeight: `${TEXTAREA_MAX_HEIGHT}px`,
+                    }}
+                    disabled={uploadInFlight}
+                  />
                 }
-                rows={1}
-                className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none"
-                style={{ minHeight: "1lh", maxHeight: `${TEXTAREA_MAX_HEIGHT}px` }}
-                disabled={uploadInFlight}
               />
             </div>
             {isStreaming && onStop && (

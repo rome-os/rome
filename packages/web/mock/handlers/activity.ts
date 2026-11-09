@@ -1,5 +1,3 @@
-import { pairingPayload, PAIRING_HISTORY_PAGE_SIZE } from "@rome/api-types/approvals";
-import { pairingFixtures } from "../../src/pages/dev/pairing-fixtures";
 import { http, HttpResponse } from "msw";
 import type { ApprovalRecord } from "@/lib/chat-types";
 import type {
@@ -17,11 +15,10 @@ import type {
 
 const GUARDIAN = { kind: "guardian" as const, userId: "mock-guardian", via: "cookie" as const };
 
-// `type` is a closed set of three lifecycles (see @rome/api-types/approvals),
-// and each has one creator: the action engine writes `action_execution` — the
-// only kind the resolve route queues and the only kind offering a retry — while
-// the inbox app writes `outgoing_message` for a sent-message audit record and
-// `person_mapping` when it maps an unknown sender. What is being approved lives
+// `type` is a closed set of lifecycles (see @rome/api-types/approvals): the
+// action engine writes `action_execution` — the only kind the resolve route
+// queues and the only kind offering a retry — and the inbox app writes
+// `outgoing_message` for a sent-message audit record. What is being approved lives
 // in the payload and the description, exactly as it does on the server;
 // `sensitive_message` is a *preview* kind, a different contract, and belongs on
 // the chat card rather than here.
@@ -31,7 +28,6 @@ const GUARDIAN = { kind: "guardian" as const, userId: "mock-guardian", via: "coo
 // same store (see `approvalCardId`), so approving from either surface is
 // visible in the other.
 const approvals: Approval[] = [
-  ...pairingFixtures(),
   {
     id: "approval-1",
     type: "action_execution",
@@ -111,29 +107,6 @@ const approvals: Approval[] = [
     createdAt: "2026-08-03T21:30:00.000Z",
     resolvedAt: "2026-08-03T21:44:00.000Z",
     resolvedBy: "mock-guardian",
-    executedAt: null,
-    executionError: null,
-  },
-  {
-    // The third lifecycle: written by the inbox app when it maps an unknown
-    // sender to an existing person. Auto-approved on creation — rejecting it is
-    // how the guardian undoes the mapping, which is why it is listed at all.
-    id: "approval-6",
-    type: "person_mapping",
-    status: "auto_approved",
-    requestedBy: "system",
-    description: 'Auto-mapped Ray (telegram:5550111) to existing person "Ray Consuelo"',
-    payload: {
-      action: "auto_mapped_existing",
-      personId: "person-ray",
-      personDisplayName: "Ray Consuelo",
-      channel: "telegram",
-      channelUserId: "5550111",
-      senderDisplayName: "Ray",
-    },
-    createdAt: "2026-08-03T18:20:00.000Z",
-    resolvedAt: "2026-08-03T18:20:00.000Z",
-    resolvedBy: "system",
     executedAt: null,
     executionError: null,
   },
@@ -333,27 +306,7 @@ function findApproval(id: string): Approval | undefined {
 }
 
 export const activityHandlers = [
-  http.get("/api/approvals", ({ request }) => {
-    for (const approval of approvals) {
-      const payload = pairingPayload(approval);
-      if (payload && approval.status === "pending") {
-        approval.status = "rejected";
-        approval.payload = { ...payload, resolution: "expired" };
-        approval.resolvedBy = "system:expiry";
-        approval.resolvedAt = new Date().toISOString();
-      }
-    }
-    const offset = Number(new URL(request.url).searchParams.get("pairingHistoryOffset") ?? "0");
-    const history = approvals.filter((row) => pairingPayload(row) && row.status !== "pending");
-    const current =
-      offset === 0
-        ? approvals.filter((row) => !pairingPayload(row) || row.status === "pending")
-        : [];
-    return HttpResponse.json([
-      ...current,
-      ...history.slice(offset, offset + PAIRING_HISTORY_PAGE_SIZE),
-    ]);
-  }),
+  http.get("/api/approvals", () => HttpResponse.json(approvals)),
   // Keyed by :id, so it must stay after the collection route above.
   http.get("/api/approvals/:id", ({ params }) => {
     const approval = findApproval(String(params.id));
@@ -391,7 +344,7 @@ export const activityHandlers = [
     // The real route is write-once: a second resolution is a 409, and the
     // ApprovalCard treats that as success (it adopts the stored record), so a
     // fixture that silently re-resolved would hide the branch.
-    if (approval.status !== "pending" || pairingPayload(approval)) {
+    if (approval.status !== "pending") {
       return HttpResponse.json({ error: "Already resolved" }, { status: 409 });
     }
     approval.status = intent === "approve" ? "approved" : "rejected";

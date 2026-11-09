@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.1.9](https://github.com/rome-os/rome/compare/node-v0.1.8...node-v0.1.9) (2026-11-08)
+
+
+### Bug Fixes
+
+* **rome-node:** run the connect status screen on production React ([#1892](https://github.com/rome-os/rome/issues/1892)) ([904c656](https://github.com/rome-os/rome/commit/904c656cbef2de5e2964dd81b3ea15a10c366632))
+
+## [0.1.8](https://github.com/rome-os/rome/compare/node-v0.1.7...node-v0.1.8) (2026-11-05)
+
+
+### Features
+
+* **core:** authenticate to Rome Cloud with signer JWTs ([#1718](https://github.com/rome-os/rome/issues/1718)) ([bd455bf](https://github.com/rome-os/rome/commit/bd455bfcfbd91995a40bc03171fce9c39b699648))
+
+
+### Dependencies
+
+* The following workspace dependencies were updated
+  * dependencies
+    * @rome-os/node-core bumped to 0.1.7
+
 ## [0.1.7](https://github.com/rome-os/rome/compare/node-v0.1.6...node-v0.1.7) (2026-11-03)
 
 

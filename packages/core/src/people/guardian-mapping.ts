@@ -6,14 +6,14 @@ import { createLogger } from "../logger.js";
 const log = createLogger("guardian-mapping");
 
 /**
- * Auto-map the guardian person onto their own account on a platform.
+ * Link the guardian to their own account on a platform.
  *
- * Called on connect for channels that surface the guardian's self address
- * (WhatsApp pairing today) and by the channels routes/descriptors. Returns
+ * Called on connect for kinds of connection that report the guardian's own
+ * address (WhatsApp pairing today) and by the connection routes. Returns
  * `true` when a link was created or re-canonicalized, `false` when the
  * account was already linked or dismissed, or no guardian person exists.
  */
-export async function mapGuardianToChannel(
+export async function linkGuardianToAccount(
   repo: PeopleRepository,
   platform: string,
   accountId: string,
@@ -91,7 +91,7 @@ function staleAddress(links: readonly Account[], platform: string): string | und
  * transaction opens so the write itself can be a single synchronous statement
  * inside a caller-owned transaction (see {@link applyGuardianMappingWithinTx}).
  * `noop` covers "already mapped", "dismissed" and "no guardian person" — the same skip cases
- * {@link mapGuardianToChannel} returns `false` for.
+ * {@link linkGuardianToAccount} returns `false` for.
  */
 export type GuardianMappingPlan =
   | { op: "noop" }
@@ -100,7 +100,7 @@ export type GuardianMappingPlan =
 
 /**
  * Read-only half of the guardian auto-map: decide whether (and how) to map the
- * account, without writing. Mirrors {@link mapGuardianToChannel}'s branching
+ * account, without writing. Mirrors {@link linkGuardianToAccount}'s branching
  * so the transactional grant path (`ConnectionRegistry.giveGrant`) reaches the
  * same decision, then applies it inside the credential-write transaction. Safe to
  * run before the transaction: the terminal grant already holds the registry's

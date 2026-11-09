@@ -1,7 +1,7 @@
 import { loadConfig } from "../config.js";
 import { HostExecutionService } from "../host-execution/service.js";
 import { getDb } from "../db/index.js";
-import { AgentLoader } from "../core/agent-loader.js";
+import { AgentLoader, requireAgent } from "../agent/index.js";
 import { ActionRegistryImpl } from "./registry.js";
 import { ActionLoader } from "./loader.js";
 import { ActionEngine } from "./engine.js";
@@ -45,13 +45,10 @@ import {
   ChannelsServiceProxy,
   AppConnectionsProxy,
 } from "./service-proxies.js";
+import { callMain } from "./worker-rpc-client.js";
 import { AppCatalog, AppInstaller, hydrateCatalogFromLockfile } from "../apps/index.js";
 import { readLockfileWithEntryIsolation } from "../apps/lockfile.js";
 import { createAppRuntimeRepositories } from "../apps/repositories.js";
-import { ChatRepository } from "../chats/chat-repository.js";
-import { ChatEvents } from "../chats/events.js";
-import { StoredMessages } from "../chats/message-repository.js";
-import { SkillCatalog } from "../core/skill-catalog.js";
 import { registerLazyAppActions } from "./app-actions-wiring.js";
 import {
   createCodexImageGenerationProvider,
@@ -61,7 +58,6 @@ import { RoutinesRepository } from "../db/repositories/routines.js";
 import { STRANGER_PERSON_ID } from "../constants.js";
 import { getProfileAppsLockfilePath, getProfileInstalledAppsDir } from "../paths.js";
 import { createLogger } from "../logger.js";
-import { sendApprovalCard } from "./approval-card.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   parseLegacyArtifactBindings,
@@ -107,7 +103,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     ),
   };
   const agentLoader = new AgentLoader(artifactIdentity);
-  const skillCatalog = new SkillCatalog(artifactIdentity);
   const actionLoader = new ActionLoader(artifactIdentity);
   const actionRegistry = new ActionRegistryImpl(artifactIdentity);
   await hydrateCatalogFromLockfile({
@@ -116,7 +111,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   });
   await agentLoader.loadFromCatalog(appCatalog);
   await actionLoader.loadFromCatalog(appCatalog);
-  await skillCatalog.loadFromCatalog(appCatalog);
 
   const channelRecords = new ChannelRecordsRepository(db, noAccountLinks);
   const connectionKindOfChannel = (name: string) => channelRecords.connectionKindOf(name);
@@ -147,8 +141,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
   const appRuntimeRepositories = createAppRuntimeRepositories({
     settingsRepo,
     webchatRepo,
-    chatRepo: new ChatRepository(db, channelRecords),
-    chatMessages: new StoredMessages(webchatRepo, new ChatEvents(), { channelsOn: () => [] }),
     speakers: appSpeakers,
     // An app's chats are read and written in Chats here too. The worker holds
     // no channels: a speaker sends through main's, which records nothing, so
@@ -185,21 +177,28 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
     { executions: actionExecutionsRepo, approvals: approvalsRepo, journal: executionJournalRepo },
     {
       processRole: "worker",
-      onApprovalCreated: (approval) => sendApprovalCard(channelsService, approval),
+      // Main sends the card, on the connections it records sends on.
+      onApprovalCreated: async ({ approvalId, actionName, preview, channelContext }) => {
+        await callMain<void>("approvals.sendCard", {
+          approvalId,
+          actionName,
+          ...(preview ? { preview } : {}),
+          ...(channelContext ? { channelContext } : {}),
+        });
+      },
     },
   );
   const capabilityDiscovery = new CapabilityDiscovery(config.cdpAutomationEnabled);
-  // Fire-and-forget: tailscale-based remote discovery is low-priority, and its
-  // initial `tailscale status` probe blocks ~2s when the daemon isn't running.
-  // Awaiting it here would put that cost on every forked worker's engine-build
-  // critical path (e.g. send_message); let it warm up in the background instead.
+  // Fire-and-forget: discovery is low-priority. Awaiting it here would put its
+  // cost on every forked worker's engine-build critical path (e.g.
+  // send_message); let it warm up in the background instead.
   void capabilityDiscovery.start().catch(() => {
     // Best effort in workers.
   });
 
   const agentRunner = new RpcAgentRunner(undefined, chatsWired.replies);
   const resolveArtifactReference = createArtifactReferenceResolver({
-    agentLoader,
+    canonicalAgentName: (name) => requireAgent(agentLoader, name).name,
     actionRegistry,
   });
 
@@ -274,11 +273,6 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
       failures: agentLoader.getRegistryLoadFailures(),
     });
   }
-  if (skillCatalog.getRegistryLoadFailures().length > 0) {
-    log.debug("some app skills failed to load", {
-      failures: skillCatalog.getRegistryLoadFailures(),
-    });
-  }
   if (actionLoader.getRegistryLoadFailures().length > 0) {
     log.debug("some app action configs failed to load", {
       failures: actionLoader.getRegistryLoadFailures(),
@@ -299,7 +293,6 @@ function mainChannel(name: string, service: Pick<ChannelsService, "send">): Chan
       name,
       send: {
         send: (chatId, message) => service.send(name, chatId, message),
-        replies: null,
         direct: null,
       },
       inbound: null,

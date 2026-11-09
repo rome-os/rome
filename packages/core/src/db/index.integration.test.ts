@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "@rstest/core";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import {
   persons,
   links,
@@ -42,7 +42,6 @@ describe("Database Integration", () => {
       displayName: "Alice",
       bondLevel: "guardian",
       profilePath: "/profiles/alice",
-      approved: true,
       createdAt: new Date("2026-01-01"),
     });
 
@@ -53,7 +52,6 @@ describe("Database Integration", () => {
       displayName: "Alice",
       bondLevel: "guardian",
       profilePath: "/profiles/alice",
-      approved: true,
     });
     expect(person.createdAt).toBeInstanceOf(Date);
 

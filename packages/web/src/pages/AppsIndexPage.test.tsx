@@ -25,12 +25,6 @@ rs.mock("sonner", () => ({
   ),
 }));
 
-rs.mock("@/components/logo", () => ({
-  RomeLogo: ({ className }: { className?: string }) => (
-    <span className={className} data-testid="rome-logo" />
-  ),
-}));
-
 // The built-in nav grid imports .svg icons that resolve to URL strings under
 // Rstest (not React components), which jsdom rejects as element names. The
 // real icons are irrelevant to apps reactivity, so stub them with components.
@@ -407,6 +401,69 @@ describe("AppsIndexPage reactivity", () => {
 
     expect(await screen.findByText("Memory")).toBeTruthy();
     expect(screen.queryByText("Chat")).toBeNull();
+  });
+
+  it("uses page tiles for exactly four first-party apps and keeps other app images", async () => {
+    const firstParty = ["briefing", "inbox", "showcases", "skills"];
+    mockBackend({
+      installed: [
+        ...firstParty.map((id) =>
+          installedCard({
+            id,
+            displayName: id,
+            origin: "builtin",
+            iconUrl: `/icons/${id}.svg`,
+          }),
+        ),
+        installedCard({
+          id: "other-builtin",
+          displayName: "Other built-in app",
+          origin: "builtin",
+          iconUrl: "/other.svg",
+        }),
+        installedCard({ id: "my-briefing", displayName: "Briefing", iconUrl: "/custom.svg" }),
+      ],
+    });
+    renderPage();
+    await screen.findByText("briefing");
+    const section = screen.getByRole("region", { name: "Built-in apps" });
+    const memoryTile = within(section)
+      .getByText("Memory")
+      .parentElement?.querySelector(".bg-surface-muted");
+    expect(memoryTile).toBeTruthy();
+    for (const id of firstParty) {
+      const tile = within(section).getByText(id).parentElement;
+      const icon = tile?.querySelector(".bg-surface-muted");
+      expect(icon?.className).toBe(memoryTile?.className);
+      expect(icon?.querySelector("svg")?.getAttribute("class")).toContain("h-6 w-6 sm:h-7 sm:w-7");
+      expect(icon?.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
+      expect(icon?.querySelector("svg")?.getAttribute("stroke-width")).toBe("2");
+      expect(tile?.querySelector("img")).toBeNull();
+    }
+    expect(section.querySelector('img[src="/other.svg"]')).toBeTruthy();
+    expect(
+      screen.getByRole("region", { name: "My apps" }).querySelector('img[src="/custom.svg"]'),
+    ).toBeTruthy();
+  });
+
+  it.each(["inbox"])("keeps a disabled %s page tile muted", async (id) => {
+    mockBackend({
+      installed: [
+        installedCard({
+          id,
+          displayName: id,
+          origin: "builtin",
+          status: "disabled",
+          isEnabled: false,
+          iconUrl: "/inbox.svg",
+        }),
+      ],
+    });
+    renderPage();
+    await screen.findByText(id);
+    const icon = screen.getByText(id).parentElement?.querySelector(".bg-surface-muted");
+    expect(icon?.className).toContain("grayscale opacity-60");
+    expect(icon?.querySelector("svg")).toBeTruthy();
   });
 
   it("sections apps by origin: my apps, then App Store installs, then built-ins", async () => {

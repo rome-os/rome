@@ -1,0 +1,1210 @@
+import { AbortError, query } from "@anthropic-ai/claude-agent-sdk";
+import { randomUUID } from "node:crypto";
+import { DEFAULT_REASONING_EFFORT } from "@rome-os/app-runtime";
+import type {
+  EffortLevel,
+  Query,
+  SDKAssistantMessage,
+  SDKMessage,
+  SDKPartialAssistantMessage,
+  SDKControlGetContextUsageResponse,
+  SDKResultMessage,
+  SDKResultSuccess,
+  SDKUserMessage,
+  SDKUserMessageReplay,
+} from "@anthropic-ai/claude-agent-sdk";
+import type { AgentContextUsage, AgentEvent, AgentPlan } from "../../../../types.js";
+import type {
+  ModelProvider,
+  ModelSession,
+  ModelSessionParams,
+  ModelUserInput,
+  ModelReasoningEffort,
+  ModelSessionEvent,
+  ModelTurnActivityEvent,
+  ModelPosition,
+} from "../../../domain/model-port.js";
+import type { ModelLoginKind } from "../../../domain/model-login.js";
+import { ROME_TOOL_GROUPS, type RomeTools } from "../../../domain/rome-tools.js";
+import { buildAgentAccounting } from "../provider-accounting.js";
+import type { LearnsRefusedTurns } from "../refused-turn.js";
+import { anthropicStop } from "./stop.js";
+import { AsyncMessageQueue } from "./async-message-queue.js";
+import { createReopeningSession, type ClaudeQuerySession } from "./reopening-session.js";
+import { createLogger } from "../../../../logger.js";
+import type { SettingsRepository } from "../../../../db/repositories/settings.js";
+import { parseTimeZone } from "../../../../lib/timezone.js";
+import {
+  buildAnthropicCompatibleProviderEnv,
+  getStoredAnthropicCompatibleCredentials,
+} from "../../../../lib/anthropic-compatible-providers.js";
+import { CUSTOM_ANTHROPIC_PROVIDER_ID } from "@rome/api-types/anthropic-compatible-providers";
+import {
+  clearAnthropicAuthRevoked,
+  markAnthropicAuthRevoked,
+  resolveAnthropicAuthRevokedSourceForQuery,
+  type AnthropicAuthRevokedSource,
+} from "./refused-credential.js";
+import { ANTHROPIC_AUTH_REVOKED_CODE, isAnthropicAuthRevokedError } from "./auth-revoked.js";
+import { anthropicToolName, buildAnthropicMcpServers } from "./mcp-servers.js";
+import { anthropicUsageLimitReset, isAnthropicUsageLimitError } from "./usage-limit.js";
+import { createClaudeQueryProcess } from "./query-process.js";
+import { claudeLoginFrom } from "./login.js";
+import {
+  compileOutputSchema,
+  formatOutputSchemaErrors,
+} from "../../../../apps/packaging/output-schema-validator.js";
+
+// Beta content block types are not re-exported from the agent SDK and
+// `@anthropic-ai/sdk` is not a direct dependency, so we derive the shapes
+// we need from the message types the agent SDK does expose. This keeps the
+// shapes tied to the SDK definitions: if Anthropic changes them, typecheck
+// will break here rather than at runtime.
+type AssistantContentBlock = SDKAssistantMessage["message"]["content"][number];
+type UserMessageContent = (SDKUserMessage | SDKUserMessageReplay)["message"]["content"];
+type UserContentBlock = Exclude<UserMessageContent, string>[number];
+type BetaUsageShape = SDKResultSuccess["usage"];
+type BetaTextBlock = Extract<AssistantContentBlock, { type: "text" }>;
+type BetaThinkingBlock = Extract<AssistantContentBlock, { type: "thinking" }>;
+type BetaToolUseBlock = Extract<AssistantContentBlock, { type: "tool_use" }>;
+type BetaToolResultBlockParam = Extract<UserContentBlock, { type: "tool_result" }>;
+
+const log = createLogger("anthropic-provider");
+const GUARDIAN_TIMEZONE_SETTING_KEY = "guardianTimezone";
+// IS_SANDBOX silences the SDK's "you're running outside a sandbox" warning.
+// We deliberately do NOT pass CLAUDE_CODE_ENABLE_TELEMETRY — the SDK's
+// resulting spans land as orphan traces (no TRACEPARENT
+// auto-injection from Rome's `model.turn`), which clutters the trace store
+// without adding signal. The per-round / per-tool detail is reconstructed
+// by `agent/application/turn-spans.ts` from the message stream instead.
+// CLAUDE_CODE_ENABLE_TASKS=false keeps TodoWrite, which Rome turns into plan
+// updates. Since Claude Code 2.1.251 the default swaps it for TaskCreate.
+export const CLAUDE_AGENT_SDK_ENV = {
+  IS_SANDBOX: "1",
+  CLAUDE_CODE_ENABLE_TASKS: "false",
+} as const;
+
+export const CLAUDE_AGENT_SDK_SETTINGS = {
+  attribution: {
+    commit: "Co-Authored-By: Rome OS <noreply@romeos.cc>",
+    pr: "🤖 Generated with [Rome OS](https://github.com/rome-os/rome)",
+  },
+} as const;
+
+// Tools whose call ends the turn (`RomeToolDefinition.endsTurn`): the turn
+// parks on something the guardian answers next turn, so the model correctly
+// ends its response with no text after them. Claude Code treats tools listed
+// in CLAUDE_CODE_TERMINAL_MCP_TOOLS as terminal: its no-visible-output guard
+// skips a response whose last non-error tool results came from one, instead
+// of re-running the model to force a reply. The CLI also counts a transcript
+// ending in such a result as a finished turn, not an interrupted one, on
+// resume. Both behaviors are undocumented CLI internals checked against agent
+// SDK 0.3.293, so re-check them when bumping the SDK.
+function endsTurnToolNames(tools: RomeTools): string[] {
+  return ROME_TOOL_GROUPS.flatMap((group) =>
+    tools
+      .listTools(group)
+      .filter((tool) => tool.endsTurn === true)
+      .map((tool) => anthropicToolName(group, tool)),
+  );
+}
+
+// With no tool ending the turn, the guard stays on and still catches an empty
+// reply.
+function terminalMcpToolsEnv(
+  inherited: string | undefined,
+  endsTurnTools: readonly string[],
+): string | undefined {
+  if (endsTurnTools.length === 0) return inherited;
+  const tools = new Set(
+    (inherited ?? "")
+      .split(",")
+      .map((tool) => tool.trim())
+      .filter(Boolean),
+  );
+  for (const tool of endsTurnTools) tools.add(tool);
+  return [...tools].join(",");
+}
+
+// Rome's efforts are a subset of Claude's, so Ultrathink (`xhigh`) maps to
+// Claude's `xhigh`, not `max`.
+function toAnthropicEffort(effort: ModelReasoningEffort | undefined): EffortLevel {
+  return effort ?? DEFAULT_REASONING_EFFORT;
+}
+
+interface AnthropicProviderOptions {
+  settingsRepo?: Pick<SettingsRepository, "get">;
+  env?: NodeJS.ProcessEnv;
+  /** The account this provider runs under, told of each turn the provider refuses. */
+  account?: LearnsRefusedTurns;
+}
+
+/** Persist the revoked-credential marker before exposing the failed terminal. */
+async function persistAnthropicAuthRevoked(
+  source: AnthropicAuthRevokedSource | null,
+  account: LearnsRefusedTurns | undefined,
+): Promise<void> {
+  // Raw environment credentials have no Rome-managed login surface or stable
+  // source marker, so keep their 401 as a plain provider error.
+  if (!source) return;
+  try {
+    await markAnthropicAuthRevoked(source);
+  } catch (err) {
+    log.warn("failed to persist anthropic auth-revoked marker", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+  account?.refusedTurn({ kind: "credential" });
+}
+
+function readPositiveNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0 ? value : undefined;
+}
+
+function isAssistantMessage(message: SDKMessage): message is SDKAssistantMessage {
+  return message.type === "assistant";
+}
+
+function isUserMessage(message: SDKMessage): message is SDKUserMessage | SDKUserMessageReplay {
+  return message.type === "user";
+}
+
+function isResultMessage(message: SDKMessage): message is SDKResultMessage {
+  return message.type === "result";
+}
+
+function isPartialAssistantMessage(message: SDKMessage): message is SDKPartialAssistantMessage {
+  return message.type === "stream_event";
+}
+
+function isResultSuccess(result: SDKResultMessage): result is SDKResultSuccess {
+  return result.subtype === "success";
+}
+
+/** The uuids of the sends a frame or result answers (the SDK's echo). */
+function echoedSendIds(message: {
+  user_message_uuid?: string;
+  user_message_uuids?: string[];
+}): string[] {
+  return (
+    message.user_message_uuids ?? (message.user_message_uuid ? [message.user_message_uuid] : [])
+  );
+}
+
+/** The uuid of a replayed user message, if `message` is one. */
+function replayedSendId(message: SDKMessage): string | undefined {
+  return isUserMessage(message) && "isReplay" in message && message.isReplay
+    ? message.uuid
+    : undefined;
+}
+
+// Which side owns the SDK turn after `message`, from the SDK's echo alone. A
+// top-level frame echoing one of Rome's sends gives the turn to Rome; that is
+// also how a send the SDK folds into its own turn takes it over, since the
+// first reply after the fold echoes it. A turn whose first frame echoes none
+// of Rome's sends is one the SDK started by itself. Later frames carry no
+// echo, so they keep the owner.
+function sdkTurnOwnerAfter(
+  message: SDKMessage,
+  current: "rome" | "sdk" | undefined,
+  romeSendIds: ReadonlySet<string>,
+): "rome" | "sdk" | undefined {
+  const isModelFrame =
+    (isAssistantMessage(message) || isPartialAssistantMessage(message)) &&
+    message.parent_tool_use_id === null;
+  if (!isModelFrame) return current;
+  if (echoedSendIds(message).some((id) => romeSendIds.has(id))) return "rome";
+  return current ?? "sdk";
+}
+
+function isTextBlock(block: AssistantContentBlock): block is BetaTextBlock {
+  return block.type === "text";
+}
+
+function isThinkingBlock(block: AssistantContentBlock): block is BetaThinkingBlock {
+  return block.type === "thinking";
+}
+
+function isToolUseBlock(block: AssistantContentBlock): block is BetaToolUseBlock {
+  return block.type === "tool_use";
+}
+
+function isToolResultParam(block: UserContentBlock): block is BetaToolResultBlockParam {
+  return block.type === "tool_result";
+}
+
+function buildRawUsage(usage: BetaUsageShape): Record<string, unknown> | undefined {
+  // Pricing rules (provider-accounting.ts) read flat scalar fields out of
+  // rawUsage; the nested cache_creation object isn't useful and would only
+  // bloat the persisted accounting blob.
+  const entries = Object.entries(usage).filter(([, value]) => {
+    if (value === null) return true;
+    if (Array.isArray(value)) return false;
+    const valueType = typeof value;
+    return valueType === "string" || valueType === "number" || valueType === "boolean";
+  });
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function buildContextUsageFromSdk(
+  contextUsage: SDKControlGetContextUsageResponse,
+): AgentContextUsage | undefined {
+  const usedTokens = readPositiveNumber(contextUsage.totalTokens);
+  if (usedTokens === undefined) {
+    return undefined;
+  }
+
+  const windowTokens =
+    readPositiveNumber(contextUsage.rawMaxTokens) ?? readPositiveNumber(contextUsage.maxTokens);
+
+  return {
+    usedTokens,
+    windowTokens,
+    remainingTokens:
+      windowTokens !== undefined ? Math.max(windowTokens - usedTokens, 0) : undefined,
+  };
+}
+
+async function readSdkContextUsage(
+  q: Pick<Query, "getContextUsage">,
+): Promise<AgentContextUsage | undefined> {
+  try {
+    const contextUsage = await q.getContextUsage();
+    return buildContextUsageFromSdk(contextUsage);
+  } catch (err) {
+    log.warn("failed to read SDK context usage", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return undefined;
+  }
+}
+
+/**
+ * Reasoning tokens from the Messages API's `output_tokens_details`. The API
+ * computes the count by re-tokenizing the raw reasoning, so it is an
+ * estimate that can differ from the billed count by a few tokens.
+ */
+function readReasoningTokens(usage: BetaUsageShape): number | undefined {
+  const details = (usage as { output_tokens_details?: unknown }).output_tokens_details;
+  if (!details || typeof details !== "object") return undefined;
+  return readPositiveNumber((details as { thinking_tokens?: unknown }).thinking_tokens);
+}
+
+function buildAnthropicAccounting(
+  result: SDKResultMessage,
+  model: string,
+  providerId: string,
+  context?: AgentContextUsage,
+  aborted = false,
+) {
+  // SDK types mark these required, but mock test data may omit them; treat
+  // the absence of `usage` as "no accounting to report" rather than crashing.
+  const usage = (result as { usage?: BetaUsageShape }).usage;
+  if (!usage) {
+    return undefined;
+  }
+
+  const reasoningTokens = readReasoningTokens(usage);
+  return buildAgentAccounting({
+    provider: providerId,
+    model,
+    usage: {
+      inputTokens: readPositiveNumber(usage.input_tokens) ?? 0,
+      outputTokens: readPositiveNumber(usage.output_tokens) ?? 0,
+      cacheReadTokens: readPositiveNumber(usage.cache_read_input_tokens) ?? 0,
+      cacheWriteTokens: readPositiveNumber(usage.cache_creation_input_tokens) ?? 0,
+      ...(reasoningTokens !== undefined ? { reasoningTokens } : {}),
+    },
+    reportedCostUsd: readPositiveNumber(result.total_cost_usd),
+    numTurns: readPositiveNumber(result.num_turns),
+    stop: anthropicStop(result, aborted),
+    stopReason: result.stop_reason ?? undefined,
+    durationMs: readPositiveNumber(result.duration_ms),
+    rawUsage: buildRawUsage(usage),
+    context,
+  });
+}
+
+function normalizeToolName(name: string): string {
+  if (name.startsWith("mcp__")) {
+    const parts = name.split("__");
+    const normalized = parts.at(-1);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return name;
+}
+
+function normalizeTodoWritePlan(input: unknown): AgentPlan | null {
+  if (!input || typeof input !== "object" || Array.isArray(input)) return null;
+  const rawTodos = (input as { todos?: unknown }).todos;
+  if (!Array.isArray(rawTodos)) return null;
+
+  const steps: AgentPlan["steps"] = [];
+  for (const candidate of rawTodos) {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
+    const todo = candidate as {
+      content?: unknown;
+      activeForm?: unknown;
+      status?: unknown;
+    };
+    const text = typeof todo.content === "string" ? todo.content.trim() : "";
+    if (!text) continue;
+    if (todo.status !== "pending" && todo.status !== "in_progress" && todo.status !== "completed") {
+      continue;
+    }
+    const activeText = typeof todo.activeForm === "string" ? todo.activeForm.trim() : undefined;
+    steps.push({
+      text,
+      ...(activeText ? { activeText } : {}),
+      status: todo.status,
+    });
+  }
+
+  // An explicit empty array clears the Plan. Malformed non-empty input keeps
+  // the last valid snapshot intact by producing no update.
+  if (rawTodos.length > 0 && steps.length === 0) return null;
+  return { steps };
+}
+
+function extractToolResultMessages(
+  message: SDKUserMessage | SDKUserMessageReplay,
+  toolUseNames: Map<string, string>,
+): ModelTurnActivityEvent[] {
+  const payload = message.message;
+  const content = Array.isArray(payload?.content) ? payload.content : [];
+  const contentResults = content.filter(isToolResultParam).map((block): ModelTurnActivityEvent => {
+    const output =
+      typeof block.is_error === "boolean"
+        ? { content: block.content, isError: block.is_error }
+        : block.content;
+    return {
+      type: "tool_result",
+      toolUseId: block.tool_use_id,
+      tool: normalizeToolName(toolUseNames.get(block.tool_use_id) ?? "unknown"),
+      output,
+      endedAt: new Date().toISOString(),
+      // The Messages API marks a failed tool result with `is_error`; its
+      // absence means success.
+      isError: block.is_error === true,
+    };
+  });
+  if (contentResults.length > 0) {
+    return contentResults;
+  }
+
+  const parentToolUseId = message.parent_tool_use_id;
+  if (parentToolUseId && "tool_use_result" in message) {
+    // `tool_use_result` has no documented failure signal, so this result
+    // leaves `isError` unset ("the producer cannot tell").
+    return [
+      {
+        type: "tool_result",
+        toolUseId: parentToolUseId,
+        tool: normalizeToolName(toolUseNames.get(parentToolUseId) ?? "unknown"),
+        output: message.tool_use_result,
+        endedAt: new Date().toISOString(),
+      },
+    ];
+  }
+
+  return [];
+}
+
+async function getStoredTimezone(
+  settingsRepo?: Pick<SettingsRepository, "get">,
+): Promise<string | null> {
+  if (!settingsRepo) {
+    return null;
+  }
+
+  return parseTimeZone(await settingsRepo.get(GUARDIAN_TIMEZONE_SETTING_KEY));
+}
+
+export class AnthropicProvider implements ModelProvider {
+  readonly id = "anthropic" as const;
+  readonly builtinTools: ReadonlySet<string> = new Set([
+    "Read",
+    "Edit",
+    "Write",
+    "Bash",
+    "Glob",
+    "Grep",
+    "WebSearch",
+    "WebFetch",
+    "TodoWrite",
+    "Task",
+  ]);
+
+  constructor(private options: AnthropicProviderOptions = {}) {}
+
+  private async buildQueryContext(): Promise<{
+    env: Record<string, string | undefined>;
+    authRevokedSource: AnthropicAuthRevokedSource | null;
+    loginKind: ModelLoginKind;
+  }> {
+    const [credentials, timezone] = await Promise.all([
+      getStoredAnthropicCompatibleCredentials(this.options.settingsRepo),
+      getStoredTimezone(this.options.settingsRepo),
+    ]);
+    const baseEnv = this.options.env ?? process.env;
+    const compatibleProviderEnv = credentials
+      ? buildAnthropicCompatibleProviderEnv(credentials)
+      : undefined;
+
+    // A custom environment is a complete provider configuration. Do not let
+    // inherited Anthropic / Claude Code variables silently alter it.
+    const inheritedEnv = { ...baseEnv };
+    if (credentials?.provider === CUSTOM_ANTHROPIC_PROVIDER_ID) {
+      for (const key of Object.keys(inheritedEnv)) {
+        if (
+          key.startsWith("ANTHROPIC_") ||
+          key.startsWith("CLAUDE_CODE_") ||
+          key === "API_TIMEOUT_MS" ||
+          key === "ENABLE_TOOL_SEARCH"
+        ) {
+          delete inheritedEnv[key];
+        }
+      }
+    }
+
+    const env: Record<string, string | undefined> = {
+      ...inheritedEnv,
+      ...(compatibleProviderEnv ?? {}),
+      ...(timezone ? { TZ: timezone } : {}),
+      ...CLAUDE_AGENT_SDK_ENV,
+    };
+    if (compatibleProviderEnv) {
+      if (!("ANTHROPIC_API_KEY" in compatibleProviderEnv)) {
+        delete env.ANTHROPIC_API_KEY;
+      }
+      if (!("ANTHROPIC_AUTH_TOKEN" in compatibleProviderEnv)) {
+        delete env.ANTHROPIC_AUTH_TOKEN;
+      }
+    }
+
+    const login = claudeLoginFrom(credentials, baseEnv);
+    return {
+      env,
+      authRevokedSource: await resolveAnthropicAuthRevokedSourceForQuery(credentials, login),
+      loginKind: login.kind,
+    };
+  }
+
+  // Long-lived streaming-input session
+  //
+  // openSession() opens one CLI subprocess per conversation. The host pushes
+  // turns onto an in-memory queue via sendUserInput(); a single events loop
+  // translates SDK messages → AgentMessages for the lifetime of the query.
+  // close() ends the queue and closes the SDK Query, which lets the SDK shut
+  // its CLI subprocess down cleanly.
+
+  async openSession(params: ModelSessionParams): Promise<ModelSession> {
+    const open = (openParams: ModelSessionParams) => this.openQuerySession(openParams);
+    return createReopeningSession({
+      params,
+      first: await open(params),
+      open,
+      reasoningEffort: toAnthropicEffort(params.config.reasoningEffort),
+    });
+  }
+
+  private async openQuerySession(params: ModelSessionParams): Promise<ClaudeQuerySession> {
+    const { model, systemPrompt, maxTurns = 1000 } = params.config;
+    const outputValidator = params.config.outputSchema
+      ? compileOutputSchema(params.config.outputSchema)
+      : undefined;
+
+    const toolUseNames = new Map<string, string>();
+
+    const mcpServers = buildAnthropicMcpServers({
+      tools: params.tools,
+      externalMcpServers: params.config.externalMcpServers,
+    });
+
+    const queryContext = await this.buildQueryContext();
+    const effort = toAnthropicEffort(params.config.reasoningEffort);
+    const queryEnv: Record<string, string | undefined> = {
+      ...queryContext.env,
+      // The run's variables for the shell the builtin tools run in; an
+      // undefined value clears one Rome itself inherited.
+      ...params.config.env,
+      CLAUDE_CODE_EFFORT_LEVEL: effort,
+      CLAUDE_CODE_TERMINAL_MCP_TOOLS: terminalMcpToolsEnv(
+        queryContext.env.CLAUDE_CODE_TERMINAL_MCP_TOOLS,
+        endsTurnToolNames(params.tools),
+      ),
+      // Claude Code nudges a turn that has gone a few rounds without visible
+      // text. Rome's agents speak through their tools as often as through
+      // text, so the nudge would fire right after an agent messaged the
+      // guardian; Rome never wants it.
+      CLAUDE_CODE_SILENT_TURN_REMINDER: "0",
+    };
+    const effectiveModel = queryEnv.ANTHROPIC_MODEL ?? model;
+    const authRevokedSource = queryContext.authRevokedSource;
+    const providerId = this.id;
+    // Captured for the events generator below (a plain `async function*` with no
+    // `this`): update runtime state before classified terminals become observable.
+    const account = this.options.account;
+
+    const inputQueue = new AsyncMessageQueue<SDKUserMessage>();
+    const queryProcess = createClaudeQueryProcess();
+    const { abortController } = queryProcess;
+    const pendingSteers = new Set<string>();
+    const deferredInputs = new Set<string>();
+    // Every send carries a uuid and origin {kind:"human"}. The SDK echoes a
+    // send's uuid on the turn that answers it, and a turn it starts by itself
+    // (a finished background task) echoes none. That echo decides which Rome
+    // turn owns the SDK's output.
+    const romeSendIds = new Set<string>();
+    // Uuids minted for sends without an inputId. Rome issued no id for them,
+    // so their replay reports no input status.
+    const mintedSendIds = new Set<string>();
+    // Owner of the SDK turn now streaming; undefined between a result and the
+    // next turn's first frame.
+    let sdkTurnOwner: "rome" | "sdk" | undefined;
+    // Output for one of Rome's sends can arrive with no Rome turn open, e.g. a
+    // steer the SDK carried past the previous turn's result. Reading pauses
+    // until Rome opens the next turn, so the output has a turn to go to. The
+    // pause ends because the provider reported that send as queued, and
+    // Rome's next turn adopts a queued input before anything else; interrupt
+    // and close also end it.
+    // The send that opened the current Rome turn.
+    let turnSendId: string | undefined;
+    let resumeReading: (() => void) | undefined;
+    const openRomeTurn = () => {
+      resumeReading?.();
+      resumeReading = undefined;
+    };
+    // The CLI's id for this session: the thread being resumed, or a fresh one
+    // the CLI has never seen. A cancelled first turn can leave a user-only
+    // transcript that is not resumable, so an id is never reused.
+    const sdkSessionId =
+      params.thread.kind === "resume" ? params.thread.modelThreadId : randomUUID();
+
+    const q = query({
+      prompt: inputQueue.iter(),
+      options: {
+        abortController,
+        spawnClaudeCodeProcess: queryProcess.spawn,
+        model: effectiveModel,
+        effort,
+        systemPrompt,
+        ...(params.config.outputSchema
+          ? { outputFormat: { type: "json_schema" as const, schema: params.config.outputSchema } }
+          : {}),
+        env: queryEnv,
+        maxTurns,
+        tools: params.config.builtinTools ?? [],
+        mcpServers,
+        // Only the servers above. Without this, a claude.ai subscription login
+        // also loads that account's claude.ai connectors (Gmail, Drive, ...).
+        strictMcpConfig: true,
+        debug: true,
+        // Surface raw API stream events so the events loop below can yield
+        // `text_delta` events while a text block is still being generated.
+        includePartialMessages: true,
+        extraArgs: { "replay-user-messages": null },
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+        settingSources: ["project"],
+        settings: CLAUDE_AGENT_SDK_SETTINGS,
+        ...(params.config.workingDir ? { cwd: params.config.workingDir } : {}),
+        ...(params.thread.kind === "branch"
+          ? {
+              resume: params.thread.at.modelThreadId,
+              forkSession: true,
+              sessionId: sdkSessionId,
+              resumeSessionAt: params.thread.at.checkpointId,
+            }
+          : // `{ resume }` fails with "No conversation found with session ID"
+            // for a thread that never wrote a transcript, so the run asks to
+            // resume only a thread id this provider reported after a turn with
+            // content (`session.modelThreadId`, captured below).
+            params.thread.kind === "resume"
+            ? { resume: params.thread.modelThreadId }
+            : { sessionId: sdkSessionId }),
+      },
+    });
+
+    // `closed` means the public event/input surface can no longer be used. It
+    // is set when the events iterator ends, including when a fork consumer
+    // returns immediately after its terminal block. That does *not* prove the
+    // SDK Query was disposed: iterator return can happen while the long-lived
+    // query process is still waiting on the input queue. Track disposal
+    // separately so ModelSession.close() always reaches inputQueue.end() and
+    // q.close() exactly once.
+    let closed = false;
+    let queryDisposed = false;
+    let running = false;
+
+    // The SDK's own session id, captured from the first assistant message once a
+    // transcript with real content exists. Exposed via `session.modelThreadId`
+    // so the host persists it and gates `{ resume }` on it (see options above).
+    let establishedThreadId: string | undefined =
+      params.thread.kind === "new" ? undefined : sdkSessionId;
+    let activeTurnLastAssistantMessageId: string | undefined;
+
+    // Translate the SDK's lifetime stream into AgentMessages. Runs once for
+    // the whole session; turn boundaries live one layer up (AgentSession §6).
+    const events: AsyncIterable<ModelSessionEvent> = (async function* () {
+      // In-turn narration vs. closing answer. The agent SDK never sets
+      // `stop_reason` on its streamed assistant messages (always null) and splits
+      // a single API message into one `assistant` message per content block, so
+      // there is no per-message field that tells us, at arrival, whether a text
+      // block is mid-turn commentary or the final answer. We resolve it by
+      // position with a one-step lookahead: hold each completed text block; the
+      // moment any further turn activity (more text, a thinking block, or a tool
+      // call) arrives, the held block is confirmed mid-turn → tag it `commentary`.
+      // Whatever text is still held when the terminal `result`/`error` lands is
+      // the closing answer → tag it `final`. Live `text_delta` events still
+      // stream in real time; only the completed-block event is deferred by one
+      // step (a block isn't truly "done" until the next one starts anyway).
+      let pendingText: string | null = null;
+      let pendingTextBlockId: string | undefined;
+      let partialText = "";
+      let providerError: string | undefined;
+      let partialTextBlockId: string | undefined;
+      // Block identity is `<API message id>:<content block index>`. The stream
+      // reports the index on each `content_block_*` event; the SDK then sends
+      // each completed block as its own assistant message, in index order, so
+      // counting blocks per message id yields the same index.
+      let streamMessageId: string | undefined;
+      const streamToolBlocks = new Map<number, { id: string; name: string }>();
+      const assistantBlockCounts = new Map<string, number>();
+      const blockIdOf = (messageId: string | undefined, index: number): string | undefined =>
+        messageId ? `${messageId}:${index}` : undefined;
+      const textBlock = (
+        content: string,
+        turnPhase: "commentary" | "final",
+        blockId: string | undefined,
+      ): ModelTurnActivityEvent =>
+        blockId
+          ? { type: "text", content, turnPhase, blockId }
+          : { type: "text", content, turnPhase };
+      try {
+        for await (const message of q) {
+          const replayedId = replayedSendId(message);
+          const romeReplay = replayedId !== undefined && romeSendIds.has(replayedId);
+          const owner = sdkTurnOwnerAfter(message, sdkTurnOwner, romeSendIds);
+          const romeClaims = romeReplay || (owner === "rome" && sdkTurnOwner !== "rome");
+          sdkTurnOwner = owner;
+          if (romeClaims && !running && !closed) {
+            const inputId =
+              replayedId ??
+              (isAssistantMessage(message) || isPartialAssistantMessage(message)
+                ? echoedSendIds(message).find((id) => romeSendIds.has(id))
+                : undefined);
+            log.info("pausing SDK stream until Rome opens a turn for a queued send", { inputId });
+            await new Promise<void>((resolve) => {
+              resumeReading = resolve;
+            });
+            log.info("resumed SDK stream", { inputId });
+          }
+          // First assistant message means the SDK has written user+assistant
+          // turns to the transcript: record the SDK's own session id so the
+          // host can persist it and safely `{ resume }` next time. Capturing
+          // here (not at the `system`/init event) is deliberate — an init-only
+          // transcript with zero messages also fails to resume. A turn the SDK
+          // started by itself writes the transcript too.
+          if (establishedThreadId === undefined && isAssistantMessage(message)) {
+            establishedThreadId = message.session_id;
+          }
+          // A turn the SDK started by itself reaches no Rome turn. Replays of
+          // Rome's own sends still report their input status.
+          const turnFrame =
+            isPartialAssistantMessage(message) ||
+            isAssistantMessage(message) ||
+            isUserMessage(message);
+          if (sdkTurnOwner === "sdk" && turnFrame && !romeReplay) continue;
+          if (isPartialAssistantMessage(message)) {
+            // Deltas of in-flight blocks. Each complete block still arrives
+            // on its own assistant message, so this is purely additive for
+            // consumers that render live output. Skip
+            // SDK-internal subagent streams (parent_tool_use_id set) — Rome's
+            // own subagents run in their own provider sessions.
+            if (message.parent_tool_use_id === null) {
+              const evt = message.event;
+              if (evt.type === "message_start") {
+                streamMessageId = evt.message.id;
+                streamToolBlocks.clear();
+              } else if (
+                evt.type === "content_block_start" &&
+                evt.content_block.type === "tool_use"
+              ) {
+                streamToolBlocks.set(evt.index, {
+                  id: evt.content_block.id,
+                  name: normalizeToolName(evt.content_block.name),
+                });
+              } else if (evt.type === "content_block_delta") {
+                const blockId = blockIdOf(streamMessageId, evt.index);
+                if (evt.delta.type === "text_delta") {
+                  if (params.config.outputSchema) continue;
+                  if (partialText === "" && pendingText !== null) {
+                    yield textBlock(pendingText, "commentary", pendingTextBlockId);
+                    pendingText = null;
+                  }
+                  partialText += evt.delta.text;
+                  partialTextBlockId = blockId;
+                  yield blockId
+                    ? { type: "text_delta", content: evt.delta.text, blockId }
+                    : { type: "text_delta", content: evt.delta.text };
+                } else if (evt.delta.type === "thinking_delta" && evt.delta.thinking && blockId) {
+                  // A following block confirms the held text was narration.
+                  if (pendingText !== null) {
+                    yield textBlock(pendingText, "commentary", pendingTextBlockId);
+                    pendingText = null;
+                  }
+                  yield { type: "thinking_delta", blockId, content: evt.delta.thinking };
+                } else if (evt.delta.type === "input_json_delta" && evt.delta.partial_json) {
+                  const toolBlock = streamToolBlocks.get(evt.index);
+                  if (toolBlock) {
+                    if (pendingText !== null) {
+                      yield textBlock(pendingText, "commentary", pendingTextBlockId);
+                      pendingText = null;
+                    }
+                    yield {
+                      type: "tool_input_delta",
+                      toolUseId: toolBlock.id,
+                      tool: toolBlock.name,
+                      content: evt.delta.partial_json,
+                    };
+                  }
+                }
+              }
+            }
+          } else if (isAssistantMessage(message)) {
+            if (message.parent_tool_use_id === null) {
+              // The latest top-level message decides, so an error the SDK
+              // recovered from does not describe a later failure.
+              providerError = message.error;
+              activeTurnLastAssistantMessageId = message.uuid;
+            }
+            const apiMessageId = (message.message as { id?: unknown }).id;
+            const assistantMessageId = typeof apiMessageId === "string" ? apiMessageId : undefined;
+            for (const block of message.message.content) {
+              let blockId: string | undefined;
+              if (assistantMessageId) {
+                const index = assistantBlockCounts.get(assistantMessageId) ?? 0;
+                assistantBlockCounts.set(assistantMessageId, index + 1);
+                blockId = blockIdOf(assistantMessageId, index);
+              }
+              if (isTextBlock(block) && block.text) {
+                if (params.config.outputSchema) continue;
+                partialText = "";
+                partialTextBlockId = undefined;
+                // The SDK's synthetic message for a failed API call. Its text is
+                // an API error notice, never an answer.
+                if (message.error) continue;
+                // A new text block: the previously held one is now confirmed
+                // mid-turn narration. Hold this one until something follows it.
+                if (pendingText !== null) {
+                  yield textBlock(pendingText, "commentary", pendingTextBlockId);
+                }
+                pendingText = block.text;
+                pendingTextBlockId = blockId;
+              } else if (isThinkingBlock(block) && block.thinking) {
+                if (pendingText !== null) {
+                  yield textBlock(pendingText, "commentary", pendingTextBlockId);
+                  pendingText = null;
+                }
+                yield blockId
+                  ? { type: "thinking", content: block.thinking, blockId }
+                  : { type: "thinking", content: block.thinking };
+              } else if (isToolUseBlock(block)) {
+                // A tool call follows the held text → that text was narration.
+                if (pendingText !== null) {
+                  yield textBlock(pendingText, "commentary", pendingTextBlockId);
+                  pendingText = null;
+                }
+                const normalizedToolName = normalizeToolName(block.name);
+                log.debug("tool_use requested", { tool: normalizedToolName });
+                if (normalizedToolName === "TodoWrite" && message.parent_tool_use_id === null) {
+                  const plan = normalizeTodoWritePlan(block.input);
+                  if (plan) {
+                    yield { type: "plan_update", plan };
+                  } else {
+                    log.warn("skipping malformed anthropic TodoWrite plan update", {
+                      sessionId: message.session_id,
+                      toolUseId: block.id,
+                    });
+                  }
+                }
+                toolUseNames.set(block.id, normalizedToolName);
+                yield {
+                  type: "tool_use",
+                  id: block.id,
+                  tool: normalizedToolName,
+                  input: block.input,
+                  startedAt: new Date().toISOString(),
+                };
+              }
+            }
+          } else if (isUserMessage(message)) {
+            if (romeReplay && replayedId && !mintedSendIds.has(replayedId)) {
+              pendingSteers.delete(replayedId);
+              yield { type: "input_status", inputId: replayedId, state: "consumed" };
+            }
+            for (const toolResult of extractToolResultMessages(message, toolUseNames)) {
+              yield toolResult;
+            }
+          } else if (isResultMessage(message)) {
+            // Block ids are unique within a turn; start the next turn's count fresh.
+            assistantBlockCounts.clear();
+            const echoed = echoedSendIds(message).filter((id) => romeSendIds.has(id));
+            const ownerAtResult = sdkTurnOwner;
+            sdkTurnOwner = undefined;
+            // A result follows the owner its frames were routed to. A turn with
+            // no frames (the empty results of a resumed or batched background
+            // task) is the SDK's own when its origin says so. Such a result ends
+            // no Rome turn, but it runs the same accounting, metrics and account
+            // handling as any other: it may have called the model.
+            const sdkOwned =
+              echoed.length === 0 &&
+              ownerAtResult !== "rome" &&
+              (ownerAtResult === "sdk" || message.origin?.kind === "task-notification");
+            // A `success` result flagged `is_error` is a turn that ended on an
+            // API error, and its `result` is the error text.
+            const apiFailed = isResultSuccess(message) && message.is_error;
+            if (!sdkOwned) {
+              running = false;
+              // The SDK owns these queued messages already. Rebind them to a
+              // new Rome turn before reading on into the turn that answers them.
+              for (const inputId of pendingSteers) {
+                deferredInputs.add(inputId);
+                yield { type: "input_status", inputId, state: "queued" };
+              }
+              pendingSteers.clear();
+              // Forget the sends this result answered. A send it didn't answer
+              // may still get a reply, which must reach a Rome turn. A result
+              // that answers none (a frameless SDK error) takes the place of
+              // this turn's own reply, so that send is forgotten instead.
+              const answered = echoed.length > 0 ? echoed : turnSendId ? [turnSendId] : [];
+              for (const id of answered) {
+                if (deferredInputs.has(id)) continue;
+                romeSendIds.delete(id);
+                mintedSendIds.delete(id);
+              }
+              // The turn is ending: any text still held was the closing answer,
+              // unless an API error cut the turn short.
+              if (!params.config.outputSchema && pendingText !== null) {
+                yield textBlock(
+                  pendingText,
+                  apiFailed ? "commentary" : "final",
+                  pendingTextBlockId,
+                );
+                pendingText = null;
+              }
+            }
+            if (abortController.signal.aborted) await queryProcess.abort();
+            const contextUsage = abortController.signal.aborted
+              ? undefined
+              : await readSdkContextUsage(q);
+            const accounting = buildAnthropicAccounting(
+              message,
+              effectiveModel,
+              providerId,
+              contextUsage,
+              abortController.signal.aborted,
+            );
+            const resultData = {
+              subtype: message.subtype,
+              numTurns: message.num_turns,
+              stopReason: message.stop_reason,
+              costUsd: accounting?.costUsd,
+              durationMs: message.duration_ms,
+              ...(sdkOwned ? { sdkInitiated: true } : {}),
+            };
+
+            let terminal: AgentEvent;
+            let position: ModelPosition | undefined;
+            if (isResultSuccess(message) && !apiFailed) {
+              log.info("agent SDK result", resultData);
+              // A turn that reached the API proves the credential works; drop any
+              // lingering revoked marker (covers a Keychain re-login whose file
+              // fingerprint we can't diff).
+              void clearAnthropicAuthRevoked(authRevokedSource).catch(() => {});
+              if (!sdkOwned && establishedThreadId && activeTurnLastAssistantMessageId) {
+                position = {
+                  provider: providerId,
+                  modelThreadId: establishedThreadId,
+                  checkpointId: activeTurnLastAssistantMessageId,
+                };
+              }
+              if (params.config.outputSchema) {
+                if (!("structured_output" in message) || message.structured_output === undefined) {
+                  terminal = {
+                    type: "error",
+                    error: "Claude Agent SDK completed without structured output",
+                    accounting,
+                  };
+                } else {
+                  const structuredOutput = message.structured_output;
+                  if (outputValidator && !outputValidator.validate(structuredOutput)) {
+                    terminal = {
+                      type: "error",
+                      error: `Claude Agent SDK returned structured output that failed validation: ${formatOutputSchemaErrors(outputValidator.validate.errors).join("; ")}`,
+                      accounting,
+                    };
+                  } else {
+                    terminal = {
+                      type: "result",
+                      content: JSON.stringify(structuredOutput),
+                      structuredOutput,
+                      accounting,
+                    };
+                  }
+                }
+              } else {
+                terminal = {
+                  type: "result",
+                  content: message.result || "",
+                  accounting,
+                };
+              }
+            } else {
+              let errors: string[];
+              let fallbackText: string;
+              if (isResultSuccess(message)) {
+                errors = message.result ? [message.result] : [];
+                const status = message.api_error_status;
+                fallbackText = `Claude API error${status ? ` (${status})` : ""}`;
+              } else {
+                errors = message.errors ?? [];
+                fallbackText = `Agent run failed (${message.subtype})`;
+              }
+              log.error("agent SDK result", { ...resultData, errors });
+              const errorText = errors.join("; ") || fallbackText;
+              // A 401 here means the credential `claude auth status` reports as
+              // valid was rejected server-side. Stamp `auth_revoked` and persist
+              // the marker so the next state refresh can downgrade the badge.
+              if (isAnthropicUsageLimitError(errors) || isAnthropicUsageLimitError(errorText)) {
+                account?.refusedTurn({ kind: "usage", until: anthropicUsageLimitReset(errorText) });
+                terminal = { type: "error", error: errorText, code: "usage_limit", accounting };
+              } else if (
+                isAnthropicAuthRevokedError(errors) ||
+                isAnthropicAuthRevokedError(errorText)
+              ) {
+                await persistAnthropicAuthRevoked(authRevokedSource, account);
+                terminal = {
+                  type: "error",
+                  error: errorText,
+                  ...(authRevokedSource ? { code: ANTHROPIC_AUTH_REVOKED_CODE } : {}),
+                  accounting,
+                };
+              } else if (message.terminal_reason === "prompt_too_long") {
+                terminal = {
+                  type: "error",
+                  error: errorText,
+                  code: "context_window_exceeded",
+                  accounting,
+                };
+              } else {
+                terminal = { type: "error", error: errorText, accounting };
+              }
+            }
+            if (terminal.type === "error") {
+              terminal = {
+                ...terminal,
+                ...(providerError ? { providerError } : {}),
+                ...(isResultSuccess(message) && message.api_error_status
+                  ? { httpStatus: message.api_error_status }
+                  : {}),
+              };
+            }
+            providerError = undefined;
+            if (!sdkOwned) {
+              yield terminal.type === "result"
+                ? { ...terminal, reasoningEffort: effort, position }
+                : terminal;
+            }
+          }
+        }
+        if (abortController.signal.aborted && running) {
+          await queryProcess.abort();
+          if (!params.config.outputSchema && pendingText !== null) {
+            yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
+          }
+          if (!params.config.outputSchema && partialText)
+            yield textBlock(partialText, "final", partialTextBlockId);
+          running = false;
+          yield params.config.outputSchema
+            ? { type: "error", error: "Claude structured-output turn was interrupted" }
+            : {
+                type: "result",
+                content: partialText || pendingText || "",
+                reasoningEffort: effort,
+              };
+        }
+      } catch (err) {
+        // The stream threw without delivering a terminal `result` (raw abort,
+        // SDK panic, …). Flush any held text as the closing answer before the
+        // error propagates, so a completed block the consumer already previewed
+        // isn't silently dropped. Done in `catch` rather than `finally` on
+        // purpose: a `yield` in `finally` re-suspends the generator when the
+        // consumer abandons iteration via `.return()`, swallowing the close.
+        if (!params.config.outputSchema && pendingText !== null) {
+          yield textBlock(pendingText, partialText ? "commentary" : "final", pendingTextBlockId);
+        }
+        if (!params.config.outputSchema && partialText)
+          yield textBlock(partialText, "final", partialTextBlockId);
+        if (abortController.signal.aborted && err instanceof AbortError) {
+          await queryProcess.abort();
+          if (running) {
+            running = false;
+            yield params.config.outputSchema
+              ? { type: "error", error: "Claude structured-output turn was interrupted" }
+              : {
+                  type: "result",
+                  content: partialText || pendingText || "",
+                  reasoningEffort: effort,
+                };
+          }
+          return;
+        }
+        // A 401 can also surface as a thrown stream error rather than a result
+        // with `subtype: error`. Convert it to a classified terminal and persist
+        // the marker instead of rethrowing a raw 401 up the events loop.
+        if (isAnthropicUsageLimitError(err)) {
+          running = false;
+          account?.refusedTurn({ kind: "usage" });
+          yield {
+            type: "error",
+            error: err instanceof Error ? err.message : String(err),
+            code: "usage_limit",
+          };
+          return;
+        }
+        if (isAnthropicAuthRevokedError(err)) {
+          running = false;
+          await persistAnthropicAuthRevoked(authRevokedSource, account);
+          yield {
+            type: "error",
+            error: err instanceof Error ? err.message : String(err),
+            ...(authRevokedSource ? { code: ANTHROPIC_AUTH_REVOKED_CODE } : {}),
+          };
+          return;
+        }
+        throw err;
+      } finally {
+        closed = true;
+      }
+    })();
+
+    const session: ClaudeQuerySession = {
+      providerId,
+      model: effectiveModel,
+      loginKind: queryContext.loginKind,
+      get ended(): boolean {
+        return closed || abortController.signal.aborted;
+      },
+      get modelThreadId(): string | undefined {
+        return establishedThreadId;
+      },
+      events,
+      async sendUserInput(input: ModelUserInput): Promise<void> {
+        if (closed || abortController.signal.aborted) {
+          throw new Error("ModelSession is closed");
+        }
+        // A position is publishable only after this turn reaches an SDK
+        // success result. Assistant UUIDs observed before an abort can be
+        // present in the stream without being resumable in Claude's durable
+        // transcript, so never let a prior or partial UUID stand in for the
+        // current turn.
+        activeTurnLastAssistantMessageId = undefined;
+        running = true;
+        openRomeTurn();
+        if (input.inputId && deferredInputs.delete(input.inputId)) {
+          turnSendId = input.inputId;
+          return;
+        }
+        const content: NonNullable<SDKUserMessage["message"]["content"]> = [];
+        if (input.injectedToolResult) {
+          content.push({
+            type: "tool_result",
+            tool_use_id: input.injectedToolResult.toolUseId,
+            content: serializeInjectedToolContent(input.injectedToolResult.content),
+          });
+        }
+        if (input.text) {
+          content.push({ type: "text", text: input.text });
+        }
+        if (content.length > 0) {
+          activeTurnLastAssistantMessageId = undefined;
+          running = true;
+        }
+        const uuid = input.inputId ?? randomUUID();
+        turnSendId = uuid;
+        romeSendIds.add(uuid);
+        if (!input.inputId) mintedSendIds.add(uuid);
+        const sdkMsg: SDKUserMessage = {
+          type: "user",
+          uuid: uuid as SDKUserMessage["uuid"],
+          origin: { kind: "human" },
+          priority: "next",
+          parent_tool_use_id: null,
+          session_id: sdkSessionId,
+          message: {
+            role: "user",
+            content,
+          },
+        };
+        inputQueue.push(sdkMsg);
+      },
+      async steerUserInput(input: ModelUserInput): Promise<"accepted" | "deferred"> {
+        if (closed || abortController.signal.aborted) {
+          throw new Error("ModelSession is closed");
+        }
+        if (!running || !input.inputId || input.injectedToolResult) return "deferred";
+        if (input.reasoningEffort && toAnthropicEffort(input.reasoningEffort) !== effort)
+          return "deferred";
+        pendingSteers.add(input.inputId);
+        romeSendIds.add(input.inputId);
+        inputQueue.push({
+          type: "user",
+          uuid: input.inputId as SDKUserMessage["uuid"],
+          origin: { kind: "human" },
+          priority: "next",
+          parent_tool_use_id: null,
+          session_id: sdkSessionId,
+          message: { role: "user", content: [{ type: "text", text: input.text }] },
+        });
+        return "accepted";
+      },
+      async interrupt(reason?: string): Promise<void> {
+        log.info("ModelSession interrupt requested", { reason });
+        openRomeTurn();
+        await queryProcess.abort();
+        inputQueue.end();
+      },
+      async close(): Promise<void> {
+        if (queryDisposed) return;
+        queryDisposed = true;
+        openRomeTurn();
+        try {
+          inputQueue.end();
+        } catch {
+          // ignore
+        }
+        try {
+          q.close?.();
+        } catch {
+          // ignore
+        }
+        closed = true;
+      },
+    };
+
+    return session;
+  }
+}
+
+function serializeInjectedToolContent(content: unknown): string {
+  if (typeof content === "string") return content;
+  try {
+    return JSON.stringify(content);
+  } catch {
+    return String(content);
+  }
+}

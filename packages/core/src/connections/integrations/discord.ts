@@ -14,7 +14,6 @@
 //   - any other terminal gateway/websocket failure → Disconnected → runtime
 //     backs off and rebuilds.
 
-import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import { z } from "zod";
 import type { ChatStopHandler, ChannelActivity, ChannelInboundMedia } from "@rome-os/app-runtime";
 import type { TalkDirectory, TalkFeatures } from "../types.js";
@@ -26,6 +25,9 @@ import { CredentialRejected, Disconnected } from "../errors.js";
 import { tokenPaste } from "../schemes.js";
 import type { ConnectionDescriptor, ProfileDisplay, ProfileRecord, Talker } from "../types.js";
 import { directoryPage } from "./talk-features.js";
+import { requireOnFirstUse } from "../../lib/require-on-first-use.js";
+
+const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
 
 // The `bot` grant's profile — the identity the Discord API reports for the token
 // (users/@me). Declared next to the material shape ({ token }); parse-then-store,
@@ -89,9 +91,9 @@ export function discordProfileFromSettings(
  */
 export function isDiscordAuthError(err: unknown): boolean {
   return (
-    err instanceof DiscordjsError &&
-    (err.code === DiscordjsErrorCodes.TokenInvalid ||
-      err.code === DiscordjsErrorCodes.DisallowedIntents)
+    err instanceof discordJs().DiscordjsError &&
+    (err.code === discordJs().DiscordjsErrorCodes.TokenInvalid ||
+      err.code === discordJs().DiscordjsErrorCodes.DisallowedIntents)
   );
 }
 
@@ -237,6 +239,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
 
   return {
     connectionKind: "discord",
+    label: "Discord",
     severalAccounts: true,
     reviveProfile: (record) => reviveDiscordProfile(record),
     accountIdOf: (record) => (typeof record.botId === "string" && record.botId) || null,
@@ -345,7 +348,6 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
             inboundMedia,
             activity,
             directory,
-            replyDelivery: adapter.replyDelivery(),
           };
           return {
             start(deliver, fault): void {
@@ -385,7 +387,7 @@ export function makeDiscordDescriptor(deps: DiscordDeps): ConnectionDescriptor {
               }
               return adapter
                 .executeApiRequest(
-                  call.input as import("../../apps/platform-requests.js").ChannelApiRequest,
+                  call.input as import("../../apps/platform-requests.js").ConnectionApiRequest,
                 )
                 .then((result) => {
                   if (result.response?.status === 401) {

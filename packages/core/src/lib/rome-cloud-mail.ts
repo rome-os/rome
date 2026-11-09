@@ -1,4 +1,4 @@
-import { getInstanceToken } from "./instance-identity.js";
+import { cloudBearer } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 import { createLogger } from "../logger.js";
 
@@ -180,6 +180,9 @@ export class MailProviderError extends Error {
     message: string,
     readonly status?: number,
     readonly code?: string,
+    /** The status of the mail provider behind Rome Cloud, which Rome Cloud
+     *  forwards beside its own. */
+    readonly providerStatus?: number,
   ) {
     super(message);
     this.name = "MailProviderError";
@@ -198,8 +201,8 @@ export class RomeCloudMailProvider implements MailProvider {
     this.fetchImpl = options.fetch ?? globalThis.fetch;
   }
 
-  private resolve(): { token: string; origin: string } {
-    const token = getInstanceToken();
+  private async resolve(): Promise<{ token: string; origin: string }> {
+    const token = await cloudBearer();
     if (!token) {
       throw new MailProviderError(
         "instance is not enrolled (no instance token)",
@@ -218,7 +221,7 @@ export class RomeCloudMailProvider implements MailProvider {
     path: string,
     init: { method: "GET" | "POST"; body?: unknown } = { method: "GET" },
   ): Promise<T> {
-    const { token, origin } = this.resolve();
+    const { token, origin } = await this.resolve();
     const headers: Record<string, string> = {
       Authorization: `Bearer ${token}`,
       "Cache-Control": "no-store",
@@ -262,6 +265,7 @@ export class RomeCloudMailProvider implements MailProvider {
         `Rome Cloud mail API ${path} failed (${response.status})${parts.length ? `: ${parts.join(" — ")}` : ""}`,
         response.status,
         body?.error,
+        typeof body?.providerStatus === "number" ? body.providerStatus : undefined,
       );
     }
 

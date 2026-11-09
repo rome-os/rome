@@ -121,6 +121,7 @@ jobs:
       - run: pnpm lint:prose
       - run: pnpm check:ui:tailwind
       - run: pnpm lint:agents
+      - run: pnpm lint:imports
 
       # Dead-code analysis. Knip resolves the import graph across every
       # workspace, so it needs the full install above and cannot move to a
@@ -129,7 +130,7 @@ jobs:
       - run: pnpm lint:deadcode
 
       - run: pnpm typecheck
-      - run: pnpm typecheck:lint-agents
+      - run: pnpm typecheck:lint
 
   # ──────────────────────────────────────────
   # Job 1b: DB schema drift — committed migrations must match the schema files
@@ -163,7 +164,7 @@ jobs:
   # The mapping and its fail-open rules live in scripts/ci-changed-areas.mjs.
   #
   # Job 2a: packages/core. The suite collects tests out of rome_apps, scripts,
-  # and infra as well as core itself, and is the longest shard at ~5m05s. Every
+  # lint, and infra as well as core itself, and is the longest shard at ~5m05s. Every
   # cap below clears its shard's runtime with room: a cut mid-suite reports as a
   # job failure with no failing test, which reads as a broken test rather than
   # an exhausted budget.

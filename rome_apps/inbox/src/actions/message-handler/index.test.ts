@@ -9,11 +9,13 @@ import type {
   PersonRecord,
   RunParams,
 } from "@rome-os/app-runtime";
+import { ActionInvocationError } from "@rome-os/app-runtime";
 import {
   appendAttachmentPathsToPrompt,
   buildMessageContext,
   createAction as createMessageHandlerAction,
   parseSentinelDecision,
+  sendAnswer,
 } from "./index.js";
 
 const STRANGER_PERSON_ID = "__STRANGER__";
@@ -106,7 +108,6 @@ function createMessageHandlerDeps(
     })),
     addMessage: rs.fn(async () => ({ inserted: true })),
     promoteMessageToUser: rs.fn(async () => undefined),
-    recordOutboundMessage: rs.fn(async () => undefined),
     ...overrides.conversations,
   };
 
@@ -183,7 +184,6 @@ describe("buildMessageContext", () => {
         bondLevel: "inner-circle",
         profilePath: "memory/relationship/alice.md",
         channelMappings: [],
-        approved: true,
         createdAt: new Date("2026-01-01T00:00:00Z"),
       },
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
@@ -267,7 +267,6 @@ describe("buildMessageContext", () => {
         displayName: "Unknown",
         bondLevel: "other",
         channelMappings: [],
-        approved: true,
         createdAt: new Date("2026-01-01T00:00:00Z"),
       },
       resolveProfilePath: (filePath: string) => join(profileDir, filePath),
@@ -1186,7 +1185,7 @@ describe("account agent", () => {
   });
 });
 
-describe("streamed guardian replies", () => {
+describe("guardian direct replies", () => {
   beforeEach(() => {
     rs.clearAllMocks();
   });
@@ -1199,67 +1198,30 @@ describe("streamed guardian replies", () => {
     profilePath: null,
   };
 
-  const reply = (threadType: "private" | "group", delivered?: "delivered" | "failed") => {
-    const { deps, agentRunner, sentMessages, approvals } = createMessageHandlerDeps({
+  it("sends a guardian's direct reply whole, without asking the host to stream it", async () => {
+    const { deps, agentRunner, sentMessages } = createMessageHandlerDeps({
       personMappingRepo: { findByChannelUser: rs.fn(async () => guardianPerson) },
       agentResponses: [
         [
           { type: "result", content: "Here it is." },
-          {
-            type: "turn_end",
-            turnId: "turn-1",
-            status: "completed",
-            durationMs: 1,
-            ...(delivered
-              ? {
-                  replyDelivery: {
-                    status: delivered,
-                    messageIds: delivered === "failed" ? [] : ["m1"],
-                  },
-                }
-              : {}),
-          },
+          { type: "turn_end", turnId: "turn-1", status: "completed", durationMs: 1 },
         ],
       ],
     });
-    const run = createAction(actionConfig, deps).execute({
+
+    const result = await createAction(actionConfig, deps).execute({
       channel: "telegram",
       channelUserId: "g-telegram",
       threadId: "chat-1",
-      threadType,
+      threadType: "private",
       displayName: "Guardian",
       text: "tell me",
       messageId: "msg-1",
     });
-    return { run, agentRunner, sentMessages, approvals };
-  };
-
-  it("asks the host to stream a guardian's direct reply, and sends nothing once it is streamed", async () => {
-    const { run, agentRunner, sentMessages, approvals } = reply("private", "delivered");
-
-    const result = await run;
-
-    expect(agentRunner.calls[0]).toMatchObject({ streamReply: true });
-    expect(sentMessages).toEqual([]);
-    expect(result).toMatchObject({ status: "ok", data: { action: "streamed" } });
-    expect(approvals[0]).toMatchObject({ status: "auto_approved" });
-  });
-
-  it("sends the reply itself when the stream sent nothing", async () => {
-    const { run, sentMessages } = reply("private", "failed");
-
-    await run;
-
-    expect(sentMessages).toHaveLength(1);
-  });
-
-  it("does not ask to stream into a group", async () => {
-    const { run, agentRunner, sentMessages } = reply("group");
-
-    await run;
 
     expect(agentRunner.calls[0]?.streamReply).toBeUndefined();
     expect(sentMessages).toHaveLength(1);
+    expect(result).toMatchObject({ status: "ok", data: { action: "sent" } });
   });
 });
 
@@ -1325,5 +1287,42 @@ describe("a message the host recorded", () => {
     expect(agentRunner.calls).toEqual([]);
     expect(conversations.addMessage).not.toHaveBeenCalled();
     expect(conversations.promoteMessageToUser).not.toHaveBeenCalled();
+  });
+});
+
+describe("sendAnswer", () => {
+  it("sends the answer again without its quote when the platform cannot quote", async () => {
+    const runAction = rs
+      .fn()
+      .mockRejectedValueOnce(
+        new ActionInvocationError(
+          "send_message",
+          "handler_error",
+          "no quote",
+          "reply_unaddressable",
+        ),
+      )
+      .mockResolvedValueOnce({ status: "ok" });
+
+    await sendAnswer({ appContext: { runAction } } as never, {
+      text: "hi",
+      replyToMessageId: "m-1",
+    });
+
+    expect(runAction).toHaveBeenNthCalledWith(1, "send_message", {
+      text: "hi",
+      replyToMessageId: "m-1",
+    });
+    expect(runAction).toHaveBeenNthCalledWith(2, "send_message", { text: "hi" });
+  });
+
+  it("lets any other failure through", async () => {
+    const failure = new ActionInvocationError("send_message", "handler_error", "boom");
+    const runAction = rs.fn().mockRejectedValue(failure);
+
+    await expect(
+      sendAnswer({ appContext: { runAction } } as never, { text: "hi", replyToMessageId: "m-1" }),
+    ).rejects.toBe(failure);
+    expect(runAction).toHaveBeenCalledTimes(1);
   });
 });

@@ -9,6 +9,8 @@ export interface ResolvedSelection {
   selection: ExternalSelection | null;
   /** True only when `/resolve` answered that the current path does not exist. */
   missing: boolean;
+  /** True once the current path got an answer or its lookup failed. */
+  settled: boolean;
 }
 
 interface Resolved {
@@ -32,11 +34,16 @@ export function useResolvedSelection(apiBasePath: string, path: string | null): 
     }
 
     let cancelled = false;
+    // A failed lookup says nothing about the path: settle without a verdict.
+    const fail = () => {
+      if (cancelled) return;
+      setResolved((prev) => ({ path, selection: prev?.selection ?? null, missing: false }));
+    };
     fetch(`${apiBasePath}/resolve?path=${encodeURIComponent(path)}`, {
       credentials: "include",
     })
       .then(async (res) => {
-        if (!res.ok) return; // A transient failure says nothing about the path.
+        if (!res.ok) return fail();
         const data = (await res.json()) as ResolveResult;
         if (cancelled) return;
         const found = data.type === "file" || data.type === "directory";
@@ -46,16 +53,17 @@ export function useResolvedSelection(apiBasePath: string, path: string | null): 
           missing: !found,
         });
       })
-      .catch(() => {});
+      .catch(fail);
 
     return () => {
       cancelled = true;
     };
   }, [apiBasePath, path]);
 
-  if (!path) return { selection: null, missing: false };
+  if (!path) return { selection: null, missing: false, settled: true };
   return {
     selection: resolved?.selection ?? null,
     missing: resolved?.path === path && resolved.missing,
+    settled: resolved?.path === path,
   };
 }

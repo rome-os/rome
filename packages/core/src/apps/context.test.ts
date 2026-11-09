@@ -7,7 +7,7 @@ import {
   type RomeAppContext,
   type RomeAppRuntimeServices,
 } from "./context.js";
-import type { ChatRepository } from "../chats/chat-repository.js";
+import type { OpenSpeakerDeps } from "../connections/open-chat.js";
 import { createAppRuntimeRepositories } from "./repositories.js";
 import { AppApiDispatcher } from "./api.js";
 import type { AppCatalog } from "./catalog.js";
@@ -20,6 +20,7 @@ import {
   ActionInvocationError,
   ActionInvocationEventOverflowError,
   getCurrentActionContext,
+  SendRefused,
 } from "@rome-os/app-runtime";
 import { registerAppActions, registerLazyAppActions } from "../actions/app-actions-wiring.js";
 import { HostExecutionService } from "../host-execution/service.js";
@@ -27,7 +28,7 @@ import { bumpModuleEnvEpoch } from "../actions/module-loader.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { FavorActionRequestView, FavorService } from "../favors/types.js";
-import { createActionEngineRepos } from "../test/helpers.js";
+import { createActionEngineRepos } from "../test/db.js";
 
 type RuntimeContextCapture = {
   surface: "action" | "api";
@@ -254,8 +255,7 @@ export function createAction(config, deps) {
     const repositories = createAppRuntimeRepositories({
       settingsRepo,
       webchatRepo,
-      chatRepo: {} as ChatRepository,
-      chatMessages: { recordSent: rs.fn() },
+      speakers: {} as OpenSpeakerDeps,
     });
 
     expect("delete" in repositories.settings).toBe(false);
@@ -695,6 +695,36 @@ describe("runAction invocation port", () => {
       undefined,
       undefined,
     );
+  });
+
+  it("carries the reason a send was refused, so the caller can send again", async () => {
+    const context = contextWithActions([
+      probeAction("sends_unquotable", async () => {
+        throw new SendRefused("reply_unaddressable", "whatsapp cannot quote a message");
+      }),
+    ]);
+    const err = await context.runAction("sends_unquotable", {}).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ActionInvocationError);
+    expect(err).toMatchObject({ code: "handler_error", refusal: "reply_unaddressable" });
+  });
+
+  it("carries the refusal of an action called from the one it runs, which let it pass up", async () => {
+    const context = contextWithActions([
+      probeAction("sends_through_another", async () => {
+        throw new ActionInvocationError(
+          "send_message",
+          "handler_error",
+          "whatsapp cannot quote a message",
+          "reply_unaddressable",
+        );
+      }),
+    ]);
+    const err = await context.runAction("sends_through_another", {}).catch((e: unknown) => e);
+    expect(err).toMatchObject({
+      actionName: "sends_through_another",
+      code: "handler_error",
+      refusal: "reply_unaddressable",
+    });
   });
 
   it("rejects with code handler_error carrying the handler's message", async () => {

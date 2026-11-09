@@ -62,6 +62,46 @@ An agent outside Rome, such as a Dot, Muse or another Rome, that talks to Rome t
 - The dashboard shows assistants' chats on one Assistants page, one chat at a time: it opens on the chat that moved last, and its header switches to another assistant, each marked with its kind. The page stays off the sidebar until the guardian adds it. Assistants' chats are not in the dashboard's chat list.
 - Another Rome is an assistant, but the dashboard does not list it. Rome can still message it, and its messages still reach Rome.
 
+## Concierge chat
+
+A dashboard chat where its owner talks with their Concierge: a [main chat](#main-chat) or a [topic chat](#topic-chat). Every Concierge chat of one owner talks to the same Concierge, with one list of follows and one list of tasks. Memory is one for every owner.
+
+- A Concierge chat is a chat of its own, not a thread. What is said in one does not show in another, and each has its own agent session.
+- The Concierge reads another Concierge chat of the same owner when the question needs it, and not on every turn. What it keeps across chats is what it writes to memory, follows and tasks.
+- While the Concierge is on, the guardian and every visitor on the dashboard allow-list each have their own Concierge. App users have none.
+- A Concierge chat is private to its owner: to anyone else, the guardian included, it does not exist. So is a fork or a subagent session of it, or of a task chat it started, from the moment it is made.
+- Its follows and unfinished tasks go to its owner's main chat when it is archived or deleted, and everything that reported to it stays its owner's.
+- A visitor dropped from the dashboard allow-list keeps their Concierge chats and follows, but their Concierge tells them nothing until they are back on the list.
+- Each follow sends its alerts to one Concierge chat: the one it was followed from, until its owner **moves** it to another. One owner follows one thing once, whatever chat asks for it. Two owners may follow the same thing, and each hears it.
+- Digest times, quiet hours and the time zone they are read in are each owner's own.
+- A Concierge chat can start [task chats](#task-chat), and each task's result comes back to the Concierge chat that started it. A Concierge chat's task panel lists only its own tasks: the main chat's lists the tasks whose chat is the main chat.
+
+## Main chat
+
+The one Concierge chat each owner always has.
+
+- The main chat exists while the Concierge is on, and it is never archived or deleted.
+- The dashboard opens it at `/message`, for the guardian and for each visitor alike. A topic chat is at `/chat/<id>`. The old `/chat/concierge` address redirects to `/message`.
+- The digest goes to the main chat and lists every Concierge chat's items, grouped by chat.
+- Alerts and tasks whose Concierge chat is archived or deleted come here.
+- The dashboard calls the Concierge by the name the guardian gave their agent (else "Concierge"), in the main chat's title and in its own copy. The stored chat name stays "Concierge".
+
+## Topic chat
+
+A Concierge chat its owner starts for one topic, such as the calendar or a project. It stands beside the main chat, not under it.
+
+- A topic chat starts when its owner **starts** one, from the dashboard or by asking the Concierge. The Concierge never starts one on its own. It starts on the model the main chat uses.
+- One started from the dashboard opens blank, like a new chat, and exists from its first message, which names it. One the Concierge starts with a name keeps it, and the main chat's name never changes on its own.
+- Its owner can **rename**, **archive** and **delete** it. Archiving or deleting it moves its follows and tasks to its owner's main chat, and the Concierge says so there.
+- An owner may have any number of topic chats.
+
+## Task chat
+
+A chat the Concierge starts to hand one piece of work to another agent. It belongs to the Concierge chat that started it, and its result comes back there.
+
+- A task chat has a row in its owner's task list. It is private to the owner of the Concierge chat that started it, who alone can open it and write in it.
+- A task chat carries one piece of work. It gets no alerts and no digest.
+
 ## Reply rule
 
 A setting on a chat, for each of Rome's accounts in it, saying when that account's agent is woken: on every message, only when mentioned, or when it is needed. The same account can be chatty in one group and quiet in another.
@@ -97,6 +137,7 @@ Something shown in a chat that people can look at or act on: a question with cho
 
 - Widgets come from one shared catalog. Each kind has a name, what it holds, what people can do with it (answer, approve or deny, pick), and how each of those reads as plain text. Rome's own question and approval are kinds in it, beside the kinds apps add.
 - Each platform draws the kinds it can as its own cards, and sends the plain-text line for the rest. Feishu draws a question as a card. Email sends it as text.
+- A place's widget drawing is card or plain text.
 - A widget's live state belongs to what it is about. An approval request shows as approved because the approval is.
 - An agent shows a widget by calling a tool.
 
@@ -124,21 +165,23 @@ A participant's identity on a platform. A colleague's Feishu identity is an acco
 
 ## Connected account
 
-One of Rome's accounts as Chats sees it: a [connection](connections.md#connection) that lets Rome chat, with the agent that speaks through it.
+One of Rome's accounts as Chats sees it: an [account](#account) Rome holds, or held, a [connection](connections.md#connection) to that lets Rome chat as it, with the agent that speaks through it. Its two ends are the account and the agent (Ouou, 2026-11-04).
 
-- A connected account has the identity of its connection and no other. Its one attribute is its agent.
-- It starts when its connection is connected, with no agent, and ends when the connection is disconnected, for every kind of connection. Connecting the same account again makes a new connected account, with no agent.
-- The account it stands for is the one its connection's grant names. One connection reaches an account at a time, so one connected account stands for it at a time.
-- The guardian links, switches and unlinks its agent on the connected account, naming it by its connection. The dashboard shows it by its account's platform, id and name.
+- A connected account has the identity of its account, platform and the platform's own id, and no other. Its one attribute is its agent.
+- It starts when a connection to the account is first connected, with no agent. Disconnecting takes away Rome's reach, not the connected account: the agent link stays, Rome does not hear or speak through the account until it is connected again, and connecting the same account again finds the same connected account with its agent. Unlinking the agent is the guardian's own step.
+- A connection reaches one account for its whole life, and at most one connection reaches an account at a time, so a connected account is reached by at most one connection, or by none while disconnected.
+- The guardian links, switches and unlinks its agent on the connected account, naming it by its account. The dashboard shows it by its account's platform, id and name, and whether a connection reaches it.
 - A message or a participant names an account by platform and the platform's own id, never by a connection. A message remembers who said it, not the connection that carried it. Rome finds the connection when it sends, as the one whose grant reaches the account.
-- Its kind of link, [own account](#own-account) or [delegate](#delegate), follows from its kind of connection: a bot is always the agent's own account, and the guardian's signed-in account always takes a delegate.
+- Its kind of link, [own account](#own-account) or [delegate](#delegate), follows from the kind of connection that reaches it: a bot is always the agent's own account, and the guardian's signed-in account always takes a delegate.
 
 ## Account profile
 
 What a platform says about an [account](#account): its display name, handle and avatar. Chats keeps it as a cache, not a record of its own.
 
 - It is keyed by the account, the platform and the platform's own id, and has no identity of its own. Nothing points at it: a reader that holds an account looks its profile up by the same value.
-- The channels fill it as they learn: from an address book's sync, and from what a sender put on a message. On a platform Rome mirrors an address book for, only the address book fills it, keyed by the book's own id for the account, since a message may name the sender by another of the account's addresses. Elsewhere, what a platform's address book holds would outrank what a sender called themselves, so a message never overwrites a profile an address book wrote.
+- It is the one place Rome keeps an account's name. The platform fills it through whichever route its word reaches Rome: an address book's sync, what a sender put on a message, or what the platform reported for Rome's own account when the guardian connected or fixed it. A later word replaces an earlier one, except that an address book outranks the rest: nothing else overwrites a profile an address book wrote (Ouou, 2026-11-04).
+- On a platform Rome mirrors an address book for, a message does not fill it, since a message may name the sender by another of the account's addresses than the book's own id for the account.
+- A connection's grant goes when the connection is disconnected, and the name it reported stays here, so a [connected account](#connected-account) keeps its name after a disconnect.
 - It can be dropped and rebuilt from the platforms at any time, and nothing else is lost when it is. An account no profile has been learned for yet is still an account.
 - A profile may be missing for an account a link, a dismissal or a message names. A reader then shows the account by its id.
 - A channel's own mirror of an address book stays the source for what it mirrors. A name is read from the mirror first, then from the profile.
@@ -164,8 +207,7 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 
 - **Channel as a thing the guardian meets, with its own identity and lifetime.** A channel is one to one with a connected account, so the two words name one thing and the guardian only ever sees the account. Its jobs went to account, connection, connected account and chat. The code's channel layer ([Channels](../architecture/channels.md)) is retired as those words replace it.
 - **The agent as part of the connection.** Which agent speaks through an account is the guardian's decision about a chat identity, so it belongs to Chats. Kept on the connection, Connections would hold a fact only Chats uses.
-- **A record of Rome's account kept by its platform and id rather than by its connection.** It would outlive the connection and survive a reconnect, so a new connection would inherit an agent the guardian never set on it. A connection whose grant has not yet reported its account would have no record to hold an agent.
-- **Linking an agent by the account's platform and id.** A dashboard tab left open across a disconnect and a reconnect would link an agent to a connection the guardian never looked at. The connection's identity changes on reconnect, so a stale command is refused.
+- **The connected account as the connection, with the agent dying on disconnect.** This was the rule until 2026-11-04. Its forces were that a reconnect would inherit an agent the guardian never set, and that a connection with no account reported yet had no record to hold one. Neither holds: the guardian set the agent on that account, and a connection is active only once the platform has reported its account. The account is what the guardian means by "the sales agent", so the link hangs on it.
 - **Storing the kind of link.** It follows from the kind of connection, and a stored copy could disagree with it. It becomes the guardian's choice only if a kind of connection ever allows both.
 - **A per-chat choice of agent that overrides the account's agent.** An account named "Sales agent" has to be the sales agent wherever it appears, and a per-chat override breaks that intuition.
 - **At most one account per agent per platform.** A guardian with two Feishu accounts for one agent is an ordinary case, and the rule forced a "move the link" behaviour nobody asked for.
@@ -176,6 +218,11 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **"Agent" for a Dot or Muse.** Agent means one of Rome's own agents, which the guardian defines and runs. A Dot or Muse runs elsewhere and answers to someone else's rules, so one word for both would need context to tell them apart.
 - **Assistants' chats mixed into the dashboard's own chats.** The guardian talks to Rome in one and watches Rome talk to another agent in the other. Mixed together, a chat with Muse reads as a chat with Rome.
 - **The guardian's line in an assistant's chat going to main.** It would put two conversations in one place: the guardian with main, and Rome with the assistant. Talking about an assistant with main belongs in the dashboard's own chat.
+- **"Side chat" for a topic chat.** Muse uses the word, but in Rome a side chat is a fork of a chat from one of its turns, carrying that chat's history. A Concierge chat starts empty and belongs to no other chat.
+- **"Channel" for a topic chat, as in Claude Duet.** Channel names nothing the guardian meets in Rome, and bringing it back for one kind of chat would give it a meaning no other surface shares.
+- **"Sub chat" for a topic chat.** It reads as a chat under another, which is what a task chat is. A topic chat stands beside the main chat.
+- **A topic chat as a thread of the main chat.** A thread's messages are messages of its chat, so the main chat would still carry every topic. Separate topics need separate chats.
+- **Several Concierges, each with its own memory, follows and tasks.** One event would be triaged and told once per Concierge, and the isolation it promises does not exist inside one Rome. The reasons are in [One Concierge with several chats](../adrs/one-concierge-with-several-chats.md).
 - **A reply rule the guardian sets per assistant.** An assistant writes to Rome to get an answer, and no case has come up yet where one should be ignored. The setting waits until one does.
 - **An assistant's chat starting at its first message.** The guardian could not find an assistant to write to before it had written, so they could never start the chat.
 - **Listing other Romes among the assistants, for now.** Talking to another Rome has no product of its own yet: no way in, and no rule for two Romes answering each other's replies. Every Rome in the account, stopped test stacks included, would also fill the list. Other Romes return to the list when that product is designed.

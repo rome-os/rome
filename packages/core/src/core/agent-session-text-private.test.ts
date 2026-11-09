@@ -1,3 +1,12 @@
+import { romeToolPorts } from "./rome-tool-ports.js";
+import { createLogger } from "../logger.js";
+import {
+  ChatSessionSettings,
+  readAnswerShape,
+  romeSessionTracing,
+  TurnUsageReporter,
+} from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -5,23 +14,21 @@ import { join } from "node:path";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
-import { testChannelSurface } from "../test/channel-surface.js";
-import { createActionEngineRepos, createTestDb, type TestDb } from "../test/helpers.js";
-import { createAgentLifecycleDispatcher } from "./agent-lifecycle.js";
-import { AgentLoader } from "./agent-loader.js";
+import { DrizzleSessionRepository } from "../agent/index.js";
+import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
+import { AgentLoader } from "../agent/index.js";
 import {
   createSessionFromRun,
   type ModelProvider,
   type ModelSessionParams,
 } from "./agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "./agent-session.js";
-import { CapabilityDiscovery } from "./capability-discovery.js";
-import { createModelResolver } from "./model-resolver.js";
-import { PromptBuilder } from "./prompt-builder.js";
-import { SessionManager } from "./session-manager.js";
-import { SkillCatalog } from "./skill-catalog.js";
+import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
+import { createModelResolver } from "../agent/index.js";
+import { createTestSystemPrompts } from "../test/system-prompts.js";
+import { SkillLoader } from "../agent/index.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 
 describe("AgentSessionManager textPrivate", () => {
   let directory: string;
@@ -53,11 +60,9 @@ describe("AgentSessionManager textPrivate", () => {
     const loader = new AgentLoader(artifactIdentity);
     await loader.loadAll(directory);
     testDb = createTestDb();
-    const sessionsRepo = new SessionsRepository(testDb.db);
     opened = [];
     const provider: ModelProvider = {
       id: "anthropic",
-      displayName: "anthropic",
       builtinTools: new Set<string>(),
       openSession: async (params) => {
         opened.push(params);
@@ -71,29 +76,37 @@ describe("AgentSessionManager textPrivate", () => {
       },
     };
     const state = {
-      codex: { loggedIn: false, quotaExhausted: false, solAccess: false, lunaAccess: false },
-      claude: { loggedIn: true, quotaExhausted: false },
+      openai: reportOf("unauthorized"),
+      anthropic: reportOf("available"),
     };
     const actionRegistry = new ActionRegistryImpl();
-    const promptBuilder = new PromptBuilder();
-    rs.spyOn(promptBuilder, "build").mockReturnValue("textPrivate test prompt");
+    const systemPrompts = createTestSystemPrompts();
+    rs.spyOn(systemPrompts, "build").mockReturnValue("textPrivate test prompt");
     manager = createAgentSessionManager(
       {
         agentLoader: loader,
-        sessionManager: new SessionManager(sessionsRepo, artifactIdentity),
-        sessionsRepo,
-        webchatRepo: new WebChatRepository(testDb.db),
-        promptBuilder,
-        actionRegistry,
-        actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+        sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
+        sessionSettings: new ChatSessionSettings({
+          webchatRepo: new ChatsWebChatRepository(testDb.db),
+        }),
+        systemPrompts,
         modelResolver: createModelResolver({
           providers: [provider],
-          aiToolState: { get: () => state, refresh: async () => state },
+          accounts: fakeAccounts(() => state),
         }),
-        capabilityDiscovery: new CapabilityDiscovery(),
-        skillCatalog: new SkillCatalog(artifactIdentity),
-        lifecycleDispatcher: createAgentLifecycleDispatcher(),
-        channelSurface: testChannelSurface,
+        networkMcpServers: () => ({}),
+        skillCatalog: new SkillLoader(artifactIdentity),
+        turnLifecycle: new TurnListeners(new AppTurnHooks()),
+        readAnswerShape,
+        sessionTracing: romeSessionTracing,
+        turnUsage: new TurnUsageReporter(),
+        folders: agentFolders(),
+        log: createLogger("agent-session"),
+        ...romeToolPorts({
+          webchatRepo: new ChatsWebChatRepository(testDb.db),
+          actionRegistry,
+          actionEngine: new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db)),
+        }),
       },
       { keepAliveAcrossTurns: true },
     );
@@ -109,12 +122,17 @@ describe("AgentSessionManager textPrivate", () => {
   it.each([
     ["texter", true],
     ["worker", false],
-  ])("opens %s's model session with textPrivate %s", async (agentName, textPrivate) => {
+  ])("opens %s's model session with a defer tool that asks for a confirmation line: %s", async (agentName, textPrivate) => {
     await manager.acquire(
       { agentName, channelThreadKey: `webchat:${agentName}` },
-      { workingDir: directory },
+      // A web chat faces the guardian, so a wake-up can be scheduled into it.
+      { workingDir: directory, guardianFacing: true },
     );
     expect(opened).toHaveLength(1);
-    expect(opened[0]!.textPrivate).toBe(textPrivate);
+    // A private-text agent's words never reach the guardian, so `defer` asks
+    // it for no confirmation line.
+    const defer = opened[0]!.tools.listTools("ask_user").find((tool) => tool.name === "defer");
+    expect(defer).toBeDefined();
+    expect(defer!.description.includes("write one short line confirming")).toBe(!textPrivate);
   });
 });

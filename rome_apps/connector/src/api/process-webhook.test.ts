@@ -274,7 +274,7 @@ describe("publishPendingEvents", () => {
         args: {
           name: "provider:event:gmail.gmail_new_gmail_message",
           source: "connector",
-          payload: { number: 42 },
+          payload: { number: 42, _deliveryId: "evt-pub" },
         },
       },
     ]);
@@ -298,7 +298,10 @@ describe("publishPendingEvents", () => {
 
     await publishPendingEvents(harness.repo, run, silentLog());
 
-    expect(calls.map((call) => call.args.payload)).toEqual([{ order: 1 }, { order: 2 }]);
+    expect(calls.map((call) => call.args.payload)).toEqual([
+      { order: 1, _deliveryId: "evt-early" },
+      { order: 2, _deliveryId: "evt-late" },
+    ]);
   });
 
   const capacityError = async () => {
@@ -358,6 +361,19 @@ describe("publishPendingEvents", () => {
     const lapsed = new Date(clock.getTime() + PUBLISH_CLAIM_LEASE_MS);
     await publishPendingEvents(harness.repo, run, silentLog(), () => lapsed);
     expect(calls).toHaveLength(1);
+  });
+
+  it("publishes a stored event with the same delivery id however often it is published", async () => {
+    await store("evt-again", receivedAt, { response_status: "declined" });
+    let clock = at(5 * 60_000);
+    // The publisher dies mid-publish, and the event goes out again once its claim lapses.
+    expect(await harness.repo.claimNextUnpublished(clock)).not.toBeNull();
+    clock = new Date(clock.getTime() + PUBLISH_CLAIM_LEASE_MS);
+    const { calls, run } = recordingRunAction();
+    await publishPendingEvents(harness.repo, run, silentLog(), () => clock);
+    expect(calls.map((call) => call.args.payload)).toEqual([
+      { response_status: "declined", _deliveryId: "evt-again" },
+    ]);
   });
 
   it("gives up on an event after the last attempt so it stops blocking the line", async () => {

@@ -106,7 +106,7 @@ describe("inbound webhook credential failures", () => {
     expect(runAction).toHaveBeenCalledExactlyOnceWith("publish_event", {
       name: "provider:event:gmail.gmail_new_gmail_message",
       source: "connector",
-      payload: { subject: "Fixture message" },
+      payload: { subject: "Fixture message", _deliveryId: "evt_webhook_auth_test" },
     });
 
     const duplicate = await createApiHandler(ctx).handle(delivery);

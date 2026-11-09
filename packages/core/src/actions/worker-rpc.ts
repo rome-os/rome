@@ -1,4 +1,6 @@
+import { WEBCHAT_CHANNEL, webchatCaller } from "../chats/dashboard/dashboard-account.js";
 import type { IpcCallContext, IpcRpc } from "./ipc.js";
+import type { ApprovalCard } from "./approval-card.js";
 import { z } from "zod";
 import { runWithHookInvocationContext } from "../core/hook-recursion.js";
 import type { EmailInboundResult } from "../connections/kinds/email/email-control.js";
@@ -16,6 +18,8 @@ import type {
   UpdateChatSettingsInput,
   ResetChatSettingsInput,
   ListChatSettingsInput,
+  PreviewPayload,
+  ThreadContext,
 } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../connections/registry.js";
 import type { EventService } from "../events/event-service.js";
@@ -43,6 +47,17 @@ const AccountOrChannel = z.union([
   z.string().min(1),
   z.object({ platform: z.string().min(1), id: z.string().min(1) }).strict(),
 ]);
+
+// An approval's card, which a worker asks main to put in the conversation the
+// approval came from, so it is recorded in that chat as main records it.
+const ApprovalCardParams = z.object({
+  approvalId: z.string(),
+  actionName: z.string(),
+  preview: z.custom<PreviewPayload>((val) => typeof val === "object" && val !== null).optional(),
+  channelContext: z
+    .custom<ThreadContext>((val) => typeof val === "object" && val !== null)
+    .optional(),
+});
 
 const ChannelsSendParams = z.object({
   channel: AccountOrChannel,
@@ -178,6 +193,7 @@ const SessionContinueParams = z.object({
   threadId: z.string().min(1),
   channelUserId: z.string().optional(),
   prompt: z.string(),
+  ownerKey: z.string().optional(),
 });
 
 const AppConnectionsListParams = z
@@ -288,6 +304,19 @@ export interface WorkerRpcServices {
   appConnections: AppConnectionBrokerPort;
   /** Resolve the owner from the action that the Core IPC boundary captured. */
   appIdForAction: (actionName: string) => string | null;
+  /** Puts an approval's card in the conversation it came from, recorded in
+   *  that chat (`approvals.sendCard`). */
+  sendApprovalCard: (approval: ApprovalCard) => Promise<void>;
+}
+
+/** The person and the dashboard chat behind an action's call across the worker boundary. */
+function callerOf(context: IpcCallContext | undefined) {
+  const caller = context?.callerActionContext;
+  const thread = caller?.channelContext;
+  return {
+    actor: caller?.actor,
+    chatId: thread?.channel === WEBCHAT_CHANNEL && thread.threadId ? thread.threadId : null,
+  };
 }
 
 export class WorkerRpcServer {
@@ -300,8 +329,12 @@ export class WorkerRpcServer {
     this.handlers = new Map<string, (params: unknown, context?: IpcCallContext) => unknown>(
       Object.entries({
         "channels.list": () => this.services.channelsService.list(),
-        "channels.send": (params) => this.handleChannelsSend(params),
-        "channels.query": (params) => this.handleChannelsQuery(params),
+        "channels.send": (params, context) => this.handleChannelsSend(params, context),
+        "approvals.sendCard": (params) =>
+          this.services.sendApprovalCard(
+            parseParams("approvals.sendCard", ApprovalCardParams, params),
+          ),
+        "channels.query": (params, context) => this.handleChannelsQuery(params, context),
         "agentNames.resolve": (params) => {
           const { name } = parseParams("agentNames.resolve", AgentNamesResolveParams, params);
           return this.services.agentNames.resolve(name);
@@ -510,23 +543,36 @@ export class WorkerRpcServer {
     return { ok: true };
   }
 
-  private async handleChannelsSend(params: unknown): Promise<MessageReceipt> {
+  private async handleChannelsSend(
+    params: unknown,
+    context?: IpcCallContext,
+  ): Promise<MessageReceipt> {
     const { channel, chatId, message } = parseParams("channels.send", ChannelsSendParams, params);
-    return await this.services.channelsService.send(channel, chatId as ChatId, message);
+    // The dashboard chat writes only where the calling action's person may.
+    return await webchatCaller.run(callerOf(context), () =>
+      this.services.channelsService.send(channel, chatId as ChatId, message),
+    );
   }
 
-  private async handleChannelsQuery(params: unknown): Promise<ChannelMessage[]> {
+  private async handleChannelsQuery(
+    params: unknown,
+    context?: IpcCallContext,
+  ): Promise<ChannelMessage[]> {
     const { channel, chatId, since, after, limit } = parseParams(
       "channels.query",
       ChannelsQueryParams,
       params,
     );
-    return await this.services.channelsService.query(channel, {
-      ...(chatId ? { chatId: chatId as ChatId } : {}),
-      ...(since ? { since: new Date(since) } : {}),
-      ...(after ? { after } : {}),
-      ...(limit ? { limit } : {}),
-    });
+    // The dashboard chat reads as the person accountable for the calling
+    // action's turn, in the chat it runs in.
+    return await webchatCaller.run(callerOf(context), () =>
+      this.services.channelsService.query(channel, {
+        ...(chatId ? { chatId: chatId as ChatId } : {}),
+        ...(since ? { since: new Date(since) } : {}),
+        ...(after ? { after } : {}),
+        ...(limit ? { limit } : {}),
+      }),
+    );
   }
 
   private async handleEmailIngestInbound(params: unknown): Promise<EmailInboundResult> {

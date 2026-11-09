@@ -11,6 +11,9 @@ fi
 geometry="${BASH_REMATCH[1]}"
 depth="${BASH_REMATCH[3]:-24}"
 
+# This X server, and openbox, noVNC and Chrome after it, start after the
+# wait-for-rome oneshot, so they do not slow Rome's boot on a small VM.
+
 # s6 starts this service only after the previous X server has exited, so a lock
 # or socket left on disk is stale.
 mkdir -p /tmp/.X11-unix

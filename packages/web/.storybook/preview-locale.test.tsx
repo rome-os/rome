@@ -3,9 +3,14 @@ import { afterEach, expect, test } from "@rstest/core";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import i18n, { SUPPORTED_LANGUAGES } from "../src/i18n";
-import { PairingRequestCard } from "../src/components/pairing/pairing-views";
+import { useTranslation } from "react-i18next";
 import { storyLocale } from "./locale";
 import { Locale } from "./preview";
+
+function ApprovedStatus() {
+  const { t } = useTranslation("activity");
+  return <span>{t("status.approved")}</span>;
+}
 
 afterEach(async () => {
   cleanup();
@@ -19,14 +24,7 @@ test("locale updates existing components without remounting them", async () => {
   const content = (
     <details>
       <summary>Request</summary>
-      <PairingRequestCard
-        name="Alex"
-        accountId="123"
-        channel="Telegram"
-        createdAt="2026-09-10T10:00:00.000Z"
-        expiresAt={Date.UTC(2026, 8, 10, 10, 10)}
-        status="approved"
-      />
+      <ApprovedStatus />
     </details>
   );
   const view = render(<Locale locale="en">{content}</Locale>);

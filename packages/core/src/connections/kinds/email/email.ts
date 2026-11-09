@@ -5,18 +5,25 @@ import type {
   ChannelMessage,
   ChatId,
   MessageReceipt,
+  OutgoingEmailMessage,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
 import { createLogger } from "../../../logger.js";
-import { ChannelSendRefused } from "@rome-os/app-runtime";
-import { refuseUnshownParts } from "../../outbound/send-refusals.js";
+import { SendRefused } from "@rome-os/app-runtime";
+import {
+  EMAIL_MESSAGE_ID,
+  messageAsText,
+  refuseUnshownParts,
+  replyToShaped,
+} from "../../outbound/send-refusals.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
-import { mapGuardianToChannel } from "../../../people/guardian-mapping.js";
+import { linkGuardianToAccount } from "../../../people/guardian-mapping.js";
 import { InboundDedup } from "../../inbound/inbound-dedup.js";
 import {
   type EmailReplyTarget,
   type ResolvedEmailReplyTarget,
+  REPLY_LOOKUP_BUDGET_MS,
   resolveEmailReplyTarget,
 } from "./email-reply-target.js";
 import type {
@@ -26,6 +33,7 @@ import type {
   EmailAddress,
   EmailBodyPart,
 } from "../../../lib/rome-cloud-mail.js";
+import { MailProviderError } from "../../../lib/rome-cloud-mail.js";
 import {
   inboundBodyToMarkdown,
   markdownToEmailHtml,
@@ -127,15 +135,6 @@ function attachmentsFromParts(parts: EmailBodyPart[]): Attachment[] {
   }));
 }
 
-function textFromParts(parts: OutgoingMessage["parts"]): string {
-  if (!parts) return "";
-  return parts
-    .filter((p): p is Extract<typeof p, { type: "text" }> => p.type === "text")
-    .map((p) => p.content)
-    .join("\n\n")
-    .trim();
-}
-
 /**
  * Email as a first-class channel. Inbound is push-driven by Rome Cloud: the
  * `email_inbound` core-side action calls `ingestInbound()` with the raw relay
@@ -233,7 +232,7 @@ export class EmailAdapter {
     // known address lands on the trusted path. The inbound gate still enforces
     // authentication before honoring this mapping (see ingestInbound).
     if (this.guardianEmail) {
-      await mapGuardianToChannel(this.peopleRepo, "email", this.guardianEmail).catch((err) => {
+      await linkGuardianToAccount(this.peopleRepo, "email", this.guardianEmail).catch((err) => {
         log.warn("failed to preset guardian email mapping", {
           error: err instanceof Error ? err.message : String(err),
         });
@@ -276,12 +275,11 @@ export class EmailAdapter {
    * throw before anything is sent. A provider answer without both IDs throws as
    * unconfirmed, since the mail may have gone out.
    *
-   * An empty body is the one exception that neither sends nor throws, unless the
-   * caller asked for an email explicitly (`kind: "email"`). Parts-only messages
-   * such as approval cards have no email rendering, so the adapter skips them and
-   * receipts the conversation it was asked for, without a `messageId`.
+   * An approval card is sent as its plain-text version.
    *
-   * A thread reply targets the newest received message in the thread, falling
+   * A reply names the email it answers in In-Reply-To: `inReplyToMessageId`,
+   * else `replyToMessageId`, which must be an email's Message-ID. Without one,
+   * a thread reply targets the newest received message in the thread, falling
    * back to the newest message Rome sent for a thread nobody else wrote in.
    */
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {
@@ -349,7 +347,7 @@ export class EmailAdapter {
     // The mail transport has no attachment field. Reject before sending a body
     // that would falsely appear to deliver the requested files.
     if (message.attachments?.length) {
-      throw new ChannelSendRefused(
+      throw new SendRefused(
         "attachment_unsupported",
         "Email attachments are not supported by the mail transport. No email was sent.",
       );
@@ -357,13 +355,26 @@ export class EmailAdapter {
     refuseUnshownParts("email", message);
     const email = message.kind === "email" ? message : undefined;
     if (email?.inReplyToMessageId !== undefined && !email.inReplyToMessageId.trim()) {
-      throw new ChannelSendRefused(
+      throw new SendRefused(
         "reply_unaddressable",
         "Email inReplyToMessageId must not be blank. No email was sent.",
       );
     }
+    // An app's own HTML is the whole body, so a widget beside it would not
+    // show.
+    if (email?.html?.trim() && message.parts?.some((part) => part.type !== "text")) {
+      throw new SendRefused(
+        "part_unsupported",
+        "An email with its own HTML cannot also carry a widget. No email was sent.",
+      );
+    }
+    // A reply is email's own quote: it names the email it answers in
+    // In-Reply-To. The email field wins over the chat-style one.
+    const inReplyTo =
+      email?.inReplyToMessageId ??
+      replyToShaped("email", message.replyToMessageId, EMAIL_MESSAGE_ID);
     // Blank text says nothing, so the text parts speak, as on every channel.
-    const bodyText = (message.text?.trim() ? message.text : textFromParts(message.parts)).trim();
+    const bodyText = messageAsText(message).trim();
 
     // Build the multipart body: an app-supplied HTML wins (sanitized + inlined,
     // with a derived text/plain), otherwise render the markdown text to HTML.
@@ -381,10 +392,12 @@ export class EmailAdapter {
       text = multi.text;
     }
     if (!text && !html) {
-      throw new ChannelSendRefused(
-        "empty",
-        "Email requires non-empty text or HTML. No email was sent.",
-      );
+      throw new SendRefused("empty", "Email requires non-empty text or HTML. No email was sent.");
+    }
+    // A chat-style quote answers an email in the chat it is sent to, as on
+    // every platform. Only the email field reaches into another thread.
+    if (inReplyTo && email?.inReplyToMessageId === undefined) {
+      await this.refuseQuoteOutside(threadId, email, inReplyTo);
     }
 
     const cc = email?.cc?.length ? email.cc : undefined;
@@ -392,8 +405,8 @@ export class EmailAdapter {
 
     // An explicit message ID wins. A thread miss must not become a fresh send,
     // even when the caller also supplied `to`.
-    if (email?.inReplyToMessageId) {
-      const inReplyToMessageId = email.inReplyToMessageId;
+    if (inReplyTo) {
+      const inReplyToMessageId = inReplyTo;
       const sent = await this.provider.send({ inReplyToMessageId, text, html, cc, bcc });
       return { sent, startedThread: false };
     }
@@ -426,6 +439,66 @@ export class EmailAdapter {
     const subject = email?.subject?.trim() || "Message from Rome";
     const sent = await this.provider.send({ to: recipients, cc, bcc, subject, text, html });
     return { sent, startedThread: true };
+  }
+
+  /**
+   * Refuses a chat-style quote of `quote` on a send to `threadId` unless the
+   * thread holds that email. The provider sends a reply into the thread of
+   * the email it answers, so a quote on a new email, at a blank address, or of
+   * an email in another thread would reach people the send does not name.
+   */
+  private async refuseQuoteOutside(
+    threadId: string,
+    email: OutgoingEmailMessage | undefined,
+    quote: string,
+  ): Promise<void> {
+    const refused = (why: string) =>
+      new SendRefused(
+        "reply_unaddressable",
+        `email ${JSON.stringify(quote)} ${why}. No email was sent. ` +
+          "Name it in inReplyToMessageId to answer an email in another thread.",
+      );
+    // As in sendMail, only a chat-style send reads its conversation id as an
+    // address. An email message's id names a thread, even with an "@" in it.
+    const namesAddress =
+      !email &&
+      (!!this.resolveRecipients(threadId) || threadId.trim().toLowerCase() === "guardian");
+    if (
+      !threadId.trim() ||
+      email?.to !== undefined ||
+      (namesAddress && !this.threadReplyTarget.has(threadId))
+    ) {
+      throw refused("cannot be answered by a new email");
+    }
+    if (this.threadReplyTarget.get(threadId)?.messageId === quote) return;
+    // An email the provider does not know is in no thread, whether Rome Cloud
+    // or the provider behind it says so. Any other failure to look it up is
+    // the provider's, and passes on. The lookup keeps to a thread lookup's
+    // budget, so the send after it still fits the caller's deadline.
+    const lookup = this.provider.getMessage(quote).catch((err: unknown) => {
+      if (err instanceof MailProviderError && (err.status === 404 || err.providerStatus === 404)) {
+        return undefined;
+      }
+      throw err;
+    });
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const expired = new Promise<never>((_, reject) => {
+      timer = setTimeout(
+        () =>
+          reject(
+            new Error(
+              `Looking up email ${JSON.stringify(quote)} took longer than ` +
+                `${REPLY_LOOKUP_BUDGET_MS / 1000}s. No email was sent. Retry, or name the ` +
+                "email to answer in inReplyToMessageId.",
+            ),
+          ),
+        REPLY_LOOKUP_BUDGET_MS,
+      );
+    });
+    const quoted = await Promise.race([lookup, expired]).finally(() => clearTimeout(timer));
+    if (quoted?.threadId !== threadId) {
+      throw refused("is not in the thread this message goes to");
+    }
   }
 
   private noRecipientMessage(to: string | string[]): string {

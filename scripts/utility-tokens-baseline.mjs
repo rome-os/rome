@@ -277,26 +277,6 @@ export const BASELINE = {
     "text-sm": 13,
     "text-xs": 3,
   },
-  "rome_apps/welcome-to-rome/src/web/App.tsx": {
-    "ml-0.5": 1,
-    "sm:text-xl": 1,
-    "text-lg": 1,
-    "text-xs": 1,
-  },
-  "rome_apps/welcome-to-rome/src/web/components/ui/item.tsx": {
-    "gap-0.5": 1,
-    "text-sm": 1,
-    "text-xs": 1,
-  },
-  "rome_apps/welcome-to-rome/src/web/idea-picker.tsx": { "text-sm": 1 },
-  "rome_apps/welcome-to-rome/src/web/scout-suggestions.tsx": {
-    "gap-1.5": 2,
-    "mt-0.5": 1,
-    "mt-1.5": 1,
-    "space-y-1.5": 1,
-    "text-sm": 3,
-    "text-xs": 6,
-  },
 };
 
 export const baselineCounts = new Map(

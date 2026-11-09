@@ -78,36 +78,9 @@ cd /tmp/daemon
 test "$(cat /run/s6-linux-init-container-results/exitcode)" -eq 17
 echo 'PASS: supervisor shutdown retains its own exit code'
 
-# Compile the real Tailscale service with inert dependencies. No socket exists,
-# so its real setup script stays in its best-effort readiness retry loop.
-mkdir -p /tmp/ts-source/init /tmp/ts-source/tailscaled /tmp/scan /run/s6/container_environment
-cp -a /repo/s6-rc.d/tailscale-setup /tmp/ts-source/
-cp /repo/rome-tailscale-setup.sh /etc/s6-overlay/scripts/rome-tailscale-setup
-chmod +x /etc/s6-overlay/scripts/rome-tailscale-setup
-echo oneshot > /tmp/ts-source/init/type
-echo /bin/true > /tmp/ts-source/init/up
-echo longrun > /tmp/ts-source/tailscaled/type
-printf '#!/bin/sh\nexec sleep infinity\n' > /tmp/ts-source/tailscaled/run
-chmod +x /tmp/ts-source/tailscaled/run
-s6-rc-compile /tmp/ts-compiled /tmp/ts-source
-s6-svscan /tmp/scan > /tmp/tailscale.log 2>&1 &
-scanner=$!
-trap 'kill "$supervisor" "$scanner" 2>/dev/null || true' EXIT
-s6-rc-init -c /tmp/ts-compiled -l /tmp/ts-live /tmp/scan
-s6-rc -l /tmp/ts-live -u change tailscale-setup > /tmp/tailscale-startup.log 2>&1 &
-startup=$!
-for i in $(seq 1 100); do
-  if grep -q 'Waiting for tailscaled' /tmp/tailscale.log /tmp/tailscale-startup.log; then break; fi
-  sleep 0.1
-done
-grep -q 'Waiting for tailscaled' /tmp/tailscale.log /tmp/tailscale-startup.log
-timeout 5 s6-rc -b -l /tmp/ts-live -da change
-wait "$startup"
-echo 'PASS: shutdown cancels Tailscale retries without waiting for the startup lock'
-
 # Run the real Chrome service and wrapper with fake browser/proxy binaries.
 # Killing only the wrapper must leave no live children from its old generation.
-mkdir -p /tmp/chrome /tmp/browser-bin /opt/rome/scripts/docker /home/rome
+mkdir -p /tmp/chrome /tmp/browser-bin /opt/rome/scripts/docker /home/rome /run/s6/container_environment
 cp /repo/s6-rc.d/chrome/run /tmp/chrome/run
 if [ -f /repo/s6-rc.d/chrome/finish ]; then cp /repo/s6-rc.d/chrome/finish /tmp/chrome/finish; fi
 cp /repo/rome-start-chrome-cdp.sh /opt/rome/scripts/docker/
@@ -131,7 +104,7 @@ for name in PATH ROME_DOCKER_USER_MODE ROME_CHROME_BINARY ROME_CHROME_USER_AGENT
 done
 s6-supervise /tmp/chrome &
 chrome_supervisor=$!
-trap 'kill "$supervisor" "$scanner" "$chrome_supervisor" 2>/dev/null || true' EXIT
+trap 'kill "$supervisor" "$chrome_supervisor" 2>/dev/null || true' EXIT
 for i in $(seq 1 100); do
   if [ -s /tmp/proxy-generations ]; then break; fi
   sleep 0.1
@@ -180,6 +153,43 @@ for pair in chrome:chrome-cdp openbox:openbox novnc:novnc xtigervnc:xtigervnc; d
   grep -q service-output "$log"
 done
 echo 'PASS: service logs open as rome and cannot append through symlinks to root-owned files'
+
+# The wait-for-rome oneshot gates the desktop on Rome's health and never fails.
+cp /repo/rome-wait-for-rome.sh /etc/s6-overlay/scripts/rome-wait-for-rome
+chmod +x /etc/s6-overlay/scripts/rome-wait-for-rome
+wait_up="$(cat /repo/s6-rc.d/wait-for-rome/up)"
+started=$SECONDS
+execlineb -Pc "$wait_up"
+test $((SECONDS - started)) -le 2
+mkdir -p /tmp/unready-bin
+printf '#!/bin/sh\nexit 7\n' > /tmp/unready-bin/curl
+chmod +x /tmp/unready-bin/curl
+printf '%s' "/tmp/unready-bin:$PATH" > /run/s6/container_environment/PATH
+printf 1 > /run/s6/container_environment/ROME_DEFER_UNTIL_HEALTHY_SECONDS
+started=$SECONDS
+execlineb -Pc "$wait_up"
+test $((SECONDS - started)) -le 5
+printf 120 > /run/s6/container_environment/ROME_DEFER_UNTIL_HEALTHY_SECONDS
+# A daemon that crashed before it ever listened: its finish keeps it down.
+mkdir -p /run/service/rome-daemon
+printf '#!/bin/sh\nexit 1\n' > /run/service/rome-daemon/run
+printf '#!/bin/sh\nexit 125\n' > /run/service/rome-daemon/finish
+chmod +x /run/service/rome-daemon/run /run/service/rome-daemon/finish
+s6-supervise /run/service/rome-daemon &
+crashed_supervisor=$!
+for i in $(seq 1 50); do
+  if [ "$(s6-svstat -o up /run/service/rome-daemon 2>/dev/null)" = false ]; then break; fi
+  sleep 0.1
+done
+started=$SECONDS
+execlineb -Pc "$wait_up"
+test $((SECONDS - started)) -le 3
+kill "$crashed_supervisor"
+printf true > /run/s6/container_environment/ROME_ENABLE_CDP_AUTOMATION
+started=$SECONDS
+execlineb -Pc "$wait_up"
+test $((SECONDS - started)) -le 1
+echo 'PASS: wait-for-rome returns on health, at its cap, on a crashed daemon, and at once for CDP discovery'
 `,
   },
 );

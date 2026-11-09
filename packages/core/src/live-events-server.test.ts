@@ -10,11 +10,13 @@ import type { AppCatalog } from "./apps/catalog.js";
 import type { CatalogEvent, SubscriberHandler } from "./apps/state.js";
 import { subscribeCatalogChanges } from "./api/routes/apps.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./api/routes/webchat.js";
+import { CONCIERGE_AGENT_ID, canOpenChat } from "./concierge/service.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { guardianAuth } from "./db/schema.js";
 import { createSession, createVisitorSession } from "./lib/auth.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
+import { PhoneWatching } from "./lib/phone-watching.js";
 import {
   attachLiveEventsServer,
   type LiveEventSources,
@@ -94,6 +96,7 @@ describe("live events WebSocket", () => {
   let activeSubscriptions: number;
   let conciergeTasks: ConciergeTasks;
   let dashboardAccess: DashboardAccessState;
+  let phoneWatching: PhoneWatching;
   const catalogHandlers = new Set<SubscriberHandler>();
   const clients: TestClient[] = [];
   const originalProjectsRoot = process.env.ROME_PROJECTS_ROOT;
@@ -143,16 +146,19 @@ describe("live events WebSocket", () => {
     };
     const sources: LiveEventSources = {
       subscribeChatStatus: (emit) => track(runtime.subscribeStatusEvents(emit)),
-      hasChatSession: (sessionId) => runtime.hasStoredSession(sessionId),
+      hasChatSession: async (sessionId, owner) =>
+        (await runtime.hasStoredSession(sessionId)) &&
+        (await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, owner)),
       subscribeChatSession: (sessionId, emit) =>
         track(runtime.subscribeSessionEvents(sessionId, emit)),
       subscribeAppCatalog: (emit) => track(subscribeCatalogChanges(catalog, emit)),
-      subscribeConciergeTasks: (emit) => track(conciergeTasks.subscribe(emit)),
+      subscribeConciergeTasks: (owner, emit) => track(conciergeTasks.subscribe(emit, owner)),
     };
     server = createServer();
     dashboardAccess = new DashboardAccessState();
     dashboardAccess.setCloudEmailAccess(["visitor@example.com"]);
-    live = attachLiveEventsServer(server, testDb.db, dashboardAccess, sources);
+    phoneWatching = new PhoneWatching();
+    live = attachLiveEventsServer(server, testDb.db, dashboardAccess, sources, phoneWatching);
     port = await new Promise<number>((resolve) => {
       server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port));
     });
@@ -206,7 +212,7 @@ describe("live events WebSocket", () => {
     expect(await upgradeStatus(port, {})).toBe(101);
   });
 
-  it("gives an allow-listed dashboard visitor the chat topics but not the app catalog", async () => {
+  it("gives an allow-listed dashboard visitor every topic but the app catalog", async () => {
     const proxied = {
       "x-forwarded-for": "203.0.113.1",
       "x-forwarded-host": "rome.example",
@@ -245,11 +251,45 @@ describe("live events WebSocket", () => {
     });
     expect(activeSubscriptions).toBe(2);
     expect(catalogHandlers.size).toBe(0);
+  });
 
-    client.send({ type: "subscribe", topic: "concierge.tasks" });
+  it("gives a visitor their own Concierge rows and hides the guardian's Concierge chat", async () => {
+    const client = await connect({
+      "x-forwarded-for": "203.0.113.1",
+      "x-forwarded-host": "rome.example",
+      "x-forwarded-proto": "http",
+      cookie: `rome_visitor=${createVisitorSession("account-1", "visitor@example.com")}`,
+      origin: "http://rome.example",
+    });
+    const conciergeChat = (id: string, ownerKey: string | null) =>
+      deps.webchatRepo.createSession(
+        id,
+        "Concierge",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        CONCIERGE_AGENT_ID,
+        "webchat",
+        null,
+        { ownerKey },
+      );
+    await conciergeChat("concierge", null);
+    await conciergeChat("visitor-main", "visitor:account-1");
+    client.send({ type: "subscribe", topic: "chat.session:concierge" });
     expect(
-      await client.next((m) => m.type === "error" && m.topic === "concierge.tasks"),
-    ).toMatchObject({ message: "Forbidden" });
+      await client.next((m) => m.type === "error" && m.topic === "chat.session:concierge"),
+    ).toMatchObject({ message: "Not found" });
+    await client.subscribe("chat.session:visitor-main");
+
+    await client.subscribe("concierge.tasks");
+    await conciergeTasks.repo.upsertMany([{ title: "The guardian's", state: "next" }]);
+    const [mine] = await conciergeTasks.repo.upsertMany([
+      { title: "Mine", state: "next", chatId: "visitor-main" },
+    ]);
+    expect(
+      await client.next((m) => m.type === "event" && m.topic === "concierge.tasks"),
+    ).toMatchObject({ data: { task: { id: mine.id, title: "Mine" } } });
   });
 
   it("pushes each write to the Concierge's todo list on concierge.tasks", async () => {
@@ -300,8 +340,8 @@ describe("live events WebSocket", () => {
     await deps.webchatRepo.createSession("sess-running", "Running");
     const turn = deps.agentTurnStreamRegistry.register({
       sessionId: "sess-running",
+      chatId: "sess-running",
       turnId: "turn-1",
-      agentName: "main",
     });
     const client = await connect();
     await client.subscribe("chat.status");
@@ -323,6 +363,45 @@ describe("live events WebSocket", () => {
         (m) => m.type === "event" && (m.data as { running: boolean }).running === false,
       ),
     ).toMatchObject({ data: { sessionId: "sess-running", running: false } });
+  });
+
+  it("counts only the chat the guardian's phone watches, never its data subscriptions", async () => {
+    await deps.webchatRepo.createSession("sess-a", "A");
+    await deps.webchatRepo.createSession("sess-b", "B");
+    const phone = await connect({ "x-rome-client": "phone" });
+    // The phone follows B's data (its name, its rows) but shows A.
+    await phone.subscribe("chat.session:sess-b");
+    await phone.subscribe("chat.watch:sess-a");
+    expect(phoneWatching.isWatching("sess-a")).toBe(true);
+    expect(phoneWatching.isWatching("sess-b")).toBe(false);
+
+    // The chat on screen moves to B: the watch moves with it.
+    phone.send({ type: "unsubscribe", topic: "chat.watch:sess-a" });
+    await phone.subscribe("chat.watch:sess-b");
+    await rs.waitFor(() => expect(phoneWatching.isWatching("sess-a")).toBe(false));
+    expect(phoneWatching.isWatching("sess-b")).toBe(true);
+
+    // The phone's goodbye: closing stops the count at once.
+    await phone.close();
+    await rs.waitFor(() => expect(phoneWatching.isWatching("sess-b")).toBe(false));
+  });
+
+  it("never counts a watch from the dashboard or a visitor", async () => {
+    await deps.webchatRepo.createSession("sess-a", "A");
+    const web = await connect();
+    await web.subscribe("chat.watch:sess-a");
+    expect(phoneWatching.isWatching("sess-a")).toBe(false);
+    const visitor = await connect({
+      "x-forwarded-for": "203.0.113.1",
+      "x-forwarded-host": "rome.example",
+      "x-forwarded-proto": "http",
+      cookie: `rome_visitor=${createVisitorSession("account-1", "visitor@example.com")}`,
+      origin: "http://rome.example",
+      "x-rome-client": "phone",
+    });
+    visitor.send({ type: "subscribe", topic: "chat.watch:sess-a" });
+    await visitor.next((m) => m.topic === "chat.watch:sess-a");
+    expect(phoneWatching.isWatching("sess-a")).toBe(false);
   });
 
   it("forwards session events for the subscribed session only, until unsubscribed", async () => {
@@ -395,6 +474,34 @@ describe("live events WebSocket", () => {
     });
     await client.next((m) => m.type === "subscribed" && m.topic === "chat.session:sess-31");
     expect(activeSubscriptions).toBe(MAX_SUBSCRIPTIONS_PER_SOCKET);
+  });
+
+  it("holds the phone's watch past the cap, one per socket", async () => {
+    const phone = await connect({ "x-rome-client": "phone" });
+    for (let i = 0; i < MAX_SUBSCRIPTIONS_PER_SOCKET; i++) {
+      await deps.webchatRepo.createSession(`sess-${i}`, `Chat ${i}`);
+      phone.send({ type: "subscribe", topic: `chat.session:sess-${i}` });
+    }
+    await phone.next((m) => m.type === "subscribed" && m.topic === "chat.session:sess-31");
+    await phone.subscribe("chat.watch:sess-0");
+    expect(phoneWatching.isWatching("sess-0")).toBe(true);
+
+    // A second watch replaces the first rather than adding to it.
+    await phone.subscribe("chat.watch:sess-1");
+    expect(phoneWatching.isWatching("sess-0")).toBe(false);
+    expect(phoneWatching.isWatching("sess-1")).toBe(true);
+    expect(phone.messages.some((m) => m.type === "error")).toBe(false);
+  });
+
+  it("never counts a watch unsubscribed before its check resolves", async () => {
+    await deps.webchatRepo.createSession("sess-a", "A");
+    const phone = await connect({ "x-rome-client": "phone" });
+    phone.send({ type: "subscribe", topic: "chat.watch:sess-a" });
+    phone.send({ type: "unsubscribe", topic: "chat.watch:sess-a" });
+    // Frames run in order, so this one resolving means the watch's check has too.
+    await phone.subscribe("chat.session:sess-a");
+    expect(phoneWatching.isWatching("sess-a")).toBe(false);
+    expect(phone.messages.some((m) => m.topic === "chat.watch:sess-a")).toBe(false);
   });
 
   it("releases every source listener when the socket closes", async () => {

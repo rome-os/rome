@@ -1,10 +1,10 @@
 # Notification Delivery
 
-How a mobile push notification travels from an [instance](../concepts/deployment.md#instances) to a guardian's device, and the invariants that hold across the instance ↔ [Rome Cloud](../concepts/rome-cloud.md) ↔ push-provider boundary. A device receives push through its platform service — APNs for iOS, FCM for Android — and the notification itself originates from a user-directed [action](../concepts/actions.md).
+How a mobile push notification travels from an [instance](../concepts/deployment.md#instances) to a guardian's device, and the invariants that hold across the instance ↔ [Rome Cloud](../concepts/rome-cloud.md) ↔ push-provider boundary. A device receives push through its platform service — APNs for iOS, FCM for Android — and the notification itself originates from a user-directed [action](../concepts/actions.md) or from a [Concierge](concierge.md) turn.
 
 ## Components
 
-- **Instance** — runs the agent and the notification action. Decides *whether* to notify and *what* the body says.
+- **Instance** — runs the agent and the notification action, and the Concierge's turns. Decides *whether* to notify and *what* the body says. Knows which chat the guardian's phone app shows, from its watch on the live-events socket.
 - **Rome Cloud** — the central push broker. Owns device registration, the push-provider credentials (APNs for iOS, FCM for Android), and the delivery fan-out.
 - **APNs / FCM** — the platform push services (Apple's APNs for iOS, Google's FCM for Android), and the only path to the physical device.
 
@@ -18,7 +18,17 @@ How a mobile push notification travels from an [instance](../concepts/deployment
 
 - **The title is fixed and broker-owned. The body is the only sender-supplied content.** Rome Cloud always sets the notification title and provides the default body. A request may override only the body.
 
-- **Rome Cloud is the single content-enforcement point.** All validation, normalization, length-capping, and fallback of the body happen at the broker, once, before device lookup and delivery. The instance forwards the body unchanged and makes no content decisions.
+- **A push level and a chat are routing data, never shown.** A request may say whether the push alerts (`active`) or arrives silently (`passive`), and which chat a tap opens. Neither is displayed, so the body stays the only content the guardian reads. Only the instance itself sets them. The agent-facing action supplies a body alone.
+
+- **A Concierge turn pushes its first message, once: a proactive turn, and the reply to a message the guardian sent.** The reminder after a turn, the quota recovery and the "chat retired" notice never push, nor does the reply to a message the guardian did not write: one said as an agent account or an automated source, or sent by a loopback caller acting as the guardian. Only the guardian's own Concierge chats push, since Rome Cloud delivers to the guardian's devices: a visitor's Concierge never does. A digest pushes without an alert. Inside the guardian's quiet hours nothing pushes, and the message stays in its chat. The instance knows how a turn started, and never infers it from the text. [ADR](../adrs/proactive-concierge-push-without-per-message-consent.md)
+
+- **Nothing pushes for a chat the guardian's phone app shows.** The phone app marks its live-events socket with the `x-rome-client: phone` upgrade header and holds the `chat.watch:<chatId>` topic for the one chat on its screen, none under a sheet or its drawer. While that socket, signed in as the guardian, holds a chat's watch, the chat counts as watched, and nothing the Concierge says there pushes. The phone's other subscriptions follow chats it does not show and never count. A message skipped this way leaves the turn's one push to its next message, so an answer that comes after the guardian leaves the chat still pushes, with the fixed line. A socket holds one watch, outside its subscription cap, and the phone sends it before its other topics. The dashboard never counts either: a browser cannot set the header. The phone moves the watch as the chat on screen changes, and drops it and closes the socket as it leaves the foreground, so the count drops at once. A phone killed or cut off without that goodbye counts until the socket's ping drops it, and a reply in that window does not push.
+
+- **A Concierge push carries only the Concierge's own words, from the turn's first message.** Its body is what the Concierge wrote in the turn's first message, its text or a forward's intro, or else a fixed line in the guardian's language. A push that falls on a later message, because the phone showed the first, says the fixed line: the Concierge keeps a secret out of only the first message. Forwarded or quoted text, a task's title and a chat's name never become the body, since any of them may come from a task's output and hold a code or password.
+
+- **A push never holds or fails the turn that caused it.** The message is in the chat before the push is asked for, and a failed or refused push is logged with its outcome only. An instance with no Rome Cloud credential sends nothing.
+
+- **Rome Cloud is the single content-enforcement point.** All validation, normalization, length-capping, and fallback of the body happen at the broker, once, before device lookup and delivery. The instance forwards an agent's body unchanged. A body the instance builds itself, the Concierge's preview line, is shaped for reading before it is sent, and Rome Cloud still enforces every rule on it. The instance never relies on that shaping to meet the broker's rules.
 
 - **Agent input is validated at the instance boundary before dispatch, independently of the broker.** The action fails closed on a malformed argument — a bad request never reaches Rome Cloud and never degrades into a default notification. This is a distinct layer from Rome Cloud's own request validation: the two do not rely on each other.
 

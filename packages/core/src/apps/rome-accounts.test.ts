@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it } from "@rstest/core";
 import type { GrantValue } from "../connections/grant.js";
 import { DrizzleConnectionsRepository } from "../connections/repository-db.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { byAccount } from "../chats/connected-accounts/account-agents.js";
 import { romeAccounts } from "./rome-accounts.js";
 

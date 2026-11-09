@@ -1,10 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import {
-  buildConnectionCards,
-  groupConnectionCards,
-  isConnectedCard,
-} from "@/lib/connection-cards";
-import { connectionStatus } from "@/lib/connection-status";
+import { buildConnectionCards, isConnectedCard } from "@/lib/connection-cards";
 import type { ApiConnection, GrantDisplay } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import { stateOfGrants } from "@/test/connection-state";
@@ -516,10 +511,7 @@ describe("buildConnectionCards — several accounts per service", () => {
   });
 });
 
-describe("Connections tabs and groups", () => {
-  const needsAttention = (card: Parameters<typeof connectionStatus>[0]) =>
-    connectionStatus(card).tone === "attention";
-
+describe("Connected cards", () => {
   it("counts working and broken connections as connected, and placeholders as not", () => {
     const cards = buildConnectionCards([
       conn({ connectionKind: "github", grants: { user: "authorized" } }),
@@ -536,46 +528,5 @@ describe("Connections tabs and groups", () => {
     expect(cards.map((card) => [card.service, isConnectedCard(card)])).toEqual([
       ["telegram", true],
     ]);
-  });
-
-  it("puts channels under Messaging and OAuth and Composio under Accounts", () => {
-    const cards = buildConnectionCards(
-      [
-        conn({ connectionKind: "telegram", grants: { bot: "authorized" } }),
-        conn({ connectionKind: "github", grants: { user: "authorized" } }),
-      ],
-      composio({ installed: true, loggedIn: true }),
-    );
-    expect(
-      groupConnectionCards(cards, needsAttention).map(({ group, cards: rows }) => [
-        group,
-        rows.map((card) => card.service),
-      ]),
-    ).toEqual([
-      ["messaging", ["telegram"]],
-      ["accounts", ["github", "composio"]],
-    ]);
-  });
-
-  it("leads a group with the cards that need attention, broken or degraded", () => {
-    const cards = buildConnectionCards([
-      conn({ connectionKind: "github", grants: { user: "authorized" } }),
-      conn({ connectionKind: "slack", grants: { workspace: "degraded" } }),
-    ]);
-    expect(
-      groupConnectionCards(cards, needsAttention)[0]?.cards.map((card) => card.service),
-    ).toEqual(["slack", "github"]);
-  });
-
-  it("drops an empty group unless the caller keeps it", () => {
-    const cards = buildConnectionCards([
-      conn({ connectionKind: "telegram", grants: { bot: "authorized" } }),
-    ]);
-    expect(groupConnectionCards(cards, needsAttention).map(({ group }) => group)).toEqual([
-      "messaging",
-    ]);
-    expect(
-      groupConnectionCards(cards, needsAttention, { accounts: true }).map(({ group }) => group),
-    ).toEqual(["messaging", "accounts"]);
   });
 });

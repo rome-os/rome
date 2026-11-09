@@ -37,6 +37,7 @@ function useActiveProjectPath(): string | null {
 }
 
 const PROJECTS_SLOT_ID = "projects";
+const PROJECTS_ROOT_SELECTION = { path: "projects", type: "directory" } as const;
 
 export function ProjectsWidget({
   dragging,
@@ -95,7 +96,11 @@ export function ProjectsWidget({
   // selection. `useExternalSelection` only re-selects when this value's path
   // changes and no-ops if the browser is already there, so a manual selection
   // after restore is never overridden.
-  const externalSelection = followTarget ?? restored.selection;
+  // A restore that ended without a location (missing or failed lookup) lands on
+  // the root folder, which a pending restore deliberately did not pre-select.
+  const restoreFellBack = restorePath !== null && restored.settled && !restored.selection;
+  const externalSelection =
+    followTarget ?? restored.selection ?? (restoreFellBack ? PROJECTS_ROOT_SELECTION : null);
 
   // Publish a workspace-context snapshot driven by the file
   // browser's own selection (`onSelectionChange`) so it works on the first
@@ -155,7 +160,9 @@ export function ProjectsWidget({
           apiBasePath="/api/projects"
           embedded
           externalSelection={externalSelection}
-          initialSelectedFolderPath="projects"
+          // Frozen at mount. A saved location is selected through
+          // `externalSelection` instead, so the root folder never flashes first.
+          initialSelectedFolderPath={restorePath === null ? "projects" : undefined}
           logicalRootPath="projects"
           onSelectionChange={handleSelectionChange}
           rootLabel={tFiles("projects.rootLabel")}
@@ -164,6 +171,11 @@ export function ProjectsWidget({
           sidebarHeading={tFiles("projects.title")}
         />
       </div>
+      {!restored.settled && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-surface">
+          <p className="text-ui text-subtle-foreground">{tFiles("view.loadingFile")}</p>
+        </div>
+      )}
       {dragging && <div className="absolute inset-0 z-10" />}
     </div>
   );

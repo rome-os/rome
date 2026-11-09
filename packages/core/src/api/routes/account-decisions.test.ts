@@ -85,7 +85,6 @@ describe("Account dismiss and restore", () => {
     waPersonId = await deps.peopleRepo.create({
       displayName: "Wanda Placed",
       bondLevel: "acquaintance",
-      approved: true,
       links: [{ platform: "whatsapp", id: LINKED_JID }],
     });
 
@@ -260,7 +259,6 @@ describe("Account dismiss and restore", () => {
           rivalId ??= await repo.create({
             displayName: "Rival Claimant",
             bondLevel: "other",
-            approved: true,
             links: [{ platform: "whatsapp", id: TALKING_JID }],
           });
           return stale;

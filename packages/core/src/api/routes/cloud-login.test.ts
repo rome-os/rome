@@ -13,8 +13,11 @@
  *   - vanilla instance: callback enrolls (persists the instance token), stamps the
  *     guardian account from the verified id_token, and issues a session. When no
  *     guardian seat exists it is created from the cloud account, setup finishes
- *     with defaults (the guardian name from the `name` claim or the email local
- *     part, a preset agent), and the browser lands on the welcome conversation.
+ *     (the guardian and agent names from the signup survey, else the `name` claim or
+ *     the email local part and a preset agent), the survey's background lands in
+ *     GUARDIAN.md once, the Concierge is turned on, a request to follow the chosen services goes into its main chat, and the
+ *     browser lands in its main chat. A missing or failing survey keeps the
+ *     fallback names, and a Concierge that cannot start never fails the sign-in.
  *     Creating the seat also starts the email auto-connect; signing in to an
  *     existing seat does not.
  *   - bound instance: a session is issued for the verified account, and that
@@ -30,7 +33,7 @@
  *   - flag off: start and callback both 404.
  */
 import { generateKeyPairSync, type KeyObject } from "node:crypto";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
@@ -40,20 +43,27 @@ import jwt from "jsonwebtoken";
 
 // The seat creation writes the guardian's profile notes; keep them out of the
 // runner's real profile.
+const memory = rs.hoisted(() => ({ dir: "" }));
 rs.mock("../../profile-memory.js", () => ({
-  ensureProfileMemoryInitialized: rs.fn(() => mkdtempSync(join(tmpdir(), "cloud-login-"))),
+  ensureProfileMemoryInitialized: rs.fn(() => memory.dir),
+  getRelationshipDir: rs.fn(() => `${memory.dir}/relationship`),
+  getGuardianProfileFile: rs.fn(() => `${memory.dir}/relationship/GUARDIAN.md`),
+  GUARDIAN_PROFILE_PATH: "memory/relationship/GUARDIAN.md",
 }));
 
 import { type CloudLoginSeams, cloudLoginRoutes } from "./cloud-login.js";
 import { AGENT_PRESETS } from "../../lib/agent-presets.js";
 import { visitorAuthRoutes } from "./visitor-auth.js";
-import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME } from "../../lib/auth.js";
+import { COOKIE_NAME, JWT_SECRET, VISITOR_COOKIE_NAME, verifySession } from "../../lib/auth.js";
 import { DashboardAccessState } from "../../lib/dashboard-access-state.js";
 import {
   INSTANCE_TOKEN_SETTING_KEY,
   setInstanceTokenInMemory,
 } from "../../lib/instance-identity.js";
-import { guardianAuth, persons, settings } from "../../db/schema.js";
+import type { ConciergeService } from "../../concierge/service.js";
+import type { CloudProfileService } from "../../lib/cloud-profile.js";
+import { guardianAuth, persons, settings, visitorProfiles } from "../../db/schema.js";
+import { startFakeSigner } from "../../test/fake-signer.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 
 const testDb = createTestDb();
@@ -67,9 +77,11 @@ const ENV_KEYS = ["PANTHEON_BASE_ORIGIN"] as const;
 const savedEnv: Record<string, string | undefined> = {};
 
 beforeEach(() => {
+  memory.dir = mkdtempSync(join(tmpdir(), "cloud-login-"));
   testDb.db.delete(guardianAuth).run();
   testDb.db.delete(persons).run();
   testDb.db.delete(settings).run();
+  testDb.db.delete(visitorProfiles).run();
   setInstanceTokenInMemory(null);
   for (const key of ENV_KEYS) savedEnv[key] = process.env[key];
   process.env.PANTHEON_BASE_ORIGIN = ISSUER;
@@ -107,8 +119,9 @@ function signIdToken(opts: {
   email?: string;
   picture?: string;
   name?: string;
+  claims?: Record<string, unknown>;
 }): string {
-  const payload: Record<string, unknown> = {};
+  const payload: Record<string, unknown> = { ...opts.claims };
   if (opts.nonce) payload.nonce = opts.nonce;
   if (opts.email) payload.email = opts.email;
   if (opts.picture) payload.picture = opts.picture;
@@ -314,6 +327,7 @@ describe("/api/auth/cloud/native", () => {
       origin: string;
     };
     expect(body.cookie_name).toBe(COOKIE_NAME);
+    expect(body).toMatchObject({ role: "owner" });
     expect(jwt.verify(body.session_token, JWT_SECRET)).toMatchObject({ userId: "A" });
     expect(new Date(body.expires_at).getTime()).toBeGreaterThan(Date.now());
     expect(body.origin).toBeTruthy();
@@ -364,7 +378,7 @@ describe("/api/auth/cloud — vanilla instance", () => {
     const deps = {
       ...(await buildTestDeps(testDb.db)),
       isCloudAuthEnabled: async () => true,
-      provisionNodeCaller: () => {
+      provisionAfterLink: () => {
         provisioned = true;
         return new Promise<void>(() => {});
       },
@@ -391,6 +405,44 @@ describe("/api/auth/cloud — vanilla instance", () => {
     expect(row.accountId).toBe("A");
   });
 
+  it("reports a registration conflict instead of signing in", async () => {
+    insertGuardian({ accountId: null });
+    const signer = await startFakeSigner({ aud: ISSUER });
+    rs.stubEnv("ROME_SIGNER_SOCKET", signer.socketPath);
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = (async (input: URL | string) =>
+      new URL(String(input)).pathname === "/api/instance/key"
+        ? Response.json({ error: "key_in_use" }, { status: 409 })
+        : Response.json({ error: "invalid_instance_token" }, { status: 401 })) as typeof fetch;
+    const provisionAfterLink = rs.fn(async () => {});
+    try {
+      const deps = {
+        ...(await buildTestDeps(testDb.db)),
+        isCloudAuthEnabled: async () => true,
+        provisionAfterLink,
+      };
+      const romeCloud = fakeRomeCloud((nonce) => ({
+        id_token: signIdToken({ sub: "A", nonce }),
+        instance_token: "romeinst_new",
+        instance_id: "inst-1",
+      }));
+      const app = new Hono();
+      app.route("/api", cloudLoginRoutes(deps, { fetchImpl: romeCloud.fetch }));
+      const { state, nonce } = await start(app);
+      romeCloud.setNonce(nonce);
+      const res = await callback(
+        app,
+        `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`,
+      );
+      expect(res.headers.get("location")).toBe("/login?cloud=error&reason=key_conflict");
+      expect(provisionAfterLink).not.toHaveBeenCalled();
+    } finally {
+      globalThis.fetch = realFetch;
+      rs.unstubAllEnvs();
+      await signer.close();
+    }
+  });
+
   it("creates the guardian seat from the cloud account when none exists", async () => {
     const autoConnectEmail = rs.fn(async () => {});
     const deps = {
@@ -411,7 +463,8 @@ describe("/api/auth/cloud — vanilla instance", () => {
     const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
 
     expect(res.status).toBe(302);
-    expect(res.headers.get("location")).toBe("/full/apps/welcome-to-rome");
+    // No Concierge is wired in this test, so the guardian lands at the root.
+    expect(res.headers.get("location")).toBe("/");
     expect(sessionUserId(res)).toBe("A");
 
     expect(await deps.settingsRepo.get<string>(INSTANCE_TOKEN_SETTING_KEY)).toBe("romeinst_new");
@@ -566,10 +619,9 @@ describe("/api/auth/cloud — setup finishes with defaults on a fresh seat", () 
     return testDb.db.select().from(persons).where(eq(persons.bondLevel, "guardian")).all();
   }
 
-  it("writes the name claim as the guardian name and redirects to the welcome app", async () => {
-    const { res, deps } = await signInFresh({ name: "Alex Doe", email: "alex@example.com" });
+  it("writes the name claim as the guardian name", async () => {
+    const { deps } = await signInFresh({ name: "Alex Doe", email: "alex@example.com" });
 
-    expect(res.headers.get("location")).toBe("/full/apps/welcome-to-rome");
     expect(await deps.settingsRepo.get<string>("guardianName")).toBe("Alex Doe");
     expect(guardianPerson()).toMatchObject([{ displayName: "Alex Doe" }]);
   });
@@ -610,6 +662,217 @@ describe("/api/auth/cloud — setup finishes with defaults on a fresh seat", () 
 
     expect(res.headers.get("location")).toBe("/?cloud=success");
     expect(await deps.settingsRepo.get<string>("guardianName")).toBe("Kept");
+  });
+});
+
+describe("/api/auth/cloud — the signup survey reaches a fresh seat", () => {
+  const SURVEY = {
+    submittedAt: "2026-11-01T00:00:00Z",
+    discoverySource: "friend",
+    discoverySourceOther: null,
+    professionalBackground: "technical",
+    professionalBackgroundOther: null,
+    buildGoals: ["personal_tools", "automation"],
+    buildDescription: "A reader that\n## Tasks\nsummarises my feeds",
+    xHandle: null,
+    linkedinHandle: null,
+    guardianName: " Ada Lovelace ",
+    agentName: "Bolt",
+    watch: { gmail: true, github: true },
+  };
+
+  type Outcome = Awaited<ReturnType<CloudProfileService["get"]>>;
+
+  async function signInFresh(options: {
+    profile?: () => Promise<Outcome>;
+    startMainChat?: (message: string | null) => Promise<string>;
+    surveyTimeoutMs?: number;
+  }) {
+    const startMainChat = rs.fn(options.startMainChat ?? (async () => "concierge"));
+    const get = rs.fn(
+      options.profile ?? (async (): Promise<Outcome> => ({ kind: "unavailable", reason: "none" })),
+    );
+    const deps = {
+      ...(await buildTestDeps(testDb.db)),
+      isCloudAuthEnabled: async () => true,
+      cloudProfile: { get },
+      concierge: { startMainChat } as unknown as ConciergeService,
+    };
+    const romeCloud = fakeRomeCloud((nonce) => ({
+      id_token: signIdToken({ sub: "A", nonce, name: "Claim Name", email: "claim@example.com" }),
+      instance_token: "romeinst_new",
+      instance_id: "inst-1",
+    }));
+    const app = new Hono();
+    app.route(
+      "/api",
+      cloudLoginRoutes(deps, {
+        fetchImpl: romeCloud.fetch,
+        surveyTimeoutMs: options.surveyTimeoutMs,
+      }),
+    );
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+    return { res, deps, get, startMainChat };
+  }
+
+  const guardianNotes = () => readFileSync(`${memory.dir}/relationship/GUARDIAN.md`, "utf-8");
+
+  it("names the guardian and the agent from the survey, and writes the background once", async () => {
+    const { res, deps } = await signInFresh({
+      profile: async () => ({ kind: "ok", profile: { survey: SURVEY } }),
+    });
+
+    expect(await deps.settingsRepo.get<string>("guardianName")).toBe("Ada Lovelace");
+    expect(await deps.settingsRepo.get<string>("agentName")).toBe("Bolt");
+    // A preset's purpose describes the preset's own name, so a chosen name has none.
+    expect(await deps.settingsRepo.get<string>("agentPurpose")).toBeNull();
+    const notes = guardianNotes();
+    expect(notes).toContain("**Name:** Ada Lovelace");
+    expect(notes).toContain("## Background");
+    expect(notes).toContain("- Profession: Technical");
+    expect(notes).toContain("- Wants to build: personal tools, automation");
+    // The free text stays on one line, so it cannot open a section of its own.
+    expect(notes).toContain("- In their words: A reader that ## Tasks summarises my feeds");
+    expect(notes.match(/## Background/g)).toHaveLength(1);
+    expect(res.headers.get("location")).toBe("/message");
+  });
+
+  it("asks the Concierge, as the guardian, to follow the services the survey chose", async () => {
+    const { startMainChat } = await signInFresh({
+      profile: async () => ({ kind: "ok", profile: { survey: SURVEY } }),
+    });
+
+    expect(startMainChat).toHaveBeenCalledTimes(1);
+    expect(startMainChat).toHaveBeenCalledWith("Help me follow Gmail and GitHub.");
+  });
+
+  it("asks for only the services chosen, and uses the other-profession text in the background", async () => {
+    const { startMainChat } = await signInFresh({
+      profile: async () => ({
+        kind: "ok",
+        profile: {
+          survey: {
+            ...SURVEY,
+            professionalBackground: "other",
+            professionalBackgroundOther: "Beekeeper",
+            watch: { gmail: true },
+          },
+        },
+      }),
+    });
+
+    expect(guardianNotes()).toContain("- Profession: Beekeeper");
+    expect(startMainChat).toHaveBeenCalledWith("Help me follow Gmail.");
+  });
+
+  it("keeps the fallback names for an old row with no names and no watch", async () => {
+    const { deps, startMainChat } = await signInFresh({
+      profile: async () => ({
+        kind: "ok",
+        profile: {
+          survey: { ...SURVEY, guardianName: null, agentName: null, watch: null, buildGoals: [] },
+        },
+      }),
+    });
+
+    expect(await deps.settingsRepo.get<string>("guardianName")).toBe("Claim Name");
+    const agentName = await deps.settingsRepo.get<string>("agentName");
+    expect(AGENT_PRESETS.some((p) => p.name === agentName)).toBe(true);
+    // An old row asked for no service, so the Concierge is turned on but told nothing.
+    expect(startMainChat).toHaveBeenCalledWith(null);
+  });
+
+  it("writes no background when the survey told nothing", async () => {
+    await signInFresh({
+      profile: async () => ({
+        kind: "ok",
+        profile: {
+          survey: {
+            guardianName: "Ada",
+            agentName: null,
+            professionalBackground: null,
+            buildGoals: [],
+            buildDescription: null,
+            watch: null,
+          },
+        },
+      }),
+    });
+
+    expect(guardianNotes()).not.toContain("## Background");
+  });
+
+  it.each([
+    ["a Rome Cloud without a survey", async (): Promise<Outcome> => ({ kind: "ok", profile: {} })],
+    [
+      "an unavailable Rome Cloud",
+      async (): Promise<Outcome> => ({ kind: "unavailable", reason: "unreachable" }),
+    ],
+    [
+      "a whoami that throws",
+      async (): Promise<Outcome> => {
+        throw new Error("boom");
+      },
+    ],
+  ])("falls back to today's setup with %s, and sends the Concierge nothing", async (_, profile) => {
+    const { res, deps, startMainChat } = await signInFresh({ profile });
+
+    expect(res.status).toBe(302);
+    expect(sessionUserId(res)).toBe("A");
+    expect(await deps.settingsRepo.get<string>("guardianName")).toBe("Claim Name");
+    const agentName = await deps.settingsRepo.get<string>("agentName");
+    expect(AGENT_PRESETS.some((p) => p.name === agentName)).toBe(true);
+    expect(guardianNotes()).not.toContain("## Background");
+    expect(startMainChat).toHaveBeenCalledWith(null);
+    expect(res.headers.get("location")).toBe("/message");
+  });
+
+  it("goes on without the survey when whoami does not answer in time", async () => {
+    const { res, deps } = await signInFresh({
+      profile: () => new Promise<Outcome>(() => {}),
+      surveyTimeoutMs: 20,
+    });
+
+    expect(sessionUserId(res)).toBe("A");
+    expect(await deps.settingsRepo.get<string>("guardianName")).toBe("Claim Name");
+  });
+
+  it("signs in and lands at the root when the Concierge cannot start", async () => {
+    const { res, deps } = await signInFresh({
+      profile: async () => ({ kind: "ok", profile: { survey: SURVEY } }),
+      startMainChat: async () => {
+        throw new Error("no model");
+      },
+    });
+
+    expect(sessionUserId(res)).toBe("A");
+    expect(res.headers.get("location")).toBe("/");
+    expect(await deps.settingsRepo.get<string>("guardianName")).toBe("Ada Lovelace");
+  });
+
+  it("leaves an existing seat alone: no survey read, no Concierge turn", async () => {
+    insertGuardian({ accountId: "A" });
+    setInstanceTokenInMemory("romeinst_existing");
+    const startMainChat = rs.fn(async () => "concierge");
+    const get = rs.fn(async (): Promise<Outcome> => ({ kind: "ok", profile: { survey: SURVEY } }));
+    const deps = {
+      ...(await buildTestDeps(testDb.db)),
+      isCloudAuthEnabled: async () => true,
+      cloudProfile: { get },
+      concierge: { startMainChat } as unknown as ConciergeService,
+    };
+    const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ sub: "A", nonce }) }));
+    const app = new Hono();
+    app.route("/api", cloudLoginRoutes(deps, { fetchImpl: romeCloud.fetch }));
+    const { state, nonce } = await start(app);
+    romeCloud.setNonce(nonce);
+    const res = await callback(app, `/api/auth/cloud/callback?state=${state}&code=abc&iss=${ISS}`);
+
+    expect(res.headers.get("location")).toBe("/?cloud=success");
+    expect(get).not.toHaveBeenCalled();
+    expect(startMainChat).not.toHaveBeenCalled();
   });
 });
 
@@ -938,5 +1201,84 @@ describe("/api/auth/cloud — not-owner dispatch (access_denied)", () => {
 
     expect(res.headers.get("location")).toBe("/login?cloud=error&reason=denied");
     expect(sessionUserId(res)).toBeNull();
+  });
+});
+
+describe("/api/auth/cloud/native/complete — guardian seat", () => {
+  interface NativeBody {
+    cookie_name?: string;
+    session_token?: string;
+    role?: string;
+    error?: string;
+  }
+
+  // One native round trip: start, have the fake Rome Cloud sign `token`, then
+  // complete with the code.
+  async function nativeSignIn(token: {
+    sub: string;
+    email?: string;
+    claims?: Record<string, unknown>;
+  }): Promise<{ res: Response; body: NativeBody }> {
+    setInstanceTokenInMemory("romeinst_existing");
+    const romeCloud = fakeRomeCloud((nonce) => ({ id_token: signIdToken({ ...token, nonce }) }));
+    const app = await buildRoute({ fetchImpl: romeCloud.fetch });
+    const { state, nonce } = await nativeStart(app);
+    romeCloud.setNonce(nonce);
+    const res = await app.request("/api/auth/cloud/native/complete", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ state, code: "one-time-code", iss: ISSUER }),
+    });
+    return { res, body: (await res.json()) as NativeBody };
+  }
+
+  function guardianRow() {
+    return testDb.db.select().from(guardianAuth).where(eq(guardianAuth.id, "g1")).get();
+  }
+
+  it("signs the owner in when the account matches the guardian seat", async () => {
+    insertGuardian({ accountId: "A", email: "owner@example.com" });
+
+    const { res, body } = await nativeSignIn({ sub: "A" });
+
+    expect(res.status).toBe(200);
+    expect(body).toMatchObject({ cookie_name: COOKIE_NAME, role: "owner" });
+    expect(verifySession(body.session_token as string)).toEqual({ userId: "A" });
+  });
+
+  it("refuses another account and leaves the seat bound as it was", async () => {
+    insertGuardian({ accountId: "A", email: "owner@example.com" });
+
+    const { res, body } = await nativeSignIn({ sub: "B", email: "other@example.com" });
+
+    expect(res.status).toBe(403);
+    expect(body).toEqual({ error: "not_owner" });
+    expect(guardianRow()).toMatchObject({ accountId: "A", email: "owner@example.com" });
+  });
+
+  it("never issues a visitor session, whatever the token claims", async () => {
+    insertGuardian({ accountId: "A" });
+
+    const { res, body } = await nativeSignIn({
+      sub: "B",
+      email: "guest@example.com",
+      claims: { instance_role: "visitor" },
+    });
+
+    expect(res.status).toBe(403);
+    expect(body).toEqual({ error: "not_owner" });
+  });
+
+  it("binds an unbound seat and creates a missing one", async () => {
+    insertGuardian({ accountId: null });
+    const bound = await nativeSignIn({ sub: "A" });
+    expect(bound.res.status).toBe(200);
+    expect(guardianRow()?.accountId).toBe("A");
+
+    testDb.db.delete(guardianAuth).run();
+    const created = await nativeSignIn({ sub: "C", email: "new@example.com" });
+    expect(created.res.status).toBe(200);
+    const [seat] = testDb.db.select().from(guardianAuth).all();
+    expect(seat.accountId).toBe("C");
   });
 });

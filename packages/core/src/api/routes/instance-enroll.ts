@@ -4,12 +4,12 @@ import { hostname } from "node:os";
 import { Hono } from "hono";
 import {
   clearInstanceToken,
-  getInstanceToken,
+  getIdentityIssue,
+  isInstanceLinked,
   persistInstanceToken,
   proveIdentity,
   type ProveIdentityResult,
 } from "../../lib/instance-identity.js";
-import { ensureRelayMailbox } from "../../lib/rome-cloud-relay.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { RELAY_SETTING_KEY } from "../../relay/settings.js";
 import { createLogger } from "../../logger.js";
@@ -68,13 +68,15 @@ interface TokenResponse {
 
 export interface InstanceEnrollSeams {
   proveIdentity?: typeof proveIdentity;
-  ensureRelayMailbox?: typeof ensureRelayMailbox;
   fetchImpl?: typeof fetch;
 }
 
 type EnrollStartGate = { ok: true } | { ok: false; status: 409 | 503; error: string };
 
-async function clearRejectedInstanceState(deps: ApiDeps, reason: "revoked" | "unknown") {
+async function clearRejectedInstanceState(
+  deps: ApiDeps,
+  reason: "revoked" | "unknown" | "key_conflict",
+) {
   await clearInstanceToken(deps.settingsRepo);
   await deps.settingsRepo.delete(RELAY_SETTING_KEY);
   try {
@@ -92,7 +94,7 @@ async function checkExistingEnrollment(
   deps: ApiDeps,
   seams: InstanceEnrollSeams,
 ): Promise<EnrollStartGate> {
-  if (!getInstanceToken()) return { ok: true };
+  if (!isInstanceLinked()) return { ok: true };
 
   let auth: ProveIdentityResult;
   try {
@@ -112,6 +114,7 @@ async function checkExistingEnrollment(
       return { ok: false, status: 409, error: "already_enrolled" };
     case "revoked":
     case "unknown":
+    case "key_conflict":
       await clearRejectedInstanceState(deps, auth.status);
       return { ok: true };
     case "no_token":
@@ -120,6 +123,11 @@ async function checkExistingEnrollment(
       return { ok: false, status: 503, error: "pantheon_origin_unconfigured" };
     case "unreachable":
       return { ok: false, status: 503, error: "identity_unreachable" };
+    case "clock_skew":
+    case "signer_unavailable":
+    case "audience_mismatch":
+    case "upgrade_required":
+      return { ok: false, status: 503, error: auth.status };
   }
 }
 
@@ -214,35 +222,15 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
         return c.redirect(errorRedirect("malformed"));
       }
 
-      await persistInstanceToken(deps.settingsRepo, token);
-      void deps.provisionNodeCaller?.();
-      log.info("instance enrolled via in-app OAuth", { instanceId });
-      void (seams.ensureRelayMailbox ?? ensureRelayMailbox)({
-        settingsRepo: deps.settingsRepo,
-        appCatalog: deps.appCatalog,
-        relayDrainer: deps.relayDrainer,
-      })
-        .then((result) => {
-          switch (result.status) {
-            case "provisioned":
-              log.info("relay mailbox provisioned after instance enrollment", {
-                mailboxId: result.mailboxId,
-              });
-              break;
-            case "not_enrolled":
-            case "unconfigured":
-            case "unreachable":
-            case "rejected":
-            case "error":
-              log.warn("relay mailbox not provisioned after instance enrollment", result);
-              break;
-          }
-        })
-        .catch((err) => {
-          log.warn("relay mailbox provisioning after instance enrollment threw", {
-            error: err instanceof Error ? err.message : String(err),
-          });
+      const linked = await persistInstanceToken(deps.settingsRepo, token);
+      if (linked?.status === "key_conflict") return c.redirect(errorRedirect("key_conflict"));
+      if (linked && linked.status !== "ok") {
+        log.warn("instance enrolled but the signer key is not registered yet", {
+          status: linked.status,
         });
+      }
+      void deps.provisionAfterLink?.();
+      log.info("instance enrolled via in-app OAuth", { instanceId });
       return c.redirect(enrolledRedirect());
     } catch (err) {
       log.warn("token exchange errored", {
@@ -254,7 +242,7 @@ export function instanceEnrollRoutes(deps: ApiDeps, seams: InstanceEnrollSeams =
 
   // Lightweight gate signal for the web onboarding: is this instance enrolled?
   app.get("/instance/enroll/status", (c) => {
-    return c.json({ enrolled: getInstanceToken() !== null });
+    return c.json({ enrolled: isInstanceLinked(), issue: getIdentityIssue() });
   });
 
   return app;

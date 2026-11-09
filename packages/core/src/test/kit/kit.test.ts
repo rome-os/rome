@@ -39,15 +39,15 @@ describe("testkit", () => {
       const resultMsg = messages.find((m) => m.type === "result");
       expect(resultMsg).toMatchObject({ content: "It's sunny in Rome." });
 
-      // The REAL SessionManager persisted the session row.
+      // The real SessionRepository persisted the session.
       const init = messages.find((m) => m.type === "session_init");
       expect(init).toBeDefined();
-      const session = await rome.repos.sessions.findById((init as { sessionId: string }).sessionId);
+      const session = await rome.repos.sessions.session((init as { sessionId: string }).sessionId);
       expect(session).not.toBeNull();
       expect(session!.agentName).toBe("core:main");
-      expect(session!.channelThreadKey).toBe("telegram:thread-7");
+      expect(session!.continuityKey).toBe("telegram:thread-7");
 
-      // The model saw the real PromptBuilder output for the "main" agent.
+      // The model saw the real system prompt for the "main" agent.
       expect(rome.model.lastSystemPrompt()).toContain("You are a test agent.");
     });
 
@@ -96,7 +96,7 @@ describe("testkit", () => {
     it("builds the production system prompt by default, and a bare one with repoView 'empty'", async () => {
       rome = await createTestRome();
       await rome.runAgent({ prompt: "hi" });
-      // Real repo roots: PromptBuilder picked up the repo's CHARTER.md.
+      // Real repo roots: the system prompt picked up the repo's CHARTER.md.
       expect(rome.model.lastSystemPrompt()).toContain("# Charter");
       await rome.cleanup();
 

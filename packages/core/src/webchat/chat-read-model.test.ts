@@ -6,7 +6,7 @@ import type { ChatRef } from "../chats/storage/place.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
 import { approvals, channels, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { TurnLinks } from "../sessions/turn-links.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
 import {
   ChatReadModel,
@@ -14,6 +14,7 @@ import {
   type Transcript,
   type TranscriptCursor,
 } from "./chat-read-model.js";
+import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
 const text = (content: string) => JSON.stringify([{ type: "text", content }]);
 
@@ -26,7 +27,7 @@ describe("ChatReadModel", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new WebChatRepository(testDb.db);
+    repo = new ChatsWebChatRepository(testDb.db);
     reads = new ChatReadModel(testDb.db);
     links = new TurnLinks(testDb.db);
     fixture = speakerFixture(testDb.db);
@@ -233,93 +234,28 @@ describe("ChatReadModel", () => {
       expect(transcript?.traces.map((trace) => trace.id)).toEqual(["trace-s", "trace-p"]);
     });
 
-    it("draws a line each of Rome's accounts holds a copy of once, with every copy's turn traced", async () => {
-      const chat = fixture.chat("telegram", "-42", "group");
-      fixture.speaker({ id: "sales", chat, accountId: "bot-sales" });
-      fixture.speaker({ id: "support", chat, accountId: "bot-support" });
-      const heard = (id: string, seconds: number) =>
-        fixture.say({ id, chat, from: "wei", text: "hi", at: new Date(seconds * 1000) });
-      heard("bot-sales:4", 999);
-      heard("bot-support:8", 999);
-      const mine = heard("bot-sales:5", 1_000);
-      const theirs = heard("bot-support:9", 1_000);
-      links.prompt(theirs, "support", "turn-p");
-      links.prompt(mine, "sales", "turn-s");
-      await traceAt("sales", "trace-s", "turn-s", 1_001);
-      await traceAt("support", "trace-p", "turn-p", 1_002);
-      links.answer(
-        fixture.say({
-          id: "bot-sales:6",
-          chat,
-          from: "bot-sales",
-          agent: "main",
-          at: new Date(1_003_000),
-        }),
-        "sales",
-        "turn-s",
-      );
-
-      const whole = await reads.chatTranscript("sales");
-      expect(whole?.lines.map((l) => [l.id, l.turnId])).toEqual([
-        ["bot-sales:4", null],
-        ["bot-sales:5", "turn-s"],
-        ["bot-sales:6", "turn-s"],
-      ]);
-      expect(whole?.traces.map((trace) => trace.id)).toEqual(["trace-s", "trace-p"]);
-
-      const newest = await reads.chatTranscript("sales", { limit: 1 });
-      expect(newest?.lines.map((l) => l.id)).toEqual(["bot-sales:5", "bot-sales:6"]);
-      expect(newest?.traces.map((trace) => trace.id)).toEqual(["trace-s", "trace-p"]);
-      const older = await reads.chatTranscript("sales", {
-        limit: 1,
-        before: newest?.nextCursor ?? null,
-      });
-      expect(older?.lines.map((l) => l.id)).toEqual(["bot-sales:4"]);
-      expect(older?.nextCursor).toBeNull();
-    });
-
-    it("draws a copy queued as a prompt over a copy no turn took", async () => {
+    // Each of Rome's accounts records its own copy (#1670), and every message
+    // recorded in the place is drawn.
+    it("draws every copy each of Rome's accounts holds of a message", async () => {
       const chat = fixture.chat("telegram", "-42", "group");
       fixture.speaker({ id: "sales", chat, accountId: "bot-sales" });
       fixture.speaker({ id: "support", chat, accountId: "bot-support" });
       const heard = (id: string) =>
         fixture.say({ id, chat, from: "wei", text: "hi", at: new Date(1_000_000) });
-      heard("bot-sales:5");
-      links.prompt(heard("bot-support:9"), "support", null, "queued");
-
-      const expected = [["bot-support:9", "user", "queued"]];
-      const draw = (transcript: Awaited<ReturnType<typeof reads.chatTranscript>>) =>
-        transcript?.lines.map((l) => [l.id, l.role, l.inputState]);
-      expect(draw(await reads.chatTranscript("sales"))).toEqual(expected);
-      expect(draw(await reads.chatTranscript("sales", { limit: 5 }))).toEqual(expected);
-    });
-
-    it("pages a turn by the lines it draws, not a copy it leaves to another turn", async () => {
-      const chat = fixture.chat("telegram", "-42", "group");
-      fixture.speaker({ id: "sales", chat, accountId: "bot-sales" });
-      fixture.speaker({ id: "support", chat, accountId: "bot-support" });
-      const heard = (id: string, seconds: number, text: string) =>
-        fixture.say({ id, chat, from: "wei", text, at: new Date(seconds * 1000) });
-      links.prompt(heard("bot-sales:1", 1_000, "earlier"), "sales", "turn-s");
-      const theirs = heard("bot-support:2", 1_010, "hi");
-      const mine = heard("bot-sales:3", 1_010, "hi");
-      links.prompt(theirs, "support", "turn-p");
+      const mine = heard("bot-sales:5");
+      const theirs = heard("bot-support:9");
       links.prompt(mine, "sales", "turn-s");
+      links.prompt(theirs, "support", "turn-p");
+      await traceAt("sales", "trace-s", "turn-s", 1_001);
+      await traceAt("support", "trace-p", "turn-p", 1_002);
 
-      const whole = await reads.chatTranscript("sales");
-      expect(whole?.lines.map((l) => [l.id, l.turnId])).toEqual([
-        ["bot-sales:1", "turn-s"],
-        ["bot-support:2", "turn-p"],
+      const transcript = await reads.chatTranscript("sales");
+
+      expect(transcript?.lines.map((l) => [l.id, l.turnId])).toEqual([
+        ["bot-sales:5", "turn-s"],
+        ["bot-support:9", "turn-p"],
       ]);
-
-      const newest = await reads.chatTranscript("sales", { limit: 1 });
-      expect(newest?.lines.map((l) => l.id)).toEqual(["bot-support:2"]);
-      const older = await reads.chatTranscript("sales", {
-        limit: 1,
-        before: newest?.nextCursor ?? null,
-      });
-      expect(older?.lines.map((l) => l.id)).toEqual(["bot-sales:1"]);
-      expect(older?.nextCursor).toBeNull();
+      expect(transcript?.traces.map((trace) => trace.id)).toEqual(["trace-s", "trace-p"]);
     });
 
     it("reads the traces of more turns than SQLite binds parameters", async () => {
@@ -643,7 +579,7 @@ describe("ChatReadModel", () => {
       expect(await reads.unreadCount("chat-1", 1)).toBe(1);
     });
 
-    it("counts a line from Rome each of Rome's accounts holds a copy of once", async () => {
+    it("counts every copy of a line from Rome each of Rome's accounts holds", async () => {
       const chat = fixture.chat("telegram", "-42", "group");
       fixture.speaker({
         id: "sales",
@@ -664,7 +600,7 @@ describe("ChatReadModel", () => {
       said("bot-support:9", 2_000);
       said("bot-sales:6", 2_001);
 
-      expect(await reads.unreadCount("sales", 10)).toBe(2);
+      expect(await reads.unreadCount("sales", 10)).toBe(3);
       expect(await reads.unreadCount("sales", 1)).toBe(1);
     });
   });

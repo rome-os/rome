@@ -349,7 +349,8 @@ export function NodeDevices({
     >
       <SectionHeader>
         <SectionHeading>
-          <SectionTitle id="node-devices-title" className="text-title">
+          {/* The host's tab already names the page, so the title is for screen readers. */}
+          <SectionTitle id="node-devices-title" className="sr-only">
             {m.title}
           </SectionTitle>
           <ServiceProblem socket={socket} m={m} />

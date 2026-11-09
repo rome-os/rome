@@ -1,10 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
-import { eq } from "drizzle-orm";
 import { readWebchatMessages, WebChatAdapter } from "./webchat.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
-import { romeAgentMessages } from "../../db/schema.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
+import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 
 /** The instant `hours` before the test's fixed clock. */
 function hoursAgo(hours: number): Date {
@@ -18,7 +17,7 @@ describe("WebChatAdapter", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new WebChatRepository(testDb.db);
+    repo = new ChatsWebChatRepository(testDb.db);
     adapter = new WebChatAdapter(repo);
     rs.useFakeTimers();
     rs.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
@@ -30,6 +29,7 @@ describe("WebChatAdapter", () => {
   });
 
   it("fetches recent user and assistant history from one webchat session", async () => {
+    rs.setSystemTime(new Date("2029-12-31T12:00:00.000Z"));
     await repo.createSession(
       "sess-1",
       "Build Planner",
@@ -40,11 +40,19 @@ describe("WebChatAdapter", () => {
       "workflow-planner",
     );
     await repo.addMessage(
+      "msg-old",
+      "sess-1",
+      "user",
+      JSON.stringify([{ type: "text", content: "Old context" }]),
+    );
+    rs.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
+    await repo.addMessage(
       "msg-user",
       "sess-1",
       "user",
       JSON.stringify([{ type: "text", content: "Please draft the plan." }]),
     );
+    rs.setSystemTime(new Date("2030-01-01T12:00:01.000Z"));
     await repo.addMessage(
       "msg-assistant",
       "sess-1",
@@ -61,16 +69,6 @@ describe("WebChatAdapter", () => {
       JSON.stringify([{ type: "approval_card", approvalId: "appr-1" }]),
     );
     await repo.addMessage("msg-trace", "sess-1", "trace", "[]");
-    await repo.addMessage(
-      "msg-old",
-      "sess-1",
-      "user",
-      JSON.stringify([{ type: "text", content: "Old context" }]),
-    );
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2030-01-01T00:00:00.000Z") })
-      .where(eq(romeAgentMessages.id, "msg-old"));
 
     const messages = await readWebchatMessages(repo, "sess-1", hoursAgo(2));
 
@@ -100,28 +98,24 @@ describe("WebChatAdapter", () => {
   });
 
   it("fetches all session history chronologically when threadId is null", async () => {
+    rs.setSystemTime(new Date("2030-01-01T10:00:00.000Z"));
     await repo.createSession("sess-a", "Alpha");
     await repo.createSession("sess-b", "Beta");
+    rs.setSystemTime(new Date("2030-01-01T11:30:00.000Z"));
     await repo.addMessage(
       "msg-b",
       "sess-b",
       "user",
       JSON.stringify([{ type: "text", content: "Second session" }]),
     );
+    rs.setSystemTime(new Date("2030-01-01T11:00:00.000Z"));
     await repo.addMessage(
       "msg-a",
       "sess-a",
       "assistant",
       JSON.stringify([{ type: "text", content: "First session" }]),
     );
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2030-01-01T11:00:00.000Z") })
-      .where(eq(romeAgentMessages.id, "msg-a"));
-    await testDb.db
-      .update(romeAgentMessages)
-      .set({ createdAt: new Date("2030-01-01T11:30:00.000Z") })
-      .where(eq(romeAgentMessages.id, "msg-b"));
+    rs.setSystemTime(new Date("2030-01-01T12:00:00.000Z"));
 
     const messages = await readWebchatMessages(repo, null, hoursAgo(24));
 

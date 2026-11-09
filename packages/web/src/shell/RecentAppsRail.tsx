@@ -2,6 +2,7 @@ import { Ellipsis } from "lucide-react";
 import { Fragment, type ReactNode, useContext, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
+import { getBuiltinAppIcon } from "@/lib/builtin-app-icons";
 import { RECENT_APPS_VISIBLE } from "@/lib/recent-apps";
 import {
   DropdownMenu,
@@ -27,6 +28,17 @@ interface RecentSidebarApp {
 }
 
 export function RailAppIcon({ app }: { app: RecentSidebarApp }) {
+  const BuiltinIcon = getBuiltinAppIcon(app.id);
+  if (BuiltinIcon) {
+    return (
+      <span
+        className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
+        aria-hidden
+      >
+        <BuiltinIcon className="h-4 w-4 shrink-0" aria-hidden />
+      </span>
+    );
+  }
   if (app.iconUrl) {
     return (
       <img

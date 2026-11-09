@@ -1,25 +1,19 @@
-import {
+import type {
   Client,
-  GatewayIntentBits,
-  Partials,
   ChannelType,
-  MessageReferenceType,
-  MessageType,
-  AttachmentBuilder,
   DiscordAPIError,
   REST,
-  RESTEvents,
-  Routes,
-  SlashCommandBuilder,
-  type Message,
-  type TextChannel,
-  type DMChannel,
-  type NewsChannel,
-  type ThreadChannel,
-  type ChatInputCommandInteraction,
-  type AutocompleteInteraction,
+  Message,
+  MessageCreateOptions,
+  TextChannel,
+  DMChannel,
+  NewsChannel,
+  ThreadChannel,
+  ChatInputCommandInteraction,
+  AutocompleteInteraction,
 } from "discord.js";
-import { chatStopReceipt, isStopCommand } from "@rome-os/app-runtime";
+import { randomBytes } from "node:crypto";
+import { SendRefused, chatStopReceipt, isStopCommand } from "@rome-os/app-runtime";
 import type {
   APIRequest,
   RateLimitData,
@@ -28,11 +22,12 @@ import type {
   RESTOptions,
 } from "discord.js";
 import { isCoreMainAgentId } from "../../../apps/artifact-id.js";
+import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
 import {
-  filterChannelApiResponseHeaders,
-  isProtectedChannelApiRequestHeader,
-  type ChannelApiRequest,
-  type ChannelApiResult,
+  filterConnectionApiResponseHeaders,
+  isProtectedConnectionApiRequestHeader,
+  type ConnectionApiRequest,
+  type ConnectionApiResult,
 } from "../../../apps/platform-requests.js";
 import type {
   ChannelMessage,
@@ -47,8 +42,6 @@ import type {
 } from "@rome-os/app-runtime";
 import type { Attachment, OutgoingMessage, OutgoingAttachment } from "../../../types.js";
 import { createLogger } from "../../../logger.js";
-import { discordTransport } from "./reply-writes.js";
-import type { DeliveryTransport } from "../../sending.js";
 import {
   ALL_ATTACHMENT_TYPES,
   attachmentsToSend,
@@ -70,6 +63,9 @@ import {
 } from "../../../chats/connected-accounts/account-agents.js";
 import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
 import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
+
+// discord.js loads when a Discord connection first needs it, not with every boot.
+const discordJs = requireOnFirstUse<typeof import("discord.js")>("discord.js");
 
 /**
  * The human-readable attachment name as the uploader saw it. Discord sanitizes
@@ -118,25 +114,25 @@ interface DiscordChannelConfig {
 export function resolveDiscordReplyToMessageId(
   message: Pick<Message, "type" | "reference">,
 ): string | undefined {
-  if (message.type !== MessageType.Reply) return undefined;
-  if (message.reference?.type === MessageReferenceType.Forward) return undefined;
+  if (message.type !== discordJs().MessageType.Reply) return undefined;
+  if (message.reference?.type === discordJs().MessageReferenceType.Forward) return undefined;
   return message.reference?.messageId;
 }
 
 function isThreadType(type: ChannelType): boolean {
   return (
-    type === ChannelType.PublicThread ||
-    type === ChannelType.PrivateThread ||
-    type === ChannelType.AnnouncementThread
+    type === discordJs().ChannelType.PublicThread ||
+    type === discordJs().ChannelType.PrivateThread ||
+    type === discordJs().ChannelType.AnnouncementThread
   );
 }
 
 export function buildDiscordSlashCommands() {
-  const stop = new SlashCommandBuilder()
+  const stop = new (discordJs().SlashCommandBuilder)()
     .setName("stop")
     .setDescription("Stop the active Rome response in this conversation");
 
-  const channel = new SlashCommandBuilder()
+  const channel = new (discordJs().SlashCommandBuilder)()
     .setName("channel")
     .setDescription("Configure Rome Bot behavior for this channel")
     .addSubcommand((sub) =>
@@ -234,12 +230,12 @@ export function buildDiscordSlashCommands() {
       sub.setName("status").setDescription("Show current configuration for this channel"),
     );
 
-  const bot = new SlashCommandBuilder()
+  const bot = new (discordJs().SlashCommandBuilder)()
     .setName("bot")
     .setDescription("Global Rome Bot status and management")
     .addSubcommand((sub) => sub.setName("status").setDescription("Show all channel overrides"));
 
-  const help = new SlashCommandBuilder()
+  const help = new (discordJs().SlashCommandBuilder)()
     .setName("help")
     .setDescription("Show available Rome Bot commands");
 
@@ -284,14 +280,14 @@ export interface GuildChannelInfo {
  */
 export interface DiscordAdapterLike {
   listGuildChannels(): GuildChannelInfo[];
-  executeApiRequest(request: ChannelApiRequest): Promise<ChannelApiResult>;
+  executeApiRequest(request: ConnectionApiRequest): Promise<ConnectionApiResult>;
 }
 
 function projectDiscordBody(
   status: number,
   headers: ResponseLike["headers"],
   bytes: Uint8Array,
-): ChannelApiResult {
+): ConnectionApiResult {
   if (bytes.byteLength > DISCORD_BROKER_RESPONSE_LIMIT_BYTES) {
     return {
       error: {
@@ -314,7 +310,7 @@ function projectDiscordBody(
   return {
     response: {
       status,
-      headers: filterChannelApiResponseHeaders(headers.entries()),
+      headers: filterConnectionApiResponseHeaders(headers.entries()),
       body,
     },
   };
@@ -392,19 +388,19 @@ export class DiscordAdapter {
     this.resolveDiscordPerson = config.resolveDiscordPerson;
     this.chatStop = config.chatStop;
     this.onGatewayFault = config.onGatewayFault;
-    this.client = new Client({
+    this.client = new (discordJs().Client)({
       intents: [
-        GatewayIntentBits.Guilds,
-        GatewayIntentBits.GuildMessages,
-        GatewayIntentBits.MessageContent,
-        GatewayIntentBits.DirectMessages,
-        GatewayIntentBits.DirectMessageReactions,
+        discordJs().GatewayIntentBits.Guilds,
+        discordJs().GatewayIntentBits.GuildMessages,
+        discordJs().GatewayIntentBits.MessageContent,
+        discordJs().GatewayIntentBits.DirectMessages,
+        discordJs().GatewayIntentBits.DirectMessageReactions,
       ],
-      partials: [Partials.Channel, Partials.Message],
+      partials: [discordJs().Partials.Channel, discordJs().Partials.Message],
       ...(config.rest ? { rest: config.rest } : {}),
     });
     this._botToken = config.botToken;
-    this.rest = new REST({
+    this.rest = new (discordJs().REST)({
       version: DISCORD_API_VERSION,
       userAgentAppendix: "Rome Discord broker/1",
       ...config.rest,
@@ -427,9 +423,9 @@ export class DiscordAdapter {
     for (const guild of this.client.guilds.cache.values()) {
       for (const channel of guild.channels.cache.values()) {
         let kind: "text" | "news" | "thread" | "forum" | null = null;
-        if (channel.type === ChannelType.GuildText) kind = "text";
-        else if (channel.type === ChannelType.GuildAnnouncement) kind = "news";
-        else if (channel.type === ChannelType.GuildForum) kind = "forum";
+        if (channel.type === discordJs().ChannelType.GuildText) kind = "text";
+        else if (channel.type === discordJs().ChannelType.GuildAnnouncement) kind = "news";
+        else if (channel.type === discordJs().ChannelType.GuildForum) kind = "forum";
         else if (isThreadType(channel.type)) kind = "thread";
         if (!kind) continue;
         out.push({
@@ -451,10 +447,10 @@ export class DiscordAdapter {
   /** Execute a provider-relative request through the epoch-owned discord.js
    * REST manager. This boundary pins the path to Discord API v10, rejects
    * caller-owned auth headers, and returns only serializable safe response data. */
-  async executeApiRequest(request: ChannelApiRequest): Promise<ChannelApiResult> {
+  async executeApiRequest(request: ConnectionApiRequest): Promise<ConnectionApiResult> {
     const path = normalizeDiscordEndpoint(request.path);
     for (const name of Object.keys(request.headers)) {
-      if (isProtectedChannelApiRequestHeader(name)) {
+      if (isProtectedConnectionApiRequestHeader(name)) {
         throw new Error(`header ${name} is owned by the channel provider`);
       }
     }
@@ -463,7 +459,7 @@ export class DiscordAdapter {
     let capturedResponse: ResponseLike | null = null;
     let rateLimit: RateLimitData | null = null;
     const routeData = (
-      REST as unknown as {
+      discordJs().REST as unknown as {
         generateRouteData(endpoint: string, method: string): { bucketRoute: string };
       }
     ).generateRouteData(path, request.method);
@@ -476,8 +472,8 @@ export class DiscordAdapter {
         rateLimit = data;
       }
     };
-    this.rest.on(RESTEvents.Response, onResponse);
-    this.rest.on(RESTEvents.RateLimited, onRateLimited);
+    this.rest.on(discordJs().RESTEvents.Response, onResponse);
+    this.rest.on(discordJs().RESTEvents.RateLimited, onRateLimited);
     this.activeApiRequestControllers.add(controller);
 
     const aborted = new Promise<never>((_resolve, reject) => {
@@ -545,7 +541,7 @@ export class DiscordAdapter {
       const observedResponse = capturedResponse as ResponseLike | null;
       if (observedResponse) {
         const projected =
-          error instanceof DiscordAPIError
+          error instanceof discordJs().DiscordAPIError
             ? this.projectDiscordApiError(error, observedResponse)
             : await this.projectDiscordResponse(observedResponse);
         if (projected.response?.status === 401) {
@@ -566,17 +562,20 @@ export class DiscordAdapter {
       clearTimeout(timer);
       this.activeApiRequestControllers.delete(controller);
       controller.abort();
-      this.rest.off(RESTEvents.Response, onResponse);
-      this.rest.off(RESTEvents.RateLimited, onRateLimited);
+      this.rest.off(discordJs().RESTEvents.Response, onResponse);
+      this.rest.off(discordJs().RESTEvents.RateLimited, onRateLimited);
     }
   }
 
-  private async projectDiscordResponse(response: ResponseLike): Promise<ChannelApiResult> {
+  private async projectDiscordResponse(response: ResponseLike): Promise<ConnectionApiResult> {
     const bytes = new Uint8Array(await response.arrayBuffer());
     return projectDiscordBody(response.status, response.headers, bytes);
   }
 
-  private projectDiscordApiError(error: DiscordAPIError, response: ResponseLike): ChannelApiResult {
+  private projectDiscordApiError(
+    error: DiscordAPIError,
+    response: ResponseLike,
+  ): ConnectionApiResult {
     // discord.js keeps parsed JSON, or raw bytes for a non-JSON error body.
     const raw: unknown = error.rawError;
     if (raw instanceof ArrayBuffer) {
@@ -585,7 +584,7 @@ export class DiscordAdapter {
     return {
       response: {
         status: error.status,
-        headers: filterChannelApiResponseHeaders(response.headers.entries()),
+        headers: filterConnectionApiResponseHeaders(response.headers.entries()),
         body: raw,
       },
     };
@@ -686,7 +685,9 @@ export class DiscordAdapter {
         this.slashCommandsRegistered = true;
         try {
           const commands = buildDiscordSlashCommands();
-          await this.rest.put(Routes.applicationCommands(client.user.id), { body: commands });
+          await this.rest.put(discordJs().Routes.applicationCommands(client.user.id), {
+            body: commands,
+          });
           log.info("slash commands registered", { count: commands.length });
         } catch (err) {
           this.slashCommandsRegistered = false; // allow retry on next ready
@@ -719,7 +720,7 @@ export class DiscordAdapter {
         this.client.channels as unknown as {
           _add(data: { id: string; type: ChannelType; recipients: unknown[] }): unknown;
         }
-      )._add({ id: channelId, type: ChannelType.DM, recipients: [data.author] });
+      )._add({ id: channelId, type: discordJs().ChannelType.DM, recipients: [data.author] });
     });
 
     this.client.on("messageCreate", async (message: Message) => {
@@ -732,7 +733,8 @@ export class DiscordAdapter {
       if (this.client.user && message.author.id === this.client.user.id) return;
 
       const isDm =
-        message.channel.type === ChannelType.DM || message.channel.type === ChannelType.GroupDM;
+        message.channel.type === discordJs().ChannelType.DM ||
+        message.channel.type === discordJs().ChannelType.GroupDM;
 
       const isThread = isThreadType(message.channel.type);
 
@@ -1413,6 +1415,30 @@ Use \`/channel agent clear\` to undo.`,
     }
 
     const targetChannel = await this.replyChannel(channel as SendableChannel, replyTo);
+    // A reply that opened no thread on the message quotes it instead, on the
+    // first message that goes out. Discord refuses a quote of a message it
+    // cannot find, and nothing has gone out then.
+    let quote: MessageCreateOptions["reply"] =
+      replyTo && targetChannel === channel
+        ? { messageReference: replyTo, failIfNotExists: true }
+        : undefined;
+    // A quote does not mention its author, as an unquoted answer did not.
+    // discord.js resends a create whose answer it lost, and a quote refused
+    // on that resend would say nothing went out when the first one did. The
+    // nonce has Discord return the first message to a resend instead.
+    const quoting = <T extends object>(options: T): T => {
+      const quoted = quote
+        ? {
+            ...options,
+            reply: quote,
+            allowedMentions: { ...ALL_MENTIONS, repliedUser: false },
+            nonce: randomBytes(12).toString("base64url"),
+            enforceNonce: true,
+          }
+        : options;
+      quote = undefined;
+      return quoted;
+    };
 
     try {
       let messageId: string | undefined;
@@ -1421,13 +1447,13 @@ Use \`/channel agent clear\` to undo.`,
         // Discord has a 2000 character limit per message
         const chunks = splitMessage(text);
         for (const chunk of chunks) {
-          const sent = await targetChannel.send({ content: chunk });
+          const sent = await sendQuoting(targetChannel, quoting({ content: chunk }));
           messageId ??= sent.id;
         }
       }
 
       for (const att of attachments) {
-        const attachmentMessageId = await this.sendAttachment(targetChannel, att);
+        const attachmentMessageId = await this.sendAttachment(targetChannel, att, quoting);
         messageId ??= attachmentMessageId;
       }
 
@@ -1447,20 +1473,6 @@ Use \`/channel agent clear\` to undo.`,
     }
   }
 
-  /** Streams replies through this adapter's bot, placed as `send` places them,
-   *  so its writes share the bot's rate limits. */
-  replyDelivery(): DeliveryTransport {
-    return discordTransport({
-      rest: this.client.rest,
-      place: async (chatId, replyTo) => {
-        const channel = await this.client.channels.fetch(chatId);
-        if (!channel || !channel.isTextBased())
-          throw new Error(`Channel ${chatId} is not a text channel`);
-        return (await this.replyChannel(channel as SendableChannel, replyTo)).id;
-      },
-    });
-  }
-
   /** Where a reply to `replyTo` in `channel` goes. In a guild text channel
    *  whose settings thread replies, that is a thread on the user's message,
    *  so the reply does not flood the channel. */
@@ -1475,7 +1487,7 @@ Use \`/channel agent clear\` to undo.`,
       "guild" in channel ? channel.guild?.name : undefined,
     );
     const autoThread = snapshot?.effective.replies.placement !== "inline";
-    if (replyTo && channel.type === ChannelType.GuildText && autoThread)
+    if (replyTo && channel.type === discordJs().ChannelType.GuildText && autoThread)
       return this.getOrCreateThread(channel, replyTo);
     return channel;
   }
@@ -1557,19 +1569,60 @@ Use \`/channel agent clear\` to undo.`,
     return attachments;
   }
 
-  private async sendAttachment(channel: SendableChannel, att: OutgoingAttachment): Promise<string> {
+  private async sendAttachment(
+    channel: SendableChannel,
+    att: OutgoingAttachment,
+    quoting: <T extends object>(options: T) => T = (options) => options,
+  ): Promise<string> {
     const isUrl = att.source.startsWith("http");
     const file = isUrl
-      ? new AttachmentBuilder(att.source, { name: basename(att.source) })
-      : new AttachmentBuilder(createReadStream(att.source), { name: basename(att.source) });
+      ? new (discordJs().AttachmentBuilder)(att.source, { name: basename(att.source) })
+      : new (discordJs().AttachmentBuilder)(createReadStream(att.source), {
+          name: basename(att.source),
+        });
 
-    const sent = await channel.send({
-      content: att.caption,
-      files: [file],
-    });
+    const sent = await sendQuoting(channel, quoting({ content: att.caption, files: [file] }));
     return sent.id;
   }
 }
+
+/** Whether `err` is Discord refusing the quote of a send: an unknown message,
+ *  a bot that may not read the chat's history and so may not quote it, or an
+ *  invalid form whose fault is the message reference. Any other invalid form
+ *  is the send's own fault. */
+function isRefusedQuote(err: unknown): boolean {
+  if (!(err instanceof discordJs().DiscordAPIError)) return false;
+  if (Number(err.code) === 10008 || Number(err.code) === 160002) return true;
+  const errors = (err.rawError as { errors?: Record<string, unknown> }).errors;
+  return Number(err.code) === 50035 && errors?.message_reference !== undefined;
+}
+
+/** Sends `options` on `channel`, refusing as `reply_unaddressable` the quote
+ *  Discord cannot find. Only the first message of a send quotes, so nothing
+ *  has gone out when it is refused. */
+async function sendQuoting(
+  channel: SendableChannel,
+  options: MessageCreateOptions,
+): Promise<Message> {
+  try {
+    return await channel.send(options);
+  } catch (err) {
+    const quoted = options.reply?.messageReference;
+    if (quoted && isRefusedQuote(err)) {
+      throw new SendRefused(
+        "reply_unaddressable",
+        `discord cannot quote message ${JSON.stringify(quoted)} here`,
+      );
+    }
+    throw err;
+  }
+}
+
+/** The mentions Discord parses when a message names none of its own, kept
+ *  when a quote turns off the mention of its author. */
+const ALL_MENTIONS = {
+  parse: ["users", "roles", "everyone"] as ("users" | "roles" | "everyone")[],
+};
 
 /** A Discord message id: a snowflake, a decimal number. */
 const DISCORD_SNOWFLAKE = /^\d{1,20}$/;

@@ -3,6 +3,7 @@ import { useLocation } from "react-router-dom";
 import type { AppRemixStoreIntent } from "@rome/api-types/apps";
 import { useAuthStateSnapshot } from "@/lib/auth-state";
 import { parseRemixIntent, parseRemixSearch } from "@/lib/app-remix";
+import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 
 const STORAGE_KEY = "rome:pending-app-remix";
 const INTENT_LIFETIME_MS = 15 * 60 * 1000;
@@ -12,7 +13,8 @@ const AUTH_LANDING_PATHS = new Set([
   "/login",
   "/connect",
   "/onboard",
-  "/full/apps/welcome-to-rome",
+  // Where a first Cloud sign-in lands: the Concierge's main chat.
+  MAIN_CHAT_PATH,
 ]);
 
 interface PendingIntent {

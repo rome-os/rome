@@ -1,6 +1,4 @@
 import { Bot, type Context, InputFile } from "grammy";
-import { telegramTransport } from "./reply-writes.js";
-import type { DeliveryTransport } from "../../sending.js";
 import { Marked, Renderer, type Token } from "marked";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
 import type { Attachment, OutgoingMessage, OutgoingAttachment } from "../../../types.js";
@@ -228,11 +226,6 @@ export class TelegramAdapter {
 
   async stop(): Promise<void> {
     await this.bot.stop();
-  }
-
-  /** Streams replies through this adapter's bot, so its writes share its client. */
-  replyDelivery(): DeliveryTransport {
-    return telegramTransport(this.bot.api);
   }
 
   async send(chatId: ChatId, message: OutgoingMessage): Promise<MessageReceipt> {

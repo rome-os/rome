@@ -4,6 +4,7 @@ import {
   createCodexImageGenerationProvider,
   parseImageGenerationOutput,
 } from "./codex-provider.js";
+import { reportOf } from "../../test/kit/model-accounts.js";
 
 // 1x1 transparent PNG.
 const PNG_BASE64 =
@@ -277,7 +278,7 @@ describe("createCodexImageGenerationProvider", () => {
 
       const unprobed = createCodexImageGenerationProvider({
         agentRunner: runner,
-        getCodexState: () => ({ quotaExhausted: false }),
+        getCodexReport: () => undefined,
       });
       await expect(unprobed.availability()).resolves.toEqual({ available: true });
     });
@@ -285,7 +286,7 @@ describe("createCodexImageGenerationProvider", () => {
     it("reports not-connected with a connect remedy when logged out", async () => {
       const provider = createCodexImageGenerationProvider({
         agentRunner: runner,
-        getCodexState: () => ({ loggedIn: false, quotaExhausted: false }),
+        getCodexReport: () => reportOf("unauthorized"),
       });
 
       const availability = await provider.availability();
@@ -300,7 +301,7 @@ describe("createCodexImageGenerationProvider", () => {
     it("reports unavailable when the quota is exhausted", async () => {
       const provider = createCodexImageGenerationProvider({
         agentRunner: runner,
-        getCodexState: () => ({ loggedIn: true, quotaExhausted: true }),
+        getCodexReport: () => reportOf("usage_limit_reached"),
       });
 
       const availability = await provider.availability();

@@ -19,13 +19,15 @@ import {
   ListRowDescription,
   ListRowTitle,
 } from "@/components/ui/list-row";
+import { useActiveSessionId } from "@/hooks/use-active-session-id";
+import { useConciergeName } from "@/hooks/use-concierge";
 import { cn } from "@/lib/utils";
 import { checkPresses } from "./check-presses";
 import { requestConciergeJump } from "./concierge-jump";
 import { doneMessage, pressText, sendTaskAction } from "./send-task-action";
 import { StopGlyph } from "./StopGlyph";
 import { TaskGlyph } from "./TaskGlyph";
-import { formatTaskTime, groupTasks, taskTime, type TaskGroupKey } from "./tasks";
+import { formatTaskTime, groupTasks, taskTime, tasksOfChat, type TaskGroupKey } from "./tasks";
 import { type PendingAction, settlePending, usePendingActions } from "./task-pending";
 import { useConciergeTasks } from "./use-concierge-tasks";
 
@@ -54,6 +56,7 @@ function TaskRow({
   onNavigate?: () => void;
 }) {
   const { t, i18n } = useTranslation("chat");
+  const name = useConciergeName();
   const action = rowAction(task);
   const finished = task.state === "done" || task.state === "dropped";
   const detail =
@@ -64,7 +67,7 @@ function TaskRow({
   const status = pending
     ? pending.phase === "pending"
       ? t(`concierge.tasks.pending.${pending.action}`)
-      : t(`concierge.tasks.${pending.phase}`)
+      : t(`concierge.tasks.${pending.phase}`, { name })
     : [detail, task.notSynced ? t("concierge.tasks.notSynced") : null].filter(Boolean).join(" · ");
   const at = taskTime(task);
   const retry = pending !== undefined && pending.phase !== "pending";
@@ -184,14 +187,26 @@ function TitleText({ task, finished }: { task: ConciergeTaskDto; finished: boole
  * next, what it is watching, and what it finished. Read-only: a button sends the
  * Concierge a message, and the row changes when the Concierge writes it.
  */
-export function ConciergeTaskPanel({ onNavigate }: { onNavigate?: () => void }) {
+export function ConciergeTaskPanel({
+  chatId,
+  onNavigate,
+}: {
+  /** The Concierge chat whose rows it lists; the open chat's when left out. */
+  chatId?: string | null;
+  onNavigate?: () => void;
+}) {
   const { t } = useTranslation("chat");
+  const name = useConciergeName();
+  const activeSessionId = useActiveSessionId();
+  const openChatId = chatId === undefined ? activeSessionId : chatId;
   // Finished work is history, so that group starts folded.
   const [folded, setFolded] = useState<ReadonlySet<TaskGroupKey>>(new Set(["done"]));
   const [showAllDone, setShowAllDone] = useState(false);
   // Every finished row is loaded and the 7-day window is applied here, so the
   // panel knows how many older ones "Show older" holds.
-  const { tasks, loaded } = useConciergeTasks({ allDone: true });
+  // Only the open Concierge chat's rows: each chat has its own list.
+  const { tasks: allTasks, loaded } = useConciergeTasks({ allDone: true });
+  const tasks = tasksOfChat(allTasks, openChatId);
   const pending = usePendingActions();
 
   // Rows the Concierge wrote settle their pending buttons, and a turn that took
@@ -216,7 +231,9 @@ export function ConciergeTaskPanel({ onNavigate }: { onNavigate?: () => void }) 
           <ListChecks />
         </EmptyStateIcon>
         <EmptyStateTitle>{t("concierge.tasks.emptyTitle")}</EmptyStateTitle>
-        <EmptyStateDescription>{t("concierge.tasks.emptyDescription")}</EmptyStateDescription>
+        <EmptyStateDescription>
+          {t("concierge.tasks.emptyDescription", { name })}
+        </EmptyStateDescription>
       </EmptyState>
     );
   }

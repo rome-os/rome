@@ -44,7 +44,7 @@ export type GuardianProfileResult =
 /**
  * The single write path for the guardian profile: the guardian person row, the
  * profile memory notes, and the profile settings. Every setup path (the
- * onboarding page, the cloud sign-in callback, the welcome conversation) goes
+ * onboarding page, the cloud sign-in callback, the profile settings) goes
  * through here so they write the same fields.
  *
  * A blank `guardianName` with nothing stored fails before any write, so a
@@ -99,11 +99,15 @@ export async function applyGuardianProfile(
 
 /**
  * Finish a fresh seat's setup: write the display name the caller derived from
- * its identity source, give the agent a preset name and purpose, and mark
- * onboarding complete. Both seat origins call this — the cloud sign-in callback
- * with the identity assertion's name, the local create-account route with the
- * chosen username — so every fresh instance reaches the welcome conversation
- * with both names already set and no setup form left to fill.
+ * its identity source, give the agent a name, and mark onboarding complete.
+ * Both seat origins call this — the cloud sign-in callback with the identity
+ * assertion's name, the local create-account route with the chosen username —
+ * so every fresh instance starts with both names already set and no setup form
+ * left to fill.
+ *
+ * The agent gets a random preset's name and purpose, unless the caller brings
+ * the name the guardian chose: then that name is written alone, since a
+ * preset's purpose describes its own name.
  *
  * Call once, after the guardian row exists. A blank `guardianName` leaves the
  * profile unwritten but still completes setup, so a caller with no usable name
@@ -112,13 +116,43 @@ export async function applyGuardianProfile(
 export async function applySetupDefaults(
   guardianName: string,
   deps: GuardianProfileDeps,
+  chosen: { agentName?: string } = {},
 ): Promise<void> {
-  const preset = pickRandomAgentPreset();
-  await applyGuardianProfile(
-    { guardianName, agentName: preset.name, agentPurpose: preset.purpose },
-    deps,
-  );
+  const agentName = chosen.agentName?.trim();
+  if (agentName) {
+    await applyGuardianProfile({ guardianName, agentName }, deps);
+  } else {
+    const preset = pickRandomAgentPreset();
+    await applyGuardianProfile(
+      { guardianName, agentName: preset.name, agentPurpose: preset.purpose },
+      deps,
+    );
+  }
   await deps.db.update(guardianAuth).set({ onboardingComplete: true });
+}
+
+const BACKGROUND_HEADING = "## Background";
+
+/**
+ * Write what the guardian told Rome about themselves into GUARDIAN.md, once: a
+ * `## Background` section, left alone when the file already has one, so a
+ * second call (or a note the guardian or an agent has since edited) is never
+ * overwritten or duplicated. Failure is logged and swallowed; it is context,
+ * not setup.
+ */
+export function writeGuardianBackground(body: string): void {
+  try {
+    ensureProfileMemoryInitialized();
+    mkdirSync(getRelationshipDir(), { recursive: true });
+    updateNotes(getGuardianProfileFile(), "# Guardian Profile", (lines) => {
+      if (lines.includes(BACKGROUND_HEADING)) return;
+      upsertSection(lines, BACKGROUND_HEADING, body);
+    });
+  } catch (err) {
+    log.error("failed to write the guardian background", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
 }
 
 /** The guardian name a cloud sign-in starts with: the identity assertion's
@@ -191,7 +225,6 @@ async function upsertGuardianPerson(db: DrizzleDb, guardianName: string): Promis
     displayName: guardianName,
     bondLevel: "guardian",
     profilePath: GUARDIAN_PROFILE_PATH,
-    approved: true,
     createdAt: new Date(),
   });
   return id;
@@ -200,12 +233,10 @@ async function upsertGuardianPerson(db: DrizzleDb, guardianName: string): Promis
 /**
  * Write the fields this module owns into the profile notes, in place.
  *
- * `GUARDIAN.md` and `IDENTITY.md` are living memory: `welcome-memory` folds the
- * guardian's answers into the first and `dream` edits both. Setup is no longer
- * the only caller — the welcome conversation's name card writes through here on
- * every confirmation, including a "start over" after the fold — so a write that
- * rendered the whole file from settings would delete everything the agents
- * learned. Each owned field is upserted instead: its line or section is
+ * `GUARDIAN.md` and `IDENTITY.md` are living memory: the Concierge and `dream`
+ * edit both. Setup is not the only caller — the profile settings write through
+ * here on every save — so a write that rendered the whole file from settings
+ * would delete everything the agents learned. Each owned field is upserted instead: its line or section is
  * replaced where it exists and inserted where it does not, and every other line
  * in the file is left alone. A file that does not exist yet is created from the
  * owned fields alone.

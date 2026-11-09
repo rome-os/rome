@@ -17,7 +17,7 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 import { extract as tarExtract, list as tarList } from "tar";
 import { parseDocument } from "yaml";
-import { parseSkillFrontmatterResult } from "../core/skill-catalog.js";
+import { parseSkillFrontmatterResult } from "./packaging/skill-frontmatter.js";
 import { getCustomAppAuthoringRoot, getProfileInstalledAppsDir } from "../paths.js";
 import { getCustomAppAuthoringPath } from "./authoring.js";
 import type { AppCatalog } from "./catalog.js";
@@ -515,7 +515,7 @@ async function rewriteRemixManifest(
       })),
     );
   }
-  if (sourceManifest.eventSources) {
+  if (sourceManifest.eventSources || sourceManifest.watchProvider) {
     // A local name (format 1) maps to the new local name, a qualified ID
     // (format 2, "<appId>:<name>") to the new app's qualified ID.
     const actionNames = new Map<string, string>();
@@ -526,13 +526,25 @@ async function rewriteRemixManifest(
       actionNames.set(`${sourceManifest.id}:${rename.sourceName}`, qualified);
       actionNames.set(`${sourceManifest.id}:${rename.sourcePublicName}`, qualified);
     }
-    document.set(
-      "eventSources",
-      sourceManifest.eventSources.map((source) => ({
-        ...source,
-        ensureAction: actionNames.get(source.ensureAction) ?? source.ensureAction,
-      })),
-    );
+    const renamed = (name: string) => actionNames.get(name) ?? name;
+    if (sourceManifest.eventSources) {
+      document.set(
+        "eventSources",
+        sourceManifest.eventSources.map((source) => ({
+          ...source,
+          ensureAction: renamed(source.ensureAction),
+        })),
+      );
+    }
+    if (sourceManifest.watchProvider) {
+      const { sources, ensure, normalize, release } = sourceManifest.watchProvider;
+      document.set("watchProvider", {
+        sources: renamed(sources),
+        ensure: renamed(ensure),
+        normalize: renamed(normalize),
+        release: renamed(release),
+      });
+    }
   }
   if (sourceManifest.db) {
     document.set("db", {

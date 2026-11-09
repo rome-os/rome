@@ -10,12 +10,22 @@
 //   outbound app HTML   → sanitized (DOMPurify; drops scripts/handlers/etc.)
 
 import DOMPurify from "dompurify";
-import { JSDOM } from "jsdom";
+import type { JSDOM as JSDOMClass } from "jsdom";
 import juice from "juice";
 import { marked, type Tokens } from "marked";
 import { Readability } from "@mozilla/readability";
-import TurndownService from "turndown";
+import type TurndownService from "turndown";
+import { requireOnFirstUse } from "./require-on-first-use.js";
 import type { RomeMailBody } from "./rome-cloud-mail.js";
+
+// jsdom takes about a second of CPU to load on a small VM, and most boots never
+// convert an email, so jsdom and Turndown load on the first conversion.
+const jsdom = requireOnFirstUse<typeof import("jsdom")>("jsdom");
+const turndown = requireOnFirstUse<typeof TurndownService>("turndown");
+
+function createJsdom(...args: ConstructorParameters<typeof JSDOMClass>): JSDOMClass {
+  return new (jsdom().JSDOM)(...args);
+}
 
 // Strip zero-width / invisible / format chars commonly used as filler in
 // marketing emails to defeat preview snippets:
@@ -58,7 +68,8 @@ let turndownWithLinks: TurndownService | null = null;
 let turndownNoLinks: TurndownService | null = null;
 
 function buildTurndown(includeLinks: boolean): TurndownService {
-  const td = new TurndownService({
+  const Turndown = turndown();
+  const td = new Turndown({
     headingStyle: "atx",
     codeBlockStyle: "fenced",
     bulletListMarker: "-",
@@ -100,7 +111,7 @@ export function htmlToMarkdown(html: string, includeLinks = false): string {
   const fullMd = td.turndown(html);
   if (html.length < READABILITY_MIN_HTML_BYTES) return postProcessMarkdown(fullMd);
   try {
-    const dom = new JSDOM(html, { url: "https://mail.example/" });
+    const dom = createJsdom(html, { url: "https://mail.example/" });
     const article = new Readability(dom.window.document).parse();
     if (article && article.content) {
       const readMd = td.turndown(article.content);
@@ -271,7 +282,7 @@ const OUTBOUND_BASE_CSS = `
 let purifier: ReturnType<typeof DOMPurify> | null = null;
 function getPurifier(): ReturnType<typeof DOMPurify> {
   if (purifier) return purifier;
-  const { window } = new JSDOM("");
+  const { window } = createJsdom("");
   purifier = DOMPurify(window as unknown as Parameters<typeof DOMPurify>[0]);
   return purifier;
 }
@@ -311,7 +322,7 @@ let linkDocument: Document | null = null;
 // byte for byte.
 function resolveHtmlLinks(html: string, instanceOrigin: string | null): string {
   if (!instanceOrigin) return html;
-  linkDocument ??= new JSDOM("").window.document;
+  linkDocument ??= createJsdom("").window.document;
   const template = linkDocument.createElement("template");
   template.innerHTML = html;
   let resolved = false;

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
+import { parentTurnSession, rootSession } from "../agent/index.js";
 import type { SessionActor } from "../lib/session-actor.js";
 import {
   SKILL_REVIEW_INITIATOR,
@@ -6,7 +7,10 @@ import {
   type UsageAttributionSources,
 } from "./attribution.js";
 
-type Row = NonNullable<Awaited<ReturnType<UsageAttributionSources["getSession"]>>>;
+/** A dashboard session, with the parent the walk to its root reads. */
+type Row = NonNullable<Awaited<ReturnType<UsageAttributionSources["getSession"]>>> & {
+  parentSessionId: string | null;
+};
 
 function session(overrides: Partial<Row> & { type: string }): Row {
   return {
@@ -32,6 +36,17 @@ function resolver(
   return new UsageAttributionResolver(
     {
       getSession: async (id: string) => sessions[id] ?? null,
+      rootSession: (id: string) =>
+        rootSession(
+          {
+            parentSession: async (sessionId) => {
+              const row = sessions[sessionId];
+              if (!row) return undefined;
+              return parentTurnSession(row.type, row.parentSessionId);
+            },
+          },
+          id,
+        ),
       getExecution: async (id: string) => {
         const spec = executions[id];
         if (spec === undefined) return null;
@@ -200,7 +215,7 @@ describe("UsageAttributionResolver.forTurn", () => {
     });
   });
 
-  it("stops walking a lineage cycle", async () => {
+  it("stops walking a cycle of parent sessions", async () => {
     const sessions = {
       a: session({ type: "subagent", parentSessionId: "b" }),
       b: session({ type: "subagent", parentSessionId: "a" }),

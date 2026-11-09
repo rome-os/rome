@@ -33,7 +33,7 @@ rs.mock("../../lib/provider-token-files.js", () => ({
 }));
 
 import type { OAuthProvider } from "../../lib/oauth-providers.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";
 import type { ConnectionsRepository } from "../repository.js";
 import { ConnectionRegistry } from "../registry.js";
@@ -65,6 +65,16 @@ const CASES: Array<[OAuthProvider, string, Record<string, string>]> = [
   ["slack", "workspace", { botToken: "xoxb-live", userToken: "xoxp-live" }],
   ["shopify", "store", { accessToken: "shpat_live", refreshToken: "shprt_live" }],
 ];
+
+describe("OAuth connection kinds' display labels", () => {
+  it("name each kind as a person reads it, not by its id", () => {
+    expect(
+      (["github", "google", "slack", "shopify"] as const).map(
+        (provider) => makeOAuthProviderDescriptor(provider).label,
+      ),
+    ).toEqual(["GitHub", "Google", "Slack", "Shopify"]);
+  });
+});
 
 describe("OAuth profile revival", () => {
   it("revives GitHub's stored schema: login is the handle, committer identity fields survive", () => {

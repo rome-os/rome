@@ -19,7 +19,7 @@ import type { Account } from "@rome-os/app-runtime";
 import type { AccountSendState, SentMessage } from "@rome/api-types/people";
 import { platformOf } from "@rome/api-types/platform";
 import {
-  ChannelNotConnected,
+  AccountNotConnected,
   channelsOn,
   type Channel,
   type Channels,
@@ -109,6 +109,8 @@ export interface DashboardInbox {
 /** What a message says. Text only, for now. */
 export interface Body {
   text: string;
+  /** Skill for a dashboard turn. Other platforms send only the text. */
+  skillName?: string;
 }
 
 export type RefusedState = Exclude<AccountSendState, "yes">;
@@ -174,7 +176,7 @@ export async function send(
   } catch (error) {
     // The Connection went between choosing the sender and asking it: the same
     // answer a send that found none to begin with gives.
-    if (error instanceof ChannelNotConnected) return { ok: false, send: "not-connected" };
+    if (error instanceof AccountNotConnected) return { ok: false, send: "not-connected" };
     const words = error instanceof Error ? error.message : String(error);
     return { ok: false, error: words, delivery: { state: "failed", error: words, at: new Date() } };
   }

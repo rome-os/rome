@@ -16,8 +16,8 @@ cases:
       - app.open:
           path: /settings/connections
       - aiAct: >-
-          Click the visible Telegram connection row once. Stop as soon as its connection-detail
-          dialog is open; do not look for an "Open Telegram" button.
+          Under the "Connected" heading, click the visible Telegram card once. Stop as soon as its
+          connection-detail dialog is open; do not look for an "Open Telegram" button.
       - aiAssert: >-
           A Telegram connection detail dialog is open and shows its connected status and account
           information rather than an error.
@@ -40,16 +40,15 @@ cases:
       - app.open:
           path: /settings/advanced
       - aiAct: >-
-          Scroll through Advanced settings until the "Developer Settings" disclosure is visible
-          and open it once. Then scroll down until its heading is near the top of the screen, and
-          stop.
+          Scroll through Advanced settings until the "Developer settings" heading is near the top
+          of the screen, and stop. Do not click anything.
       - aiAssert: >-
-          The Developer Settings section is expanded and shows the "Model ID mappings" setting directly below
-          its heading.
-      # The section is taller than one screen, so the heading and the switch are
-      # checked in separate screenshots.
+          The "Developer settings" section shows the "Model selector", "Impersonation", and "AI
+          tool usage" switches below its heading, with no control to expand it.
+      # Model ID mappings sits below the switches and the page is taller than one
+      # screen, so it is checked in a separate screenshot.
       - aiAct: >-
-          Scroll farther down within the expanded Developer Settings section until the "Show
-          Claude and ChatGPT usage" switch is visible. Leave the section expanded.
+          Scroll farther down until the "Model ID mappings" heading is visible, and stop.
       - aiAssert: >-
-          The "Show Claude and ChatGPT usage" switch is visible.
+          The "Model ID mappings" section is visible below Developer settings, with model ID fields
+          and a "Save mappings" button.

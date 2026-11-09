@@ -12,6 +12,7 @@ import type {
   SendMailInput,
   SendMailResult,
 } from "../../../lib/rome-cloud-mail.js";
+import { MailProviderError } from "../../../lib/rome-cloud-mail.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
 
@@ -250,6 +251,132 @@ describe("EmailAdapter.send", () => {
     expect(receipt).toEqual({ chatId: "t_out", messageId: "m_out" });
   });
 
+  /** A mailbox holding one email, `<CAF123@mail.example.com>`, in thread t1,
+   *  that knows no other. */
+  const holding = () =>
+    makeProvider({
+      getMessage: rs.fn(async (messageId: string) => {
+        if (messageId !== "<CAF123@mail.example.com>") {
+          throw new MailProviderError("not found", 404);
+        }
+        return { threadId: "t1", providerMessageId: messageId } as never;
+      }),
+    });
+
+  it("answers the email a reply names, in In-Reply-To", async () => {
+    const provider = holding();
+    const adapter = makeAdapter(provider);
+
+    await adapter.send("t1" as ChatId, {
+      text: "On it",
+      replyToMessageId: "<CAF123@mail.example.com>",
+    });
+
+    expect(provider.sent).toHaveLength(1);
+    expect(provider.sent[0].inReplyToMessageId).toBe("<CAF123@mail.example.com>");
+    expect(provider.listMessages).not.toHaveBeenCalled();
+  });
+
+  it("passes on a provider failure to look a quoted email up, and sends nothing", async () => {
+    const provider = makeProvider({
+      getMessage: rs.fn(async () => {
+        throw new MailProviderError("unavailable", 503);
+      }),
+    });
+    const adapter = makeAdapter(provider);
+
+    await expect(
+      adapter.send("t1" as ChatId, {
+        text: "On it",
+        replyToMessageId: "<CAF123@mail.example.com>",
+      }),
+    ).rejects.toMatchObject({ name: "MailProviderError", status: 503 });
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it("refuses a chat-style reply to an email outside the thread it goes to, and sends nothing", async () => {
+    const provider = holding();
+    const adapter = makeAdapter(provider);
+    const quote = { text: "On it", replyToMessageId: "<CAF123@mail.example.com>" };
+
+    for (const address of ["t2", "bob@example.com", "guardian", "  "]) {
+      await expect(adapter.send(address as ChatId, quote)).rejects.toMatchObject({
+        reason: "reply_unaddressable",
+      });
+    }
+    await expect(
+      adapter.send("t1" as ChatId, { kind: "email", to: "bob@example.com", ...quote }),
+    ).rejects.toMatchObject({ reason: "reply_unaddressable" });
+    await expect(
+      adapter.send("t1" as ChatId, { ...quote, replyToMessageId: "<unknown@mail.example.com>" }),
+    ).rejects.toMatchObject({ reason: "reply_unaddressable" });
+    // Rome Cloud may answer an email its provider does not know with its own
+    // status, forwarding the provider's beside it.
+    provider.getMessage = rs.fn(async () => {
+      throw new MailProviderError("mail_provider_error", 502, "mail_provider_error", 404);
+    });
+    await expect(adapter.send("t1" as ChatId, quote)).rejects.toMatchObject({
+      reason: "reply_unaddressable",
+    });
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it("answers a quoted email in an email thread whose id holds an @", async () => {
+    const provider = makeProvider({
+      getMessage: rs.fn(
+        async (messageId: string) =>
+          ({ threadId: "opaque@thread-id", providerMessageId: messageId }) as never,
+      ),
+    });
+    const adapter = makeAdapter(provider);
+
+    await adapter.send("opaque@thread-id" as ChatId, {
+      kind: "email",
+      text: "On it",
+      replyToMessageId: "<CAF123@mail.example.com>",
+    });
+
+    expect(provider.getMessage).toHaveBeenCalledTimes(1);
+    expect(provider.sent).toHaveLength(1);
+    expect(provider.sent[0].inReplyToMessageId).toBe("<CAF123@mail.example.com>");
+    expect(provider.sent[0].to).toBeUndefined();
+  });
+
+  it("refuses an empty reply before looking the quoted email up", async () => {
+    const provider = holding();
+    const adapter = makeAdapter(provider);
+
+    await expect(
+      adapter.send("t1" as ChatId, { text: "  ", replyToMessageId: "<CAF123@mail.example.com>" }),
+    ).rejects.toMatchObject({ reason: "empty" });
+    expect(provider.getMessage).not.toHaveBeenCalled();
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it("answers inReplyToMessageId over a chat-style reply", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    await adapter.send("t1" as ChatId, {
+      kind: "email",
+      text: "On it",
+      inReplyToMessageId: "msg_9",
+      replyToMessageId: "<CAF123@mail.example.com>",
+    });
+
+    expect(provider.sent[0].inReplyToMessageId).toBe("msg_9");
+  });
+
+  it("refuses a reply to an id that is not an email's Message-ID, and sends nothing", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    await expect(
+      adapter.send("t1" as ChatId, { text: "On it", replyToMessageId: "12345" }),
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "reply_unaddressable" });
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
   it("starts a fresh email when a chat-style conversation names an address", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
@@ -345,11 +472,33 @@ describe("EmailAdapter.send", () => {
     expect(provider.listMessages).not.toHaveBeenCalled();
   });
 
-  it("refuses an approval card it cannot show, and calls no provider", async () => {
+  it("refuses an email with its own HTML and a card, and calls no provider", async () => {
     const provider = makeProvider();
     const adapter = makeAdapter(provider);
 
-    const sent = adapter.send("t-approval" as ChatId, {
+    await expect(
+      adapter.send("zoolsher@gmail.com" as ChatId, {
+        kind: "email",
+        html: "<p>Report</p>",
+        parts: [
+          {
+            type: "approval_card",
+            approvalId: "approval-1",
+            actionName: "send_message",
+            preview: { kind: "generic", title: "Send email", summary: "Send it." },
+            status: "pending",
+          },
+        ],
+      }),
+    ).rejects.toMatchObject({ name: "ChannelSendRefused", reason: "part_unsupported" });
+    expect(provider.send).not.toHaveBeenCalled();
+  });
+
+  it("sends an approval card as the card's plain-text version", async () => {
+    const provider = makeProvider();
+    const adapter = makeAdapter(provider);
+
+    await adapter.send("zoolsher@gmail.com" as ChatId, {
       parts: [
         {
           type: "approval_card",
@@ -361,12 +510,9 @@ describe("EmailAdapter.send", () => {
       ],
     });
 
-    await expect(sent).rejects.toMatchObject({
-      name: "ChannelSendRefused",
-      reason: "part_unsupported",
-    });
-    expect(provider.send).not.toHaveBeenCalled();
-    expect(provider.listMessages).not.toHaveBeenCalled();
+    expect(provider.sent).toHaveLength(1);
+    expect(provider.sent[0].text).toContain("Approval needed: Send email");
+    expect(provider.sent[0].text).toContain("The agent wants to send.");
   });
 
   it("names the rejected recipient and the fix when no address resolves", async () => {

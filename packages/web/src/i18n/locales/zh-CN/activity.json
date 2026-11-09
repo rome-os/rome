@@ -155,17 +155,8 @@
       "dumpAriaLabel": "下载原始 trace JSON"
     }
   },
-  "pairing": {
-    "account": "{{account}} 的配对请求",
-    "validity": "有效期 {{duration}}",
+  "approvals": {
     "resolveFailed": "无法处理审批，请刷新并确认请求状态。",
-    "loadFailed": "无法加载审批",
-    "loading": "加载中…",
-    "approved": "已批准",
-    "rejected": "已拒绝",
-    "expired": "已过期",
-    "requested": "请求时间：{{time}}",
-    "resolved": "处理人：{{actor}} · {{time}}",
-    "loadHistory": "加载更早的配对请求"
+    "loadFailed": "无法加载审批"
   }
 }

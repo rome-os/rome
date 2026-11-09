@@ -11,14 +11,11 @@ import { ConnectionRegistry } from "../../connections/registry.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { tokenPaste } from "../../connections/schemes.js";
 import type { Connection, ConnectionDescriptor, Talker } from "../../connections/types.js";
-import { createTestDb, kindChannelOf, type TestDb } from "../../test/helpers.js";
+import { createTestDb, kindChannelOf, type TestDb } from "../../test/db.js";
 import type { Accounts } from "../accounts/accounts.js";
-import { ChannelNotConnected } from "./connected-account.js";
+import { AccountNotConnected } from "./connected-account.js";
 import { channelList, joinLaterChannel } from "./connected-account-list.js";
 import type { ConnectionPortsDeps } from "./connection-ports.js";
-import { ConnectionPacing } from "../../participation/reply-delivery/connection-pacing.js";
-import { type DeliveryTransport, plainText } from "../../connections/sending.js";
-import { systemClock } from "../../lib/clock.js";
 
 const noAccounts: Accounts = {
   listAccounts: async () => ({ accounts: [] }),
@@ -46,7 +43,6 @@ function talkKind(
   direct: Pick<ChannelDirectMessaging, "chatFor"> | null = null,
   activity: ChannelActivity | null = null,
   directory: TalkDirectory | null = null,
-  replyDelivery: DeliveryTransport | null = null,
 ): { descriptor: ConnectionDescriptor; epochs: Array<{ deliver?: (m: ChannelMessage) => void }> } {
   const epochs: Array<{ deliver?: (m: ChannelMessage) => void }> = [];
   return {
@@ -72,7 +68,6 @@ function talkKind(
               ...(direct && { directMessaging: direct }),
               ...(activity && { activity }),
               ...(directory && { directory }),
-              ...(replyDelivery && { replyDelivery }),
             };
           },
         },
@@ -207,7 +202,7 @@ describe("channelList", () => {
     const discord = channels.find((channel) => channel.name === "discord")!;
 
     // Nothing backs either channel yet: the lookup says so, as a send would.
-    await expect(telegram.send!.direct!.chatFor("u-1")).rejects.toBeInstanceOf(ChannelNotConnected);
+    await expect(telegram.send!.direct!.chatFor("u-1")).rejects.toBeInstanceOf(AccountNotConnected);
 
     for (const service of ["telegram", "discord"]) {
       const connection = await registry.connect(service);
@@ -564,35 +559,5 @@ describe("joinLaterChannel", () => {
       expect(heard.map((event) => event.message.messageId)).toEqual(["to the second bot", "next"]),
     );
     expect(channels.filter((channel) => channel.name === `later-${second.id}`)).toHaveLength(1);
-  });
-
-  it("paces a later channel's writes with its Connection's pacer, so its replies can stream", async () => {
-    testDb = createTestDb();
-    const service = talkKind("telegram", {}, null, null, null, {
-      capabilities: {
-        maxPartLength: 10,
-        edit: false,
-        budget: { burst: 1, refillMs: 1, conversationSpacingMs: 0 },
-      },
-      codec: plainText,
-      create: async () => ({ messageId: "m", chatId: "c" }),
-    });
-    const registry = new ConnectionRegistry({
-      repository: new DrizzleConnectionsRepository(testDb.db),
-    });
-    registry.register(service.descriptor);
-    const connection = await registry.connect("telegram");
-    await registry.giveGrant(connection.connectionKind, connection.id, "bot", {
-      material: { token: "t" },
-      expiresAt: "never",
-    });
-    const pacing = new ConnectionPacing(systemClock, async () => true);
-
-    const channel = joinLaterChannel(
-      { registry, admit: async () => true, channelOf: () => "later", pacing, channels: [] },
-      connection,
-    );
-
-    expect(channel?.send?.replies?.pacer).toBe(pacing.pacerFor(connection));
   });
 });

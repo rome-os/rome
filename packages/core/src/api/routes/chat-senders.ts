@@ -88,13 +88,13 @@ export async function resolveAutomatedSender(
   let name = source.id;
   let appId: string | undefined;
   if (source.type === "agent" && source.id) {
-    const record = deps.agentLoader.getAllRecords().get(source.id);
+    const agent = deps.agentLoader.list().find((candidate) => candidate.name === source.id);
     name = isCoreMainAgentId(source.id)
       ? mainAgentDisplayName(await deps.settingsRepo.get("agentName"))
-      : record
+      : agent
         ? prettyAgentName(source.id)
         : source.id;
-    appId = record?.metadata.ownerId;
+    appId = agent?.ownerId;
   } else if (source.type === "app" && source.id) {
     appId = source.id;
     name = deps.appCatalog.get(source.id)?.displayName ?? source.id;

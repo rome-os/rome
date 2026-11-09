@@ -12,15 +12,14 @@ import type {
   MessageReceipt,
   OutgoingMessage,
 } from "@rome-os/app-runtime";
-import { createAppRuntimeRepositories } from "../../../apps/repositories.js";
+import { chatsWiring } from "../../../chats-wiring.js";
 import type { ChannelSend } from "../../../chats/connected-accounts/connected-account.js";
-import { ChatRepository } from "../../../chats/chat-repository.js";
-import { ChatEvents, type MessageSaid } from "../../../chats/events.js";
-import { inboundRecording } from "../../../chats/inbound.js";
-import { StoredMessages } from "../../../chats/message-repository.js";
-import { chatKey, type Place, placeIn } from "../../../chats/place.js";
-import { SettingsRepository } from "../../../db/repositories/settings.js";
-import { WebChatRepository } from "../../../db/repositories/webchat.js";
+import type { ChatRepository } from "../../../chats/storage/chat-repository.js";
+import { ChatEvents, type MessageSaid } from "../../../chats/storage/events.js";
+import type { MessageRepository } from "../../../chats/storage/message-repository.js";
+import { type Place, placeIn } from "../../../chats/storage/place.js";
+import { EMAIL_PLATFORM } from "../../../connections/email-chat-adapter.js";
+import { inboundRecording } from "../../../connections/inbound-recording.js";
 import { createTestDb, type TestDb } from "../../helpers.js";
 import { deferred, type VisibleMessage } from "./peer.js";
 
@@ -124,10 +123,9 @@ export type ConformanceCase =
  * a fresh database, Rome's inbound recording and the hook send path over the
  * adapter, so what it checks is what Rome itself would do.
  *
- * Today's hook send path is an app's: the channel's send, then the chat
- * repository the app runtime hands apps, as the system app's `send_message`
- * records a delivered message. When sends move behind the chat adapter, this
- * is the one place the suite changes.
+ * The hook send path is a channel's send wrapped to go through the chat
+ * adapter, which sends and records in one step, as production wires the
+ * channels hooks send on.
  */
 export function describeAdapterConformance(
   name: string,
@@ -161,14 +159,12 @@ export function describeAdapterConformance(
     let testDb: TestDb;
     let peer: ConformanceChannel;
     let chats: ChatRepository;
-    let messages: StoredMessages;
+    let messages: MessageRepository;
     let said: MessageSaid[];
     let stopRecording: () => void;
     let send: (address: string, message: OutgoingMessage) => Promise<void>;
     /** The second account's send, where the peer models one. */
     let secondSend: ((address: string, message: OutgoingMessage) => Promise<void>) | undefined;
-    /** Every address a case named, where Rome may hold a chat. */
-    let addresses: Set<string>;
 
     beforeEach(async () => {
       testDb = createTestDb();
@@ -176,65 +172,40 @@ export function describeAdapterConformance(
       const platform = peer.account.platform;
       const own = [peer, ...(peer.second ? [peer.second] : [])];
       const names = own.map((at) => at.channel.name);
-      const accountOf = (channel: string) =>
-        own.find((at) => at.channel.name === channel)?.account ?? null;
-      const rows = new WebChatRepository(testDb.db);
-      const events = new ChatEvents();
-      chats = new ChatRepository(testDb.db, {
-        namesOn: (on) => (on === platform ? names : []),
-        accountOf,
+      const wired = chatsWiring(testDb.db, {
+        accountOf: (channel) => own.find((at) => at.channel.name === channel)?.account ?? null,
         platformOfChannel: () => platform,
-      });
-      messages = new StoredMessages(rows, events, {
         channelsOn: (on) => (on === platform ? names : []),
-        accountOf,
       });
+      ({ chats, messages } = wired);
+      const events = new ChatEvents();
       said = [];
-      addresses = new Set();
       events.subscribe(async (event) => {
         if (event.type === "MessageSaid") said.push(event);
       });
-      // Recording runs while someone hears what is recorded.
       stopRecording = inboundRecording(
-        { chats: rows, messages, events, platformOfChannel: () => platform },
+        { chats, messages, events, adapters: wired.adapters },
         own.map((at) => at.channel),
-      ).messagesSaid.subscribe(async () => undefined);
-      const appChats = createAppRuntimeRepositories({
-        settingsRepo: new SettingsRepository(testDb.db),
-        webchatRepo: rows,
-        chatRepo: chats,
-        chatMessages: messages,
-      }).chats!;
-      // As the system app's `send_message` records a delivered message: under
-      // the conversation the channel says it delivered to, which a send to a
-      // person's own id can open, beneath the address it named.
-      const sendOn =
-        (channel: Channel) =>
-        async (address: string, message: OutgoingMessage): Promise<void> => {
-          addresses.add(address);
-          const receipt = await (channel.send as ChannelSend).send(address as ChatId, message);
-          const delivered = receipt.chatId || address;
-          const opened = delivered !== address;
-          addresses.add(delivered);
-          const conversation = await appChats.ensureChannelChat({
-            channel: channel.name,
-            threadId: delivered,
-            ...(opened ? { parentThreadId: address } : {}),
-            agentName: "main",
-            threadType: opened ? "group" : "private",
-          });
-          await appChats.recordOutboundMessage({
-            sessionId: conversation.id,
-            content: JSON.stringify([{ type: "text", content: message.text }]),
-            ...(receipt.messageId ? { platformMessageId: receipt.messageId } : {}),
-            senderId: "rome",
-            senderName: "Rome",
-            ...(message.replyToMessageId
-              ? { replyToPlatformMessageId: message.replyToMessageId }
-              : {}),
-            knownToProvider: false,
-          });
+      ).listen();
+      // As a hook sends: at an address, through the channel's send wrapped
+      // to go through the chat adapter.
+      const sendOn = (channel: Channel) => {
+        const [recorded] = wired.recordedSends([channel]);
+        return async (address: string, message: OutgoingMessage): Promise<void> => {
+          // An email quotes the email it answers by the provider's id, as a
+          // reply to it, and reads no chat's quote hint.
+          const { replyToMessageId, ...rest } = message;
+          const out =
+            platform === EMAIL_PLATFORM && replyToMessageId !== undefined
+              ? ({
+                  ...rest,
+                  kind: "email",
+                  inReplyToMessageId: replyToMessageId,
+                } as OutgoingMessage)
+              : message;
+          await (recorded!.send as ChannelSend).send(address as ChatId, out);
         };
+      };
       send = sendOn(peer.channel);
       secondSend = peer.second ? sendOn(peer.second.channel) : undefined;
     });
@@ -268,31 +239,22 @@ export function describeAdapterConformance(
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
       const heard = said[before]!;
-      addresses.add(heard.message.place.threadId ?? heard.message.place.chat.id);
       return { ...heard, platformId };
     }
 
     /** What Rome's transcript of `place` holds, oldest first. */
     const transcript = async (place: Place) =>
-      (await messages.recent(place, 50)).messages.map((message) => ({
+      messages.read(place, { limit: 50 }).messages.map((message) => ({
         text: message.body.text,
         fromRome: message.direction === "fromRome",
       }));
 
-    /** The chats of `kind` Rome holds at every address a case named. */
-    const chatsOf = (kind: "dm" | "group") => {
-      const found = new Map<string, string>();
-      for (const address of addresses) {
-        let chat;
-        try {
-          chat = chats.byKey(chatKey(peer.account.platform, address as ChatId), peer.account);
-        } catch {
-          chat = null;
-        }
-        if (chat?.kind === kind) found.set(`${chat.key.platform}:${chat.key.id}`, chat.key.id);
-      }
-      return [...found.values()];
-    };
+    /** The platform's chats Rome holds, of `kind`. */
+    const chatsOf = (kind: "dm" | "group") =>
+      chats
+        .list(peer.account.platform)
+        .filter((chat) => chat.kind === kind)
+        .map((chat) => chat.ref.id);
     const directMessages = () => chatsOf("dm");
 
     runs("directMessageOnce", models.directMessages)(
@@ -378,9 +340,9 @@ export function describeAdapterConformance(
           text: "Tuesday",
           replyTo: heard.platformId,
         });
-        const [answer] = (await messages.recent(heard.message.place, 1)).messages;
+        const answer = messages.read(heard.message.place, { limit: 50 }).messages.at(-1);
         expect(answer?.body.text).toBe("Tuesday");
-        expect(answer?.replyTo).toBe(heard.platformId);
+        expect(answer?.replyTo).toBe(heard.message.id);
       },
     );
 

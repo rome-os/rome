@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { resolveBootstrapState, type BootstrapInputs } from "./bootstrap-state.js";
 import { CLOUD_GUARDIAN_PASSWORD_SENTINEL } from "./guardian-auth-state.js";
 import { guardianAuth } from "../db/schema.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 
 let testDb: TestDb;
 

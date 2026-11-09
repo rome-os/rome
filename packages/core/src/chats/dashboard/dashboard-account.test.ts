@@ -4,9 +4,10 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
 import { WebChatRepository } from "../../db/repositories/webchat.js";
-import { createTestDb, type TestDb } from "../../test/helpers.js";
+import { createTestDb, type TestDb } from "../../test/db.js";
 import { channelMessageOrder } from "../history/messages.js";
 import { WEBCHAT_SURFACE, webchatChannel } from "./dashboard-account.js";
+import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 
 describe("webchat channel", () => {
   let testDb: TestDb;
@@ -14,7 +15,7 @@ describe("webchat channel", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new WebChatRepository(testDb.db);
+    repo = new ChatsWebChatRepository(testDb.db);
   });
 
   afterEach(() => {
@@ -35,6 +36,8 @@ describe("webchat channel", () => {
   });
 
   it("answers what was said newest first, as the channel's record", async () => {
+    rs.useFakeTimers({ toFake: ["Date"] });
+    rs.setSystemTime(new Date("2026-10-26T00:00:00Z"));
     await repo.createSession(
       "sess-3",
       "Planner Session",
@@ -50,6 +53,7 @@ describe("webchat channel", () => {
       "user",
       JSON.stringify([{ type: "text", content: "Draft the plan" }]),
     );
+    rs.setSystemTime(new Date("2026-10-26T00:00:01Z"));
     await repo.addMessage(
       "msg-agent",
       "sess-3",
@@ -57,7 +61,11 @@ describe("webchat channel", () => {
       JSON.stringify([{ type: "text", content: "Plan drafted" }]),
     );
 
-    const history = await webchatChannel(repo).messages!.query({ chatId: "sess-3" as ChatId });
+    const history = await webchatChannel(repo).messages!.query({
+      chatId: "sess-3" as ChatId,
+      since: new Date(0),
+    });
+    rs.useRealTimers();
 
     const rows = await repo.getHistoryMessages("sess-3", new Date(0));
     expect(history.map((message) => message.messageId)).toEqual(["msg-agent", "msg-guardian"]);
@@ -96,10 +104,10 @@ describe("webchat channel", () => {
   });
 
   it("pages back one message at a time through a second holding several", async () => {
-    await repo.createSession("sess-5", "Paging Session");
     rs.useFakeTimers({ toFake: ["Date"] });
     try {
       rs.setSystemTime(new Date("2026-10-26T00:00:00Z"));
+      await repo.createSession("sess-5", "Paging Session");
       await repo.addMessage(
         "msg-old",
         "sess-5",

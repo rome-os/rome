@@ -20,10 +20,14 @@ import { RecentChats } from "./RecentChats";
 
 // Concierge's chat id comes from its own query, which these tests do not
 // serve; each test that needs the entry sets the id here.
-const concierge = rs.hoisted(() => ({ chatId: null as string | null }));
+const concierge = rs.hoisted(() => ({
+  chatId: null as string | null,
+  chats: [] as Array<{ id: string; name: string; main: boolean; unread: number }>,
+}));
 rs.mock("@/hooks/use-concierge", () => ({
   ...conciergeModule,
   useConciergeChatId: () => concierge.chatId,
+  useConciergeChats: () => concierge.chats,
 }));
 
 beforeAll(async () => {
@@ -36,6 +40,7 @@ afterEach(() => {
   localStorage.clear();
   rs.restoreAllMocks();
   concierge.chatId = null;
+  concierge.chats = [];
 });
 
 interface MockSession {
@@ -54,13 +59,14 @@ interface MockSession {
   deviceFolder?: { deviceId: string; deviceName: string; platform: string | null; path: string };
 }
 
-function mockSessions(sessions: MockSession[]) {
+function mockSessions(sessions: MockSession[], settings?: Record<string, unknown>) {
   const spy = rs.spyOn(globalThis, "fetch").mockImplementation((async (
     input: RequestInfo | URL,
     init?: RequestInit,
   ) => {
     const url = String(input);
     const method = init?.method ?? "GET";
+    if (url === "/api/settings" && settings) return Response.json(settings);
     if (url.startsWith("/api/chat/sessions") && method === "GET") {
       const status = new URL(url, "http://localhost").searchParams.get("status") ?? "active";
       const filtered = sessions.filter((s) => {
@@ -170,15 +176,117 @@ describe("RecentChats", () => {
     ]);
     renderRecentChats();
     const entry = await screen.findByRole("link", { name: "Concierge" });
-    expect(entry.getAttribute("href")).toBe("/chat/concierge");
+    expect(entry.getAttribute("href")).toBe("/message");
     const task = await screen.findByRole("link", { name: /Find flights/ });
     expect(within(task).getByRole("img", { name: "Started by Concierge" })).toBeTruthy();
     // The Concierge chat itself stays out of the list.
     expect(screen.getAllByRole("link", { name: "Concierge" })).toHaveLength(1);
   });
 
+  it("marks the task chats the agent started by the name the guardian gave it", async () => {
+    concierge.chatId = "concierge";
+    mockSessions(
+      [
+        {
+          id: "task-1",
+          name: "Find flights",
+          createdAt: new Date().toISOString(),
+          activityAt: new Date().toISOString(),
+          lastSeenActivityAt: null,
+          unread: false,
+          projectName: "default",
+          projectPath: "default",
+          triggerKind: "concierge",
+        } as MockSession,
+      ],
+      { agentName: "Milo" },
+    );
+    renderRecentChats();
+    const task = await screen.findByRole("link", { name: /Find flights/ });
+    expect(await within(task).findByRole("img", { name: "Started by Milo" })).toBeTruthy();
+  });
+
+  describe("Concierge topic chats", () => {
+    const requests: Array<{ url: string; method: string; body: unknown }> = [];
+    const mockTopics = () =>
+      rs.spyOn(globalThis, "fetch").mockImplementation((async (
+        input: RequestInfo | URL,
+        init?: RequestInit,
+      ) => {
+        const url = String(input);
+        const method = init?.method ?? "GET";
+        if (method !== "GET") {
+          requests.push({ url, method, body: init?.body ? JSON.parse(String(init.body)) : null });
+        }
+        const body =
+          url === "/api/concierge/chats" && method === "POST"
+            ? { id: "topic-2", name: "Trips", main: false, unread: 0 }
+            : url.startsWith("/api/chat/sessions") && method === "GET"
+              ? []
+              : url === "/api/concierge/session"
+                ? { id: "concierge", unread: 0 }
+                : url.startsWith("/api/concierge/tasks")
+                  ? { tasks: [] }
+                  : method !== "GET"
+                    ? {}
+                    : null;
+        if (body === null) return new Response("not found", { status: 404 });
+        return new Response(JSON.stringify(body), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }) as typeof fetch);
+
+    beforeEach(() => {
+      requests.length = 0;
+      concierge.chatId = "concierge";
+      concierge.chats = [
+        { id: "concierge", name: "Concierge", main: true, unread: 0 },
+        { id: "topic-1", name: "Calendar", main: false, unread: 2 },
+      ];
+    });
+
+    it("lists each topic chat under the Concierge entry, with its unread count", async () => {
+      mockTopics();
+      renderRecentChats();
+      const entry = await screen.findByRole("link", { name: "Calendar, 2 unread messages" });
+      expect(entry.getAttribute("href")).toBe("/chat/topic-1");
+      // The main chat is the Concierge entry, not a row of its own.
+      expect(screen.queryByRole("link", { name: /^Concierge, / })).toBeNull();
+    });
+
+    it("opens a blank topic chat from the plus beside the Concierge entry, creating nothing yet", async () => {
+      mockTopics();
+      const user = userEvent.setup();
+      renderRecentChats();
+      await user.click(await screen.findByRole("button", { name: "New topic chat" }));
+      expect(screen.getByTestId("location-path").textContent).toBe("/chat");
+      expect(screen.getByTestId("location-state").textContent).toBe('{"conciergeTopic":true}');
+      // Like New chat, nothing exists until the first send, and New chat is not the open row.
+      expect(requests).toEqual([]);
+      expect(screen.queryByRole("textbox")).toBeNull();
+      expect(screen.getByRole("link", { name: "New chat" }).className).not.toContain("shadow-1");
+    });
+
+    it("archives an open topic chat from its menu and returns to the main chat", async () => {
+      mockTopics();
+      const user = userEvent.setup();
+      renderRecentChats("/chat/topic-1");
+      await user.click(await screen.findByRole("button", { name: "Actions for Calendar" }));
+      await user.click(await screen.findByRole("menuitem", { name: "Archive" }));
+      await waitFor(() =>
+        expect(requests).toContainEqual({
+          url: "/api/chat/sessions/topic-1/archive",
+          method: "PATCH",
+          body: { archived: true },
+        }),
+      );
+      await waitFor(() => expect(screen.getByTestId("location-path").textContent).toBe("/message"));
+    });
+  });
+
   describe("Concierge unread badge", () => {
-    const server = { unread: 0, tasks: [] as unknown[] };
+    const server = { unread: 0, tasks: [] as unknown[], settings: {} as Record<string, unknown> };
     const conciergeCalls = (spy: { mock: { calls: unknown[][] } }) =>
       spy.mock.calls.filter(([input]) => String(input) === "/api/concierge/session").length;
     const mockConcierge = () =>
@@ -186,11 +294,13 @@ describe("RecentChats", () => {
         const url = String(input);
         const body = url.startsWith("/api/chat/sessions")
           ? []
-          : url === "/api/concierge/session"
-            ? { id: "concierge", unread: server.unread }
-            : url.startsWith("/api/concierge/tasks")
-              ? { tasks: server.tasks }
-              : null;
+          : url === "/api/settings"
+            ? server.settings
+            : url === "/api/concierge/session"
+              ? { id: "concierge", unread: server.unread }
+              : url.startsWith("/api/concierge/tasks")
+                ? { tasks: server.tasks }
+                : null;
         if (body === null) return new Response("not found", { status: 404 });
         return new Response(JSON.stringify(body), {
           status: 200,
@@ -202,6 +312,7 @@ describe("RecentChats", () => {
       concierge.chatId = "concierge";
       server.unread = 0;
       server.tasks = [];
+      server.settings = {};
       FakeWebSocket.instances = [];
     });
 
@@ -219,6 +330,7 @@ describe("RecentChats", () => {
       completedAt: null,
       archivedAt: null,
       notSynced: false,
+      conciergeChat: { id: "concierge", name: "Concierge", main: true },
       ...extra,
     });
 
@@ -229,6 +341,41 @@ describe("RecentChats", () => {
       expect(
         await screen.findByRole("link", { name: "Concierge, 3 unread messages" }),
       ).toBeTruthy();
+    });
+
+    it("goes by the name the guardian gave their agent", async () => {
+      server.unread = 3;
+      server.settings = { agentName: " Milo " };
+      mockConcierge();
+      renderRecentChats();
+      const entry = await screen.findByRole("link", { name: "Milo, 3 unread messages" });
+      expect(entry.textContent).toContain("Milo");
+      expect(screen.queryByRole("link", { name: /Concierge/ })).toBeNull();
+    });
+
+    it("goes by Concierge when the agent name is blank", async () => {
+      server.unread = 3;
+      server.settings = { agentName: "  " };
+      mockConcierge();
+      renderRecentChats();
+      expect(
+        await screen.findByRole("link", { name: "Concierge, 3 unread messages" }),
+      ).toBeTruthy();
+    });
+
+    it("lights the entry at /message, the main chat's page, and not elsewhere", async () => {
+      server.unread = 3;
+      mockConcierge();
+      const view = renderRecentChats("/message");
+      const entry = await screen.findByRole("link", { name: "Concierge" });
+      expect(entry.getAttribute("href")).toBe("/message");
+      expect(entry.className).toContain("shadow-1");
+      view.unmount();
+
+      renderRecentChats("/chat");
+      expect((await screen.findByRole("link", { name: /^Concierge, 3/ })).className).not.toContain(
+        "shadow-1",
+      );
     });
 
     it("shows no badge at 0", async () => {
@@ -248,90 +395,52 @@ describe("RecentChats", () => {
       expect(entry.querySelector("[data-concierge-unread]")?.textContent).toContain("99+");
     });
 
-    it("counts the tasks that need the guardian beside the unread badge, each badge with its own label", async () => {
+    it("shows no tasks badge, even when tasks need the guardian", async () => {
       server.unread = 3;
-      server.tasks = [
-        taskRow("a", "needs_user"),
-        taskRow("b", "needs_user"),
-        taskRow("c", "doing"),
-        taskRow("d", "needs_user", { archivedAt: 5 }),
-      ];
+      server.tasks = [taskRow("a", "needs_user"), taskRow("b", "needs_user")];
       mockConcierge();
       renderRecentChats();
-      const entry = await screen.findByRole("link", {
-        name: "Concierge, 3 unread messages, 2 tasks need you",
-      });
-      const needsYou = within(entry).getByRole("img", { name: "2 tasks need you" });
-      const unread = within(entry).getByRole("img", { name: "3 unread messages" });
-      expect(needsYou.hasAttribute("data-concierge-needs-you")).toBe(true);
-      expect(needsYou.textContent).toBe("2");
-      expect(unread.hasAttribute("data-concierge-unread")).toBe(true);
-      // Apart by shape and colour, and the warning count comes first.
-      expect(needsYou.className).toContain("rounded-8");
-      expect(needsYou.className).toContain("bg-warning-bg");
-      expect(unread.className).toContain("rounded-full");
-      expect(unread.className).toContain("bg-destructive-bg");
+      // The link's label is the unread count alone: the tasks live in the chat's pill.
+      const entry = await screen.findByRole("link", { name: "Concierge, 3 unread messages" });
       expect(
-        needsYou.compareDocumentPosition(unread) & Node.DOCUMENT_POSITION_FOLLOWING,
-      ).toBeTruthy();
+        within(entry)
+          .getAllByRole("img")
+          .map((badge) => badge.getAttribute("aria-label")),
+      ).toEqual(["3 unread messages"]);
+      expect(screen.queryByText(/tasks? needs? you/)).toBeNull();
     });
 
-    it("counts a single task that needs the guardian, with no unread badge", async () => {
-      server.tasks = [taskRow("a", "needs_user")];
+    it("puts the plus in the unread badge's place on hover or focus, so they never overlap", async () => {
+      server.unread = 3;
       mockConcierge();
       renderRecentChats();
-      const entry = await screen.findByRole("link", { name: "Concierge, 1 task needs you" });
-      expect(entry.querySelector("[data-concierge-unread]")).toBeNull();
+      const entry = await screen.findByRole("link", { name: "Concierge, 3 unread messages" });
+      const badge = entry.querySelector("[data-concierge-unread]") as HTMLElement;
+      const plus = screen.getByRole("button", { name: "New topic chat" });
+      // The badge hides exactly when the plus shows: on the row's hover or focus.
+      for (const state of ["group-hover/concierge", "group-focus-within/concierge"]) {
+        expect(badge.className).toContain(`${state}:invisible`);
+        expect(plus.className).toContain(`${state}:opacity-100`);
+      }
+      expect(plus.className).toContain("opacity-0");
+      // With a badge to show, a touch screen keeps the badge, not the plus.
+      expect(plus.className).not.toContain("touch-show");
     });
 
-    it("keeps the Needs you count while the Concierge chat is open", async () => {
-      server.unread = 3;
-      server.tasks = [taskRow("a", "needs_user")];
-      const fetchSpy = mockConcierge();
-      renderRecentChats("/chat/concierge");
-      await waitFor(() => expect(conciergeCalls(fetchSpy)).toBeGreaterThan(0));
-      const entry = await screen.findByRole("link", { name: "Concierge, 1 task needs you" });
-      expect(entry.querySelector("[data-concierge-needs-you]")).not.toBeNull();
-      expect(entry.querySelector("[data-concierge-unread]")).toBeNull();
-    });
-
-    it("shows no Needs you count when no task needs the guardian, and follows the Concierge's writes", async () => {
-      server.tasks = [taskRow("a", "doing")];
+    it("keeps the plus within reach on a touch screen while nothing is unread", async () => {
       mockConcierge();
-      renderRecentChats("/chat", fakeSocketLiveEventsClient());
+      renderRecentChats();
       await screen.findByRole("link", { name: "Concierge" });
-      expect(document.querySelector("[data-concierge-needs-you]")).toBeNull();
-      let socket!: FakeWebSocket;
-      act(() => {
-        socket = acceptLatestSocket();
-      });
-      expect(socket.sent).toContainEqual({ type: "subscribe", topic: "concierge.tasks" });
-
-      act(() =>
-        socket.receive({
-          type: "event",
-          topic: "concierge.tasks",
-          event: "task_upsert",
-          data: { task: taskRow("a", "needs_user", { updatedAt: 2 }) },
-        }),
+      expect(document.querySelector("[data-concierge-unread]")).toBeNull();
+      expect(screen.getByRole("button", { name: "New topic chat" }).className).toContain(
+        "touch-show",
       );
-      expect(await screen.findByRole("link", { name: "Concierge, 1 task needs you" })).toBeTruthy();
-
-      act(() =>
-        socket.receive({
-          type: "event",
-          topic: "concierge.tasks",
-          event: "task_upsert",
-          data: { task: taskRow("a", "done", { updatedAt: 3 }) },
-        }),
-      );
-      await waitFor(() => expect(document.querySelector("[data-concierge-needs-you]")).toBeNull());
     });
 
     it("shows no badge on the Concierge page", async () => {
       server.unread = 3;
       const fetchSpy = mockConcierge();
-      renderRecentChats("/chat/concierge");
+      renderRecentChats("/message");
       await waitFor(() => expect(conciergeCalls(fetchSpy)).toBeGreaterThan(0));
       await act(async () => {});
       expect(screen.getByRole("link", { name: "Concierge" })).toBeTruthy();
@@ -401,23 +510,27 @@ describe("RecentChats", () => {
     ["Archived", 500],
   ])("ignores a stale %s list response with status %s", async (selection, status) => {
     let respond!: (response: Response) => void;
-    const fetchSpy = rs
-      .spyOn(globalThis, "fetch")
-      .mockImplementationOnce(
-        () =>
-          new Promise<Response>((resolve) => {
-            respond = resolve;
-          }),
-      )
-      .mockResolvedValue(new Response(JSON.stringify([]), { status: 200 }));
+    // Only the chat list is counted: the sidebar's other reads (the settings
+    // behind the Concierge's name) are not what this test is about.
+    let listRequests = 0;
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      if (!String(input).startsWith("/api/chat/sessions")) {
+        return new Response("not found", { status: 404 });
+      }
+      listRequests += 1;
+      if (listRequests > 1) return new Response(JSON.stringify([]), { status: 200 });
+      return new Promise<Response>((resolve) => {
+        respond = resolve;
+      });
+    }) as typeof fetch);
     const user = userEvent.setup();
     renderRecentChats();
-    await waitFor(() => expect(fetchSpy).toHaveBeenCalledOnce());
+    await waitFor(() => expect(listRequests).toBe(1));
 
     await user.click(screen.getByRole("button", { name: "List settings" }));
     await user.click(screen.getByRole("menuitem", { name: selection }));
     await screen.findByText("No chats yet");
-    expect(fetchSpy).toHaveBeenCalledTimes(2);
+    expect(listRequests).toBe(2);
 
     await act(async () => {
       respond(
@@ -523,7 +636,10 @@ describe("RecentChats", () => {
 
   it("offers a retry instead of claiming the guardian has no chats when the fetch fails", async () => {
     let attempts = 0;
-    rs.spyOn(globalThis, "fetch").mockImplementation((async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      if (!String(input).startsWith("/api/chat/sessions")) {
+        return new Response("not found", { status: 404 });
+      }
       attempts += 1;
       if (attempts === 1) return new Response("boom", { status: 500 });
       return new Response(
@@ -1331,6 +1447,31 @@ describe("RecentChats", () => {
     await user.click(screen.getByRole("button", { name: "Load 1 more" }));
     expect(screen.getByText("Session 25")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Load \d+ more/ })).toBeNull();
+  });
+
+  it("lists an archived topic chat with the archived chats, and no active one", async () => {
+    const topic = (id: string, name: string, archivedAt?: string) => ({
+      id,
+      name,
+      agentName: "core:concierge",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      activityAt: "2026-07-08T10:00:00.000Z",
+      lastSeenActivityAt: null,
+      unread: false,
+      projectName: "alpha",
+      projectPath: "alpha",
+      ...(archivedAt ? { archivedAt } : {}),
+    });
+    mockSessions([
+      topic("topic-1", "Live topic"),
+      topic("topic-2", "Old topic", "2026-07-08T12:00:00.000Z"),
+    ]);
+    const user = userEvent.setup();
+    renderRecentChats();
+    await user.click(await screen.findByRole("button", { name: "List settings" }));
+    await user.click(screen.getByRole("menuitem", { name: "Archived" }));
+    await waitFor(() => expect(screen.getByText("Old topic")).toBeTruthy());
+    expect(screen.queryByText("Live topic")).toBeNull();
   });
 
   it("refetches with a status query when the status filter changes", async () => {

@@ -50,15 +50,69 @@ describe("AppManifestSchema eventSources", () => {
       new URL("../../../../../rome_apps/connector/app.yaml", import.meta.url),
     );
     const manifest = AppManifestSchema.parse(parseYaml(await readFile(path, "utf-8")));
-    expect(manifest.eventSources).toEqual([
+    const [github, ...composio] = manifest.eventSources ?? [];
+    expect(github).toEqual(
       expect.objectContaining({
         events: "provider:event:github.*",
         keys: [["repository.full_name"], ["organization.login"]],
         ensureAction: "connector_event_ensure",
       }),
-    ]);
+    );
+    // Every Composio event is declared by its exact name, with no key.
+    expect(composio.map((source) => source.events)).toContain(
+      "provider:event:gmail.gmail_new_gmail_message",
+    );
+    for (const source of composio) {
+      expect(source).toEqual({
+        events: expect.stringMatching(/^provider:event:[a-z]+\.[a-z_]+$/),
+        ensureAction: "connector_event_ensure",
+      });
+    }
     expect(manifest.eventSources?.[0]?.types).toEqual(
       expect.arrayContaining(["workflow_run", "pull_request", "check_suite"]),
     );
+  });
+});
+
+describe("AppManifestSchema watchProvider", () => {
+  const provider = {
+    sources: "watch_sources",
+    ensure: "watch_ensure",
+    normalize: "watch_normalize",
+    release: "watch_release",
+  };
+
+  it("accepts the four actions an app provides watch through", () => {
+    expect(AppManifestSchema.parse({ ...base, watchProvider: provider }).watchProvider).toEqual(
+      provider,
+    );
+  });
+
+  it("rejects a missing action and unknown fields", () => {
+    const { release: _release, ...missing } = provider;
+    expect(() => AppManifestSchema.parse({ ...base, watchProvider: missing })).toThrow();
+    expect(() =>
+      AppManifestSchema.parse({ ...base, watchProvider: { ...provider, extra: "x" } }),
+    ).toThrow();
+    // Only its own actions: a namespaced name could point at another app's.
+    expect(() =>
+      AppManifestSchema.parse({
+        ...base,
+        watchProvider: { ...provider, release: "connector:connector_github_unsubscribe" },
+      }),
+    ).toThrow();
+  });
+
+  it("is declared by the connector app", async () => {
+    const path = fileURLToPath(
+      new URL("../../../../../rome_apps/connector/app.yaml", import.meta.url),
+    );
+    const manifest = AppManifestSchema.parse(parseYaml(await readFile(path, "utf-8")));
+    expect(manifest.watchProvider).toEqual({
+      sources: "connector_watch_sources",
+      ensure: "connector_watch_ensure",
+      normalize: "connector_watch_normalize",
+      release: "connector_watch_release",
+    });
   });
 });

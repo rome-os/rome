@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate, useSearchParams } from "react-router-dom";
+import { toast } from "sonner";
 import { takeLoginReturn } from "@/lib/login-return";
-import { submitSetupReturn } from "@/lib/setup-api";
+import { isTerminalSetup, submitSetupReturn } from "@/lib/setup-api";
+import { followSetupForEnded } from "@/components/setup/use-setup";
 
 interface OAuthRedeemPayload {
   nextPath?: string;
   error?: string;
+  /** The redeem reached another account and ended the connection. */
+  ended?: boolean;
 }
 
 /** The connections list — where a return leg lands when it cannot name the
@@ -36,7 +40,9 @@ function connectionPath(connectionKind: string | undefined): string {
  *  `done` either: `/api/setups/:cid` stays private, so an anonymous browser has
  *  no way to poll for the real outcome. */
 type ReturnOutcome =
-  | { redirect: string }
+  /** `ended` when the setup's fix reached another account, so it ended the
+   *  connection it fixed and started one to that account. */
+  | { redirect: string; ended?: boolean; follow?: string }
   | { error: string }
   | { delivered: true }
   | { cancelled: true }
@@ -136,7 +142,18 @@ function handleOAuthReturnOnce(
       if (!(await hasDashboardSession())) return { delivered: true };
       // The setup consumed the leg and is finishing the redeem; the connection's
       // detail page re-attaches and settles it.
-      return { redirect: connectionPath(returned.connectionKind) };
+      const ended = returned.state?.status === "done" && Boolean(returned.state.grant?.ended);
+      // A setup still redeeming can end the connection after this page has
+      // gone, and the detail page may never see it, so it is followed here.
+      const follow =
+        returned.cid && returned.state && !isTerminalSetup(returned.state)
+          ? returned.cid
+          : undefined;
+      return {
+        redirect: connectionPath(returned.connectionKind),
+        ...(ended ? { ended } : {}),
+        ...(follow ? { follow } : {}),
+      };
     }
 
     // A broker error (denied consent) means no connection could have succeeded —
@@ -156,7 +173,10 @@ function handleOAuthReturnOnce(
     // The server names "/" for a plain sign-in; the page the guardian was
     // sent to /login from wins over it. /onboard and connection pages stand.
     const nextPath = payload?.nextPath || "/";
-    return { redirect: nextPath === "/" ? takeLoginReturn() : nextPath };
+    return {
+      redirect: nextPath === "/" ? takeLoginReturn() : nextPath,
+      ...(payload?.ended ? { ended: true } : {}),
+    };
   })().catch((error) => {
     returnHandlers.delete(key);
     throw error;
@@ -248,7 +268,12 @@ export default function CallbackPage() {
           setConnectionFailed(outcome.connectionFailed);
           return;
         }
+        // The detail page cannot re-attach to a finished setup, so the
+        // callback tells the guardian a fix ended the connection it fixed.
+        const endedNotice = t("connections.accounts.endedAnother", { ns: "settings" });
+        if (outcome.ended) toast(endedNotice);
         navigate(outcome.redirect, { replace: true });
+        if (outcome.follow) void followSetupForEnded(outcome.follow, endedNotice);
       } catch (returnError) {
         if (cancelled) return;
         setError(returnError instanceof Error ? returnError.message : fallbackError);

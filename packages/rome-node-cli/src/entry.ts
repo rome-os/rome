@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { readFileSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { isRecord, cloudOrigin, validId, type ActionResponse } from "@rome-os/node-core";
-import { authorizeServer, configureCaller } from "@rome-os/node-core/auth";
+import { authorizeServer, configureCaller, configureSignerCaller } from "@rome-os/node-core/auth";
 import {
   createNodeClient,
   CallerConfigurationError,
@@ -18,6 +18,7 @@ import { commandHelp } from "./help.js";
 import { copyRequest } from "./copy.js";
 import { CLI_AUDIT_HINT, cliAuditPath, runAudit } from "./audit.js";
 import type { ConnectUi } from "./connect-ui.js";
+import { loadConnectUi } from "./load-connect-ui.js";
 
 const version = (): string | undefined => {
   try {
@@ -171,11 +172,14 @@ async function main(): Promise<void> {
   if (positionals[0] === "auth" && positionals.length === 1) {
     const cloudUrl = cloudOrigin(values.cloud ?? "https://romeos.cc");
     if (values.server) {
-      await authorizeServer(cloudUrl, process.env.ROME_INSTANCE_TOKEN, config, () => {
-        process.stderr.write(
-          "Rome Cloud is temporarily unavailable. Retrying server authorization.\n",
-        );
-      });
+      const signerSocket = process.env.ROME_SIGNER_SOCKET?.trim();
+      if (signerSocket) await configureSignerCaller(cloudUrl, signerSocket, config);
+      else
+        await authorizeServer(cloudUrl, process.env.ROME_INSTANCE_TOKEN, config, () => {
+          process.stderr.write(
+            "Rome Cloud is temporarily unavailable. Retrying server authorization.\n",
+          );
+        });
       process.stdout.write(`${JSON.stringify({ configured: true })}\n`);
       return;
     }
@@ -264,7 +268,7 @@ async function main(): Promise<void> {
       );
     else process.stderr.write(`Audit log: ${audit.path}\n`);
     // On a terminal, the status screen replaces the Connection lines once sign-in is over.
-    const screen = process.stdout.isTTY ? await import("./connect-ui.js") : undefined;
+    const screen = process.stdout.isTTY ? await loadConnectUi() : undefined;
     let ui: ConnectUi | undefined;
     const cloud = values.cloud ?? "https://romeos.cc";
     await withShutdown((signal) =>

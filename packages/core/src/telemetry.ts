@@ -23,7 +23,11 @@ import {
   DiagLogLevel,
   SpanStatusCode,
 } from "@opentelemetry/api";
-import { setTelemetryBridge, type ChannelInbound } from "@rome-os/app-runtime";
+import {
+  setTelemetryBridge,
+  type AgentAccounting,
+  type ChannelInbound,
+} from "@rome-os/app-runtime";
 import { currentSessionId, runWithSession } from "./telemetry-context.js";
 import { resolveInstanceSlug, runningInsideDocker } from "./lib/runtime.js";
 import { createLogger } from "./logger.js";
@@ -209,14 +213,15 @@ export function wrapHookSpan<T>(
 const channelInboundLog = createLogger("channels");
 
 /**
- * Emit the one "channel message received" log record for an inbound channel
- * message, carrying its content. `createLogger` mirrors it to `otel_logs`,
+ * Emit the one log record for an inbound message, carrying its content. The
+ * record keeps its stored text, "channel message received", so queries over
+ * earlier logs still match. `createLogger` mirrors it to `otel_logs`,
  * and the OTEL logger stamps the active span context, so call this inside
  * whatever span covers the delivery. Two boundaries emit it: the webchat
  * accepted-turn boundary in `api/routes/webchat.ts`, and
- * `withInboundSpans` for every channel the channel-message hook hears.
+ * `withInboundSpans` for every message the `channel-message` hook hears.
  */
-export function logInboundChannelMessage(msg: {
+export function logInboundMessage(msg: {
   channel: string;
   threadId: string;
   channelUserId: string;
@@ -236,7 +241,7 @@ export function logInboundChannelMessage(msg: {
  * `channels` with each inbound port instrumented for the hook named
  * `hookName`. Every event a subscriber handles runs in a
  * `channel:{name}.handle` → `hook:{hookName}` span pair, and emits one
- * inbound-message log record (see `logInboundChannelMessage`) linked to the
+ * inbound-message log record (see `logInboundMessage`) linked to the
  * channel span. A handler that throws marks both spans as errors and still
  * throws to the channel.
  *
@@ -263,7 +268,7 @@ export function withInboundSpans<
               "channel.user_id": message.senderId,
             },
             () => {
-              logInboundChannelMessage({
+              logInboundMessage({
                 channel: name,
                 threadId: message.chatId,
                 channelUserId: message.senderId,
@@ -357,6 +362,26 @@ export function modelTokenMetricAttributes(
     ...(attribution.agentName ? { "agent.name": attribution.agentName } : {}),
     ...(attribution.appStoreListingId ? { "rome.app.id": attribution.appStoreListingId } : {}),
   };
+}
+
+/** Record a turn's duration and tokens from its accounting, attributed by the run. */
+export function recordModelTurnMetrics(
+  accounting: AgentAccounting | undefined,
+  attribution: ModelMetricAttribution,
+): void {
+  if (!accounting) return;
+  const { model, durationMs, usage } = accounting;
+  if (typeof durationMs === "number" && Number.isFinite(durationMs)) {
+    modelTurnDurationMetric().record(durationMs, { model });
+  }
+  const tokens = modelTokensMetric();
+  // Cache reads and writes are billed on the input path, and the "in" series
+  // shows the total input work sent.
+  const inTokens = usage.inputTokens + usage.cacheReadTokens + usage.cacheWriteTokens;
+  if (inTokens > 0) tokens.add(inTokens, modelTokenMetricAttributes(model, "in", attribution));
+  if (usage.outputTokens > 0) {
+    tokens.add(usage.outputTokens, modelTokenMetricAttributes(model, "out", attribution));
+  }
 }
 
 export const actionDurationMetric = lazyDurationHistogram(

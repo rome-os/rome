@@ -17,9 +17,6 @@ const ALWAYS_REQUIRED = [
   "inbox",
   "browser-automation",
   "connector",
-  // First-run onboarding: the web lands a freshly-onboarded guardian on this
-  // app, whose web UI opens the conversational welcome flow.
-  "welcome-to-rome",
   // Guardian-facing skills surface: browse/invoke + import/generate.
   "skills",
 ] as const;

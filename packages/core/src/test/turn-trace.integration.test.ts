@@ -1,3 +1,5 @@
+import { sessionOpeningFor } from "../core/session-opening.js";
+import { testChannelSurface } from "./channel-surface.js";
 /**
  * Direct `sendTurn` path (webchat-style, no channel adapter): the turn
  * span is the trace root and post-turn work wrapped in `handle.turnContext`
@@ -19,16 +21,20 @@ async function drainOneTurn(
   rig: GoldenTraceRig,
   opts?: { linkFromSpanContext?: SpanContext },
 ): Promise<{ turnContext: Context }> {
+  const channelThreadKey = "webchat:turn-trace-test";
   const session = await rig.manager.acquire(
-    { agentName: "test-main", channelThreadKey: "webchat:turn-trace-test" },
-    { workingDir: "/tmp" },
+    { agentName: "test-main", channelThreadKey },
+    {
+      ...sessionOpeningFor({ channelSurface: testChannelSurface })(channelThreadKey),
+      workingDir: "/tmp",
+    },
   );
 
   const handle = session.sendTurn(
     { prompt: "hi" },
     opts?.linkFromSpanContext ? { links: [{ context: opts.linkFromSpanContext }] } : undefined,
   );
-  for await (const _ of handle.events) {
+  for await (const _ of handle.events()) {
     // drain
   }
   return { turnContext: handle.turnContext };

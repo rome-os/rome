@@ -14,8 +14,8 @@ import type { ThreadContext } from "./types.js";
 import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";
 import type { Logger } from "../logger.js";
 import { isCoreMainAgentId } from "../apps/artifact-id.js";
-import { isTransientDelta } from "./agent-message.js";
-import type { SessionConversation } from "./session-conversation.js";
+import { isTransientDelta } from "../agent/index.js";
+import type { SessionChat } from "./session-conversation.js";
 
 export interface AgentTraceRecorderInput {
   webchatRepo: WebChatRepository;
@@ -74,8 +74,11 @@ export function resolveRomeSessionId(input: RomeSessionIdInput): string {
 }
 
 export interface TurnConversationInput extends RomeSessionIdInput {
-  /** The conversation the session serves, as it stood when the turn started. */
-  sessionConversation?: SessionConversation;
+  /** The chat the session's opener named. It wins over the one this turn's
+   *  caller names. Temporary, see `openerChat` (ZHA-157). */
+  openerChat?: string;
+  /** The chat that has the session, read when no chat is named. */
+  sessionChat?: SessionChat;
 }
 
 // Conversations whose turns only the recorder writes. A webchat conversation
@@ -107,10 +110,8 @@ export function resolveTurnConversation(input: TurnConversationInput): {
   promptPersisted: boolean;
   recorderOwned: boolean;
 } {
-  const conversation = input.sessionConversation;
-  // The opener's named conversation wins over the one this turn's caller names.
-  const named = conversation?.origin === "named" ? conversation.id : input.romeSessionId;
-  const found = !named && conversation?.origin === "recorded" ? conversation : undefined;
+  const named = input.openerChat ?? input.romeSessionId;
+  const found = named ? undefined : input.sessionChat;
   const ownedByRecorder =
     found !== undefined &&
     RECORDER_OWNED_CONVERSATION_TYPES.has(found.type) &&
@@ -145,6 +146,22 @@ export class AgentTraceRecorder {
 
   async record(msg: AgentEvent & { agent?: string }): Promise<void> {
     await this.recordBatch([msg], this.seq);
+  }
+
+  /** Keeps what a system turn was handed, under its label, as one trace block. */
+  async recordSystemInput(label: string, content: string): Promise<void> {
+    await this.ensureSession();
+    const sessionId = this.romeSessionId();
+    await this.input.webchatRepo.appendTraceBlocks({
+      messageId: this.traceMessageId(sessionId),
+      sessionId,
+      turnId: this.input.turnId,
+      startSeq: this.seq,
+      blocks: [{ type: "system_input", label, content }],
+      trigger: this.triggerMetadata(),
+      transcriptMessages: [],
+    });
+    this.seq += 1;
   }
 
   async recordBatch(
@@ -200,6 +217,9 @@ export class AgentTraceRecorder {
       sourceThreadName,
       sourceThreadType: thread?.threadType ?? null,
       trigger: type === "action" ? trigger : undefined,
+      // An agent an action starts from a dashboard chat serves that chat's
+      // turn: it is that chat's owner's, and as private as the chat.
+      servesSessionId: type === "action" ? this.callerChatId() : null,
     });
     this.ensured = true;
   }
@@ -231,6 +251,13 @@ export class AgentTraceRecorder {
       rootActionExecutionId: ctx.rootExecutionId ?? null,
       parentActionExecutionId: ctx.parentExecutionId ?? null,
     };
+  }
+
+  /** The dashboard chat whose turn called the action this run serves, if any. */
+  private callerChatId(): string | null {
+    const caller = this.currentActionContext()?.channelContext;
+    if (caller?.channel !== "webchat") return null;
+    return caller.romeSessionId ?? caller.threadId ?? null;
   }
 
   private currentActionContext(): CurrentActionContext | undefined {
@@ -294,12 +321,12 @@ export function shouldPersistAgentTrace(threadContext?: ThreadContext): boolean 
   return threadContext?.channel !== "webchat";
 }
 
-function textMessageContent(content: string): string {
+export function textMessageContent(content: string): string {
   const parts: MessagePart[] = [{ type: "text", content }];
   return JSON.stringify(parts);
 }
 
-function transcriptMessageId(
+export function transcriptMessageId(
   sessionId: string,
   turnId: string,
   role: RomeAgentTranscriptMessageInput["role"],

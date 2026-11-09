@@ -47,7 +47,12 @@ import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
 import { platformOf } from "@rome/api-types/platform";
+import type { ConnectedAccountEntry } from "@rome/api-types/connected-accounts";
 import { connections } from "./connections-store";
+
+/** Connected accounts left by a disconnect in this session, each with its
+ *  agent. Core keeps them, so Envoys lists them as disconnected. */
+const disconnectedAccounts: ConnectedAccountEntry[] = [];
 import { dir, file, fileBrowserHandlers, type MockFsNode } from "./file-browser";
 import { memoryFileHandlers } from "./memory-files";
 import { peopleHandlers } from "./people-api";
@@ -1001,14 +1006,11 @@ const projectFileHandlers = fileBrowserHandlers({
 });
 
 /**
- * The two remaining reads the Settings page makes. The page holds its
- * loading gate until `/api/tailscale/devices` settles, and the Connections tab
- * waits on the Composio status alongside `/api/connections`. In strict E2E
- * mode, unhandled reads hit the 503 fallback and leave those panels in an
- * error state. These fixtures keep the page usable without a backend.
+ * The Connections tab waits on the Composio status alongside
+ * `/api/connections`. In strict E2E mode, unhandled reads hit the 503 fallback
+ * and leave that panel in an error state. This fixture keeps the page usable
+ * without a backend.
  */
-const tailscale = { mode: "oauth" as const, configured: false, devices: [] };
-
 const composioStatus: { composio: ComposioCliStatus } = {
   composio: {
     installed: true,
@@ -1336,6 +1338,46 @@ export const handlers = [
     HttpResponse.json({ agents: mockAgentNames.map((name) => ({ name })) }),
   ),
   http.get("/api/connections", () => HttpResponse.json(connections)),
+  // Every connected account, the ones a connection reaches and the ones left
+  // disconnected with their agent, as core lists them.
+  http.get("/api/connected-accounts", () =>
+    HttpResponse.json({
+      accounts: [
+        ...connections.connections.flatMap((connection) =>
+          connection.id !== null && connection.account && connection.agent !== undefined
+            ? [
+                {
+                  account: connection.account,
+                  name: Object.values(connection.display)[0]?.displayName ?? null,
+                  agent: connection.agent,
+                  connection: connection.id,
+                },
+              ]
+            : [],
+        ),
+        ...disconnectedAccounts,
+      ],
+    }),
+  ),
+  // A disconnected account can be unlinked by its account. Linking it waits
+  // until it is connected again, which mock mode cannot do.
+  http.put("/api/connected-accounts/:platform/:accountId/agent", async ({ params, request }) => {
+    const body = (await request.json()) as { agent: string | null };
+    const entry = disconnectedAccounts.find(
+      (candidate) =>
+        candidate.account.platform === String(params.platform) &&
+        candidate.account.id === String(params.accountId),
+    );
+    if (!entry) return HttpResponse.json({ error: "Unknown account." }, { status: 404 });
+    if (body.agent !== null) {
+      return HttpResponse.json(
+        { error: "This account is not connected. Connect it again to link an agent." },
+        { status: 409 },
+      );
+    }
+    entry.agent = null;
+    return HttpResponse.json({ account: entry });
+  }),
   // Link an agent to a connected account, named by its connection's id. Only
   // this account changes: an agent may be linked to any number of accounts,
   // several on one platform included.
@@ -1376,6 +1418,9 @@ export const handlers = [
     if (!(grant in connection.grants)) {
       return HttpResponse.json({ error: "Unknown grant." }, { status: 404 });
     }
+    // The name the connection showed, which its connected account keeps.
+    const shown = connection.display[grant];
+    const name = shown?.displayName || shown?.handle || null;
     connection.grants[grant] = "unauthorized";
     connection.state = null;
     connection.display[grant] = null;
@@ -1392,10 +1437,19 @@ export const handlers = [
         missingGrants: [grant],
       };
     }
-    // Core removes an account of a service that names its accounts, which
-    // the services that take an agent are.
+    // Core ends the connection of a service that names its accounts, which
+    // the services that take an agent are. The connected account stays with
+    // its agent, listed as disconnected.
     const unconnectedAccount = Boolean(connection.link);
     if (!unconnectedAccount) return HttpResponse.json({ ok: true, connection });
+    if (connection.account && connection.agent) {
+      disconnectedAccounts.push({
+        account: connection.account,
+        name,
+        agent: connection.agent,
+        connection: null,
+      });
+    }
     const others = connections.connections.filter(
       (candidate) =>
         candidate !== connection && candidate.connectionKind === connection.connectionKind,
@@ -1404,13 +1458,13 @@ export const handlers = [
       connections.connections.splice(connections.connections.indexOf(connection), 1);
     } else {
       connection.id = null;
+      connection.account = null;
       connection.label = connection.connectionKind;
       connection.channel = null;
       connection.agent = null;
     }
     return HttpResponse.json({ ok: true, connection: null });
   }),
-  http.get("/api/tailscale/devices", () => HttpResponse.json(tailscale)),
   http.get("/api/integrations/composio/status", () => HttpResponse.json(composioStatus)),
   http.get("/api/chat-settings", () => HttpResponse.json(conversationSettings)),
   // Auto-save writes through on every edit, so mock mode needs a real write

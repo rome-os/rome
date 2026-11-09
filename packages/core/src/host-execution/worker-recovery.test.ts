@@ -16,7 +16,7 @@ import { ActionExecutionsRepository } from "../db/repositories/action-executions
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import { RoutineEngine } from "../routines/engine.js";
-import { createActionEngineRepos, createTestDb } from "../test/helpers.js";
+import { createActionEngineRepos, createTestDb } from "../test/db.js";
 import { buildAction, FakeClock } from "../test/kit/index.js";
 import { HostExecutionService } from "./service.js";
 import { createHostWorkerRecovery } from "./worker-recovery.js";

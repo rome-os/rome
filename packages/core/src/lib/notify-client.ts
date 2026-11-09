@@ -1,4 +1,4 @@
-import { getInstanceToken } from "./instance-identity.js";
+import { cloudBearer } from "./instance-identity.js";
 import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
 /**
@@ -31,37 +31,53 @@ export interface NotifyService {
   send(content?: NotifyContent): Promise<SendOutcome>;
 }
 
+/** How a push asks the phone to present it: `active` alerts, `passive` arrives silently. */
+export type NotifyLevel = "active" | "passive";
+
+/**
+ * A push the instance sends on its own, outside the `send_notification`
+ * action. `level` and `chatId` are routing data for Rome Cloud and the phone:
+ * how the push is presented and which chat a tap opens. They are never shown,
+ * so `body` stays the only displayed sender content. Main-process only: no
+ * worker or agent input reaches these fields.
+ */
+export interface SystemNotifyContent extends NotifyContent {
+  level?: NotifyLevel;
+  chatId?: string;
+}
+
 const HTTP_TIMEOUT_MS = 120_000;
 
 export interface NotifyClientDeps {
-  getToken?: () => string | null;
+  getToken?: () => string | null | Promise<string | null>;
   getOrigin?: () => string | null;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
 }
 
 /**
- * Main-process sender for the `send_notification` action. Reads the
- * current instance token and Rome Cloud origin **fresh on every call** (never
+ * Main-process sender for the `send_notification` action and the Concierge's
+ * proactive pushes. Reads the
+ * current Rome Cloud bearer and origin **fresh on every call** (never
  * cached, never from `ROME_INSTANCE_TOKEN`) so token rotation/revocation is
  * honored, and never mutates the token store — clearing a rejected token stays
  * owned by the existing enrollment/heartbeat flow.
  */
 export class NotifyClient implements NotifyService {
-  private readonly getToken: () => string | null;
+  private readonly getToken: () => string | null | Promise<string | null>;
   private readonly getOrigin: () => string | null;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
 
   constructor(deps: NotifyClientDeps = {}) {
-    this.getToken = deps.getToken ?? getInstanceToken;
+    this.getToken = deps.getToken ?? cloudBearer;
     this.getOrigin = deps.getOrigin ?? getRomeCloudOrigin;
     this.fetchImpl = deps.fetchImpl ?? fetch;
     this.timeoutMs = deps.timeoutMs ?? HTTP_TIMEOUT_MS;
   }
 
-  async send(content?: NotifyContent): Promise<SendOutcome> {
-    const token = this.getToken();
+  async send(content?: SystemNotifyContent): Promise<SendOutcome> {
+    const token = await this.getToken();
     if (!token) return { kind: "no_token" };
     const origin = this.getOrigin();
     if (!origin) return { kind: "unconfigured" };
@@ -70,14 +86,19 @@ export class NotifyClient implements NotifyService {
     // no request could have been sent.
     const url = new URL("/api/notify", origin);
 
-    // Only attach a JSON body when a `body` is supplied. Absent content sends no
+    // Only attach a JSON body when a field is supplied. Absent content sends no
     // HTTP body; an empty/whitespace string is forwarded unchanged — Rome Cloud
     // owns the fallback decision.
     const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
     let requestBody: string | undefined;
-    if (content?.body !== undefined) {
+    const fields = {
+      ...(content?.body !== undefined ? { body: content.body } : {}),
+      ...(content?.level !== undefined ? { level: content.level } : {}),
+      ...(content?.chatId !== undefined ? { chatId: content.chatId } : {}),
+    };
+    if (Object.keys(fields).length > 0) {
       headers["Content-Type"] = "application/json";
-      requestBody = JSON.stringify({ body: content.body });
+      requestBody = JSON.stringify(fields);
     }
 
     // The abort signal must stay live across BOTH the fetch AND the body read,

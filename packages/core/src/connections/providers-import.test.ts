@@ -28,11 +28,10 @@ rs.mock("../lib/provider-token-files.js", () => ({
   clearProviderTokenFile: rs.fn(async () => {}),
 }));
 
-import { createTestDb } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { OAuthProvider } from "../lib/oauth-providers.js";
 import type { OAuthTokenBundle } from "../lib/oauth-token-bundle.js";
-import { DifferentAccountError } from "./errors.js";
 import { DrizzleConnectionsRepository } from "./repository-db.js";
 import { ConnectionRegistry } from "./registry.js";
 import {
@@ -407,19 +406,64 @@ describe.each(BUNDLES)("importProviderBundle [%s]", (provider, grant, bundle) =>
   });
 });
 
-describe("a sign-in fix reaches the same account", () => {
-  it("refuses a redeem for another account and keeps the one connected", async () => {
+describe("a sign-in fix that reaches another account", () => {
+  it("ends the connection to the first account and starts one to the other", async () => {
     const registry = makeRegistry(freshDb());
     await importProviderBundle(registry, "github", { accessToken: "gho-1" }, { subject: "42" });
+    const [first] = registry.find("github");
+
+    const ended: string[] = [];
+    await importProviderBundle(
+      registry,
+      "github",
+      { accessToken: "gho-2" },
+      { subject: "99" },
+      { onEnded: (id) => ended.push(id) },
+    );
+
+    expect(ended).toEqual([first!.id]);
+    const connections = registry.find("github");
+    expect(connections).toHaveLength(1);
+    expect(connections[0]!.id).not.toBe(first!.id);
+    const rec = await grantProfile(registry, "github");
+    expect(rec?.profile).toMatchObject({ subject: "99" });
+  });
+
+  it("leaves the connection alone when a sign-in to Rome reaches another account", async () => {
+    const registry = makeRegistry(freshDb());
+    await importProviderBundle(registry, "github", { accessToken: "gho-1" }, { subject: "42" });
+    const [first] = registry.find("github");
 
     await expect(
-      importProviderBundle(registry, "github", { accessToken: "gho-2" }, { subject: "99" }),
-    ).rejects.toBeInstanceOf(DifferentAccountError);
+      importProviderBundle(
+        registry,
+        "github",
+        { accessToken: "gho-2" },
+        { subject: "99" },
+        { signIn: true },
+      ),
+    ).resolves.toBe(true);
 
+    expect(registry.find("github").map((connection) => connection.id)).toEqual([first!.id]);
     const rec = await grantProfile(registry, "github");
     expect(rec?.profile).toMatchObject({ subject: "42" });
     expect(rec?.credential?.material).toMatchObject({ kind: "inline" });
-    expect(registry.find("github")).toHaveLength(1);
+  });
+
+  it("lets a sign-in to Rome with the same account renew the grant", async () => {
+    const registry = makeRegistry(freshDb());
+    await importProviderBundle(registry, "github", { accessToken: "gho-1" }, { subject: "42" });
+    const [first] = registry.find("github");
+
+    await importProviderBundle(
+      registry,
+      "github",
+      { accessToken: "gho-2" },
+      { subject: "42" },
+      { signIn: true },
+    );
+
+    expect(registry.find("github").map((connection) => connection.id)).toEqual([first!.id]);
   });
 });
 

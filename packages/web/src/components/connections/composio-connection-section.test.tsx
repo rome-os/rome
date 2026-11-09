@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
 import { ComposioConnectionSection } from "@/components/connections/composio-connection-section";
@@ -126,6 +127,103 @@ describe("ComposioConnectionSection", () => {
       "/api/apps/connector/webhook/register",
       expect.objectContaining({ method: "POST" }),
     );
+  });
+
+  it("says when the Composio webhook delivers to another Rome", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input) === "/api/apps/connector/webhook/target"
+        ? Response.json({ target: "elsewhere" })
+        : Response.json({ webhookRegistered: true, relayConfigured: true }),
+    );
+    renderSection(status({ loggedIn: true }), { card: composioCard(status({ loggedIn: true })) });
+    expect(await screen.findByText("Going to another Rome")).toBeTruthy();
+    expect(screen.queryByText("Ready")).toBeNull();
+  });
+
+  it("shows the pinned Composio project, marks the default, and notes what a switch leaves behind", async () => {
+    let selected = "pr_second";
+    const fetchMock = rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input);
+      if (url === "/api/apps/connector/projects/select" && init?.method === "POST") {
+        selected = JSON.parse(String(init.body)).projectId;
+        return Response.json({ ok: true, webhookError: "Relay is not configured." });
+      }
+      if (url === "/api/apps/connector/projects") {
+        return Response.json({
+          fixed: false,
+          items: [
+            {
+              id: "pr_default",
+              name: "Main",
+              selected: selected === "pr_default",
+              isDefault: true,
+            },
+            {
+              id: "pr_second",
+              name: "Second",
+              selected: selected === "pr_second",
+              isDefault: false,
+            },
+          ],
+        });
+      }
+      return Response.json({ webhookRegistered: true, relayConfigured: true });
+    });
+    const user = userEvent.setup();
+    const onFlash = rs.fn();
+    renderSection(status({ loggedIn: true }), {
+      card: composioCard(status({ loggedIn: true })),
+      onFlash,
+    });
+
+    const picker = await screen.findByRole("combobox", { name: "Composio project" });
+    expect(within(picker).getByText("Second")).toBeTruthy();
+    await user.click(picker);
+    await user.click(await screen.findByRole("option", { name: "Main (default)" }));
+
+    expect(
+      await screen.findByText(
+        "Connect your services again in this project, then ask Concierge to follow them again.",
+      ),
+    ).toBeTruthy();
+    expect(onFlash).toHaveBeenCalledWith("Relay is not configured.");
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/apps/connector/projects/select",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ projectId: "pr_default" }),
+      }),
+    );
+  });
+
+  it("shows no project row when the account has a single project", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input) === "/api/apps/connector/projects"
+        ? Response.json({
+            fixed: false,
+            items: [{ id: "pr_only", name: "Only", selected: true, isDefault: true }],
+          })
+        : Response.json({ webhookRegistered: true, relayConfigured: true }),
+    );
+    renderSection(status({ loggedIn: true }), { card: composioCard(status({ loggedIn: true })) });
+
+    expect(await screen.findByText("Ready")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Project")).toBeNull());
+    expect(screen.queryByRole("combobox", { name: "Composio project" })).toBeNull();
+  });
+
+  it("shows the project row when the pinned project is gone from the list, even with one left", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input) === "/api/apps/connector/projects"
+        ? Response.json({
+            fixed: false,
+            items: [{ id: "pr_only", name: "Only", selected: false, isDefault: true }],
+          })
+        : Response.json({ webhookRegistered: true, relayConfigured: true }),
+    );
+    renderSection(status({ loggedIn: true }), { card: composioCard(status({ loggedIn: true })) });
+
+    expect(await screen.findByRole("combobox", { name: "Composio project" })).toBeTruthy();
   });
 
   it("Disconnect posts to the composio logout endpoint and refreshes", async () => {

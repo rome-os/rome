@@ -17,9 +17,11 @@ export function ModelSwitchNotice({
   return (
     <p role="note" className={cn("mb-4 text-center text-aux text-muted-foreground", className)}>
       {quota
-        ? t("modelSwitch.quota", {
+        ? t(`modelSwitch.${quota.from === quota.to ? "model_limit" : (quota.reason ?? "quota")}`, {
             from: quota.from === "openai" ? "Codex" : "Claude",
             to: quota.to === "openai" ? "Codex" : "Claude",
+            fromModel: modelDisplayName(quota.fromModel ?? ""),
+            toModel: modelDisplayName(quota.model),
           })
         : t("modelSwitch.notice", { model: modelDisplayName(model) })}
     </p>

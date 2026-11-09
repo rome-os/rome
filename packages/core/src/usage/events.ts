@@ -2,12 +2,10 @@
 // Contract: docs/concepts/rome-cloud.md#usage-reporting.
 
 import type { AgentTurnStatus } from "@rome-os/app-runtime";
+import type { ModelLoginKind } from "../agent/index.js";
 
 /** Where the work came from. Subagent and fork turns take their root's kind. */
 export type UsageKind = "chat" | "channel" | "app" | "routine" | "other";
-
-/** Who paid the model provider for a turn. */
-export type UsageFunding = "rome_credits" | "byok" | "subscription" | "unknown";
 
 /**
  * What set the work off: a person, a schedule, an event or webhook, or
@@ -26,7 +24,8 @@ export interface TurnUsageEvent {
   status: AgentTurnStatus;
   provider: string;
   model: string | null;
-  funding: UsageFunding;
+  /** The kind of login the turn ran on. Left out when Rome cannot tell. */
+  loginKind?: ModelLoginKind;
   /** The provider's own turn id. Rome Cloud joins credit charges on it. */
   providerTurnId: string | null;
   inputTokens: number;
@@ -52,13 +51,7 @@ export interface ActionRunUsageEvent {
 }
 
 /** How the guardian signed in. */
-export type LoginMethod =
-  | "password"
-  | "onboard"
-  | "oauth"
-  | "handoff"
-  | "rome_cloud"
-  | "rome_cloud_native";
+export type LoginMethod = "password" | "onboard" | "oauth" | "rome_cloud" | "rome_cloud_native";
 
 /** One guardian sign-in to this instance. */
 export interface LoginUsageEvent {

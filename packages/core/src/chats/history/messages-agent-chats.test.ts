@@ -5,7 +5,7 @@ import type { Account } from "@rome-os/app-runtime";
 import { chatAt, directMessageAt } from "../../connections/chat-adapter.js";
 import type { ChatRef } from "../storage/place.js";
 import { chatMessages, romeAgentMessages } from "../../db/schema.js";
-import { createTestDb } from "../../test/helpers.js";
+import { createTestDb } from "../../test/db.js";
 import { speakerFixture } from "../../test/speakers.js";
 import { ChatAddresses } from "../../connections/chat-addresses.js";
 import {
@@ -15,10 +15,9 @@ import {
 } from "./messages-contract.js";
 import { chatsAgentMessages } from "./messages-agent.js";
 
-// Chats' messages read as an `AccountMessages` store: the same transcript
-// `agentMessages` reads from `rome_agent_messages`, read from the direct
-// messages Rome's account on each channel has with the account. The cases
-// mirror messages-agent.test.ts, so the two stores answer alike.
+// Chats' messages read as an `AccountMessages` store: Rome's transcript with
+// an account, read from the direct messages Rome's account on each channel has
+// with it.
 
 const CHANNEL = "telegram";
 /** The two addresses of the one account the fixtures speak to. */
@@ -42,7 +41,7 @@ const accountOn = (channel: string): Account =>
 /** The store, with each entry's ref naming its line by the key the fixture
  *  gave it rather than the id Chats did. */
 const read = (db: DrizzleDb) => {
-  const store = chatsAgentMessages(db, (channel) => [accountOn(channel)]);
+  const store = chatsAgentMessages(db, accountOn);
   const named = <M extends { ref: string } | null>(entry: M): M => {
     if (!entry) return entry;
     const id = Number(entry.ref.slice("agent:".length));
@@ -322,9 +321,9 @@ describe("chatsAgentMessages", () => {
     expect(there.map((entry) => entry.ref)).toEqual(["agent:m-elsewhere"]);
   });
 
-  // A kept connection signed in as another account keeps the direct messages
-  // its earlier account had, keyed by that account.
-  it("reads the direct messages of every account Rome spoke as on the channel", async () => {
+  // A connection signed in as another account reads that account's direct
+  // messages. What its earlier account said stays in that account's chats.
+  it("reads the direct messages of the account the channel's record holds, and none where it holds none", async () => {
     const earlier: Account = { platform: "telegram", id: "rome-earlier-bot" };
     const key = directMessageAt(earlier, DIRECT, new ChatAddresses(db));
     const fixture = speakerFixture(db);
@@ -343,18 +342,19 @@ describe("chatsAgentMessages", () => {
         saidAt: new Date(50_000),
       })
       .run();
-    const bodiesOf = async (accountsOn: (channel: string) => Account[]) =>
+    const bodiesOf = async (accountOf: (channel: string) => Account | null) =>
       (
-        await chatsAgentMessages(db, accountsOn).read({
+        await chatsAgentMessages(db, accountOf).read({
           accounts: [account],
           limit: WHOLE_HISTORY,
         })
       ).map((entry) => entry.body);
 
-    expect(await bodiesOf((channel) => [accountOn(channel)])).not.toContain("m-earlier");
-    const both = await bodiesOf((channel) => [accountOn(channel), earlier]);
-    expect(both).toContain("m-earlier");
-    expect(both).toContain("m-later");
+    const current = await bodiesOf(accountOn);
+    expect(current).toContain("m-later");
+    expect(current).not.toContain("m-earlier");
+    expect(await bodiesOf(() => earlier)).toEqual(["m-earlier"]);
+    expect(await bodiesOf(() => null)).toEqual([]);
   });
 
   /** How many statements `read` runs against the database. */
@@ -392,7 +392,7 @@ describe("chatsAgentMessages", () => {
 
   it("names every entry's conversation without a statement per entry", async () => {
     const runs = await statementsRun(async () => {
-      const page = await chatsAgentMessages(db, (channel) => [accountOn(channel)]).read({
+      const page = await chatsAgentMessages(db, accountOn).read({
         accounts: [account],
         limit: WHOLE_HISTORY,
       });

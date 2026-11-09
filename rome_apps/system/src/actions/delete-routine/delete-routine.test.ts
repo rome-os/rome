@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import type { ActionConfig } from "@rome-os/app-runtime";
-import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
+import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/db.js";
 import {
   RoutinesRepository,
   toRoutine,

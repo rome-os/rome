@@ -1,5 +1,6 @@
 import { encodeFrame, FRAME_TYPE, frameFits, isUuid, parseFrame, type Frame } from "./frame.js";
 import { parseGatewayUrl } from "./gateway-url.js";
+import { isJwt } from "./signer.js";
 import {
   CLOSE,
   gatewayMessage,
@@ -26,9 +27,19 @@ export type ConnectionStatus =
   | "revoked"
   | "superseded"
   | "stopped";
+/** How often a connection opened with a JWT asks the Gateway to extend its deadline. */
+const REAUTH_INTERVAL_MS = 60_000;
+const DEVICE_TOKEN = /^(?:romedev_|romemob_)[A-Za-z0-9_-]{43}$/;
+
 export interface GatewayClientOptions {
   gatewayUrl: string;
-  deviceToken: string;
+  /**
+   * Called on every connect and reconnect, and for each refresh of a JWT connection. Returns
+   * a device token or a JWT. A JWT lives 60 seconds, so return a fresh one each time.
+   */
+  getToken(): string | Promise<string>;
+  /** Tests only. Defaults to the global fetch. */
+  fetch?: typeof fetch;
   createSocket(url: string, authorization: string): ClientSocket;
   onMessage(message: GatewayMessage): void;
   /** Receives parsed binary frames. Unparseable binary messages are dropped. */
@@ -40,14 +51,13 @@ export interface GatewayClientOptions {
 
 export function connectGateway(options: GatewayClientOptions) {
   let url = parseGatewayUrl(options.gatewayUrl);
-  if (!/^(?:romedev_|romemob_)[A-Za-z0-9_-]{43}$/.test(options.deviceToken))
-    throw new Error("Invalid device token format");
   let stopped = false;
   let socket: ClientSocket | null = null;
   let attempt = 0;
   let timer: ReturnType<typeof setTimeout> | undefined;
   let connectingTimer: ReturnType<typeof setTimeout> | undefined;
   let stableTimer: ReturnType<typeof setTimeout> | undefined;
+  let reauthTimer: ReturnType<typeof setInterval> | undefined;
   const status = (value: ConnectionStatus) => options.onStatus?.(value);
   const schedule = () => {
     if (stopped || timer) return;
@@ -62,11 +72,30 @@ export function connectGateway(options: GatewayClientOptions) {
       delay * (0.75 + (options.random ?? Math.random)() * 0.5),
     );
   };
+  // A 404 means the Gateway holds no connection for this instance, so this socket is dead
+  // and closing it starts a reconnect. A 401 is left alone: the connection reaches its
+  // deadline and the Gateway closes it with 4004.
+  const refresh = async (current: ClientSocket, reauth: URL) => {
+    try {
+      const response = await (options.fetch ?? fetch)(reauth, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${await options.getToken()}` },
+        redirect: "error",
+        signal: AbortSignal.timeout(10_000),
+        cache: "no-store",
+      });
+      if (response.status === 404 && socket === current) current.close();
+    } catch {}
+  };
   const open = async () => {
     if (stopped) return;
     status("connecting");
     let current: ClientSocket;
+    let token: string;
     try {
+      const pending = options.getToken();
+      token = typeof pending === "string" ? pending : await pending;
+      if (!DEVICE_TOKEN.test(token) && !isJwt(token)) throw new Error("Invalid token format");
       if (options.beforeConnect) {
         const next = await options.beforeConnect();
         if (stopped) return;
@@ -77,7 +106,7 @@ export function connectGateway(options: GatewayClientOptions) {
         }
         url = parseGatewayUrl(next);
       }
-      current = options.createSocket(url.toString(), `Bearer ${options.deviceToken}`);
+      current = options.createSocket(url.toString(), `Bearer ${token}`);
     } catch {
       schedule();
       return;
@@ -89,6 +118,7 @@ export function connectGateway(options: GatewayClientOptions) {
       finished = true;
       clearTimeout(connectingTimer);
       clearTimeout(stableTimer);
+      clearInterval(reauthTimer);
       socket = null;
       if (code === CLOSE.revoked || code === CLOSE.superseded) {
         stopped = true;
@@ -109,6 +139,12 @@ export function connectGateway(options: GatewayClientOptions) {
         attempt = 0;
       }, 30_000);
       status("online");
+      if (isJwt(token)) {
+        const reauth = new URL(url);
+        reauth.protocol = url.protocol === "wss:" ? "https:" : "http:";
+        reauth.pathname = "/reauth";
+        reauthTimer = setInterval(() => void refresh(current, reauth), REAUTH_INTERVAL_MS);
+      }
     });
     current.addEventListener("message", ({ data }) => {
       if (stopped || socket !== current) return;
@@ -179,6 +215,7 @@ export function connectGateway(options: GatewayClientOptions) {
       clearTimeout(timer);
       clearTimeout(connectingTimer);
       clearTimeout(stableTimer);
+      clearInterval(reauthTimer);
       const previous = socket;
       socket = null;
       previous?.close(1000, "client stopped");

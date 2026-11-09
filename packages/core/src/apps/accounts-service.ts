@@ -25,7 +25,6 @@ import { platformOf } from "../connections/platform.js";
 import type { Connection } from "../connections/types.js";
 import type { Channel, Channels } from "../chats/connected-accounts/connected-account.js";
 import { sendThrough, type ChannelOf } from "../chats/connected-accounts/connection-ports.js";
-import type { ConnectionPacing } from "../participation/reply-delivery/connection-pacing.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
 import { parseMessageCursor } from "@rome/api-types/message";
 import { channelMessageCursor } from "../chats/history/messages.js";
@@ -55,8 +54,6 @@ export interface ChannelsServiceDeps {
   /** The platform a channel is an account on, or null where no record names
    *  one. A backed channel no record names reads its Connection's. */
   platformOf?: (channel: string) => string | null;
-  /** Paces a send while reply streaming is on. */
-  pacing?: ConnectionPacing;
   /** Channels Rome serves itself, which no Connection backs, such as webchat.
    *  Each sends through its own port, before the channel list is built too. */
   own?: readonly Channel[];
@@ -181,14 +178,14 @@ export function createChannelsService(deps: ChannelsServiceDeps): ChannelsServic
         message: OutgoingMessage,
       ): Promise<MessageReceipt> {
         if (isAccount(target)) {
-          return sendThrough(holding(target), chatId, message, deps.pacing);
+          return sendThrough(holding(target), chatId, message);
         }
         const channel = target;
         const own = deps.own?.find((candidate) => candidate.name === channel)?.send;
         if (own) return own.send(chatId, message);
         const backing = backingConnection(deps.registry, channel, deps.channelOf);
         if (!backing) throw new Error(`No Talk connection registered for "${channel}"`);
-        return sendThrough(backing, chatId, message, deps.pacing);
+        return sendThrough(backing, chatId, message);
       },
 
       query,

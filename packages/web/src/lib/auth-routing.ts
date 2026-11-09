@@ -25,7 +25,6 @@ export const STATIC_PUBLIC_PATHS = [
   "/api/onboard/create-account",
   "/api/instance/enroll/",
   "/api/health",
-  "/api/tailnet",
   "/api/terminal/",
   "/api/ai-tools/",
   "/callback",
@@ -182,14 +181,11 @@ export function resolveAuthRouting({
       }
       return { action: "redirect", location: "/onboard" };
 
-    // Fully onboarded. /onboard is the "Enter Rome" completion moment: land on
-    // the welcome-to-rome app in full mode (standalone, no dashboard chrome) — the
-    // same target OnboardPage.enterRome() navigates to, so the two redirect
-    // sources never disagree and race. /login goes home (/), which resolves to
-    // /chat.
+    // Fully onboarded. /onboard is the completion moment and /login has nothing
+    // left to do: both go home (/), which resolves to /chat.
     case "ready":
       if (isOnboardPage) {
-        return { action: "redirect", location: "/full/apps/welcome-to-rome" };
+        return { action: "redirect", location: "/" };
       }
       if (isLoginPage) {
         return { action: "redirect", location: "/" };

@@ -14,7 +14,6 @@ import type {
   ChannelInboundMedia,
 } from "@rome-os/app-runtime";
 import type { AccountLink } from "@rome/api-types/account-agents";
-import type { DeliveryTransport } from "./sending.js";
 import type { CredentialRejected, Disconnected } from "./errors.js";
 
 // ── Talk ─────────────────────────────────────────────────────────────────────
@@ -42,8 +41,6 @@ export interface TalkFeatureMap {
   /** A talker answers only `chatFor`. The channel port adds the deprecated
    *  `conversationFor` for callers. */
   directMessaging: Pick<ChannelDirectMessaging, "chatFor">;
-  /** Writing a reply as it is generated: creating and editing messages. */
-  replyDelivery: DeliveryTransport;
 }
 
 export type TalkFeatureName = keyof TalkFeatureMap;
@@ -320,6 +317,10 @@ export interface GrantCustody {
 /** A connection kind declaration. */
 export interface ConnectionDescriptor {
   connectionKind: string;
+  /** The kind's display name, as a person reads it ("GitHub"). A connection's
+   *  own `label` is the kind id until someone renames it, so surfaces that name
+   *  a service read this instead. A kind that leaves it unset shows its id. */
+  label?: string;
   /** The name of the connection's one grant: the key the dashboard, the setup
    *  routes and the ledger know it by. */
   grant: GrantName;

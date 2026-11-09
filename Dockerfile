@@ -12,12 +12,7 @@ ARG APT_MIRROR=""
 ARG NPM_REGISTRY=""
 
 # ---------------------------------------------------------------------------
-# Stage 0: Tailscale binaries
-# ---------------------------------------------------------------------------
-FROM tailscale/tailscale:latest AS tailscale
-
-# ---------------------------------------------------------------------------
-# Stage 1: Dependency cache inputs
+# Stage 0: Dependency cache inputs
 # ---------------------------------------------------------------------------
 FROM node:24-slim AS docker-manifests
 
@@ -51,7 +46,7 @@ RUN set -eux; \
     ' sh {} +
 
 # ---------------------------------------------------------------------------
-# Stage 2: Fetch dependencies into pnpm content-addressed store
+# Stage 1: Fetch dependencies into pnpm content-addressed store
 # ---------------------------------------------------------------------------
 # `pnpm fetch` downloads the runtime workspace closure into /pnpm/store.
 # Copy the manifest workspace instead of only pnpm-lock.yaml so Docker cache
@@ -100,6 +95,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm fetch \
     --filter @rome/core... \
     --filter @rome/discord-cli... \
+    --filter @rome/signer... \
     --filter @rome-os/node... \
     --filter rome-web... \
     --filter @rome-os/app-web-sdk... \
@@ -108,7 +104,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     rm -rf node_modules
 
 # ---------------------------------------------------------------------------
-# Stage 3: Build application
+# Stage 2: Build application
 # ---------------------------------------------------------------------------
 FROM fetch AS builder
 ARG ROME_DOCKER_APP_CODE_MODE=source
@@ -127,6 +123,7 @@ RUN --mount=type=cache,id=pnpm-store,target=/pnpm/store \
     pnpm install --prefer-offline --frozen-lockfile \
     --filter @rome/core... \
     --filter @rome/discord-cli... \
+    --filter @rome/signer... \
     --filter @rome-os/node... \
     --filter rome-web... \
     --filter @rome-os/app-web-sdk... \
@@ -150,7 +147,7 @@ RUN rm -rf node_modules/.pnpm/electron@* \
 RUN pnpm build:docker-runtime
 
 # ---------------------------------------------------------------------------
-# Stage 4: Production image
+# Stage 3: Production image
 # ---------------------------------------------------------------------------
 FROM node:24-slim AS production
 ARG TARGETARCH
@@ -159,20 +156,6 @@ ARG COMPOSIO_CLI_VERSION=@composio/cli@0.2.32
 # Vendored standalone CLIs (see the Slack/Notion install step below).
 ARG SLACK_CLI_VERSION=4.4.0
 ARG NTN_CLI_VERSION=0.19.0
-# Build identity, surfaced in the dashboard's Advanced settings footer. The
-# production image ships without a .git directory (see .dockerignore), so these
-# freeze the running build's SHA + build time at image-build time. ROME_VERSION
-# is the release semver (no v prefix, matching the image's docker tag); it is
-# empty on non-release builds.
-ARG ROME_VERSION
-ARG ROME_BUILD_SHA
-ARG ROME_BUILD_TIME
-# GA4 measurement ID, consumed at container RUNTIME only: the boot
-# script writes it into the SPA's runtime-config.js and the gateway page. The
-# build-arg merely sets the image's default ENV (CI secret on published images,
-# empty everywhere else) — starting a container with ROME_GA_MEASUREMENT_ID
-# overridden or emptied changes/disables analytics without a rebuild (R7).
-ARG ROME_GA_MEASUREMENT_ID=""
 ARG APT_MIRROR=""
 ARG NPM_REGISTRY=""
 # When non-empty, install the Debian-repo `chromium` on amd64 instead of pulling
@@ -310,13 +293,8 @@ RUN mkdir -p /opt/rome-corepack && \
     COREPACK_HOME=/opt/rome-corepack corepack prepare pnpm@11.6.0 --activate && \
     chown -R rome:rome /opt/rome-corepack
 
-# Tailscale binaries + state dirs
-COPY --from=tailscale /usr/local/bin/tailscale /usr/local/bin/tailscale
-COPY --from=tailscale /usr/local/bin/tailscaled /usr/local/bin/tailscaled
-RUN mkdir -p /var/lib/tailscale /var/run/tailscale && \
-    echo "rome ALL=(root) NOPASSWD: /usr/local/bin/tailscale" > /etc/sudoers.d/rome-tailscale && \
-    echo "rome ALL=(root) NOPASSWD: /bin/sh /app/scripts/docker/rome-hostfs-remote-access-provision.sh *" > /etc/sudoers.d/rome-hostfs && \
-    chmod 0440 /etc/sudoers.d/rome-tailscale /etc/sudoers.d/rome-hostfs
+RUN echo "rome ALL=(root) NOPASSWD: /bin/sh /app/scripts/docker/rome-hostfs-remote-access-provision.sh *" > /etc/sudoers.d/rome-hostfs && \
+    chmod 0440 /etc/sudoers.d/rome-hostfs
 
 # s6-overlay, with its published sha256 verified like the Notion CLI above.
 RUN set -eux; \
@@ -344,8 +322,8 @@ WORKDIR /opt/rome
 COPY --chown=rome:rome --from=builder /build/ ./
 
 ENV ROME_DOCKER_APP_CODE_MODE=${ROME_DOCKER_APP_CODE_MODE}
-# Explicitly declare ownership of the production proxy config so daemon
-# startup reconciliation is enabled without inferring ownership from a path.
+# Where the boot script (scripts/generate-caddyfile.ts) writes the production
+# proxy config.
 ENV CADDY_CONFIG_PATH=/etc/caddy/Caddyfile
 
 RUN case "$ROME_DOCKER_APP_CODE_MODE" in \
@@ -385,9 +363,11 @@ COPY infra/chrome/opencli-policy.json /etc/chromium/policies/managed/rome-opencl
 # /opt/rome, which the rome user owns, so rome cannot change what root runs.
 COPY scripts/docker/s6-rc.d/ /etc/s6-overlay/s6-rc.d/
 COPY scripts/docker/rome-init.sh /etc/s6-overlay/scripts/rome-init
-COPY scripts/docker/rome-tailscale-setup.sh /etc/s6-overlay/scripts/rome-tailscale-setup
+COPY scripts/docker/rome-init-lib.sh /etc/s6-overlay/scripts/rome-init-lib
+COPY scripts/docker/rome-init-tools.sh /etc/s6-overlay/scripts/rome-init-tools
+COPY scripts/docker/rome-wait-for-rome.sh /etc/s6-overlay/scripts/rome-wait-for-rome
 COPY scripts/docker/rome-run-as.sh /usr/local/bin/rome-run-as
-# rome-init.sh has the rome and user shells source this. It sits outside /app
+# rome-init-tools.sh has the rome and user shells source this. It sits outside /app
 # because user cannot read /app.
 COPY scripts/docker/rome-shell-path.sh /usr/local/share/rome/rome-shell-path.sh
 
@@ -436,6 +416,13 @@ RUN getent group fuse >/dev/null || groupadd --system fuse && \
 
 RUN printf 'user_allow_other\n' > /etc/fuse.conf
 
+# State directories of the signer service (docker-compose.yml). A named volume
+# mounted over an empty path copies the image directory's owner, so a fresh
+# volume is writable by the signer's fixed uid and by nobody else.
+RUN mkdir -p /keys /run/rome-signer && \
+    chown 10001:10001 /keys /run/rome-signer && \
+    chmod 0700 /keys
+
 # SSH setup
 RUN mkdir -p /run/sshd && \
     mkdir -p /etc/ssh/ssh_host_keys
@@ -446,6 +433,23 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV PANTHEON_BASE_ORIGIN=https://romeos.cc
 ENV INTERNAL_API_WEB_ROOT=/app/packages/web/dist
+# Declared here, right before their only use, on purpose: every RUN after an
+# ARG carries its value in its build-cache key, so declaring these per-release
+# values at the top of the stage rebuilt every system layer on every release.
+# Build identity, surfaced in the dashboard's Advanced settings footer. The
+# production image ships without a .git directory (see .dockerignore), so these
+# freeze the running build's SHA + build time at image-build time. ROME_VERSION
+# is the release semver (no v prefix, matching the image's docker tag); it is
+# empty on non-release builds.
+ARG ROME_VERSION
+ARG ROME_BUILD_SHA
+ARG ROME_BUILD_TIME
+# GA4 measurement ID, consumed at container RUNTIME only: the boot
+# script writes it into the SPA's runtime-config.js. The
+# build-arg merely sets the image's default ENV (CI secret on published images,
+# empty everywhere else) — starting a container with ROME_GA_MEASUREMENT_ID
+# overridden or emptied changes/disables analytics without a rebuild (R7).
+ARG ROME_GA_MEASUREMENT_ID=""
 ENV ROME_VERSION=${ROME_VERSION}
 ENV ROME_BUILD_SHA=${ROME_BUILD_SHA}
 ENV ROME_BUILD_TIME=${ROME_BUILD_TIME}

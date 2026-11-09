@@ -1,8 +1,6 @@
-import { sql } from "drizzle-orm";
-import { afterEach, beforeEach, describe, it, expect } from "@rstest/core";
+import { beforeEach, describe, it, expect } from "@rstest/core";
 import type { AppActionRuntimeDeps } from "@rome-os/app-runtime";
-import { createTestDb, type TestDb } from "../../../../../packages/core/src/test/helpers.js";
-import { fakeChatReads, withChatReads } from "../../test-support/fake-chat-reads.js";
+import { type FakeChat, fakeChatReads, withChatReads } from "../../test-support/fake-chat-reads.js";
 import { createAction, queryWords } from "./index.js";
 
 const actionConfig = {
@@ -15,49 +13,55 @@ const actionConfig = {
   sideEffects: "read-only",
 } as const;
 
-let testDb: TestDb;
-let seededMessages = 0;
+// The chats a test seeds, as Chats lists them. A background run stands in no
+// chat, so Chats never lists one.
+let chats: Map<string, FakeChat>;
 
 beforeEach(() => {
-  testDb = createTestDb();
-});
-
-afterEach(() => {
-  testDb.close();
+  chats = new Map();
 });
 
 function seedSession(
   id: string,
   type = "webchat",
-  channel: string | null = null,
+  kind: string | null = null,
   ownerKey: string | null = null,
 ): void {
-  testDb.db.run(sql`
-    INSERT INTO rome_sessions (id, name, type, source_channel, owner_key, created_at, activity_at)
-    VALUES (${id}, ${`Chat ${id}`}, ${type}, ${channel}, ${ownerKey}, 0, 0)
-  `);
+  if (type !== "webchat" && type !== "channel") return;
+  chats.set(id, {
+    chat: {
+      sessionId: id,
+      name: `Chat ${id}`,
+      ...(kind ? { channel: { name: kind, kind } } : {}),
+      ...(ownerKey ? { ownerKey } : {}),
+    },
+    lines: [],
+  });
 }
 
 function seedMessage(
   sessionId: string,
-  role: string,
+  role: "user" | "assistant",
   content: string | unknown[],
   daysAgo: number,
-  actor: Record<string, unknown> | null = null,
+  actor: { kind: string; accountId?: string } | null = null,
 ): void {
-  const createdAt = Math.floor((Date.now() - daysAgo * 24 * 60 * 60 * 1000) / 1000);
-  testDb.db.run(sql`
-    INSERT INTO rome_agent_messages (id, session_id, role, content, actor, created_at)
-    VALUES (${`m${++seededMessages}`}, ${sessionId}, ${role}, ${JSON.stringify(content)},
-      ${actor ? JSON.stringify(actor) : null}, ${createdAt})
-  `);
+  chats.get(sessionId)?.lines.push({
+    role,
+    content: JSON.stringify(content),
+    createdAt: new Date(Date.now() - daysAgo * 24 * 60 * 60 * 1000),
+    // Chats names a visitor's line by its sender.
+    ...(actor?.kind === "visitor" ? { senderId: `visitor:${actor.accountId}` } : {}),
+  });
+}
+
+function seededDeps(): AppActionRuntimeDeps {
+  const reads = fakeChatReads([...chats.values()]);
+  return { appContext: withChatReads(reads) } as unknown as AppActionRuntimeDeps;
 }
 
 async function search(args: Record<string, unknown>) {
-  const deps = {
-    appContext: { db: { connection: testDb.db } },
-  } as unknown as AppActionRuntimeDeps;
-  const result = await createAction(actionConfig, deps).execute(args);
+  const result = await createAction(actionConfig, seededDeps()).execute(args);
   if (result.status !== "ok") throw new Error(`expected ok, got ${JSON.stringify(result)}`);
   return result.data as { chatCount: number; returned: number; content: string };
 }
@@ -151,7 +155,7 @@ describe("search_chats", () => {
     expect((await search({ query: "reply" })).chatCount).toBe(1);
   });
 
-  it("treats LIKE wildcards in the query as plain characters", async () => {
+  it("treats wildcard characters in the query as plain characters", async () => {
     seedSession("a");
     seedMessage("a", "user", "Check the disk", 1);
 
@@ -185,13 +189,18 @@ describe("search_chats", () => {
   });
 
   it("rejects a query with no searchable word", async () => {
-    const deps = {
-      appContext: { db: { connection: testDb.db } },
-    } as unknown as AppActionRuntimeDeps;
-
-    const result = await createAction(actionConfig, deps).execute({ query: " a " });
+    const result = await createAction(actionConfig, seededDeps()).execute({ query: " a " });
 
     expect(result.status).toBe("error");
+  });
+
+  it("fails when the host offers no chat reads", async () => {
+    const deps = { appContext: {} } as unknown as AppActionRuntimeDeps;
+
+    const result = await createAction(actionConfig, deps).execute({ query: "invoice" });
+
+    if (result.status !== "error") throw new Error(`expected error, got ${result.status}`);
+    expect(result.error).toContain("no chat reads");
   });
 });
 

@@ -30,8 +30,15 @@ rs.mock("../profile-memory.js", () => ({
 import { persons, settings } from "../db/schema.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
 import { GUARDIAN_TIMEZONE_SETTING_KEY } from "../routines/guardian-timezone.js";
-import { createTestDb } from "../test/helpers.js";
-import { applyGuardianProfile, defaultGuardianName } from "./guardian-profile.js";
+import { createTestDb } from "../test/db.js";
+import { guardianAuth } from "../db/schema.js";
+import {
+  applyGuardianProfile,
+  applySetupDefaults,
+  defaultGuardianName,
+  writeGuardianBackground,
+} from "./guardian-profile.js";
+import { AGENT_PRESETS } from "./agent-presets.js";
 
 const testDb = createTestDb();
 afterAll(() => testDb.close());
@@ -61,6 +68,73 @@ function writeNotes(relativePath: string, body: string): void {
   writeFileSync(path, body);
 }
 
+describe("applySetupDefaults", () => {
+  beforeEach(() => {
+    testDb.db.delete(guardianAuth).run();
+    testDb.db
+      .insert(guardianAuth)
+      .values({ id: "g1", userId: "u", passwordHash: "x", createdAt: new Date() })
+      .run();
+  });
+
+  it("gives the agent a random preset's name and purpose by default", async () => {
+    await applySetupDefaults("Alex", deps());
+
+    const name = await settingsRepo.get<string>("agentName");
+    const preset = AGENT_PRESETS.find((candidate) => candidate.name === name);
+    expect(preset).toBeDefined();
+    expect(await settingsRepo.get("agentPurpose")).toBe(preset?.purpose);
+    expect(testDb.db.select().from(guardianAuth).all()[0].onboardingComplete).toBe(true);
+  });
+
+  it("writes the name the guardian chose, trimmed, without a preset's purpose", async () => {
+    await applySetupDefaults("Alex", deps(), { agentName: " Bolt " });
+
+    expect(await settingsRepo.get("agentName")).toBe("Bolt");
+    expect(await settingsRepo.get("agentPurpose")).toBeNull();
+    const identity = readFileSync(join(state.memoryDir, "IDENTITY.md"), "utf8");
+    expect(identity).toContain("**Agent Name:** Bolt");
+    expect(identity).not.toContain("## Purpose");
+  });
+
+  it("falls back to a preset for a blank chosen name", async () => {
+    await applySetupDefaults("Alex", deps(), { agentName: "  " });
+
+    const name = await settingsRepo.get<string>("agentName");
+    expect(AGENT_PRESETS.some((candidate) => candidate.name === name)).toBe(true);
+  });
+});
+
+describe("writeGuardianBackground", () => {
+  const guardianFile = () => join(state.memoryDir, "relationship", "GUARDIAN.md");
+
+  it("adds a Background section after the profile lines it finds", () => {
+    writeNotes("relationship/GUARDIAN.md", "# Guardian Profile\n\n**Name:** Alex\n");
+
+    writeGuardianBackground("- Profession: Design");
+
+    expect(readFileSync(guardianFile(), "utf8")).toBe(
+      "# Guardian Profile\n\n**Name:** Alex\n\n## Background\n\n- Profession: Design\n",
+    );
+  });
+
+  it("creates the file when there is none", () => {
+    writeGuardianBackground("- Profession: Design");
+
+    expect(readFileSync(guardianFile(), "utf8")).toContain("## Background\n\n- Profession: Design");
+  });
+
+  it("leaves an existing Background section alone, so a second call never duplicates it", () => {
+    writeGuardianBackground("- Profession: Design");
+    writeGuardianBackground("- Profession: Something else");
+
+    const notes = readFileSync(guardianFile(), "utf8");
+    expect(notes.match(/## Background/g)).toHaveLength(1);
+    expect(notes).toContain("- Profession: Design");
+    expect(notes).not.toContain("Something else");
+  });
+});
+
 describe("applyGuardianProfile", () => {
   it("rejects a blank name with nothing stored and writes nothing", async () => {
     const result = await applyGuardianProfile({ guardianName: "  ", agentName: "Atlas" }, deps());
@@ -72,7 +146,7 @@ describe("applyGuardianProfile", () => {
   });
 
   it("keeps what the memory agents wrote when a later write updates the names", async () => {
-    // What the box looks like after onboarding: `welcome-memory` has folded the
+    // What the box looks like after a while: the Concierge has folded the
     // guardian's answers into GUARDIAN.md and `dream` has added to IDENTITY.md.
     writeNotes(
       "relationship/GUARDIAN.md",
@@ -94,7 +168,7 @@ describe("applyGuardianProfile", () => {
       ),
     );
 
-    // The welcome conversation's name card, re-run after a "start over".
+    // A rename in the profile settings.
     const result = await applyGuardianProfile(
       { guardianName: "Alexandra", agentName: "Nova" },
       deps(),
@@ -135,7 +209,6 @@ describe("applyGuardianProfile", () => {
       id: "alex-doe",
       displayName: "Alex Doe",
       profilePath: "memory/relationship/GUARDIAN.md",
-      approved: true,
     });
     expect(await settingsRepo.get("guardianName")).toBe("Alex Doe");
     expect(await settingsRepo.get("agentName")).toBe("Atlas");
@@ -218,7 +291,6 @@ describe("applyGuardianProfile", () => {
         id: "alex",
         displayName: "Alex",
         bondLevel: "acquaintance",
-        approved: true,
         createdAt: new Date(),
       })
       .run();

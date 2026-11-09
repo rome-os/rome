@@ -4,11 +4,15 @@
 // The SSE routes emit the same events for clients that cannot open the socket.
 // Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md. Reach mirrors the SSE routes: the
-// guardian gets every topic, and a visitor on the dashboard allow-list gets the
-// chat topics but not `apps.catalog` or `concierge.tasks`.
+// guardian gets every topic, and a visitor on the dashboard allow-list gets
+// every topic but `apps.catalog`. `concierge.tasks` carries the caller's own
+// Concierge rows, and another owner's Concierge or task chat is not found.
 //
 // The wire contract lives in @rome/api-types/live-events. `subscribed` precedes
-// the snapshot `chat.status` replays too.
+// the snapshot `chat.status` replays too. The guardian's phone app marks its
+// socket with a header and holds `chat.watch:<id>` for the chat on its screen;
+// that chat counts as watched (`PhoneWatching`), which holds back the
+// Concierge's push there. Its data subscriptions never count.
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
@@ -16,13 +20,17 @@ import {
   APP_CATALOG_TOPIC,
   CHAT_SESSION_TOPIC_PREFIX,
   CHAT_STATUS_TOPIC,
+  CHAT_WATCH_TOPIC_PREFIX,
   CONCIERGE_TASKS_TOPIC,
+  LIVE_EVENTS_CLIENT_HEADER,
   liveEventsClientMessageSchema,
+  PHONE_CLIENT,
   type LiveEventsServerMessage,
 } from "@rome/api-types/live-events";
 import type { DrizzleDb } from "./db/index.js";
 import type { DashboardAccessState } from "./lib/dashboard-access-state.js";
 import type { LiveEventEmit } from "./lib/live-event.js";
+import type { PhoneWatching } from "./lib/phone-watching.js";
 import { gateUpgrade, type UpgradeCaller } from "./lib/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
@@ -36,12 +44,12 @@ type Unsubscribe = () => void;
 /** The event sources behind each topic. Subscribing replays any snapshot synchronously. */
 export interface LiveEventSources {
   subscribeChatStatus(emit: LiveEventEmit): Unsubscribe;
-  /** Resolves false when the id names no stored webchat session. */
-  hasChatSession(sessionId: string): Promise<boolean>;
+  /** Resolves false when the id names no stored webchat session, or one private to another owner. */
+  hasChatSession(sessionId: string, owner: string): Promise<boolean>;
   subscribeChatSession(sessionId: string, emit: LiveEventEmit): Unsubscribe;
   subscribeAppCatalog(emit: LiveEventEmit): Unsubscribe;
-  /** Emits `task_upsert` for every write to the Concierge's todo list. */
-  subscribeConciergeTasks(emit: LiveEventEmit): Unsubscribe;
+  /** Emits `task_upsert` for every write to one owner's Concierge todo list. */
+  subscribeConciergeTasks(owner: string, emit: LiveEventEmit): Unsubscribe;
 }
 
 export const MAX_SUBSCRIPTIONS_PER_SOCKET = 32;
@@ -59,7 +67,8 @@ type Topic =
   | { kind: "chat.status" }
   | { kind: "apps.catalog" }
   | { kind: "concierge.tasks" }
-  | { kind: "chat.session"; sessionId: string };
+  | { kind: "chat.session"; sessionId: string }
+  | { kind: "chat.watch"; sessionId: string };
 
 function parseTopic(topic: string): Topic | null {
   if (topic === CHAT_STATUS_TOPIC) return { kind: "chat.status" };
@@ -69,7 +78,16 @@ function parseTopic(topic: string): Topic | null {
     const sessionId = topic.slice(CHAT_SESSION_TOPIC_PREFIX.length);
     if (SESSION_ID_PATTERN.test(sessionId)) return { kind: "chat.session", sessionId };
   }
+  if (topic.startsWith(CHAT_WATCH_TOPIC_PREFIX)) {
+    const sessionId = topic.slice(CHAT_WATCH_TOPIC_PREFIX.length);
+    if (SESSION_ID_PATTERN.test(sessionId)) return { kind: "chat.watch", sessionId };
+  }
   return null;
+}
+
+/** Whether the socket is the phone app's, by the header it sends. */
+function isPhone(req: IncomingMessage): boolean {
+  return req.headers[LIVE_EVENTS_CLIENT_HEADER] === PHONE_CLIENT;
 }
 
 function errorMessage(err: unknown): string {
@@ -81,6 +99,7 @@ export function attachLiveEventsServer(
   db: DrizzleDb,
   dashboardAccess: Pick<DashboardAccessState, "isCloudEmailAllowed">,
   sources: LiveEventSources,
+  phoneWatching?: PhoneWatching,
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
 
@@ -93,7 +112,7 @@ export function attachLiveEventsServer(
     void gateUpgrade(req, socket, db, dashboardAccess)
       .then((caller) => {
         if (!caller || socket.destroyed) return;
-        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, caller));
+        wss.handleUpgrade(req, socket, head, (ws) => serve(ws, caller, isPhone(req)));
       })
       .catch((err) => {
         log.error("live events upgrade failed", { error: errorMessage(err) });
@@ -102,7 +121,7 @@ export function attachLiveEventsServer(
   };
   httpServer.on("upgrade", onUpgrade);
 
-  function serve(ws: WebSocket, caller: UpgradeCaller): void {
+  function serve(ws: WebSocket, caller: UpgradeCaller, phone: boolean): void {
     // An entry exists from the subscribe message on. `unsubscribe` stays null
     // while the topic check is pending, and the identity check after it drops
     // a result whose topic was unsubscribed (or resubscribed) meanwhile.
@@ -124,13 +143,15 @@ export function attachLiveEventsServer(
     // the socket at the next ping, as the edge probe would refuse a new stream.
     const visitorAllowed = () =>
       caller.kind === "guardian" || dashboardAccess.isCloudEmailAllowed(caller.email);
-    // App existence and change timing stay guardian-only, as on `/api/apps/events`,
-    // and so does the Concierge's todo list.
+    // App existence and change timing stay guardian-only, as on `/api/apps/events`.
     const permitted = (topic: Topic) =>
-      caller.kind === "guardian" ||
-      (topic.kind !== "apps.catalog" && topic.kind !== "concierge.tasks" && visitorAllowed());
+      caller.kind === "guardian" || (topic.kind !== "apps.catalog" && visitorAllowed());
+    // Whose Concierge todo list and private chats this socket may read.
+    const owner = caller.kind === "guardian" ? "guardian" : `visitor:${caller.accountId}`;
     const exists = async (topic: Topic): Promise<boolean> =>
-      topic.kind === "chat.session" ? sources.hasChatSession(topic.sessionId) : true;
+      topic.kind === "chat.session" || topic.kind === "chat.watch"
+        ? sources.hasChatSession(topic.sessionId, owner)
+        : true;
 
     const open = (topic: Topic, emit: LiveEventEmit): Unsubscribe => {
       switch (topic.kind) {
@@ -139,19 +160,32 @@ export function attachLiveEventsServer(
         case "apps.catalog":
           return sources.subscribeAppCatalog(emit);
         case "concierge.tasks":
-          return sources.subscribeConciergeTasks(emit);
+          return sources.subscribeConciergeTasks(owner, emit);
         case "chat.session":
           return sources.subscribeChatSession(topic.sessionId, emit);
+        case "chat.watch":
+          // The chat on the guardian's phone: what the Concierge says there is
+          // read on the phone, so it is not pushed to it. Anyone else's watch
+          // is held and counts for nothing.
+          if (!phone || caller.kind !== "guardian" || !phoneWatching) return () => {};
+          return phoneWatching.watch(topic.sessionId);
       }
     };
 
     const subscribe = (name: string) => {
       if (subscriptions.has(name)) return;
-      if (subscriptions.size >= MAX_SUBSCRIPTIONS_PER_SOCKET) {
+      const topic = parseTopic(name);
+      if (topic?.kind === "chat.watch") {
+        // A phone shows one chat, so its watch sits outside the cap: a new
+        // watch replaces the one before, and the cap never refuses it.
+        const held = [...subscriptions.keys()].find((key) =>
+          key.startsWith(CHAT_WATCH_TOPIC_PREFIX),
+        );
+        if (held) unsubscribe(held);
+      } else if (dataSubscriptions() >= MAX_SUBSCRIPTIONS_PER_SOCKET) {
         sendError("Too many subscriptions", name);
         return;
       }
-      const topic = parseTopic(name);
       if (!topic) {
         sendError("Unknown topic", name);
         return;
@@ -182,6 +216,9 @@ export function attachLiveEventsServer(
           sendError("Subscribe failed", name);
         });
     };
+
+    const dataSubscriptions = () =>
+      [...subscriptions.keys()].filter((key) => !key.startsWith(CHAT_WATCH_TOPIC_PREFIX)).length;
 
     const unsubscribe = (name: string) => {
       const entry = subscriptions.get(name);

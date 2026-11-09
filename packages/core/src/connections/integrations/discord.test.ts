@@ -13,7 +13,7 @@
 import { beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { DiscordjsError, DiscordjsErrorCodes } from "discord.js";
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
-import type { ChannelApiRequest, ChannelApiResult } from "../../apps/platform-requests.js";
+import type { ConnectionApiRequest, ConnectionApiResult } from "../../apps/platform-requests.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { StreamFault, Talker } from "../types.js";
 
@@ -34,8 +34,8 @@ const fakeState: {
   typedThread?: string;
   inbound?: (msg: ChannelMessage) => Promise<void>;
   sent: Array<{ chatId: ChatId; message: unknown }>;
-  apiRequests: ChannelApiRequest[];
-  apiResult: ChannelApiResult;
+  apiRequests: ConnectionApiRequest[];
+  apiResult: ConnectionApiResult;
   stopCalls: number;
   channels: Array<{
     id: string;
@@ -53,8 +53,6 @@ const fakeState: {
   stopCalls: 0,
   channels: [],
 };
-
-const FAKE_REPLY_DELIVERY = { capabilities: { maxPartLength: 2000, edit: true } };
 
 rs.mock("../kinds/discord/discord.js", () => ({
   DiscordAdapter: class {
@@ -77,9 +75,6 @@ rs.mock("../kinds/discord/discord.js", () => ({
       fakeState.sent.push({ chatId, message });
       return { chatId, messageId: "sent-1" };
     }
-    replyDelivery() {
-      return FAKE_REPLY_DELIVERY;
-    }
     async saveIncomingAttachments(msg: { attachments: unknown[] }): Promise<unknown[]> {
       return msg.attachments;
     }
@@ -89,7 +84,7 @@ rs.mock("../kinds/discord/discord.js", () => ({
     listGuildChannels() {
       return fakeState.channels;
     }
-    async executeApiRequest(request: ChannelApiRequest) {
+    async executeApiRequest(request: ConnectionApiRequest) {
       fakeState.apiRequests.push(request);
       return fakeState.apiResult;
     }
@@ -236,10 +231,6 @@ describe("discord descriptor shape", () => {
     expect(fakeState.sent).toEqual([{ chatId: "chan-1", message: { text: "hi" } }]);
   });
 
-  it("offers reply delivery through the adapter's bot", () => {
-    expect(buildTalker().talker.replyDelivery).toBe(FAKE_REPLY_DELIVERY);
-  });
-
   it("exposes provider-neutral activity", async () => {
     const h = buildTalker();
     h.start();
@@ -345,7 +336,7 @@ describe("discord descriptor shape", () => {
       persist: async () => {},
       registerIngress: () => () => {},
     });
-    const request: ChannelApiRequest = {
+    const request: ConnectionApiRequest = {
       method: "GET",
       path: "/users/@me",
       query: [],
@@ -380,7 +371,7 @@ describe("discord descriptor shape", () => {
         headers: {},
         body: null,
         timeoutMs: 30_000,
-      } satisfies ChannelApiRequest,
+      } satisfies ConnectionApiRequest,
     });
 
     await expect(request).rejects.toMatchObject({ name: "CredentialRejected", grant: "bot" });

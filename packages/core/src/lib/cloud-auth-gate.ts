@@ -1,6 +1,6 @@
-import type { Config } from "../config.js";
 import type { DrizzleDb } from "../db/index.js";
 import { getGuardianAuthState } from "./guardian-auth-state.js";
+import { resolveInstanceSlug } from "./runtime.js";
 import { checkGate } from "@rome-os/libs/feature-flags";
 
 /** Feature-gate name for the cloud-auth rollout (the cloud-auth-specific key). */
@@ -18,16 +18,18 @@ export const CLOUD_AUTH_GATE_NAME = "rome_cloud_auth";
  *      missing slug, or an unreachable backend must never strand that guardian
  *      on a local sign-in path they cannot use. This is the top invariant.
  *   2. Otherwise the rollout gate `rome_cloud_auth` decides, keyed on the
- *      instance slug. An indeterminate result (no slug, backend
+ *      instance slug, read live so a slug adopted at runtime applies at once.
+ *      An indeterminate result (no slug, backend
  *      unconfigured/unreachable) fails closed to local auth — safe before any
  *      cloud-only seat exists. A `FEATURE_GATE_ROME_CLOUD_AUTH` env override (see
  *      @rome-os/libs/feature-flags/env-overrides) is honored inside `checkGate` and serves
  *      as the break-glass / no-Statsig knob.
  */
-export async function resolveCloudAuthEnabled(config: Config, db: DrizzleDb): Promise<boolean> {
+export async function resolveCloudAuthEnabled(db: DrizzleDb): Promise<boolean> {
   const guardian = await getGuardianAuthState(db);
   if (guardian.exists && !guardian.hasLocalPassword) return true;
 
-  if (!config.instanceSlug) return false;
-  return checkGate(CLOUD_AUTH_GATE_NAME, config.instanceSlug);
+  const slug = resolveInstanceSlug();
+  if (!slug) return false;
+  return checkGate(CLOUD_AUTH_GATE_NAME, slug);
 }

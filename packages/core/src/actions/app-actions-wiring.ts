@@ -32,6 +32,7 @@ import type { CloudProfileService } from "../lib/cloud-profile.js";
 import type { AgentNamesService } from "../chats/accounts/agent-names.js";
 import { withRemovedMembers } from "../lib/removed-members.js";
 import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
+import { AppActionSchemaCache } from "./app-action-schema-cache.js";
 
 export interface AppActionLoadFailure {
   name: string;
@@ -165,6 +166,7 @@ function createLazyAppAction(
   catalog: AppCatalog,
   deps: Record<string, unknown>,
   services: AppActionServices,
+  inputSchema?: Record<string, unknown>,
 ): Action {
   let actionPromise: Promise<Action> | null = null;
 
@@ -184,6 +186,7 @@ function createLazyAppAction(
 
   return {
     config: record.config,
+    ...(inputSchema ? { inputSchema } : {}),
     async execute(args: Record<string, unknown>, context?: ActionExecutionContext) {
       const action = await load();
       return action.execute(args, context);
@@ -195,22 +198,48 @@ function createLazyAppAction(
   };
 }
 
+/**
+ * Registers the app actions the loader knows, importing each module so a
+ * module that fails to load stays unregistered and is reported in `failed`.
+ *
+ * With a `schemaCache`, an action whose schema is cached from an earlier import
+ * of the same bundle registers without an import. Its module loads on first
+ * use, so a load failure surfaces from that call instead of in `failed`.
+ */
 export async function registerAppActions(
   actionLoader: ActionLoader,
   actionRegistry: ActionRegistryImpl,
   catalog: AppCatalog,
   deps: Record<string, unknown>,
   services: AppActionServices,
-  options: { onlyAppId?: string } = {},
+  options: { onlyAppId?: string; schemaCache?: AppActionSchemaCache | null } = {},
 ): Promise<{ loaded: string[]; failed: AppActionLoadFailure[] }> {
   const loaded: string[] = [];
   const failed: AppActionLoadFailure[] = [];
+  const schemaCache = options.schemaCache ?? null;
 
   for (const [name, record] of actionLoader.getAllRecords()) {
     if (record.metadata.ownerType !== "app") {
       continue;
     }
     if (options.onlyAppId !== undefined && record.metadata.ownerId !== options.onlyAppId) {
+      continue;
+    }
+
+    const cacheKey = schemaCache
+      ? AppActionSchemaCache.key(
+          record.metadata.ownerId,
+          catalog.get(record.metadata.ownerId)?.installedHash ?? null,
+          name,
+        )
+      : null;
+    const cached = cacheKey ? schemaCache?.get(cacheKey) : undefined;
+    if (cached) {
+      actionRegistry.register(
+        createLazyAppAction(record, catalog, deps, services, cached.inputSchema ?? undefined),
+        record.metadata,
+      );
+      loaded.push(name);
       continue;
     }
 
@@ -221,6 +250,7 @@ export async function registerAppActions(
         createAppActionRuntimeDeps(record, catalog, deps, services),
       );
       actionRegistry.register(action, record.metadata);
+      if (cacheKey) schemaCache?.set(cacheKey, action.inputSchema);
       loaded.push(name);
     } catch (err) {
       failed.push({
@@ -231,6 +261,7 @@ export async function registerAppActions(
     }
   }
 
+  await schemaCache?.save();
   return { loaded, failed };
 }
 
@@ -269,6 +300,7 @@ export function createAppActionsSubscriber(
   deps: Record<string, unknown>,
   services: AppActionServices,
   log: Pick<Logger, "warn"> = appActionsLog,
+  schemaCache: AppActionSchemaCache | null = null,
 ): SubscriberHandler {
   return async function appActionsSubscriber(event: CatalogEvent) {
     actionRegistry.unregisterOwnedBy("app", event.appId);
@@ -280,7 +312,7 @@ export function createAppActionsSubscriber(
       catalog,
       deps,
       services,
-      { onlyAppId: event.appId },
+      { onlyAppId: event.appId, schemaCache },
     );
     if (failed.length > 0) {
       log.warn("some app actions failed to initialize", { appId: event.appId, failed });

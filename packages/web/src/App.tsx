@@ -9,7 +9,7 @@ import { RomeShellLayout } from "./shell/RomeShellLayout";
 import { useHostNavigation } from "./hooks/use-host-navigation";
 import { useAppRemixResume } from "./hooks/use-app-remix-resume";
 import { useCloudLoginReturn } from "./hooks/use-cloud-login-return";
-import FreePage from "./pages/free/FreePage";
+import FreePage, { MainChatRedirect } from "./pages/free/FreePage";
 import { DEV_ROUTES } from "./pages/dev/dev-routes";
 
 // /chat is the home route and what the first-load trace targets, so FreePage +
@@ -50,7 +50,6 @@ const SettingsPage = lazy(() => import("./pages/SettingsPage"));
 const SettingsTabPage = lazy(() => import("./pages/SettingsTabPage"));
 const ConnectionDetailPage = lazy(() => import("./pages/ConnectionDetailPage"));
 const DeviceActivityPage = lazy(() => import("./pages/DeviceActivityPage"));
-const AppKeysPage = lazy(() => import("./pages/AppKeysPage"));
 // Dev-only pages (src/pages/dev/). import.meta.env.DEV is statically false in
 // production builds, so the route entries below are dropped AND — because each
 // registry entry's lazy() dynamic import is only referenced from inside the
@@ -151,7 +150,12 @@ export default function App() {
             }
           >
             <Route path="/" element={<Navigate to="/chat" replace />} />
+            <Route path="/chat/concierge" element={<MainChatRedirect />} />
             <Route path="/chat/*" element={<FreePage />} />
+            {/* The signed-in person's main Concierge chat. It shares FreePage
+                with /chat/*, so moving between it and a topic chat keeps the
+                workspace mounted. */}
+            <Route path="/message" element={<FreePage />} />
             {/* The event log is a tab of the Activity page, which keeps the
                 Sessions address. */}
             <Route path="/activity" element={<Navigate to="/sessions/events" replace />} />
@@ -197,9 +201,14 @@ export default function App() {
             {/* More-specific static-segment path must win over the wildcard
                 `:tab` route: `/settings/connections` (no id) still falls through
                 to SettingsTabPage. */}
-            {/* Static segment outranks `:serviceId`, so "app-keys" never
-                reaches ConnectionDetailPage's unknown-id redirect. */}
-            <Route path="/settings/connections/app-keys" element={<AppKeysPage />} />
+            {/* App keys moved from its own page into a sheet on the Advanced
+                tab; keep the old path working. The static segment outranks
+                `:serviceId`, so it never reaches ConnectionDetailPage's
+                unknown-id redirect. */}
+            <Route
+              path="/settings/connections/app-keys"
+              element={<Navigate to="/settings/advanced" replace />}
+            />
             <Route path="/settings/connections/:serviceId" element={<ConnectionDetailPage />} />
             <Route path="/settings/devices/:deviceId" element={<DeviceActivityPage />} />
             <Route path="/settings/:tab" element={<SettingsTabPage />} />

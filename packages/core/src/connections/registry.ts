@@ -17,7 +17,7 @@ import {
   brokenGrant,
   givenGrant,
   reachedAccount,
-  refuseDifferentAccount,
+  reachesAnotherAccount,
   renewedGrant,
   sameAccount,
   toPersisted,
@@ -67,11 +67,21 @@ const KIND_OF: Record<Capability, CapabilityKind> = {
 
 /** How {@link ConnectionRegistry.giveGrant} writes. */
 export interface GiveGrantOptions {
-  /** A participant run in the grant's transaction (the guardian mapping). */
-  inTx?: (tx: DrizzleTx) => void;
+  /** A participant run in the grant's transaction (the guardian mapping).
+   *  `reachesAnotherAccount` is true when the grant reaches another account
+   *  than the connection it found, which is still the guardian's. */
+  inTx?: (tx: DrizzleTx, grant: { reachesAnotherAccount: boolean }) => void;
   /** Mint another account of the connection kind rather than fill its first one. Only
    *  read when no connection id is addressed. */
   another?: boolean;
+  /** Told the id of the connection the grant ended, when the grant reached
+   *  another account than the one that connection reaches. */
+  onEnded?: (id: ConnectionId) => void;
+  /** The grant comes from signing in to Rome. A sign-in never disturbs a
+   *  connection (docs/adrs/sign-in-links-separate-from-provider-connections.md),
+   *  so one that reaches another account grants nothing and leaves the
+   *  connection as it is. */
+  signIn?: boolean;
 }
 
 export interface ConnectionRegistryDeps {
@@ -157,6 +167,10 @@ export class ConnectionRegistry {
 
   private readonly descriptors = new Map<string, RegisteredDescriptor>();
   private readonly connections = new Map<ConnectionId, ConnectionImpl>();
+  /** The connection a fix that reached another account started in place of
+   *  each connection it ended, so a disconnect asked for before that fix
+   *  finished ends the connection it started. */
+  private readonly startedInPlaceOf = new WeakMap<ConnectionImpl, ConnectionImpl>();
   private readonly unlockHandlers: Record<Capability, Array<(conn: Connection) => void>> = {
     chat: [],
     act: [],
@@ -367,10 +381,17 @@ export class ConnectionRegistry {
     const grant = conn.descriptor.grant;
     await this.withGrantSection(connectionKind, grant, () =>
       this.connectionMutex.runExclusive(connectionKind, async () => {
-        // A disconnect that ran while this one waited may have removed it.
-        if (this.connections.get(id) !== conn) return;
-        await conn.disconnect(grant);
-        this.connections.delete(id);
+        // A disconnect that ran while this one waited may have removed it. A
+        // fix that reached another account while this one waited ended it and
+        // started a connection to that account, and the guardian asked to take
+        // away the access they were fixing, so this ends that connection.
+        let current: ConnectionImpl | undefined = conn;
+        while (current && this.connections.get(current.id) !== current) {
+          current = this.startedInPlaceOf.get(current);
+        }
+        if (!current) return;
+        await current.disconnect(grant);
+        this.connections.delete(current.id);
       }),
     );
   }
@@ -443,19 +464,32 @@ export class ConnectionRegistry {
     if (connectionId && !conn) {
       throw new Error(`Connection "${connectionId}" no longer exists; setup cannot grant.`);
     }
+    const account =
+      registered && profile !== undefined ? accountOf(registered.descriptor, profile) : undefined;
+    // A connection's account never changes. A grant that reaches another
+    // account than the one `conn` reaches ends `conn` and starts a new
+    // connection to that account, in the same transaction
+    // (docs/domains/connections.md).
+    let ending: ConnectionImpl | undefined;
+    let anotherAccount = false;
+    if (registered && account && conn) {
+      const held = (await this.store.grantOf(conn.id)) ?? NO_GRANT;
+      if (reachesAnotherAccount(registered.descriptor, held, account)) {
+        if (opts.signIn) return conn;
+        anotherAccount = true;
+        // A grant that addresses no connection, on a kind that holds several
+        // accounts, is adding an account: it mints beside the one it found.
+        if (connectionId || !registered.descriptor.severalAccounts) ending = conn;
+        conn = undefined;
+      }
+    }
     const minting = !conn;
     if (minting && !registered) {
       throw new Error(`no registered descriptor for connection kind "${connectionKind}"`);
     }
 
     const id = conn?.id ?? crypto.randomUUID();
-    const account =
-      registered && profile !== undefined ? accountOf(registered.descriptor, profile) : undefined;
     if (registered && account) {
-      if (conn) {
-        const held = (await this.store.grantOf(id)) ?? NO_GRANT;
-        refuseDifferentAccount(registered.descriptor, id, held, account);
-      }
       await this.refuseAccountHeldElsewhere(registered.descriptor, id, account);
     }
     const createdAt = this.clock();
@@ -469,17 +503,17 @@ export class ConnectionRegistry {
 
     // One transaction spanning every durable write of the grant: mint (if a
     // placeholder), the credential/profile, and the caller's participant.
-    const commit = () =>
-      this.store.transaction((tx) => {
-        this.store.save(tx, { ...record, grant: grantValue });
-        this.raise(
-          tx,
-          minting
-            ? { kind: "connected", connection: record, profile, account }
-            : { kind: "fixed", connection: { id, connectionKind }, account },
-        );
-        opts.inTx?.(tx);
-      });
+    const write = (tx: DrizzleTx) => {
+      this.store.save(tx, { ...record, grant: grantValue });
+      this.raise(
+        tx,
+        minting
+          ? { kind: "connected", connection: record, profile, account }
+          : { kind: "fixed", connection: { id, connectionKind }, profile, account },
+      );
+      opts.inTx?.(tx, { reachesAnotherAccount: anotherAccount });
+    };
+    const commit = () => this.store.transaction(write);
     const logActivationFailure = (err: unknown) => {
       this.log.error("grant committed but adapter activation failed", {
         connectionKind,
@@ -496,10 +530,21 @@ export class ConnectionRegistry {
     // lock, so a renewal in flight on the same grant finishes before this
     // grant writes and can never land over it.
     if (minting) {
-      commit();
+      if (ending) {
+        // The ended connection goes the way every disconnect goes, under its
+        // grant's lock, so a renewal in flight on it finishes first and none
+        // can revive it. The new connection is written in the same
+        // transaction.
+        await ending.disconnect(ending.descriptor.grant, { inTx: write });
+        this.connections.delete(ending.id);
+        opts.onEnded?.(ending.id);
+      } else {
+        commit();
+      }
       try {
         conn = new ConnectionImpl(record, registered!.descriptor, this);
         this.connections.set(id, conn);
+        if (ending) this.startedInPlaceOf.set(ending, conn);
         await conn.hydrate(grantValue);
       } catch (err) {
         logActivationFailure(err);
@@ -1324,14 +1369,17 @@ class ConnectionImpl implements Connection {
 
   /** Remove this connection and its grant in one transaction that raises
    *  disconnected, then drop the grant in memory, stop every capability and
-   *  clear the custody artifacts. The store comes first, so a failed write
-   *  throws with nothing changed in memory. */
-  disconnect(grant: GrantName): Promise<void> {
+   *  clear the custody artifacts. `opts.inTx` joins the transaction, so a fix
+   *  that reaches another account writes the new connection with it. The
+   *  store comes first, so a failed write throws with nothing changed in
+   *  memory. */
+  disconnect(grant: GrantName, opts: { inTx?: (tx: DrizzleTx) => void } = {}): Promise<void> {
     return this.withGrantLock(grant, async () => {
       const connection = { id: this.id, connectionKind: this.connectionKind };
       this.store.transaction((tx) => {
         this.store.remove(tx, this.id);
         this.registry.raise(tx, { kind: "disconnected", connection });
+        opts.inTx?.(tx);
       });
       this.grantState.set(grant, "unauthorized");
       this.liveCreds.delete(grant);

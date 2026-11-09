@@ -1,4 +1,5 @@
 import type { RunLineDeps } from "../connections/speaker-messages.js";
+import { testTurnHandle } from "../test/turn-handle.js";
 import { EventEmitter } from "node:events";
 import type { ChildProcess } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
@@ -7,27 +8,23 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId, StreamAgentEvent } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
+import { createChatTurns } from "./chat-turns.js";
 import type {
   AgentSession,
   AgentSessionInit,
   AgentSessionManager,
   AgentTurnHandle,
-} from "./agent-session.js";
-import { Pacer } from "../participation/reply-delivery/pacer.js";
-import {
-  type ReplyStream,
-  ReplyStreams,
-  type ReplyTarget,
-} from "../participation/reply-delivery/streams.js";
-import { DeliveryFailure, type DeliveryTransport, plainText } from "../connections/sending.js";
-import { systemClock } from "../lib/clock.js";
+} from "../agent/index.js";
+import type { ChatResetPolicy } from "./chat-reset-policy.js";
+import type { SessionOpeningFor } from "./session-opening.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
+import { canOpen } from "../concierge/privacy.js";
 import { IpcRpc, createChildProcessTransport } from "../actions/ipc.js";
 import { WebChatRepository } from "../db/repositories/webchat.js";
-import { ChatEvents } from "../chats/events.js";
-import { StoredMessages } from "../chats/message-repository.js";
-import type { DrizzleDb } from "../db/index.js";
-import { createTestDb, testChatRepository } from "../test/helpers.js";
+import { createTestDb } from "../test/db.js";
+import { sessions } from "../db/schema.js";
+import { eq } from "drizzle-orm";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 class FakeChild extends EventEmitter {
   connected = true;
@@ -40,7 +37,7 @@ class FakeChild extends EventEmitter {
 }
 
 describe("AgentSessionBridge turn routing", () => {
-  it("routes a started provider conversation to its exact interruptible turn", async () => {
+  it("lists a started provider conversation's turn in its chat and as a live turn", async () => {
     let startTurn!: () => void;
     const start = new Promise<void>((resolve) => {
       startTurn = resolve;
@@ -49,7 +46,6 @@ describe("AgentSessionBridge turn routing", () => {
     const finish = new Promise<void>((resolve) => {
       finishTurn = resolve;
     });
-    const interrupt = rs.fn(async () => undefined);
     const events = (async function* (): AsyncIterable<StreamAgentEvent> {
       await start;
       yield {
@@ -64,16 +60,26 @@ describe("AgentSessionBridge turn routing", () => {
     const session = {
       key: { agentName: "main", channelThreadKey: "discord:channel-1" },
       sessionId: "session-1",
-      conversation: { origin: "named", id: "channel:discord:channel-1" },
-      sendTurn: () => ({ turnId: "turn-1", events, interrupt }) as unknown as AgentTurnHandle,
+      sendTurn: () => testTurnHandle({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
       acquire: async () => session,
       peek: () => session,
     } as unknown as AgentSessionManager;
     const turns = createAgentTurnStreamRegistry();
+    const chatTurns = createChatTurns();
     const child = new FakeChild();
-    new AgentSessionBridge(manager, undefined, undefined, turns).attach(
+    new AgentSessionBridge(
+      manager,
+      undefined,
+      undefined,
+      turns,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      (chat, turn) => chatTurns.start(chat, turn),
+    ).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
@@ -103,18 +109,16 @@ describe("AgentSessionBridge turn routing", () => {
     await rs.waitFor(() =>
       expect(child.sent).toContainEqual(expect.objectContaining({ type: "rpc_response" })),
     );
-    expect(turns.getActiveByConversation(ref)).toBeUndefined();
+    expect(chatTurns.runningIn(ref)).toBeUndefined();
 
     startTurn();
-    await rs.waitFor(() => expect(turns.getActiveByConversation(ref)?.turnId).toBe("turn-1"));
-    const active = turns.getActiveByConversation(ref)!;
-    expect(active.initiatorId).toBe("user-1");
+    await rs.waitFor(() => expect(chatTurns.runningIn(ref)?.turnId).toBe("turn-1"));
+    expect(chatTurns.runningIn(ref)?.initiatorId).toBe("user-1");
 
-    await active.interrupt?.("chat-stop");
-    expect(interrupt).toHaveBeenCalledWith("chat-stop");
+    expect(turns.get("turn-1")).toMatchObject({ sessionId: "session-1", finished: false });
 
     finishTurn();
-    await rs.waitFor(() => expect(turns.getActiveByConversation(ref)).toBeUndefined());
+    await rs.waitFor(() => expect(chatTurns.runningIn(ref)).toBeUndefined());
   });
 });
 
@@ -122,30 +126,35 @@ describe("AgentSessionBridge conversation", () => {
   it("records a turn with no caller conversation in the one the session recorded", async () => {
     const testDb = createTestDb();
     try {
-      const repo = new WebChatRepository(testDb.db);
+      const repo = new ChatsWebChatRepository(testDb.db);
       await repo.ensureRomeSession({
         id: "child-chat",
         type: "subagent",
         name: "researcher: Parent",
         agentName: "researcher",
       });
+      // The chat that has the session is read from the session's stored row.
+      const now = new Date();
+      await testDb.db.insert(sessions).values({
+        id: "session-1",
+        agentName: "main",
+        channelThreadKey: "discord:channel-1",
+        chatId: "child-chat",
+        createdAt: now,
+        lastActiveAt: now,
+        status: "active",
+      });
       type TurnRef = { romeSessionId?: string; romeSessionType?: string };
       const sent: TurnRef[] = [];
       const session = {
         key: { agentName: "main", channelThreadKey: "discord:channel-1" },
         sessionId: "session-1",
-        conversation: {
-          origin: "recorded" as const,
-          id: "child-chat",
-          name: "researcher: Parent",
-          type: "subagent",
-        },
         sendTurn: (_input: unknown, options: TurnRef) => {
           sent.push({
             romeSessionId: options.romeSessionId,
             romeSessionType: options.romeSessionType,
           });
-          return {
+          return testTurnHandle({
             turnId: "turn-1",
             events: (async function* (): AsyncIterable<StreamAgentEvent> {
               yield {
@@ -158,7 +167,7 @@ describe("AgentSessionBridge conversation", () => {
               yield { type: "result", content: "Done", agent: "main" };
             })(),
             interrupt: async () => undefined,
-          } as unknown as AgentTurnHandle;
+          }) as unknown as AgentTurnHandle;
         },
       } as unknown as AgentSession;
       const manager = {
@@ -195,6 +204,244 @@ describe("AgentSessionBridge conversation", () => {
   });
 });
 
+describe("AgentSessionBridge resuming a session by its id", () => {
+  it("refuses a caller who may not open the session's chat, and lets its owner in", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession(
+        "concierge",
+        "Concierge",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "core:concierge",
+      );
+      await repo.createSession("plain", "Plain");
+      const sent: unknown[] = [];
+      const session = {
+        key: { agentName: "core:concierge", channelThreadKey: "webchat:concierge" },
+        sessionId: "guardian-runtime",
+        sendTurn: (input: unknown) => {
+          sent.push(input);
+          return testTurnHandle({
+            turnId: `turn-${sent.length}`,
+            events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
+            interrupt: async () => undefined,
+          }) as unknown as AgentTurnHandle;
+        },
+      } as unknown as AgentSession;
+      const manager = {
+        acquire: async () => session,
+        acquireBySessionId: async () => session,
+        peek: () => session,
+      } as unknown as AgentSessionManager;
+      const child = new FakeChild();
+      new AgentSessionBridge(manager, repo).attach(
+        new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
+        child as unknown as ChildProcess,
+      );
+      // A summon from an ordinary chat names the guardian's Concierge runtime.
+      const summon = (reqId: string, actor: Record<string, unknown>) =>
+        child.emit("message", {
+          type: "rpc_request",
+          reqId,
+          method: "agent.session.runTurn",
+          callerActionName: "system:summon",
+          callerActionContext: {
+            actor,
+            channelContext: { channel: "webchat", threadId: "plain" },
+          },
+          params: {
+            key: session.key,
+            sessionId: "guardian-runtime",
+            input: { prompt: "what did they say?" },
+          },
+        });
+      const responseTo = (reqId: string) =>
+        child.sent.find(
+          (m) =>
+            (m as { reqId?: string }).reqId === reqId &&
+            (m as { type?: string }).type === "rpc_response",
+        ) as { error?: unknown } | undefined;
+
+      summon("as-visitor", { kind: "visitor", accountId: "a", email: "a@example.com" });
+      await rs.waitFor(() => expect(responseTo("as-visitor")).toBeDefined());
+      expect(responseTo("as-visitor")?.error).toBeDefined();
+      expect(sent).toEqual([]);
+
+      summon("as-guardian", { kind: "guardian", userId: "seat", via: "cookie" });
+      await rs.waitFor(() => expect(sent).toHaveLength(1));
+    } finally {
+      testDb.close();
+    }
+  });
+});
+
+describe("AgentSessionBridge chat link on resume", () => {
+  it("never lets a worker move the chat that has a session it resumes", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession(
+        "private-chat",
+        "Private",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "guardian" },
+      );
+      await repo.createSession("worker-chat", "Worker");
+      const now = new Date();
+      await testDb.db.insert(sessions).values({
+        id: "runtime-1",
+        agentName: "main",
+        channelThreadKey: "telegram:t1",
+        chatId: "private-chat",
+        createdAt: now,
+        lastActiveAt: now,
+        status: "active",
+      });
+      const sent: unknown[] = [];
+      const open = () =>
+        ({
+          key: { agentName: "main", channelThreadKey: "telegram:t1" },
+          sessionId: "runtime-1",
+          sendTurn: (input: unknown) => {
+            sent.push(input);
+            return testTurnHandle({
+              turnId: `turn-${sent.length}`,
+              events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
+              interrupt: async () => undefined,
+            }) as unknown as AgentTurnHandle;
+          },
+        }) as unknown as AgentSession;
+      // Each resume reopens the session, as a cold open would.
+      const manager = {
+        acquire: async () => open(),
+        acquireBySessionId: async () => open(),
+        peek: () => undefined,
+      } as unknown as AgentSessionManager;
+      const child = new FakeChild();
+      new AgentSessionBridge(manager, repo).attach(
+        new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
+        child as unknown as ChildProcess,
+      );
+      const resume = (reqId: string, actor: Record<string, unknown>, sessionId?: string) =>
+        child.emit("message", {
+          type: "rpc_request",
+          reqId,
+          method: "agent.session.runTurn",
+          callerActionName: "system:summon",
+          callerActionContext: {
+            actor,
+            channelContext: { channel: "webchat", threadId: "worker-chat" },
+          },
+          params: {
+            key: { agentName: "main", channelThreadKey: "telegram:t1" },
+            ...(sessionId ? { sessionId } : {}),
+            input: { prompt: "hello" },
+            init: { romeSessionId: "worker-chat" },
+          },
+        });
+      const responseTo = (reqId: string) =>
+        child.sent.find(
+          (m) =>
+            (m as { reqId?: string }).reqId === reqId &&
+            (m as { type?: string }).type === "rpc_response",
+        );
+      const linked = async () =>
+        (await testDb.db.select().from(sessions).where(eq(sessions.id, "runtime-1")))[0]?.chatId;
+
+      resume("by-id", { kind: "visitor", accountId: "a", email: "a@example.com" }, "runtime-1");
+      await rs.waitFor(() => expect(responseTo("by-id")).toBeDefined());
+      resume("by-key", { kind: "visitor", accountId: "a", email: "a@example.com" });
+      await rs.waitFor(() => expect(responseTo("by-key")).toBeDefined());
+
+      expect(await linked()).toBe("private-chat");
+    } finally {
+      testDb.close();
+    }
+  });
+});
+
+describe("AgentSessionBridge fresh run started from a chat", () => {
+  it("records a summon from a private task chat as that chat's owner's, private from the start", async () => {
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db);
+      await repo.createSession(
+        "guardian-task",
+        "Task",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "guardian" },
+      );
+      await repo.setSessionTrigger("guardian-task", { triggerKind: "concierge", triggerName: "T" });
+      const session = {
+        key: { agentName: "main", channelThreadKey: "summon:exec-1" },
+        sessionId: "summon-runtime",
+        sendTurn: () =>
+          testTurnHandle({
+            turnId: "summon-turn",
+            events: (async function* (): AsyncIterable<StreamAgentEvent> {
+              yield {
+                type: "turn_start",
+                turnId: "summon-turn",
+                sessionId: "summon-runtime",
+                userPrompt: "look it up",
+                agent: "main",
+              };
+              yield { type: "result", content: "Found it", agent: "main" };
+            })(),
+            interrupt: async () => undefined,
+          }) as unknown as AgentTurnHandle,
+      } as unknown as AgentSession;
+      const manager = {
+        acquire: async () => session,
+        peek: () => session,
+      } as unknown as AgentSessionManager;
+      const child = new FakeChild();
+      new AgentSessionBridge(manager, repo).attach(
+        new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
+        child as unknown as ChildProcess,
+      );
+      child.emit("message", {
+        type: "rpc_request",
+        reqId: "summon-1",
+        method: "agent.session.runTurn",
+        params: {
+          key: session.key,
+          input: { prompt: "look it up" },
+          actionContext: {
+            actionName: "system:summon",
+            executionId: "exec-1",
+            channelContext: { channel: "webchat", threadId: "guardian-task" },
+          },
+        },
+      });
+      const runId = "action:exec-1:main";
+      await rs.waitFor(async () => expect(await repo.getSession(runId)).not.toBeNull());
+      const run = await repo.getSession(runId);
+      expect(run).toMatchObject({ ownerKey: "guardian", triggerKind: "concierge_fork" });
+      expect(canOpen(run, "visitor:a")).toBe(false);
+      expect(canOpen(run, "guardian")).toBe(true);
+    } finally {
+      testDb.close();
+    }
+  });
+});
+
 describe("AgentSessionBridge working dir", () => {
   const summonCall = { actionName: "system:summon", agentName: "main" };
   const tempDirs: string[] = [];
@@ -203,7 +450,11 @@ describe("AgentSessionBridge working dir", () => {
     for (const dir of tempDirs.splice(0)) rmSync(dir, { recursive: true, force: true });
   });
 
-  function setup(callerWorkingDirs: Record<string, string> = {}) {
+  function setup(
+    callerWorkingDirs: Record<string, string> = {},
+    resetPolicyOf?: ChatResetPolicy,
+    openingFor?: SessionOpeningFor,
+  ) {
     const projectsRoot = realpathSync(mkdtempSync(join(tmpdir(), "rome-bridge-projects-")));
     tempDirs.push(projectsRoot);
     mkdirSync(join(projectsRoot, "landingpage"));
@@ -212,7 +463,7 @@ describe("AgentSessionBridge working dir", () => {
       key: { agentName: "coder", channelThreadKey: "coder:1" },
       sessionId: "summoned-1",
       sendTurn: () =>
-        ({
+        testTurnHandle({
           turnId: "turn-1",
           events: (async function* (): AsyncIterable<StreamAgentEvent> {})(),
           interrupt: async () => undefined,
@@ -231,7 +482,16 @@ describe("AgentSessionBridge working dir", () => {
       findWorkingDirBySessionId: (id: string) => callerWorkingDirs[id],
     } as unknown as AgentSessionManager;
     const child = new FakeChild();
-    new AgentSessionBridge(manager, undefined, undefined, undefined, projectsRoot).attach(
+    new AgentSessionBridge(
+      manager,
+      undefined,
+      undefined,
+      undefined,
+      projectsRoot,
+      undefined,
+      resetPolicyOf,
+      openingFor,
+    ).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
@@ -282,6 +542,38 @@ describe("AgentSessionBridge working dir", () => {
     expect(outside.error).toContain("is not inside the projects root");
     expect(traversal.error).toBeDefined();
     expect(acquired).toEqual([]);
+  });
+
+  it("opens with the reset policy of the message's chat, never one the worker sends", async () => {
+    const policy = { mode: "idle", idleMinutes: 60 } as const;
+    const { acquired, runTurn } = setup({}, async () => policy);
+    const threadContext = { channel: "telegram", connectionId: "telegram-1", threadId: "t-1" };
+    const forged = { mode: "idle", idleMinutes: 1 };
+
+    await runTurn({ platformMessageId: "m-1", init: { threadContext, resetPolicy: forged } });
+    await runTurn({ init: { threadContext, resetPolicy: forged } });
+
+    expect(acquired.map((init) => init.resetPolicy)).toEqual([policy, undefined]);
+  });
+
+  it("opens with what it states for the session, never what the worker sends", async () => {
+    const stated = {
+      drawsCards: false,
+      guardianFacing: true,
+      toolEnv: { ROME_CHANNEL: "telegram" },
+      spanAttributes: { "channel.name": "telegram" },
+    };
+    const { acquired, runTurn } = setup({}, undefined, () => stated);
+    const forged = {
+      drawsCards: true,
+      guardianFacing: false,
+      toolEnv: { ROME_CHANNEL: "discord" },
+      spanAttributes: { "channel.name": "discord" },
+    };
+
+    await runTurn({ init: forged });
+
+    expect(acquired[0]).toMatchObject(stated);
   });
 
   it("inherits the calling session's working dir for a summon run with none requested", async () => {
@@ -354,7 +646,7 @@ describe("AgentSessionBridge worker disconnect", () => {
       const status = await ended;
       yield { type: "turn_end", turnId, status, durationMs: 1 };
     })();
-    const handle = { turnId, events, interrupt } as unknown as AgentTurnHandle;
+    const handle = testTurnHandle({ turnId, events, interrupt }) as unknown as AgentTurnHandle;
     return { handle, interrupt, finish: () => end("completed") };
   }
 
@@ -370,9 +662,6 @@ describe("AgentSessionBridge worker disconnect", () => {
     const session = {
       key: { agentName: "main", channelThreadKey: "discord:channel-1" },
       sessionId: "session-1",
-      conversation: options.romeSessionId
-        ? { origin: "named", id: options.romeSessionId }
-        : undefined,
       sendTurn: () => queue.shift()!,
     } as unknown as AgentSession;
     const manager = {
@@ -397,7 +686,12 @@ describe("AgentSessionBridge worker disconnect", () => {
         type: "rpc_request",
         reqId,
         method: "agent.session.runTurn",
-        params: { key: session.key, input: { prompt: "hello" }, ...params },
+        params: {
+          key: session.key,
+          input: { prompt: "hello" },
+          ...(options.romeSessionId ? { init: { romeSessionId: options.romeSessionId } } : {}),
+          ...params,
+        },
       });
       return reqId;
     };
@@ -436,10 +730,6 @@ describe("AgentSessionBridge worker disconnect", () => {
     await rs.waitFor(() => expect(turns.get("turn-1")?.finished).toBe(true));
     expect(turn.interrupt).toHaveBeenCalledTimes(1);
     expect(turn.interrupt).toHaveBeenCalledWith("action worker disconnected");
-    expect(turns.get("turn-1")?.messages().at(-1)).toMatchObject({
-      type: "turn_end",
-      status: "interrupted",
-    });
   });
 
   it("interrupts a running turn when its worker exits", async () => {
@@ -516,6 +806,7 @@ describe("AgentSessionBridge worker disconnect", () => {
   it("interrupts a turn whose message assignment fails, and only once", async () => {
     const turn = controllableTurn("turn-1");
     const webchatRepo = {
+      recordSessionInChat: async () => null,
       assignConversationMessageTurn: async () => {
         throw new Error("db down");
       },
@@ -538,98 +829,32 @@ describe("AgentSessionBridge worker disconnect", () => {
   });
 });
 
-describe("AgentSessionBridge reply streaming", () => {
-  const budget = { burst: 100, refillMs: 1, conversationSpacingMs: 0 };
-  const policy = {
-    mode: "edit",
-    editIntervalMs: 0,
-    blockWaitMs: 0,
-    maxPendingChars: 1000,
-  } as const;
-
-  /** A Telegram-like transport that records what it was asked to write. */
-  function platform() {
-    const written: Array<[string, string, string | undefined]> = [];
-    const edits: string[] = [];
-    const transport: DeliveryTransport = {
-      capabilities: { maxPartLength: 100, edit: true, budget },
-      codec: plainText,
-      async create(conversation, text, replyTo) {
-        written.push([conversation, text, replyTo]);
-        return { messageId: `m${written.length}`, chatId: conversation };
-      },
-      async edit(_receipt, text) {
-        edits.push(text);
-      },
-    };
-    return { transport, written, edits };
-  }
-
-  /** Runs one turn over the bridge. `on` is the reply streaming setting. */
+describe("AgentSessionBridge answer recording", () => {
+  /** Runs one turn over the bridge. */
   function run(
     events: AsyncIterable<StreamAgentEvent>,
     {
       streamReply,
-      on = true,
-      interrupt,
-      replies: replacement,
-      transport: own,
       repo,
-      db,
-      named = true,
       runLineDeps,
     }: {
-      streamReply: boolean;
-      /** A pending promise holds the setting's read open. */
-      on?: boolean | Promise<boolean>;
-      interrupt?: () => Promise<void>;
-      /** A stream to hand out in place of the real one. */
-      replies?: ReplyStream;
-      /** A platform to write to in place of the one that records. */
-      transport?: DeliveryTransport;
-      /** The repository the turn and its reply are recorded in. */
+      /** The deprecated ask to stream the reply, which the bridge ignores. */
+      streamReply?: boolean;
+      /** The repository the turn and its answer are recorded in. */
       repo?: WebChatRepository;
-      /** The database under `repo`, which the reply finds its place in. */
-      db?: DrizzleDb;
-      /** Whether the caller names the conversation. Otherwise the thread does. */
-      named?: boolean;
-      /** Chats' lines, given once Chats records what the caller sends. */
+      /** Chats' messages, given once Chats records what the caller sends. */
       runLineDeps?: RunLineDeps;
-    },
+    } = {},
   ) {
-    const recording = platform();
-    const { written, edits } = recording;
-    const transport = own ?? recording.transport;
     const session = {
       key: { agentName: "main", channelThreadKey: "telegram:chat-1" },
       sessionId: "session-1",
-      sendTurn: () => ({ turnId: "turn-1", events, interrupt }) as unknown as AgentTurnHandle,
+      sendTurn: () => testTurnHandle({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = { acquire: async () => session } as unknown as AgentSessionManager;
-    const targets: ReplyTarget[] = [];
-    const replies = replacement
-      ? ({
-          open: async (target: ReplyTarget) => {
-            targets.push(target);
-            return replacement;
-          },
-        } as unknown as ReplyStreams)
-      : new ReplyStreams({
-          streaming: async () => on,
-          replies: (channel) =>
-            channel === "telegram" ? { transport, pacer: new Pacer(budget, systemClock) } : null,
-          clock: systemClock,
-          policy,
-          ...(repo && db
-            ? {
-                messages: new StoredMessages(repo, new ChatEvents(), { channelsOn: () => [] }),
-                places: testChatRepository(db),
-              }
-            : {}),
-        });
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
-    new AgentSessionBridge(manager, repo, undefined, turns, undefined, replies, runLineDeps).attach(
+    new AgentSessionBridge(manager, repo, undefined, turns, undefined, runLineDeps).attach(
       new IpcRpc(createChildProcessTransport(child as unknown as ChildProcess), "main"),
       child as unknown as ChildProcess,
     );
@@ -641,26 +866,21 @@ describe("AgentSessionBridge reply streaming", () => {
         key: session.key,
         input: { prompt: "hi" },
         platformMessageId: "msg-1",
-        streamReply,
+        ...(streamReply === undefined ? {} : { streamReply }),
         init: {
-          ...(named ? { romeSessionId: "conversation-1" } : {}),
+          romeSessionId: "conversation-1",
           threadContext: {
             channel: "telegram",
             connectionId: "c",
             threadId: "chat-1",
             channelUserId: "user-1",
-            ...(named ? {} : { romeSessionId: "conversation-1" }),
           },
         },
       },
     });
     const turnEnd = () =>
       child.sent.find((message) => JSON.stringify(message).includes('"type":"turn_end"'));
-    const workerGone = () => {
-      child.connected = false;
-      child.emit("disconnect");
-    };
-    return { written, edits, turnEnd, turns, targets, workerGone };
+    return { turnEnd };
   }
 
   const turnStart: StreamAgentEvent = {
@@ -680,223 +900,10 @@ describe("AgentSessionBridge reply streaming", () => {
     { type: "turn_end", turnId: "turn-1", status: "completed", durationMs: 1 },
   ];
 
-  it("streams the reply and reports it on turn_end", async () => {
-    const { written, turnEnd } = run(turnEvents(...answer), { streamReply: true });
-
-    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-    expect(written).toEqual([["chat-1", "hi there", "msg-1"]]);
-    expect(JSON.stringify(turnEnd())).toContain(
-      JSON.stringify({ status: "delivered", messageIds: ["m1"] }),
-    );
-  });
-
-  it("leaves the reply to its caller when the run did not ask to stream", async () => {
-    const { written, turnEnd } = run(turnEvents(...answer), { streamReply: false });
-
-    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-    expect(written).toEqual([]);
-    expect(JSON.stringify(turnEnd())).not.toContain("replyDelivery");
-  });
-
-  it("leaves the reply to its caller while reply streaming is off, even when the run asked", async () => {
-    const { written, turnEnd } = run(turnEvents(...answer), { streamReply: true, on: false });
-
-    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-    expect(written).toEqual([]);
-    expect(JSON.stringify(turnEnd())).not.toContain("replyDelivery");
-  });
-
-  it("keeps the run going when the reply stream throws, and reports a reply it never wrote as failed", async () => {
-    const { turnEnd, written } = run(turnEvents(...answer), {
-      streamReply: true,
-      replies: {
-        accept: () => {
-          throw new Error("split failed");
-        },
-        settle: async () => ({ status: "stopped", parts: [] }),
-        stop: () => {},
-      },
-    });
-
-    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-    expect(written).toEqual([]);
-    expect(JSON.stringify(turnEnd())).toContain(
-      JSON.stringify({ status: "failed", messageIds: [] }),
-    );
-  });
-
-  it("reports a broken reply whose message may have been created as unknown, so its caller does not send it again", async () => {
-    const { turnEnd } = run(turnEvents(...answer), {
-      streamReply: true,
-      replies: {
-        accept: () => {
-          throw new Error("split failed");
-        },
-        settle: async () => ({
-          status: "unknown",
-          parts: [{ block: 0, text: "hi there", source: "hi there", state: "unknown" }],
-        }),
-        stop: () => {},
-      },
-    });
-
-    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-    expect(JSON.stringify(turnEnd())).toContain(
-      JSON.stringify({ status: "unknown", messageIds: [] }),
-    );
-  });
-
-  it("still ends the turn when the reply cannot settle, and reports the reply as unknown", async () => {
-    const { turnEnd } = run(turnEvents(...answer), {
-      streamReply: true,
-      replies: {
-        accept: () => {},
-        settle: async () => {
-          throw new Error("record failed");
-        },
-        stop: () => {},
-      },
-    });
-
-    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-    expect(JSON.stringify(turnEnd())).toContain(
-      JSON.stringify({ status: "unknown", messageIds: [] }),
-    );
-  });
-
-  it("opens the reply in the conversation its caller records the run in", async () => {
-    const { turnEnd, targets } = run(turnEvents(...answer), {
-      streamReply: true,
-      replies: {
-        accept: () => {},
-        settle: async () => ({ status: "delivered", parts: [] }),
-        stop: () => {},
-      },
-    });
-
-    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-    expect(targets).toEqual([
-      expect.objectContaining({ channel: "telegram", romeSessionId: "conversation-1" }),
-    ]);
-  });
-
-  it("stops writing the reply before it interrupts the provider", async () => {
-    let more!: () => void;
-    const gate = new Promise<void>((resolve) => (more = resolve));
-    const events = (async function* (): AsyncIterable<StreamAgentEvent> {
-      yield turnStart;
-      yield { type: "text_delta", content: "Hello", blockId: "a" };
-      await gate;
-      yield { type: "text_delta", content: " world", blockId: "a" };
-      yield { type: "turn_end", turnId: "turn-1", status: "interrupted", durationMs: 1 };
-    })();
-    const interrupt = rs.fn(async () => undefined);
-    const { written, edits, turnEnd, turns } = run(events, { streamReply: true, interrupt });
-    const ref = { connectionId: "c", chatId: "chat-1" as ChatId };
-
-    await rs.waitFor(() => expect(written).toEqual([["chat-1", "Hello", "msg-1"]]));
-    await turns.getActiveByConversation(ref)?.interrupt?.("chat-stop");
-    expect(interrupt).toHaveBeenCalledWith("chat-stop");
-
-    // The provider winds down and still emits text. None of it is written.
-    more();
-    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-    expect(written).toHaveLength(1);
-    expect(edits).toEqual([]);
-    expect(JSON.stringify(turnEnd())).toContain('"status":"stopped"');
-  });
-
-  it("stops writing the reply before it interrupts the provider when the worker disconnects", async () => {
-    let more!: () => void;
-    const gate = new Promise<void>((resolve) => (more = resolve));
-    let end!: () => void;
-    const ended = new Promise<void>((resolve) => (end = resolve));
-    const events = (async function* (): AsyncIterable<StreamAgentEvent> {
-      yield turnStart;
-      yield { type: "text_delta", content: "Hello", blockId: "a" };
-      await gate;
-      yield { type: "text_delta", content: " world", blockId: "a" };
-      await ended;
-      yield { type: "turn_end", turnId: "turn-1", status: "interrupted", durationMs: 1 };
-    })();
-    const interrupt = rs.fn(async () => undefined);
-    const { written, edits, turns, workerGone } = run(events, { streamReply: true, interrupt });
-
-    await rs.waitFor(() => expect(written).toEqual([["chat-1", "Hello", "msg-1"]]));
-    workerGone();
-    await rs.waitFor(() => expect(interrupt).toHaveBeenCalledWith("action worker disconnected"));
-
-    // The provider winds down and still emits text, with time for the reply
-    // to write it. None of it is written. No worker is left to hear turn_end,
-    // so the turn's end in the registry marks the reply settled.
-    more();
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    end();
-    await rs.waitFor(() => expect(turns.get("turn-1")?.finished).toBe(true));
-    expect(written).toHaveLength(1);
-    expect(edits).toEqual([]);
-  });
-
-  it("drops the reply's queued writes when the worker disconnects after the run ended", async () => {
-    let release!: () => void;
-    const held = new Promise<void>((resolve) => (release = resolve));
-    const created: string[] = [];
-    const transport: DeliveryTransport = {
-      capabilities: { maxPartLength: 100, edit: true, budget },
-      codec: plainText,
-      async create(conversation, text) {
-        created.push(text);
-        if (created.length === 1) await held;
-        return { messageId: `m${created.length}`, chatId: conversation };
-      },
-      async edit() {},
-    };
-    const interrupt = rs.fn(async () => undefined);
-    const { turns, workerGone } = run(
-      turnEvents({ type: "text", content: "Looking." }, ...answer),
-      { streamReply: true, interrupt, transport },
-    );
-
-    // The run has ended, and the reply's first write is still running.
-    await rs.waitFor(() => expect(created).toEqual(["Looking."]));
-    workerGone();
-    await rs.waitFor(() => expect(interrupt).toHaveBeenCalledWith("action worker disconnected"));
-    release();
-
-    await rs.waitFor(() => expect(turns.get("turn-1")?.finished).toBe(true));
-    expect(created).toEqual(["Looking."]);
-  });
-
-  it("writes nothing when the worker disconnects while the reply opens, and records the answer as usual", async () => {
-    const { repo, db, answers, close } = await recorded();
-    try {
-      let read!: (on: boolean) => void;
-      const setting = new Promise<boolean>((resolve) => (read = resolve));
-      const interrupt = rs.fn(async () => undefined);
-      const { written, turns, workerGone } = run(turnEvents(...answer), {
-        streamReply: true,
-        on: setting,
-        interrupt,
-        repo,
-        db,
-      });
-
-      workerGone();
-      await rs.waitFor(() => expect(interrupt).toHaveBeenCalledWith("action worker disconnected"));
-      read(true);
-
-      await rs.waitFor(() => expect(turns.get("turn-1")?.finished).toBe(true));
-      expect(written).toEqual([]);
-      expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "hi there" }])]);
-    } finally {
-      close();
-    }
-  });
-
   /** A repository holding the conversation the run is recorded in. */
   async function recorded() {
     const testDb = createTestDb();
-    const repo = new WebChatRepository(testDb.db);
+    const repo = new ChatsWebChatRepository(testDb.db);
     await repo.ensureRomeSession({
       id: "conversation-1",
       type: "channel",
@@ -909,83 +916,15 @@ describe("AgentSessionBridge reply streaming", () => {
       (await repo.getMessages("conversation-1"))
         .filter((message) => message.role === "assistant")
         .map((message) => message.content);
-    return { repo, db: testDb.db, answers, close: () => testDb.close() };
+    return { repo, answers, close: () => testDb.close() };
   }
 
-  it("records a streamed reply as the turn's one answer, under the message a quote of the answer names", async () => {
-    const { repo, db, answers, close } = await recorded();
-    try {
-      const { written, turnEnd } = run(
-        turnEvents({ type: "text", content: "Looking." }, ...answer),
-        { streamReply: true, repo, db },
-      );
-
-      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-      expect(written.map(([, text]) => text)).toEqual(["Looking.", "hi there"]);
-      const shown = JSON.stringify([{ type: "text", content: "Looking.\n\nhi there" }]);
-      expect(await answers()).toEqual([shown]);
-      const { repliedTo } = await repo.loadConversationContext("conversation-1", "m2");
-      expect(repliedTo?.content).toBe(shown);
-    } finally {
-      close();
-    }
-  });
-
-  it("finds the recorded answer from a quote of any message the reply wrote", async () => {
-    const { repo, db, close } = await recorded();
-    try {
-      const { turnEnd } = run(turnEvents({ type: "text", content: "Looking." }, ...answer), {
-        streamReply: true,
-        repo,
-        db,
-      });
-
-      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-      const shown = JSON.stringify([{ type: "text", content: "Looking.\n\nhi there" }]);
-      const { repliedTo } = await repo.loadConversationContext("conversation-1", "m1");
-      expect(repliedTo?.content).toBe(shown);
-    } finally {
-      close();
-    }
-  });
-
-  it("records only what a reply that failed partway showed", async () => {
-    const { repo, db, answers, close } = await recorded();
-    try {
-      const transport: DeliveryTransport = {
-        capabilities: { maxPartLength: 100, edit: true, budget },
-        codec: plainText,
-        async create(conversation, text) {
-          if (text !== "Looking.") throw new DeliveryFailure("rejected", "refused");
-          return { messageId: "m1", chatId: conversation };
-        },
-        async edit() {},
-      };
-      const { turnEnd } = run(turnEvents({ type: "text", content: "Looking." }, ...answer), {
-        streamReply: true,
-        repo,
-        db,
-        transport,
-      });
-
-      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-      expect(JSON.stringify(turnEnd())).toContain(
-        JSON.stringify({ status: "partial", messageIds: ["m1"] }),
-      );
-      expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "Looking." }])]);
-    } finally {
-      close();
-    }
-  });
-
   for (const stands of [true, false]) {
-    it(`records an answer it does not stream ${stands ? "through its caller's send, in a chat" : "itself, outside any chat"}`, async () => {
-      const { repo, db, answers, close } = await recorded();
+    it(`records the answer ${stands ? "through its caller's send, in a chat" : "itself, outside any chat"}`, async () => {
+      const { repo, answers, close } = await recorded();
       try {
         const { turnEnd } = run(turnEvents(...answer), {
-          streamReply: false,
           repo,
-          db,
           runLineDeps: {
             lines: { recorded: async () => null, stands: () => stands },
             links: { prompt: () => {} },
@@ -1002,39 +941,10 @@ describe("AgentSessionBridge reply streaming", () => {
     });
   }
 
-  it("records the answer of a reply whose create may have landed, which its caller does not send", async () => {
-    const { repo, db, answers, close } = await recorded();
-    try {
-      const transport: DeliveryTransport = {
-        capabilities: { maxPartLength: 100, edit: true, budget },
-        codec: plainText,
-        async create() {
-          throw new DeliveryFailure("unknown", "no answer");
-        },
-        async edit() {},
-      };
-      const { turnEnd } = run(turnEvents(...answer), { streamReply: true, repo, db, transport });
+  it("leaves the reply to its caller even when the run asks to stream it", async () => {
+    const { turnEnd } = run(turnEvents(...answer), { streamReply: true });
 
-      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-      expect(JSON.stringify(turnEnd())).toContain(
-        JSON.stringify({ status: "unknown", messageIds: [] }),
-      );
-      expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "hi there" }])]);
-    } finally {
-      close();
-    }
-  });
-
-  it("records a streamed reply in the conversation its turn is recorded in, when the caller names none", async () => {
-    const { repo, db, answers, close } = await recorded();
-    try {
-      const { turnEnd } = run(turnEvents(...answer), { streamReply: true, repo, db, named: false });
-
-      await rs.waitFor(() => expect(turnEnd()).toBeDefined());
-      expect(await answers()).toEqual([JSON.stringify([{ type: "text", content: "hi there" }])]);
-      expect(await repo.getMessages("channel:telegram:chat-1")).toEqual([]);
-    } finally {
-      close();
-    }
+    await rs.waitFor(() => expect(turnEnd()).toBeDefined());
+    expect(JSON.stringify(turnEnd())).not.toContain("replyDelivery");
   });
 });

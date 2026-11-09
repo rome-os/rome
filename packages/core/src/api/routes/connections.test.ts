@@ -24,9 +24,16 @@ import { domainOf } from "../../connections/platform.js";
 import { ChannelRecordsRepository } from "../../db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "../../db/repositories/connected-accounts.js";
 import { PeopleRepository } from "../../db/repositories/people.js";
-import { createTestDb, identityConnectionKindOf, testAccountLinkOf } from "../../test/helpers.js";
+import {
+  createTestDb,
+  grantReaching,
+  identityConnectionKindOf,
+  testAccountLinkOf,
+} from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { connectionsRoutes } from "./connections.js";
+import { SetupManager } from "../../connections/setup/manager.js";
+import type { SetupFn } from "../../connections/setup/types.js";
 
 const openDbs: Array<() => void> = [];
 function makeLedger(): DrizzleConnectionsRepository {
@@ -99,6 +106,7 @@ describe("GET /connections", () => {
       connectionKind: "fake-telegram",
       service: "fake-telegram",
       label: "Telegram",
+      kindLabel: "fake-telegram",
       state: "working",
       grants: { bot: "authorized" },
       display: {
@@ -206,6 +214,8 @@ describe("GET /connections", () => {
       connectionKind: "fake-discord",
       service: "fake-discord",
       label: "fake-discord",
+      // The fixture kind declares no display label, so the kind id stands in.
+      kindLabel: "fake-discord",
       state: null,
       grants: { bot: "unauthorized" },
       display: { bot: null },
@@ -267,6 +277,42 @@ describe("GET /connections", () => {
       const { connections } = await res.json();
       expect(connections[0].connect).toEqual({
         url: "/api/oauth/github/start",
+        available: true,
+        unavailableReason: null,
+      });
+    } finally {
+      if (prev === undefined) delete process.env.PANTHEON_BASE_ORIGIN;
+      else process.env.PANTHEON_BASE_ORIGIN = prev;
+    }
+  });
+
+  it("makes the connect link of a broken OAuth connection a reconnect", async () => {
+    const prev = process.env.PANTHEON_BASE_ORIGIN;
+    process.env.PANTHEON_BASE_ORIGIN = "https://rome-cloud.example";
+    try {
+      const ledger = makeLedger();
+      const fixture = makeBotAll();
+      const descriptor = { ...fixture.descriptor, connectionKind: "github" };
+      {
+        const setup = new ConnectionRegistry({ repository: ledger });
+        setup.register(descriptor);
+        const conn = await setup.connect("github", "GitHub");
+        await setup.giveGrant(conn.connectionKind, conn.id, "bot", fixture.botCredential());
+        await updateGrant(ledger, conn.id, (current) => ({
+          ...current,
+          state: "degraded",
+          degraded: { at: new Date("2026-07-13T00:00:00Z"), reason: "token revoked upstream" },
+        }));
+      }
+      const registry = new ConnectionRegistry({ repository: ledger });
+      registry.register(descriptor);
+      await registry.load();
+
+      const { connections } = await (await makeApp(registry).request("/connections")).json();
+
+      expect(connections[0].state).toBe("broken");
+      expect(connections[0].connect).toEqual({
+        url: "/api/oauth/github/start?reconnect=1",
         available: true,
         unavailableReason: null,
       });
@@ -399,6 +445,60 @@ describe("DELETE /connections/:id/grants/:name", () => {
 
     expect([first.status, second.status]).toEqual([200, 200]);
     expect((await second.json()).connection).toBeNull();
+    expect(registry.find("fake-telegram")).toEqual([]);
+  });
+
+  it("ends the connection a committing fix started when that fix reached another bot", async () => {
+    let releaseClear: () => void = () => {};
+    const clearing = new Promise<void>((resolve) => {
+      releaseClear = resolve;
+    });
+    const pasteBot: SetupFn = async (interact) => {
+      const { token, botId } = await interact.prompt({
+        fields: [
+          { name: "token", label: "Token", secret: true },
+          { name: "botId", label: "Bot id", secret: false },
+        ],
+      });
+      return { credential: { material: { token }, expiresAt: "never" }, profile: { botId } };
+    };
+    const fixture = makePasteTalk();
+    let clears = 0;
+    const registry = new ConnectionRegistry({ repository: makeLedger() });
+    registry.register({
+      ...fixture.descriptor,
+      auth: { ...fixture.descriptor.auth, setup: pasteBot },
+      // The ended connection's custody clears slowly, so the fix is still
+      // committing when the disconnect arrives.
+      custody: {
+        sync: async () => {},
+        clear: () => (clears++ === 0 ? clearing : Promise.resolve()),
+      },
+    });
+    const setupManager = new SetupManager({
+      registry,
+      peopleRepo: {} as PeopleRepository,
+    });
+    const conn = await registry.connect("fake-telegram");
+    await registry.giveGrant(conn.connectionKind, conn.id, "bot", fixture.validCredential(), {
+      botId: "100",
+    });
+    const fix = await setupManager.start(
+      { connectionKind: conn.connectionKind, connectionId: conn.id },
+      "bot",
+    );
+    const fixed = setupManager.provideInput(fix.cid, { token: "t-9", botId: "900" });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    const disconnect = makeApp(registry, { setupManager }).request(
+      `/connections/${conn.id}/grants/bot`,
+      { method: "DELETE", headers: SAME_ORIGIN },
+    );
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    releaseClear();
+
+    expect((await disconnect).status).toBe(200);
+    expect((await fixed)?.state).toMatchObject({ status: "done", grant: { ended: conn.id } });
     expect(registry.find("fake-telegram")).toEqual([]);
   });
 
@@ -536,6 +636,14 @@ describe("GET /connections accounts", () => {
     registry.register({ ...telegram.descriptor, connectionKind: "telegram" });
     const conn = await registry.connect("telegram");
     const channel = records.idOf(conn.id) as string;
+    // The account's agent is kept by the account, so the grant reaches one.
+    new DrizzleConnectionsRepository(db).save(db, {
+      id: conn.id,
+      connectionKind: "telegram",
+      label: "telegram",
+      createdAt: new Date(),
+      grant: grantReaching("telegram", "bot-1"),
+    });
     const accounts = new ConnectedAccountsRepository(db);
     accounts.link(conn.id, "sales:agent");
 

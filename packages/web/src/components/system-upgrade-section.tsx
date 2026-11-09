@@ -1,4 +1,3 @@
-import { Section, SectionHeader, SectionTitle } from "@rome-os/ui/page";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useMutation, useQuery } from "@tanstack/react-query";
@@ -146,10 +145,7 @@ export function SystemUpgradeSection() {
 
   if (restartingTo !== null) {
     return (
-      <Section>
-        <SectionHeader>
-          <SectionTitle>{t("system.title")}</SectionTitle>
-        </SectionHeader>
+      <div className="flex flex-col gap-3">
         {restartTimedOut ? (
           <Alert variant="warning">
             <AlertTitle>{t("system.restartTimeoutTitle")}</AlertTitle>
@@ -176,7 +172,7 @@ export function SystemUpgradeSection() {
             </AlertDescription>
           </Alert>
         )}
-      </Section>
+      </div>
     );
   }
 
@@ -189,13 +185,9 @@ export function SystemUpgradeSection() {
   }
 
   return (
-    <Section>
-      <SectionHeader>
-        <SectionTitle>{t("system.title")}</SectionTitle>
-      </SectionHeader>
-
+    <div className="flex flex-col gap-3">
       {build?.upgradedSinceLastBoot && build.version && (
-        <Alert variant="success" className="mb-4">
+        <Alert variant="success">
           <AlertDescription>
             {t("system.upgradedNotice", { from: build.previousVersion, to: build.version })}
           </AlertDescription>
@@ -248,7 +240,7 @@ export function SystemUpgradeSection() {
         </CardContent>
       </Card>
 
-      <div className="mt-3 space-y-3">
+      <div className="space-y-3 empty:hidden">
         {checkQuery.error && <CheckErrorNotice message={checkQuery.error.message} />}
 
         {check && !check.upgradeAvailable && (
@@ -302,7 +294,7 @@ export function SystemUpgradeSection() {
           }}
         />
       )}
-    </Section>
+    </div>
   );
 }
 

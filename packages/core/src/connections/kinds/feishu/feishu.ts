@@ -1,12 +1,9 @@
 import { platformOf } from "../../platform.js";
-import {
-  createLarkChannel,
-  type CardActionEvent,
-  Domain,
-  type LarkChannel,
+import type {
+  CardActionEvent,
+  LarkChannel,
   LarkChannelError,
-  LoggerLevel,
-  type NormalizedMessage as LarkMessage,
+  NormalizedMessage as LarkMessage,
 } from "@larksuiteoapi/node-sdk";
 import { isStopCommand } from "@rome-os/app-runtime";
 import {
@@ -14,9 +11,6 @@ import {
   describeAnsweringAgent,
   storedAgentChoice,
 } from "../../../chats/connected-accounts/account-agents.js";
-import type { FeishuStreamingStyle } from "../../../participation/reply-delivery/streaming-switch.js";
-import { feishuTransport } from "./reply-writes.js";
-import type { DeliveryTransport } from "../../sending.js";
 import { preserveMentionOnlyText } from "../../../participation/mention-only.js";
 import { isLinkCodeMessage } from "../../../people/guardian-link-code.js";
 import type { OutgoingMessage } from "../../../types.js";
@@ -32,6 +26,11 @@ import type {
   MessageAddressing,
   MessageReceipt,
 } from "@rome-os/app-runtime";
+import { requireOnFirstUse } from "../../../lib/require-on-first-use.js";
+
+// The Lark SDK loads when a Feishu connection first needs it, not with every boot.
+const larkSdk =
+  requireOnFirstUse<typeof import("@larksuiteoapi/node-sdk")>("@larksuiteoapi/node-sdk");
 
 const log = createLogger("feishu");
 const PROCESSING_REACTION_EMOJI = "Typing";
@@ -62,9 +61,6 @@ export interface FeishuConfig {
   /** Whether an agent is loaded, aliases included. Absent, every agent counts
    *  as loaded. */
   hasAgent?: (name: string) => boolean;
-  /** How a streamed reply shows, read for each message it creates. Absent,
-   *  it streams as messages. */
-  replyStreamingStyle?: () => Promise<FeishuStreamingStyle>;
   /**
    * Optional fault seam the Talker wires in. Fires on a terminal
    * `error` event from the long connection so the Talker maps it (auth →
@@ -85,7 +81,7 @@ export interface FeishuConfig {
  * state; every other websocket/transport failure is a `Disconnected`.
  */
 export function isFeishuAuthError(err: unknown): boolean {
-  if (err instanceof LarkChannelError && err.code === "permission_denied") return true;
+  if (err instanceof larkSdk().LarkChannelError && err.code === "permission_denied") return true;
   const code = extractFeishuErrorCode(err);
   if (code !== null && FEISHU_AUTH_ERROR_CODES.has(code)) return true;
   const message = err instanceof Error ? err.message : typeof err === "string" ? err : "";
@@ -155,7 +151,6 @@ export class FeishuAdapter {
   private readonly listAgents?: () => string[];
   private readonly accountAgent?: () => string | null | undefined;
   private readonly hasAgent?: (name: string) => boolean;
-  private readonly replyStreamingStyle?: () => Promise<FeishuStreamingStyle>;
   private readonly onFault?: (err: unknown) => void;
   private readonly observedConversations = new Map<
     string,
@@ -174,17 +169,17 @@ export class FeishuAdapter {
   constructor(
     config: FeishuConfig,
     createChannel: CreateLarkChannel = (c) =>
-      createLarkChannel({
+      larkSdk().createLarkChannel({
         appId: c.appId,
         appSecret: c.appSecret,
-        domain: c.domain === "lark" ? Domain.Lark : Domain.Feishu,
+        domain: c.domain === "lark" ? larkSdk().Domain.Lark : larkSdk().Domain.Feishu,
         transport: "websocket",
         outbound: { markdownConverter: "builtin" },
         // Populate `raw` on normalized events so the inbound message's `raw`
         // carries the real wire-level payload (e.g. for media not surfaced in
         // the normal shape).
         includeRawEvent: true,
-        loggerLevel: LoggerLevel.warn,
+        loggerLevel: larkSdk().LoggerLevel.warn,
       }),
   ) {
     this.channel = createChannel(config);
@@ -195,7 +190,6 @@ export class FeishuAdapter {
     this.listAgents = config.listAgents;
     this.accountAgent = config.accountAgent;
     this.hasAgent = config.hasAgent;
-    this.replyStreamingStyle = config.replyStreamingStyle;
     this.onFault = config.onFault;
   }
 
@@ -258,16 +252,6 @@ export class FeishuAdapter {
       });
       throw err;
     }
-  }
-
-  /** Streams replies through this adapter's client, placed as `send` places
-   *  them, in the style the guardian chose. */
-  replyDelivery(): DeliveryTransport {
-    return feishuTransport({
-      client: this.channel.rawClient,
-      replyInThread: (chat) => this.repliesInThread(chat),
-      ...(this.replyStreamingStyle ? { style: this.replyStreamingStyle } : {}),
-    });
   }
 
   private async repliesInThread(chatId: string): Promise<boolean> {

@@ -3,6 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { WhatsAppAdapter } from "./whatsapp.js";
+import * as firstUseModule from "../../../lib/require-on-first-use.js" with {
+  rstest: "importActual",
+};
 import type { ChannelMessage, ChatId } from "@rome-os/app-runtime";
 import type {
   WhatsAppSyncSink,
@@ -10,8 +13,6 @@ import type {
   WaChatInput,
   WaMessageInput,
 } from "./whatsapp-sync.js";
-
-// Mock @whiskeysockets/baileys
 
 const mockSendMessage = rs.fn();
 const mockEnd = rs.fn();
@@ -50,8 +51,10 @@ function decodeUser(jid?: string): string | undefined {
   return jid?.split("@")[0]?.split(":")[0]?.split("_")[0];
 }
 
-rs.mock("@whiskeysockets/baileys", () => {
-  return {
+// The adapter loads Baileys through the first-use loader, so the stub stands in
+// for Baileys there and every other package loads for real.
+rs.mock("../../../lib/require-on-first-use.js", () => {
+  const baileys = {
     default: rs.fn(() => mockSock),
     useMultiFileAuthState: rs.fn(() =>
       Promise.resolve({
@@ -68,6 +71,12 @@ rs.mock("@whiskeysockets/baileys", () => {
     },
     areJidsSameUser: (a?: string, b?: string) => decodeUser(a) === decodeUser(b),
     isJidGroup: (jid?: string) => jid?.endsWith("@g.us"),
+  };
+  return {
+    requireOnFirstUse: (specifier: string) =>
+      specifier === "@whiskeysockets/baileys"
+        ? () => baileys
+        : firstUseModule.requireOnFirstUse(specifier),
   };
 });
 

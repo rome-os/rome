@@ -36,6 +36,30 @@ export async function configureCaller(
   await writePrivateJson(callerCredentialPath(config), { cloudUrl: origin, token });
 }
 
+/**
+ * Points the caller at the signer, so it holds no secret and needs no `gateway-credential`
+ * call. Does nothing when the file already names this Cloud and socket.
+ */
+export async function configureSignerCaller(
+  origin: string,
+  signerSocket: string,
+  config: NodeConfig,
+): Promise<void> {
+  const cloudUrl = cloudOrigin(origin);
+  const existing = await readOptionalCallerCredential(config);
+  if (existing?.cloudUrl === cloudUrl && existing.signerSocket === signerSocket) return;
+  if (await daemonStatus(config))
+    throw new CallerConfigurationError(
+      "daemon_running",
+      "Stop the caller daemon before changing credentials.",
+    );
+  await writePrivateJson(callerCredentialPath(config), {
+    version: 2,
+    cloudUrl,
+    signerSocket,
+  });
+}
+
 async function exchangeInstanceToken(origin: string, token: string): Promise<string> {
   let response: Response;
   try {

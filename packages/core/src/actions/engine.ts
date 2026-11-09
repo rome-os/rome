@@ -29,6 +29,7 @@ import { currentSessionId } from "../telemetry-context.js";
 import { sessionKeyChannel } from "../core/agent-session-key.js";
 import { artifactLocalName } from "../apps/artifact-id.js";
 import {
+  fromWireError,
   isActionWorkerMessage,
   type ActionWorkerPayload,
   type ActionWorkerShutdown,
@@ -141,6 +142,16 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "core:app_connection_read",
   "core:app_connection_write",
   "core:app_connection_write_without_approval",
+  // What the Concierge follows (concierge/following.ts). The event action
+  // queues an event; its delivery timer starts the Concierge's turn outside
+  // the action's context. `follow` subscribes at the source through connector
+  // actions, also called outside the action's context.
+  "core:concierge_follow_event",
+  "core:concierge_digest",
+  "core:concierge_follow",
+  "core:concierge_unfollow",
+  "core:concierge_following_list",
+  "core:concierge_following_configure",
 ]);
 
 export interface ActionRunContext {
@@ -183,6 +194,13 @@ export interface ActionRunContext {
    * caller that queues can wait on its own slot. Read on the root only and
    * never inherited by nested calls, which always fail fast. */
   whenWorkersBusy?: "fail" | "queue";
+  /**
+   * Argument names whose values the execution record leaves out, keeping
+   * only their size: a routine's trigger payload, an event passed on. Read
+   * on the root only and never inherited by nested calls. The action itself
+   * still gets every argument.
+   */
+  omitFromRecord?: readonly string[];
   executionId?: string;
   rootExecutionId?: string;
   parentExecutionId?: string;
@@ -266,6 +284,22 @@ interface ActionEngineOptions {
    * worker. Trust never comes from the action's own manifest. Absent, every
    * root takes a worker as before. */
   isFirstPartyAction?: (actionName: string) => boolean;
+}
+
+/** The arguments as an execution record keeps them, without the values a root run omits. */
+export function recordedArgs(
+  args: Record<string, unknown>,
+  context: ActionRunContext | undefined,
+  isRoot: boolean,
+): Record<string, unknown> {
+  const omit = isRoot ? context?.omitFromRecord : undefined;
+  if (!omit?.length) return args;
+  const out = { ...args };
+  for (const key of omit) {
+    if (!(key in out)) continue;
+    out[key] = { omitted: true, bytes: JSON.stringify(out[key] ?? null)?.length ?? 0 };
+  }
+  return out;
 }
 
 interface ExecutionInvocation {
@@ -701,7 +735,7 @@ export class ActionEngine {
         actionName: action.config.name,
         actionType: action.config.type,
         status: "pending_approval",
-        args,
+        args: recordedArgs(args, context, true),
         initiator,
         actor,
         parentId,
@@ -944,7 +978,7 @@ export class ActionEngine {
       rootExecutionId,
       actionName: name,
       actionType: action.config.type,
-      args,
+      args: recordedArgs(args, invocation.context, isRoot),
       initiator,
       actor,
       parentId,
@@ -979,7 +1013,7 @@ export class ActionEngine {
           actionName: name,
           actionType: action.config.type,
           status,
-          args,
+          args: recordedArgs(args, invocation.context, isRoot),
           initiator,
           actor,
           parentId,
@@ -992,7 +1026,7 @@ export class ActionEngine {
           actionName: name,
           actionType: action.config.type,
           status,
-          args,
+          args: recordedArgs(args, invocation.context, isRoot),
           error: result.status === "error" ? result.error : undefined,
           initiator,
           actor,
@@ -1035,7 +1069,7 @@ export class ActionEngine {
             actionName: name,
             actionType: action.config.type,
             status: "error",
-            args,
+            args: recordedArgs(args, invocation.context, isRoot),
             error: failureMessage,
             initiator,
             actor,
@@ -1523,9 +1557,7 @@ export class ActionEngine {
           finish({ reusable: false });
           // Rebuild the worker's thrown error from its wire envelope so the
           // caller sees the same name/message an in-process run would produce.
-          const err = new Error(message.error.message);
-          err.name = message.error.name;
-          reject(err);
+          reject(fromWireError(message.error));
           return;
         }
       };

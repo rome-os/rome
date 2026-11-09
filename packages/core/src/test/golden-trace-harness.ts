@@ -1,28 +1,34 @@
+import { romeToolPorts } from "../core/rome-tool-ports.js";
+import { createLogger } from "../logger.js";
+import { sessionOpeningFor } from "../core/session-opening.js";
+import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
+import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
+import { agentFolders } from "../paths.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Tracer } from "@opentelemetry/api";
-import { AgentLoader } from "../core/agent-loader.js";
+import { AgentLoader } from "../agent/index.js";
 import {
   AgentRunner,
   createSessionFromRun,
   type ModelProvider,
   type ModelRunParams,
 } from "../core/agent-runner.js";
-import { createAgentSessionManager, type AgentSessionManager } from "../core/agent-session.js";
-import { createAgentLifecycleDispatcher } from "../core/agent-lifecycle.js";
-import { createModelResolver } from "../core/model-resolver.js";
-import { CapabilityDiscovery } from "../core/capability-discovery.js";
-import { SkillCatalog } from "../core/skill-catalog.js";
-import { SessionManager } from "../core/session-manager.js";
-import { PromptBuilder } from "../core/prompt-builder.js";
+import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
+import { AppTurnHooks, TurnListeners } from "../agent/index.js";
+import { createModelResolver } from "../agent/index.js";
+import { bothAvailable, fakeAccounts } from "./kit/model-accounts.js";
+import { SkillLoader } from "../agent/index.js";
+import { DrizzleSessionRepository } from "../agent/index.js";
+import { createTestSystemPrompts } from "./system-prompts.js";
 import { ActionEngine } from "../actions/engine.js";
 import { ActionRegistryImpl } from "../actions/registry.js";
-import { SessionsRepository } from "../db/repositories/sessions.js";
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import { withInboundSpans } from "../telemetry.js";
 import type { Action } from "../actions/types.js";
 import { channelList } from "../chats/connected-accounts/connected-account-list.js";
 import type { AgentEvent } from "../types.js";
+import { executeActionTool } from "./tool-calls.js";
 import {
   createTestConnections,
   createTestDb,
@@ -79,16 +85,15 @@ export interface GoldenTraceOptions {
 
 export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<GoldenTraceRig> {
   const testDb = createTestDb();
-  const sessionsRepo = new SessionsRepository(testDb.db);
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-  const sessionManager = new SessionManager(sessionsRepo, artifactIdentity);
-  const promptBuilder = new PromptBuilder();
+  const sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
+  const systemPrompts = createTestSystemPrompts();
   const actionRegistry = new ActionRegistryImpl();
   const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db), {
     tracer: options.tracer,
   });
 
-  const agentLoader = new AgentLoader(artifactIdentity);
+  const agentLoader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
   await agentLoader.loadAll(options.fixturesDir ?? FIXTURES_DIR);
 
   for (const action of options.extraActions ?? []) {
@@ -97,31 +102,36 @@ export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<
 
   const modelResolver = createModelResolver({
     providers: [options.modelProvider],
-    aiToolState: {
-      get: () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-      refresh: async () => ({
-        codex: { loggedIn: true, quotaExhausted: false, solAccess: true, lunaAccess: true },
-        claude: { loggedIn: true, quotaExhausted: false },
-      }),
-    },
+    accounts: fakeAccounts(bothAvailable()),
   });
   const manager = createAgentSessionManager({
     agentLoader,
-    sessionManager,
-    sessionsRepo,
-    promptBuilder,
-    actionRegistry,
+    sessionRepository,
+    systemPrompts,
     modelResolver,
-    actionEngine,
-    capabilityDiscovery: new CapabilityDiscovery(),
-    skillCatalog: new SkillCatalog(artifactIdentity),
-    lifecycleDispatcher: createAgentLifecycleDispatcher(),
-    channelSurface: testChannelSurface,
+    networkMcpServers: () => ({}),
+    skillCatalog: new SkillLoader(artifactIdentity),
+    turnLifecycle: new TurnListeners(new AppTurnHooks()),
+    readAnswerShape,
+    sessionTracing: romeSessionTracing,
+    turnUsage: new TurnUsageReporter(),
+    folders: agentFolders(),
+    log: createLogger("agent-session"),
+    ...romeToolPorts({
+      actionRegistry,
+      actionEngine,
+    }),
   });
-  const runner = new AgentRunner(manager, agentLoader);
+  const runner = new AgentRunner(
+    manager,
+    agentLoader,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    sessionOpeningFor({ channelSurface: testChannelSurface }),
+  );
 
   const transports = new Map<string, FakeTransport>();
   for (const name of options.channels) {
@@ -193,7 +203,7 @@ export function makeSingleActionProvider(
   const runImpl = async function* (params: ModelRunParams): AsyncIterable<AgentEvent> {
     const id = randomUUID();
     yield { type: "tool_use", id, tool: actionName, input };
-    await params.executeAction(actionName, input);
+    await executeActionTool(params.tools, actionName, input, { toolUseId: id });
     yield { type: "tool_result", toolUseId: id, tool: actionName, output: { success: true } };
     yield {
       type: "result",
@@ -215,7 +225,6 @@ export function makeSingleActionProvider(
   };
   return {
     id: "mock",
-    displayName: "mock-single-action",
     builtinTools: new Set<string>(),
     openSession: async (params) => createSessionFromRun("mock", runImpl, params),
   };

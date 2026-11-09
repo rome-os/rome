@@ -56,7 +56,6 @@ describe("A person's memory profile", () => {
     const id = await deps.peopleRepo.create({
       displayName: "Wei Chen",
       bondLevel: "inner-circle",
-      approved: true,
     });
     writeProfile(`${id}.md`);
 
@@ -70,7 +69,6 @@ describe("A person's memory profile", () => {
     const id = await deps.peopleRepo.create({
       displayName: "Wei Chen",
       bondLevel: "inner-circle",
-      approved: true,
     });
     await deps.peopleRepo.update(id, { profilePath: "memory/IDENTITY.md" });
     mkdirSync(join(mockPaths.profileDir, "memory"), { recursive: true });
@@ -85,7 +83,6 @@ describe("A person's memory profile", () => {
     await deps.peopleRepo.create({
       displayName: "Nadia Petrova",
       bondLevel: "acquaintance",
-      approved: true,
     });
 
     expect(await memoryPathOf("Nadia Petrova")).toBe(null);

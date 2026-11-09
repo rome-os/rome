@@ -12,19 +12,21 @@ import type {
 } from "@rome-os/app-runtime";
 import { type ChatsPort, isSendError, SendError } from "@rome-os/app-runtime/chats";
 import { sql } from "drizzle-orm";
-import { ChannelNotConnected } from "../chats/connected-accounts/connected-account.js";
-import { ChannelSendRefused } from "@rome-os/app-runtime";
+import { AccountNotConnected } from "../chats/connected-accounts/connected-account.js";
+import { SendRefused } from "@rome-os/app-runtime";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { SpeakerReplies } from "../sessions/speaker-replies.js";
 import { Speakers } from "../sessions/speakers.js";
 import { TurnLinks } from "../sessions/turn-links.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
 import { appChats } from "./app-chats.js";
 import { ChatAddresses } from "./chat-addresses.js";
 import { ChatAdapters, chatAt } from "./chat-adapter.js";
 import { chatKey } from "./chat-ids.js";
+import { messageAsText } from "./outbound/send-refusals.js";
+import { widgetText } from "../chats/widget-text.js";
 
 const BOT: Account = { platform: "telegram", id: "rome-bot" };
 const SECOND_BOT: Account = { platform: "telegram", id: "rome-bot-2" };
@@ -146,8 +148,8 @@ describe("appChats", () => {
       expect(lines()).toEqual([
         { chat_id: group.id, thread_id: null, text: "Deploy done", agent: "main" },
       ]);
-      expect(result.message.chat).toEqual(group);
-      expect(result.message.id).toBeGreaterThan(0);
+      expect(result.message?.chat).toEqual(group);
+      expect(result.message?.id).toBeGreaterThan(0);
       expect(result.platformMessageId).toBe("m-1");
       expect(result.thread).toBeUndefined();
     });
@@ -249,7 +251,7 @@ describe("appChats", () => {
       const result = await chats.send({ chat: group, id: said }, { text: "In a thread." });
 
       expect(sent[0]?.message.replyToMessageId).toBe("q-1");
-      expect(result.thread).toEqual({ chat: group, id: result.message.id });
+      expect(result.thread).toEqual({ chat: group, id: result.message?.id });
 
       await chats.send(result.thread!, { text: "And again." });
       expect(sent.map((send) => send.address)).toEqual(["guild-chan", "thread-new"]);
@@ -344,7 +346,7 @@ describe("appChats", () => {
     it("hands a part only the host makes to the channel, which refuses it, and records nothing", async () => {
       const group = fixture.chat("telegram", "-100", "group");
       duringSend = () => {
-        throw new ChannelSendRefused("part_unsupported", "telegram shows text only");
+        throw new SendRefused("part_unsupported", "telegram shows text only");
       };
       const forged = { type: "routine_draft_card", draft: {} } as never;
 
@@ -363,6 +365,7 @@ describe("appChats", () => {
       const result = await chats.send(group, { text: "Deploy done" });
 
       expect(result.delivery.state).toBe("sent");
+      expect(result.message).toBeUndefined();
       expect(sent).toHaveLength(1);
     });
 
@@ -377,10 +380,34 @@ describe("appChats", () => {
       expect(JSON.parse(recorded[0]?.parts ?? "[]")).toEqual([card]);
     });
 
+    it("hands a text-only connection a card's plain-text line once, in its place", async () => {
+      const group = fixture.chat("telegram", "-100", "group");
+      const card = {
+        type: "approval_card",
+        approvalId: "ap-1",
+        actionName: "deploy",
+        preview: { kind: "generic", title: "deploy", summary: "Deploy?" },
+        status: "pending",
+      } as const;
+
+      await chats.send(group, {
+        parts: [
+          { type: "text", content: "Before I go on:" },
+          card,
+          { type: "text", content: "Back soon." },
+        ],
+      });
+
+      const line = widgetText(card) ?? "";
+      expect(messageAsText(sent[0]?.message ?? {})).toBe(
+        ["Before I go on:", line, "Back soon."].join("\n\n"),
+      );
+    });
+
     it("answers what the channel refuses as unsupported, and records nothing", async () => {
       const group = fixture.chat("telegram", "-100", "group");
       duringSend = () => {
-        throw new ChannelSendRefused("part_unsupported", "telegram shows text only");
+        throw new SendRefused("part_unsupported", "telegram shows text only");
       };
 
       expect(
@@ -392,7 +419,7 @@ describe("appChats", () => {
     it("answers a Connection whose talk is locked as not connected, and records nothing", async () => {
       const group = fixture.chat("telegram", "-100", "group");
       duringSend = () => {
-        throw new ChannelNotConnected("telegram");
+        throw new AccountNotConnected("telegram");
       };
 
       expect(await refusal(chats.send(group, { text: "x" }))).toBe("not_connected");

@@ -51,9 +51,17 @@
     "action": "断开",
     "pending": "断开中…",
     "accountLabel": "断开 {{account}}",
-    "confirm": "断开 {{account}}？Rome 将失去对该账号的访问，并停止在它的聊天中回复。再次连接时，它会从零开始，不带之前的聊天。",
-    "delegateConfirm": "断开你自己的账号 {{account}}？Rome 将失去对它的访问，并不再代你在个人聊天中回复。",
+    "confirm": "断开 {{account}}？Rome 将失去对该账号的访问，并停止在它的聊天中回复。它会保留智能体和聊天，再次连接同一账号时会继续使用。",
+    "delegateConfirm": "断开你自己的账号 {{account}}？Rome 将失去对它的访问，并不再代你在个人聊天中回复。它会保留智能体，再次连接时会继续使用。",
     "failed": "无法断开账号"
+  },
+  "disconnected": {
+    "badge": "已断开",
+    "count_one": "{{count}} 个已断开",
+    "count_other": "{{count}} 个已断开",
+    "description": "Rome 现在无法访问这个账号。它会保留智能体，再次连接同一账号时会继续使用。",
+    "unlinkLabel": "取消 {{account}} 的智能体关联",
+    "unlinkConfirm": "取消 <agent>{{agent}}</agent> 与 {{account}} 的关联？再次连接该账号时，它将没有智能体。"
   },
   "connect": {
     "title": "连接账号",

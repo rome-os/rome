@@ -1,5 +1,6 @@
 // An app's writes to the chats its sessions stand in, kept in Chats.
 
+import { messageAsText } from "../connections/outbound/send-refusals.js";
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import type { Channel, ChatId, ChatRecord, OutgoingMessage } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
@@ -12,13 +13,13 @@ import type { ChannelChatAdapter, Outbound } from "../connections/chat-adapter.j
 import { chatKey } from "../connections/chat-ids.js";
 import { emailChatAdapter } from "../connections/email-chat-adapter.js";
 import { SpeakerMessages } from "../connections/speaker-messages.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
 import { SpeakerReplies } from "../sessions/speaker-replies.js";
 import { Speakers } from "../sessions/speakers.js";
 import { TurnLinks } from "../sessions/turn-links.js";
-import { createTestDb, type TestDb } from "../test/helpers.js";
+import { createTestDb, type TestDb } from "../test/db.js";
 import { speakerFixture } from "../test/speakers.js";
 import { appChatWrites, type ChatWrites } from "./chat-writes.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 
 const BOT = { platform: "telegram", id: "rome_bot" };
 const TELEGRAM = { name: "telegram" } as Channel;
@@ -111,13 +112,13 @@ describe("appChatWrites", () => {
     failKeysOnSend = false;
     threads = 0;
     writes = appChatWrites({
-      webchatRepo: new WebChatRepository(testDb.db),
+      webchatRepo: new ChatsWebChatRepository(testDb.db),
       chats,
       messages,
       speakers,
       replies: new SpeakerReplies({
         speakers,
-        adapters: { of: adapterOf, keyOf },
+        adapters: { of: adapterOf },
         messages,
         links,
       }),
@@ -239,23 +240,6 @@ describe("appChatWrites", () => {
     });
   });
 
-  describe("recordOutboundMessage", () => {
-    it("puts what an older app sent on record in Chats as the speaker's and the turn's answer", async () => {
-      await writes.recordOutboundMessage({
-        sessionId: "s1",
-        content: JSON.stringify([{ type: "text", content: "Sent by hand" }]),
-        platformMessageId: "202",
-        turnId: "turn-1",
-        knownToProvider: true,
-      });
-
-      expect(sends).toEqual([]);
-      const [line] = said();
-      expect(line).toMatchObject({ key: lines.keyIn(speakerAt(), "202"), text: "Sent by hand" });
-      expect(linkOf("s1", line!.id)).toMatchObject({ role: "answer", turnId: "turn-1" });
-    });
-  });
-
   describe("send", () => {
     it("sends through the session's adapter, records it as the turn's answer, and answers the platform's id", async () => {
       const result = await writes.send({
@@ -364,7 +348,7 @@ describe("appChatWrites", () => {
       expect(session!.activity_at).toBeGreaterThan(0);
     });
 
-    it("says a parts-only message's text parts as its text", async () => {
+    it("leaves a parts-only message's text to its parts, which a text-only connection reads in order", async () => {
       await writes.send({
         sessionId: "s1",
         channel: "telegram",
@@ -372,7 +356,8 @@ describe("appChatWrites", () => {
         knownToProvider: false,
       });
 
-      expect(sends[0]?.out.text).toBe("From parts");
+      expect(sends[0]?.out).toMatchObject({ text: "", parts: [{ content: "From parts" }] });
+      expect(messageAsText({ parts: [...(sends[0]?.out.parts ?? [])] })).toBe("From parts");
     });
 
     it("notes an attachment-only message's attachments on record", async () => {

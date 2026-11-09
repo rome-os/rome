@@ -71,7 +71,6 @@ describe("LinkedIn replies through People", () => {
     person = await deps.peopleRepo.create({
       displayName: "LinkedIn Recipient",
       bondLevel: "acquaintance",
-      approved: true,
       links: [{ platform: "linkedin", id: MEMBER }],
     });
     app = new Hono().route("/", peopleRoutes(deps));

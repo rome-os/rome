@@ -8,6 +8,7 @@ A skill is a markdown document with front matter declaring its name, its descrip
 
 - Skill frontmatter declares a [local artifact name](apps.md#artifact-names-and-references). The name cannot contain `:`. Rome exposes the skill by its canonical `<app-id>:<local-name>` id.
 - A qualified slash invocation uses the canonical id, such as `/coding:app_creation`. A bare slash name is accepted only through legacy compatibility.
+- In Concierge, a slash invocation starts a task chat with the main agent, which reads and follows the skill.
 - A skill is *loaded*, not *executed*: when a task matches its description, the agent loads the body into its context for that turn. A skill never runs code itself.
 - Skills are owned by [apps](apps.md#rome-apps). Adding or modifying a skill takes effect on the next install of its owning app, and disabling an app removes its skills from the catalog.
 - The skill catalog is a flat index, not a hierarchy: skills from any app are equally discoverable.

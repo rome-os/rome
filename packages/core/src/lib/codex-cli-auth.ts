@@ -14,15 +14,16 @@
 //   }
 //
 // Revoked-credential signal: the codex binary owns token refresh, so a revoked
-// refresh token surfaces only through Codex (see `codex-auth-revoked.ts`),
+// refresh token surfaces only through Codex (see `agent/infrastructure/model/codex/auth-revoked.ts`),
 // never from reading auth.json — the file still looks "logged in". When a turn
 // fails that way, or Codex's account/read hides a saved ChatGPT login (see
-// `core/codex/account-service.ts`), we drop a Rome-owned marker
+// `agent/infrastructure/model/codex/account-service.ts`), we drop a Rome-owned marker
 // (`.rome-auth-revoked.json`) next to auth.json recording a fingerprint of the
 // dead refresh token; this reader then downgrades the status to `needsReauth`
 // for as long as that exact token is still in auth.json, and self-clears once a
 // re-login rotates it.
 
+import type { ModelPlanType } from "../agent/index.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
@@ -59,19 +60,7 @@ interface CodexAuthFile {
   last_refresh?: string;
 }
 
-export type CodexPlanType =
-  | "free"
-  | "go"
-  | "plus"
-  | "pro"
-  | "prolite"
-  | "team"
-  | "self_serve_business_usage_based"
-  | "business"
-  | "enterprise_cbp_usage_based"
-  | "enterprise"
-  | "edu"
-  | "unknown";
+export type CodexPlanType = ModelPlanType;
 
 export interface CodexCliStatus {
   loggedIn: boolean;

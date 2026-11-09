@@ -8,7 +8,7 @@
 // unversioned build (no release identity to compare against Rome Cloud's latest).
 
 import { getBuildInfo } from "../build-info.js";
-import { getInstanceToken } from "../lib/instance-identity.js";
+import { cloudBearer } from "../lib/instance-identity.js";
 import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
 
 const ROME_CLOUD_TIMEOUT_MS = 15_000;
@@ -23,8 +23,8 @@ export type CheckResult = { ok: true; data: UpgradeCheck } | { ok: false; error:
 
 export type ApplyResult = { ok: true } | { ok: false; error: string };
 
-function romeCloudAccess(): { origin: string; token: string } | null {
-  const token = getInstanceToken();
+async function romeCloudAccess(): Promise<{ origin: string; token: string } | null> {
+  const token = await cloudBearer();
   const origin = getRomeCloudOrigin();
   if (!token || !origin) return null;
   return { origin, token };
@@ -37,7 +37,7 @@ export async function checkUpgrade(): Promise<CheckResult> {
   const build = getBuildInfo();
   if (!build.version) return { ok: false, error: "unversioned_build" };
 
-  const romeCloud = romeCloudAccess();
+  const romeCloud = await romeCloudAccess();
   if (!romeCloud) return { ok: false, error: "pantheon_unconfigured" };
 
   const url = new URL("/api/instance/upgrade/check", romeCloud.origin);
@@ -74,7 +74,7 @@ export async function checkUpgrade(): Promise<CheckResult> {
 export async function applyUpgrade(target: string): Promise<ApplyResult> {
   if (!getBuildInfo().version) return { ok: false, error: "unversioned_build" };
 
-  const romeCloud = romeCloudAccess();
+  const romeCloud = await romeCloudAccess();
   if (!romeCloud) return { ok: false, error: "pantheon_unconfigured" };
 
   let response: Response;

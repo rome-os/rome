@@ -51,14 +51,10 @@ import { sentinelLogRoutes } from "./routes/sentinel-log.js";
 import { webhookInvocationsRoutes } from "./routes/webhook-invocations.js";
 import { actionExecutionsRoutes } from "./routes/action-executions.js";
 import { terminalRoutes } from "./routes/terminal.js";
-import {
-  capabilityDiscoveryRoutes,
-  hostCapabilityDiscoverySource,
-} from "./routes/capability-discovery.js";
 import { desktopRoutes } from "./routes/desktop.js";
-import { tailscaleRoutes } from "./routes/tailscale.js";
 import { authRoutes } from "./routes/auth.js";
 import { onboardRoutes } from "./routes/onboard.js";
+import { instanceAdoptRoutes } from "./routes/instance-adopt.js";
 import { instanceEnrollRoutes } from "./routes/instance-enroll.js";
 import { cloudLoginRoutes } from "./routes/cloud-login.js";
 import { visitorAuthRoutes } from "./routes/visitor-auth.js";
@@ -87,6 +83,7 @@ import { ConnectedAccountsRepository } from "../db/repositories/connected-accoun
 import { accountLinkOf, connectionKindOf } from "../chats/connected-accounts/account-links.js";
 import { byChannel, readAccountAgent } from "../chats/connected-accounts/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
+import { canOpenChat } from "../concierge/privacy.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
 const log = createLogger("api");
@@ -113,6 +110,9 @@ export function buildApp(
       config.host,
     ),
   );
+
+  // Codex's loopback route to Rome credits. Outside `/api` for the same reason.
+  app.route("/", deps.romeCreditsProxy);
 
   // External webhooks — X-API-Key auth, no /api/ prefix. Intentionally outside
   // sessionActorMiddleware: a machine-credential surface records no session
@@ -162,6 +162,7 @@ export function buildApp(
   api.route("/", authRoutes(deps));
   api.route("/", onboardRoutes(deps));
   api.route("/", instanceEnrollRoutes(deps));
+  api.route("/", instanceAdoptRoutes(deps));
   api.route("/", cloudLoginRoutes(deps));
   api.route("/", visitorAuthRoutes(deps));
   api.route("/", oauthRoutes(deps));
@@ -171,7 +172,6 @@ export function buildApp(
   api.route("/", appConnectionAccessRoutes(deps));
   api.route("/", connectedAccountsRoutes(deps));
   api.route("/", setupsRoutes(deps));
-  api.route("/", capabilityDiscoveryRoutes(hostCapabilityDiscoverySource));
   api.route("/", desktopRoutes());
   api.route("/", publicAccessRoutes(deps));
   api.route("/", dashboardAccessRoutes(deps));
@@ -203,7 +203,6 @@ export function buildApp(
   api.route("/", webhookInvocationsRoutes(deps));
   api.route("/", actionExecutionsRoutes(deps));
   api.route("/", terminalRoutes());
-  api.route("/", tailscaleRoutes(deps));
   api.route("/", memoryFilesRoutes());
   api.route("/", projectsFilesRoutes(deps));
   api.route("/", syncRoutes(deps));
@@ -220,6 +219,7 @@ export function buildApp(
   const sessionQueries = new SessionQueryService({
     repository: new SessionQueryRepository(deps.db, "chats"),
     agentLoader: deps.agentLoader,
+    agentsByName: deps.agentsByName,
     appCatalog: deps.appCatalog,
     accountAgentOf: byChannel(sessionChannelRecords, (connectionId) =>
       readAccountAgent(sessionAccountAgents, deps.agentLoader, connectionId),
@@ -334,7 +334,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
       });
       const terminalServer = attachTerminalServer(server as Server, deps.db, {
         onAuthCommandExit: () => {
-          void deps.aiToolState.refresh().catch(() => {});
+          void deps.modelAccounts.refresh().catch(() => {});
         },
       });
       const liveEvents = attachLiveEventsServer(
@@ -343,13 +343,16 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
         deps.dashboardAccessState,
         {
           subscribeChatStatus: (emit) => webchatRuntime.subscribeStatusEvents(emit),
-          hasChatSession: (sessionId) => webchatRuntime.hasStoredSession(sessionId),
+          hasChatSession: async (sessionId, owner) =>
+            (await webchatRuntime.hasStoredSession(sessionId)) &&
+            (await canOpenChat((id) => deps.webchatRepo.getSession(id), sessionId, owner)),
           subscribeChatSession: (sessionId, emit) =>
             webchatRuntime.subscribeSessionEvents(sessionId, emit),
           subscribeAppCatalog: (emit) => subscribeCatalogChanges(deps.appCatalog, emit),
-          subscribeConciergeTasks: (emit) =>
-            deps.concierge?.deps.tasks.subscribe(emit) ?? (() => {}),
+          subscribeConciergeTasks: (owner, emit) =>
+            deps.concierge?.deps.tasks.subscribe(emit, owner) ?? (() => {}),
         },
+        deps.phoneWatching,
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
       const desktopProxy = attachDesktopProxy(server as Server, deps.db);

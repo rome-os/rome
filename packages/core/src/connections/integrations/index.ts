@@ -1,6 +1,5 @@
 // Built-in connection integrations. `registerBuiltinConnections` is the boot-time entry point.
 
-import { feishuStreamingStyle } from "../../participation/reply-delivery/streaming-switch.js";
 import type { EmailAdapter } from "../kinds/email/email.js";
 import type { DrizzleDb } from "../../db/index.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
@@ -72,7 +71,7 @@ export interface BuiltinConnectionDeps {
   mailProvider: MailProvider;
   /** Optional email dep mirrored from index.ts (whoami resolver). */
   emailOwnerEmailResolver?: () => Promise<string | undefined>;
-  /** Keeps index.ts's prompt-builder "our own inbox address" ref pointed at the
+  /** Keeps index.ts's system prompt "our own inbox address" ref pointed at the
    *  CURRENT email epoch (birth/relock/backoff rebuild). */
   onEmailAdapterBuilt?: (adapter: EmailAdapter) => void;
   /** DB handle for the Rome Cloud-OAuth grant setups (github/slack/google):
@@ -124,7 +123,6 @@ export function registerBuiltinConnections(
       listAgents: deps.listAgents,
       accountAgentOf: deps.accountAgentOf,
       hasAgent: deps.hasAgent,
-      replyStreamingStyle: feishuStreamingStyle(deps.settingsRepo),
     }),
   );
   registry.register(
@@ -168,7 +166,11 @@ export function registerBuiltinConnections(
     registry.register(
       makeOAuthProviderDescriptor(provider, {
         beginRedirect: (opts) =>
-          createRomeCloudOAuthStartRedirect(deps.db, provider, { ...opts, reconnect: true }),
+          createRomeCloudOAuthStartRedirect(deps.db, provider, {
+            ...opts,
+            reconnect: true,
+            intent: "connect",
+          }),
         redeem: async (handoff, state) => {
           const redeemed = await redeemRomeCloudOAuthHandoff(deps.db, handoff, state);
           const credential = credentialFromBundle(redeemed.provider, redeemed.tokens);

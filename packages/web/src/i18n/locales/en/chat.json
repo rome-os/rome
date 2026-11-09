@@ -19,6 +19,17 @@
     "openForwardedChat": "Open task chat {{title}}",
     "showFullText": "Show full text",
     "showLess": "Show less",
+    "connect": {
+      "action": "Connect",
+      "connecting": "Connecting…",
+      "connected": "Connected",
+      "retry": "Try again",
+      "settings": "Settings",
+      "notConnected": "Not connected yet",
+      "unavailable": "Cannot be connected here",
+      "blocked": "Pop-up blocked",
+      "checkFailed": "Could not check the connection"
+    },
     "openTaskChat": "Open",
     "tasks": {
       "title": "Tasks",
@@ -39,8 +50,8 @@
         "archive": "Archiving…",
         "done": "Sending…"
       },
-      "unchanged": "Concierge did not change it",
-      "timeout": "Concierge has not handled this yet",
+      "unchanged": "{{name}} did not change it",
+      "timeout": "{{name}} has not handled this yet",
       "failed": "Could not send",
       "notSynced": "Not synced",
       "sourceMissing": "Can't find the original message",
@@ -65,9 +76,11 @@
         "idle": "Tasks"
       },
       "emptyTitle": "No tasks yet",
-      "emptyDescription": "Tasks the Concierge is working on, planning, or watching appear here."
+      "emptyDescription": "Tasks {{name}} is working on, planning, or watching appear here."
     },
     "messageDetails": "Message details",
+    "chooseFolder": "Choose folder…",
+    "removeFolder": "Remove folder",
     "composerMenu": "Add files or change the model",
     "placeholder": "Message",
     "empty": {
@@ -78,6 +91,17 @@
         "email": "Summarize my unread email",
         "task": "Build me a simple habit tracker app"
       }
+    },
+    "topicEmpty": {
+      "title": "Start an ongoing topic",
+      "description": "Give something that keeps coming up a place of its own, like your calendar, a project or a trip. Alerts and tasks here show up only in this chat.",
+      "starters": {
+        "life": "Be my life helper: schedule, bills, deliveries and other errands live here",
+        "work": "Keep track of work here: project progress, PRs and meetings",
+        "trip": "Help me plan next month's trip, and keep everything about it here"
+      },
+      "justAsk": "Just asking a question?",
+      "backToMain": "Ask in the main chat →"
     }
   },
   "reply": {
@@ -97,6 +121,7 @@
   "documentTitle": "{{guardian}} & {{agent}} | Rome",
   "sidebar": {
     "newChat": "New Chat",
+    "loading": "Loading…",
     "noSessions": "No sessions yet",
     "openSidebar": "Open sidebar"
   },
@@ -375,6 +400,9 @@
   },
   "modelSwitch": {
     "quota": "{{from}} quota ran out, switched to {{to}}",
+    "login": "{{from}} sign-in failed, switched to {{to}}",
+    "temporary": "{{from}} is temporarily unavailable, switched to {{to}}",
+    "model_limit": "{{fromModel}} limit reached, switched to {{toModel}}",
     "notice": "Switched to {{model}}"
   },
   "modelSelector": {
