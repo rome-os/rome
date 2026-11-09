@@ -14,12 +14,15 @@ function write(path: string, text: string): void {
   writeFileSync(join(root, path), text);
 }
 
-function move(...pairs: Array<[string, string]>): {
+function move(
+  pairs: Array<[string, string]>,
+  options?: { tests?: boolean },
+): {
   plan: ReturnType<typeof planMoves>;
   mentions: string[];
 } {
   const moves: Move[] = pairs.map(([from, to]) => ({ from: pkg(from), to: pkg(to) }));
-  const plan = planMoves(root, moves);
+  const plan = planMoves(root, moves, options);
   applyPlan(root, plan);
   return { plan, mentions: findMentions(root, moves, plan) };
 }
@@ -50,6 +53,13 @@ beforeEach(() => {
     'import data from "./data.json" with { type: "json" };\nexport { data };\n',
   );
   write("pkg/src/b/dep.ts", "export const dep = 1;\n");
+  write("pkg/src/b/dep.test.ts", 'import { dep } from "./dep.js";\nexport { dep };\n');
+  write("pkg/src/b/dep.integration.test.ts", 'import { dep } from "./dep.js";\nexport { dep };\n');
+  write("pkg/src/b/dep-extra.test.ts", "export {};\n");
+  write(
+    "pkg/src/b/notes.ts",
+    "// The dependency lives in b/dep.ts, next to b/dep-extra.\nexport {};\n",
+  );
   write(
     "pkg/src/b/user.ts",
     [
@@ -77,7 +87,7 @@ afterEach(() => rmSync(root, { recursive: true, force: true }));
 
 describe("planMoves and applyPlan", () => {
   it("moves a folder and respells imports into it, keeping each specifier's ending", () => {
-    const { plan } = move(["src/a", "src/ctx/a"]);
+    const { plan } = move([["src/a", "src/ctx/a"]]);
 
     expect(existsSync(pkg("src/a/thing.ts"))).toBe(false);
     expect(existsSync(pkg("src/ctx/a/thing.ts"))).toBe(true);
@@ -100,7 +110,7 @@ describe("planMoves and applyPlan", () => {
   });
 
   it("respells a moved file's own imports and leaves its sibling imports alone", () => {
-    move(["src/a", "src/ctx/a"]);
+    move([["src/a", "src/ctx/a"]]);
 
     expect(read("pkg/src/ctx/a/thing.ts")).toContain('from "../../b/dep.js"');
     expect(read("pkg/src/ctx/a/index.ts")).toBe('export * from "./thing.js";\n');
@@ -108,20 +118,43 @@ describe("planMoves and applyPlan", () => {
   });
 
   it("respells imports from other packages that reach in by relative path", () => {
-    move(["src/a", "src/ctx/a"]);
+    move([["src/a", "src/ctx/a"]]);
 
     expect(read("other/src/test.ts")).toContain('from "../../pkg/src/ctx/a/thing.js"');
   });
 
   it("moves a single file and the imports of the file it leaves behind", () => {
-    move(["src/b/dep.ts", "src/ctx/dep.ts"]);
+    move([["src/b/dep.ts", "src/ctx/dep.ts"]]);
 
     expect(read("pkg/src/a/thing.ts")).toContain('from "../ctx/dep.js"');
     expect(read("pkg/src/b/user.ts")).toContain('import { dep } from "../ctx/dep.js";');
   });
 
+  it("brings a moved file's tests along, renamed with it", () => {
+    move([["src/b/dep.ts", "src/ctx/needed.ts"]]);
+
+    expect(read("pkg/src/ctx/needed.test.ts")).toContain('from "./needed.js"');
+    expect(read("pkg/src/ctx/needed.integration.test.ts")).toContain('from "./needed.js"');
+    // `dep-extra` is another file's test, not one of `dep`'s.
+    expect(existsSync(pkg("src/b/dep-extra.test.ts"))).toBe(true);
+  });
+
+  it("leaves the tests behind with tests: false", () => {
+    move([["src/b/dep.ts", "src/ctx/dep.ts"]], { tests: false });
+
+    expect(existsSync(pkg("src/b/dep.test.ts"))).toBe(true);
+    expect(read("pkg/src/b/dep.test.ts")).toContain('from "../ctx/dep.js"');
+  });
+
+  it("lists comments that name an old path below src, but not a path that only ends the same", () => {
+    const { mentions } = move([["src/b/dep.ts", "src/ctx/dep.ts"]]);
+
+    expect(mentions).toEqual([expect.stringMatching(/^pkg\/src\/b\/notes\.ts:1:/)]);
+    expect(read("pkg/src/b/notes.ts")).toContain("b/dep.ts");
+  });
+
   it("lists the hand-built paths it cannot rewrite", () => {
-    const { mentions } = move(["src/a", "src/ctx/a"]);
+    const { mentions } = move([["src/a", "src/ctx/a"]]);
 
     expect(mentions).toEqual([expect.stringMatching(/^knip\.json:1:/)]);
   });

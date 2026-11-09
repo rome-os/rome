@@ -3,10 +3,14 @@
  * Move files or folders inside one TypeScript package and rewrite every import
  * that names a moved file, or sits in one.
  *
- *   pnpm move-files [--dry] <from>:<to> [<from>:<to> ...]
+ *   pnpm move-files [--dry] [--no-tests] [--no-format] <from>:<to> [...]
  *
  * Paths are relative to the current directory, and every move must fall inside
- * the same package (the nearest tsconfig.json above the first source).
+ * the same package (the nearest tsconfig.json above the first source). A moved
+ * file takes its sibling tests along (`x.ts` brings `x.test.ts` and
+ * `x.integration.test.ts`) unless `--no-tests` is given or the test has a move
+ * of its own. Afterwards Biome formats and sorts the imports of every touched
+ * file, unless `--no-format` is given.
  *
  * Every relative specifier in every tracked script of the repo is resolved
  * against the layout before the move, mapped through the move table, and
@@ -21,9 +25,9 @@
  * every line that still names an old path, for a person to fix.
  */
 
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { dirname, join, relative, resolve, sep } from "node:path";
+import { basename, dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 
@@ -45,6 +49,9 @@ export interface MovePlan {
 }
 
 const TS_EXTENSION = /\.(d\.)?[cm]?tsx?$/;
+const TEST_FILE = /\.test\.[cm]?tsx?$/;
+/** What follows a file's stem in the name of one of its tests: `.test.ts`, `.e2e.test.ts`. */
+const TEST_SUFFIX = /^(\.[A-Za-z0-9-]+)*\.test\.[cm]?tsx?$/;
 const MOCK_CALLERS = new Set(["rs", "vi"]);
 const MOCK_METHODS = new Set([
   "mock",
@@ -135,7 +142,11 @@ function respell(spec: string, importer: string, oldTarget: string, newTarget: s
  * Plans the moves without touching the disk. Throws when a source is not
  * tracked or a destination already exists.
  */
-export function planMoves(repoRoot: string, moves: Move[]): MovePlan {
+export function planMoves(
+  repoRoot: string,
+  moves: Move[],
+  options: { tests?: boolean } = {},
+): MovePlan {
   if (moves.length === 0) throw new Error("no moves given");
   const tsconfig = findTsconfig(moves[0].from);
   const pkgDir = dirname(tsconfig);
@@ -158,6 +169,19 @@ export function planMoves(repoRoot: string, moves: Move[]): MovePlan {
     const files = trackedFiles(repoRoot, [from]);
     if (files.length === 0) throw new Error(`${from} holds no tracked file`);
     for (const f of files) renames.set(f, f === from ? to : to + f.slice(from.length));
+  }
+  if (options.tests ?? true) {
+    for (const [from, to] of [...renames]) {
+      if (!TS_EXTENSION.test(from) || TEST_FILE.test(from)) continue;
+      const stem = basename(from).replace(TS_EXTENSION, "");
+      const newStem = basename(to).replace(TS_EXTENSION, "");
+      for (const sibling of trackedFiles(repoRoot, [join(dirname(from), `${stem}.*`)])) {
+        const suffix = basename(sibling).slice(stem.length);
+        if (dirname(sibling) !== dirname(from) || !TEST_SUFFIX.test(suffix) || renames.has(sibling))
+          continue;
+        renames.set(sibling, join(dirname(to), newStem + suffix));
+      }
+    }
   }
   const destinations = new Set<string>();
   for (const to of renames.values()) {
@@ -243,38 +267,91 @@ export function applyPlan(repoRoot: string, plan: MovePlan): void {
 
 /**
  * Lines in tracked files that still name an old path, as `file:line:text`.
- * It looks for each requested source by its repo path, and by its path inside
- * the package under `src/` or `dist/` where no other folder name precedes it,
- * since configs and bundler inputs spell a path that way.
+ * It looks for each requested source by its repo path everywhere, by its
+ * package path under `src/` or `dist/` everywhere (configs and bundler inputs
+ * spell a path that way), and inside the package by its path below `src/`
+ * (comments spell it that way). The last two match only where no other folder
+ * name precedes the path, so a path that now sits deeper is not reported.
  */
 export function findMentions(repoRoot: string, moves: Move[], plan: MovePlan): string[] {
-  const tsconfig = findTsconfig(moves[0].from);
-  const pkgDir = dirname(tsconfig);
+  const pkgDir = dirname(findTsconfig(moves[0].from));
   const escape = (s: string): string => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const patterns: string[] = [];
+  const anywhere: string[] = [];
+  const inPackage: string[] = [];
   for (const { from } of moves) {
     const isDir = !plan.renames.has(from);
-    const stem = (p: string): string => toPosix(p).replace(TS_EXTENSION, "") + (isDir ? "/" : "");
-    patterns.push(escape(stem(relative(repoRoot, from))));
-    const inPkg = stem(relative(pkgDir, from));
+    // A folder ends at its `/`. A file ends where its name does, so `a/b` does not match `a/b-c`.
+    const pattern = (p: string): string =>
+      escape(toPosix(p).replace(TS_EXTENSION, "")) + (isDir ? "/" : "([^A-Za-z0-9_-]|$)");
+    const unprefixed = "(^|[^A-Za-z0-9_./-])";
+    anywhere.push(pattern(relative(repoRoot, from)));
+    const inPkg = toPosix(relative(pkgDir, from));
     if (inPkg.startsWith("src/")) {
-      patterns.push(`(^|[^A-Za-z0-9_./-])(src|dist)/${escape(inPkg.slice("src/".length))}`);
+      const belowSrc = inPkg.slice("src/".length);
+      anywhere.push(`${unprefixed}(src|dist)/${pattern(belowSrc)}`);
+      inPackage.push(`${unprefixed}${pattern(belowSrc)}`);
     }
   }
-  let out: string;
-  try {
-    out = git(repoRoot, ["grep", "-n", "-I", "-E", ...patterns.flatMap((p) => ["-e", p])]);
-  } catch {
-    return []; // git grep exits 1 when nothing matches
-  }
-  return out.split("\n").filter(Boolean);
+  const grep = (patterns: string[], pathspecs: string[]): string[] => {
+    if (patterns.length === 0) return [];
+    const args = [
+      "grep",
+      "-n",
+      "-I",
+      "-E",
+      ...patterns.flatMap((p) => ["-e", p]),
+      "--",
+      ...pathspecs,
+    ];
+    const run = spawnSync("git", args, { cwd: repoRoot, encoding: "utf8" });
+    // git grep exits 1 when nothing matches.
+    if (run.status !== 0 && run.status !== 1) throw new Error(run.stderr);
+    return run.stdout.split("\n").filter(Boolean);
+  };
+  return [
+    ...new Set([...grep(anywhere, ["."]), ...grep(inPackage, [relative(repoRoot, pkgDir) || "."])]),
+  ].sort();
+}
+
+/**
+ * Formats the moved and edited files with Biome and sorts their imports, then
+ * stages the moved ones again. Returns false when Biome could not run.
+ */
+export function formatTouched(repoRoot: string, plan: MovePlan): boolean {
+  const moved = (f: string): string => plan.renames.get(f) ?? f;
+  const files = [
+    ...new Set([...plan.edits.keys()].map(moved).concat([...plan.renames.values()])),
+  ].filter((f) => /\.[cm]?[jt]sx?$/.test(f));
+  if (files.length === 0) return true;
+  const run = spawnSync(
+    "biome",
+    [
+      "check",
+      "--write",
+      "--linter-enabled=false",
+      "--no-errors-on-unmatched",
+      "--files-ignore-unknown=true",
+      ...files,
+    ],
+    { cwd: repoRoot, encoding: "utf8" },
+  );
+  if (run.error || run.status !== 0) return false;
+  const staged = [...plan.renames.values()];
+  for (let i = 0; i < staged.length; i += 500)
+    git(repoRoot, ["add", "--", ...staged.slice(i, i + 500)]);
+  return true;
 }
 
 function main(argv: string[]): void {
-  const dry = argv.includes("--dry");
-  const pairs = argv.filter((a) => a !== "--dry");
-  if (pairs.length === 0) {
-    console.error("usage: pnpm move-files [--dry] <from>:<to> [<from>:<to> ...]");
+  const flags = new Set(argv.filter((a) => a.startsWith("--")));
+  const dry = flags.delete("--dry");
+  const tests = !flags.delete("--no-tests");
+  const format = !flags.delete("--no-format");
+  const pairs = argv.filter((a) => !a.startsWith("--"));
+  if (pairs.length === 0 || flags.size > 0) {
+    console.error(
+      "usage: pnpm move-files [--dry] [--no-tests] [--no-format] <from>:<to> [<from>:<to> ...]",
+    );
     process.exit(2);
   }
   // pnpm runs a root script from the repo root; INIT_CWD is where it was typed.
@@ -285,8 +362,13 @@ function main(argv: string[]): void {
     return { from: resolve(cwd, from), to: resolve(cwd, to) };
   });
   const repoRoot = git(cwd, ["rev-parse", "--show-toplevel"]).trim();
-  const plan = planMoves(repoRoot, moves);
+  const plan = planMoves(repoRoot, moves, { tests });
   if (!dry) applyPlan(repoRoot, plan);
+  if (!dry && format && !formatTouched(repoRoot, plan)) {
+    console.log(
+      "Biome could not run, so the touched files are not formatted. Run `biome check --write` on them.",
+    );
+  }
   console.log(
     `${dry ? "Would move" : "Moved"} ${plan.renames.size} files and rewrite ${plan.rewritten} specifiers in ${plan.edits.size} files.`,
   );
