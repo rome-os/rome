@@ -16,6 +16,24 @@ describe("ApprovalsRepository", () => {
     testDb.close();
   });
 
+  it("holdsSession() is true while an approval of the session waits or runs, and false once it ends", async () => {
+    const id = await repo.create({
+      type: "action_execution",
+      requestedBy: "agent",
+      description: "Send the mail",
+      payload: { sessionId: "runtime-1" },
+    });
+    expect(await repo.holdsSession("runtime-1")).toBe(true);
+    expect(await repo.holdsSession("runtime-2")).toBe(false);
+
+    await repo.resolvePending(id, "approve", "guardian");
+    await repo.claimExecution(id);
+    expect(await repo.holdsSession("runtime-1")).toBe(true);
+
+    await repo.markExecuted(id);
+    expect(await repo.holdsSession("runtime-1")).toBe(false);
+  });
+
   it("create() inserts approval with pending status", async () => {
     const id = await repo.create({
       type: "person_mapping",

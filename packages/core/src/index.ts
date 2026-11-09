@@ -1178,6 +1178,8 @@ async function main() {
         eventSources,
         sessionTools: (context) => buildConciergeTools(concierge, context),
       }),
+      // A session an approval waits to resume mid-turn stays until it ends.
+      heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );

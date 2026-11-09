@@ -68,6 +68,8 @@ export interface SessionState {
   reasoningEffort: string | null;
   workingDir: string | null;
   setup: string | null;
+  /** The session that replaced this one in a reset, or null. */
+  supersededBy: SessionId | null;
   createdAt: Date;
   lastActiveAt: Date;
 }
@@ -107,6 +109,7 @@ export class Session {
       reasoningEffort: null,
       workingDir: options.workingDir ?? null,
       setup: options.setup ?? null,
+      supersededBy: null,
       createdAt: now,
       lastActiveAt: now,
     });
@@ -156,6 +159,14 @@ export class Session {
    */
   get setup(): string | null {
     return this.state.setup;
+  }
+  /**
+   * The session that replaced this one in a reset, or null. A superseded
+   * session is completed, and whatever still names it by id, such as a
+   * scheduled wake-up, reaches the chat through its successor.
+   */
+  get supersededBy(): SessionId | null {
+    return this.state.supersededBy;
   }
   get createdAt(): Date {
     return this.state.createdAt;
@@ -227,11 +238,13 @@ export class Session {
    */
   replace(options: ReplaceSessionOptions = {}): Session {
     this.complete();
-    return Session.create(this.state.agentName, {
+    const successor = Session.create(this.state.agentName, {
       continuityKey: this.state.continuityKey ?? undefined,
       workingDir: options.workingDir,
       setup: options.setup,
     });
+    this.state.supersededBy = successor.id;
+    return successor;
   }
 
   /** The state to write. Only the repository calls this. */

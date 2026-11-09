@@ -3278,6 +3278,8 @@ describe("AgentRunner", () => {
       const charter = { text: "Be kind." };
       let sessionTools: RomeTool[];
       const managers: Sessions[] = [];
+      /** Sessions an approval waits to resume mid-turn. */
+      const held = new Set<string>();
 
       afterEach(async () => {
         await Promise.all(managers.splice(0).map((manager) => manager.shutdown()));
@@ -3309,6 +3311,7 @@ describe("AgentRunner", () => {
             ...managerDeps(createTestModelResolver({ providers: [provider] })),
             systemPrompts: createSystemPrompts({ sources }),
             sessionTools: { forTurn: async () => sessionTools },
+            heldMidTurn: async (sessionId: string) => held.has(sessionId),
           },
           { keepAliveAcrossTurns: true },
         );
@@ -3351,6 +3354,7 @@ describe("AgentRunner", () => {
         identity.text = "**Agent Name:** Yo";
         charter.text = "Be kind.";
         sessionTools = [tool("Send one message.")];
+        held.clear();
       });
 
       it("keeps the session while the setup is unchanged", async () => {
@@ -3412,6 +3416,33 @@ describe("AgentRunner", () => {
 
         expect(resumed).toBe(first);
         expect((await sessionRepository.session(first!))?.status).toBe("active");
+      });
+
+      it("routes a wake-up for a session a renewal replaced to the chat's current session", async () => {
+        const runner = renewingRunner(new MockModelProvider(replies(3)));
+        const scheduledFrom = await turn(runner);
+        identity.text = "**Agent Name:** YoYo";
+        const current = await turn(runner);
+
+        const woken = await turn(runner, { sessionId: scheduledFrom });
+
+        expect(current).not.toBe(scheduledFrom);
+        expect(woken).toBe(current);
+        expect((await sessionRepository.session(scheduledFrom!))?.supersededBy).toBe(current);
+      });
+
+      it("keeps a session an approval holds mid-turn, and renews it once the hold ends", async () => {
+        const runner = renewingRunner(new MockModelProvider(replies(3)));
+        const first = await turn(runner);
+        identity.text = "**Agent Name:** YoYo";
+        held.add(first!);
+
+        const whileHeld = await turn(runner);
+        held.clear();
+        const after = await turn(runner);
+
+        expect(whileHeld).toBe(first);
+        expect(after).not.toBe(first);
       });
 
       it("renews a session that opened before setups were recorded", async () => {

@@ -56,6 +56,10 @@ export const sessions = sqliteTable(
      *  the column existed and for agents that never replace a session on a
      *  setup change. */
     setup: text("setup_fingerprint"),
+    /** The session that replaced this one in a reset. Null for a session
+     *  still active, completed another way, or replaced before the column
+     *  existed. */
+    supersededBy: text("superseded_by"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
     status: text("status", {

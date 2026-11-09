@@ -349,6 +349,13 @@ interface ManagerDeps {
   folders: AgentFolders;
   /** Where the session logs. */
   log: AgentLog;
+  /**
+   * Whether something outside the session waits to resume it by its id in
+   * the middle of a turn, such as an approval still pending or running. A
+   * session held this way is not replaced, whatever its reset says, until
+   * the hold ends. Absent, nothing holds a session.
+   */
+  heldMidTurn?: (sessionId: string) => Promise<boolean>;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
   /** Stamps the session id on the spans a session starts and binds it for logs. */
@@ -443,13 +450,25 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
       const chatId = init.threadContext?.romeSessionId;
       return await lifecycleMutex.runExclusive(k, async () => {
         const active = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-        const decision = !active
+        const due = !active
           ? { due: false as const }
           : setup !== undefined && setupChanged(active.setup, setup)
             ? { due: true as const, reason: "setup" as const }
             : reset
               ? evaluateProviderSessionReset(reset, active, interactionAt)
               : { due: false as const };
+        // A turn stopped midway resumes by this session's id, so the session
+        // stays until that turn has ended.
+        const held = due.due && active ? await deps.heldMidTurn?.(active.id) : false;
+        if (held && active && due.due) {
+          log.info("provider_session.reset_held", {
+            chatId,
+            agentName: key.agentName,
+            oldSessionId: active.id,
+            resetReason: due.reason,
+          });
+        }
+        const decision = held ? { due: false as const } : due;
         const cached = sessions.get(k);
         if (decision.due) {
           log.info("provider_session.reset_due", {
@@ -598,13 +617,21 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     agentName: string,
     opening?: ResumeOpening,
   ): Promise<AgentSession> => {
-    const session = await resumableSession(deps, sessionId, agentName);
+    // A session a reset replaced is resumed as its chat's current session.
+    const session = await currentSuccessor(deps, sessionId, agentName);
     if (!session?.continuityKey) {
       throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
     }
+    if (session.id !== sessionId) {
+      log.info("provider_session.resume_redirected", {
+        agentName,
+        requestedSessionId: sessionId,
+        sessionId: session.id,
+      });
+    }
     return acquire(
       { agentName, channelThreadKey: session.continuityKey },
-      { ...(opening ?? {}), resumeSessionId: sessionId },
+      { ...(opening ?? {}), resumeSessionId: session.id },
     );
   };
 
@@ -754,6 +781,27 @@ async function resumableSession(
   const session = await deps.sessionRepository.session(sessionId);
   if (!session || session.status !== "active" || session.continuityKey === null) return undefined;
   return deprecatedSameAgent(deps, session.agentName, agentName) ? session : undefined;
+}
+
+/**
+ * The session an explicit id names, or the one that superseded it when a
+ * reset replaced it, followed to the chat's current session, when this agent
+ * can resume that. A session completed any other way is not resumable.
+ */
+async function currentSuccessor(
+  deps: ManagerDeps,
+  sessionId: string,
+  agentName: string,
+): Promise<Session | undefined> {
+  let id: string | null = sessionId;
+  // A chain longer than this is a cycle no reset can write.
+  for (let hop = 0; id && hop < 32; hop++) {
+    const session: Session | null = await deps.sessionRepository.session(id);
+    if (!session) return undefined;
+    if (session.status === "active") return resumableSession(deps, session.id, agentName);
+    id = session.supersededBy;
+  }
+  return undefined;
 }
 
 /** @deprecated Matches an agent under its legacy names, which a stored

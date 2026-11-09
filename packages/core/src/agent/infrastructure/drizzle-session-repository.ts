@@ -129,7 +129,11 @@ export class DrizzleSessionRepository implements SessionRepository {
       for (const checkpoint of retiredPending.checkpoints) upsertCheckpoint(tx, checkpoint);
       if (retiredState.continuityKey !== null) {
         tx.update(sessions)
-          .set({ status: "completed", lastActiveAt: retiredState.lastActiveAt })
+          .set({
+            status: "completed",
+            lastActiveAt: retiredState.lastActiveAt,
+            supersededBy: successorState.id,
+          })
           .where(exactlyActive(retiredState.continuityKey, retiredState.agentName))
           .run();
       }
@@ -225,6 +229,7 @@ function restore(row: SessionRow): Session {
     reasoningEffort: row.reasoningEffort,
     workingDir: row.workingDir,
     setup: row.setup,
+    supersededBy: row.supersededBy,
     createdAt: row.createdAt,
     lastActiveAt: row.lastActiveAt,
   });
@@ -247,7 +252,10 @@ function writeChanges(
   if (changes.has("lastActiveAt")) columns.lastActiveAt = state.lastActiveAt;
   // A completion is final. A stale instance that still believes the session is
   // active never writes that belief back.
-  if (changes.has("status") && state.status !== "active") columns.status = state.status;
+  if (changes.has("status") && state.status !== "active") {
+    columns.status = state.status;
+    if (state.supersededBy) columns.supersededBy = state.supersededBy;
+  }
   if (Object.keys(columns).length > 0) {
     tx.update(sessions).set(columns).where(eq(sessions.id, state.id)).run();
   }
@@ -266,6 +274,7 @@ function toRow(state: SessionState): SessionRow {
     reasoningEffort: state.reasoningEffort,
     workingDir: state.workingDir,
     setup: state.setup,
+    supersededBy: state.supersededBy,
     createdAt: state.createdAt,
     lastActiveAt: state.lastActiveAt,
     status: state.status,

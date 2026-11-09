@@ -1,4 +1,4 @@
-import { and, eq, or, desc } from "drizzle-orm";
+import { and, eq, or, desc, inArray, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { approvals } from "../../db/schema.js";
 import type { DrizzleDb } from "../../db/index.js";
@@ -110,6 +110,27 @@ export class ApprovalsRepository {
     return () => {
       this.createdListeners.delete(listener);
     };
+  }
+
+  /**
+   * Whether an approval waits to resume runtime session `sessionId` in the
+   * middle of a turn: one still pending, or approved and queued or running.
+   */
+  async holdsSession(sessionId: string): Promise<boolean> {
+    const rows = await this.db
+      .select({ id: approvals.id })
+      .from(approvals)
+      .where(
+        and(
+          sql`json_extract(${approvals.payload}, '$.sessionId') = ${sessionId}`,
+          or(
+            eq(approvals.status, "pending"),
+            inArray(approvals.executionState, ["queued", "running"]),
+          ),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
   }
 
   async findPending() {

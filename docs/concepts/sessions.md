@@ -27,6 +27,8 @@ A continuity key is the value that whatever opens a session, and comes back to i
 
 - At most one session per continuity key and agent is active. A reset completes that session and starts the next one under the same continuity key, so the next message continues where the chat left off.
 - A chat's reset policy decides when its session is due for a reset. In code, the rule is `evaluateProviderSessionReset` in [`packages/core/src/agent/domain/session-reset.ts`](../../packages/core/src/agent/domain/session-reset.ts), and the opener reads the policy from Chat settings and hands it over when it opens a session by continuity key. A session resumed by its id takes none, since it is resumed as it is.
+- A session that a reset replaced is superseded, not ended: whatever still names it by id, such as a scheduled wake-up, reaches the chat's current session. A session completed any other way cannot be resumed.
+- While something waits to resume a session in the middle of a turn, such as an approval not yet resolved or still running, no reset replaces it. The reset happens on the first turn after the wait ends.
 - Sessions never reads what a continuity key means. Only the code that minted it may parse it.
 - A session can have no continuity key. A subagent and a one-shot fork are found only by their id.
 - Where the continuity key is stored is a storage decision, separate from this contract. Today it is a column on the session (`channel_thread_key`).
