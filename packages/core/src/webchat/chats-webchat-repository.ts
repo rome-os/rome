@@ -461,12 +461,17 @@ export class ChatsWebChatRepository extends WebChatRepository {
   }
 
   /**
-   * The newest turn of each dashboard chat, when it began at or after `sinceMs`
-   * and ended in an error. A turn still running, or ended any other way, is
-   * not listed. Concierge chats are left out: they recover on their own. Oldest
-   * first. Eligibility is for `canContinueAfterRestart` to decide.
+   * The newest turn of each dashboard chat that ended in an error, when its
+   * trace began at or after `sinceMs` or its runtime session was active then.
+   * A turn that began earlier and was active since is listed, and the caller
+   * decides by its last activity. A turn still running, or ended any other
+   * way, is not listed. Concierge chats are left out: they recover on their
+   * own. Oldest first. Eligibility is for `canContinueAfterRestart` to decide.
    */
   getLatestErroredTurns(sinceMs: number): ErroredTurn[] {
+    const since = Math.floor(sinceMs / 1000);
+    // One index probe per chat finds its newest trace, so the work follows the
+    // number of chats and only a chat with recent activity has its blocks read.
     const traces = this.db.all<{
       messageId: string;
       sessionId: string;
@@ -474,16 +479,18 @@ export class ChatsWebChatRepository extends WebChatRepository {
       agentName: string | null;
     }>(sql`
       SELECT t.id AS messageId, t.session_id AS sessionId, t.turn_id AS turnId, s.agent_name AS agentName
-      FROM ${romeAgentMessages} t
-      JOIN ${romeSessions} s ON s.id = t.session_id
-      WHERE t.role = 'trace' AND t.created_at >= ${Math.floor(sinceMs / 1000)}
-        AND s.type = 'channel' AND s.chat_platform = 'webchat'
+      FROM ${romeSessions} s
+      JOIN ${romeAgentMessages} t ON t.id = (
+        SELECT n.id FROM ${romeAgentMessages} n
+        WHERE n.session_id = s.id AND n.role = 'trace'
+        ORDER BY n.created_at DESC, n.rowid DESC LIMIT 1
+      )
+      WHERE s.type = 'channel' AND s.chat_platform = 'webchat'
         AND s.id <> ${CONCIERGE_CHAT_ID}
         AND coalesce(s.agent_name, '') NOT IN (${CONCIERGE_AGENT_ID}, 'concierge')
-        AND NOT EXISTS (
-          SELECT 1 FROM ${romeAgentMessages} n
-          WHERE n.session_id = t.session_id AND n.role = 'trace' AND n.id <> t.id
-            AND (n.created_at > t.created_at OR (n.created_at = t.created_at AND n.rowid > t.rowid))
+        AND (
+          t.created_at >= ${since}
+          OR EXISTS (SELECT 1 FROM ${sessions} r WHERE r.chat_id = s.id AND r.last_active_at >= ${since})
         )
       ORDER BY t.created_at, t.rowid
     `);

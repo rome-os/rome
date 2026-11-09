@@ -12,8 +12,8 @@ import { isRecentActivity, MAX_RESTART_INACTIVITY_MS } from "./restart-continuat
 
 const log = createLogger("usage-limit-continuation");
 const USAGE_LIMIT_MARKER = "<usage_limit_recovery>";
-/** The longest delay setTimeout accepts. A later limit end is reached in steps. */
-const MAX_TIMER_MS = 2 ** 31 - 1;
+/** The longest excerpt `getRestartGuardianPrompt` returns. */
+const EXCERPT_LIMIT = 1000;
 
 /** `request` is empty when no excerpt is known. `refused` marks a request that never reached a model. */
 export function usageLimitContinuationPrompt(request: string, refused: boolean): string {
@@ -26,7 +26,9 @@ export function usageLimitContinuationPrompt(request: string, refused: boolean):
     "Read this chat's history to see what was running. " +
     "Check the actual state of the work and verify anything uncertain. Do only what remains. " +
     "If a side-effecting action cannot be confirmed, ask the guardian rather than redo it. " +
-    "The request below is cut at 1000 characters, so read the chat for its full text. " +
+    (request.length >= EXCERPT_LIMIT
+      ? `The request below is cut at ${EXCERPT_LIMIT} characters, so read the chat for its full text. `
+      : "") +
     "</usage_limit_recovery>" +
     (request
       ? `\n\n${refused ? "Refused request" : "Stopped request (may already be partly complete)"}:\n${request}`
@@ -37,12 +39,15 @@ export function usageLimitContinuationPrompt(request: string, refused: boolean):
 /**
  * The provider whose usage limit stopped this turn, or null when something else did.
  * A mid-run error block does not name its provider, so the chat's model pin does.
+ * An error that names another provider than the pin is left stopped.
  * Spend limits, credit balances and sign-in problems are not usage limits.
  */
 function usageLimitProviderOf(
   { failure, pinnedProvider }: ErroredTurn,
   reports: ModelAccountReports,
 ): ProviderId | null {
+  // A resumed session runs on its pin, so a refusal on another provider would not be retried there.
+  if (failure.provider && pinnedProvider && failure.provider !== pinnedProvider) return null;
   const provider = failure.provider ?? pinnedProvider;
   if (provider !== "openai" && provider !== "anthropic") return null;
   if (failoverReason({ ...failure, provider }, reports) !== "quota") return null;
@@ -54,7 +59,7 @@ function usageLimitProviderOf(
 }
 
 export interface UsageLimitContinuationOptions {
-  accounts: Pick<ModelAccounts, "read" | "refresh" | "onChanged">;
+  accounts: Pick<ModelAccounts, "read" | "onChanged">;
   repo: Pick<
     ChatsWebChatRepository,
     | "getLatestErroredTurns"
@@ -67,15 +72,14 @@ export interface UsageLimitContinuationOptions {
 
 /**
  * Continues guardian turns a usage limit stopped, once the limit has cleared.
- * Call once after startup. A provider's account is read again when its limit
- * ends, and each settled read that shows it available sweeps its stopped
- * turns, one chat at a time. A turn that began less than a day ago, in a
- * top-level dashboard chat nobody has written in since, gets one continuation.
+ * Call once after startup. Each settled read of an account that shows its
+ * provider available sweeps that provider's stopped turns, one chat at a time.
+ * A turn with activity in the last day, in a top-level dashboard chat nobody
+ * has written in since, gets one continuation.
  * Returns what stops it.
  */
 export function startUsageLimitContinuation(options: UsageLimitContinuationOptions): () => void {
   const { accounts, repo, runner } = options;
-  const timers = new Map<ProviderId, { until: number; timer: NodeJS.Timeout }>();
   // Stopped turns already handed over, so repeated reads never continue one twice.
   const attempted = new Set<string>();
   const pending = new Set<ProviderId>();
@@ -150,36 +154,8 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
     }
   };
 
-  // Nothing else fires when a limit's end passes, so one read is timed for it.
-  const arm = (provider: ProviderId): void => {
-    const report = accounts.read()[provider];
-    const until =
-      report?.state === "usage_limit_reached" ? Date.parse(report.usageLimitUntil ?? "") : NaN;
-    const current = timers.get(provider);
-    if (current?.until === until) return;
-    if (current) clearTimeout(current.timer);
-    timers.delete(provider);
-    if (!Number.isFinite(until)) return;
-    const timer = setTimeout(
-      () => {
-        timers.delete(provider);
-        void accounts.refresh(provider).catch((error) =>
-          log.warn("model account read at usage-limit reset failed", {
-            provider,
-            error: String(error),
-          }),
-        );
-      },
-      Math.min(Math.max(until - Date.now(), 0), MAX_TIMER_MS),
-    );
-    timer.unref?.();
-    timers.set(provider, { until, timer });
-  };
-
   const onRead = (provider: ProviderId, change: "authorization" | "refreshed"): void => {
-    if (stopped) return;
-    arm(provider);
-    if (change === "refreshed" && available(provider)) {
+    if (!stopped && change === "refreshed" && available(provider)) {
       pending.add(provider);
       void drain();
     }
@@ -193,8 +169,6 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
   return () => {
     stopped = true;
     unsubscribe();
-    for (const { timer } of timers.values()) clearTimeout(timer);
-    timers.clear();
     pending.clear();
   };
 }

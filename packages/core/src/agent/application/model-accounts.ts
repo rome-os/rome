@@ -1,8 +1,8 @@
 // Model accounts: remembers, for each provider, what its account last
 // reported, so its readers can read it without waiting on the provider's
-// process. It reads the accounts at start,
-// hourly, when an account says it changed and when asked, and tells its
-// listeners after each read. The accounts decide what they report
+// process. It reads the accounts at start, hourly, when an account says it
+// changed, shortly after a stated usage limit ends and when asked, and tells
+// its listeners after each read. The accounts decide what they report
 // (domain/model-account.ts); this module decides only when to ask.
 
 import type { AgentLog } from "../domain/agent-log.js";
@@ -41,6 +41,14 @@ export interface CreateModelAccountsOptions {
 }
 
 const DEFAULT_REFRESH_INTERVAL_MS = 60 * 60 * 1000;
+/**
+ * How long after a stated limit end the account is read. At the end itself a
+ * fresh usage read cannot contradict the stated end, and a provider that
+ * resets a little late would still report the limit.
+ */
+export const RESET_GRACE_MS = 2 * 60 * 1000;
+/** The longest delay setTimeout accepts. A later read is reached in steps. */
+const MAX_TIMER_MS = 2 ** 31 - 1;
 
 export function createModelAccounts(options: CreateModelAccountsOptions): ModelAccounts {
   const now = options.now ?? (() => new Date());
@@ -54,6 +62,8 @@ export function createModelAccounts(options: CreateModelAccountsOptions): ModelA
   const inFlight = new Map<ProviderId, Promise<void>>();
   // Providers whose account changed during a read: read again when it settles.
   const rereadAfter = new Set<ProviderId>();
+  // One read per limited provider, timed for the end of its limit.
+  const resetTimers = new Map<ProviderId, { until: number; timer: NodeJS.Timeout }>();
   let closed = false;
 
   const emit = (provider: ProviderId, change: ModelAccountChange): void => {
@@ -68,6 +78,30 @@ export function createModelAccounts(options: CreateModelAccountsOptions): ModelA
         });
       }
     }
+  };
+
+  // (Re)arms the read for a limit's end when the remembered end changes. The
+  // timer only fires after the end, so a limit that already ended arms none.
+  const armReset = (provider: ProviderId, account: ModelAccount): void => {
+    const report = remembered[provider];
+    const until =
+      report?.state === "usage_limit_reached" ? Date.parse(report.usageLimitUntil ?? "") : NaN;
+    const current = resetTimers.get(provider);
+    if (current?.until === until) return;
+    if (current) clearTimeout(current.timer);
+    resetTimers.delete(provider);
+    const wait = until + RESET_GRACE_MS - now().getTime();
+    if (closed || !Number.isFinite(until) || wait <= 0) return;
+    const timer = setTimeout(
+      () => {
+        resetTimers.delete(provider);
+        // A failed read leaves the report as it was, so the remaining wait is armed again.
+        void refreshProvider(provider, account).finally(() => armReset(provider, account));
+      },
+      Math.min(wait, MAX_TIMER_MS),
+    );
+    timer.unref?.();
+    resetTimers.set(provider, { until, timer });
   };
 
   const remember = (provider: ProviderId, next: ModelAccountReport): void => {
@@ -87,7 +121,10 @@ export function createModelAccounts(options: CreateModelAccountsOptions): ModelA
   const readAccount = async (provider: ProviderId, account: ModelAccount): Promise<void> => {
     try {
       const next = await account.report();
-      if (!closed) remember(provider, next);
+      if (!closed) {
+        remember(provider, next);
+        armReset(provider, account);
+      }
     } catch (err) {
       log?.warn("model account read failed", {
         provider,
@@ -156,6 +193,8 @@ export function createModelAccounts(options: CreateModelAccountsOptions): ModelA
     close() {
       closed = true;
       if (timer) clearInterval(timer);
+      for (const { timer: reset } of resetTimers.values()) clearTimeout(reset);
+      resetTimers.clear();
       for (const unsubscribe of unsubscribers) unsubscribe();
       listeners.clear();
     },

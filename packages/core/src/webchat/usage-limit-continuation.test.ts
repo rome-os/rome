@@ -21,9 +21,10 @@ import {
 } from "./usage-limit-continuation.js";
 
 const HOUR = 60 * 60 * 1000;
+/** How long after a stated limit end the account is read. */
+const RESET_GRACE_MS = 2 * 60 * 1000;
 const DAY = 24 * HOUR;
 const NOW = Date.parse("2026-11-10T12:00:00Z");
-const MAX_TIMER_MS = 2 ** 31 - 1;
 
 const available: ModelAccountReport = { state: "available", account: { loggedIn: true } };
 const limitedUntil = (at: number): ModelAccountReport => ({
@@ -99,6 +100,9 @@ describe("usage-limit continuation", () => {
       /** The dashboard refused the turn before any model session opened, so `turn_start` names the chat. */
       refusedByDashboard?: boolean;
       runtimeStatus?: "active" | "completed";
+      /** The runtime session has not completed a turn, so it holds no model pin. */
+      unpinned?: boolean;
+      runtimeActiveAt?: Date;
     } = {},
   ) {
     const { error = MID_RUN, pin = "anthropic", guardianPrompt = "Finish the work" } = options;
@@ -114,15 +118,15 @@ describe("usage-limit continuation", () => {
       turnId: `${id}-turn`,
       state: "consumed",
     });
-    if (pin) {
+    if (pin || options.unpinned) {
       await db.db.insert(sessions).values({
         id: `${id}-runtime`,
         agentName: "assistant:coder",
         chatId: id,
-        provider: pin,
+        provider: options.unpinned ? null : pin,
         channelThreadKey: `webchat:${id}`,
         createdAt: new Date(),
-        lastActiveAt: new Date(),
+        lastActiveAt: options.runtimeActiveAt ?? new Date(),
         status: options.runtimeStatus ?? "active",
       });
     }
@@ -208,6 +212,7 @@ describe("usage-limit continuation", () => {
       );
       expect(prompt).not.toContain("composed");
       expect(prompt).not.toContain("none of it was done");
+      expect(prompt).not.toContain("cut at");
     });
 
     it("continues a turn the limit refused before it started, and says it never ran", async () => {
@@ -289,8 +294,18 @@ describe("usage-limit continuation", () => {
       expect(agent.calls.map((call) => call.threadContext?.threadId)).toEqual(["claude-chat"]);
     });
 
-    it("trusts the provider an error names over the chat's pin", async () => {
+    it("leaves a refusal on another provider than the chat's pin stopped", async () => {
+      // A resumed session runs on its pin, so a continuation would not run on the refused provider.
       await stopped("chat", { error: REFUSED, pin: "openai" });
+      const { agent, runner } = backend();
+      start(runner);
+      await clearAndSweep("anthropic");
+      await clearAndSweep("openai");
+      expect(agent.calls).toHaveLength(0);
+    });
+
+    it("continues a refusal that names a provider for a chat with no pin yet", async () => {
+      await stopped("chat", { error: REFUSED, unpinned: true, refusedByDashboard: true });
       const { agent, runner } = backend();
       start(runner);
       await clearAndSweep("openai");
@@ -336,71 +351,18 @@ describe("usage-limit continuation", () => {
   });
 
   describe("when the limit ends", () => {
-    it("reads the account at the stated end, and continues once it reports available", async () => {
+    it("continues once the read after the stated end reports available", async () => {
       await stopped();
       claude.set(limitedUntil(NOW + 5 * HOUR));
       await accounts.refresh("anthropic");
       const { agent, runner } = backend();
       start(runner);
-      const reads = claude.reads();
 
-      await rs.advanceTimersByTimeAsync(5 * HOUR - 1);
-      expect(claude.reads()).toBe(reads);
       claude.set(available);
-      await rs.advanceTimersByTimeAsync(1);
-
-      expect(claude.reads()).toBe(reads + 1);
-      expect(agent.calls).toHaveLength(1);
-    });
-
-    it("arms again when a read moves the end, and not for the old time", async () => {
-      claude.set(limitedUntil(NOW + HOUR));
-      await accounts.refresh("anthropic");
-      const { runner } = backend();
-      start(runner);
-      expect(rs.getTimerCount()).toBe(1);
-      claude.set(limitedUntil(NOW + 3 * HOUR));
-      await accounts.refresh("anthropic");
-      expect(rs.getTimerCount()).toBe(1);
-
-      const reads = claude.reads();
-      await rs.advanceTimersByTimeAsync(HOUR);
-      expect(claude.reads()).toBe(reads);
-      await rs.advanceTimersByTimeAsync(2 * HOUR);
-      expect(claude.reads()).toBe(reads + 1);
-    });
-
-    it("arms nothing for a provider that is available, and drops a timer once it clears", async () => {
-      claude.set(limitedUntil(NOW + HOUR));
-      await accounts.refresh("anthropic");
-      const { runner } = backend();
-      start(runner);
-      expect(rs.getTimerCount()).toBe(1);
-      claude.set(available);
-      await accounts.refresh("anthropic");
-      expect(rs.getTimerCount()).toBe(0);
-    });
-
-    it("reaches an end more than 24.8 days away in steps, without firing at once", async () => {
-      const end = NOW + 40 * DAY;
-      claude.set(limitedUntil(end));
-      await accounts.refresh("anthropic");
-      await stopped();
-      const { agent, runner } = backend();
-      start(runner);
-      const reads = claude.reads();
-
-      await rs.advanceTimersByTimeAsync(MAX_TIMER_MS - 1);
-      expect(claude.reads()).toBe(reads);
-      await rs.advanceTimersByTimeAsync(1);
-      // The early step reads the account, which is still limited, and arms the rest.
-      expect(claude.reads()).toBe(reads + 1);
-      expect(rs.getTimerCount()).toBe(1);
+      await rs.advanceTimersByTimeAsync(5 * HOUR + RESET_GRACE_MS - 1);
       expect(agent.calls).toHaveLength(0);
-
-      claude.set(available);
-      await rs.advanceTimersByTimeAsync(end - Date.now());
-      expect(claude.reads()).toBe(reads + 2);
+      await rs.advanceTimersByTimeAsync(1);
+      expect(agent.calls).toHaveLength(1);
     });
 
     it("sweeps at start for a limit that ended while Rome was down", async () => {
@@ -516,6 +478,26 @@ describe("usage-limit continuation", () => {
       start(runner);
       await clearAndSweep();
       expect(agent.calls).toHaveLength(expected);
+    });
+
+    it("continues a turn that began more than a day ago and was active since", async () => {
+      rs.setSystemTime(NOW - 30 * HOUR);
+      await stopped("chat", { runtimeActiveAt: new Date(NOW - HOUR) });
+      rs.setSystemTime(NOW);
+      const { agent, runner } = backend();
+      start(runner);
+      await clearAndSweep();
+      expect(agent.calls).toHaveLength(1);
+    });
+
+    it("skips a turn that began more than a day ago and has been inactive since", async () => {
+      rs.setSystemTime(NOW - 30 * HOUR);
+      await stopped("chat", { runtimeActiveAt: new Date(NOW - 26 * HOUR) });
+      rs.setSystemTime(NOW);
+      const { agent, runner } = backend();
+      start(runner);
+      await clearAndSweep();
+      expect(agent.calls).toHaveLength(0);
     });
 
     it("continues a system-started turn's chat only through a guardian prompt", async () => {
@@ -694,7 +676,7 @@ describe("usage-limit continuation", () => {
       expect(calls).toEqual(["one"]);
 
       claude.set(available);
-      await rs.advanceTimersByTimeAsync(6 * HOUR);
+      await rs.advanceTimersByTimeAsync(6 * HOUR + RESET_GRACE_MS);
       expect(calls).toEqual(["one", "two"]);
     });
 
@@ -715,7 +697,7 @@ describe("usage-limit continuation", () => {
       expect(agent.calls).toHaveLength(0);
 
       claude.set(available);
-      await rs.advanceTimersByTimeAsync(2 * HOUR);
+      await rs.advanceTimersByTimeAsync(2 * HOUR + RESET_GRACE_MS);
       expect(agent.calls).toHaveLength(1);
     });
 
@@ -732,25 +714,31 @@ describe("usage-limit continuation", () => {
   });
 
   describe("shutdown", () => {
-    it("clears its timers and ignores later reads", async () => {
+    it("ignores later reads", async () => {
       await stopped();
-      claude.set(limitedUntil(NOW + HOUR));
-      await accounts.refresh("anthropic");
       const { agent, runner } = backend();
-      const stopIt = start(runner);
-      expect(rs.getTimerCount()).toBe(1);
-      stopIt();
-      expect(rs.getTimerCount()).toBe(0);
-
-      claude.set(available);
+      start(runner)();
       await clearAndSweep();
-      await rs.advanceTimersByTimeAsync(2 * HOUR);
       expect(agent.calls).toHaveLength(0);
     });
   });
 
-  it("words a continuation with no known request without an excerpt", () => {
-    expect(usageLimitContinuationPrompt("", false)).not.toContain("request (may");
-    expect(usageLimitContinuationPrompt("", false).endsWith("</usage_limit_recovery>")).toBe(true);
+  describe("the prompt", () => {
+    it("omits the excerpt, and the cut notice, when no request is known", () => {
+      const prompt = usageLimitContinuationPrompt("", false);
+      expect(prompt).not.toContain("request (may");
+      expect(prompt).not.toContain("cut at");
+      expect(prompt.endsWith("</usage_limit_recovery>")).toBe(true);
+    });
+
+    it.each([
+      [999, false],
+      [1000, true],
+    ])("with a %i character request, says the request is cut: %s", (length, cut) => {
+      const prompt = usageLimitContinuationPrompt("a".repeat(length), false);
+      expect(prompt.includes("cut at 1000 characters, so read the chat for its full text")).toBe(
+        cut,
+      );
+    });
   });
 });
