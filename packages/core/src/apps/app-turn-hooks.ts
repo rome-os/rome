@@ -8,10 +8,10 @@ import type {
   AgentTurnStartedEvent,
   AgentTurnStartedHook,
 } from "@rome-os/app-runtime";
-import type { AppCatalog } from "../../apps/catalog.js";
-import type { RomeAppRuntimeServices } from "../../apps/context.js";
-import type { ArtifactRef } from "../../apps/state.js";
-import { loadAppHook } from "../../apps/hook-loader.js";
+import type { AppCatalog } from "./catalog.js";
+import type { RomeAppRuntimeServices } from "./context.js";
+import type { ArtifactRef } from "./state.js";
+import { loadAppHook } from "./hook-loader.js";
 import {
   createHookDispatchResult,
   evaluateHookInvocation,
@@ -22,10 +22,10 @@ import {
   type HookDispatchResult,
   type HookIdentity,
   type HookInvocationContext,
-} from "../../core/hook-recursion.js";
-import { createLogger, type Logger } from "../../logger.js";
-import { wrapHookSpan } from "../../telemetry.js";
-import type { TurnLifecycleListener } from "../domain/turn-lifecycle.js";
+} from "../core/hook-recursion.js";
+import { createLogger, type Logger } from "../logger.js";
+import { wrapHookSpan } from "../telemetry.js";
+import type { TurnLifecycleListener } from "../agent/index.js";
 
 const log = createLogger("agent-lifecycle");
 

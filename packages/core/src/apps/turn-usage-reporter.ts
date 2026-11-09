@@ -1,7 +1,7 @@
 // Reports sessions and turns to Rome's OpenTelemetry metrics, and ended turns
 // to the usage recorder.
 
-import type { AppCatalog } from "../../apps/catalog.js";
+import type { AppCatalog } from "./catalog.js";
 import {
   modelPromptCacheMetric,
   modelSessionOpenMetric,
@@ -9,14 +9,14 @@ import {
   recordModelTurnMetrics,
   sessionAcquireMetric,
   sessionDurationMetric,
-} from "../../telemetry.js";
+} from "../telemetry.js";
 import type {
   ReportedAgent,
   SessionServed,
   TurnAttribution,
   TurnUsageFacts,
   TurnUsageReporting,
-} from "../domain/turn-usage-reporting.js";
+} from "../agent/index.js";
 import type { AgentAccounting } from "@rome-os/app-runtime";
 
 export interface TurnUsageReporterDeps {

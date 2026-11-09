@@ -1,12 +1,12 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
-import type { AppCatalog } from "../../apps/catalog.js";
-import { toArtifactMetadata } from "../../apps/artifact-ref-adapter.js";
-import { resolveArtifactId, type ArtifactIdentityContext } from "../../apps/artifact-id.js";
-import { loadArtifactRecords } from "../../apps/artifact-records.js";
-import { parseSkillFrontmatterResult } from "../../apps/packaging/skill-frontmatter.js";
-import type { AppOwnedArtifactLoadFailure } from "../../apps/types.js";
-import type { Skill, SkillCatalog } from "../domain/skill.js";
+import type { AppCatalog } from "./catalog.js";
+import { toArtifactMetadata } from "./artifact-ref-adapter.js";
+import { resolveArtifactId, type ArtifactIdentityContext } from "./artifact-id.js";
+import { loadArtifactRecords } from "./artifact-records.js";
+import { parseSkillFrontmatterResult } from "./packaging/skill-frontmatter.js";
+import type { AppOwnedArtifactLoadFailure } from "./types.js";
+import type { Skill, SkillCatalog } from "../agent/index.js";
 
 function stripSkillStructuredSection(content: string): string {
   return content.replace(/^---\r?\n[\s\S]*?\r?\n---(?:\r?\n)*/, "").trim();

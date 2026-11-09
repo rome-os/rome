@@ -6,18 +6,15 @@ import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "./session-opening.js";
 import { chatPromptFacts } from "./chat-prompt-facts.js";
 import type { PromptFacts } from "../agent/index.js";
-import {
-  ChatSessionSettings,
-  readAnswerShape,
-  romeSessionTracing,
-  TurnUsageReporter,
-} from "../agent/index.js";
+import { ChatSessionSettings, readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { TurnUsageReporter } from "../apps/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
-import { AgentLoader, createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
+import { createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
+import { AgentLoader } from "../apps/agent-loader.js";
 import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { ActionEngine } from "../apps/actions/engine.js";
@@ -97,14 +94,10 @@ import {
   type AgentSessionManager,
   type AgentTurnHandle,
 } from "../agent/index.js";
-import { SkillLoader } from "../agent/index.js";
-import {
-  AppTurnHooks,
-  AppTurnMiddleware,
-  TurnListeners,
-  type TurnLifecycle,
-  type TurnMiddleware,
-} from "../agent/index.js";
+import { SkillLoader } from "../apps/skill-loader.js";
+import { TurnListeners, type TurnLifecycle, type TurnMiddleware } from "../agent/index.js";
+import { AppTurnHooks } from "../apps/app-turn-hooks.js";
+import { AppTurnMiddleware } from "../apps/app-turn-middleware.js";
 import type {
   AgentTurnFinishedEvent,
   AgentTurnStartedEvent,

@@ -10,6 +10,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
+import { contextCrossings, contextRules } from "./rules/contexts.js";
 import { layerRules, listedCrossings } from "./rules/layers.js";
 
 /**
@@ -202,20 +203,16 @@ function toPosix(path: string): string {
 /** Checks packages/core/src against every rule set and prints each violation. Returns the exit code. */
 export function runCli(): number {
   const core = join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "core");
-  const rules = [...layerRules];
-  const violations = checkImports(
-    join(core, "src"),
-    join(core, "tsconfig.json"),
-    rules,
-    listedCrossings,
-  );
+  const rules = [...layerRules, ...contextRules];
+  const crossings = [...listedCrossings, ...contextCrossings];
+  const violations = checkImports(join(core, "src"), join(core, "tsconfig.json"), rules, crossings);
   if (violations.length > 0) {
     for (const violation of violations) console.error(`  - ${formatImportViolation(violation)}`);
     console.error(`import-rules: ${violations.length} import(s) break a rule`);
     return 1;
   }
   console.log(
-    `import-rules: packages/core/src follows all ${rules.length} import rules, with ${listedCrossings.length} listed crossing(s)`,
+    `import-rules: packages/core/src follows all ${rules.length} import rules, with ${crossings.length} listed crossing(s)`,
   );
   return 0;
 }

@@ -2,12 +2,13 @@ import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
-import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
+import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { TurnUsageReporter } from "../apps/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { Tracer } from "@opentelemetry/api";
-import { AgentLoader } from "../agent/index.js";
+import { AgentLoader } from "../apps/agent-loader.js";
 import {
   AgentRunner,
   createSessionFromRun,
@@ -15,10 +16,11 @@ import {
   type ModelRunParams,
 } from "../core/agent-runner.js";
 import { createAgentSessionManager, type AgentSessionManager } from "../agent/index.js";
-import { AppTurnHooks, TurnListeners } from "../agent/index.js";
+import { TurnListeners } from "../agent/index.js";
+import { AppTurnHooks } from "../apps/app-turn-hooks.js";
 import { createModelResolver } from "../agent/index.js";
 import { bothAvailable, fakeAccounts } from "./kit/model-accounts.js";
-import { SkillLoader } from "../agent/index.js";
+import { SkillLoader } from "../apps/skill-loader.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import { createTestSystemPrompts } from "./system-prompts.js";
 import { ActionEngine } from "../apps/actions/engine.js";

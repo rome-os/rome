@@ -2,7 +2,8 @@ import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
-import { readAnswerShape, romeSessionTracing, TurnUsageReporter } from "../agent/index.js";
+import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { TurnUsageReporter } from "../apps/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
 import {
@@ -27,9 +28,9 @@ import type {
   ModelSessionParams,
 } from "../core/agent-runner.js";
 import { AgentRunner, createSessionFromRun } from "../core/agent-runner.js";
-import { AgentLoader } from "../agent/index.js";
+import { AgentLoader } from "../apps/agent-loader.js";
 import { agentsByLegacyName } from "../apps/agents-by-legacy-name.js";
-import { SkillLoader } from "../agent/index.js";
+import { SkillLoader } from "../apps/skill-loader.js";
 import { createTestSystemPrompts } from "./system-prompts.js";
 import {
   createModelAccounts,
@@ -48,7 +49,8 @@ import {
   subagentTurnLog,
 } from "../core/subagent-call-ports.js";
 import { createSubagentCalls, WebChatDashboardSessions } from "../agent/index.js";
-import { AppTurnHooks, TurnListeners } from "../agent/index.js";
+import { TurnListeners } from "../agent/index.js";
+import { AppTurnHooks } from "../apps/app-turn-hooks.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
 import { ApprovalHandler } from "../apps/actions/approval-handler.js";
 import { createBackendTurnRunner } from "../apps/actions/backend-turn.js";

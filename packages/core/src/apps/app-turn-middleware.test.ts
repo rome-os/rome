@@ -3,10 +3,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AppTurnMiddleware } from "./app-turn-middleware.js";
-import type { AppCatalog } from "../../apps/catalog.js";
-import type { ArtifactRef } from "../../apps/state.js";
+import type { AppCatalog } from "./catalog.js";
+import type { ArtifactRef } from "./state.js";
 import type { AgentEvent } from "@rome-os/app-runtime";
-import type { TurnMiddleware } from "../domain/turn-middleware.js";
+import type { TurnMiddleware } from "../agent/index.js";
 
 describe("AppTurnMiddleware", () => {
   const tempDirs: string[] = [];

@@ -1,20 +1,20 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, extname } from "node:path";
 import { parse as parseYaml } from "yaml";
-import type { AppOwnedArtifactLoadFailure, ArtifactMetadata } from "../../apps/types.js";
-import type { AppCatalog } from "../../apps/catalog.js";
-import { listCoreAgents } from "../../apps/core-artifacts.js";
-import { toArtifactMetadata } from "../../apps/artifact-ref-adapter.js";
-import { AgentConfigSchema } from "../../apps/packaging/index.js";
-import { resolveArtifactId, type ArtifactIdentityContext } from "../../apps/artifact-id.js";
-import { loadArtifactRecords } from "../../apps/artifact-records.js";
-import { createLogger } from "../../logger.js";
+import type { AppOwnedArtifactLoadFailure, ArtifactMetadata } from "./types.js";
+import type { AppCatalog } from "./catalog.js";
+import { listCoreAgents } from "./core-artifacts.js";
+import { toArtifactMetadata } from "./artifact-ref-adapter.js";
+import { AgentConfigSchema } from "./packaging/index.js";
+import { resolveArtifactId, type ArtifactIdentityContext } from "./artifact-id.js";
+import { loadArtifactRecords } from "./artifact-records.js";
+import { createLogger } from "../logger.js";
 import {
   type Agent,
   type AgentCatalog,
   type AgentDefinition,
   resolveSubagents,
-} from "../domain/agent-definition.js";
+} from "../agent/index.js";
 
 const log = createLogger("agent-loader");
 

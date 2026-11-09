@@ -3,15 +3,15 @@ import { AgentLoader } from "./agent-loader.js";
 import { join } from "node:path";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import type { AppCatalog } from "../../apps/catalog.js";
-import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
-import type { Agent } from "../domain/agent-definition.js";
+import type { AppCatalog } from "./catalog.js";
+import { createEmptyLegacyArtifactBindings } from "./artifact-id.js";
+import type { Agent } from "../agent/index.js";
 
-rs.mock("../../apps/core-artifacts.js", () => ({
+rs.mock("./core-artifacts.js", () => ({
   listCoreAgents: async () => [],
 }));
 
-const FIXTURES_DIR = join(import.meta.dirname, "..", "..", "test", "fixtures", "agents");
+const FIXTURES_DIR = join(import.meta.dirname, "..", "test", "fixtures", "agents");
 
 /** The loaded agents by canonical id. */
 const byId = (catalog: { list(): readonly Agent[] }) =>
