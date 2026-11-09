@@ -168,7 +168,7 @@ import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
 import { ActionRegistryImpl } from "./apps/actions/registry.js";
 import { ActionLoader } from "./apps/actions/loader.js";
 import { ActionEngine } from "./apps/actions/engine.js";
-import { readMemoryHeadroom } from "./apps/actions/memory-headroom.js";
+import { readMemoryHeadroom } from "./instance/memory-headroom.js";
 import { defaultWorkerCap } from "./apps/actions/worker-cap.js";
 import { isFirstPartyAction } from "./apps/first-party-action.js";
 import { bumpModuleEnvEpoch } from "./apps/actions/module-loader.js";

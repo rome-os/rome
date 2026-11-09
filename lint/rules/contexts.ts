@@ -11,11 +11,12 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
   access: ["apps", "instance"],
   agent: ["instance", "routines"],
   apps: ["access", "agent", "chats", "connections", "instance", "people", "routines"],
-  chats: ["access", "agent", "apps", "connections", "people"],
-  connections: ["apps", "chats", "desktops", "instance", "people"],
+  chats: ["access", "agent", "apps", "connections", "participation", "people"],
+  connections: ["apps", "chats", "desktops", "instance", "participation", "people"],
   desktops: ["access", "instance"],
   favors: ["access", "apps", "instance"],
-  instance: ["apps"],
+  instance: [],
+  participation: [],
   people: ["apps", "chats", "connections", "routines"],
   routines: ["access", "agent", "apps"],
 };
@@ -36,6 +37,22 @@ const REASONS: Record<string, string> = {
     "A connection that needs a screen, such as WeChat's own-account connection, asks Desktops for one. Desktops never names a connection, so no file in desktops/ imports connections/.",
   "desktops-never-imports-people":
     "Desktops never names a person or an account, so no file in desktops/ imports people/.",
+  "instance-never-imports-agent":
+    "Instance says which Rome this is and whether it is healthy, whoever runs on it, so no file in instance/ imports agent/.",
+  "instance-never-imports-apps":
+    "Apps read the instance's identity and health, never the other way round, so no file in instance/ imports apps/.",
+  "instance-never-imports-chats":
+    "Instance never names a chat or an account, so no file in instance/ imports chats/.",
+  "instance-never-imports-connections":
+    "A connection asks Instance who this Rome is when it goes through Rome Cloud. Instance never names a connection, so no file in instance/ imports connections/.",
+  "instance-never-imports-desktops":
+    "Desktops asks Instance for this Rome's identity to reach a machine, never the other way round, so no file in instance/ imports desktops/.",
+  "instance-never-imports-favors":
+    "Favors asks Rome Cloud on the instance's behalf through Instance, never the other way round, so no file in instance/ imports favors/.",
+  "instance-never-imports-participation":
+    "Instance never decides when an agent takes part in a chat, so no file in instance/ imports participation/.",
+  "instance-never-imports-people":
+    "Instance never names a person, so no file in instance/ imports people/.",
   "instance-never-imports-access":
     "Access asks Instance which Rome Cloud this Rome belongs to, so no file in instance/ imports access/.",
 };
