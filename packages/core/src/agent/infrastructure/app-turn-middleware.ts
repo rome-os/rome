@@ -6,7 +6,7 @@ import type { TurnMiddlewareContext, TurnMiddlewareHook } from "@rome-os/app-run
 import type { AppCatalog } from "../../apps/catalog.js";
 import type { RomeAppRuntimeServices } from "../../apps/context.js";
 import type { ArtifactRef } from "../../apps/state.js";
-import { loadAppHook } from "../../core/hook-loader.js";
+import { loadAppHook } from "../../apps/hook-loader.js";
 import { createLogger } from "../../logger.js";
 import { wrapHookSpan } from "../../telemetry.js";
 import type { TurnMiddleware } from "../domain/turn-middleware.js";

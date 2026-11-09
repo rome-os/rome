@@ -8,7 +8,7 @@ import type { AppCatalog } from "../../apps/catalog.js";
 import type { ArtifactRef, ResolvedApp } from "../../apps/state.js";
 import type { AgentTurnFinishedEvent } from "@rome-os/app-runtime";
 import type { RomeAppRuntimeServices } from "../../apps/context.js";
-import type { ActionEngine } from "../../actions/engine.js";
+import type { ActionEngine } from "../../apps/actions/engine.js";
 import { getCurrentHookInvocationContext } from "../../core/hook-recursion.js";
 
 type LifecycleHookGlobal = typeof globalThis & {

@@ -1,4 +1,4 @@
-import type { ActionEngine } from "../actions/engine.js";
+import type { ActionEngine } from "../apps/actions/engine.js";
 import { createLogger } from "../logger.js";
 import type { FavorActionDispatchClaim, FavorActionRequestView, FavorService } from "./types.js";
 

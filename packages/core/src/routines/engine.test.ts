@@ -3,12 +3,12 @@ import { RoutineEngine } from "./engine.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
-import type { ActionEngine } from "../actions/engine.js";
+import type { ActionEngine } from "../apps/actions/engine.js";
 import { systemClock, type Clock } from "../lib/clock.js";
 import type { TriggerProvider } from "./trigger-provider.js";
 import type { Trigger } from "./types.js";
-import { actionExecutionContext, type ActionExecutionStore } from "../actions/context.js";
-import { replayContext, type ReplayStore } from "../actions/replay.js";
+import { actionExecutionContext, type ActionExecutionStore } from "../apps/actions/context.js";
+import { replayContext, type ReplayStore } from "../apps/actions/replay.js";
 import { currentSessionId, runWithSession } from "../telemetry-context.js";
 
 // reactivateFloating only touches routinesRepo + activate(); the other ctor

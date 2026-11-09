@@ -1,7 +1,7 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { TurnFacts } from "../agent/index.js";
-import type { ActionEngine } from "../actions/engine.js";
-import type { Action, ActionRegistry } from "../actions/types.js";
+import type { ActionEngine } from "../apps/actions/engine.js";
+import type { Action, ActionRegistry } from "../apps/actions/types.js";
 import { romeToolPorts } from "./rome-tool-ports.js";
 
 function action(name: string): Action {

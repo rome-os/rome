@@ -5,12 +5,12 @@ import type { Routine, RoutineRunStatus } from "./types.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import { toRoutine } from "../db/repositories/routines.js";
 import type { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
-import type { ActionEngine, ActionRunContext } from "../actions/engine.js";
+import type { ActionEngine, ActionRunContext } from "../apps/actions/engine.js";
 import { createLogger } from "../logger.js";
 import { withRomeSpan } from "../telemetry.js";
 import { runWithoutHookInvocationContext } from "../core/hook-recursion.js";
-import { actionExecutionContext } from "../actions/context.js";
-import { replayContext } from "../actions/replay.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
+import { replayContext } from "../apps/actions/replay.js";
 import { runWithoutSession } from "../telemetry-context.js";
 import type { Clock, ClockTimer } from "../lib/clock.js";
 

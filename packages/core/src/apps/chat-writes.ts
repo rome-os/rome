@@ -9,7 +9,7 @@
 // `send_message` onto them.
 
 import { partsWithText } from "../chats/storage/message.js";
-import { actionExecutionContext } from "../actions/context.js";
+import { actionExecutionContext } from "./actions/context.js";
 import type {
   Channel,
   ChatId,

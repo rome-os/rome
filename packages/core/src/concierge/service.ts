@@ -12,7 +12,7 @@ import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../connections/s
 import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import type { ApprovalsRepository } from "../db/repositories/approvals.js";
+import type { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { SkillCatalog } from "../agent/index.js";
 import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
 import type { AgentTurnFailedBeforeStart } from "../agent/index.js";

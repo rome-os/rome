@@ -3,7 +3,7 @@ import { resolveReply } from "../../api/routes/webchat-reply.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq, sql } from "drizzle-orm";
 import { buildAgent, createTestDb, testChatsWiring, type TestDb } from "../../test/helpers.js";
-import { ApprovalsRepository } from "./approvals.js";
+import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
 import { ChatSettingsRepository } from "../../chat-settings/repository.js";
 import type { DrizzleDb } from "../index.js";
 import { sessionTraceCutoff } from "../../webchat/trace-retention.js";

@@ -12,7 +12,7 @@ import {
 } from "../../routines/guardian-timezone.js";
 import { resolveGuardianSession } from "../../lib/guardian-session.js";
 import { parseTimeZone } from "../../lib/timezone.js";
-import { PUBLIC_ACCESS_SETTING_KEY } from "../../lib/public-access-config.js";
+import { PUBLIC_ACCESS_SETTING_KEY } from "../../apps/public-access-config.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";
 import { CONCIERGE_FOLLOWING_SETTING_KEY } from "../../concierge/following.js";
 

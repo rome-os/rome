@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
-import { createBackendTurnRunner } from "../actions/backend-turn.js";
+import { createBackendTurnRunner } from "../apps/actions/backend-turn.js";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { romeAgentMessages, romeSessions, sessions } from "../db/schema.js";
 import { createMockAgentRunner, createTestDb, type TestDb } from "../test/helpers.js";

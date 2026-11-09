@@ -13,7 +13,7 @@ import type {
   FavorRechargePackView,
   FavorService,
 } from "./types.js";
-import { getEmbeddedAppHref } from "../lib/app-routes.js";
+import { getEmbeddedAppHref } from "../apps/app-routes.js";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 
