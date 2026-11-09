@@ -8,31 +8,30 @@ This folder is the source of truth for what these words mean. Other docs link he
 
 | Context | Its question | File |
 |---|---|---|
-| **Chats** | Who said what, where, and as whom | [chats.md](chats.md) |
+| **Chats** | Who said what, where, and as whom, and when an agent takes part: what wakes it, what it reads, and where it speaks | [chats.md](chats.md) |
 | **Connections** | What access Rome has to which external account | [connections.md](connections.md) |
-| **Participation** | When an agent takes part in a chat, what wakes it, what it reads, and where it speaks | [participation.md](participation.md) |
 | **Agents** | What an agent is and how it runs | [agents.md](agents.md) |
 | **People** | Who is behind an account, and how close they are to the guardian | [people.md](people.md) |
+| **Apps** | What an installed app brings to Rome | owed; terms in [concepts/apps.md](../concepts/apps.md) for now |
+| **Routines** | What runs on a schedule or a trigger | owed; terms in [concepts/data.md](../concepts/data.md#routines) for now |
+
+Apps, Routines and Connections are each a context, and Participation is not one: its words live in Chats (Ouou, 2026-11-09). Apps and Routines have no file here yet.
 
 ```mermaid
 flowchart LR
     Connections["Connections<br/><i>what access Rome has to which external account</i>"]
-    Chats["Chats<br/><i>who said what, where, and as whom</i>"]
-    Participation["Participation<br/><i>what wakes an agent, what it reads, and where it speaks</i>"]
+    Chats["Chats<br/><i>who said what, where, and as whom; what wakes an agent, what it reads, where it speaks</i>"]
     Agents["Agents<br/><i>what an agent is and how it runs</i>"]
     People["People<br/><i>who is behind an account, and how close they are</i>"]
     Connections -- carries messages --> Chats
-    Participation -- reads --> Chats
-    Participation -- speaks --> Chats
-    Participation -- starts a turn --> Agents
+    Chats -- wakes an agent, starts a turn --> Agents
     Chats -. which agent speaks through this account .-> Agents
-    People -- platform and account --> Chats
-    Participation -- who is this --> People
+    Chats -- who is this --> People
 ```
 
-Connections carry messages between chats and Rome. Participation sits between Chats and Agents: it reads the chat's record, speaks back into it, and starts an agent's turn. The dashed line is the link the guardian sets on a [connected account](chats.md#connected-account) after connecting it, as a separate step: which agent speaks through it. An account may have none. Chats follows the definitions of Connections and Agents and changes neither, and Connections never names an agent. Connections and Agents do not depend on each other.
+Connections carry messages between chats and Rome. Chats keeps the record, decides when a message wakes an agent, starts the agent's turn, and takes what the agent says back into the record. The dashed line is the link the guardian sets on a [connected account](chats.md#connected-account) after connecting it, as a separate step: which agent speaks through it. An account may have none. Chats follows the definitions of Connections and Agents and changes neither, and Connections never names an agent. Connections and Agents do not depend on each other.
 
-People follows Chats for platform and account and changes neither. Participation asks People who a sender is and gets a person with their bond level, or nobody. People never decides what happens to a message. Connections and People do not depend on each other, so a disconnect removes nothing from People.
+Chats asks People who a sender is, handing it the sender's platform and the platform's own id as plain values, and gets a person with their bond level, or nobody. People depends on no other context and never decides what happens to a message. Connections and People do not depend on each other, so a disconnect removes nothing from People.
 
 ## How to read a context file
 

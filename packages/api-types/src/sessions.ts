@@ -105,7 +105,7 @@ export interface RomeSessionExplorerRecord {
   /** The platform of the chat the session stands in, `webchat` for a
    *  dashboard chat, or null for a session that stands in no chat, such as
    *  a subagent, a fork or an action run. Vocabulary:
-   *  docs/domains/participation.md#speaker. */
+   *  docs/domains/chats.md#speaker. */
   platform: string | null;
   /** The one of Rome's accounts the session speaks as there, or null. */
   accountId: string | null;
