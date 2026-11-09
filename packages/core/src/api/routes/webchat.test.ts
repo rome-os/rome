@@ -662,6 +662,7 @@ describe("Webchat API", () => {
     };
     deps.agentSessionManager = {
       open: rs.fn(async () => agent),
+      resume: rs.fn(async () => agent),
       find: () => agent,
       findWorkingDirBySessionId: () => undefined,
       turn: () => undefined,
@@ -759,6 +760,7 @@ describe("Webchat API", () => {
     });
     deps.agentSessionManager = {
       open: rs.fn(async () => agent),
+      resume: rs.fn(async () => agent),
       find: () => agent,
       findWorkingDirBySessionId: () => undefined,
       turn: () => undefined,
@@ -823,6 +825,7 @@ describe("Webchat API", () => {
     });
     deps.agentSessionManager = {
       open: rs.fn(async () => agent),
+      resume: rs.fn(async () => agent),
       find: () => agent,
       findWorkingDirBySessionId: () => undefined,
       turn: () => undefined,
@@ -7598,12 +7601,12 @@ function fakeSessionManager(
   open: (key: AgentSessionKey, init?: AgentSessionInit) => Promise<FakeSession> | FakeSession,
 ): Sessions {
   return {
-    open: rs.fn(
-      async (continuityKey: AgentSessionKey | { id: string }, init?: AgentSessionInit) => {
-        if ("id" in continuityKey) throw new Error("fake manager cannot resume by session id");
-        return withSubmitInput(await open(continuityKey, init));
-      },
-    ) as Sessions["open"],
+    open: rs.fn(async (continuityKey: AgentSessionKey, init?: AgentSessionInit) =>
+      withSubmitInput(await open(continuityKey, init)),
+    ),
+    resume: async () => {
+      throw new Error("fake manager cannot resume by session id");
+    },
     find: () => undefined,
     findWorkingDirBySessionId: () => undefined,
     turn: () => undefined,

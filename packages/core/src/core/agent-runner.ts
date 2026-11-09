@@ -240,7 +240,7 @@ export class AgentRunner {
       }),
     };
     const session = explicitSessionId
-      ? await this.agentSessionManager.open(
+      ? await this.agentSessionManager.resume(
           { id: explicitSessionId, agent: params.agentName },
           init,
         )

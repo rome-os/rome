@@ -59,6 +59,7 @@ describe("AgentSessionBridge turn routing", () => {
     } as unknown as AgentSession;
     const manager = {
       open: async () => session,
+      resume: async () => session,
       find: () => session,
     } as unknown as Sessions;
     const turns = createAgentTurnStreamRegistry();
@@ -167,6 +168,7 @@ describe("AgentSessionBridge conversation", () => {
       } as unknown as AgentSession;
       const manager = {
         open: async () => session,
+        resume: async () => session,
         find: () => session,
       } as unknown as Sessions;
       const child = new FakeChild();
@@ -229,6 +231,7 @@ describe("AgentSessionBridge resuming a session by its id", () => {
       } as unknown as AgentSession;
       const manager = {
         open: async () => session,
+        resume: async () => session,
         find: () => session,
       } as unknown as Sessions;
       const child = new FakeChild();
@@ -318,6 +321,7 @@ describe("AgentSessionBridge chat link on resume", () => {
       // Each resume reopens the session, as a cold open would.
       const manager = {
         open: async () => open(),
+        resume: async () => open(),
         find: () => undefined,
       } as unknown as Sessions;
       const child = new FakeChild();
@@ -402,6 +406,7 @@ describe("AgentSessionBridge fresh run started from a chat", () => {
       } as unknown as AgentSession;
       const manager = {
         open: async () => session,
+        resume: async () => session,
         find: () => session,
       } as unknown as Sessions;
       const child = new FakeChild();
@@ -464,6 +469,10 @@ describe("AgentSessionBridge working dir", () => {
     } as unknown as AgentSession;
     const manager = {
       open: async (_key: unknown, init: AgentSessionInit) => {
+        acquired.push(init);
+        return session;
+      },
+      resume: async (_key: unknown, init: AgentSessionInit) => {
         acquired.push(init);
         return session;
       },
@@ -658,6 +667,10 @@ describe("AgentSessionBridge worker disconnect", () => {
         await options.beforeAcquire?.();
         return session;
       },
+      resume: async () => {
+        await options.beforeAcquire?.();
+        return session;
+      },
       find: () => session,
     } as unknown as Sessions;
     const turns = createAgentTurnStreamRegistry();
@@ -840,7 +853,7 @@ describe("AgentSessionBridge answer recording", () => {
       sessionId: "session-1",
       sendTurn: () => testTurnHandle({ turnId: "turn-1", events }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
-    const manager = { open: async () => session } as unknown as Sessions;
+    const manager = { open: async () => session, resume: async () => session } as unknown as Sessions;
     const turns = createAgentTurnStreamRegistry();
     const child = new FakeChild();
     new AgentSessionBridge(manager, repo, undefined, turns, undefined, runLineDeps).attach(

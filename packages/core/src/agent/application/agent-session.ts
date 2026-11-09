@@ -270,13 +270,13 @@ export interface SessionById {
 }
 
 export interface Sessions {
-  /** The open session for this continuity key and agent, opening it when none is open. */
+  /** The current session for this continuity key and agent, started when there is none. */
   open(continuityKey: AgentSessionKey, init?: AgentSessionInit): Promise<AgentSession>;
   /**
-   * The stored session with this id, reopened when it is not open. Fails when
-   * no stored session has the id or the session cannot be resumed.
+   * The stored session with this id, reopened when it is not open. Never starts
+   * one: fails when no stored session has the id or it cannot be resumed.
    */
-  open(session: SessionById, init?: AgentSessionInit): Promise<AgentSession>;
+  resume(session: SessionById, init?: AgentSessionInit): Promise<AgentSession>;
   /** The open session for this continuity key and agent. Never opens one. */
   find(continuityKey: AgentSessionKey): AgentSession | undefined;
   /**
@@ -577,12 +577,8 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
   };
 
   return {
-    // A continuity key always names its conversation and a session's id never
-    // does, so a key that carries an extra `id` still opens by its key.
-    open: (target: AgentSessionKey | SessionById, init?: AgentSessionInit) =>
-      "channelThreadKey" in target
-        ? acquire(target, init)
-        : acquireBySessionId(target.id, target.agent, init),
+    open: acquire,
+    resume: ({ id, agent }, init) => acquireBySessionId(id, agent, init),
     find(continuityKey) {
       let canonicalKey: AgentSessionKey;
       try {

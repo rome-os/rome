@@ -71,7 +71,7 @@ export function subagentSessions(
       return subagentSession(child);
     },
     async resume(id, subagent, at) {
-      const child = await manager.open({ id, agent: subagent }, opening(at, inherited));
+      const child = await manager.resume({ id, agent: subagent }, opening(at, inherited));
       // Naming the chat lets the resume fill a row whose record failed when
       // the subagent was minted.
       await openedInChat(webchatRepo, child, id);

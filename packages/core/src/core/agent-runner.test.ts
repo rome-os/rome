@@ -264,10 +264,10 @@ describe("AgentRunner", () => {
     const webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession("chat-1", "Webchat chat");
     const stop = new Error("stop after open");
-    const open = rs.fn(async () => {
+    const resume = rs.fn(async () => {
       throw stop;
     });
-    const manager = { open } as unknown as Sessions;
+    const manager = { resume } as unknown as Sessions;
     const runner = new AgentRunner(manager, agentLoader, webchatRepo);
 
     await expect(
@@ -281,7 +281,7 @@ describe("AgentRunner", () => {
       ),
     ).rejects.toBe(stop);
 
-    expect(open).toHaveBeenCalledWith(
+    expect(resume).toHaveBeenCalledWith(
       { id: "agent-session-1", agent: "test-main" },
       expect.objectContaining({
         threadContext: { channel: "webchat", threadId: "chat-1", romeSessionId: "chat-1" },
@@ -789,7 +789,7 @@ describe("AgentRunner", () => {
         close: rs.fn(async () => undefined),
       };
       const manager = {
-        open: rs.fn(async () => session),
+        resume: rs.fn(async () => session),
         find: rs.fn(),
         shutdown: rs.fn(async () => undefined),
       } as unknown as Sessions;
@@ -3004,10 +3004,10 @@ describe("AgentRunner", () => {
         close: rs.fn(async () => undefined),
       };
       const manager: Sessions = {
-        open: rs.fn(async (continuityKey: AgentSessionKey | { id: string }) => {
-          if (!("id" in continuityKey)) throw new Error("implicit open should not be used");
-          return session;
-        }) as Sessions["open"],
+        open: rs.fn(async () => {
+          throw new Error("implicit open should not be used");
+        }),
+        resume: rs.fn(async () => session),
         find: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
         turn: rs.fn(),
@@ -3023,8 +3023,8 @@ describe("AgentRunner", () => {
         }),
       );
 
-      expect(manager.open).toHaveBeenCalledTimes(1);
-      expect(manager.open).toHaveBeenCalledWith(
+      expect(manager.open).not.toHaveBeenCalled();
+      expect(manager.resume).toHaveBeenCalledWith(
         { id: "sess-1", agent: "test-main" },
         expect.objectContaining({}),
       );
@@ -3058,10 +3058,10 @@ describe("AgentRunner", () => {
         close: rs.fn(async () => undefined),
       };
       const manager: Sessions = {
-        open: rs.fn(async (continuityKey: AgentSessionKey | { id: string }) => {
-          if (!("id" in continuityKey)) throw new Error("implicit open should not be used");
-          return session;
-        }) as Sessions["open"],
+        open: rs.fn(async () => {
+          throw new Error("implicit open should not be used");
+        }),
+        resume: rs.fn(async () => session),
         find: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
         turn: rs.fn(),
@@ -3258,7 +3258,7 @@ describe("AgentRunner", () => {
       expect(cached.sessionId).not.toBe("sess-old");
       expect(provider.sessions).toHaveLength(1);
 
-      const resumed = await manager.open!({ id: "sess-old", agent: "test-main" });
+      const resumed = await manager.resume!({ id: "sess-old", agent: "test-main" });
 
       expect(resumed.sessionId).toBe("sess-old");
       expect(resumed).not.toBe(cached);
@@ -3934,23 +3934,6 @@ describe("AgentRunner", () => {
         { channelUserId: "guardian-one", sharedRunId: "run-one" },
         { channelUserId: "guardian-two", sharedRunId: "run-two" },
       ]);
-    });
-
-    it("opens a continuity key by its key even when it carries an id", async () => {
-      const provider: ModelProvider = {
-        id: "mock",
-        builtinTools: new Set<string>(),
-        openSession: async (params) => createClosableModelSession(params),
-      };
-      const manager = createSessions(
-        managerDeps(createTestModelResolver({ providers: [provider] })),
-        { keepAliveAcrossTurns: true },
-      );
-      const continuityKey = { agentName: "test-main", channelThreadKey: "webchat:extra-id" };
-      const opened = await manager.open(continuityKey);
-      const withId = { ...continuityKey, id: "some-other-session" };
-      expect(await manager.open(withId)).toBe(opened);
-      await manager.shutdown();
     });
 
     it("does not dispatch finished lifecycle events for turns that never started", async () => {

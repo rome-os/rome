@@ -28,6 +28,7 @@ A continuity key is the value that whatever opens a session, and comes back to i
 - A chat's reset policy decides when its session is due for a reset. In code, the rule is `evaluateProviderSessionReset` in [`packages/core/src/agent/domain/session-reset.ts`](../../packages/core/src/agent/domain/session-reset.ts), and the session reads the policy through the `SessionSettings` port.
 - Sessions never reads what a continuity key means. Only the code that minted it may parse it.
 - A session can have no continuity key. A subagent and a one-shot fork are found only by their id.
+- Opening by a continuity key finds the current session or starts one. Resuming by id only reopens a stored session and never starts one. In code these are `Sessions.open(continuityKey)` and `Sessions.resume({ id, agent })`. Finding by a continuity key (`find`) never opens one.
 - Where the continuity key is stored is a storage decision, separate from this contract. Today it is a column on the session (`channel_thread_key`).
 
 **Not to be confused with:**

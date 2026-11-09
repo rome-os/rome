@@ -225,7 +225,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
             }),
           };
           session = req.sessionId
-            ? await this.manager.open({ id: req.sessionId, agent: req.key.agentName }, init)
+            ? await this.manager.resume({ id: req.sessionId, agent: req.key.agentName }, init)
             : await this.manager.open(
                 // Only the key's own fields, never the rest of the worker's request.
                 { agentName: req.key.agentName, channelThreadKey: req.key.channelThreadKey },

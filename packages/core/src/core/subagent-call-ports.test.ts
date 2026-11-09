@@ -146,6 +146,7 @@ describe("subagent calls through the run's ports", () => {
     const recordSessionInChat = rs.spyOn(repo, "recordSessionInChat");
     const childManager = {
       open: rs.fn(async () => children.shift()!),
+      resume: rs.fn(async () => children.shift()!),
       find: rs.fn(),
       shutdown: rs.fn(async () => undefined),
     } as unknown as Sessions;
@@ -227,6 +228,7 @@ describe("subagent calls through the run's ports", () => {
     rs.spyOn(repo, "recordSessionInChat").mockRejectedValue(new Error("database is locked"));
     const childManager = {
       open: rs.fn(async () => child.session),
+      resume: rs.fn(async () => child.session),
       find: rs.fn(),
       shutdown: rs.fn(async () => undefined),
     } as unknown as Sessions;
@@ -260,6 +262,10 @@ describe("subagent calls through the run's ports", () => {
     const childManager = {
       // The Parent goes while the Child's runtime opens.
       open: rs.fn(async () => {
+        await repo.deleteSession("parent-1");
+        return child.session;
+      }),
+      resume: rs.fn(async () => {
         await repo.deleteSession("parent-1");
         return child.session;
       }),
@@ -302,6 +308,7 @@ describe("subagent calls through the run's ports", () => {
     const recordSessionInChat = rs.spyOn(repo, "recordSessionInChat");
     const childManager = {
       open: rs.fn(async () => resumed.session),
+      resume: rs.fn(async () => resumed.session),
       find: rs.fn(),
       shutdown: rs.fn(async () => undefined),
     } as unknown as Sessions;
@@ -323,7 +330,7 @@ describe("subagent calls through the run's ports", () => {
       context,
     );
     expect(execution).toMatchObject({ sessionId: "child-resume", turnId: "resumed-turn" });
-    expect(childManager.open).toHaveBeenCalledWith(
+    expect(childManager.resume).toHaveBeenCalledWith(
       { id: "child-resume", agent: "researcher" },
       expect.anything(),
     );
