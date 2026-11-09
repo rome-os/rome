@@ -93,7 +93,7 @@ import {
 import {
   createSessions,
   type AgentSession,
-  type SessionOpening,
+  type AgentSessionInit,
   type AgentSessionKey,
   type Sessions,
   type AgentTurnHandle,
@@ -264,10 +264,10 @@ describe("AgentRunner", () => {
     const webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession("chat-1", "Webchat chat");
     const stop = new Error("stop after open");
-    const resume = rs.fn(async () => {
+    const open = rs.fn(async () => {
       throw stop;
     });
-    const manager = { resume } as unknown as Sessions;
+    const manager = { open } as unknown as Sessions;
     const runner = new AgentRunner(manager, agentLoader, webchatRepo);
 
     await expect(
@@ -281,7 +281,7 @@ describe("AgentRunner", () => {
       ),
     ).rejects.toBe(stop);
 
-    expect(resume).toHaveBeenCalledWith(
+    expect(open).toHaveBeenCalledWith(
       { id: "agent-session-1", agent: "test-main" },
       expect.objectContaining({
         threadContext: { channel: "webchat", threadId: "chat-1", romeSessionId: "chat-1" },
@@ -455,6 +455,7 @@ describe("AgentRunner", () => {
         inputs.push(input);
         yield { type: "result", content: "Fork summary", agent: "test-main" } as const;
       },
+      subscribe: rs.fn(() => () => undefined),
       onStatusChange: rs.fn(() => () => undefined),
       stop: rs.fn(async () => undefined),
       close: rs.fn(async () => undefined),
@@ -509,6 +510,7 @@ describe("AgentRunner", () => {
             agent: "main",
           } as const;
         },
+        subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
         stop: rs.fn(async () => undefined),
         close: rs.fn(async () => undefined),
@@ -629,6 +631,7 @@ describe("AgentRunner", () => {
           } as const;
           yield { type: "result", content: "Noted", agent: "main" } as const;
         },
+        subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
         stop: rs.fn(async () => undefined),
         close: rs.fn(async () => undefined),
@@ -702,6 +705,7 @@ describe("AgentRunner", () => {
             agent: "main",
           } as const;
         },
+        subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
         stop: rs.fn(async () => undefined),
         close: rs.fn(async () => undefined),
@@ -781,13 +785,13 @@ describe("AgentRunner", () => {
             }),
           );
         }),
+        subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
         stop: rs.fn(async () => undefined),
         close: rs.fn(async () => undefined),
       };
       const manager = {
         open: rs.fn(async () => session),
-        resume: rs.fn(async () => session),
         find: rs.fn(),
         shutdown: rs.fn(async () => undefined),
       } as unknown as Sessions;
@@ -1076,6 +1080,7 @@ describe("AgentRunner", () => {
           } as const;
           yield { type: "result", content: "Fork summary", agent: "main" } as const;
         },
+        subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
         stop: rs.fn(async () => undefined),
         close: rs.fn(async () => undefined),
@@ -1127,6 +1132,7 @@ describe("AgentRunner", () => {
           } as const;
           yield { type: "result", content: "Fork summary", agent: "main" } as const;
         },
+        subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
         stop: rs.fn(async () => undefined),
         close: rs.fn(async () => undefined),
@@ -1177,6 +1183,7 @@ describe("AgentRunner", () => {
           agent: "main",
         } as const;
       },
+      subscribe: rs.fn(() => () => undefined),
       onStatusChange: rs.fn(() => () => undefined),
       stop: rs.fn(async () => undefined),
       close: rs.fn(async () => undefined),
@@ -2244,7 +2251,7 @@ describe("AgentRunner", () => {
       subagentSessions: (
         manager: Sessions,
         parentLink: string,
-        inherited: Pick<SessionOpening, "toolEnv" | "spanAttributes">,
+        inherited: Pick<AgentSessionInit, "toolEnv" | "spanAttributes">,
       ) => subagentSessions(manager, parentLink, webchatRepo, inherited),
       ...romeToolPorts({
         actionRegistry,
@@ -2956,7 +2963,7 @@ describe("AgentRunner", () => {
       const manager = createSessions(
         managerDeps(createTestModelResolver({ providers: [provider] })),
       );
-      const resume = manager.resume.bind(manager) as (...args: unknown[]) => Promise<AgentSession>;
+      const open = manager.open.bind(manager) as (...args: unknown[]) => Promise<AgentSession>;
       let notifyEntered!: () => void;
       const entered = new Promise<void>((resolve) => {
         notifyEntered = resolve;
@@ -2967,13 +2974,13 @@ describe("AgentRunner", () => {
       });
       let acquired!: AgentSession;
       let submit!: ReturnType<typeof rs.spyOn<AgentSession, "submit">>;
-      rs.spyOn(manager, "resume").mockImplementation((async (...args: unknown[]) => {
+      rs.spyOn(manager, "open").mockImplementation((async (...args: unknown[]) => {
         notifyEntered();
         await release;
-        acquired = await resume(...args);
+        acquired = await open(...args);
         submit = rs.spyOn(acquired, "submit");
         return acquired;
-      }) as Sessions["resume"]);
+      }) as Sessions["open"]);
       const agentRunner = new AgentRunner(manager, agentLoader, repo);
       const send = rs.fn(async () => ({ messageId: "reply", chatId }));
       const emit = rs.fn(async () => {});
@@ -3011,7 +3018,7 @@ describe("AgentRunner", () => {
           expect(send).not.toHaveBeenCalled();
           expect(await repo.getTraceContents(chatId)).toEqual(beforeTrace);
           expect(acquired.status).toBe("idle");
-          expect(acquired.runningTurn).toBeUndefined();
+          expect(acquired.currentTurnId).toBeUndefined();
           expect(await manager.open(key)).toBe(acquired);
           const followUp = await collectMessages(
             (await startAfter(acquired, { prompt: "Guardian follow-up" })).events(),
@@ -3047,15 +3054,16 @@ describe("AgentRunner", () => {
         status: "idle",
         submit,
         fork: rs.fn(),
+        subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
         stop: rs.fn(async () => undefined),
         close: rs.fn(async () => undefined),
       };
       const manager: Sessions = {
-        open: rs.fn(async () => {
-          throw new Error("implicit open should not be used");
-        }),
-        resume: rs.fn(async () => session),
+        open: rs.fn(async (continuityKey: AgentSessionKey | { id: string }) => {
+          if (!("id" in continuityKey)) throw new Error("implicit open should not be used");
+          return session;
+        }) as Sessions["open"],
         find: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
         turn: rs.fn(),
@@ -3071,8 +3079,8 @@ describe("AgentRunner", () => {
         }),
       );
 
-      expect(manager.resume).toHaveBeenCalledTimes(1);
-      expect(manager.resume).toHaveBeenCalledWith(
+      expect(manager.open).toHaveBeenCalledTimes(1);
+      expect(manager.open).toHaveBeenCalledWith(
         { id: "sess-1", agent: "test-main" },
         expect.objectContaining({}),
       );
@@ -3101,15 +3109,16 @@ describe("AgentRunner", () => {
         status: "idle",
         submit,
         fork: rs.fn(),
+        subscribe: rs.fn(() => () => undefined),
         onStatusChange: rs.fn(() => () => undefined),
         stop: rs.fn(async () => undefined),
         close: rs.fn(async () => undefined),
       };
       const manager: Sessions = {
-        open: rs.fn(async () => {
-          throw new Error("implicit open should not be used");
-        }),
-        resume: rs.fn(async () => session),
+        open: rs.fn(async (continuityKey: AgentSessionKey | { id: string }) => {
+          if (!("id" in continuityKey)) throw new Error("implicit open should not be used");
+          return session;
+        }) as Sessions["open"],
         find: rs.fn(() => undefined),
         findWorkingDirBySessionId: rs.fn(),
         turn: rs.fn(),
@@ -3306,7 +3315,7 @@ describe("AgentRunner", () => {
       expect(cached.sessionId).not.toBe("sess-old");
       expect(provider.sessions).toHaveLength(1);
 
-      const resumed = await manager.resume({ id: "sess-old", agent: "test-main" });
+      const resumed = await manager.open!({ id: "sess-old", agent: "test-main" });
 
       expect(resumed.sessionId).toBe("sess-old");
       expect(resumed).not.toBe(cached);

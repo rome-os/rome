@@ -2,7 +2,7 @@ import type { ThreadContext } from "@rome-os/app-runtime";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
 import { createLogger } from "../logger.js";
 import { sessionKeyChannel } from "./agent-session-key.js";
-import type { SessionOpening } from "../agent/index.js";
+import type { AgentSessionInit } from "../agent/index.js";
 import { isGuardianFacingChannel } from "./guardian-channel.js";
 
 const log = createLogger("session-opening");
@@ -40,6 +40,11 @@ export function surfaceOf(surfaces: ChannelSurfaces, channel: string): ChannelSu
   return surfaces(channel) ?? MESSAGING_CHANNEL_SURFACE;
 }
 
+/** What an opener states about where a session opens, fixed for the session's life. */
+export type SessionOpening = Required<
+  Pick<AgentSessionInit, "drawsCards" | "guardianFacing" | "toolEnv" | "spanAttributes">
+>;
+
 export interface SessionOpeningDeps {
   channelSurface: ChannelSurfaces;
   /** The connection kind behind a channel id. When absent, every channel id reads as
@@ -51,7 +56,7 @@ export interface SessionOpeningDeps {
 export type SessionOpeningFor = (
   continuityKey: string,
   threadContext?: ThreadContext,
-) => Required<Pick<SessionOpening, "drawsCards" | "guardianFacing" | "toolEnv" | "spanAttributes">>;
+) => SessionOpening;
 
 /**
  * What an opener states for a session it opens: whether its conversation

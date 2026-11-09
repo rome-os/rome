@@ -12,7 +12,7 @@ import {
 } from "../agent/index.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
-import type { AgentSession, SessionOpening, Sessions } from "../agent/index.js";
+import type { AgentSession, AgentSessionInit, Sessions } from "../agent/index.js";
 import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-recorder.js";
 import type { AgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { openedInChat } from "./session-conversation.js";
@@ -47,10 +47,10 @@ function subagentSession(child: AgentSession): SubagentSession {
 }
 
 /** What a parent hands its subagent's sessions: its tools' environment and its span attributes. */
-type Inherited = Pick<SessionOpening, "toolEnv" | "spanAttributes">;
+type Inherited = Pick<AgentSessionInit, "toolEnv" | "spanAttributes">;
 
 /** A subagent's session shows no cards and takes no wake-ups; its tools and spans carry its parent's. */
-const opening = (at: SessionPlace, inherited: Inherited): SessionOpening => ({
+const opening = (at: SessionPlace, inherited: Inherited): AgentSessionInit => ({
   workingDir: at.workingDir,
   threadContext: at.threadContext,
   sharedContext: at.sharedContext,
@@ -77,7 +77,7 @@ export function subagentSessions(
       return subagentSession(child);
     },
     async resume(id, subagent, at) {
-      const child = await manager.resume({ id, agent: subagent }, opening(at, inherited));
+      const child = await manager.open({ id, agent: subagent }, opening(at, inherited));
       // Naming the chat lets the resume fill a row whose record failed when
       // the subagent was minted.
       await openedInChat(webchatRepo, child, id);

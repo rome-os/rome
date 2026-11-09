@@ -15,11 +15,12 @@ describe("resetPolicyOfMessage", () => {
     expect(policyOf).toHaveBeenCalledWith({ connectionId: "telegram-1", chatId: "thread-1" });
   });
 
-  it("asks nothing for a turn that answers no message or has no connected account", async () => {
+  it("asks nothing for a run that answers no message, names its session, or has no connected account", async () => {
     const policyOf = rs.fn(async (_chat: ChatRef) => POLICY);
     const { threadContext } = MESSAGE;
     for (const run of [
       { threadContext },
+      { ...MESSAGE, sessionId: "session-1" },
       { ...MESSAGE, threadContext: { channel: "webchat", threadId: "chat-1" } },
     ]) {
       expect(await resetPolicyOfMessage(policyOf, run)).toBeUndefined();

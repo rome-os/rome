@@ -9,7 +9,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId, StreamAgentEvent } from "@rome-os/app-runtime";
 import { createAgentTurnStreamRegistry } from "./agent-turn-stream-registry.js";
 import { createChatTurns } from "./chat-turns.js";
-import type { AgentSession, SessionOpening, Sessions, AgentTurnHandle } from "../agent/index.js";
+import type { AgentSession, AgentSessionInit, Sessions, AgentTurnHandle } from "../agent/index.js";
 import type { ChatResetPolicy } from "./chat-reset-policy.js";
 import type { SessionOpeningFor } from "./session-opening.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
@@ -169,7 +169,6 @@ describe("AgentSessionBridge conversation", () => {
       } as unknown as AgentSession;
       const manager = {
         open: async () => session,
-        resume: async () => session,
         find: () => session,
       } as unknown as Sessions;
       const child = new FakeChild();
@@ -233,7 +232,6 @@ describe("AgentSessionBridge resuming a session by its id", () => {
       } as unknown as AgentSession;
       const manager = {
         open: async () => session,
-        resume: async () => session,
         find: () => session,
       } as unknown as Sessions;
       const child = new FakeChild();
@@ -409,7 +407,6 @@ describe("AgentSessionBridge fresh run started from a chat", () => {
       } as unknown as AgentSession;
       const manager = {
         open: async () => session,
-        resume: async () => session,
         find: () => session,
       } as unknown as Sessions;
       const child = new FakeChild();
@@ -459,7 +456,7 @@ describe("AgentSessionBridge working dir", () => {
     const projectsRoot = realpathSync(mkdtempSync(join(tmpdir(), "rome-bridge-projects-")));
     tempDirs.push(projectsRoot);
     mkdirSync(join(projectsRoot, "landingpage"));
-    const acquired: SessionOpening[] = [];
+    const acquired: AgentSessionInit[] = [];
     const session = {
       key: { agentName: "coder", channelThreadKey: "coder:1" },
       sessionId: "summoned-1",
@@ -472,11 +469,7 @@ describe("AgentSessionBridge working dir", () => {
         }) as unknown as AgentTurnHandle,
     } as unknown as AgentSession;
     const manager = {
-      open: async (_key: unknown, init: SessionOpening) => {
-        acquired.push(init);
-        return session;
-      },
-      resume: async (_session: unknown, init: SessionOpening) => {
+      open: async (_key: unknown, init: AgentSessionInit) => {
         acquired.push(init);
         return session;
       },

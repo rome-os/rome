@@ -69,6 +69,7 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
       );
     },
     fork: rs.fn(),
+    subscribe: () => () => undefined,
     onStatusChange: () => () => undefined,
     stop: interrupt,
     close: rs.fn(async () => undefined),
@@ -301,7 +302,7 @@ describe("subagent calls through the run's ports", () => {
     const resumed = fakeChildSession("child-resume", ["resumed-turn"]);
     const recordSessionInChat = rs.spyOn(repo, "recordSessionInChat");
     const childManager = {
-      resume: rs.fn(async () => resumed.session),
+      open: rs.fn(async () => resumed.session),
       find: rs.fn(),
       shutdown: rs.fn(async () => undefined),
     } as unknown as Sessions;
@@ -323,7 +324,7 @@ describe("subagent calls through the run's ports", () => {
       context,
     );
     expect(execution).toMatchObject({ sessionId: "child-resume", turnId: "resumed-turn" });
-    expect(childManager.resume).toHaveBeenCalledWith(
+    expect(childManager.open).toHaveBeenCalledWith(
       { id: "child-resume", agent: "researcher" },
       expect.anything(),
     );
