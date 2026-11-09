@@ -63,6 +63,56 @@ interface ImportSite {
   line: number;
 }
 
+/** One import site, resolved. `line` is 1-based. An `unresolved` import is a relative or `@/` path that names no file. */
+export type ScannedImport = { line: number } & (
+  | Import
+  | { from: string; specifier: string; kind: "unresolved" }
+);
+
+/**
+ * Lists every import of every `.ts` and `.tsx` file under `srcDir`, resolved
+ * through the TypeScript resolver. `tsconfigPath` gives the resolver options,
+ * including path aliases.
+ */
+export function scanImports(srcDir: string, tsconfigPath: string): ScannedImport[] {
+  const options = readCompilerOptions(tsconfigPath);
+  const cache = ts.createModuleResolutionCache(srcDir, (name) => name, options);
+  const imports: ScannedImport[] = [];
+  for (const path of listSourceFiles(srcDir)) {
+    const from = toPosix(relative(srcDir, path));
+    for (const site of importSites(path)) {
+      const { line } = site;
+      if (site.specifier === null) {
+        imports.push({ line, from, specifier: "<computed>", kind: "computed" });
+      } else if (!isPathSpecifier(site.specifier)) {
+        imports.push({ line, from, specifier: site.specifier, kind: "package" });
+      } else {
+        const resolved = ts.resolveModuleName(
+          site.specifier,
+          path,
+          options,
+          ts.sys,
+          cache,
+          undefined,
+          site.mode,
+        ).resolvedModule;
+        imports.push(
+          resolved
+            ? {
+                line,
+                from,
+                specifier: site.specifier,
+                kind: "file",
+                to: toPosix(relative(srcDir, resolved.resolvedFileName)),
+              }
+            : { line, from, specifier: site.specifier, kind: "unresolved" },
+        );
+      }
+    }
+  }
+  return imports;
+}
+
 /**
  * Checks every `.ts` and `.tsx` file under `srcDir` against `rules`. An
  * import that breaks several rules is reported once per rule, unless
@@ -75,54 +125,31 @@ export function checkImports(
   rules: readonly ImportRule[],
   listed: readonly ListedCrossing[] = [],
 ): ImportViolation[] {
-  const options = readCompilerOptions(tsconfigPath);
-  const cache = ts.createModuleResolutionCache(srcDir, (name) => name, options);
   const violations: ImportViolation[] = [];
   const unseen = new Set(listed);
 
-  for (const path of listSourceFiles(srcDir)) {
-    const from = toPosix(relative(srcDir, path));
-    for (const site of importSites(path)) {
-      const at = `${from}:${site.line}`;
-      let imp: Import;
-      if (site.specifier === null) {
-        imp = { from, specifier: "<computed>", kind: "computed" };
-      } else if (!isPathSpecifier(site.specifier)) {
-        imp = { from, specifier: site.specifier, kind: "package" };
-      } else {
-        const resolved = ts.resolveModuleName(
-          site.specifier,
-          path,
-          options,
-          ts.sys,
-          cache,
-          undefined,
-          site.mode,
-        ).resolvedModule;
-        if (!resolved) {
-          violations.push({
-            at,
-            specifier: site.specifier,
-            rule: "unresolved",
-            reason: "The import does not resolve, so no rule can judge it.",
-          });
-          continue;
-        }
-        const to = toPosix(relative(srcDir, resolved.resolvedFileName));
-        imp = { from, specifier: site.specifier, kind: "file", to };
+  for (const { line, ...imp } of scanImports(srcDir, tsconfigPath)) {
+    const at = `${imp.from}:${line}`;
+    if (imp.kind === "unresolved") {
+      violations.push({
+        at,
+        specifier: imp.specifier,
+        rule: "unresolved",
+        reason: "The import does not resolve, so no rule can judge it.",
+      });
+      continue;
+    }
+    for (const rule of rules) {
+      if (!rule.rejects(imp)) continue;
+      const crossing =
+        imp.kind === "file" &&
+        listed.find((c) => c.rule === rule.name && c.from === imp.from && c.to === imp.to);
+      if (crossing) {
+        unseen.delete(crossing);
+        continue;
       }
-      for (const rule of rules) {
-        if (!rule.rejects(imp)) continue;
-        const crossing =
-          imp.kind === "file" &&
-          listed.find((c) => c.rule === rule.name && c.from === imp.from && c.to === imp.to);
-        if (crossing) {
-          unseen.delete(crossing);
-          continue;
-        }
-        const specifier = imp.kind === "file" ? `${imp.specifier} (${imp.to})` : imp.specifier;
-        violations.push({ at, specifier, rule: rule.name, reason: rule.description });
-      }
+      const specifier = imp.kind === "file" ? `${imp.specifier} (${imp.to})` : imp.specifier;
+      violations.push({ at, specifier, rule: rule.name, reason: rule.description });
     }
   }
   for (const crossing of unseen) {

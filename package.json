@@ -33,6 +33,7 @@
     "lint:prose": "node scripts/check-prose.mjs",
     "lint:agents": "tsx lint/agents-symlinks.ts",
     "lint:imports": "tsx lint/import-rules.ts",
+    "context-arrows": "tsx lint/context-arrows.ts",
     "lint:deadcode": "knip --no-config-hints",
     "lint:deadcode:report": "knip --no-exit-code",
     "typecheck:lint": "tsc -p lint",
