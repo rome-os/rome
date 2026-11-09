@@ -47,6 +47,7 @@ const THREAD_PARAMETER = {
   description:
     'The chat thread this message belongs to: the id of any message in it, or "new" to start one. ' +
     "It also places the guardian's message that started this turn there. " +
+    'On your first message of a turn whose <chat_thread> says chosen="false", pass "new" when the guardian asks for something other than what its `about` says, even when you only ask a question back. ' +
     "Leave it out to stay in the thread of the guardian's message, or of the task this turn reports on.",
 };
 
