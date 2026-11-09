@@ -9,7 +9,7 @@ import {
   issueVisitorSession,
   shouldSecureCookie,
 } from "../../lib/auth.js";
-import { normalizePublicAccessEmail } from "../../lib/public-access-config.js";
+import { normalizePublicAccessEmail } from "../../apps/public-access-config.js";
 import { isValidAppId } from "../../apps/packaging/app-id.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
 import { createLogger } from "../../logger.js";

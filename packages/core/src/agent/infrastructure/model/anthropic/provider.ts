@@ -53,7 +53,7 @@ import { claudeLoginFrom } from "./login.js";
 import {
   compileOutputSchema,
   formatOutputSchemaErrors,
-} from "../../../../apps/packaging/output-schema-validator.js";
+} from "../../../../lib/output-schema-validator.js";
 
 // Beta content block types are not re-exported from the agent SDK and
 // `@anthropic-ai/sdk` is not a direct dependency, so we derive the shapes

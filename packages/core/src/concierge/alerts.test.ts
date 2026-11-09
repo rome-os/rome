@@ -338,6 +338,71 @@ describe("renderImportantTurn and renderDigestTurn", () => {
     expect(prompt.match(/<\/external_events>/g)).toHaveLength(1);
   });
 
+  const closedLabel = "Pull requests merged or closed";
+  const kindLabel = (source: string, kind: string) =>
+    source === "github" && kind === "your_pr_closed" ? closedLabel : undefined;
+
+  it("uses a catalog kind label in important items without changing stored rows", () => {
+    const row = item({ kind: "your_pr_closed" });
+    const stored = structuredClone(row);
+    const turn = renderImportantTurn([row], false, NOW, kindLabel);
+    expect(turn).toContain(`kind="${closedLabel}"`);
+    expect(turn).not.toContain("your_pr_closed");
+    expect(row).toEqual(stored);
+  });
+
+  it("uses catalog kind labels in digest items and overflow counts, with or without chats", () => {
+    const rows = Array.from({ length: 41 }, () =>
+      item({ kind: "your_pr_closed", decision: "digest" }),
+    );
+    for (const chatOf of [undefined, () => ({ id: "concierge", name: "Concierge", main: true })]) {
+      const turn = renderDigestTurn(rows, NOW, chatOf, kindLabel);
+      expect(turn).toContain(`<item source="github" target="acme/widgets" kind="${closedLabel}"`);
+      expect(turn).toContain(`<more source="github" kind="${closedLabel}" count="36"/>`);
+      expect(turn).not.toContain("your_pr_closed");
+    }
+    const important = renderDigestTurn(
+      [item({ kind: "your_pr_closed" })],
+      NOW,
+      undefined,
+      kindLabel,
+    );
+    expect(important).toContain(`kind="${closedLabel}" important="true"`);
+    expect(rows.every((row) => row.kind === "your_pr_closed")).toBe(true);
+  });
+
+  it.each([
+    ["github", "unknown_kind"],
+    ["unknown-source", "your_pr_closed"],
+  ])("falls back to the id for an unknown kind or source: %s, %s", (source, kind) => {
+    const row = item({ source, kind, decision: "digest" });
+    expect(renderImportantTurn([row], false, NOW, kindLabel)).toContain(`kind="${kind}"`);
+    const turn = renderDigestTurn(Array(41).fill(row), NOW, undefined, kindLabel);
+    expect(turn).toContain(`<more source="${source}" kind="${kind}" count="36"/>`);
+  });
+
+  it("escapes catalog labels in item and overflow attributes", () => {
+    const label = () => 'Pull <requests> & "closed"';
+    const escaped = "Pull &lt;requests&gt; &amp; &quot;closed&quot;";
+    expect(renderImportantTurn([item()], false, NOW, label)).toContain(`kind="${escaped}"`);
+    const turn = renderDigestTurn(
+      Array.from({ length: 41 }, () => item({ decision: "digest" })),
+      NOW,
+      undefined,
+      label,
+    );
+    expect(turn).toContain(`<more source="github" kind="${escaped}" count="36"/>`);
+  });
+
+  it("keeps digest groups separate by kind id when their labels match", () => {
+    const rows = ["first_kind", "second_kind"].flatMap((kind) =>
+      Array.from({ length: 21 }, () => item({ kind, decision: "digest" })),
+    );
+    const turn = renderDigestTurn(rows, NOW, undefined, () => "Shared label");
+    expect(turn.match(/<more source="github" kind="Shared label" count="16"\//g)).toHaveLength(2);
+    expect(turn.match(/<item /g)).toHaveLength(10);
+  });
+
   it("puts important items first in a digest, marked, and never counts them away", () => {
     const many = [
       ...Array.from({ length: 60 }, () =>

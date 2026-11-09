@@ -56,6 +56,7 @@ export interface TriageDecision {
   line: string;
 }
 
+/** Event and follow kinds are catalog labels, or ids when no label is known. */
 export interface TriageInput {
   events: FollowEvent[];
   /** The guardian's account on each source. */
@@ -82,7 +83,7 @@ const oneLine = (value: string) => {
 
 /** The line an event gets when triage gave none: its kind and subject. */
 export function fallbackLine(event: FollowEvent): string {
-  return oneLine(`${event.kind.replaceAll("_", " ")}: ${event.subject ?? event.target}`);
+  return oneLine(`${event.kind}: ${event.subject ?? event.target}`);
 }
 
 /** The run's prompt: the guardian's own settings first, the events as JSON data. */

@@ -1,7 +1,10 @@
 import { z } from "zod";
 import { DEFAULT_REASONING_EFFORT, REASONING_EFFORT_VALUES } from "@rome-os/app-runtime";
 import { ArtifactLocalNameSchema } from "./artifact-name.js";
-import { compileOutputSchema, validatePortableOutputSchema } from "./output-schema-validator.js";
+import {
+  compileOutputSchema,
+  validatePortableOutputSchema,
+} from "../../lib/output-schema-validator.js";
 
 const FavorRequirementSchema = z
   .object({
@@ -33,7 +36,7 @@ const FavorRequirementSchema = z
  * (`action.yaml`, agent yamls). Unknown fields are rejected, not stripped:
  * packed bundles are immutable once published, so a field tolerated here
  * would have to be tolerated forever. One schema serves both gates — the
- * runtime loaders (`actions/loader.ts`, `agent/infrastructure/agent-loader.ts`) and
+ * runtime loaders (`apps/actions/loader.ts`, `apps/agent-loader.ts`) and
  * pack/install validation (`validate.ts`) — and the bundle's
  * `formatVersion` (in app.yaml) governs it.
  */

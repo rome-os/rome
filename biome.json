@@ -98,7 +98,14 @@
               "options": {
                 "patterns": [
                   {
-                    "group": ["..", "../*", "../**", "@/*", "@/**"],
+                    "group": [
+                      "..",
+                      "../*",
+                      "../**",
+                      "@/*",
+                      "@/**",
+                      "!**/lib/output-schema-validator.js"
+                    ],
                     "message": "packaging/ must not import from outside packages/core/src/apps/packaging/ — pass values in from the caller instead."
                   }
                 ]

@@ -12,7 +12,6 @@ import type {
   TurnLifecycle,
   TurnLifecycleListener,
 } from "../domain/turn-lifecycle.js";
-import type { AppTurnHooks } from "./app-turn-hooks.js";
 
 const log = createLogger("agent-lifecycle");
 
@@ -25,7 +24,9 @@ const log = createLogger("agent-lifecycle");
 export class TurnListeners implements TurnLifecycle {
   private readonly listeners = new Set<TurnLifecycleListener>();
 
-  constructor(private readonly appHooks: Pick<AppTurnHooks, "started" | "ended">) {}
+  constructor(
+    private readonly appHooks: Required<Pick<TurnLifecycleListener, "started" | "ended">>,
+  ) {}
 
   /** Returns the call that stops listening. */
   listen(listener: TurnLifecycleListener): () => void {

@@ -16,7 +16,7 @@
 import { createHmac } from "node:crypto";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { ApprovalsRepository } from "../../db/repositories/approvals.js";
+import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
 import { connectionsRoutes } from "../../api/routes/connections.js";
 import { setupsRoutes } from "../../api/routes/setups.js";
 import type { ApiDeps } from "../../api/deps.js";

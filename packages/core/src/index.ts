@@ -27,7 +27,7 @@ import { NotifyClient } from "./lib/notify-client.js";
 import { CloudProfileClient } from "./lib/cloud-profile.js";
 import { getGuardianAuthState, recordResolvedAccount } from "./lib/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
-import { provisionRelayMailboxAtBoot } from "./lib/rome-cloud-relay.js";
+import { provisionRelayMailboxAtBoot } from "./apps/rome-cloud-relay.js";
 import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
 import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
 import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./lib/rome-cloud-origin.js";
@@ -49,7 +49,7 @@ import { containerUptimeMs } from "./lib/runtime.js";
 import {
   AppActionSchemaCache,
   appActionSchemaCacheBuild,
-} from "./actions/app-action-schema-cache.js";
+} from "./apps/actions/app-action-schema-cache.js";
 import {
   initTelemetry,
   getTracer,
@@ -131,7 +131,7 @@ import { recordedChannelOf } from "./chats/connected-accounts/connection-ports.j
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
-import { recordedCardChannels, sendApprovalCard } from "./actions/approval-card.js";
+import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
 import { createChannelsService, emailConnection } from "./apps/accounts-service.js";
 import { createAgentNames } from "./chats/accounts/agent-names.js";
 import {
@@ -140,22 +140,18 @@ import {
 } from "./connections/kinds/wechat-user/wechat-user.js";
 import { WechatApp } from "./desktop-apps/wechat-app.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
-import { ApprovalsRepository } from "./db/repositories/approvals.js";
+import { ApprovalsRepository } from "./apps/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
 import { ComputerUseService } from "./computer-use/service.js";
-import { AppKeysRepository } from "./db/repositories/app-keys.js";
-import { AppKeyInjector } from "./app-keys/injector.js";
+import { AppKeysRepository } from "./apps/repositories/app-keys.js";
+import { AppKeyInjector } from "./apps/app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
-import { ActionExecutionsRepository } from "./db/repositories/action-executions.js";
-import { ExecutionJournalRepository } from "./db/repositories/execution-journal.js";
+import { ActionExecutionsRepository } from "./apps/repositories/action-executions.js";
+import { ExecutionJournalRepository } from "./apps/repositories/execution-journal.js";
 import { AppConnectionAccessRepository } from "./db/repositories/app-connection-access.js";
-import { WebhookInvocationsRepository } from "./db/repositories/webhook-invocations.js";
+import { WebhookInvocationsRepository } from "./apps/repositories/webhook-invocations.js";
 import {
-  AgentLoader,
-  AppTurnHooks,
-  AppTurnMiddleware,
   readAnswerShape,
-  TurnUsageReporter,
   romeSessionTracing,
   ChatSessionSettings,
   createSubagentCalls,
@@ -164,18 +160,22 @@ import {
   rootSession,
   TurnListeners,
 } from "./agent/index.js";
+import { AgentLoader } from "./apps/agent-loader.js";
+import { AppTurnHooks } from "./apps/app-turn-hooks.js";
+import { AppTurnMiddleware } from "./apps/app-turn-middleware.js";
+import { TurnUsageReporter } from "./apps/turn-usage-reporter.js";
 import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
-import { ActionRegistryImpl } from "./actions/registry.js";
-import { ActionLoader } from "./actions/loader.js";
-import { ActionEngine } from "./actions/engine.js";
-import { readMemoryHeadroom } from "./actions/memory-headroom.js";
-import { defaultWorkerCap } from "./actions/worker-cap.js";
+import { ActionRegistryImpl } from "./apps/actions/registry.js";
+import { ActionLoader } from "./apps/actions/loader.js";
+import { ActionEngine } from "./apps/actions/engine.js";
+import { readMemoryHeadroom } from "./apps/actions/memory-headroom.js";
+import { defaultWorkerCap } from "./apps/actions/worker-cap.js";
 import { isFirstPartyAction } from "./apps/first-party-action.js";
-import { bumpModuleEnvEpoch } from "./actions/module-loader.js";
-import { ActionWorkerCoordinator } from "./actions/action-subprocess.js";
-import { endInterruptedRuns } from "./actions/restart-recovery.js";
-import { WorkerRpcServer } from "./actions/worker-rpc.js";
-import { setWorkerRpcInProcessDispatcher } from "./actions/worker-rpc-client.js";
+import { bumpModuleEnvEpoch } from "./apps/actions/module-loader.js";
+import { ActionWorkerCoordinator } from "./apps/actions/action-subprocess.js";
+import { endInterruptedRuns } from "./apps/actions/restart-recovery.js";
+import { WorkerRpcServer } from "./apps/actions/worker-rpc.js";
+import { setWorkerRpcInProcessDispatcher } from "./apps/actions/worker-rpc-client.js";
 import { AgentRunner } from "./core/agent-runner.js";
 import type { ChatResetPolicy } from "./core/chat-reset-policy.js";
 import {
@@ -189,12 +189,12 @@ import {
   DrizzleSessionRepository,
   codexLoginKind,
   SharedCodexAccountService,
-  SkillLoader,
   romeCreditsProxyRoutes,
   resolveAgentPolicy,
-  createPromptSources,
   createSystemPrompts,
 } from "./agent/index.js";
+import { SkillLoader } from "./apps/skill-loader.js";
+import { createPromptSources } from "./apps/prompt-sources.js";
 import { startCodexLoginChoice } from "./rome-cloud/codex-login.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createSessions } from "./agent/index.js";
@@ -217,7 +217,7 @@ import { startConciergeEvents } from "./concierge/events.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
 import { listConnectionViews } from "./api/routes/connections.js";
 import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
-import { createAppStartedDispatcher } from "./core/app-started.js";
+import { createAppStartedDispatcher } from "./apps/app-started.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
 import { stopActiveConversationTurn, stopSenderPlatform } from "./core/chat-stop.js";
 import { createChatTurns } from "./core/chat-turns.js";
@@ -241,17 +241,17 @@ import { linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
 import { SystemUpgradeService } from "./system-upgrade/service.js";
-import { HostExecutionService } from "./host-execution/service.js";
-import { createHostWorkerRecovery } from "./host-execution/worker-recovery.js";
+import { HostExecutionService } from "./apps/host-execution/service.js";
+import { createHostWorkerRecovery } from "./apps/host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
 import { PublicAccessState } from "./lib/public-access-state.js";
 import { DashboardAccessState } from "./lib/dashboard-access-state.js";
 import { DashboardAccessStore } from "./lib/dashboard-access-store.js";
 import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./lib/visitor-allowlist-sync.js";
 import { PhoneWatching } from "./lib/phone-watching.js";
-import { ApprovalHandler } from "./actions/approval-handler.js";
-import { createBackendTurnRunner } from "./actions/backend-turn.js";
-import { emitAgentMessage } from "./actions/runtime-events.js";
+import { ApprovalHandler } from "./apps/actions/approval-handler.js";
+import { createBackendTurnRunner } from "./apps/actions/backend-turn.js";
+import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { PolicyEngine } from "./core/policy-engine.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
 import { ensureProfileExampleAppsSeeded } from "./profile-example-apps.js";
@@ -286,8 +286,8 @@ import {
   createChannelMessageHookFromCatalog,
   createChannelMessageHookReloader,
   registerAppActions,
-} from "./actions/app-actions-wiring.js";
-import type { ChannelMessageHook } from "./hooks/types.js";
+} from "./apps/actions/app-actions-wiring.js";
+import type { ChannelMessageHook } from "./apps/hooks/types.js";
 import {
   createCodexImageGenerationProvider,
   createImageGenerationService,
