@@ -358,7 +358,7 @@ export function autoPlaceProjects(activate = false): string | null {
 }
 
 /**
- * Place a chat card pinned to one session (the side-chat surface). Re-placing
+ * Place a chat card pinned to one session (the fork-chat surface). Re-placing
  * the same session is a no-op that keeps the existing placement id — a fresh
  * id would remount the card and tear down its live stream.
  */

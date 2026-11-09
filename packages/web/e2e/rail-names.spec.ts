@@ -55,7 +55,8 @@ test.describe("desktop", () => {
 
   test("the Chat tile stays lit on an open chat", async ({ page }) => {
     await page.goto("/chat/mock-chat-build-app");
-    await expect(page.locator('aside nav a[href="/chat"]')).toHaveClass(/shadow-1/, {
+    // The tile opens the main chat, and lights on any chat.
+    await expect(page.locator('aside nav a[href="/message"]')).toHaveClass(/shadow-1/, {
       timeout: 30_000,
     });
   });
@@ -87,9 +88,13 @@ test.describe("phone", () => {
     await expect(list).toHaveCount(0);
     await expect(page).toHaveURL(/\/chat\/(?!mock-chat-build-app)/);
 
-    // New chat on the list closes it too, though the path may not change.
+    // A new chat from a project row's plus closes it too, though the path may
+    // not change. The default project's row leads Projects.
     await header.getByRole("button", { name: "Chat list", exact: true }).click();
-    await list.getByRole("link", { name: "New chat", exact: true }).click();
+    await list
+      .locator('[data-project-group="project:default"]')
+      .getByRole("button", { name: "New chat in this project", exact: true })
+      .click();
     await expect(list).toHaveCount(0);
     await expect(page).toHaveURL(/\/chat$/);
   });

@@ -12,6 +12,7 @@ A place where people and agents talk: a group, a direct message, the chat built 
 - A chat starts existing in Rome when its first message reaches Rome through one of Rome's accounts. A chat with an [assistant](#assistant) is the exception: it starts when Rome first knows the assistant, before any message.
 - A chat's history belongs to the chat. It goes when the last of Rome's accounts leaves the chat, not before.
 - A chat may have threads inside it.
+- In the dashboard, a chat is a [common chat](#common-chat), a [fork chat](#fork-chat), a [Concierge chat](#concierge-chat) or a [task chat](#task-chat). The dashboard says chat for every one of them.
 
 ## Thread
 
@@ -62,6 +63,24 @@ An agent outside Rome, such as a Dot, Muse or another Rome, that talks to Rome t
 - The dashboard shows assistants' chats on one Assistants page, one chat at a time: it opens on the chat that moved last, and its header switches to another assistant, each marked with its kind. The page stays off the sidebar until the guardian adds it. Assistants' chats are not in the dashboard's chat list.
 - Another Rome is an assistant, but the dashboard does not list it. Rome can still message it, and its messages still reach Rome.
 
+## Common chat
+
+A dashboard chat a person starts themselves, in a project. The dashboard calls it a chat.
+
+- A person **starts** one from the Projects section of the [chat list](#chat-list), from the search palette, or from an app or a project. It exists from its first message.
+- It belongs to one project, or to one folder on a device, and the chat list groups it there.
+- Its owner can **rename**, **archive** and **delete** it.
+- A settled turn of it can be **forked** into a [fork chat](#fork-chat).
+
+## Fork chat
+
+A chat forked from one turn of another chat, carrying that chat's history up to the turn.
+
+- A person **forks** one from a settled turn of a common chat or of a fork chat. A main chat, a topic chat and a task chat offer no fork.
+- A chat forked from a Concierge chat still talks to the Concierge, so it is a topic chat, not a fork chat: it sits under the main chat and offers no fork. A chat forked from a common chat or a fork chat is a fork chat, under Projects.
+- It is a chat of its own once forked: what is said in it does not reach the chat it came from.
+- It keeps the folder of the chat it was forked from, and the model it was forked with.
+
 ## Concierge chat
 
 A dashboard chat where its owner talks with their Concierge: a [main chat](#main-chat) or a [topic chat](#topic-chat). Every Concierge chat of one owner talks to the same Concierge, with one list of follows and one list of tasks. Memory is one for every owner.
@@ -80,11 +99,12 @@ A dashboard chat where its owner talks with their Concierge: a [main chat](#main
 
 The one Concierge chat each owner always has.
 
-- The main chat exists while the Concierge is on, and it is never archived or deleted.
+- The main chat exists while the Concierge is on, and it is never archived or deleted. The dashboard offers neither.
+- The dashboard's Chat entry and its home page open the main chat. When it cannot be loaded, the dashboard says so rather than opening a blank chat.
 - The dashboard opens it at `/message`, for the guardian and for each visitor alike. A topic chat is at `/chat/<id>`. The old `/chat/concierge` address redirects to `/message`.
 - The digest goes to the main chat and lists every Concierge chat's items, grouped by chat.
 - Alerts and tasks whose Concierge chat is archived or deleted come here.
-- The dashboard calls the Concierge by the name the guardian gave their agent (else "Concierge"), in the main chat's title and in its own copy. The stored chat name stays "Concierge".
+- In the main chat's title and in the Concierge's own copy, the dashboard calls the Concierge by the name the guardian gave their agent (else "Concierge"). The chat list labels the main chat "Main chat". The stored chat name stays "Concierge".
 
 ## Topic chat
 
@@ -101,6 +121,16 @@ A chat the Concierge starts to hand one piece of work to another agent. It belon
 
 - A task chat has a row in its owner's task list. It is private to the owner of the Concierge chat that started it, who alone can open it and write in it.
 - A task chat carries one piece of work. It gets no alerts and no digest.
+- A task chat is not in the [chat list](#chat-list). It opens from its row in the task list and from its task card, and search finds it.
+
+## Chat list
+
+The dashboard's list of a person's chats, beside the rail. Every dashboard person gets the same list, with their own main chat in it.
+
+- It opens with the main chat, labelled "Main chat", and the topic chats under it, latest first: five, then a More row for the rest. The plus beside the main chat starts a topic chat.
+- Below a divider, the Projects section holds the common chats and fork chats, grouped by project or by device folder, with the default project first. The default project's row is always there, under every filter, even when it holds no chat. A plus on a project row starts a chat in that project, and the composer can still move it to another project before its first message. The plus shows on hover, and always on a touch screen.
+- Nothing in it is pinned, and it is not grouped by date.
+- Its status filter, active, archived or all, applies to every chat in it. Under archived the main chat is hidden, since it is never archived, and an archived topic chat stays under the main chat, not in Projects.
 
 ## Reply rule
 
@@ -202,6 +232,8 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 
 ## Decided against
 
+- **A New chat button, pinned chats and pinned projects at the top of the chat list.** They showed the same ideas twice beside the main chat, and a person had to choose between the Concierge and a new chat for every request. The main chat is where a person talks to Rome, and a common chat starts from Projects.
+- **Task chats in the chat list.** Under the default project they read as the guardian's own work, and each task pushed the guardian's own chats down. The task list and task cards already open them.
 - **Channel as a thing the guardian meets, with its own identity and lifetime.** A channel is one to one with a connected account, so the two words name one thing and the guardian only ever sees the account. Its jobs went to account, connection, connected account and chat. The code's channel layer ([Channels](../architecture/channels.md)) is retired as those words replace it.
 - **The agent as part of the connection.** Which agent speaks through an account is the guardian's decision about a chat identity, so it belongs to Chats. Kept on the connection, Connections would hold a fact only Chats uses.
 - **The connected account as the connection, with the agent dying on disconnect.** This was the rule until 2026-11-04. Its forces were that a reconnect would inherit an agent the guardian never set, and that a connection with no account reported yet had no record to hold one. Neither holds: the guardian set the agent on that account, and a connection is active only once the platform has reported its account. The account is what the guardian means by "the sales agent", so the link hangs on it.
@@ -215,7 +247,6 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **"Agent" for a Dot or Muse.** Agent means one of Rome's own agents, which the guardian defines and runs. A Dot or Muse runs elsewhere and answers to someone else's rules, so one word for both would need context to tell them apart.
 - **Assistants' chats mixed into the dashboard's own chats.** The guardian talks to Rome in one and watches Rome talk to another agent in the other. Mixed together, a chat with Muse reads as a chat with Rome.
 - **The guardian's line in an assistant's chat going to main.** It would put two conversations in one place: the guardian with main, and Rome with the assistant. Talking about an assistant with main belongs in the dashboard's own chat.
-- **"Side chat" for a topic chat.** Muse uses the word, but in Rome a side chat is a fork of a chat from one of its turns, carrying that chat's history. A Concierge chat starts empty and belongs to no other chat.
 - **"Channel" for a topic chat, as in Claude Duet.** Channel names nothing the guardian meets in Rome, and bringing it back for one kind of chat would give it a meaning no other surface shares.
 - **"Sub chat" for a topic chat.** It reads as a chat under another, which is what a task chat is. A topic chat stands beside the main chat.
 - **A topic chat as a thread of the main chat.** A thread's messages are messages of its chat, so the main chat would still carry every topic. Separate topics need separate chats.

@@ -32,7 +32,7 @@ export interface ChatSession {
   /** Folder on a rome-node device the chat works in, set when the chat was created. */
   deviceFolder?: DeviceFolder | null;
   agentName?: string | null;
-  /** The chat a side chat branched from, kept once it is promoted to a chat. */
+  /** The chat a fork chat branched from, kept once it is promoted to a chat. */
   parentSessionId?: string | null;
   /** Why the chat exists, when something other than the guardian started it, e.g. `concierge`. */
   triggerKind?: string | null;

@@ -516,7 +516,7 @@ export class AgentRunner {
         agentName: isCoreMainAgentId(params.agentName) ? null : params.agentName,
         projectName: thread?.projectName,
         projectPath: thread?.projectPath,
-        // Later turns of the side chat read the folder from this row.
+        // Later turns of the fork chat read the folder from this row.
         deviceFolder: thread?.deviceFolder ?? null,
         trigger,
         parentSessionId,

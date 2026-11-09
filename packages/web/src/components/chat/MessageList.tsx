@@ -85,10 +85,13 @@ export interface MessageListProps {
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
   actions: BlockActions;
-  // Render inline turn actions (feedback + side-chat branch) next to the copy
-  // button under settled agent turns. Guardian-only, so the live chat opts in
-  // while read-only surfaces (public share, sessions viewer) omit them.
+  // Render inline turn actions (feedback, and the fork button where `fork`
+  // allows it) next to the copy button under settled agent turns.
+  // Guardian-only, so the live chat opts in while read-only surfaces (public
+  // share, sessions viewer) omit them.
   feedback?: boolean;
+  /** Offers the fork button under settled turns: only in a common chat or a fork chat. */
+  fork?: boolean;
   /** `concierge` shows a texting transcript (see ConciergeTranscript). Defaults to `default`. */
   variant?: ChatVariant;
 }
@@ -163,6 +166,7 @@ const RowView = memo(function RowView({
   activeTraceTarget,
   subagentIconByName,
   feedback = false,
+  fork = false,
 }: {
   row: ChatRow;
   live: LivePreview | null;
@@ -173,6 +177,7 @@ const RowView = memo(function RowView({
   activeTraceTarget?: TraceDrawerTarget | null;
   subagentIconByName?: ReadonlyMap<string, string | null>;
   feedback?: boolean;
+  fork?: boolean;
 }) {
   if (row.kind === "user") return <UserMessage msg={row.message} />;
   if (row.kind === "model_switch") return <ModelSwitchNotice model={row.model} />;
@@ -216,7 +221,7 @@ const RowView = memo(function RowView({
   const feedbackTurn = feedback && !live ? rowTurnRef(row) : null;
   const showFeedback = !!feedbackTurn?.turnId && !!feedbackTurn.sessionId;
   const summary = live?.snapshot?.summary ?? row.trace?.traceSummary;
-  const showBranch = showFeedback && summary?.turnStatus === "completed";
+  const showBranch = fork && showFeedback && summary?.turnStatus === "completed";
   const subagents = summary?.subagents;
   const recapMessageId = row.messages.find((message) =>
     parseMessageEntries(message).some((block) => block.type === "turn_recap"),
@@ -414,6 +419,7 @@ export function MessageList({
   subagentIconByName,
   actions,
   feedback,
+  fork,
   variant = "default",
 }: MessageListProps) {
   if (variant === "concierge") {
@@ -440,6 +446,7 @@ export function MessageList({
       subagentIconByName={subagentIconByName}
       actions={actions}
       feedback={feedback}
+      fork={fork}
     />
   );
 }
@@ -456,6 +463,7 @@ function TranscriptMessageList({
   subagentIconByName,
   actions,
   feedback,
+  fork,
 }: Omit<MessageListProps, "variant">) {
   const codeBlockDisclosureState = useRef(new Map<string, boolean>()).current;
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
@@ -512,6 +520,7 @@ function TranscriptMessageList({
               activeTraceTarget={activeTraceTarget}
               subagentIconByName={subagentIconByName}
               feedback={feedback}
+              fork={fork}
             />
           );
           const tail = row === anchorRow ? standalone : null;

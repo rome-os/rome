@@ -57,8 +57,10 @@ export const APP_NAV: readonly BuiltinNavEntry[] = [
     aliases: ["browser"],
   },
   {
+    // Chat opens the signed-in person's main chat. A new chat starts from the
+    // chat list's Projects section or the Cmd+K palette.
     id: "chat",
-    href: "/chat",
+    href: "/message",
     labelKey: "nav.chat",
     Icon: Pencil2Icon,
     sidebarIconMotion: "chat",

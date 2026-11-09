@@ -113,17 +113,6 @@ export async function archiveSession(sessionId: string, archived: boolean): Prom
   return jsonOrThrow<ChatSession>(res);
 }
 
-/** Pin or unpin a top-level guardian chat. */
-export async function pinSession(sessionId: string, pinned: boolean): Promise<ChatSession> {
-  const res = await fetch(`/api/chat/sessions/${sessionId}/pin`, {
-    method: "PATCH",
-    credentials: "include",
-    headers: JSON_HEADERS,
-    body: JSON.stringify({ pinned }),
-  });
-  return jsonOrThrow<ChatSession>(res);
-}
-
 /** Rename a top-level webchat session. `name` should be trimmed by the caller;
  * the server also trims, rejects empty, and caps length. */
 export async function renameSession(sessionId: string, name: string): Promise<ChatSession> {
