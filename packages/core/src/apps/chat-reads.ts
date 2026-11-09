@@ -1,6 +1,6 @@
 // What an app reads of the chats Rome's sessions stand in: the SDK's
 // `ChatReads`, over Chats' relations and Agents' sessions. Vocabulary:
-// docs/domains/chats.md and docs/domains/participation.md.
+// docs/domains/chats.md.
 //
 // Apps read these instead of querying Rome's tables, so a change to how
 // Chats stores a line changes this file and not an app. The app

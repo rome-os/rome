@@ -79,7 +79,7 @@ function normalizedAgentName(scope: SessionQueryStorageScope): SQL<string> {
  * account on its chat's platform, null for a session in no chat or a
  * dashboard chat. It only finds the agent of the account a speaker speaks
  * as, which is still keyed by channel; the explorer shows the chat's
- * platform. Vocabulary: docs/domains/participation.md#speaker.
+ * platform. Vocabulary: docs/domains/chats.md#speaker.
  */
 const speakerChannel = channelOfAccountSql(romeSessions.chatPlatform, romeSessions.accountId);
 

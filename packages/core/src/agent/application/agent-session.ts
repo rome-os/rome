@@ -2947,7 +2947,7 @@ class AgentSessionImpl implements AgentSession {
       let userPrompt = input.prompt;
       let unseenMessageIds: number[] = [];
       // The agent catches up on the messages said where its session stands
-      // that no turn of it took, gave or saw (docs/domains/participation.md#projection).
+      // that no turn of it took, gave or saw (docs/domains/chats.md#projection).
       // The prompt facts answer null where it catches up on nothing.
       const unseen =
         sink.romeSessionType === "channel" && sink.romeSessionId && sink.threadContext

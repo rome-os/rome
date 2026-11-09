@@ -1,5 +1,5 @@
 // Reply rules, kept on each of Rome's speakers. Vocabulary:
-// docs/domains/participation.md#speaker and docs/domains/chats.md#chat.
+// docs/domains/chats.md#speaker and docs/domains/chats.md#chat.
 
 import { and, asc, desc, eq, isNotNull, isNull, like, or, sql, type SQL } from "drizzle-orm";
 import type { Account, ChatDescriptor, ChatId, StoredChatSettings } from "@rome-os/app-runtime";

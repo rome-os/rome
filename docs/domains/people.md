@@ -1,6 +1,6 @@
 # People
 
-Who is behind an account, and how close they are to the guardian. People follows the definitions of [platform](chats.md#platform) and [account](chats.md#account) in Chats and changes neither. [Participation](participation.md) asks People one question about a sender, [who is this](#who-is-this), and People never decides what happens to a message.
+Who is behind an account, and how close they are to the guardian. People follows the definitions of [platform](chats.md#platform) and [account](chats.md#account) in Chats and changes neither. [Chats](chats.md#wake) asks People one question about a sender, [who is this](#who-is-this), and People never decides what happens to a message.
 
 ## Person
 
@@ -75,7 +75,7 @@ Every account Rome has heard of, and every account with a link or a dismissal, e
 
 ## Who is this
 
-The one question Participation asks People about a sender. The answer is a person with their bond level, or nobody.
+The one question Chats asks People about a sender. The answer is a person with their bond level, or nobody.
 
 - A stranger and a dismissed account both answer nobody. The difference matters only to the guardian, in which accounts are shown for them to decide about.
 

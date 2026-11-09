@@ -8,8 +8,8 @@ export interface ChatTurn {
 
 /**
  * Which turn runs in each connected account's chat, and who started it. The
- * web chat side holds it for Participation until Participation has a home of
- * its own. The newest turn started in a chat is its turn; ending an older one
+ * web chat side holds it for Chats (docs/domains/chats.md#wake) until Chats
+ * has a home for it. The newest turn started in a chat is its turn; ending an older one
  * leaves it in place.
  */
 export interface ChatTurns {

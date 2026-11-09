@@ -1,7 +1,7 @@
 // Chats, the adapters that feed it, and Agents' speakers, turn links and
 // replies over one database, built once so startup, the action worker and
 // tests hold the same objects wired the same way. Vocabulary:
-// docs/domains/chats.md and docs/domains/participation.md.
+// docs/domains/chats.md.
 
 import type { Account, Channel, ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";

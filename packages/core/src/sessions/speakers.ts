@@ -1,6 +1,6 @@
 // Where each of Rome's agent sessions stands: a speaker, one of Rome's accounts
 // in a place, and the agent that speaks there. Vocabulary:
-// docs/domains/participation.md and docs/domains/chats.md#place.
+// docs/domains/chats.md#speaker and docs/domains/chats.md#place.
 //
 // A speaker is read off its session's row (`rome_sessions`), not stored, and the row
 // names its chat by Chats' id. Nothing reads through it yet: the Chats

@@ -35,9 +35,9 @@ async function readChat(
 }
 
 /**
- * Which chat has this session, asked by the session's id. Participation owns
- * the question; the web chat side answers it until Participation has the
- * query. A failed read counts as no chat.
+ * Which chat has this session, asked by the session's id. Chats owns the
+ * question (docs/domains/chats.md#speaker); the web chat side answers it
+ * until Chats has the query. A failed read counts as no chat.
  */
 export async function findSessionChat(
   webchatRepo: Pick<WebChatRepository, "chatOfSession"> | undefined,

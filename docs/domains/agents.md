@@ -6,7 +6,7 @@ What an agent is and how it runs. This context exists in the code and the docs a
 
 A named Rome agent, such as main, sales or support. Its definition, model selection and capabilities are in [`concepts/agents.md`](../concepts/agents.md). Nothing in the domain language changes what an agent is.
 
-- In a chat, an agent is a participant ([Chats](chats.md#agent)). It speaks through its own account or answers on the guardian's behalf. When it wakes, what it reads and where it speaks is in [Participation](participation.md).
+- In a chat, an agent is a participant ([Chats](chats.md#agent)). It speaks through its own account or answers on the guardian's behalf. When it wakes, what it reads and where it speaks is in Chats ([Wake](chats.md#wake), [Projection](chats.md#projection), [Reply](chats.md#reply)).
 - How an agent remembers what it observes in a chat or its threads is its own decision. Chats describes participants and messages and says nothing about memory.
 - An agent's name is the apps context's [artifact name](../concepts/apps.md#artifact-names-and-references): its canonical id, local name, aliases and legacy names. The agent context uses the name and does not define it.
 - In code an installed agent is `Agent`, and the agents Rome can run are the `AgentCatalog` port, both in [`packages/core/src/agent/domain/agent-definition.ts`](../../packages/core/src/agent/domain/agent-definition.ts). An agent's owner there means only core, or the app that installed it.

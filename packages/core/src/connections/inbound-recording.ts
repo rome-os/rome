@@ -27,7 +27,7 @@ export interface InboundRecordingDeps {
   /** Whether Rome listens to the account behind connection `connectionId`,
    *  as its inbound port reads it. An account linked to an agent that is not
    *  loaded is still listened to, so what it receives is recorded and
-   *  Participation decides whether anything answers it. */
+   *  Chats decides whether anything answers it (docs/domains/chats.md#wake). */
   listens?: (connectionId: string) => boolean;
 }
 
