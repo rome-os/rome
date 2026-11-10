@@ -304,18 +304,6 @@ export class MessageRepository {
     return row ? (row.thread ?? key) : null;
   }
 
-  /** The chat thread of the newest message in `chat` that is in one, or null
-   *  when none is. */
-  latestChatThread(chat: ChatRef): string | null {
-    return (
-      this.db.all<{ thread: string }>(sql`
-        SELECT chat_thread_id AS thread FROM chat_messages
-        WHERE chat_id = ${chatIdOf(chat)} AND chat_thread_id IS NOT NULL
-        ORDER BY said_at DESC, id DESC LIMIT 1
-      `)[0]?.thread ?? null
-    );
-  }
-
   /**
    * Put the message keyed `key` in `chat` in chat thread `thread`, and, with
    * `settle`, for good. A settled message is never moved again. Answers

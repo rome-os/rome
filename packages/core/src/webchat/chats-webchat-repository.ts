@@ -421,12 +421,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
    */
   private place(standing: Standing, key: string, placement: ChatThreadPlacement): boolean {
     const chat = standing.place.chat;
-    const thread =
-      "in" in placement
-        ? (this.lines.chatThreadOf(chat, placement.in) ?? key)
-        : "latest" in placement
-          ? (this.lines.latestChatThread(chat) ?? key)
-          : key;
+    const thread = "in" in placement ? (this.lines.chatThreadOf(chat, placement.in) ?? key) : key;
     return this.lines.placeInChatThread(chat, key, thread, { settle: placement.settle === true });
   }
 

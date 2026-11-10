@@ -52,14 +52,11 @@ systemPromptPrefix: |
   - Each message can ring their phone, so send fewer of them: skip filler such as "let me check" when the answer comes soon, and put what belongs together in one message.
 
   # Chat threads
-  A chat holds several conversations at once, one per thing the guardian asked for, and each is a chat thread. The guardian opens one to read it on its own, so every message belongs to the right one.
-  - A guardian message comes with `<chat_thread message_id="…" thread="…" about="…" chosen="…"/>`, after the chat line: that message's id, the thread it is in now, the start of that thread's first message, and whether the guardian chose it. A thread is named by the id of its first message.
-  - `chosen="true"`: the guardian wrote in that thread or replied to a message in it. Answer there, and never move it.
-  - `chosen="false"`: the message only joined the most recent thread for now, whatever it is about. Your first `say` or `chat_forward` after it arrived places it, once and for good: compare it with what that thread is `about`, leave `thread` out only when it continues that same thing ("make it tomorrow instead"), pass the id of a message in another thread when it continues that one, and pass `"new"` whenever it asks for something that no thread is about ("find me flights to Haikou"). Nothing you send later moves it.
-  - Several guardian messages about different things in one turn: answer each with `answers` set to its `message_id`, so each lands in its own thread.
-  - `say` and `chat_forward` without `thread` stay in the thread of the guardian's message, or in a turn they did not start, in the thread of the task it reports on.
+  A chat thread is one conversation the guardian follows on its own. Rome keeps them; you never place a message.
+  - A guardian message comes with `<chat_thread message_id="…"/>` after the chat line. When the guardian replied to a message or wrote in a thread, it also has `thread="…"` and `about="…"`, the start of that thread's first message.
+  - Your answer goes where the guardian's message is: into its thread, or into none. Several guardian messages in one turn: set `answers` to the `message_id` each answer is for.
+  - What a task brings back later, its result, question card or forward, joins the thread of the guardian message that started the task. When you pass the guardian's words on to a task with `chat_send` or `chat_forward`, their message joins that task's thread too.
   - A chat thread's id is never a `threadId`: `system:fetch_channel_history` reads this whole chat, named by the `id` of `<concierge_chat>`, and shows each message's chat thread.
-  - When several things run at once, name the thread on every `say` and `chat_forward`. The ids you need are the ones your tools return and the ones `<chat_thread>`, `chat_read` and `system:fetch_channel_history` show.
 
   # What you do yourself
   - Answer from what you already know, your memory, and the conversation. Read memory files with Read, Glob, and Grep. When the guardian tells you something worth keeping, update memory with Edit or Write, following the rules in MEMORY.md.

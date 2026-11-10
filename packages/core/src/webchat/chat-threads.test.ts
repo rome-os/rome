@@ -39,27 +39,31 @@ describe("chat threads", () => {
       .id;
   const threadOf = (id: string) => repo.chatThreadOf(CHAT, id);
 
-  it("starts the first unmarked message's own thread, and later ones join the latest", async () => {
-    await guardian("m1", { latest: true });
-    const reply = await concierge("t1", "On it", { in: "m1" });
-    await guardian("m2", { latest: true });
+  it("leaves a message sent with no thread, and an answer to it, in none", async () => {
+    await guardian("m1");
+    await repo.addBackendMessage(CHAT, "t1", [{ type: "text", content: "Sunny" }]);
+    await guardian("m2");
 
-    expect(await threadOf("m1")).toBe("m1");
-    expect(await threadOf(reply)).toBe("m1");
-    expect(await threadOf("m2")).toBe("m1");
+    expect((await repo.getMessages(CHAT)).map((message) => message.chatThreadId ?? null)).toEqual([
+      null,
+      null,
+      null,
+    ]);
+    expect(placed).toEqual([]);
   });
 
-  it("moves an unmarked message when the Concierge starts a new thread for it", async () => {
-    await guardian("m1", { latest: true });
-    await guardian("m2", { latest: true });
+  it("starts a thread at a message in none, when something later joins it", async () => {
+    await guardian("m1");
+    await guardian("m2");
 
-    expect(await repo.placeInChatThread(CHAT, "m2", { starts: true })).toBe("m2");
-    expect(await threadOf("m2")).toBe("m2");
-    expect(placed.at(-1)).toEqual({ sessionId: CHAT, messageId: "m2", chatThreadId: "m2" });
+    expect(await repo.placeInChatThread(CHAT, "m2", { starts: true, settle: true })).toBe("m2");
+    const result = await concierge("t2", "Your flights", { in: "m2" });
+    expect(await threadOf(result)).toBe("m2");
+    expect(placed).toEqual([{ sessionId: CHAT, messageId: "m2", chatThreadId: "m2" }]);
   });
 
   it("never moves a message the guardian placed in a thread or sent as a reply", async () => {
-    await guardian("m1", { latest: true });
+    await guardian("m1", { starts: true });
     await guardian("m2", { starts: true });
     await guardian("m3", { in: "m1", settle: true });
 
@@ -70,7 +74,7 @@ describe("chat threads", () => {
   });
 
   it("reads one thread's messages in the order they were said, through its index", async () => {
-    await guardian("m1", { latest: true });
+    await guardian("m1", { starts: true });
     const first = await concierge("t1", "Meeting at 3?", { in: "m1" });
     await guardian("m2", { starts: true });
     await concierge("t2", "Flights to Haikou", { in: "m2" });
@@ -88,7 +92,7 @@ describe("chat threads", () => {
   });
 
   it("leaves a root that moved out of the thread its settled reply is in", async () => {
-    await guardian("other", { latest: true });
+    await guardian("other");
     await repo.placeInChatThread(CHAT, "other", { starts: true, settle: true });
     await guardian("root");
     await repo.placeInChatThread(CHAT, "root", { starts: true });
@@ -113,7 +117,7 @@ describe("chat threads", () => {
   });
 
   it("carries the thread on message events", async () => {
-    await guardian("m1", { latest: true });
+    await guardian("m1", { starts: true });
     await concierge("t1", "On it", { in: "m1" });
 
     expect(placed[0]).toEqual({ sessionId: CHAT, messageId: "m1", chatThreadId: "m1" });

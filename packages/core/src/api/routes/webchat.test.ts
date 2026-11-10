@@ -4312,21 +4312,22 @@ describe("Webchat API", () => {
         expect(sent.status).toBe(200);
         await drainTurn(app, sent);
       }
-      // The guardian's message starts its chat thread, which the Concierge reads.
-      expect(sentTurns[0]?.prompt).toMatch(
-        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)" thread="\1" chosen="false"\/>\n\nhello$/,
-      );
+      // The Concierge reads which message it is: one sent from the composer is in no thread.
+      const first = sentTurns[0]?.prompt.match(
+        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)"\/>\n\nhello$/,
+      )?.[1];
+      expect(first).toBeTruthy();
       expect(sentTurns[1]?.prompt).toBe("hello");
 
-      // The next message joins that thread for now, and reads what it is about.
+      // One sent from a thread view reads the thread and what it is about.
       const next = await app.request(`/chat/sessions/topic-1/turns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "and later?" }),
+        body: JSON.stringify({ text: "and later?", chatThread: first }),
       });
       await drainTurn(app, next);
       expect(sentTurns[2]?.prompt).toMatch(
-        /<chat_thread message_id="[^"]+" thread="[^"]+" about="hello" chosen="false"\/>/,
+        new RegExp(`<chat_thread message_id="[^"]+" thread="${first}" about="hello"/>`),
       );
     });
 

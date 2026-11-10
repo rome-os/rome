@@ -86,11 +86,11 @@ export interface StoredWebchatMessage {
 
 /**
  * Where a message goes among its chat's chat threads: into the thread of
- * the message `in` names, into the most recently active thread, or into a
- * thread of its own. With `settle` it stays there for good: its sender chose
- * the thread, or the Concierge placed it. A settled message is never moved.
+ * the message `in` names, or into a thread of its own. With `settle` it
+ * stays there for good: its sender chose the thread, or a task's thread took
+ * it. A settled message is never moved.
  */
-export type ChatThreadPlacement = ({ in: string } | { latest: true } | { starts: true }) & {
+export type ChatThreadPlacement = ({ in: string } | { starts: true }) & {
   settle?: boolean;
 };
 
