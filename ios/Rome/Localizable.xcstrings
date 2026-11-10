@@ -2445,6 +2445,16 @@
         }
       }
     },
+    "This card was already answered. The task has been refreshed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这张卡片已经回答过，任务已刷新。"
+          }
+        }
+      }
+    },
     "This connection cannot start here" : {
       "localizations" : {
         "zh-Hans" : {

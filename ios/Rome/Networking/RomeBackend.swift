@@ -54,6 +54,8 @@ protocol RomeBackend: AnyObject, Sendable {
     func interrupt(turnId: String) async throws
     func tasks() async throws -> [ConciergeTask]
     func approval(id: String) async throws -> ApprovalRecord
+    /// Every pending approval; the guardian's only (a visitor gets an error).
+    func pendingApprovals() async throws -> [PendingApproval]
     func resolveApproval(id: String, approve: Bool) async throws
     func toolCalls(traceMessageId: String) async throws -> [ToolCall]
     func aiTools() async throws -> AIToolsStatus
@@ -190,6 +192,11 @@ final class LiveBackend: RomeBackend {
             query: [URLQueryItem(name: "doneDays", value: "30")]
         )
         return response.tasks
+    }
+
+    func pendingApprovals() async throws -> [PendingApproval] {
+        let rows: JSONValue = try await client.get("/approvals", query: [URLQueryItem(name: "status", value: "pending")], reportsUnauthorized: false)
+        return (rows.array ?? []).compactMap(PendingApproval.init(json:))
     }
 
     func approval(id: String) async throws -> ApprovalRecord {
@@ -338,6 +345,7 @@ extension RomeBackend {
     func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply { throw APIError.notFound }
     func connectors() async throws -> [ConnectorState] { [] }
     func agentName() async -> String? { nil }
+    func pendingApprovals() async throws -> [PendingApproval] { [] }
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn {
         try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority)
     }

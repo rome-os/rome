@@ -32,7 +32,9 @@ enum TranscriptRow: Identifiable, Hashable {
     case separator(id: String, date: Date)
     case userText(id: String, text: String, images: [UserImage] = [], pending: PendingSend.State?)
     case agentText(id: String, text: String, long: Bool, forwardedFrom: MessagePart.ForwardedFrom?, position: BubblePosition)
-    case taskCard(id: String, chatId: String, title: String)
+    /// `latest`: the newest card for that task chat, the only one that may
+    /// show what the task waits on.
+    case taskCard(id: String, chatId: String, title: String, latest: Bool = false)
     case approval(id: String, part: MessagePart.ApprovalPart, sessionId: String)
     case question(id: String, part: MessagePart.QuestionPart, sessionId: String, answered: JSONValue?)
     /// `done`: an interactive card the guardian already answered.
@@ -50,7 +52,7 @@ enum TranscriptRow: Identifiable, Hashable {
     var id: String {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
-             .taskCard(let id, _, _), .approval(let id, _, _), .question(let id, _, _, _),
+             .taskCard(let id, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
              .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .error(let id, _), .tools(let id, _, _),
              .threadReplies(let id, _, _, _):
             return id
@@ -226,6 +228,13 @@ enum TranscriptBuilder {
             previous = entry
         }
         closeRun()
+        // Only the newest card for each task chat expands.
+        var marked = Set<String>()
+        for index in output.indices.reversed() {
+            if case .taskCard(let id, let chatId, let title, _) = output[index], marked.insert(chatId).inserted {
+                output[index] = .taskCard(id: id, chatId: chatId, title: title, latest: true)
+            }
+        }
         if options.typing { output.append(.typing) }
         return output
     }

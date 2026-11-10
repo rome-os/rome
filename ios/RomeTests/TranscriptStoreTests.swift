@@ -24,6 +24,7 @@ final class FakeBackend: RomeBackend {
     var duringNewestFetch: (() async -> Void)?
 
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
+        pageLimits.append(limit)
         let end = before.flatMap { cursor in stored.firstIndex { $0.id == cursor } } ?? stored.count
         let start = max(0, end - limit)
         let page = MessagePage(messages: Array(stored[start..<end]), nextCursor: start > 0 ? stored[start].id : nil)
@@ -128,9 +129,17 @@ final class FakeBackend: RomeBackend {
         throw APIError.network
     }
     var answeredSessions: [String] = []
+    /// What an answer fails with; nil lets it through.
+    var answerError: APIError? = .network
+    var pending: [PendingApproval] = []
+    /// The page size of each fetch, in order.
+    var pageLimits: [Int] = []
+
+    func pendingApprovals() async throws -> [PendingApproval] { pending }
+
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
         answeredSessions.append(sessionId)
-        throw APIError.network
+        if let answerError { throw answerError }
     }
     /// The chats marked read, in order.
     var reads: [String] = []

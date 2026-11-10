@@ -375,6 +375,40 @@ enum RoutineStatus: Hashable, Sendable {
     }
 }
 
+/// A pending approval and the chat that asked for it, from `GET /approvals?status=pending`.
+struct PendingApproval: Hashable, Sendable {
+    let id: String
+    /// The chat the action ran in (`payload.channelContext.threadId`).
+    let chatId: String?
+    let part: MessagePart.ApprovalPart
+    let createdAt: Date
+
+    /// Reads one row; a row with no id is skipped. A preview the app cannot
+    /// read keeps the approval's controls, titled by the row's description.
+    init?(json row: JSONValue) {
+        guard let id = row["id"]?.string, row["status"]?.string ?? "pending" == "pending" else { return nil }
+        self.id = id
+        let payload = row["payload"]
+        chatId = payload?["channelContext"]?["threadId"]?.string
+        var fields: [String: JSONValue] = ["status": .string("pending")]
+        if let action = payload?["actionName"]?.string { fields["actionName"] = .string(action) }
+        if let preview = payload?["preview"] { fields["preview"] = preview }
+        var part = MessagePart.approval(.object(fields), id: id)
+        if part.title == nil, let description = row["description"]?.string, !description.isEmpty {
+            part = .init(approvalId: id, actionName: part.actionName, title: description, summary: part.summary, fields: part.fields, storedStatus: part.storedStatus)
+        }
+        self.part = part
+        createdAt = row["createdAt"]?.string.flatMap(RomeDate.parse) ?? .distantPast
+    }
+
+    init(id: String, chatId: String?, part: MessagePart.ApprovalPart, createdAt: Date) {
+        self.id = id
+        self.chatId = chatId
+        self.part = part
+        self.createdAt = createdAt
+    }
+}
+
 /// What an approval card shows, derived from the stored part and the server's record.
 enum ApprovalStatus: String, Sendable {
     case pending, approved, executing, executed, rejected, failed

@@ -196,6 +196,7 @@ struct ConciergeRow: View {
     let onOpenChat: (String, String) -> Void
     /// Drawn in an open chat thread: no menus or thread links, text selectable.
     var inThread = false
+    @Environment(AppModel.self) private var model
 
     /// The message's time, and Reply on the Agent's messages outside a thread.
     private func menu(reply: Bool) -> BubbleMenu {
@@ -218,10 +219,17 @@ struct ConciergeRow: View {
             if !inThread {
                 ThreadRepliesLine(count: count, guardian: guardian) { store.openThread(at: messageId, toReply: false) }
             }
-        case .taskCard(_, let chatId, let title):
+        case .taskCard(_, let chatId, let title, let latest):
             let name = tasks.title(forChat: chatId, fallback: title)
-            TaskCard(title: name) {
-                onOpenChat(chatId, name)
+            VStack(alignment: .leading, spacing: 8) {
+                TaskCard(title: name) {
+                    onOpenChat(chatId, name)
+                }
+                // The newest card of a task that waits on the guardian shows
+                // what it asks, answered right here (rome-os/rome#1949).
+                if latest, !inThread, TaskWaitView.waits(tasks.chats[chatId]), let workspace = model.workspace {
+                    TaskWaitView(store: workspace.taskWait(chatId), session: tasks.chats[chatId])
+                }
             }
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)

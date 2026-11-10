@@ -269,6 +269,21 @@ final class DemoBackend: RomeBackend {
         return approvals[id] ?? ApprovalRecord(id: id, status: "pending")
     }
 
+    /// Approvals still pending, from the cards the demo's chats hold.
+    func pendingApprovals() async throws -> [PendingApproval] {
+        try await pause(0.2)
+        return messages.flatMap { chatId, list in
+            list.flatMap { message in
+                message.parts.compactMap { part -> PendingApproval? in
+                    guard case .approval(let approval) = part,
+                          ApprovalStatus.derive(stored: "pending", record: approvals[approval.approvalId]) == .pending
+                    else { return nil }
+                    return PendingApproval(id: approval.approvalId, chatId: chatId, part: approval, createdAt: message.date)
+                }
+            }
+        }
+    }
+
     func resolveApproval(id: String, approve: Bool) async throws {
         try await pause(0.9)
         approvals[id] = ApprovalRecord(id: id, status: approve ? "approved" : "rejected", executionState: approve ? "running" : nil, resolvedAt: RomeDate.string(.now))
@@ -611,6 +626,7 @@ final class DemoBackend: RomeBackend {
             agent("降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。", at: at(9, 40)),
             parts([.object(["type": .string("task_chat"), "chatId": .string("chat-price"), "title": .string("价格追踪：发提醒邮件")])], at: at(9, 40).addingTimeInterval(1), session: conciergeChatID),
             agent("竞品调研想确认一下范围，你看下。", at: at(9, 40).addingTimeInterval(2)),
+            parts([.object(["type": .string("task_chat"), "chatId": .string("chat-research"), "title": .string("竞品定价调研")])], at: at(9, 40).addingTimeInterval(3), session: conciergeChatID),
             // The Concierge asks and waits for an approval in the main chat too.
             user("c3", "海口明天怎么样？", at: at(9, 52), session: conciergeChatID),
             parts([.object([
