@@ -55,6 +55,16 @@ enum SnapshotRunner {
             model.openDemo()
             try? await Task.sleep(for: .seconds(2))
             await capture("04-chat", style: styleName, in: directory) {}
+            // Reply on an Agent message in no chat thread: quoted above the composer.
+            await capture("04b-chat-quote", style: styleName, in: directory, wait: 1) {
+                guard let chat = model.workspace?.concierge,
+                      let said = chat.messages.last(where: { message in
+                          !message.isUser && message.parts.contains { if case .text = $0 { true } else { false } }
+                      })
+                else { return }
+                chat.reply(to: said.id)
+            }
+            model.workspace?.concierge.cancelQuote()
             // The header's status line in each state, then back to the name alone.
             let states: [(String, ConciergeActivity)] = [
                 ("working", .working), ("tool", .tool(.searchingWeb)), ("tasks", .tasks(title: "整理本周会议纪要", more: 1)),
@@ -128,7 +138,7 @@ enum SnapshotRunner {
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
             // Chat threads: the replies lines, then one thread open over its chat.
             await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
-            // A long chat thread: its last answer carries the replies line.
+            // A long chat thread: its root carries the replies line.
             await capture("53-topic-long-thread", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-books")) }
             // A long topic name: cut at the end inside the header's pill.
             await capture("52-topic-long-name", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }

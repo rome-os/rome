@@ -471,6 +471,13 @@ final class DemoBackend: RomeBackend {
         String(data: (try? JSONEncoder().encode(parts)) ?? Data(), encoding: .utf8) ?? "[]"
     }
 
+    /// A guardian-side message said by the Concierge, as the instance marks it.
+    private func saidByConcierge(_ message: ChatMessage) -> ChatMessage {
+        var message = message
+        message.sender = MessageSender(kind: "automated", sourceType: "agent", name: "Milo", onBehalfOf: nil)
+        return message
+    }
+
     /// The message, placed in the chat thread that starts at `root`.
     private func threaded(_ message: ChatMessage, _ root: String?) -> ChatMessage {
         var message = message
@@ -585,7 +592,7 @@ final class DemoBackend: RomeBackend {
         }.jpegData(compressionQuality: 0.8)
         // A long chat, to scroll far from the bottom.
         // The last eight chapters are one long chat thread, taller than the
-        // screen: its last answer carries the replies line.
+        // screen: its root, chapter 17's question, carries the replies line.
         messages["topic-books"] = (0..<24).flatMap { index -> [ChatMessage] in
             let time = at(8, 0, daysAgo: 1).addingTimeInterval(Double(index) * 600)
             let root: String? = index >= 16 ? "b16" : nil
@@ -597,16 +604,17 @@ final class DemoBackend: RomeBackend {
                     : "第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"), root),
             ]
         }
-        // Two chat threads: the plan, interrupted by the weather, so both of
-        // its stretches carry the replies line; the weather's question and
-        // answer carry none.
+        // One chat thread among messages in none (rome-os/rome#1976): the
+        // plan's task came back into the thread of the message that started
+        // it, so its root carries "2 replies". The weather's question and
+        // answer, and the last word typed in the composer, are in no thread.
         messages["topic-trip"] = [
             threaded(user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"), "k1"),
             threaded(agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"), "k1"),
-            threaded(user("k4", "顺便看下四月京都的天气。", at: at(8, 58), session: "topic-trip"), "k4"),
-            threaded(agent("四月白天 15–20 度，早晚凉，带件外套。月初樱花还在。", at: at(8, 59), session: "topic-trip"), "k4"),
+            threaded(user("k4", "顺便看下四月京都的天气。", at: at(8, 58), session: "topic-trip"), nil),
+            threaded(agent("四月白天 15–20 度，早晚凉，带件外套。月初樱花还在。", at: at(8, 59), session: "topic-trip"), nil),
             threaded(agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/api/projects/asset/hotel.jpg?path=projects%2Fdemo%2Ftrip%2Fhotel.jpg)\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip"), "k1"),
-            threaded(user("k6", "就按它排。", at: at(9, 24), session: "topic-trip"), "k1"),
+            threaded(user("k6", "就按它排。", at: at(9, 24), session: "topic-trip"), nil),
         ]
         // A photo the guardian sent, stored the way the server stores it, and a long reply.
         let kitchen = "projects/demo/home/kitchen.jpg"
@@ -751,6 +759,10 @@ final class DemoBackend: RomeBackend {
 
             翻译稿会放在 `content/home.en.md`。
             """, at: at(9, 16), session: site, long: true),
+            // The Concierge relays what the guardian added in the main chat:
+            // drawn on the guardian's side, under its own name.
+            saidByConcierge(user("s2", "补充一下：英文版标题保持简短，不超过 8 个词。", at: at(9, 18), session: site)),
+            agent("好的，标题我会控制在 8 个词以内。", at: at(9, 19), session: site),
         ]
 
         // Task: Notion, failed.

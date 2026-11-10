@@ -603,6 +603,16 @@
         }
       }
     },
+    "Cancel reply" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消回复"
+          }
+        }
+      }
+    },
     "Cannot be connected here" : {
       "localizations" : {
         "zh-Hans" : {

@@ -392,6 +392,42 @@ struct AgentBubble: View {
     }
 }
 
+/// What the Concierge said in a task chat it started (rome-os/rome#1976):
+/// on the guardian's side, since it speaks for them, but in a neutral
+/// bubble under its own name and mascot, so it never reads as the guardian.
+struct ConciergeBubble: View {
+    let name: String
+    let text: String
+    var menu = BubbleMenu()
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Spacer(minLength: 40)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(verbatim: name)
+                    .romeFont(12)
+                    .foregroundStyle(Palette.sub)
+                    .lineLimit(1)
+                MarkdownText(source: text)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Palette.bubble, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
+                    .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
+                    .bubbleMenu(text: text, menu: menu)
+            }
+            Mascot()
+                .frame(height: 16)
+                .frame(width: 28, height: 28)
+                .background(Palette.elevated, in: Circle())
+                .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
+                .padding(.top, 18)
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
 struct CopyButton: View {
     let text: String
 

@@ -75,6 +75,7 @@ struct TopicChatScreen: View {
         }
         // Reply brings the keyboard up; the replies line opens it for reading.
         .onChange(of: store?.thread != nil) { _, open in if open, store?.thread?.toReply == true { composerFocused = true } }
+        .onChange(of: store?.quote) { _, quote in if quote != nil { composerFocused = true } }
         .alert("Rename chat", isPresented: $renaming) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) {}
@@ -91,6 +92,10 @@ struct TopicChatScreen: View {
             VStack(spacing: 10) {
                 // Inside the composer's inset, so the last message rests above it too.
                 UpdatePill(agentName: workspace.agentName)
+                if let store, store.quote != nil {
+                    QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 if startFailed && store == nil {
                     Text("Could not start the chat")
                         .romeFont(13, .medium)
@@ -103,6 +108,7 @@ struct TopicChatScreen: View {
                 Composer(text: $draft, placeholder: store?.composerThread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) { send() }
             }
             .animation(.easeOut(duration: 0.2), value: showsStarters)
+            .animation(.easeOut(duration: 0.2), value: store?.quote)
             .disabled(starting != nil)
             .padding(.horizontal, Metrics.pagePadding)
             .readableColumn()

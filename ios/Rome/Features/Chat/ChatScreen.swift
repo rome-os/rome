@@ -47,6 +47,7 @@ struct ChatScreen: View {
         }
         // Reply brings the keyboard up; the replies line opens it for reading.
         .onChange(of: store.thread != nil) { _, open in if open, store.thread?.toReply == true { composerFocused = true } }
+        .onChange(of: store.quote) { _, quote in if quote != nil { composerFocused = true } }
         .pageBackground()
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
@@ -65,6 +66,10 @@ struct ChatScreen: View {
                 VStack(spacing: 10) {
                     // Inside the composer's inset, so the last message rests above it too.
                     UpdatePill(agentName: workspace.agentName)
+                    if store.quote != nil {
+                        QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                     if ConciergeStarters.visible(loaded: store.loaded, rows: store.rows) {
                         ConciergeStarters { store.send($0.text) }
                     }
@@ -80,6 +85,7 @@ struct ChatScreen: View {
                     }
                 }
                 .animation(.easeOut(duration: 0.2), value: store.rows.isEmpty)
+                .animation(.easeOut(duration: 0.2), value: store.quote)
                 .padding(.horizontal, Metrics.pagePadding)
                 .readableColumn()
                 .padding(.top, 6)
@@ -209,7 +215,7 @@ struct ConciergeRow: View {
     private func menu(reply: Bool) -> BubbleMenu {
         let message = row.messageId.flatMap(store.message)
         let onReply: (() -> Void)? = reply && !inThread
-            ? row.messageId.map { id in { store.openThread(at: id) } }
+            ? row.messageId.map { id in { store.reply(to: id) } }
             : nil
         return BubbleMenu(date: message?.date, onReply: onReply, inThread: inThread)
     }

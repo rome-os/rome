@@ -115,8 +115,51 @@ private struct StayAtBottom: ViewModifier {
     }
 }
 
-/// Under the first message of a chat thread: how many replies it has. A
-/// tap opens the thread.
+/// Above the composer while it replies to a message in no chat thread: a
+/// line of that message, and a cross that drops the reply.
+struct QuoteBar: View {
+    /// The quoted message; nil while it is not held.
+    let message: ChatMessage?
+    let onCancel: () -> Void
+
+    private var preview: String {
+        let text = message?.parts.compactMap { part -> String? in
+            if case .text(let text, _, _) = part { return text }
+            return nil
+        }.joined(separator: " ") ?? ""
+        return MarkdownParser.plain(text).split(whereSeparator: \.isNewline).joined(separator: " ")
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrowshape.turn.up.left")
+                .romeFont(12)
+                .foregroundStyle(Palette.sub)
+            Text(verbatim: preview.isEmpty ? String(localized: "Reply") : preview)
+                .romeFont(13)
+                .foregroundStyle(Palette.sub)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Button(action: onCancel) {
+                Image(systemName: "xmark")
+                    .romeFont(11, .semibold)
+                    .foregroundStyle(Palette.sub)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressScaleStyle())
+            .accessibilityLabel(Text("Cancel reply"))
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 4)
+        .frame(minHeight: 34)
+        .glassSurface(Capsule(), frost: Frost.composer)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// Under the root of a chat thread: how many replies it has. A tap opens
+/// the thread.
 struct ThreadRepliesLine: View {
     let count: Int
     let guardian: Bool

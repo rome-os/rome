@@ -52,68 +52,57 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
     }
 }
 
-/// Where the "N replies" line shows: under the last Agent message of a
-/// stretch of a thread, and only where it helps.
+/// Where the "N replies" line shows: under the thread's root, once the
+/// thread has messages after it (rome-os/rome#1976).
 @Suite struct ThreadRepliesRowTests {
     private func lines(_ messages: [ChatMessage]) -> [String: Int] { TranscriptBuilder.threadLines(messages) }
 
-    /// A plain question and answer never shows it.
-    @Test func aQuestionAndItsAnswerShowNothing() {
-        #expect(lines([message("q", role: "user", at: 0, thread: "q"), message("a", at: 10, thread: "q")]).isEmpty)
+    /// A plain question and answer, in no thread, never shows it; nor does
+    /// a root alone in its thread.
+    @Test func noRepliesShowNothing() {
         #expect(lines([message("q", role: "user", at: 0), message("a", at: 10)]).isEmpty)
+        #expect(lines([message("q", role: "user", at: 0, thread: "q"), message("a", at: 10)]).isEmpty)
     }
 
-    /// Interrupted by another thread: both stretches show it, and the
-    /// interruption, a plain question and answer, does not.
-    @Test func anInterruptedThreadShowsItOnEachStretch() {
+    /// Under the root, counting every message of the thread but the root,
+    /// wherever they are in the timeline. Fails before the change, which put
+    /// it under the last Agent message of each stretch.
+    @Test func itSitsUnderTheRootAndCountsTheRest() {
         let messages = [
             message("r", role: "user", at: 0, thread: "r"), message("a1", at: 10, thread: "r"),
-            message("w", role: "user", at: 20, thread: "w"), message("a2", at: 30, thread: "w"),
+            message("w", role: "user", at: 20), message("a2", at: 30),
             message("a3", at: 40, thread: "r"), message("u", role: "user", at: 50, thread: "r"),
         ]
-        #expect(lines(messages) == ["a1": 3, "a3": 3])
-        // In the rows: right under that Agent message, never under the guardian's.
+        #expect(lines(messages) == ["r": 3])
+        // In the rows: right under the root, on the guardian's side when it is theirs.
         let rows = TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: .init(showThreads: true))
-        let index = rows.firstIndex { $0.id == "replies-a1" }!
-        #expect(rows[index - 1].id == "a1:0")
-        #expect(rows[index] == .threadReplies(id: "replies-a1", messageId: "a1", count: 3, guardian: false))
+        let index = rows.firstIndex { $0.id == "replies-r" }!
+        #expect(rows[index - 1].id == "r:0")
+        #expect(rows[index] == .threadReplies(id: "replies-r", messageId: "r", count: 3, guardian: true))
         #expect(TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: .init()).allSatisfy {
             if case .threadReplies = $0 { return false } else { return true }
         })
     }
 
-    @Test func aLongThreadShowsItOnce() {
-        let messages = (0..<4).map { message("m\($0)", role: $0.isMultiple(of: 2) ? "user" : "assistant", at: Double($0) * 10, thread: "m0") }
-        #expect(lines(messages) == ["m3": 3])
+    /// An Agent message replied to is the root: "1 reply" under it.
+    @Test func aReplyToAnAgentMessageShowsOneReply() {
+        #expect(lines([message("a", at: 0, thread: "a"), message("u", role: "user", at: 10, thread: "a")]) == ["a": 1])
+        // A root from before threads (no chatThreadId of its own) still carries it.
+        #expect(lines([message("legacy", at: 0), message("u", role: "user", at: 10, thread: "legacy")]) == ["legacy": 1])
     }
 
-    /// The thread's first message is not loaded (an older page): the
-    /// stretch still says there is more.
-    @Test func aThreadWhoseStartIsNotLoadedShowsIt() {
-        // Both are replies: the first message is not loaded, so none is taken off.
-        #expect(lines([message("u", role: "user", at: 0, thread: "old"), message("a", at: 10, thread: "old")]) == ["a": 2])
-        // A lone reply counts as one, never "0 replies".
-        #expect(lines([message("a", at: 0, thread: "old")]) == ["a": 1])
-        // A first message from before threads (no chatThreadId) is loaded but
-        // not counted: its one reply still reads "1 reply". Fails before the change.
-        #expect(lines([message("legacy", role: "user", at: 0), message("a", at: 10, thread: "legacy")]) == ["a": 1])
+    /// The root is not loaded (an older page): nothing until it is.
+    @Test func aThreadWhoseRootIsNotLoadedShowsNothing() {
+        #expect(lines([message("u", role: "user", at: 0, thread: "old"), message("a", at: 10, thread: "old")]).isEmpty)
     }
 
-    /// Two stretches next to each other never both show it: the later keeps it.
-    @Test func neighboursKeepOnlyTheLaterLine() {
+    /// Two threads each carry their own line.
+    @Test func eachThreadHasItsOwn() {
         let messages = [
-            message("x", role: "user", at: 0, thread: "oldX"), message("xa", at: 10, thread: "oldX"),
-            message("y", role: "user", at: 20, thread: "oldY"), message("ya", at: 30, thread: "oldY"),
+            message("x", role: "user", at: 0, thread: "x"), message("xa", at: 10, thread: "x"),
+            message("y", at: 20, thread: "y"), message("yu", role: "user", at: 30, thread: "y"), message("ya", at: 40, thread: "y"),
         ]
-        #expect(lines(messages) == ["ya": 2])
-        // A stretch in between that shows nothing lets both show.
-        let apart = messages[0...1] + [message("p", role: "user", at: 15), message("pa", at: 16)] + messages[2...3]
-        #expect(lines(Array(apart)) == ["xa": 2, "ya": 2])
-    }
-
-    /// A stretch of only the guardian's messages has no Agent message to carry it.
-    @Test func onlyAgentMessagesCarryIt() {
-        #expect(lines([message("u1", role: "user", at: 0, thread: "old"), message("u2", role: "user", at: 10, thread: "old")]).isEmpty)
+        #expect(lines(messages) == ["x": 1, "y": 2])
     }
 }
 
@@ -281,5 +270,83 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(long.hasPrefix(String(cut.dropLast())))
         #expect((cut as NSString).size(withAttributes: [.font: font]).width <= 200)
         #expect(MenuTitle.oneLine("Milo", width: 200, font: font) == "Milo")
+    }
+}
+
+/// Reply on a message in no chat thread quotes it above the composer
+/// (rome-os/rome#1976); one in a thread opens the thread.
+@MainActor
+@Suite struct QuoteReplyTests {
+    private func chat(_ messages: [ChatMessage]) async -> TranscriptStore {
+        let backend = FakeBackend()
+        backend.stored = messages
+        let store = TranscriptStore(sessionId: "concierge", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        return store
+    }
+
+    @Test func onlyAMessageInNoThreadIsQuoted() {
+        let alone = message("a", at: 0)
+        let root = message("r", at: 10)
+        let inside = message("i", at: 20, thread: "r")
+        let all = [alone, root, inside]
+        #expect(TranscriptStore.quotes(alone, among: all))
+        // A root (another message names it) and a message inside open the thread.
+        #expect(!TranscriptStore.quotes(root, among: all))
+        #expect(!TranscriptStore.quotes(inside, among: all))
+        // An instance before chat threads cannot tell: Reply opens the thread, as before.
+        #expect(!TranscriptStore.quotes(message("old", at: 0, knows: false), among: []))
+    }
+
+    @Test func aQuoteStaysInTheChatAndSendsToTheMessagesThread() async {
+        let store = await chat([message("q", role: "user", at: 0), message("a", "sunny", at: 10)])
+        store.reply(to: "a")
+        #expect(store.thread == nil)
+        #expect(store.quotedMessage?.id == "a")
+        // The send path a reply to a message takes: the reply starts its thread.
+        #expect(store.composerThread?.body == ["chatThread": .string("a")])
+        store.cancelQuote()
+        #expect(store.composerThread == nil)
+        // A message already in a thread opens it instead.
+        let threaded = await chat([message("r", role: "user", at: 0, thread: "r"), message("b", at: 10, thread: "r")])
+        threaded.reply(to: "b")
+        #expect(threaded.thread != nil && threaded.quote == nil)
+    }
+
+    /// A draft keeps its quote, and a relaunch brings it back as a quote.
+    @Test func aDraftsQuoteComesBack() async throws {
+        let target = ThreadTarget(messageId: "a", instanceKnowsThreads: true, quote: true)
+        let back = try JSONDecoder().decode(ThreadTarget.self, from: JSONEncoder().encode(target))
+        #expect(back == target && back.isQuote)
+        // Drafts written before quotes read as threads.
+        let old = try JSONDecoder().decode(ThreadTarget.self, from: Data(#"{"messageId":"a","instanceKnowsThreads":true}"#.utf8))
+        #expect(!old.isQuote)
+        let store = await chat([message("a", at: 0)])
+        store.reopenThread(target)
+        #expect(store.thread == nil && store.quote == target)
+        store.closeThread()
+        #expect(store.quote == nil)
+    }
+}
+
+/// The Concierge's messages in a task chat it started (rome-os/rome#1976).
+@Suite struct ConciergeSenderTests {
+    private func decode(_ sender: String) throws -> ChatMessage {
+        try JSONDecoder().decode(ChatMessage.self, from: Data(#"{"id":"m","sessionId":"s","role":"user","content":"[]","createdAt":"2026-11-10T10:00:00Z","sender":\#(sender)}"#.utf8))
+    }
+
+    @Test func anAgentOnNoOnesBehalfIsTheConcierge() throws {
+        let concierge = try decode(#"{"kind":"automated","sourceType":"agent","name":"Yo","iconUrl":null}"#)
+        #expect(concierge.saidByAgent && concierge.sender?.name == "Yo")
+        // On the guardian's behalf, it is the guardian's own message.
+        #expect(try !decode(#"{"kind":"automated","sourceType":"agent","name":"Yo","onBehalfOf":{"kind":"guardian","name":"Lin","avatarUrl":null}}"#).saidByAgent)
+        #expect(try !decode(#"{"kind":"automated","sourceType":"routine","name":"Daily"}"#).saidByAgent)
+        #expect(try !decode(#"{"kind":"guardian","name":"Lin","avatarUrl":null}"#).saidByAgent)
+        // A shape the app does not know keeps the message.
+        #expect(try decode(#""odd""#).sender == nil)
+        // A kept copy reads back the same.
+        let back = try JSONDecoder().decode(ChatMessage.self, from: JSONEncoder().encode(concierge))
+        #expect(back.sender == concierge.sender)
     }
 }
