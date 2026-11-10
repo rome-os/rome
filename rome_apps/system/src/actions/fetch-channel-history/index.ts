@@ -38,6 +38,8 @@ interface StructuredMessage {
   timestamp: string;
   threadId: string;
   threadName?: string;
+  /** The chat thread the message is in, where its chat keeps them. */
+  chatThread?: string;
   text: string;
   attachments: StructuredAttachment[];
 }
@@ -65,6 +67,7 @@ function toStructuredMessages(channel: string, messages: ChannelMessage[]): Stru
     timestamp: m.timestamp.toISOString(),
     threadId: m.chatId,
     threadName: m.thread?.name,
+    ...(m.chatThread ? { chatThread: m.chatThread } : {}),
     text: m.text,
     attachments: m.attachments.map((a) => ({
       type: a.type,
@@ -111,7 +114,10 @@ function formatMessages(
           text = text ? `${text} [attachments: ${names}]` : `[attachments: ${names}]`;
         }
         if (!text) return null;
-        return `[${time}] **${senderLabel(channel, m)}**: ${text}`;
+        // A chat that keeps chat threads names each message and its thread,
+        // so the agent can place a message in one.
+        const placed = m.chatThread ? ` (message ${m.messageId}, chat thread ${m.chatThread})` : "";
+        return `[${time}] **${senderLabel(channel, m)}**${placed}: ${text}`;
       })
       .filter(Boolean);
 

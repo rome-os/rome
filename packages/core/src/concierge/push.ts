@@ -1,19 +1,26 @@
-// A Concierge turn with a push level, proactive or the reply to the guardian's
-// own message, sends one push to the guardian's phone, on the first message it
-// says while the phone app does not show the chat. Its words come only from
-// the turn's first message: a push on a later one says a fixed line
+// Every message a Concierge turn with a push level says goes to its chat's
+// owner's phone, the guardian's or a visitor's, unless their phone shows the
+// chat, their dashboard is active, or their quiet hours hold it. Per chat,
+// messages within MERGE_MS of the last push merge into one, and a push rings
+// only after RING_MS without one
 // (docs/adrs/proactive-concierge-push-without-per-message-consent.md).
 
+import { withoutSessionActor } from "../access/session-actor.js";
 import { marked, type Token } from "marked";
 import type { NotifyLevel, SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
 import { createLogger } from "../logger.js";
+import { recipientOf, type ConciergeOwner } from "./owner.js";
 
 const log = createLogger("concierge-push");
 
 /** About this many characters of the message reach the phone. */
 export const PUSH_BODY_MAX_CHARS = 100;
-/** Turns remembered as pushed or spoken in. A session runs one turn at a time, so a few suffice. */
-const TURNS_KEPT = 64;
+/** Messages said in a chat within this long of its last push merge into one push, showing the latest. */
+export const MERGE_MS = 15_000;
+/** A push rings only when its chat's last push is older than this; otherwise it arrives silently. */
+export const RING_MS = 2 * 60_000;
+/** Past this many chats, ones idle for RING_MS are forgotten. */
+const CHATS_KEPT = 64;
 
 // The lexer escapes these in text, as HTML would show them.
 const ENTITIES: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', "#39": "'" };
@@ -73,15 +80,18 @@ export function pushBody(markdown: string): string {
 
 export interface ConciergePushDeps {
   notify: { send(content: SystemNotifyContent): Promise<SendOutcome> };
-  /** When the quiet window `at` falls in ends, or null outside quiet hours. */
-  quietUntil: (at: number) => Promise<number | null>;
-  /** Whether a message in this chat may reach the guardian's phone: only one of their own chats. */
-  pushesFor: (chatId: string) => Promise<boolean>;
-  /** Whether the guardian's phone app shows this chat now: then it is read there, not pushed. */
-  watching?: (chatId: string) => boolean;
-  /** The guardian's dashboard language, as its setting holds it, or null. */
-  language: () => Promise<string | null>;
+  /** Whose a chat is, or null when it no longer exists. */
+  ownerOf: (chatId: string) => Promise<ConciergeOwner | null>;
+  /** When `owner`'s quiet window `at` falls in ends, or null outside their quiet hours. */
+  quietUntil: (at: number, owner: ConciergeOwner) => Promise<number | null>;
+  /** The people whose phone app shows this chat now: it is read there, not pushed to them. */
+  watchersOf?: (chatId: string) => ReadonlySet<ConciergeOwner>;
+  /** The people at one of their web dashboards now: none of their pushes goes out. */
+  activeOwners?: () => ReadonlySet<ConciergeOwner>;
+  /** `owner`'s dashboard language, or null. */
+  language: (owner: ConciergeOwner) => Promise<string | null>;
   now?: () => number;
+  setTimer?: (fn: () => void, ms: number) => unknown;
 }
 
 /** What the Concierge said, and where. */
@@ -95,46 +105,144 @@ export interface SaidInTurn {
    * for a bare forward or a card: the push then says {@link FIXED_LINE}.
    */
   ownWords: string | null;
+  /** The Concierge marked the message private: the push says {@link FIXED_LINE}. */
+  private?: boolean;
   /** The turn's push level; undefined for a reminder, a recovery or a notice. */
   level: NotifyLevel | undefined;
 }
 
-/** The line a push says for a message with none of the Concierge's own words, by dashboard language. */
+/** The line a push says for a message it may not show, by dashboard language. */
 export const FIXED_LINE: Record<string, string> = {
   en: "A task has an update",
   "zh-CN": "有个任务有了新进展",
 };
 
+/** Who the phone and dashboard holds cover, at one moment. */
+interface Holds {
+  watchers: ReadonlySet<ConciergeOwner>;
+  active: ReadonlySet<ConciergeOwner>;
+  /** The moment the holds were taken: quiet hours are judged at it. */
+  at: number;
+}
+
+interface Pending {
+  said: SaidInTurn & { level: NotifyLevel };
+  owner: ConciergeOwner;
+}
+
+interface Waiting extends Pending {
+  /** When the merge window this message waits in ends: only that window's flush sends it. */
+  due: number;
+}
+
+interface ChatPushes {
+  lastPushAt: number | null;
+  /** The latest message said within MERGE_MS of the last push, sent when that window ends. */
+  pending: Waiting | null;
+}
+
 export class ConciergePush {
-  private readonly pushed = new Set<string>();
-  /** Turns that have said a message: any later one is not the first. */
-  private readonly spoken = new Set<string>();
+  private readonly chats = new Map<string, ChatPushes>();
+  /** Each chat's messages run in the order said, so a merge always keeps the latest. */
+  private readonly queues = new Map<string, Promise<void>>();
   private readonly now: () => number;
+  private readonly setTimer: (fn: () => void, ms: number) => unknown;
 
   constructor(private readonly deps: ConciergePushDeps) {
     this.now = deps.now ?? Date.now;
+    this.setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms).unref());
+  }
+
+  /** Registers a merge timer that carries no one's session actor, whoever's turn said the message. */
+  private schedule(fn: () => void, ms: number): void {
+    withoutSessionActor(() => this.setTimer(fn, ms));
   }
 
   /**
-   * Pushes the first message of a turn that has a push level, skipping any the
-   * phone shows as it is said. Answers at once: the push never holds or fails
-   * the turn, and the message stays in the chat whatever happens to it.
+   * Pushes a message of a turn that has a push level to its chat's owner.
+   * A message held back is dropped, never pushed later. Answers at once: the
+   * push never holds or fails the turn, and the message stays in the chat
+   * whatever happens to it.
    */
   said(said: SaidInTurn): void {
-    const { turnId, chatId, level } = said;
-    if (!level || this.pushed.has(turnId)) return;
-    const first = remember(this.spoken, turnId);
-    // A message read on the phone leaves the turn's push to a later message,
-    // so an answer that comes after the guardian leaves the chat still pushes.
-    if (this.deps.watching?.(chatId)) {
-      log.info("concierge push skipped: the phone shows the chat", { turnId, chatId });
+    const { level } = said;
+    if (!level) return;
+    // Taken as the message is said: a hold that ends while the owner lookup
+    // or an earlier message is still in the queue still drops it.
+    const holds = this.holdsNow(said.chatId);
+    // A message is said in whoever's scope ran the tool; the push serves the
+    // chat's owner, so its queue carries no one's session actor.
+    withoutSessionActor(() =>
+      this.enqueue(said.chatId, () => this.handle({ ...said, level }, holds)),
+    );
+  }
+
+  /** Runs `step` after every earlier step of the chat; a failure is logged, never thrown. */
+  private enqueue(chatId: string, step: () => Promise<void>): void {
+    const queued = (this.queues.get(chatId) ?? Promise.resolve()).then(step).catch((error) =>
+      log.warn("concierge push failed", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    this.queues.set(chatId, queued);
+    void queued.then(() => {
+      if (this.queues.get(chatId) === queued) this.queues.delete(chatId);
+    });
+  }
+
+  private holdsNow(chatId: string): Holds {
+    return {
+      watchers: this.deps.watchersOf?.(chatId) ?? new Set(),
+      active: this.deps.activeOwners?.() ?? new Set(),
+      at: this.now(),
+    };
+  }
+
+  private async handle(said: SaidInTurn & { level: NotifyLevel }, holds: Holds): Promise<void> {
+    const owner = await this.deps.ownerOf(said.chatId);
+    if (!owner) return;
+    // A message read or held when said is dropped: it never enters the merge
+    // window, so it cannot go out once the hold clears.
+    if (await this.held(said, owner, holds)) return;
+    const chat = this.chatOf(said.chatId);
+    const sinceLast = chat.lastPushAt === null ? Infinity : this.now() - chat.lastPushAt;
+    if (sinceLast < MERGE_MS) {
+      const due = (chat.lastPushAt ?? 0) + MERGE_MS;
+      if (chat.pending?.due !== due) {
+        this.schedule(() => this.flush(said.chatId, due), MERGE_MS - sinceLast);
+      }
+      chat.pending = { said, owner, due };
       return;
     }
-    remember(this.pushed, turnId);
-    // Only the first message is held to keeping secrets off the lock screen;
-    // the Concierge gives them in a later one, so a later push never shows it.
-    const preview = first ? said : { ...said, ownWords: null };
-    void this.send(preview, level).catch((error: unknown) =>
+    // The window has ended but its flush has not run yet: this newer message
+    // replaces the pending one, so the older never goes out after it.
+    chat.pending = null;
+    await this.deliver(chat, { said, owner });
+  }
+
+  /** Sends the message waiting in the window that ends at `due`; a later window's message waits for its own flush. */
+  private flush(chatId: string, due: number): void {
+    this.enqueue(chatId, async () => {
+      const chat = this.chats.get(chatId);
+      const pending = chat?.pending;
+      if (!chat || !pending || pending.due !== due) return;
+      chat.pending = null;
+      await this.deliver(chat, pending);
+    });
+  }
+
+  private async deliver(chat: ChatPushes, { said, owner }: Pending): Promise<void> {
+    const { turnId, chatId } = said;
+    // Checked again at dispatch: a hold may have started while a merged push waited.
+    if (await this.held(said, owner, this.holdsNow(chatId))) return;
+    const at = this.now();
+    const rings = chat.lastPushAt === null || at - chat.lastPushAt > RING_MS;
+    const level: NotifyLevel = said.level === "active" && rings ? "active" : "passive";
+    // Set before the send, so a message said while it is in flight merges.
+    chat.lastPushAt = at;
+    // The chat's queue never waits on Rome Cloud: a slow send holds no later message.
+    void this.send(said, owner, level).catch((error: unknown) =>
       log.warn("concierge push failed", {
         turnId,
         chatId,
@@ -143,28 +251,69 @@ export class ConciergePush {
     );
   }
 
-  private async send({ turnId, chatId, ownWords }: SaidInTurn, level: NotifyLevel): Promise<void> {
-    if (!(await this.deps.pushesFor(chatId))) return;
-    if ((await this.deps.quietUntil(this.now())) !== null) {
-      log.info("concierge push held back by quiet hours", { turnId, chatId });
-      return;
-    }
-    const body = ownWords ?? (await this.fixedLine());
-    const outcome = await this.deps.notify.send({ body: pushBody(body), level, chatId });
+  private async send(said: SaidInTurn, owner: ConciergeOwner, level: NotifyLevel): Promise<void> {
+    const { turnId, chatId } = said;
+    const words = said.private ? null : said.ownWords;
+    const body = words ?? (await this.fixedLine(owner));
+    const recipient = recipientOf(owner);
+    const outcome = await this.deps.notify.send({
+      body: pushBody(body),
+      level,
+      chatId,
+      ...(recipient !== undefined ? { recipient } : {}),
+    });
     // The outcome only: the body never reaches a log.
-    log.info("concierge push", { turnId, chatId, level, outcome: outcome.kind });
+    log.info("concierge push", {
+      turnId,
+      chatId,
+      level,
+      recipient: recipient === undefined ? "guardian" : "visitor",
+      outcome: outcome.kind,
+    });
   }
 
-  private async fixedLine(): Promise<string> {
-    const language = await this.deps.language().catch(() => null);
+  /**
+   * Whether a hold covered `owner` when `holds` was taken, logging which: the
+   * phone's watch, their dashboard, then their quiet hours at that moment.
+   */
+  private async held(
+    { turnId, chatId }: SaidInTurn,
+    owner: ConciergeOwner,
+    holds: Holds,
+  ): Promise<boolean> {
+    if (holds.watchers.has(owner)) {
+      log.info("concierge push skipped: the phone shows the chat", { turnId, chatId });
+      return true;
+    }
+    if (holds.active.has(owner)) {
+      log.info("concierge push held back: a dashboard is active", { turnId, chatId });
+      return true;
+    }
+    if ((await this.deps.quietUntil(holds.at, owner)) !== null) {
+      log.info("concierge push held back by quiet hours", { turnId, chatId });
+      return true;
+    }
+    return false;
+  }
+
+  private chatOf(chatId: string): ChatPushes {
+    let chat = this.chats.get(chatId);
+    if (chat) return chat;
+    if (this.chats.size >= CHATS_KEPT) {
+      const now = this.now();
+      for (const [id, kept] of this.chats) {
+        if (!kept.pending && (kept.lastPushAt === null || now - kept.lastPushAt > RING_MS)) {
+          this.chats.delete(id);
+        }
+      }
+    }
+    chat = { lastPushAt: null, pending: null };
+    this.chats.set(chatId, chat);
+    return chat;
+  }
+
+  private async fixedLine(owner: ConciergeOwner): Promise<string> {
+    const language = await this.deps.language(owner).catch(() => null);
     return language && Object.hasOwn(FIXED_LINE, language) ? FIXED_LINE[language] : FIXED_LINE.en;
   }
-}
-
-/** Adds a turn, forgetting the oldest past the cap; true when it was new. */
-function remember(turns: Set<string>, turnId: string): boolean {
-  if (turns.has(turnId)) return false;
-  turns.add(turnId);
-  if (turns.size > TURNS_KEPT) turns.delete(turns.values().next().value as string);
-  return true;
 }

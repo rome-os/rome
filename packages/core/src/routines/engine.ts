@@ -13,6 +13,14 @@ import { actionExecutionContext } from "../apps/actions/context.js";
 import { replayContext } from "../apps/actions/replay.js";
 import { runWithoutSession } from "../telemetry-context.js";
 import type { Clock, ClockTimer } from "../lib/clock.js";
+import {
+  currentSessionActor,
+  withoutSessionActor,
+  type SessionActor,
+} from "../access/session-actor.js";
+
+/** What fired a Run now pressed by no person: the agent, or a CLI over loopback. */
+export const RUN_NOW_IN_BACKGROUND = "run_now_background";
 
 const log = createLogger("routine-engine");
 
@@ -43,7 +51,25 @@ export class RoutineEngine {
     private retryDelayMs: number,
     /** Time source for run durations, lastFiredAt, and the retry timer. */
     private clock: Clock,
+    /**
+     * Who a routine from before `createdBy` acts for: its chat's owner.
+     * Absent, such a routine acts for no one.
+     */
+    private legacyActorOf: (routine: Routine) => Promise<SessionActor | undefined> = async () =>
+      undefined,
   ) {}
+
+  /**
+   * The person a fire acts for: who created the routine, read from its stored
+   * row at each fire, so however a routine was activated its fires act for
+   * that person. Never anyone ambient.
+   */
+  private async actorOf(routine: Routine): Promise<SessionActor | undefined> {
+    const creator = await this.routinesRepo.creatorOf(routine.id);
+    if (creator === undefined) return undefined;
+    if (creator === null) return this.legacyActorOf(routine);
+    return creator.kind === "anonymous" ? undefined : creator;
+  }
 
   registerProvider(type: string, provider: TriggerProvider): void {
     this.providers.set(type, provider);
@@ -133,7 +159,12 @@ export class RoutineEngine {
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     const row = await this.routinesRepo.findById(routineId);
     if (!row) throw new Error(`routine not found: ${routineId}`);
-    return this.dispatch(toRoutine(row), payload, { manual: true });
+    // The run acts for the routine's creator; whether a person pressed Run now
+    // is kept apart, as what fired it, for usage attribution.
+    const presser = await currentSessionActor();
+    const byPerson =
+      presser?.kind === "visitor" || (presser?.kind === "guardian" && presser.via === "cookie");
+    return this.dispatch(toRoutine(row), payload, { manual: byPerson ? "person" : "background" });
   }
 
   /** Stop a routine's running run(s), forcing each to a terminal "cancelled".
@@ -184,7 +215,7 @@ export class RoutineEngine {
   private dispatch(
     routine: Routine,
     payload: Record<string, unknown>,
-    opts: { manual?: boolean } = {},
+    opts: { manual?: "person" | "background" } = {},
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     // A fire is a new root in every sense. The trigger that fires it was
     // registered from inside the action that created the routine, and a timer
@@ -192,11 +223,14 @@ export class RoutineEngine {
     // store, its trace span and the session id of the turn that created it.
     // Leaving all four keeps a fire from reading as a nested call, from
     // parenting its span under a long-ended action and from being attributed
-    // to a session it does not belong to.
+    // to a session it does not belong to. Nor does it act for whoever's
+    // request is ambient: it acts for the routine's own person (`actorOf`).
     return otelContext.with(ROOT_CONTEXT, () =>
       replayContext.exit(() =>
         actionExecutionContext.exit(() =>
-          runWithoutSession(() => this.dispatchAsRoot(routine, payload, opts)),
+          withoutSessionActor(() =>
+            runWithoutSession(() => this.dispatchAsRoot(routine, payload, opts)),
+          ),
         ),
       ),
     );
@@ -205,7 +239,7 @@ export class RoutineEngine {
   private async dispatchAsRoot(
     routine: Routine,
     payload: Record<string, unknown>,
-    opts: { manual?: boolean },
+    opts: { manual?: "person" | "background" },
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     const startTime = this.clock.now().getTime();
 
@@ -221,7 +255,12 @@ export class RoutineEngine {
       status: "running",
       // A routine that keeps no payload records only its size.
       payload: keep ? payload : payloadSize(payload),
-      firedBy: opts.manual ? "run_now" : routine.trigger.type,
+      firedBy:
+        opts.manual === "person"
+          ? "run_now"
+          : opts.manual === "background"
+            ? RUN_NOW_IN_BACKGROUND
+            : routine.trigger.type,
     });
 
     // Captured inside the span callback and returned to the caller so a manual
@@ -245,9 +284,14 @@ export class RoutineEngine {
         });
 
         const mergedArgs = { ...routine.args, __triggerPayload: payload };
+        const actor = await this.actorOf(routine);
         // A routine fire holds no action worker, so it can wait out a busy pool.
         const context: ActionRunContext = {
           initiator: `routine:${routine.name}`,
+          ...(actor ? { actor } : {}),
+          // The root row takes the run's id, so an approval of this fire finds
+          // it (and the person it acted for) under its root execution id.
+          executionId: rootExecutionId,
           rootExecutionId,
           whenWorkersBusy: "queue",
           ...(keep ? {} : { omitFromRecord: ["__triggerPayload"] }),
@@ -360,6 +404,7 @@ export class RoutineEngine {
                       const retryResult = await runWithoutHookInvocationContext(() =>
                         this.actionEngine.run(routine.actionName, mergedArgs, {
                           initiator: `routine:${routine.name}`,
+                          ...(actor ? { actor } : {}),
                           whenWorkersBusy: "queue",
                           // A retry keeps the payload out of its record, as the first try did.
                           ...(keep ? {} : { omitFromRecord: ["__triggerPayload"] }),

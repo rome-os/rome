@@ -94,6 +94,9 @@ export interface SaidMessage {
   readonly body: Body;
   readonly parts: string;
   readonly replyTo?: number;
+  /** The chat thread the message is in (docs/domains/chats.md#chat-thread):
+   *  the key of its first message. Absent when it is in none. */
+  readonly chatThread?: string;
   readonly at: Date;
 }
 

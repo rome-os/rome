@@ -107,7 +107,8 @@
   "reply": {
     "action": "回复",
     "dismiss": "取消回复",
-    "jump": "跳到原消息"
+    "jump": "跳到原消息",
+    "openThread": "打开对话串"
   },
   "senderGuardian": "守护者",
   "inputState": {
@@ -129,8 +130,6 @@
     "sessionModel": "会话模型：{{model}}",
     "sessionModelWithEffort": "会话模型：{{model}}，推理强度：{{effort}}",
     "more": "更多操作",
-    "pin": "置顶对话",
-    "unpin": "取消置顶",
     "archive": "归档对话",
     "unarchive": "取消归档",
     "delete": "删除对话",
@@ -186,8 +185,8 @@
       "recorded": "反馈已记录"
     },
     "branch": {
-      "open": "从此回复发起侧边对话",
-      "title": "创建侧边对话",
+      "open": "从此回复分叉出新对话",
+      "title": "分叉为新对话",
       "description": "继续追问，同时不改变当前聊天。",
       "suggestionsLabel": "推荐提示词",
       "suggestions": {
@@ -196,10 +195,10 @@
         "example": "给我一个具体示例"
       },
       "promptPlaceholder": "针对这条回复提问…",
-      "submit": "发起侧边对话",
-      "submitting": "正在创建…",
-      "submitFailed": "无法创建侧边对话",
-      "notBranchable": "无法从这条回复创建侧边对话。发送一条追问，再从新的回复创建即可。"
+      "submit": "分叉对话",
+      "submitting": "正在分叉…",
+      "submitFailed": "无法分叉对话",
+      "notBranchable": "无法从这条回复分叉对话。发送一条追问，再从新的回复分叉即可。"
     }
   },
   "blocks": {
@@ -564,6 +563,20 @@
     "morningBrief": {
       "label": "早间简报",
       "prompt": "构建一个带前端设计的早间简报应用,读取我过去 24 小时的 Gmail 邮件和即将到来的 Google 日历事件。每天上午 8:00 更新仪表盘,展示最新的优先事项、紧急邮件、重要会议、截止日期和推荐的后续行动。识别最需要我关注的事项,并在每次每日更新后通过 Telegram 给我发送简短摘要。"
+    }
+  },
+  "thread": {
+    "title": "对话串",
+    "close": "关闭对话串",
+    "loadFailed": "无法加载这个对话串。"
+  },
+  "sessionRenewal": {
+    "notice": "新会话 · {{reason}}",
+    "reasons": {
+      "setup": "设定已变",
+      "idle": "闲置后",
+      "daily": "每日重置",
+      "working_dir": "工作目录不存在"
     }
   }
 }

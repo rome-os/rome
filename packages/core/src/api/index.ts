@@ -18,7 +18,7 @@ import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
 import { wechatAppRoutes } from "./routes/wechat-app.js";
 import { defaultApiCacheControl } from "./middleware/cache-control.js";
-import { sessionActorMiddleware } from "../lib/session-actor.js";
+import { sessionActorMiddleware } from "../access/session-actor.js";
 import { healthRoutes } from "./routes/health.js";
 import { aiToolsRoutes } from "./routes/ai-tools.js";
 import { actionsRoutes } from "./routes/actions.js";
@@ -148,7 +148,7 @@ export function buildApp(
 
   // Annotate-only (never gates): expose the request's session actor ambiently
   // so any action run during the request is stamped with who triggered it —
-  // see lib/session-actor.ts and `action_executions.actor`.
+  // see access/session-actor.ts and `action_executions.actor`.
   api.use("*", sessionActorMiddleware(deps.db));
 
   api.route("/", healthRoutes(deps));
@@ -353,6 +353,7 @@ export async function startApi(config: ApiConfig, deps: ApiDeps): Promise<ApiHan
             deps.concierge?.deps.tasks.subscribe(emit, owner) ?? (() => {}),
         },
         deps.phoneWatching,
+        deps.dashboardActivity,
       );
       const nodeConsole = attachNodeConsoleServer(server as Server, deps.db);
       const desktopProxy = attachDesktopProxy(server as Server, deps.db);

@@ -1,5 +1,5 @@
 import type { RomeSessionType } from "@rome-os/app-runtime";
-import type { SessionActor } from "../lib/session-actor.js";
+import type { SessionActor } from "../access/session-actor.js";
 import type { UsageKind, UsageTrigger } from "./events.js";
 
 /** The initiator of the skill review core starts after a main-agent turn. */
@@ -127,20 +127,18 @@ export class UsageAttributionResolver {
     return reported ? { ...reported, trigger: await this.triggerFor(row) } : null;
   }
 
-  // A person in the chain wins. Otherwise a routine run reports what fired it,
-  // a webhook is an event, and an app's own call has no person behind it. A
-  // guardian reached over loopback is the agent or a CLI in the container. A
-  // sessionless caller may be a machine posting to an app's open route.
+  // A routine run reports what fired it, whoever it acts for: a fire carries
+  // the person who created the routine, which says whom it serves, not that
+  // they were there. Otherwise a person in the chain wins, a webhook is an
+  // event, and an app's own call has no person behind it. A guardian reached
+  // over loopback is the agent or a CLI in the container. A sessionless
+  // caller may be a machine posting to an app's open route.
   private async triggerFor(params: {
     initiator: string | null;
     actor: SessionActor | null;
     rootExecutionId: string | null;
   }): Promise<UsageTrigger> {
     const { initiator, actor } = params;
-    if (actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via === "cookie")) {
-      return "user";
-    }
-    if (actor?.kind === "guardian") return "background";
     if (initiator?.startsWith("routine:") && params.rootExecutionId) {
       const firedBy = await this.sources.getRoutineFiredBy({
         rootExecutionId: params.rootExecutionId,
@@ -148,6 +146,10 @@ export class UsageAttributionResolver {
       });
       return triggerForRoutineFire(firedBy);
     }
+    if (actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via === "cookie")) {
+      return "user";
+    }
+    if (actor?.kind === "guardian") return "background";
     if (initiator === "webhook") return "event";
     if (initiator?.startsWith("app:")) return "background";
     if (initiator === SKILL_REVIEW_INITIATOR) return "background";
@@ -172,6 +174,9 @@ function triggerForRoutineFire(firedBy: string | null): UsageTrigger {
     case "run_now":
     case "manual":
       return "user";
+    // Run now pressed by the agent or a CLI over loopback, not a person.
+    case "run_now_background":
+      return "background";
     case "schedule":
       return "schedule";
     case "event-bus":

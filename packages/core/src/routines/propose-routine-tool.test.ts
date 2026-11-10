@@ -393,3 +393,35 @@ describe("normalizeRoutineDraftForCard", () => {
     });
   });
 });
+
+// A model reads these shapes from the tool's input schema, so they must be
+// spelled out there, whichever model provider converts it.
+describe("propose_routine's input schema", () => {
+  const [tool] = proposeRoutineTools({
+    widgets: "card",
+    hasSpeaker: true,
+    gate: {
+      canCallAction: () => "permitted",
+      validateArgs: () => null,
+      routineKeyFor: () => undefined,
+    },
+    runAction: async (): Promise<ActionResult> => ({ status: "ok" }),
+  });
+  const properties = (tool.inputSchema as { properties: Record<string, unknown> }).properties;
+
+  it("gives each filter condition its field and value, both required", () => {
+    expect(properties.filter).toMatchObject({
+      type: "array",
+      items: {
+        type: "object",
+        required: expect.arrayContaining(["field", "equals"]),
+        properties: { field: { type: "string" }, equals: { type: "string" } },
+      },
+    });
+  });
+
+  it("leaves the action's args free-form", () => {
+    expect(properties.args).toMatchObject({ type: "object", additionalProperties: true });
+    expect(properties.args).not.toHaveProperty("properties");
+  });
+});

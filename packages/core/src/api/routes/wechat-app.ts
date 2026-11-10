@@ -8,7 +8,7 @@
 import { Hono, type Context } from "hono";
 import { WechatAppNotInstalled } from "../../connections/kinds/wechat-user/wechat-app.js";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { currentSessionActor } from "../../lib/session-actor.js";
+import { currentSessionActor } from "../../access/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 
 export function wechatAppRoutes(deps: Pick<ApiDeps, "wechatApp">): Hono {

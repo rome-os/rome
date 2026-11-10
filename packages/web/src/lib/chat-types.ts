@@ -32,7 +32,7 @@ export interface ChatSession {
   /** Folder on a rome-node device the chat works in, set when the chat was created. */
   deviceFolder?: DeviceFolder | null;
   agentName?: string | null;
-  /** The chat a side chat branched from, kept once it is promoted to a chat. */
+  /** The chat a fork chat branched from, kept once it is promoted to a chat. */
   parentSessionId?: string | null;
   /** Why the chat exists, when something other than the guardian started it, e.g. `concierge`. */
   triggerKind?: string | null;
@@ -168,6 +168,9 @@ export interface ChatMessage {
   traceArchived?: boolean;
   /** Who sent a user message. Absent when the message recorded no sender. */
   sender?: ChatMessageSender;
+  /** The chat thread the message is in, in a Concierge chat: the id of the
+   *  thread's first message. Absent or null when it is in none. */
+  chatThreadId?: string | null;
 }
 
 export interface ProjectOption {

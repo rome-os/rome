@@ -204,6 +204,8 @@ function setup(
   /** The chat each Concierge turn ran in, in order. */
   const turnChats: string[] = [];
   const routines = new Map<string, Routine>();
+  /** Who each routine was created to act for, by routine key. */
+  const creators = new Map<string | undefined, unknown>();
   const active = new Set<string>();
   const settings = new Map<string, unknown>();
   const actions: Action[] = [];
@@ -244,7 +246,9 @@ function setup(
     routines: {
       create: async (data) => {
         const id = `r${nextId++}`;
-        routines.set(id, { ...data, id, enabled: data.enabled ?? true, createdAt: new Date() });
+        const { createdBy, ...stored } = data;
+        creators.set(data.key, createdBy);
+        routines.set(id, { ...stored, id, enabled: data.enabled ?? true, createdAt: new Date() });
         return id;
       },
       findByKey: async (key) => [...routines.values()].find((r) => r.key === key) ?? null,
@@ -384,6 +388,7 @@ function setup(
   const action = (name: string) => actions.find((a) => a.config.name === name)!;
   return {
     routines,
+    creators,
     active,
     calls,
     settings,
@@ -1489,6 +1494,20 @@ describe("follows in several Concierge chats", () => {
       tzid: "Europe/Paris",
     });
     expect(triggerOf("concierge-digest:09:00")).toMatchObject({ tzMode: "floating" });
+    s.stop();
+  });
+
+  it("makes each digest act for the person whose Concierge it serves, and a follow watcher for no one", async () => {
+    const s = withAnn(setup());
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    s.calling.chat = annMain;
+    await s.following().follow({ source: "github", target: "acme/widgets" }, ANN);
+    s.calling.chat = null;
+    expect(s.creators.get(`concierge-digest:${annMain}:09:00`)).toEqual({ owner: ANN });
+    expect(s.creators.get("concierge-digest:09:00")).toEqual({ owner: "guardian" });
+    const watchers = [...s.creators].filter(([key]) => key?.startsWith("concierge-follow:"));
+    expect(watchers.length).toBeGreaterThan(0);
+    for (const [, creator] of watchers) expect(creator).toEqual({ kind: "anonymous" });
     s.stop();
   });
 

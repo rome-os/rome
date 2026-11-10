@@ -65,8 +65,18 @@ export interface PromptSources {
   onChanged(listener: () => void): void;
 }
 
-/** The fixed part of a system prompt, the same for every session of the agent. */
-export function buildPromptPrefix(agent: PromptAgent, material: PromptMaterial): string {
+/**
+ * The fixed part of a system prompt, the same for every session of the
+ * agent. With `setup`, only what a session's setup counts
+ * (docs/concepts/sessions.md#setup): the agent's own instructions, the
+ * charter and the identity, without the runtime facts and the installed
+ * apps, which change with the instance rather than with the agent.
+ */
+export function buildPromptPrefix(
+  agent: PromptAgent,
+  material: PromptMaterial,
+  options: { setup?: boolean } = {},
+): string {
   // An app agent's YAML is its complete base prompt. Rome's identity, policy,
   // tools, and app catalog are core-agent concerns and must not silently
   // constrain an app author's agent.
@@ -85,12 +95,14 @@ export function buildPromptPrefix(agent: PromptAgent, material: PromptMaterial):
 
   if (material.charter) sections.push(`# Charter\n\n${material.charter}`);
   if (material.identity) sections.push(markdownSection("Identity", material.identity));
-  if (resolveAgentPolicy(agent).loadMemory) sections.push(runtimeSection(material.runtime));
+  if (resolveAgentPolicy(agent).loadMemory && !options.setup) {
+    sections.push(runtimeSection(material.runtime));
+  }
 
   // Every core agent, because these executables are global runtime capabilities.
   sections.push(COMMAND_LINE_TOOLS_SECTION);
 
-  const installedApps = installedAppsSection(material.installedApps);
+  const installedApps = options.setup ? null : installedAppsSection(material.installedApps);
   if (installedApps) sections.push(installedApps);
 
   return sections.join(SECTION_DIVIDER);

@@ -559,6 +559,26 @@ describe("ChatSearchDialog", () => {
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
+  it("offers New chat once the query names it, and opens a blank chat", async () => {
+    mockSessionSearch([chatSession("news-chat", "News digest", "rome")], [], []);
+    const user = userEvent.setup();
+    renderSearch("/message", true);
+
+    const input = await screen.findByRole("combobox", { name: "Search pages, apps, and chats" });
+    await screen.findByRole("option", { name: /News digest/ });
+    // The blank state stays recent chats only.
+    expect(screen.queryByRole("option", { name: "New chat" })).toBeNull();
+
+    await user.type(input, "new");
+    const options = await screen.findAllByRole("option");
+    expect(options[0].getAttribute("aria-label")).toBe("New chat");
+    expect(screen.getByText("Pages")).toBeTruthy();
+
+    fireEvent.keyDown(input, { key: "Enter" });
+    await waitFor(() => expect(screen.getByTestId("location").textContent).toBe("/chat"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
   it("lists pages before apps and moves between them with the keyboard", async () => {
     mockSessionSearch([], [], [installedApp("settings-sync", "Settings Sync")]);
     const user = userEvent.setup();

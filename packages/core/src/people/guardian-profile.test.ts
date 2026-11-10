@@ -38,7 +38,7 @@ import {
   defaultGuardianName,
   writeGuardianBackground,
 } from "./guardian-profile.js";
-import { AGENT_PRESETS } from "./agent-presets.js";
+import { AGENT_PRESETS } from "../lib/agent-presets.js";
 
 const testDb = createTestDb();
 afterAll(() => testDb.close());

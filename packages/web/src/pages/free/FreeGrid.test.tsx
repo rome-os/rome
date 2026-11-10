@@ -1,12 +1,21 @@
 // @rstest-environment jsdom
 import { useEffect } from "react";
-import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
+import { MemoryRouter, Outlet, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
 import * as conciergeModule from "@/hooks/use-concierge" with { rstest: "importActual" };
+import { LiveEventsClientContext } from "@/hooks/use-live-events";
+import { LiveEventsClient } from "@/lib/live-events";
+import { RomeShellLayout } from "@/shell/RomeShellLayout";
+import {
+  acceptLatestSocket,
+  FakeWebSocket,
+  fakeSocketLiveEventsClient,
+} from "@/test/fake-websocket";
 import { FreeGrid } from "./FreeGrid";
 import { selectTool, setActiveSession } from "./use-free-cells";
 
@@ -17,6 +26,11 @@ const catalog = rs.hoisted(() => ({
   apps: [] as { id: string; displayName: string }[] | null,
 }));
 rs.mock("@/hooks/use-apps", () => ({ useApps: () => ({ apps: catalog.apps }) }));
+rs.mock("@/shell/ChatSearchHost", () => ({ ChatSearchHost: () => null }));
+rs.mock("@/shell/AppGrid", () => ({ AppGrid: () => null }));
+rs.mock("@/shell/ProfileMenu", () => ({ ProfileMenu: () => null }));
+rs.mock("@/shell/DesktopTitlebar", () => ({ DesktopTitlebar: () => null }));
+rs.mock("@/components/upgrade-countdown-banner", () => ({ UpgradeCountdownBanner: () => null }));
 // Concierge's chat id comes from its own query, which these tests do not serve.
 const concierge = rs.hoisted(() => ({ chatId: null as string | null }));
 rs.mock("@/hooks/use-concierge", () => ({
@@ -195,6 +209,8 @@ describe("FreeGrid mobile header", () => {
     settings: Record<string, unknown> = {},
     // `/message` names no chat, so its page hands the grid the main chat's id.
     grid = <FreeGrid />,
+    shell = false,
+    live?: LiveEventsClient,
   ) {
     const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     rs.stubGlobal(
@@ -232,20 +248,80 @@ describe("FreeGrid mobile header", () => {
       }),
     );
     return render(
-      <MemoryRouter initialEntries={[path]}>
-        <QueryClientProvider client={queryClient}>
-          <SlotProvider>
-            <SlotOutlet name="mobileHeader" className="header" />
-            <Routes>
-              <Route path="/chat/*" element={<FreeGrid />} />
-              <Route path="/message" element={grid} />
-            </Routes>
-          </SlotProvider>
-        </QueryClientProvider>
-      </MemoryRouter>,
+      <LiveEventsClientContext.Provider value={live ?? new LiveEventsClient()}>
+        <MemoryRouter initialEntries={[path]}>
+          <QueryClientProvider client={queryClient}>
+            <SlotProvider>
+              {shell ? null : <SlotOutlet name="mobileHeader" className="header" />}
+              <Routes>
+                <Route element={shell ? <RomeShellLayout /> : <Outlet />}>
+                  <Route path="/chat/*" element={<FreeGrid />} />
+                  <Route path="/message" element={grid} />
+                </Route>
+              </Routes>
+            </SlotProvider>
+          </QueryClientProvider>
+        </MemoryRouter>
+      </LiveEventsClientContext.Provider>,
     );
   }
-  const header = (container: HTMLElement) => container.querySelector<HTMLElement>(".header")!;
+  const header = (container: HTMLElement) =>
+    container.querySelector<HTMLElement>(".header, header[data-mobile-header]")!;
+
+  it("refreshes the main chat header and document title with the chat list closed, including after reconnect", async () => {
+    concierge.chatId = "concierge";
+    const settings = { agentName: "Flint", guardianLanguage: "en" };
+    const client = fakeSocketLiveEventsClient();
+    rs.stubGlobal(
+      "matchMedia",
+      rs.fn((query: string) => ({
+        matches: false,
+        media: query,
+        addEventListener: rs.fn(),
+        removeEventListener: rs.fn(),
+      })),
+    );
+    const { container, unmount } = renderAt(
+      "/message",
+      settings,
+      <FreeGrid sessionId="concierge" />,
+      true,
+      client,
+    );
+    try {
+      await waitFor(() => expect(header(container).textContent).toContain("Flint"));
+      expect(document.title).toContain("Flint");
+      expect(container.querySelector("[data-phone-chat-list]")).toBeNull();
+      expect(container.querySelector("[data-projects-section]")).toBeNull();
+      const socket = acceptLatestSocket();
+      settings.agentName = "Pebble";
+      act(() =>
+        socket.receive({
+          type: "event",
+          topic: "chat.status",
+          event: "agent_name_changed",
+          data: { agentName: "Pebble" },
+        }),
+      );
+      await waitFor(() => expect(header(container).textContent).toContain("Pebble"));
+      expect(header(container).textContent).not.toContain("Flint");
+      expect(document.title).toContain("Pebble");
+      expect(rs.mocked(fetch).mock.calls.filter(([url]) => url === "/api/settings")).toHaveLength(
+        2,
+      );
+      const count = FakeWebSocket.instances.length;
+      act(() => socket.close());
+      settings.agentName = "Boulder";
+      await waitFor(() => expect(FakeWebSocket.instances.length).toBe(count + 1));
+      act(() => {
+        acceptLatestSocket();
+      });
+      await waitFor(() => expect(header(container).textContent).toContain("Boulder"));
+      expect(document.title).toContain("Boulder");
+    } finally {
+      unmount();
+    }
+  });
 
   it("puts the tasks pill beside the Concierge's name", async () => {
     concierge.chatId = "concierge";
@@ -311,6 +387,26 @@ describe("FreeGrid mobile header", () => {
       expect(header(container).querySelector("[data-concierge-tasks-pill]")).not.toBeNull(),
     );
     await waitFor(() => expect(header(container).textContent).toContain("Milo"));
+  });
+
+  it("offers no Delete for the main chat in the phone header's menu", async () => {
+    concierge.chatId = "concierge";
+    identity.current = { sessionName: "Concierge" };
+    const user = userEvent.setup();
+    const main = renderAt("/message", {}, <FreeGrid sessionId="concierge" />);
+    await user.click(
+      await within(header(main.container)).findByRole("button", { name: "More actions" }),
+    );
+    expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
+    await user.keyboard("{Escape}");
+    main.unmount();
+
+    identity.current = { sessionName: "Plan the launch" };
+    const other = renderAt("/chat/some-other-chat");
+    await user.click(
+      await within(header(other.container)).findByRole("button", { name: "More actions" }),
+    );
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
   });
 
   it("leaves every other chat's header without it", async () => {

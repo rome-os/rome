@@ -4,7 +4,7 @@ import { eq } from "drizzle-orm";
 import { v4 as uuidv4 } from "uuid";
 import type { DrizzleDb } from "../db/index.js";
 import { guardianAuth, persons } from "../db/schema.js";
-import { pickRandomAgentPreset } from "./agent-presets.js";
+import { pickRandomAgentPreset } from "../lib/agent-presets.js";
 import { generatePersonSlug } from "@rome/api-types/persons";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import { createLogger } from "../logger.js";
@@ -129,6 +129,24 @@ export async function applySetupDefaults(
     );
   }
   await deps.db.update(guardianAuth).set({ onboardingComplete: true });
+}
+
+/**
+ * Rename the agent: the `Agent Name` line in `IDENTITY.md`, then the `agentName`
+ * setting, and nothing else. Unlike `applyGuardianProfile`, it does not replay
+ * the stored profile, so the rest of the agent's evolved memory stays as it is.
+ * The file is written first and a failure throws, so a rename that could not
+ * reach memory leaves the setting unchanged.
+ */
+export async function applyAgentName(
+  agentName: string,
+  settingsRepo: Pick<SettingsRepository, "set">,
+): Promise<void> {
+  const profileMemoryDir = ensureProfileMemoryInitialized();
+  updateNotes(join(profileMemoryDir, "IDENTITY.md"), "# Identity", (lines) => {
+    upsertLabel(lines, "Agent Name", agentName);
+  });
+  await settingsRepo.set("agentName", agentName);
 }
 
 const BACKGROUND_HEADING = "## Background";

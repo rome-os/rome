@@ -18,7 +18,7 @@ import {
   type LinkCodeResponse,
 } from "@rome/api-types/people";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { currentSessionActor } from "../../lib/session-actor.js";
+import { currentSessionActor } from "../../access/session-actor.js";
 import { parseMessageCursor } from "@rome/api-types/message";
 import { platformOf } from "@rome/api-types/platform";
 import { createPerson } from "../../people/create.js";

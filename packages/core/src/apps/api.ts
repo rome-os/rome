@@ -16,7 +16,7 @@ import {
   runWithRomeAppApiRequestContext,
   type RomeAppContext,
 } from "./context.js";
-import type { RomeAppViewer } from "../lib/visitor-session.js";
+import type { RomeAppViewer } from "../access/visitor-session.js";
 import type { FavorService } from "../favors/index.js";
 import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
 

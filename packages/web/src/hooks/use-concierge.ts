@@ -1,15 +1,14 @@
 import type { ConciergeChatDto, ConciergeChatsResponse } from "@rome/api-types/concierge";
-import { type QueryClient, useQuery } from "@tanstack/react-query";
+import { type QueryClient, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useCallback } from "react";
+import { invalidateChatSessions } from "@/hooks/use-chat-sessions";
 import { fetchJson } from "@/lib/fetch-json";
 import { useSettings } from "@/hooks/use-settings";
 import { mainAgentDisplayName } from "@/lib/agent-name";
 
-/** The canonical id of the agent behind the Concierge chat. */
-export const CONCIERGE_AGENT_ID = "core:concierge";
+export { CONCIERGE_AGENT_ID, TASK_CHAT_TRIGGER_KIND } from "@/lib/chat-session";
 /** The guardian's main Concierge chat's id. A visitor's main chat has its own, which the server answers. */
 export const CONCIERGE_CHAT_ID = "concierge";
-/** `triggerKind` of a task chat Concierge started. */
-export const TASK_CHAT_TRIGGER_KIND = "concierge";
 /** The Concierge chat and its unread count; invalidate it to recount. */
 export const CONCIERGE_SESSION_QUERY_KEY = ["concierge-session"] as const;
 /** The Concierge chats, main first, with their unread counts; invalidate it to recount. */
@@ -83,6 +82,10 @@ export interface ConciergeChat {
   chatId: string | null;
   /** Whether the chat's creation is still in flight. */
   loading: boolean;
+  /** Whether the first load failed, so there is no chat to show, such as when the Concierge is off. A failed refetch after a success is not a failure. */
+  failed: boolean;
+  /** Asks the server again after a failure. */
+  retry: () => void;
 }
 
 /**
@@ -90,8 +93,15 @@ export interface ConciergeChat {
  * first request, and asks again on every mount, which recreates a deleted chat.
  */
 export function useConciergeChat(): ConciergeChat {
-  const { data, isSuccess, isPending } = useConciergeSession();
-  return { chatId: isSuccess ? data.id : null, loading: isPending };
+  const { data, isPending, isError, refetch } = useConciergeSession();
+  // A failed refetch keeps the data it had, with an error status. The chat it
+  // names still exists, so only a first load that failed counts as failed.
+  return {
+    chatId: data?.id ?? null,
+    loading: isPending,
+    failed: isError && data === undefined,
+    retry: () => void refetch(),
+  };
 }
 
 /**
@@ -125,6 +135,25 @@ export function useConciergeChats(): ConciergeChatDto[] {
     staleTime: 0,
   });
   return data?.chats ?? [];
+}
+
+/**
+ * Refetches both lists a topic chat's row reads: the Concierge's own list,
+ * which carries names and unread counts, and the chat list, which carries
+ * activity times and the archived topic chats. Call it after anything that
+ * changes a topic chat, so the two never disagree about one.
+ */
+export function refreshTopicChats(queryClient: QueryClient): Promise<void> {
+  return Promise.all([
+    queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY }),
+    invalidateChatSessions(queryClient),
+  ]).then(() => undefined);
+}
+
+/** {@link refreshTopicChats} bound to this component's query client. */
+export function useRefreshTopicChats(): () => void {
+  const queryClient = useQueryClient();
+  return useCallback(() => void refreshTopicChats(queryClient), [queryClient]);
 }
 
 /** Starts an untitled topic chat, which its first message names, and answers it. */

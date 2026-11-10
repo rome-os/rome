@@ -29,6 +29,10 @@ export interface DeferContext {
   /** Whose the thread's chat is, so the wake-up reaches that person even
    *  after the chat is gone. */
   ownerKey?: string;
+  /** The turn that called `defer`, so the woken turn can find its context. */
+  turnId?: string;
+  /** When `defer` was called. */
+  scheduledAt: Date;
 }
 
 export interface DeferDeps {
@@ -92,6 +96,23 @@ function buildResumeArgs(
   };
 }
 
+/**
+ * The prompt the woken turn receives: what fired, then the agent's
+ * note-to-self and where it was written, since the session that wakes may be
+ * a newer one with none of that turn in its context.
+ */
+function wakePrompt(headline: string, wakeUp: WakeUp, context: DeferContext): string {
+  const attrs = [
+    `scheduled_at="${context.scheduledAt.toISOString()}"`,
+    ...(context.turnId ? [`turn_id="${xmlAttr(context.turnId)}"`] : []),
+  ].join(" ");
+  return `${headline}\n<defer_note ${attrs}>\n${wakeUp.note}\n</defer_note>`;
+}
+
+function xmlAttr(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
+}
+
 /** Schedule the deferred wakeup. Throws (for the tool to relay as an error)
  * on a missing thread context. */
 export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferResult> {
@@ -119,7 +140,7 @@ export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferRe
       actionName: RESUME_SESSION_ACTION,
       // `resume_session` appends a summary of the event payload to `text`.
       args: buildResumeArgs(deps.context, {
-        text: `📨 Event arrived: ${parsed.name}`,
+        text: wakePrompt(`📨 Event arrived: ${parsed.name}`, parsed, deps.context),
         attachEvent: true,
       }),
     });
@@ -151,10 +172,10 @@ export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferRe
       localTime: iso.slice(11, 16),
     },
     actionName: RESUME_SESSION_ACTION,
-    // The woken agent resumes the same session with full context, so the wakeup
-    // needs no instructions — just a simple time's-up nudge naming what it was
-    // watching. The ⏰ prefix marks it in the thread.
-    args: buildResumeArgs(deps.context, { text: `⏰ Time's up: ${parsed.name}` }),
+    // The ⏰ prefix marks it in the thread, and the note says what to do.
+    args: buildResumeArgs(deps.context, {
+      text: wakePrompt(`⏰ Time's up: ${parsed.name}`, parsed, deps.context),
+    }),
   };
 
   const data = await deps.createRoutine(createArgs);

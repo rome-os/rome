@@ -6,10 +6,12 @@ import { z } from "zod";
 const MINUTE_MS = 60_000;
 
 /** When a deferred session wakes, under the name the agent gave what it watches:
- * at a minute-aligned instant, or on the next event that matches. */
+ * at a minute-aligned instant, or on the next event that matches. `note` is
+ * the agent's self-contained note-to-self, which the woken turn always
+ * receives, since another session than the one that deferred may wake to it. */
 export type WakeUp =
-  | { kind: "time"; name: string; fireAtMs: number }
-  | { kind: "event"; name: string; event: DeferEvent };
+  | { kind: "time"; name: string; note: string; fireAtMs: number }
+  | { kind: "event"; name: string; note: string; event: DeferEvent };
 
 export type ParsedDefer = { ok: true; wakeUp: WakeUp } | { ok: false; error: string };
 
@@ -60,6 +62,13 @@ const deferInputSchema = z
       .refine((value) => value.length > 0, {
         message: "defer.name is required — a short name for what you're watching",
       }),
+    note: z
+      .string()
+      .transform((value) => value.trim())
+      .refine((value) => value.length > 0, {
+        message:
+          "defer.note is required — why you are waiting, what to do on waking, and the links or ids it concerns",
+      }),
     afterMinutes: z.number().int().min(1).optional(),
     at: z.string().optional(),
     event: deferEventSchema.optional(),
@@ -87,9 +96,9 @@ export function parseDeferInput(input: unknown, now: number): ParsedDefer {
     const error = issue.message.startsWith("defer") ? issue.message : `${where}: ${issue.message}`;
     return { ok: false, error };
   }
-  const { name, afterMinutes, at, event } = parsed.data;
+  const { name, note, afterMinutes, at, event } = parsed.data;
 
-  if (event) return { ok: true, wakeUp: { kind: "event", name, event } };
+  if (event) return { ok: true, wakeUp: { kind: "event", name, note, event } };
 
   let rawMs: number;
   if (afterMinutes != null) {
@@ -110,5 +119,5 @@ export function parseDeferInput(input: unknown, now: number): ParsedDefer {
     return { ok: false, error: "defer fires in the past — pick a time at least a minute from now" };
   }
 
-  return { ok: true, wakeUp: { kind: "time", name, fireAtMs } };
+  return { ok: true, wakeUp: { kind: "time", name, note, fireAtMs } };
 }

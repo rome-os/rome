@@ -2,7 +2,7 @@ import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-o
 import { v4 as uuid } from "uuid";
 import { actionExecutions } from "../../db/schema.js";
 import type { DrizzleDb } from "../../db/index.js";
-import type { SessionActor } from "../../lib/session-actor.js";
+import type { SessionActor } from "../../access/session-actor.js";
 
 export type ActionExecutionStatus =
   | "running"

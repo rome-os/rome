@@ -143,8 +143,8 @@ private struct UserImageTile: View {
 
     private func load(_ upload: UploadLines.Upload) async {
         guard let assetLoader else { return }
-        let key = StoredImageCache.key(upload.assetPath)
-        if let cached = StoredImageCache.image(key) {
+        let key = StoredImageCache.shared.key(upload.assetPath)
+        if let cached = StoredImageCache.shared.image(key) {
             loaded = cached
             return
         }
@@ -155,7 +155,7 @@ private struct UserImageTile: View {
                 ImageCompressor.thumbnail(from: data, maxPixel: ComposerImage.thumbnailPixels)
             }.value
             guard let thumbnail else { throw APIError.network }
-            StoredImageCache.store(thumbnail, for: key)
+            StoredImageCache.shared.store(thumbnail, for: key)
             loaded = thumbnail
         } catch is CancellationError {
             // Scrolled away mid-load: the next appear loads it.
@@ -179,15 +179,18 @@ private struct UserImageTile: View {
 }
 
 /// Stored photos already loaded, so scrolling back does not fetch them again.
-/// It holds at most 64 MB of decoded pixels.
+/// It holds at most 64 MB of decoded pixels. The app uses `shared`; a test
+/// makes its own, so it never sees another test's pictures or resets.
 @MainActor
-enum StoredImageCache {
+final class StoredImageCache {
+    static let shared = StoredImageCache()
+
     private final class Box {
         let image: CGImage
         init(_ image: CGImage) { self.image = image }
     }
 
-    private static let cache: NSCache<NSString, Box> = {
+    private let cache: NSCache<NSString, Box> = {
         let cache = NSCache<NSString, Box>()
         cache.totalCostLimit = 64 * 1024 * 1024
         return cache
@@ -195,23 +198,23 @@ enum StoredImageCache {
 
     /// The open workspace's: keys carry it, so a picture loaded for one
     /// instance or account never shows in another.
-    @MainActor private static var scope = UUID()
+    private var scope = UUID()
 
     /// The key for a path in the open workspace. Taken before a load starts,
     /// so a load that ends after a switch lands under the old scope.
-    @MainActor static func key(_ path: String) -> String { "\(scope.uuidString)|\(path)" }
+    func key(_ path: String) -> String { "\(scope.uuidString)|\(path)" }
 
     /// A workspace opened or closed, or a sign-out: nothing cached carries over.
-    @MainActor static func reset() {
+    func reset() {
         scope = UUID()
         cache.removeAllObjects()
     }
 
-    static func image(_ path: String) -> CGImage? {
+    func image(_ path: String) -> CGImage? {
         cache.object(forKey: path as NSString)?.image
     }
 
-    static func store(_ image: CGImage, for path: String) {
+    func store(_ image: CGImage, for path: String) {
         cache.setObject(Box(image), forKey: path as NSString, cost: image.bytesPerRow * image.height)
     }
 }
@@ -258,6 +261,16 @@ struct AgentBubble: View {
     }
 
     private var folds: Bool { Self.folds(height: fullHeight, size: dynamicTypeSize) }
+    /// Held to the folded height until it is measured, so a long reply is
+    /// folded from its first frame. Unfolded first, it shrank by hundreds of
+    /// points after the list had placed its bottom.
+    private var capped: Bool { Self.capped(measured: fullHeight, expanded: expanded, size: dynamicTypeSize) }
+
+    /// Whether the text is held to the folded height: until it is measured
+    /// (`measured` is 0), and while a long one is folded.
+    nonisolated static func capped(measured: CGFloat, expanded: Bool, size: DynamicTypeSize) -> Bool {
+        !expanded && (measured == 0 || folds(height: measured, size: size))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -277,7 +290,7 @@ struct AgentBubble: View {
             MarkdownText(source: text)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
-                .frame(maxHeight: folds && !expanded ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
+                .frame(maxHeight: capped ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
                 .clipped()
                 .overlay(alignment: .bottom) {
                     if folds && !expanded {
@@ -403,11 +416,17 @@ struct Composer: View {
     let onSend: () -> Void
     var onStop: () -> Void = {}
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var choosingPhotos = false
     @State private var takingPhoto = false
     @State private var picked: [PhotosPickerItem] = []
     /// The text without what an input method is still composing (pinyin).
     @State private var committedText = ""
+
+    /// The + and Send sit on the text's last line, 36 pt tall.
+    private var controlPadding: CGFloat {
+        ComposerTextView.controlBottomPadding(height: 36, size: dynamicTypeSize)
+    }
 
     private var hasPhotos: Bool { !(attachments?.images.isEmpty ?? true) }
     private var canSend: Bool {
@@ -426,7 +445,7 @@ struct Composer: View {
             HStack(alignment: .bottom, spacing: 8) {
                 if let attachments {
                     plusMenu(attachments)
-                        .padding(.bottom, 7)
+                        .padding(.bottom, controlPadding)
                 }
                 ComposerTextView(
                     text: $text,
@@ -465,12 +484,12 @@ struct Composer: View {
                     }
                 }
                 .buttonStyle(PressScaleStyle(scale: 0.9))
-                .padding(.bottom, 7)
+                .padding(.bottom, controlPadding)
             }
             .padding(.leading, attachments == nil ? 18 : 7)
             .padding(.trailing, 7)
         }
-        .frame(minHeight: 50)
+        .frame(minHeight: ComposerTextView.minHeight)
         // Frosted glass: the transcript behind blurs out so the placeholder
         // reads. In light the glass alone barely parts from the page, so it
         // keeps an edge.

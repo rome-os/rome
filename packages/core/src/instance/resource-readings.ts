@@ -1,8 +1,4 @@
-import {
-  isMemoryShort,
-  type MemoryHeadroomReader,
-  readMemoryHeadroom,
-} from "../apps/actions/memory-headroom.js";
+import { isMemoryShort, type MemoryHeadroomReader, readMemoryHeadroom } from "./memory-headroom.js";
 import { DISK_LOW_FRACTION, type DiskUsage, readDiskUsage } from "./disk-usage.js";
 
 /** The instance's memory and disk, as the system diagnosis card shows them. A

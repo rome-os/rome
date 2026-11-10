@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import { parentTurnSession, rootSession } from "../agent/index.js";
-import type { SessionActor } from "../lib/session-actor.js";
+import type { SessionActor } from "../access/session-actor.js";
 import {
   SKILL_REVIEW_INITIATOR,
   UsageAttributionResolver,
@@ -185,6 +185,33 @@ describe("UsageAttributionResolver.forTurn", () => {
     expect((await r.forTurn(turn("onEmail"))).trigger).toBe("event");
   });
 
+  it("reports a routine fire by what fired it, though the fire acts for the routine's creator", async () => {
+    const visitor: SessionActor = { kind: "visitor", accountId: "acct-v", email: "v@example.com" };
+    const guardian: SessionActor = { kind: "guardian", userId: "g", via: "loopback" };
+    const sessions = {
+      reminder: session({
+        type: "action",
+        triggerExecutionId: "exec-reminder",
+        rootActionExecutionId: "reminder-root",
+      }),
+      onEmail: session({
+        type: "action",
+        triggerExecutionId: "exec-on-email",
+        rootActionExecutionId: "email-root",
+      }),
+    };
+    const executions: Record<string, ExecutionSpec> = {
+      "exec-reminder": { initiator: "routine:Remind me", actor: visitor },
+      "exec-on-email": { initiator: "routine:Inbox", actor: guardian },
+    };
+    const r = resolver(sessions, executions, {
+      "reminder-root": "schedule",
+      "email-root": "event-bus",
+    });
+    expect((await r.forTurn(turn("reminder"))).trigger).toBe("schedule");
+    expect((await r.forTurn(turn("onEmail"))).trigger).toBe("event");
+  });
+
   it("counts the skill review core starts after a turn as background", async () => {
     const sessions = {
       review: session({
@@ -293,10 +320,13 @@ describe("UsageAttributionResolver.forActionRun", () => {
   });
 
   it("does not count a Run now from the agent or a CLI over loopback as a person", async () => {
-    const manual = resolver({}, {}, { root: "run_now" });
-    const loopback: SessionActor = { kind: "guardian", userId: "g", via: "loopback" };
+    // The run acts for the routine's creator; who pressed Run now is kept as what fired it.
+    const creator: SessionActor = { kind: "visitor", accountId: "acct-v", email: "v@example.com" };
     const row = { actionName: "core.memory", initiator: "routine:Digest", rootExecutionId: "root" };
-    expect((await manual.forActionRun({ ...row, actor: loopback }))?.trigger).toBe("background");
+    const background = resolver({}, {}, { root: "run_now_background" });
+    expect((await background.forActionRun({ ...row, actor: creator }))?.trigger).toBe("background");
+    const pressed = resolver({}, {}, { root: "run_now" });
+    expect((await pressed.forActionRun({ ...row, actor: creator }))?.trigger).toBe("user");
   });
 
   it("skips agent tool calls, channel delivery, startup work, and core webhooks", async () => {

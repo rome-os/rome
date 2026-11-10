@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from "@rstest/core";
 import { Hono } from "hono";
 import { publicAccessRoutes } from "./public-access.js";
 import { generateCaddyfile } from "../../lib/caddyfile-generator.js";
-import { PublicAccessState } from "../../lib/public-access-state.js";
+import { Permissions } from "../../access/permissions.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
 import type { ApiDeps } from "../deps.js";
 
@@ -10,12 +10,12 @@ describe("Public-access API", () => {
   let testDb: TestDb;
   let app: Hono;
   let deps: ApiDeps;
-  let publicAccessState: PublicAccessState;
+  let permissions: Permissions;
 
   beforeEach(async () => {
     testDb = createTestDb();
-    publicAccessState = new PublicAccessState();
-    deps = { ...(await buildTestDeps(testDb.db)), publicAccessState };
+    permissions = new Permissions();
+    deps = { ...(await buildTestDeps(testDb.db)), permissions };
     app = new Hono().route("/", publicAccessRoutes(deps));
   });
 
@@ -81,8 +81,8 @@ describe("Public-access API", () => {
       });
 
       // The in-memory snapshot read by /api/auth/verify follows the write.
-      expect([...publicAccessState.allowedApps()]).toEqual(["inbox"]);
-      expect([...publicAccessState.cloudEmailsForApp("inbox")]).toEqual(["ada@example.com"]);
+      expect(permissions.get("inbox").anyoneWithLink).toBe(true);
+      expect([...permissions.get("inbox").listedEmails]).toEqual(["ada@example.com"]);
     });
 
     it("stores only the app policy when the body carries the retired enableAccessControl flag", async () => {
@@ -94,7 +94,7 @@ describe("Public-access API", () => {
 
       const stored = await deps.settingsRepo!.get("publicAccess");
       expect(stored).toEqual({ allowedApps: ["inbox"], cloudEmailAccess: {} });
-      expect([...publicAccessState.allowedApps()]).toEqual(["inbox"]);
+      expect(permissions.get("inbox").anyoneWithLink).toBe(true);
 
       // The proxy shape is independent of the policy: the dashboard stays
       // reachable and /api/* still goes through the verify probe.
@@ -107,7 +107,7 @@ describe("Public-access API", () => {
       const res = await putConfig("not-json");
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ ok: true });
-      expect([...publicAccessState.allowedApps()]).toEqual([]);
+      expect(permissions.get("inbox").anyoneWithLink).toBe(false);
     });
   });
 });

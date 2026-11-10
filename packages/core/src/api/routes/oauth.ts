@@ -1,8 +1,8 @@
 import { type Context, Hono } from "hono";
 import { getCookie } from "hono/cookie";
-import { COOKIE_NAME, issueGuardianSession, verifySession } from "../../lib/auth.js";
-import { getGuardianAuthState } from "../../lib/guardian-auth-state.js";
-import { resolveGuardianSession } from "../../lib/guardian-session.js";
+import { COOKIE_NAME, issueGuardianSession, verifySession } from "../../access/auth.js";
+import { getGuardianAuthState } from "../../access/guardian-auth-state.js";
+import { resolveGuardianSession } from "../../access/guardian-session.js";
 import {
   getEnabledOAuthProviders,
   isEnabledOAuthProvider,

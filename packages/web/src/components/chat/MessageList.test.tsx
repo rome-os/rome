@@ -13,7 +13,7 @@ rs.mock("@/hooks/use-dashboard-identity", () => ({
   }),
 }));
 rs.mock("@/components/chat/TurnBranchButton", () => ({
-  TurnBranchButton: () => <button type="button">side-chat-branch</button>,
+  TurnBranchButton: () => <button type="button">fork-branch</button>,
 }));
 rs.mock("@/components/chat/TurnFeedbackButtons", () => ({
   TurnFeedbackButtons: () => null,
@@ -176,21 +176,21 @@ describe("MessageList inline-card state across streaming→settled", () => {
   });
 });
 
-describe("MessageList side-chat eligibility", () => {
-  const renderSettledTurn = (turnStatus?: "completed" | "interrupted" | "error") => {
+describe("MessageList fork eligibility", () => {
+  const renderSettledTurn = (turnStatus?: "completed" | "interrupted" | "error", fork = true) => {
     const messages: ChatMessage[] = [
       {
-        id: "assistant-side-chat",
+        id: "assistant-fork",
         sessionId: "s-1",
-        turnId: "turn-side-chat",
+        turnId: "turn-fork",
         role: "assistant",
         content: JSON.stringify([{ type: "text", content: "Turn output" }]),
         createdAt: "2026-06-13T00:00:00.000Z",
       },
       {
-        id: "trace-side-chat",
+        id: "trace-fork",
         sessionId: "s-1",
-        turnId: "turn-side-chat",
+        turnId: "turn-fork",
         role: "trace",
         content: "[]",
         createdAt: "2026-06-13T00:00:01.000Z",
@@ -227,23 +227,29 @@ describe("MessageList side-chat eligibility", () => {
             interactionResults: new Map(),
           }}
           feedback
+          fork={fork}
         />
       </ThemeProvider>,
     );
   };
 
-  it("shows Side Chat only for completed turns", () => {
+  it("shows the fork button only for completed turns", () => {
     renderSettledTurn("completed");
-    expect(screen.getByRole("button", { name: "side-chat-branch" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "fork-branch" })).toBeTruthy();
+  });
+
+  it("hides the fork button in a chat that cannot be forked", () => {
+    renderSettledTurn("completed", false);
+    expect(screen.queryByRole("button", { name: "fork-branch" })).toBeNull();
   });
 
   it.each([
     "interrupted",
     "error",
     undefined,
-  ] as const)("hides Side Chat when turn status is %s", (status) => {
+  ] as const)("hides the fork button when turn status is %s", (status) => {
     renderSettledTurn(status);
-    expect(screen.queryByRole("button", { name: "side-chat-branch" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "fork-branch" })).toBeNull();
   });
 });
 

@@ -34,9 +34,13 @@ import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { saveSetting } from "@/lib/chat-api";
 import { openChatSearch } from "@/lib/chat-search-events";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
+import { useDashboardActivity } from "@/hooks/use-dashboard-activity";
+import { hasSession, useAuthStateSnapshot } from "@/lib/auth-state";
 import { useDesktop } from "@/hooks/use-desktop";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { useSettings } from "@/hooks/use-settings";
+import { useSettings, useInvalidateSettings } from "@/hooks/use-settings";
+import { agentNameChangedSchema } from "@rome/api-types/live-events";
+import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { isChatPath } from "@/lib/chat-session";
 import { isElectronShell } from "@/lib/electron-shell";
 import { routeTitle } from "@/lib/page-title";
@@ -84,6 +88,25 @@ function sidebarShortcutForPlatform(): string {
 
 export function RomeShellLayout() {
   const { t, i18n } = useTranslation("common");
+  // The chat list can be unmounted on phones and collapsed desktops.
+  // Keep identity updates subscribed even when that list is absent.
+  const invalidateSettings = useInvalidateSettings();
+  useLiveEvents(
+    chatStatusTopic,
+    {
+      agent_name_changed: {
+        schema: agentNameChangedSchema,
+        fn: () => {
+          void invalidateSettings();
+        },
+      },
+    },
+    {
+      onReconnect: () => {
+        void invalidateSettings();
+      },
+    },
+  );
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -95,6 +118,10 @@ export function RomeShellLayout() {
   const [railNames, setRailNames] = useState(readRailNames);
   const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const isDesktop = useDesktop();
+  // Every shell page reports whether the person signed in is here, sidebar
+  // shown or not, so their phone pushes wait while they are.
+  const { bootstrap } = useAuthStateSnapshot();
+  useDashboardActivity(hasSession(bootstrap));
   // The fallback title for whatever the shell is showing. A routed page that
   // can name its own subject claims the page slot, which outranks this.
   // Sourced from the sidebar's own destinations: the nav already has to know
