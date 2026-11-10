@@ -87,6 +87,22 @@ describe("chat threads", () => {
     expect(plan.map((row) => row.detail).join("\n")).toContain("idx_chat_messages_chat_thread");
   });
 
+  it("leaves a root that moved out of the thread its settled reply is in", async () => {
+    await guardian("other", { latest: true });
+    await repo.placeInChatThread(CHAT, "other", { starts: true, settle: true });
+    await guardian("root");
+    await repo.placeInChatThread(CHAT, "root", { starts: true });
+    await guardian("reply", { in: "root", settle: true });
+    // The Concierge places the provisional root in another thread.
+    await repo.placeInChatThread(CHAT, "root", { in: "other", settle: true });
+
+    expect((await repo.getChatThreadMessages(CHAT, "reply")).map((m) => m.id)).toEqual(["reply"]);
+    expect((await repo.getChatThreadMessages(CHAT, "other")).map((m) => m.id)).toEqual([
+      "other",
+      "root",
+    ]);
+  });
+
   it("shows a message from before chat threads alone in its thread", async () => {
     await guardian("old");
 

@@ -1080,9 +1080,11 @@ async function openSession(
   // continues its chat with none of it in context, until a turn of its own
   // succeeds and records its thread. A failed open keeps that true for the
   // next one.
-  const predecessor = session.modelThreadId
-    ? null
-    : await deps.sessionRepository.predecessorOf(sessionId);
+  // A session this open just created has no predecessor to look up.
+  const predecessor =
+    session.modelThreadId || (!prepared && !resumed)
+      ? null
+      : await deps.sessionRepository.predecessorOf(sessionId);
   const continuesChat = session.setup !== null && predecessor !== null;
   // The chat shows where its session changed, on this session's first turn.
   const renewal: SessionRenewal | undefined = predecessor

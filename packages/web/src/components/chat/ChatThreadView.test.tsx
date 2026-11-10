@@ -233,6 +233,25 @@ describe("ChatThreadView", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("reads malformed parts and legacy plain content as the timeline does", async () => {
+    thread = [
+      { ...message("m1", "user", "x"), content: "Plain text from before parts" },
+      {
+        ...message("a1", "assistant", "x"),
+        content: JSON.stringify([
+          { type: "text" },
+          { type: "mystery", content: "never shown" },
+          { type: "text", content: "Thursday works" },
+        ]),
+      },
+    ];
+    render(host(<ChatThreadView sessionId="concierge" messageId="m1" onClose={() => {}} />));
+
+    expect(await screen.findByText("Plain text from before parts")).toBeTruthy();
+    expect(screen.getByText("Thursday works")).toBeTruthy();
+    expect(screen.queryByText("never shown")).toBeNull();
+  });
+
   it("closes on Esc and on a click outside, but not on a click in the composer", async () => {
     const onClose = rs.fn();
     render(

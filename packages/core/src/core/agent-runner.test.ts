@@ -3907,6 +3907,8 @@ describe("AgentRunner", () => {
       });
       const key = { agentName: "test-main", channelThreadKey: "telegram:t-1" };
       const cached = await manager.open(key);
+      // Its caller lets it go without a turn, so another session may replace it.
+      cached.release();
       // A second active row for the same key and agent, as rows written before
       // the one-active-session rule could be. The repository refuses to add one.
       const now = new Date();

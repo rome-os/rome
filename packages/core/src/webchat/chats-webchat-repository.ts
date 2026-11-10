@@ -1027,11 +1027,12 @@ export function sessionLines(sessionIds: readonly string[], chatThread?: string)
       -- A session sees the place from when it started there.
       AND m.said_at >= s.created_at
       ${
-        // The thread's first line names it, and a line from before chat
-        // threads names its own, so the line keyed by the id is in it too.
+        // A line from before chat threads is in none, so the thread its own
+        // key names holds it. A line that is in a thread, even one that
+        // started here and moved on, is read by that thread alone.
         chatThread === undefined
           ? sql``
-          : sql`AND (m.chat_thread_id = ${chatThread} OR m.key = ${chatThread})`
+          : sql`AND (m.chat_thread_id = ${chatThread} OR (m.chat_thread_id IS NULL AND m.key = ${chatThread}))`
       }
     -- Only a prompt or answer link says whose turn a line is: one caught up
     -- on is read by who said it.

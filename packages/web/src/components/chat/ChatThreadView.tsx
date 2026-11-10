@@ -8,6 +8,7 @@ import { IconButton } from "@/components/ui/icon-button";
 import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { listChatThreadMessages } from "@/lib/chat-api";
 import type { ChatMessage } from "@/lib/chat-types";
+import { parseMessageEntries } from "./entries/parse-entries";
 import { cn } from "@/lib/utils";
 
 /**
@@ -36,20 +37,14 @@ function appTreeOf(element: Element): Element {
   return tree;
 }
 
-/** A message's words as the thread view shows them: its text, and a card's title. */
+/** A message's words as the thread view shows them: its text, and a card's
+ *  title, from the parts the timeline itself reads (`parseMessageEntries`). */
 function wordsOf(message: ChatMessage): string {
-  let parts: unknown;
-  try {
-    parts = JSON.parse(message.content);
-  } catch {
-    return message.content;
-  }
-  if (!Array.isArray(parts)) return "";
-  return parts
-    .flatMap((part: { type?: string; content?: unknown; title?: unknown; label?: unknown }) => {
-      if (part.type === "text" && typeof part.content === "string") return [part.content];
-      if (part.type === "task_chat" && typeof part.title === "string") return [part.title];
-      if (part.type === "connect_card" && typeof part.label === "string") return [part.label];
+  return parseMessageEntries(message)
+    .flatMap((part) => {
+      if (part.type === "text") return [part.content];
+      if (part.type === "task_chat") return [part.title];
+      if (part.type === "connect_card") return [part.label];
       return [];
     })
     .join("\n\n");
