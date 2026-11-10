@@ -239,19 +239,30 @@ enum TranscriptBuilder {
         return output
     }
 
-    /// Where the "N replies" line goes, by message id, and its count.
-    ///
-    /// Under a chat thread's root, the message it started from, and only
-    /// when the thread has messages after it. The count is every loaded
-    /// message of the thread except the root. A thread whose root is not
-    /// loaded yet shows nothing until an older page brings it.
+    /// Where the "N replies" line goes, by message id, and its count
+    /// (rome-os/rome#1976). A thread gets at most two: one under its root,
+    /// and one under its newest message when something outside the thread
+    /// lies between the two. With its root not loaded, only the newest
+    /// gets one. Both count every loaded message of the thread but the root.
     static func threadLines(_ messages: [ChatMessage]) -> [String: Int] {
         let shown = messages.filter { !$0.isTrace && $0.parts.contains(where: \.isVisible) }
-        let loaded = Set(shown.map(\.id))
+        let position = Dictionary(shown.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var replies: [String: [Int]] = [:]
+        for (index, message) in shown.enumerated() {
+            guard let root = message.chatThreadId, root != message.id else { continue }
+            replies[root, default: []].append(index)
+        }
         var lines: [String: Int] = [:]
-        for message in shown {
-            guard let root = message.chatThreadId, root != message.id, loaded.contains(root) else { continue }
-            lines[root, default: 0] += 1
+        for (root, indexes) in replies {
+            guard let newest = indexes.last else { continue }
+            let count = indexes.count
+            guard let rootIndex = position[root] else {
+                lines[shown[newest].id] = count
+                continue
+            }
+            lines[root] = count
+            let interrupted = shown[(rootIndex + 1)..<newest].contains { $0.chatThreadId != root }
+            if interrupted { lines[shown[newest].id] = count }
         }
         return lines
     }

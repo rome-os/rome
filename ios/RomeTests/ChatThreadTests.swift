@@ -52,8 +52,9 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
     }
 }
 
-/// Where the "N replies" line shows: under the thread's root, once the
-/// thread has messages after it (rome-os/rome#1976).
+/// Where the "N replies" line shows (rome-os/rome#1976): under the
+/// thread's root, and under its newest message when the thread is
+/// interrupted between them.
 @Suite struct ThreadRepliesRowTests {
     private func lines(_ messages: [ChatMessage]) -> [String: Int] { TranscriptBuilder.threadLines(messages) }
 
@@ -64,39 +65,51 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(lines([message("q", role: "user", at: 0, thread: "q"), message("a", at: 10)]).isEmpty)
     }
 
-    /// Under the root, counting every message of the thread but the root,
-    /// wherever they are in the timeline. Fails before the change, which put
-    /// it under the last Agent message of each stretch.
-    @Test func itSitsUnderTheRootAndCountsTheRest() {
-        let messages = [
-            message("r", role: "user", at: 0, thread: "r"), message("a1", at: 10, thread: "r"),
-            message("w", role: "user", at: 20), message("a2", at: 30),
-            message("a3", at: 40, thread: "r"), message("u", role: "user", at: 50, thread: "r"),
-        ]
-        #expect(lines(messages) == ["r": 3])
+    /// Shown in one stretch: only the root's line.
+    @Test func aContiguousThreadShowsOnlyTheRootLine() {
+        let messages = [message("r", role: "user", at: 0, thread: "r"), message("a1", at: 10, thread: "r"), message("a2", at: 20, thread: "r")]
+        #expect(lines(messages) == ["r": 2])
         // In the rows: right under the root, on the guardian's side when it is theirs.
         let rows = TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: .init(showThreads: true))
         let index = rows.firstIndex { $0.id == "replies-r" }!
         #expect(rows[index - 1].id == "r:0")
-        #expect(rows[index] == .threadReplies(id: "replies-r", messageId: "r", count: 3, guardian: true))
+        #expect(rows[index] == .threadReplies(id: "replies-r", messageId: "r", count: 2, guardian: true))
         #expect(TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: .init()).allSatisfy {
             if case .threadReplies = $0 { return false } else { return true }
         })
     }
 
-    /// An Agent message replied to is the root: "1 reply" under it.
-    @Test func aReplyToAnAgentMessageShowsOneReply() {
-        #expect(lines([message("a", at: 0, thread: "a"), message("u", role: "user", at: 10, thread: "a")]) == ["a": 1])
+    /// Interrupted: the root and the newest message both carry the same count.
+    @Test func anInterruptedThreadShowsTwoLines() {
+        let messages = [
+            message("r", role: "user", at: 0, thread: "r"), message("a1", at: 10, thread: "r"),
+            message("w", role: "user", at: 20), message("a2", at: 30),
+            message("a3", at: 40, thread: "r"), message("u", role: "user", at: 50, thread: "r"),
+        ]
+        #expect(lines(messages) == ["r": 3, "u": 3])
+    }
+
+    /// The root is not loaded (an older page): only the newest gets it.
+    @Test func aThreadWhoseRootIsNotLoadedShowsItUnderItsNewest() {
+        #expect(lines([message("u", role: "user", at: 0, thread: "old"), message("a", at: 10, thread: "old")]) == ["a": 2])
+        // A lone reply counts as one, never "0 replies".
+        #expect(lines([message("a", at: 0, thread: "old")]) == ["a": 1])
+    }
+
+    /// A new message of the thread takes the newest line.
+    @Test func theNewestLineMovesWithTheThread() {
+        var messages = [
+            message("r", at: 0, thread: "r"), message("u1", role: "user", at: 10, thread: "r"),
+            message("x", role: "user", at: 20), message("u2", role: "user", at: 30, thread: "r"),
+        ]
+        #expect(lines(messages) == ["r": 2, "u2": 2])
+        messages.append(message("a", at: 40, thread: "r"))
+        #expect(lines(messages) == ["r": 3, "a": 3])
         // A root from before threads (no chatThreadId of its own) still carries it.
         #expect(lines([message("legacy", at: 0), message("u", role: "user", at: 10, thread: "legacy")]) == ["legacy": 1])
     }
 
-    /// The root is not loaded (an older page): nothing until it is.
-    @Test func aThreadWhoseRootIsNotLoadedShowsNothing() {
-        #expect(lines([message("u", role: "user", at: 0, thread: "old"), message("a", at: 10, thread: "old")]).isEmpty)
-    }
-
-    /// Two threads each carry their own line.
+    /// Two threads each carry their own.
     @Test func eachThreadHasItsOwn() {
         let messages = [
             message("x", role: "user", at: 0, thread: "x"), message("xa", at: 10, thread: "x"),
