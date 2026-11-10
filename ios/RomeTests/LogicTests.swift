@@ -494,6 +494,21 @@ final class StubBackend: RomeBackend {
     }
 }
 
+/// The chat on screen, which Chat's read marks, the server's watch and push
+/// banners all go by.
+@MainActor
+@Suite struct VisibleChatTests {
+    @Test func aCoveringSheetHidesTheChat() {
+        #expect(MainShell.visibleChat(section: .chat, path: [], covered: false) == conciergeChatID)
+        // An instance page's sheet over Chat: nothing reads as seen.
+        // Fails before the change, which marked Chat read under the sheet.
+        #expect(MainShell.visibleChat(section: .chat, path: [], covered: true) == nil)
+        #expect(MainShell.visibleChat(section: .topic("t1"), path: [], covered: false) == "t1")
+        #expect(MainShell.visibleChat(section: .chat, path: [.taskChat(chatId: "c-1", title: "T")], covered: false) == "c-1")
+        #expect(MainShell.visibleChat(section: .apps, path: [], covered: false) == nil)
+    }
+}
+
 @Suite struct ChatWatchTests {
     /// The watch follows the chat on screen: one chat at a time, none under a sheet.
     @Test func followsTheChatOnScreen() {
