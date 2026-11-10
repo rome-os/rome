@@ -14,14 +14,17 @@ final class ThreadStore {
     /// id while it is alone, so a reply placed under it is recognised.
     private(set) var root: String
     private(set) var loaded = false
+    /// Opened to reply (the keyboard comes up) or to read (it stays down).
+    let toReply: Bool
 
     @ObservationIgnored private weak var chat: TranscriptStore?
     @ObservationIgnored private let backend: RomeBackend
     @ObservationIgnored private var tokens: [UUID] = []
     @ObservationIgnored private var loads = 0
 
-    init(anchor: ChatMessage, chat: TranscriptStore, backend: RomeBackend) {
+    init(anchor: ChatMessage, chat: TranscriptStore, backend: RomeBackend, toReply: Bool = true) {
         self.anchor = anchor
+        self.toReply = toReply
         self.chat = chat
         self.backend = backend
         root = anchor.threadRoot

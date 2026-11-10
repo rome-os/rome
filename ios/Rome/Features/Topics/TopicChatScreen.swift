@@ -68,8 +68,8 @@ struct TopicChatScreen: View {
                 ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.mainChatTitle, activity: workspace.topics.activity(for: chatId), onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
-        // Reply or a tap on a message: the composer is ready for the reply.
-        .onChange(of: store?.thread != nil) { _, open in if open { composerFocused = true } }
+        // Reply brings the keyboard up; the replies line opens it for reading.
+        .onChange(of: store?.thread != nil) { _, open in if open, store?.thread?.toReply == true { composerFocused = true } }
         .alert("Rename chat", isPresented: $renaming) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) {}

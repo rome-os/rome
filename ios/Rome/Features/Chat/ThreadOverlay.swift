@@ -66,8 +66,7 @@ struct ThreadOverlay: View {
         HStack(alignment: .center) {
             // Where the drawer button sits below, so the identity keeps its place.
             Color.clear.frame(width: 44, height: 44)
-            ChatIdentity(name: name, activity: activity, still: true)
-                .frame(maxWidth: .infinity)
+            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, still: true) }
             GlassCircleButton(accessibilityLabel: "Close", action: close) {
                 Image(systemName: "xmark").romeFont(15, .semibold)
             }

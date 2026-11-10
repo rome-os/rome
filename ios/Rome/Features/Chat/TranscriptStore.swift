@@ -307,10 +307,12 @@ final class TranscriptStore {
     private(set) var thread: ThreadStore?
 
     /// Opens the chat thread a stored message is in, over the chat.
-    func openThread(at messageId: String) {
+    /// `toReply`: Reply was chosen, so the composer takes the keyboard; the
+    /// replies line opens it for reading, keyboard down.
+    func openThread(at messageId: String, toReply: Bool = true) {
         guard kind == .concierge, let anchor = messages.first(where: { $0.id == messageId }) else { return }
         thread?.stop()
-        let opened = ThreadStore(anchor: anchor, chat: self, backend: backend)
+        let opened = ThreadStore(anchor: anchor, chat: self, backend: backend, toReply: toReply)
         thread = opened
         opened.start()
     }

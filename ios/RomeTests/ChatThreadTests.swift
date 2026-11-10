@@ -216,6 +216,19 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(backend.sentThreads.last == .some(nil))
     }
 
+    /// Reply opens a thread to answer it; the replies line opens it to read.
+    @Test func theRepliesLineOpensTheThreadForReading() async {
+        let backend = FakeBackend()
+        let store = await chat(backend, [message("a1", "sure", at: 10, thread: "r")])
+        store.openThread(at: "a1")
+        #expect(store.thread?.toReply == true)
+        store.openThread(at: "a1", toReply: false)
+        #expect(store.thread?.toReply == false)
+        // Either way the composer sends into the thread.
+        #expect(store.thread?.target == ThreadTarget(messageId: "a1", instanceKnowsThreads: true))
+        store.closeThread()
+    }
+
     /// Task chats have no chat threads.
     @Test func aTaskChatOpensNoThread() async {
         let backend = FakeBackend()

@@ -42,8 +42,8 @@ struct ChatScreen: View {
                 ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.mainChatTitle, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
-        // Reply or a tap on a message: the composer is ready for the reply.
-        .onChange(of: store.thread != nil) { _, open in if open { composerFocused = true } }
+        // Reply brings the keyboard up; the replies line opens it for reading.
+        .onChange(of: store.thread != nil) { _, open in if open, store.thread?.toReply == true { composerFocused = true } }
         .pageBackground()
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
@@ -216,7 +216,7 @@ struct ConciergeRow: View {
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat, menu: menu(reply: true))
         case .threadReplies(_, let messageId, let count, let guardian):
             if !inThread {
-                ThreadRepliesLine(count: count, guardian: guardian) { store.openThread(at: messageId) }
+                ThreadRepliesLine(count: count, guardian: guardian) { store.openThread(at: messageId, toReply: false) }
             }
         case .taskCard(_, let chatId, let title):
             let name = tasks.title(forChat: chatId, fallback: title)
@@ -258,14 +258,14 @@ struct ChatHeader: View {
     var onArchive: (() -> Void)? = nil
 
     var body: some View {
-        // The identity is centred on the buttons' row and reaches a little
-        // above and below it.
+        // The row is as tall as the identity with its name alone, so the
+        // buttons never move. A status line grows the pill down, past the
+        // row, over the transcript, never pushing it.
         HStack(alignment: .center) {
             GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
                 MenuGlyph()
             }
-            ChatIdentity(name: name, activity: activity)
-                .frame(maxWidth: .infinity)
+            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity) }
             ChatMoreMenu(title: menuTitle ?? name, onTasks: onTasks, onRename: onRename, onArchive: onArchive)
         }
         .padding(.horizontal, 12)
@@ -292,6 +292,27 @@ struct ChatIdentity: View {
     static let avatarSize: CGFloat = 50
     /// How far the avatar reaches down over the pill.
     static let overlap: CGFloat = 8
+
+    /// The identity's height with the name alone, at the current text size:
+    /// what the header row is laid out for.
+    static func restingHeight(for size: DynamicTypeSize) -> CGFloat {
+        let name = UIFont.systemFont(ofSize: ScaledFont.scaled(14, for: size), weight: .semibold).lineHeight
+        return avatarSize - overlap + (overlap + 1) + name + 5
+    }
+
+    /// Holds the identity at the top of a fixed-height slot: the slot is the
+    /// resting height, and what grows below it overflows downward.
+    struct Slot<Content: View>: View {
+        @ViewBuilder var content: () -> Content
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+        var body: some View {
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: ChatIdentity.restingHeight(for: dynamicTypeSize))
+                .overlay(alignment: .top) { content() }
+        }
+    }
 
     private var status: String? { activity?.statusLine }
     private var busy: Bool { activity?.isBusy ?? false }
@@ -323,7 +344,6 @@ struct ChatIdentity: View {
                     .foregroundStyle(Palette.fg)
                 if let status {
                     StatusLine(text: status, warning: activity == .needsYou, shimmers: busy && !reduceMotion)
-                        .transition(.opacity)
                 }
             }
             .lineLimit(1)
@@ -336,7 +356,8 @@ struct ChatIdentity: View {
             // Frosted like the composer, so what scrolls under blurs out.
             .background(Palette.headerPillTint, in: Capsule())
             .glassSurface(Capsule(), frost: Frost.composer)
-            .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.9), value: status)
+            // A new state switches at once: no resize or fade.
+            .transaction { $0.animation = nil }
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: status.map { "\(name), \($0)" } ?? name))
