@@ -86,7 +86,7 @@ extension ChatMessage {
 /// Where a message sent from a chat thread goes. An instance with chat
 /// threads takes `chatThread`; an older one places a reply by
 /// `replyToMessageId` (every supported release has it).
-struct ThreadTarget: Hashable, Sendable {
+struct ThreadTarget: Codable, Hashable, Sendable {
     /// A message of the open thread.
     let messageId: String
     let instanceKnowsThreads: Bool

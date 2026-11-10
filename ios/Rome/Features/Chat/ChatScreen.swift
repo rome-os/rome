@@ -32,7 +32,7 @@ struct ChatScreen: View {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     onMenu()
-                }, onTasks: onTasks, mascotTitle: true)
+                }, onTasks: onTasks, menuTitle: String(localized: "Chat"))
                 banners
             }
         }
@@ -77,6 +77,7 @@ struct ChatScreen: View {
         }
         // The chat's own keyboard goes down under an opened thread.
         .onChange(of: store.thread != nil) { _, open in if open { composerFocused = false } }
+        .task(id: "\(store.sessionId)|\(store.loaded)") { if store.loaded { await store.reopenThreadDraft() } }
     }
 
     #if DEBUG
@@ -245,94 +246,111 @@ struct ChatHeader: View {
     let title: Text
     let onMenu: () -> Void
     let onTasks: () -> Void
-    /// A topic chat's "…" menu. Without both, only the Tasks button shows.
+    /// A topic chat's options in the "…" menu, below Tasks.
     var onRename: (() -> Void)? = nil
     var onArchive: (() -> Void)? = nil
-    /// A topic chat's title: one line of small text, no pill.
-    var plainTitle = false
-    /// The main Chat: the mascot in the pill, read out as the title.
-    var mascotTitle = false
+    /// The chat's title as the "…" menu names it.
+    var menuTitle: String = ""
+    /// A topic chat: its title first, then the mascot in its place.
+    var revealsMascot = false
+    /// Which chat the header shows: another one starts from its title again.
+    var chatKey: String = ""
     @State private var pokes = 0
     @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
+    @State private var mascotShown = false
+
+    /// How long a topic chat shows its title before the mascot takes its place.
+    static let titleHold: Duration = .seconds(3)
+
+    private var showsMascot: Bool { !revealsMascot || mascotShown }
 
     var body: some View {
         HStack {
             GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
                 MenuGlyph()
             }
-            if plainTitle {
-                PlainHeaderTitle(title: title)
-            } else if mascotTitle {
-                Spacer()
-                Mascot(blinks: true, pokes: pokes)
-                    .frame(height: 22)
-                    .padding(.horizontal, 22)
-                    .frame(height: 44)
-                    .glassSurface(Capsule())
-                    // The whole pill: a soft tap and a reaction, nothing else.
-                    .contentShape(Capsule())
-                    .onTapGesture {
-                        haptic.impactOccurred()
-                        haptic.prepare()
-                        pokes += 1
-                    }
-                    .onAppear { haptic.prepare() }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(title)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityRemoveTraits(.isButton)
-                Spacer()
-            } else {
-                Spacer()
-                title
-                    .lineLimit(1)
-                    .romeFont(17, .semibold)
-                    .tracking(-0.4)
-                    .padding(.horizontal, 18)
-                    .frame(height: 44)
-                    .glassSurface(Capsule())
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
-            }
-            // No count: task progress is not reported accurately enough to badge.
-            if let onRename, let onArchive {
-                // Each keeps a 44 pt target; the targets overlap so the icons
-                // sit as close as iOS's own paired toolbar buttons.
-                HStack(spacing: -10) {
-                    Button(action: onTasks) {
-                        ChecklistGlyph()
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressScaleStyle(scale: 0.9))
-                    .accessibilityLabel("Tasks")
-                    Menu {
-                        Button(action: onRename) {
-                            Label("Rename", systemImage: "pencil")
+            ZStack {
+                if showsMascot {
+                    MascotPill(pokes: pokes)
+                        // The whole pill: a soft tap and a reaction, nothing else.
+                        .contentShape(Capsule())
+                        .onTapGesture {
+                            haptic.impactOccurred()
+                            haptic.prepare()
+                            pokes += 1
                         }
-                        Button(role: .destructive, action: onArchive) {
-                            Label("Archive", systemImage: "archivebox")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .romeFont(17, .semibold)
-                            .foregroundStyle(Palette.fg)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("More")
-                }
-                .glassSurface(Capsule(), interactive: true)
-            } else {
-                GlassCircleButton(accessibilityLabel: "Tasks", action: onTasks) {
-                    ChecklistGlyph()
+                        .onAppear { haptic.prepare() }
+                        .accessibilityLabel(title)
+                        .transition(.opacity)
+                } else {
+                    PlainHeaderTitle(title: title)
+                        .transition(.opacity)
                 }
             }
+            .frame(maxWidth: .infinity)
+            ChatMoreMenu(title: menuTitle, onTasks: onTasks, onRename: onRename, onArchive: onArchive)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .frame(height: 52)
-        .modifier(PlainTitleFade(active: plainTitle))
+        .task(id: revealsMascot ? chatKey : nil) {
+            guard revealsMascot else { return }
+            mascotShown = false
+            try? await Task.sleep(for: Self.titleHold)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.45)) { mascotShown = true }
+        }
+    }
+}
+
+/// The mascot in its glass pill: the Concierge chats' title, read out as `title`.
+struct MascotPill: View {
+    var pokes = 0
+    /// Still: no blinking, for a copy laid over the header (a chat thread).
+    var still = false
+
+    var body: some View {
+        Mascot(blinks: !still, pokes: pokes)
+            .frame(height: 22)
+            .padding(.horizontal, 22)
+            .frame(height: 44)
+            .glassSurface(Capsule())
+            .accessibilityElement(children: .ignore)
+            .accessibilityAddTraits(.isHeader)
+            .accessibilityRemoveTraits(.isButton)
+    }
+}
+
+/// A Concierge chat's "…" button: the chat's title in small grey text on
+/// top, then Tasks, then the chat's own options.
+struct ChatMoreMenu: View {
+    let title: String
+    let onTasks: () -> Void
+    var onRename: (() -> Void)? = nil
+    var onArchive: (() -> Void)? = nil
+
+    var body: some View {
+        Menu {
+            Section {
+                // No count: task progress is not reported accurately enough to badge.
+                Button(action: onTasks) { Label("Tasks", systemImage: "checklist") }
+                if let onRename {
+                    Button(action: onRename) { Label("Rename", systemImage: "pencil") }
+                }
+                if let onArchive {
+                    Button(role: .destructive, action: onArchive) { Label("Archive", systemImage: "archivebox") }
+                }
+            } header: {
+                if !title.isEmpty { Text(verbatim: title) }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .romeFont(17, .semibold)
+                .foregroundStyle(Palette.fg)
+                .frame(width: 44, height: 44)
+                .glassSurface(Circle(), interactive: true)
+        }
+        .accessibilityLabel("More")
     }
 }
 
@@ -359,14 +377,6 @@ struct DrawerPageHeader: View {
 }
 
 /// The fade a plain title needs; the main Chat's pill reads on its own.
-private struct PlainTitleFade: ViewModifier {
-    let active: Bool
-
-    func body(content: Content) -> some View {
-        if active { content.headerFade() } else { content }
-    }
-}
-
 /// A header title without a pill: one line of small semibold text, cut at
 /// the end, centered between the side buttons.
 struct PlainHeaderTitle: View {

@@ -12,11 +12,11 @@ struct ThreadOverlay: View {
     let onClose: () -> Void
 
     @State private var draft = ""
+    /// The thread's composer takes no photos; the draft keeps none.
+    @State private var attachments = ComposerAttachments()
     @State private var focused = false
     @State private var shown = false
     @State private var visibleHeight: CGFloat = 0
-
-    private var replies: Int { max(0, thread.messages.count - 1) }
 
     var body: some View {
         let rows = thread.rows(answers: chat.answers)
@@ -28,7 +28,9 @@ struct ThreadOverlay: View {
                 .opacity(shown ? 1 : 0)
                 .onTapGesture { close() }
             VStack(spacing: 0) {
+                // In place from the first frame: it stands for the header below.
                 header
+                VStack(spacing: 0) {
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
@@ -49,7 +51,7 @@ struct ThreadOverlay: View {
                 .defaultScrollAnchor(.bottom)
                 .scrollDismissesKeyboard(.interactively)
                 Composer(text: $draft, placeholder: String(localized: "Reply"), focused: $focused) {
-                    if chat.send(draft, thread: thread.target) {
+                    if chat.send(draft, fromComposer: true, thread: thread.target) {
                         draft = ""
                         close()
                     }
@@ -57,10 +59,12 @@ struct ThreadOverlay: View {
                 .padding(.horizontal, Metrics.pagePadding)
                 .padding(.top, 6)
                 .padding(.bottom, 8)
+                }
+                .opacity(shown ? 1 : 0)
+                .offset(y: shown ? 0 : 36)
             }
-            .opacity(shown ? 1 : 0)
-            .offset(y: shown ? 0 : 36)
         }
+        .modifier(ThreadDraft(chat: chat, thread: thread, text: $draft, attachments: attachments))
         .onAppear {
             withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { shown = true }
             // The keyboard comes up as the thread lands, ready for the reply.
@@ -72,21 +76,22 @@ struct ThreadOverlay: View {
         .accessibilityAddTraits(.isModal)
     }
 
+    /// The chat's own header, laid over it unchanged: the mascot pill in the
+    /// middle, still, and the close button where the "…" sits.
     private var header: some View {
-        ZStack {
-            (replies == 0 ? Text("Reply") : Text("\(replies) replies"))
-                .romeFont(16, .semibold)
-                .accessibilityAddTraits(.isHeader)
-            HStack {
-                Spacer()
-                GlassCircleButton(accessibilityLabel: "Close", action: close) {
-                    Image(systemName: "xmark").romeFont(15, .semibold)
-                }
+        HStack {
+            // Where the drawer button sits below, so the pill keeps its place.
+            Color.clear.frame(width: 44, height: 44)
+            MascotPill(still: true)
+                .accessibilityLabel(Text("Reply"))
+                .frame(maxWidth: .infinity)
+            GlassCircleButton(accessibilityLabel: "Close", action: close) {
+                Image(systemName: "xmark").romeFont(15, .semibold)
             }
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
-        .padding(.bottom, 6)
+        .frame(height: 52)
     }
 
     private func close() {
@@ -118,5 +123,22 @@ struct ThreadRepliesLine: View {
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: guardian ? .trailing : .leading)
         .padding(.leading, guardian ? 0 : 8)
+    }
+}
+
+/// The thread's composer keeps its own draft, under the thread's key, so a
+/// send that did not get through comes back here.
+private struct ThreadDraft: ViewModifier {
+    let chat: TranscriptStore
+    let thread: ThreadStore
+    @Binding var text: String
+    let attachments: ComposerAttachments
+
+    func body(content: Content) -> some View {
+        if let drafts = chat.drafts {
+            content.composerDraft(drafts.store, chat: DraftStore.threadChat(drafts.chat, messageId: thread.anchor.id), text: $text, attachments: attachments, transcript: chat)
+        } else {
+            content
+        }
     }
 }

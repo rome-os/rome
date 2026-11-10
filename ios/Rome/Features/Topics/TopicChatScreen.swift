@@ -56,7 +56,9 @@ struct TopicChatScreen: View {
                     renaming = true
                 },
                 onArchive: chatId.map { id in { archive(id) } },
-                plainTitle: true
+                menuTitle: title,
+                revealsMascot: true,
+                chatKey: chatId ?? draftKey
             )
         }
         .alert("Rename chat", isPresented: $renaming) {
@@ -97,6 +99,7 @@ struct TopicChatScreen: View {
         }
         // The chat's own keyboard goes down under an opened thread.
         .onChange(of: store?.thread != nil) { _, open in if open { composerFocused = false } }
+        .task(id: "\(store?.sessionId ?? "")|\(store?.loaded ?? false)") { if let store, store.loaded { await store.reopenThreadDraft() } }
         .onAppear { store?.start() }
         // A blank chat that just started its chat keeps this view.
         .onChange(of: chatId) { store?.start() }

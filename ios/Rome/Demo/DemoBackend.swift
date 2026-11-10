@@ -154,7 +154,7 @@ final class DemoBackend: RomeBackend {
 
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread target: ThreadTarget?) async throws -> CreatedTurn {
         try await pause(0.35)
-        if text.contains("失败") { throw APIError.network }
+        if text.contains("失败") || text.lowercased().contains("fail") { throw APIError.network }
         // Stored the way the server stores it: a line per file after the text.
         let lines = files.enumerated().map { index, file in
             let path = "projects/demo/\(inputId)/\(file.name)"

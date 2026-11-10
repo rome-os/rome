@@ -320,6 +320,22 @@ final class TranscriptStore {
         thread = nil
     }
 
+    /// A thread with a draft left from last time opens again, so the draft
+    /// shows where it was written. A draft whose thread is not in this chat
+    /// any more comes back into the chat's own composer.
+    func reopenThreadDraft() async {
+        guard kind == .concierge, thread == nil, let drafts else { return }
+        var reopen: String?
+        for target in await drafts.store.threadDrafts(chat: drafts.chat) {
+            if message(target.messageId) != nil {
+                reopen = reopen ?? target.messageId
+            } else {
+                drafts.store.unthread(chat: drafts.chat, messageId: target.messageId)
+            }
+        }
+        if let reopen, thread == nil { openThread(at: reopen) }
+    }
+
     /// The messages held for this chat that are in `root`'s thread.
     func messages(inThread root: String) -> [ChatMessage] {
         messages.filter { !$0.isTrace && ($0.chatThreadId == root || $0.id == root) }
@@ -405,7 +421,9 @@ final class TranscriptStore {
 
     private func deliver(inputId: String, text: String, images: [ComposerImage], fromComposer: Bool = false, thread: ThreadTarget? = nil) {
         // Kept as the chat's draft until the server takes it.
-        if let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer) }
+        // A send from a chat thread is kept under the thread's own draft.
+        let draftChat = drafts.map { drafts in thread.map { DraftStore.threadChat(drafts.chat, messageId: $0.messageId) } ?? drafts.chat }
+        if let drafts, let draftChat { drafts.store.sending(chat: draftChat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer, thread: thread) }
         Task {
             do {
                 let turn = try await backend.send(
@@ -419,7 +437,7 @@ final class TranscriptStore {
                 if let index = pending.firstIndex(where: { $0.id == inputId }) {
                     pending[index].state = .sent
                 }
-                if let drafts { drafts.store.delivered(chat: drafts.chat, inputId: inputId) }
+                if let drafts, let draftChat { drafts.store.delivered(chat: draftChat, inputId: inputId) }
                 // The server does not announce the guardian's own input, so fetch it.
                 Task {
                     try? await Task.sleep(for: .seconds(1.5))
