@@ -630,8 +630,6 @@ final class AppModel {
     /// that is gone go with it.
     private func take(_ list: [CloudInstance]) {
         instances = list
-        // Pushes follow the list: each instance on it, and only those.
-        Task { await push.listChanged(instanceIds: list.map(\.id)) }
         DraftStore.removeInstances(keeping: Set(list.map(\.host)))
         TranscriptCache.removeInstances(keeping: Set(list.map(\.host)))
     }

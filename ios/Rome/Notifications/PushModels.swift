@@ -102,20 +102,6 @@ struct DeviceRegistration: Encodable, Equatable, Sendable {
     }
 }
 
-/// The body of `PUT /api/devices/subscriptions` on Rome Cloud: every
-/// instance this device takes pushes from, which replaces the set it had.
-/// Ids are Rome Cloud's, as `v1/instances` lists them; their order does not count.
-struct DeviceSubscriptions: Encodable, Equatable, Sendable {
-    let token: String
-    let instanceIds: [String]
-
-    init(token: String, instanceIds: [String]) {
-        self.token = token
-        var seen = Set<String>()
-        self.instanceIds = instanceIds.sorted().filter { seen.insert($0).inserted }
-    }
-}
-
 /// Whether this app may show notifications, as the guardian set it.
 enum PushPermission: Equatable, Sendable {
     case notSet
