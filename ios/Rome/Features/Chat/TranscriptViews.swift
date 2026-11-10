@@ -415,7 +415,7 @@ struct TaskCard: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Task")
-                    .romeFont(CardScale.label, .semibold)
+                    .romeFont(CardScale.label)
                     .foregroundStyle(Palette.sub)
                 HStack(spacing: 8) {
                     Text(title)
