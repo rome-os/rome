@@ -3,6 +3,7 @@ import {
   type ConciergeActivityEvent,
   type ConciergeActivityFacts,
   conciergeActivity,
+  parseConciergeActivity,
   type TaskChatActivityFacts,
   toolActivityOf,
 } from "@rome/api-types/concierge-activity";
@@ -43,6 +44,33 @@ describe("toolActivityOf", () => {
   it("names no tool the owner sees as the reply itself", () => {
     expect(toolActivityOf("core:say")).toBeNull();
     expect(toolActivityOf("Read")).toBeNull();
+  });
+});
+
+describe("parseConciergeActivity", () => {
+  it("reads every known activity as it is", () => {
+    for (const activity of [
+      { kind: "idle" },
+      { kind: "needsYou" },
+      { kind: "working" },
+      { kind: "tool", tool: "startingTask" },
+      { kind: "tasks", title: "Book the flight", more: 2 },
+    ]) {
+      expect(parseConciergeActivity(activity)).toEqual(activity);
+    }
+  });
+
+  it("reads a tool it does not know as plain work", () => {
+    expect(parseConciergeActivity({ kind: "tool", tool: "paintingMural" })).toEqual({
+      kind: "working",
+    });
+    expect(parseConciergeActivity({ kind: "tool" })).toEqual({ kind: "working" });
+  });
+
+  it("leaves out a kind it does not know, or a malformed value, and never throws", () => {
+    for (const raw of [{ kind: "dreaming" }, null, undefined, "working", 3, {}]) {
+      expect(parseConciergeActivity(raw)).toBeNull();
+    }
   });
 });
 

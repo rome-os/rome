@@ -89,6 +89,41 @@ describe("ConciergeTasksRepository", () => {
     expect(await repo.get(row.id)).toMatchObject({ id: row.id, sessionId: null });
   });
 
+  it("lists one Concierge chat's rows only, with a gone topic chat's rows in its owner's main chat", async () => {
+    const now = Date.now();
+    const concierge = (id: string, ownerKey: string | null) =>
+      chats.createSession(
+        id,
+        id,
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+        "webchat",
+        null,
+        { ownerKey },
+      );
+    const visitorMain = mainChatIdOf("visitor:a");
+    await concierge("concierge", null);
+    await concierge("topic", null);
+    await concierge("gone-topic", null);
+    await concierge(visitorMain, "visitor:a");
+    await repo.upsertMany([{ title: "Main's", state: "doing" }]);
+    await repo.upsertMany([{ title: "Topic's", state: "doing", chatId: "topic" }]);
+    await repo.upsertMany([{ title: "Gone topic's", state: "doing", chatId: "gone-topic" }]);
+    await repo.upsertMany([{ title: "Visitor's", state: "doing", chatId: visitorMain }]);
+    await repo.upsertMany([{ title: "Old done", state: "done" }], new Date(now - 30 * DAY));
+    await chats.deleteSession("gone-topic");
+    const since = new Date(now - 7 * DAY);
+    const titles = async (chatId: string, owner: string) =>
+      (await repo.listForConciergeChat(chatId, owner, since)).map(({ row }) => row.title).sort();
+
+    expect(await titles("concierge", "guardian")).toEqual(["Gone topic's", "Main's"]);
+    expect(await titles("topic", "guardian")).toEqual(["Topic's"]);
+    expect(await titles(visitorMain, "visitor:a")).toEqual(["Visitor's"]);
+  });
+
   it("lists open rows whatever their age and finished rows only inside the window", async () => {
     const now = Date.now();
     const old = new Date(now - 30 * DAY);

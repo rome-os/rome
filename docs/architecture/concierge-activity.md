@@ -35,5 +35,6 @@ flowchart LR
 - **A quiet turn, one the owner is not meant to see, counts as work only once it says something,** as the transcript shows it.
 - **No activity stays stale.** Every chat whose activity is not idle has its facts read again at least every 30 s, so a fact that changes without telling still shows, and a busy chat that is archived or deleted is told idle.
 - **The activity is said as a kind and its parameters, never as text.** Each client words it in its own language, so a server change never changes a client's copy.
+- **Tools and kinds are only ever added, and a client reads one it does not know without failing:** an unknown tool is plain work, and an unknown kind is left out, as if the chat were idle. A client never drops an event or fails to load the chats list over a value it does not know.
 - **It reaches the chat's owner only,** on the owner's own `concierge.activity` live-events topic, and only when it changes. Like the chat, it does not exist for anyone else, the guardian included.
 - **A client that connects or reconnects starts from where each chat stands now:** a new subscription first tells every one of the owner's Concierge chats, and the Concierge chats list carries each chat's current activity. Both are additions, so a client from before them keeps working.

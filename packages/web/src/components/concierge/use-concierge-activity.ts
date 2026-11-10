@@ -1,7 +1,7 @@
 import { useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { z } from "zod";
-import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
+import { type ConciergeActivity, parseConciergeActivity } from "@rome/api-types/concierge-activity";
 import { CONCIERGE_ACTIVITY_TOPIC } from "@rome/api-types/live-events";
 import { CONCIERGE_CHATS_QUERY_KEY, useConciergeChats } from "@/hooks/use-concierge";
 import { type LiveTopic, useLiveEvents } from "@/hooks/use-live-events";
@@ -11,30 +11,12 @@ const conciergeActivityTopic: LiveTopic = {
   sseUrl: "/api/concierge/activity/events",
 };
 
-const TOOLS = [
-  "startingTask",
-  "messagingTask",
-  "readingChat",
-  "stoppingTask",
-  "updatingTasks",
-  "startingTopic",
-  "checkingFollows",
-  "searchingWeb",
-  "readingPage",
-] as const;
-
-// A kind or a tool from a newer server fails the parse, and the event is dropped.
-const activitySchema = z.discriminatedUnion("kind", [
-  z.object({ kind: z.literal("idle") }),
-  z.object({ kind: z.literal("needsYou") }),
-  z.object({ kind: z.literal("working") }),
-  z.object({ kind: z.literal("tool"), tool: z.enum(TOOLS) }),
-  z.object({ kind: z.literal("tasks"), title: z.string(), more: z.number() }),
-]) satisfies z.ZodType<ConciergeActivity>;
-
+// Only the envelope is checked here; the activity itself is read by
+// `parseConciergeActivity`, so a tool or kind from a newer server degrades
+// rather than dropping the event.
 const activityEventSchema = z.object({
   chatId: z.string(),
-  activity: activitySchema,
+  activity: z.unknown(),
   at: z.number(),
 });
 
@@ -56,12 +38,16 @@ export function useConciergeActivity(chatId: string | null): ConciergeActivity {
     {
       concierge_activity: {
         schema: activityEventSchema,
-        fn: ({ chatId: id, activity }) =>
+        fn: ({ chatId: id, activity: raw }) => {
+          const activity = parseConciergeActivity(raw);
+          // A kind this client does not know is left out.
+          if (!activity) return;
           setLive((prev) => {
             const next = new Map(prev);
             next.set(id, activity);
             return next;
-          }),
+          });
+        },
       },
     },
     {
@@ -76,5 +62,6 @@ export function useConciergeActivity(chatId: string | null): ConciergeActivity {
   );
 
   if (!chatId) return IDLE;
-  return live.get(chatId) ?? chats.find((chat) => chat.id === chatId)?.activity ?? IDLE;
+  const listed = parseConciergeActivity(chats.find((chat) => chat.id === chatId)?.activity);
+  return live.get(chatId) ?? listed ?? IDLE;
 }

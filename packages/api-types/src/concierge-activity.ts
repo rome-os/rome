@@ -4,7 +4,7 @@
 // reported) and pushes it on the `concierge.activity` live-events topic; the
 // clients only say it. None of it is a state the Concierge writes.
 
-/** A tool the Concierge is in, by what the header calls it. */
+/** A tool the Concierge is in, by what the header calls it. A client that does not know one reads it as `working`. */
 export type ConciergeToolActivity =
   | "startingTask"
   | "messagingTask"
@@ -16,6 +16,12 @@ export type ConciergeToolActivity =
   | "searchingWeb"
   | "readingPage";
 
+/**
+ * What a Concierge chat is doing. New tools and kinds are only ever added,
+ * so a client reads what it does not know without failing (see
+ * {@link parseConciergeActivity}): a `tool` it does not know is plain work,
+ * and a `kind` it does not know is left out, as if the chat were idle.
+ */
 export type ConciergeActivity =
   /** Nothing is running and nothing waits. */
   | { kind: "idle" }
@@ -115,4 +121,37 @@ export function conciergeActivity(facts: ConciergeActivityFacts): ConciergeActiv
 /** Whether two activities say the same thing. */
 export function sameActivity(a: ConciergeActivity, b: ConciergeActivity): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+const TOOLS = new Set<string>(Object.values(TOOL_ACTIVITY));
+
+/**
+ * Reads an activity off the wire, by the rule on {@link ConciergeActivity}:
+ * a `tool` this client does not know reads as `working`, and a `kind` it does
+ * not know, or a malformed value, reads as null, which the caller leaves out.
+ * Never throws.
+ */
+export function parseConciergeActivity(raw: unknown): ConciergeActivity | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const value = raw as Record<string, unknown>;
+  switch (value.kind) {
+    case "idle":
+    case "needsYou":
+    case "working":
+      return { kind: value.kind };
+    case "tool":
+      return typeof value.tool === "string" && TOOLS.has(value.tool)
+        ? { kind: "tool", tool: value.tool as ConciergeToolActivity }
+        : { kind: "working" };
+    case "tasks":
+      return typeof value.title === "string"
+        ? {
+            kind: "tasks",
+            title: value.title,
+            more: typeof value.more === "number" && value.more > 0 ? value.more : 0,
+          }
+        : { kind: "working" };
+    default:
+      return null;
+  }
 }

@@ -268,7 +268,9 @@ describe("FreeGrid mobile header", () => {
   const header = (container: HTMLElement) =>
     container.querySelector<HTMLElement>(".header, header[data-mobile-header]")!;
 
-  it("refreshes the main chat header and document title with the chat list closed, including after reconnect", async () => {
+  // The main chat's name is in the chat's own floating header, which reads the
+  // same name as the tab title; the phone bar carries none.
+  it("refreshes the main chat's document title with the chat list closed, including after reconnect", async () => {
     concierge.chatId = "concierge";
     const settings = { agentName: "Flint", guardianLanguage: "en" };
     const client = fakeSocketLiveEventsClient();
@@ -289,8 +291,7 @@ describe("FreeGrid mobile header", () => {
       client,
     );
     try {
-      await waitFor(() => expect(header(container).textContent).toContain("Flint"));
-      expect(document.title).toContain("Flint");
+      await waitFor(() => expect(document.title).toContain("Flint"));
       expect(container.querySelector("[data-phone-chat-list]")).toBeNull();
       expect(container.querySelector("[data-projects-section]")).toBeNull();
       const socket = acceptLatestSocket();
@@ -303,9 +304,8 @@ describe("FreeGrid mobile header", () => {
           data: { agentName: "Pebble" },
         }),
       );
-      await waitFor(() => expect(header(container).textContent).toContain("Pebble"));
-      expect(header(container).textContent).not.toContain("Flint");
-      expect(document.title).toContain("Pebble");
+      await waitFor(() => expect(document.title).toContain("Pebble"));
+      expect(document.title).not.toContain("Flint");
       expect(rs.mocked(fetch).mock.calls.filter(([url]) => url === "/api/settings")).toHaveLength(
         2,
       );
@@ -316,8 +316,7 @@ describe("FreeGrid mobile header", () => {
       act(() => {
         acceptLatestSocket();
       });
-      await waitFor(() => expect(header(container).textContent).toContain("Boulder"));
-      expect(document.title).toContain("Boulder");
+      await waitFor(() => expect(document.title).toContain("Boulder"));
     } finally {
       unmount();
     }

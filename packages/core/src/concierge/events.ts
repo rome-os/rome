@@ -440,15 +440,15 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     },
     awaitingGuardianOf: (chatIds) => webchatRepo.awaitingGuardianOf(chatIds),
     tasksOf: async (chatId) => {
+      const owner = await service.ownerOfChat(chatId);
+      if (!owner) return [];
       const since = new Date(Date.now() - CONCIERGE_DONE_DAYS * 24 * 60 * 60 * 1000);
-      return (await tasks.repo.listForPanel(since))
-        .filter((task) => task.conciergeChat.id === chatId)
-        .map((task) => ({
-          id: task.row.id,
-          title: task.row.title,
-          chatId: task.chat?.id ?? null,
-          updatedAt: task.row.updatedAt.getTime(),
-        }));
+      return (await tasks.repo.listForConciergeChat(chatId, owner, since)).map((task) => ({
+        id: task.row.id,
+        title: task.row.title,
+        chatId: task.chat?.id ?? null,
+        updatedAt: task.row.updatedAt.getTime(),
+      }));
     },
     reportPending: () => coalescer.awaitingReport,
     ownerOf: async (chatId) =>

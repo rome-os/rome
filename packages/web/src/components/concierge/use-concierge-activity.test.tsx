@@ -27,6 +27,14 @@ beforeEach(() => {
           chats: [
             { id: "main", name: "Concierge", main: true, unread: 0, activity: listed },
             { id: "topic", name: "Calendar", main: false, unread: 0 },
+            // A kind from a newer server: the list still loads.
+            {
+              id: "newer",
+              name: "Trip",
+              main: false,
+              unread: 0,
+              activity: { kind: "dreaming" },
+            },
           ],
         })
       : new Response("not found", { status: 404 })) as typeof fetch);
@@ -74,6 +82,23 @@ describe("useConciergeActivity", () => {
     expect(result.current).toEqual({ kind: "idle" });
     act(() => socket.receive(event("topic", { kind: "working" })));
     expect(result.current).toEqual({ kind: "working" });
+  });
+
+  it("reads a tool it does not know as plain work", async () => {
+    const { result } = renderHook(() => useConciergeActivity("main"), { wrapper });
+    await waitFor(() => expect(result.current.kind).toBe("tasks"));
+    const socket = acceptLatestSocket();
+    act(() => socket.receive(event("main", { kind: "tool", tool: "paintingMural" })));
+    expect(result.current).toEqual({ kind: "working" });
+  });
+
+  it("loads a list whose chat carries a kind it does not know, and reads that chat as idle", async () => {
+    const main = renderHook(() => useConciergeActivity("main"), { wrapper });
+    await waitFor(() =>
+      expect(main.result.current).toEqual({ kind: "tasks", title: "Book the flight", more: 0 }),
+    );
+    const newer = renderHook(() => useConciergeActivity("newer"), { wrapper });
+    await waitFor(() => expect(newer.result.current).toEqual({ kind: "idle" }));
   });
 
   it("is idle outside a Concierge chat and subscribes to nothing", () => {

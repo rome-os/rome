@@ -146,29 +146,7 @@ export function conciergeRoutes(
     if (!concierge) {
       return c.json({ error: "Concierge is not available" }, 404);
     }
-    return streamSSE(c, async (sse) => {
-      let close!: () => void;
-      let finished = false;
-      const closed = new Promise<void>((resolve) => {
-        close = resolve;
-      });
-      let unsubscribe = () => {};
-      const heartbeat = setInterval(() => {
-        sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);
-      }, 20_000);
-      function finish() {
-        if (finished) return;
-        finished = true;
-        clearInterval(heartbeat);
-        unsubscribe();
-        close();
-      }
-      unsubscribe = concierge.deps.tasks.subscribe((event, data) => {
-        sse.writeSSE({ event, data: JSON.stringify(data) }).catch(finish);
-      }, owner);
-      sse.onAbort(finish);
-      await closed;
-    });
+    return streamEvents(c, (emit) => concierge.deps.tasks.subscribe(emit, owner));
   });
 
   // The same `concierge_activity` events as the `concierge.activity` topic
