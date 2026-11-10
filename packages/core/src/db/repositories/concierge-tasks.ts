@@ -161,27 +161,52 @@ export class ConciergeTasksRepository {
    * to in the query: a topic chat by the rows that name it, the main chat by
    * its owner's rows. Which chat a row belongs to is then read as the panel
    * reads it, so a row whose topic chat is archived or gone is its main chat's.
+   *
+   * `live` says whether the task is still going on: the row is open, or its
+   * task chat was active after the row was last written, as when the
+   * Concierge resumes a finished task. A finished row's leftover card or
+   * approval is not the task's.
    */
   async listForConciergeChat(
     conciergeChatId: string,
     owner: string,
     activeSince: Date,
-  ): Promise<ConciergeTaskWithChat[]> {
+  ): Promise<(ConciergeTaskWithChat & { live: boolean })[]> {
     const ofChat =
       conciergeChatId === mainChatIdOf(owner)
         ? eq(conciergeTasks.ownerKey, owner)
         : eq(conciergeTasks.chatId, conciergeChatId);
-    const rows = await this.withChat(
-      and(
-        ofChat,
-        isNull(conciergeTasks.archivedAt),
-        or(
-          and(ne(conciergeTasks.state, "done"), ne(conciergeTasks.state, "dropped")),
-          gte(romeSessions.activityAt, activeSince),
-        ),
-      ),
+    const open = and(ne(conciergeTasks.state, "done"), ne(conciergeTasks.state, "dropped"));
+    const where = and(
+      ofChat,
+      isNull(conciergeTasks.archivedAt),
+      or(open, gte(romeSessions.activityAt, activeSince)),
     );
-    return rows.filter((task) => task.conciergeChat.id === conciergeChatId);
+    const rows = (await this.withChat(where)).filter(
+      (task) => task.conciergeChat.id === conciergeChatId,
+    );
+    if (rows.length === 0) return [];
+    const live = new Set(
+      (
+        await this.db
+          .select({ id: conciergeTasks.id })
+          .from(conciergeTasks)
+          .leftJoin(romeSessions, eq(romeSessions.id, conciergeTasks.sessionId))
+          .where(
+            and(
+              inArray(
+                conciergeTasks.id,
+                rows.map((task) => task.row.id),
+              ),
+              or(
+                open,
+                sql`cast(${romeSessions.activityAt} as integer) * 1000 > cast(${conciergeTasks.updatedAt} as integer)`,
+              ),
+            ),
+          )
+      ).map((row) => row.id),
+    );
+    return rows.map((task) => ({ ...task, live: live.has(task.row.id) }));
   }
 
   /** The Concierge's own view: not archived, finished rows only on request. */

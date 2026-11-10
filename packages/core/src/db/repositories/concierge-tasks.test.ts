@@ -142,6 +142,38 @@ describe("ConciergeTasksRepository", () => {
     expect(await titles(visitorMain, "visitor:a")).toEqual(["Visitor's"]);
   });
 
+  it("marks a row live while it is open, or its task chat was active after it finished", async () => {
+    const now = Date.now();
+    await chats.createSession("concierge", "Concierge");
+    await chats.createSession("open-chat", "Open");
+    await chats.createSession("resumed-chat", "Resumed");
+    await chats.createSession("finished-chat", "Finished");
+    const recent = (id: string, at: number) =>
+      testDb.db
+        .update(romeSessions)
+        .set({ activityAt: new Date(at) })
+        .where(eq(romeSessions.id, id));
+    await recent("finished-chat", now - 2 * DAY);
+    await recent("resumed-chat", now - 2 * DAY);
+    await repo.upsertMany(
+      [
+        { title: "Open", state: "needs_user", sessionId: "open-chat" },
+        { title: "Resumed", state: "done", sessionId: "resumed-chat" },
+        { title: "Finished", state: "done", sessionId: "finished-chat" },
+      ],
+      new Date(now - DAY),
+    );
+    // Only the resumed chat was active after its row finished.
+    await recent("resumed-chat", now);
+
+    const live = Object.fromEntries(
+      (await repo.listForConciergeChat("concierge", "guardian", new Date(now - 7 * DAY))).map(
+        (task) => [task.row.title, task.live],
+      ),
+    );
+    expect(live).toEqual({ Open: true, Resumed: true, Finished: false });
+  });
+
   it("lists open rows whatever their age and finished rows only inside the window", async () => {
     const now = Date.now();
     const old = new Date(now - 30 * DAY);

@@ -448,6 +448,7 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
         title: task.row.title,
         chatId: task.chat?.id ?? null,
         updatedAt: task.row.updatedAt.getTime(),
+        live: task.live,
       }));
     },
     reportPending: () => coalescer.awaitingReport,
