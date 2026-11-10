@@ -38,7 +38,7 @@ class Socket implements ClientSocket {
 afterEach(() => {
   vi.useRealTimers();
 });
-function fixture() {
+function fixture(onNotification?: (notification: unknown) => void) {
   vi.useFakeTimers();
   const sockets: Socket[] = [];
   const messages = vi.fn();
@@ -56,10 +56,59 @@ function fixture() {
     onMessage: messages,
     onFrame: frames,
     onStatus: statuses,
+    onNotification,
     random: () => 0.5,
   });
   return { client, sockets, factory, messages, frames, statuses };
 }
+describe("notifications", () => {
+  const notification = {
+    title: "Rome",
+    body: "Your report is ready",
+    level: "active",
+    instanceId: "inst-1",
+    chatId: "chat_1",
+  };
+  const frame = { type: "notification", ...notification };
+  it("hands a notification to onNotification, not onMessage", () => {
+    const onNotification = vi.fn();
+    const f = fixture(onNotification);
+    f.sockets[0].open();
+    f.sockets[0].emit("message", { data: JSON.stringify(frame) });
+    expect(onNotification).toHaveBeenCalledExactlyOnceWith(notification);
+    expect(f.messages).not.toHaveBeenCalled();
+    f.client.stop();
+  });
+  it("drops a notification when no handler is set and keeps relaying messages", () => {
+    const f = fixture();
+    f.sockets[0].open();
+    f.sockets[0].emit("message", { data: JSON.stringify(frame) });
+    expect(f.messages).not.toHaveBeenCalled();
+    f.sockets[0].emit("message", {
+      data: JSON.stringify({ id: "a", from: "peer", payload: { type: "notification" } }),
+    });
+    expect(f.messages).toHaveBeenCalledOnce();
+    f.client.stop();
+  });
+  it("ignores invalid notifications and a handler that throws", () => {
+    const onNotification = vi.fn(() => {
+      throw new Error("boom");
+    });
+    const f = fixture(onNotification);
+    f.sockets[0].open();
+    f.sockets[0].emit("message", { data: JSON.stringify({ ...frame, body: 5 }) });
+    f.sockets[0].emit("message", { data: JSON.stringify({ ...frame, id: "x", from: "peer" }) });
+    expect(onNotification).not.toHaveBeenCalled();
+    f.sockets[0].emit("message", { data: JSON.stringify(frame) });
+    expect(onNotification).toHaveBeenCalledOnce();
+    f.sockets[0].emit("message", {
+      data: JSON.stringify({ id: "b", from: "peer", payload: "still works" }),
+    });
+    expect(f.messages).toHaveBeenCalledOnce();
+    f.client.stop();
+  });
+});
+
 describe("device connection helper", () => {
   it("uses a header credential, rejects offline sends, and never queues or resends after disconnect", async () => {
     const f = fixture();

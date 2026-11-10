@@ -7,7 +7,7 @@ import { createNodeSocket } from "./socket.js";
 import type { DeviceSession } from "./login.js";
 import type { CredentialStore } from "./storage.js";
 import { createExecutor, type HostAudit } from "./executor.js";
-import { validId } from "./protocol.js";
+import { validId, type GatewayNotification } from "./protocol.js";
 
 export type HostCredential = DeviceSession & { name: string };
 export type HostEvent =
@@ -23,6 +23,11 @@ export interface HostOptions {
   credentials: CredentialStore<HostCredential>;
   authorize(cloudUrl: string, name: string, signal: AbortSignal): Promise<DeviceSession>;
   onEvent?(event: HostEvent): void;
+  /**
+   * Rome Cloud asked this computer to show a notification. Without a handler, as in the
+   * `rome-node` CLI, it is dropped.
+   */
+  onNotification?(notification: GatewayNotification): void;
   /** Every remote request is recorded here before it runs. An unavailable log refuses them. */
   audit: HostAudit;
 }
@@ -118,6 +123,7 @@ export async function connectHost(options: HostOptions): Promise<void> {
         if ("from" in message) void executor.receive(message);
       },
       onFrame: (frame) => void executor.receiveFrame(frame),
+      onNotification: options.onNotification,
       onStatus: (status) => {
         options.audit.host(
           {

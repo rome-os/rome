@@ -25,6 +25,8 @@ export interface DeviceHostOptions {
   /** Runs once, before the first connection. */
   prepare?(): Promise<void>;
   onStatus?(status: DeviceStatus): void;
+  /** Rome Cloud sent a notification over the Gateway connection for this app to show. */
+  onNotification?: HostOptions["onNotification"];
   /** Every remote request is recorded here before it runs. */
   audit: HostOptions["audit"];
   connect?: (options: HostOptions) => Promise<void>;
@@ -114,6 +116,7 @@ export class DeviceHost {
         name,
         signal,
         audit: this.options.audit,
+        onNotification: this.options.onNotification,
         credentials: {
           load: async () => ({
             cloudUrl: cloudOrigin,

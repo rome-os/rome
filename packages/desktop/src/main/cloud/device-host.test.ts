@@ -83,6 +83,14 @@ describe("DeviceHost", () => {
     });
   });
 
+  it("passes notifications from the Gateway connection to the app", async () => {
+    const onNotification = rs.fn();
+    const { subject, gateway } = host({ onNotification });
+    subject.start();
+    await settle();
+    expect(gateway.calls[0].onNotification).toBe(onNotification);
+  });
+
   it("connects as the device the app signed in as, once", async () => {
     const { subject, gateway } = host();
     subject.start();

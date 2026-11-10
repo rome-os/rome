@@ -495,6 +495,24 @@ once the device reconnects. Turning the device off, signing out, Rome Cloud
 revoking the device, or quitting the app releases it at once. Closing the lid or
 choosing Sleep still sleeps the computer.
 
+Rome Cloud can also send the app a notification over the same connection, as one
+text message, only from the Gateway to the app:
+
+```json
+{"type":"notification","title":"Rome","body":"…","level":"active","instanceId":"…","chatId":"…"}
+```
+
+`title`, `body` and `instanceId` are required strings (title up to 200 characters, body
+up to 2000, instance id up to 128). `level` is `active` or `passive`, and `chatId` is a
+string up to 128 characters; both are optional. It has no `id` or `from`, which every
+relayed peer message has, so it can only come from the Gateway. A client ignores it
+without an `onNotification` handler, as `rome-node` does, and ignores any message that
+does not match. The app shows it as a system notification, silent unless `level` is
+`active`, and skips it while its Rome window is visible and in front. Clicking it shows
+the window, and opens the chat if the notification is for the Rome the app has open.
+With the device switched off the app has no Gateway connection and gets no
+notifications. macOS only shows them from a signed app.
+
 The app keeps its credential in its own encrypted store and never reads the CLI's
 configuration directory. `rome-node connect` on the same computer is a separate
 device. Each configuration directory holds one identity, so `ROME_NODE_CONFIG_DIR`

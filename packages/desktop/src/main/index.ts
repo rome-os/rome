@@ -1,5 +1,5 @@
 import { release } from "os";
-import { app, BrowserWindow, dialog, net, powerSaveBlocker, shell } from "electron";
+import { app, BrowserWindow, dialog, net, Notification, powerSaveBlocker, shell } from "electron";
 import { initDatabase } from "./db/database";
 import { createLogger, LOG_FILE } from "./logger";
 import {
@@ -19,6 +19,7 @@ import { isQuitting, requestStopAndQuit, setupLifecycle } from "./lifecycle";
 import { setupUpdater, updateManager } from "./updater";
 import { RESTART_BUTTON, updateDialogFor } from "./update-dialog";
 import { setupTray } from "./tray";
+import { showDesktopNotification } from "./notifications";
 import { setupFloatingPill } from "./floating-pill";
 import { supportsFloatingPill } from "./floating-pill-state";
 import { setupApplicationMenu } from "./menu";
@@ -107,6 +108,17 @@ async function bootstrap() {
           },
           prepare: process.platform === "darwin" ? adoptLoginShellPath : undefined,
           audit,
+          // Rome Cloud also sends each push to the desktop apps of the person it is for.
+          onNotification: (notification) =>
+            showDesktopNotification(notification, {
+              mainWindow: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
+              openInstance: () => controller.activeTarget().instance,
+              showMainWindow: async () => {
+                await showMainWindow();
+                return mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+              },
+              createNotification: (options) => new Notification(options),
+            }),
           onStatus: (status) => {
             keepAwake.sync(status);
             // Only the app's own pages and the open Rome hear it, as with device:get.
