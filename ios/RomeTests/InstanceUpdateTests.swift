@@ -406,7 +406,8 @@ final class Counter: @unchecked Sendable {
         #expect(live.count == TopicChatsStore.liveNameLimit)
         #expect(live.contains("t29") && !live.contains("t0"))
         #expect(TopicChatsStore.liveIDs(Array(chats.prefix(3))) == ["t0", "t1", "t2"])
-        // Status, tasks, the main chat and the chat on screen still fit.
-        #expect(TopicChatsStore.liveNameLimit + 4 <= 32)
+        // Status, tasks, the Concierge's activity, the main chat and the chat
+        // on screen still fit.
+        #expect(TopicChatsStore.liveNameLimit + 5 <= 32)
     }
 }

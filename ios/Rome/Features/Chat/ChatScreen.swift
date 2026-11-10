@@ -28,7 +28,7 @@ struct ChatScreen: View {
         // The bar is clear: the transcript scrolls under its glass items.
         .floatingTopBar {
             VStack(spacing: 0) {
-                ChatHeader(name: workspace.mainChatTitle, onMenu: {
+                ChatHeader(name: workspace.mainChatTitle, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     onMenu()
@@ -39,7 +39,7 @@ struct ChatScreen: View {
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.mainChatTitle, onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.mainChatTitle, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
         // Reply or a tap on a message: the composer is ready for the reply.
@@ -245,8 +245,12 @@ private extension View {
 
 /// The floating header: menu, title, tasks.
 struct ChatHeader: View {
-    /// The chat's name: the Concierge's for the main chat, the topic's for a topic chat.
+    /// The Concierge's name, in the main chat and in topic chats alike.
     let name: String
+    /// The chat's own title, for the "…" menu: the topic's name, or the name.
+    var menuTitle: String? = nil
+    /// What the Concierge is doing here; nil shows the name alone.
+    var activity: ConciergeActivity? = nil
     let onMenu: () -> Void
     let onTasks: () -> Void
     /// A topic chat's options in the "…" menu, below Tasks.
@@ -260,9 +264,9 @@ struct ChatHeader: View {
             GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
                 MenuGlyph()
             }
-            ChatIdentity(name: name)
+            ChatIdentity(name: name, activity: activity)
                 .frame(maxWidth: .infinity)
-            ChatMoreMenu(title: name, onTasks: onTasks, onRename: onRename, onArchive: onArchive)
+            ChatMoreMenu(title: menuTitle ?? name, onTasks: onTasks, onRename: onRename, onArchive: onArchive)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -271,27 +275,33 @@ struct ChatHeader: View {
 }
 
 /// A Concierge chat's identity at the top: a round avatar with the mascot,
-/// overlapping a glass pill with the chat's name and, when there is one, a
-/// status line under it.
+/// overlapping a glass pill with the Concierge's name and, while it does
+/// something, a status line under it.
 struct ChatIdentity: View {
     let name: String
-    /// A second, lighter line under the name; none leaves the pill one line.
-    var status: String? = nil
-    /// Still: no blinking or reactions, for the copy over the header (a chat thread).
+    /// Nil or idle: the name alone, and the pill shrinks back.
+    var activity: ConciergeActivity? = nil
+    /// A copy laid over the header (a chat thread): no reactions to a tap,
+    /// and no announcement, which the header below already makes.
     var still = false
 
     @State private var pokes = 0
     @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     static let avatarSize: CGFloat = 50
     /// How far the avatar reaches down over the pill.
     static let overlap: CGFloat = 8
 
+    private var status: String? { activity?.statusLine }
+    private var busy: Bool { activity?.isBusy ?? false }
+
     var body: some View {
         VStack(spacing: -Self.overlap) {
             // A solid disc on the glass pill: two overlapping layers never
-            // share a color (DESIGN.md 1).
-            Mascot(blinks: !still, pokes: pokes)
+            // share a color (DESIGN.md 1). Busy, the mascot bobs and glances;
+            // at rest it blinks; under Reduce Motion it stays still.
+            Mascot(alive: busy && !reduceMotion, blinks: !reduceMotion, pokes: pokes)
                 .frame(height: 28)
                 .frame(width: Self.avatarSize, height: Self.avatarSize)
                 .background(Palette.elevated, in: Circle())
@@ -312,9 +322,8 @@ struct ChatIdentity: View {
                     .romeFont(14, .semibold)
                     .foregroundStyle(Palette.fg)
                 if let status {
-                    Text(verbatim: status)
-                        .romeFont(12)
-                        .foregroundStyle(Palette.sub)
+                    StatusLine(text: status, warning: activity == .needsYou, shimmers: busy && !reduceMotion)
+                        .transition(.opacity)
                 }
             }
             .lineLimit(1)
@@ -327,10 +336,51 @@ struct ChatIdentity: View {
             // Frosted like the composer, so what scrolls under blurs out.
             .background(Palette.headerPillTint, in: Capsule())
             .glassSurface(Capsule(), frost: Frost.composer)
+            .animation(reduceMotion ? nil : .spring(response: 0.35, dampingFraction: 0.9), value: status)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: status.map { "\(name), \($0)" } ?? name))
         .accessibilityAddTraits(.isHeader)
+        .onChange(of: status) { _, line in
+            // Read out politely, as the web's live region is.
+            guard !still, let line else { return }
+            var announcement = AttributedString(line)
+            announcement.accessibilitySpeechAnnouncementPriority = .low
+            AccessibilityNotification.Announcement(announcement).post()
+        }
+    }
+}
+
+/// The header's status line: small and muted, the warning colour while the
+/// Concierge waits on the guardian, and a faint left-to-right shimmer
+/// while it works.
+private struct StatusLine: View {
+    let text: String
+    let warning: Bool
+    let shimmers: Bool
+
+    var body: some View {
+        let line = Text(verbatim: text)
+            .romeFont(12, .medium)
+            .foregroundStyle(warning ? Palette.warningText : Palette.sub)
+        if shimmers {
+            line.overlay {
+                TimelineView(.animation) { context in
+                    // One pass every two seconds, left to right.
+                    let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2) / 2
+                    GeometryReader { geometry in
+                        let band = geometry.size.width * 0.45
+                        LinearGradient(colors: [.clear, Palette.fg.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: band)
+                            .offset(x: -band + (geometry.size.width + band) * phase)
+                    }
+                    .mask(line)
+                }
+                .allowsHitTesting(false)
+            }
+        } else {
+            line
+        }
     }
 }
 

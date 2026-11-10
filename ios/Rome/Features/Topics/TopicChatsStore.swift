@@ -13,6 +13,10 @@ final class TopicChatsStore {
     private(set) var chats: [ConciergeChat] = []
     private(set) var loaded = false
     private var statusToken: UUID?
+    private var activityToken: UUID?
+    /// What the Concierge is doing in each chat, the main chat included, by
+    /// chat id. A chat missing here shows no status line.
+    private(set) var activities: [String: ConciergeActivity] = [:]
     private var chatTokens: [String: UUID] = [:]
     private var refreshWork: Task<Void, Never>?
     private var refreshAgain = false
@@ -26,12 +30,18 @@ final class TopicChatsStore {
         statusToken = backend.events.subscribe(LiveTopic.chatStatus) { [weak self] event in
             self?.handle(event)
         }
+        // The server answers a subscription with each chat's current state.
+        activityToken = backend.events.subscribe(LiveTopic.conciergeActivity) { [weak self] event in
+            if case .conciergeActivity(let chatId, let activity) = event { self?.setActivity(activity, for: chatId) }
+        }
         refresh()
     }
 
     func stop() {
         if let statusToken { backend.events.unsubscribe(statusToken) }
         statusToken = nil
+        if let activityToken { backend.events.unsubscribe(activityToken) }
+        activityToken = nil
         for token in chatTokens.values { backend.events.unsubscribe(token) }
         chatTokens = [:]
     }
@@ -49,11 +59,22 @@ final class TopicChatsStore {
                 // Off or unreachable: keep what is held.
                 if let all = try? await backend.conciergeChats() {
                     mainChatId = all.first { $0.main }?.id
+                    for chat in all where chat.activity != nil { setActivity(chat.activity, for: chat.id) }
                     apply(Self.topics(in: all))
                 }
             } while refreshAgain
             refreshWork = nil
         }
+    }
+
+    /// What the Concierge is doing in a chat; nil when it shows no status line.
+    func activity(for chatId: String?) -> ConciergeActivity? {
+        guard let chatId, let activity = activities[chatId], activity != .idle else { return nil }
+        return activity
+    }
+
+    func setActivity(_ activity: ConciergeActivity?, for chatId: String) {
+        if activities[chatId] != activity { activities[chatId] = activity }
     }
 
     /// A chat this app just started: listed now, ahead of the next refetch.

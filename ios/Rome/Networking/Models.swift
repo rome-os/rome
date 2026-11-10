@@ -172,6 +172,114 @@ struct ConciergeChat: Codable, Identifiable, Hashable, Sendable {
     var main: Bool
     /// Agent messages since the guardian last read it.
     var unread: Int?
+    /// What the Concierge is doing in this chat now. Absent on older
+    /// instances, and for a state this build does not know: no status line.
+    var activity: ConciergeActivity? = nil
+
+    private enum CodingKeys: String, CodingKey { case id, name, main, unread, activity }
+
+    init(id: String, name: String, main: Bool, unread: Int? = nil, activity: ConciergeActivity? = nil) {
+        self.id = id
+        self.name = name
+        self.main = main
+        self.unread = unread
+        self.activity = activity
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        main = try container.decode(Bool.self, forKey: .main)
+        unread = try container.decodeIfPresent(Int.self, forKey: .unread)
+        activity = (try? container.decodeIfPresent(JSONValue.self, forKey: .activity)).flatMap { $0 }.flatMap(ConciergeActivity.init(json:))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(main, forKey: .main)
+        try container.encodeIfPresent(unread, forKey: .unread)
+        try container.encodeIfPresent(activity?.json, forKey: .activity)
+    }
+}
+
+/// What the Concierge is doing in one of its chats, as the server works it
+/// out (`ConciergeActivity`). The app only draws it.
+enum ConciergeActivity: Hashable, Sendable {
+    case idle
+    /// A card or approval waits on the guardian.
+    case needsYou
+    /// The chat's turn is running, in no named tool.
+    case working
+    /// The chat's turn is in a named tool.
+    case tool(Tool)
+    /// Task chats it started are running: the newest's title, and how many more.
+    case tasks(title: String, more: Int)
+
+    enum Tool: String, Sendable, CaseIterable {
+        case startingTask, messagingTask, readingChat, stoppingTask, updatingTasks
+        case startingTopic, checkingFollows, searchingWeb, readingPage
+    }
+
+    /// Lenient, as the contract asks: an unknown kind is nil (no line), an
+    /// unknown tool reads as working.
+    init?(json: JSONValue) {
+        switch json["kind"]?.string {
+        case "idle": self = .idle
+        case "needsYou": self = .needsYou
+        case "working": self = .working
+        case "tool": self = json["tool"]?.string.flatMap(Tool.init(rawValue:)).map(Self.tool) ?? .working
+        case "tasks":
+            let title = json["title"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let more = json["more"]?.number.map(Int.init) ?? 0
+            self = title.isEmpty ? .working : .tasks(title: title, more: max(0, more))
+        default: return nil
+        }
+    }
+
+    var json: JSONValue {
+        switch self {
+        case .idle: return .object(["kind": .string("idle")])
+        case .needsYou: return .object(["kind": .string("needsYou")])
+        case .working: return .object(["kind": .string("working")])
+        case .tool(let tool): return .object(["kind": .string("tool"), "tool": .string(tool.rawValue)])
+        case .tasks(let title, let more): return .object(["kind": .string("tasks"), "title": .string(title), "more": .number(Double(more))])
+        }
+    }
+
+    /// The header's second line; nil leaves the name alone.
+    var statusLine: String? {
+        switch self {
+        case .idle: return nil
+        // Its own key: the question card's "Waiting for your answer" reads
+        // differently in Chinese.
+        case .needsYou: return String(localized: "status.needsYou", defaultValue: "Waiting for your answer")
+        case .working: return String(localized: "Working on it")
+        case .tasks(let title, let more): return more > 0 ? "\(title) +\(more)" : title
+        case .tool(let tool):
+            switch tool {
+            case .startingTask: return String(localized: "Starting a task")
+            case .messagingTask: return String(localized: "Writing to a task chat")
+            case .readingChat: return String(localized: "Reading a chat")
+            case .stoppingTask: return String(localized: "Stopping a task")
+            case .updatingTasks: return String(localized: "Updating tasks")
+            case .startingTopic: return String(localized: "Starting a topic chat")
+            case .checkingFollows: return String(localized: "Checking what you follow")
+            case .searchingWeb: return String(localized: "Searching the web")
+            case .readingPage: return String(localized: "Reading a page")
+            }
+        }
+    }
+
+    /// Working, in a tool, or running tasks: the line shimmers and the mascot is alive.
+    var isBusy: Bool {
+        switch self {
+        case .working, .tool, .tasks: return true
+        case .idle, .needsYou: return false
+        }
+    }
 }
 
 /// `GET /concierge/chats`: the main chat first, then the topic chats, oldest first.

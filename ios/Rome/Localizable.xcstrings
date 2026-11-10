@@ -465,6 +465,16 @@
         }
       }
     },
+    "Checking what you follow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查看你的关注"
+          }
+        }
+      }
+    },
     "Choose from library" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1523,6 +1533,26 @@
         }
       }
     },
+    "Reading a chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查看对话"
+          }
+        }
+      }
+    },
+    "Reading a page" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在阅读网页"
+          }
+        }
+      }
+    },
     "Reading log" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1857,6 +1887,16 @@
         }
       }
     },
+    "Searching the web" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在搜索网页"
+          }
+        }
+      }
+    },
     "Send" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2145,6 +2185,26 @@
         }
       }
     },
+    "Starting a task" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在开始任务"
+          }
+        }
+      }
+    },
+    "Starting a topic chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在开启话题对话"
+          }
+        }
+      }
+    },
     "Stop" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2161,6 +2221,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已停止"
+          }
+        }
+      }
+    },
+    "Stopping a task" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在停止任务"
           }
         }
       }
@@ -2595,6 +2665,16 @@
         }
       }
     },
+    "Updating tasks" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在更新任务"
+          }
+        }
+      }
+    },
     "Usage resets automatically" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2753,6 +2833,26 @@
         }
       }
     },
+    "Working on it" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在处理"
+          }
+        }
+      }
+    },
+    "Writing to a task chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在给任务对话发消息"
+          }
+        }
+      }
+    },
     "Yesterday %@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2819,6 +2919,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自己的想法…"
+          }
+        }
+      }
+    },
+    "status.needsYou" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for your answer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等你回复"
           }
         }
       }

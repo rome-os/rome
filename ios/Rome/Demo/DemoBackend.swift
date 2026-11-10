@@ -81,7 +81,32 @@ final class DemoBackend: RomeBackend {
     func conciergeChats() async throws -> [ConciergeChat] {
         try await pause(0.2)
         if variant == .conciergeOff { throw APIError.conciergeOff }
-        return [ConciergeChat(id: conciergeChatID, name: "Concierge", main: true, unread: 0)] + topicChats
+        startActivityCycle()
+        return [ConciergeChat(id: conciergeChatID, name: "Concierge", main: true, unread: 0, activity: .working)] + topicChats
+    }
+
+    /// The header's states, in turn, so each can be seen on a phone: working,
+    /// a tool, running tasks, waiting on the guardian, then idle. The main
+    /// chat and the trip topic run it two steps apart. Snapshot runs set
+    /// their states themselves.
+    private var activityCycle: Task<Void, Never>?
+
+    private func startActivityCycle() {
+        guard activityCycle == nil, SnapshotRunner.directory == nil else { return }
+        let steps: [(ConciergeActivity, Double)] = [
+            (.working, 3), (.tool(.searchingWeb), 3), (.tasks(title: "整理本周会议纪要", more: 1), 4), (.needsYou, 4), (.idle, 4),
+        ]
+        activityCycle = Task { [weak self] in
+            var step = 0
+            while !Task.isCancelled {
+                guard let self else { return }
+                let (main, seconds) = steps[step % steps.count]
+                self.bus.emit(LiveTopic.conciergeActivity, .conciergeActivity(chatId: conciergeChatID, activity: main))
+                self.bus.emit(LiveTopic.conciergeActivity, .conciergeActivity(chatId: "topic-trip", activity: steps[(step + 2) % steps.count].0))
+                step += 1
+                try? await Task.sleep(for: .seconds(seconds))
+            }
+        }
     }
 
     func startTopicChat() async throws -> ConciergeChat {

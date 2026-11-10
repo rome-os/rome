@@ -43,7 +43,11 @@ struct TopicChatScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .floatingTopBar {
             ChatHeader(
-                name: title,
+                // The Concierge's name, as in the main chat; the topic's own
+                // title stays in the "…" menu.
+                name: workspace.mainChatTitle,
+                menuTitle: title,
+                activity: workspace.topics.activity(for: chatId),
                 onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
@@ -61,7 +65,7 @@ struct TopicChatScreen: View {
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let store, let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: title, onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.mainChatTitle, activity: workspace.topics.activity(for: chatId), onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
         // Reply or a tap on a message: the composer is ready for the reply.
