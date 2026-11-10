@@ -13,8 +13,16 @@ import { automatedSource, speaksForGuardian } from "./automated-source.js";
 
 import { randomUUID } from "node:crypto";
 import type { TranscriptPart } from "@rome/api-types/chat";
-import type { Account, AgentInputState, ChatId, InputStatusEvent } from "@rome-os/app-runtime";
+import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
+import type {
+  Account,
+  AgentInputState,
+  AgentTurnFailure,
+  ChatId,
+  InputStatusEvent,
+} from "@rome-os/app-runtime";
 import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
+import { CONCIERGE_AGENT_ID } from "../concierge/privacy.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import { partsText, type SaidBy } from "../chats/storage/message.js";
@@ -51,6 +59,20 @@ import type { MessagePart } from "../types.js";
 
 /** The dashboard's platform: Rome's own chat behind the guardian's sign-in. */
 export const WEBCHAT_PLATFORM = "webchat";
+
+/** A turn that ended in an error, as its trace records the error. */
+export interface ErroredTurn {
+  turn: InterruptedTurn;
+  /** The error block's own fields. The block names its provider only when a resolution error wrote it. */
+  failure: Pick<
+    AgentTurnFailure,
+    "message" | "code" | "reason" | "httpStatus" | "providerError"
+  > & {
+    provider?: string;
+  };
+  /** The provider in the model pin of the runtime session that resumes the chat, null before a turn completed in it. */
+  pinnedProvider: string | null;
+}
 
 /** Where a session stands in Chats, and as whom it speaks there. */
 interface Standing {
@@ -436,6 +458,97 @@ export class ChatsWebChatRepository extends WebChatRepository {
       .map((row) => row.text)
       .join("\n\n")
       .slice(0, 1000);
+  }
+
+  /**
+   * The newest turn of each dashboard chat that ended in an error, when its
+   * trace began at or after `sinceMs` or its runtime session was active then.
+   * A turn that began earlier and was active since is listed, and the caller
+   * decides by its last activity. A turn still running, or ended any other
+   * way, is not listed. Concierge chats are left out: they recover on their
+   * own. Oldest first. Eligibility is for `canContinueAfterRestart` to decide.
+   */
+  getLatestErroredTurns(sinceMs: number): ErroredTurn[] {
+    const since = Math.floor(sinceMs / 1000);
+    // One index probe per chat finds its newest trace, so the work follows the
+    // number of chats and only a chat with recent activity has its blocks read.
+    const traces = this.db.all<{
+      messageId: string;
+      sessionId: string;
+      turnId: string | null;
+      agentName: string | null;
+    }>(sql`
+      SELECT t.id AS messageId, t.session_id AS sessionId, t.turn_id AS turnId, s.agent_name AS agentName
+      FROM ${romeSessions} s
+      JOIN ${romeAgentMessages} t ON t.id = (
+        SELECT n.id FROM ${romeAgentMessages} n
+        WHERE n.session_id = s.id AND n.role = 'trace'
+        ORDER BY n.created_at DESC, n.rowid DESC LIMIT 1
+      )
+      WHERE s.type = 'channel' AND s.chat_platform = 'webchat'
+        AND s.id <> ${CONCIERGE_CHAT_ID}
+        AND coalesce(s.agent_name, '') NOT IN (${CONCIERGE_AGENT_ID}, 'concierge')
+        AND (
+          t.created_at >= ${since}
+          OR EXISTS (SELECT 1 FROM ${sessions} r WHERE r.chat_id = s.id AND r.last_active_at >= ${since})
+        )
+      ORDER BY t.created_at, t.rowid
+    `);
+    const errored: ErroredTurn[] = [];
+    for (const trace of traces) {
+      const blocks = this.db
+        .all<{ content: string }>(sql`
+          SELECT content FROM ${romeAgentTraceBlocks}
+          WHERE message_id = ${trace.messageId}
+            AND json_extract(content, '$.type') IN ('turn_start', 'error', 'turn_end')
+          ORDER BY seq
+        `)
+        .flatMap(({ content }) => {
+          try {
+            return [JSON.parse(content) as Record<string, unknown>];
+          } catch {
+            return [];
+          }
+        });
+      const newestFirst = blocks.slice().reverse();
+      const begun = newestFirst.find((block) => block.type === "turn_start");
+      if (!begun) continue;
+      const after = newestFirst.slice(0, newestFirst.indexOf(begun));
+      const error = after.find((block) => block.type === "error");
+      const end = after.find((block) => block.type === "turn_end");
+      if (!error || end?.status !== "error" || typeof error.error !== "string") continue;
+      // A turn the dashboard refused before any model session opened names the
+      // chat in `turn_start`, not a runtime. Either way, the chat's active runtime resumes it.
+      const named = typeof begun.sessionId === "string" ? begun.sessionId : "";
+      const runtime = this.db.get<{ id: string; provider: string | null }>(sql`
+        SELECT id, provider FROM ${sessions}
+        WHERE status = 'active' AND channel_thread_key IS NOT NULL
+          AND (id = ${named} OR chat_id = ${trace.sessionId})
+        ORDER BY id = ${named} DESC, last_active_at DESC
+        LIMIT 1
+      `);
+      const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+      errored.push({
+        turn: {
+          agentName: trace.agentName ?? text(begun.agent) ?? "main",
+          messageId: trace.messageId,
+          sessionId: trace.sessionId,
+          turnId: text(begun.turnId) ?? trace.turnId ?? "",
+          runtimeSessionId: runtime?.id ?? null,
+          prompt: text(begun.userPrompt) ?? "",
+        },
+        failure: {
+          message: error.error,
+          provider: text(error.provider),
+          code: text(error.code) as AgentTurnFailure["code"],
+          reason: text(error.reason) as AgentTurnFailure["reason"],
+          httpStatus: typeof error.httpStatus === "number" ? error.httpStatus : undefined,
+          providerError: text(error.providerError),
+        },
+        pinnedProvider: runtime?.provider ?? null,
+      });
+    }
+    return errored;
   }
 
   override async recoverInterruptedInputs(): Promise<void> {

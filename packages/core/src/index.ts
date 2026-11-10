@@ -1,4 +1,5 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
+import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { WebChatDashboardSessions } from "./webchat/webchat-dashboard-sessions.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
@@ -2317,6 +2318,13 @@ async function main() {
   void continueInterruptedTurns(endedTurns, webchatRepo, backendTurnRunner).catch((error) => {
     log.warn("restart continuations failed", { error: String(error) });
   });
+  // Subscribes after the first account read may have settled, so it also reads the
+  // remembered state: a limit that ended while Rome was down is swept now.
+  const stopUsageLimitContinuation = startUsageLimitContinuation({
+    accounts: modelAccounts,
+    repo: webchatRepo,
+    runner: backendTurnRunner,
+  });
 
   // Best-effort instance-identity check. Fire-and-forget: announces
   // which account this instance is bound to, reports the running version, and
@@ -2426,6 +2434,7 @@ async function main() {
     capabilityDiscovery.stop();
     shutdownLog.info("capability discovery stopped");
 
+    stopUsageLimitContinuation();
     stopCodexLoginChoice();
     unsubscribeInstanceLinked();
     visitorAllowListSync.stop();
