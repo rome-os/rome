@@ -194,6 +194,9 @@
       "submittingCode": "正在提交 Claude 登录代码"
     }
   },
+  "upgradeIndicator": {
+    "tooltip": "{{name}} 可以升级"
+  },
   "upgradeBanner": {
     "countdownTitle": "Rome {{version}} 更新已就绪",
     "countdownBody": "将在 {{remaining}} 后更新，除非你推迟。",

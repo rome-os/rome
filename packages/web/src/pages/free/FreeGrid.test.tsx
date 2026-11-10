@@ -31,6 +31,7 @@ rs.mock("@/shell/AppGrid", () => ({ AppGrid: () => null }));
 rs.mock("@/shell/ProfileMenu", () => ({ ProfileMenu: () => null }));
 rs.mock("@/shell/DesktopTitlebar", () => ({ DesktopTitlebar: () => null }));
 rs.mock("@/components/upgrade-countdown-banner", () => ({ UpgradeCountdownBanner: () => null }));
+rs.mock("@/shell/UpgradeIndicator", () => ({ UpgradeIndicator: () => null }));
 // Concierge's chat id comes from its own query, which these tests do not serve.
 const concierge = rs.hoisted(() => ({ chatId: null as string | null }));
 rs.mock("@/hooks/use-concierge", () => ({

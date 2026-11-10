@@ -14,9 +14,19 @@ import { estimatedServerNow, useUpgradeStatus } from "../hooks/use-upgrade-statu
  * going away), stalled (restart overdue — dismissable), hidden. The desktop
  * app renders the same SPA, so this covers both.
  */
-export function UpgradeCountdownBanner() {
+export function UpgradeCountdownBanner({
+  onVisibleChange,
+}: {
+  /** Told whether the banner is up, so the shell can hide the sidebar's
+   * upgrade arrow without re-rendering on every poll. */
+  onVisibleChange?: (visible: boolean) => void;
+}) {
   const { t } = useTranslation("common");
   const { state, updateNow, defer, dismissStalled } = useUpgradeStatus();
+  const visible = state !== null;
+  useEffect(() => {
+    onVisibleChange?.(visible);
+  }, [visible, onVisibleChange]);
   const [busy, setBusy] = useState(false);
   const [verbFailed, setVerbFailed] = useState(false);
 
