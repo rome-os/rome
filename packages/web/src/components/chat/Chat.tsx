@@ -113,6 +113,7 @@ import {
   FLOATING_SURFACE,
 } from "@/components/concierge/ConciergeHeaderStatus";
 import { useConciergeTaskList } from "@/components/concierge/ConciergeTaskList";
+import { useToolTasks } from "@/pages/free/tool-tasks";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
@@ -2165,16 +2166,23 @@ export function Chat({
   // middle centred over the chat. Only its pieces take the pointer, so the
   // messages under the gaps stay reachable. The thread view floats the same
   // header with its close button on the right.
+  // A narrow workspace shows the open tool pane in place of the chat.
+  const toolTasksHost = useToolTasks();
+  const paneCoversChat = toolTrace.paneOpen && Boolean(toolTasksHost?.compact);
   const floatingHeader = (trailing: ReactNode) => (
     <div
       data-concierge-header
       className="pointer-events-none absolute inset-x-0 top-0 z-20 grid grid-cols-[1fr_minmax(0,max-content)_1fr] items-center gap-x-2 px-2 pt-2 max-md:pt-[calc(var(--rome-safe-area-top)+0.5rem)] md:px-3"
     >
-      {/* The phone shell's back and menu buttons move in here. */}
-      <SlotOutlet
-        name={CONCIERGE_LEADING_SLOT}
-        className="pointer-events-auto col-start-1 row-start-1 flex items-center gap-1 justify-self-start md:hidden"
-      />
+      {/* The phone shell's back and menu buttons move in here, and its bar
+          steps aside. Not while the tool pane covers the chat: the shell's
+          bar is then the only way back from the pane. */}
+      {paneCoversChat ? null : (
+        <SlotOutlet
+          name={CONCIERGE_LEADING_SLOT}
+          className="pointer-events-auto col-start-1 row-start-1 flex items-center gap-1 justify-self-start md:hidden"
+        />
+      )}
       {conciergeStatus}
       <div className="pointer-events-auto col-start-3 row-start-1 flex items-center gap-1 justify-self-end">
         {trailing}

@@ -12,6 +12,9 @@ import { requestConciergeJump } from "@/components/concierge/concierge-jump";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
 import type { ConciergeActivity } from "@/components/concierge/concierge-activity";
+import { SlotProvider, useSlotOutlet } from "@/components/slot";
+import { CONCIERGE_LEADING_SLOT } from "@/components/concierge/ConciergeHeaderStatus";
+import { ToolTasksContext, type ToolTasksHost } from "@/pages/free/tool-tasks";
 import { Chat } from "./Chat";
 import enChat from "@/i18n/locales/en/chat.json";
 import zhChat from "@/i18n/locales/zh-CN/chat.json";
@@ -2101,6 +2104,54 @@ describe("Chat Concierge empty state", () => {
 
     expect(await screen.findByTestId("user-row")).toBeTruthy();
     expect(guidance()).toBeNull();
+  });
+
+  it("gives the phone shell its bar back while the tool pane covers a Concierge chat", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const seen: { outlet: boolean } = { outlet: false };
+    function ShellProbe() {
+      seen.outlet = useSlotOutlet(CONCIERGE_LEADING_SLOT);
+      return null;
+    }
+    const tasksHost = (compact: boolean): ToolTasksHost => ({
+      active: false,
+      compact,
+      show: rs.fn(),
+      hide: rs.fn(),
+    });
+    const at = (compact: boolean, paneOpen: boolean) => (
+      <SlotProvider>
+        <ShellProbe />
+        <ToolTasksContext.Provider value={tasksHost(compact)}>
+          <ToolTraceContext.Provider
+            value={{
+              outlet: null,
+              paneOpen,
+              setPaneCollapsed: rs.fn(),
+              reveal: rs.fn(),
+              set: rs.fn(),
+            }}
+          >
+            <Chat sessionId="concierge" variant="concierge" />
+          </ToolTraceContext.Provider>
+        </ToolTasksContext.Provider>
+      </SlotProvider>
+    );
+    const view = render(<MemoryRouter>{at(true, false)}</MemoryRouter>);
+    // Chat on screen: its floating header takes the shell's buttons.
+    await waitFor(() => expect(seen.outlet).toBe(true));
+
+    // The pane fills a narrow screen in place of the chat: the shell's bar is the way back.
+    view.rerender(<MemoryRouter>{at(true, true)}</MemoryRouter>);
+    await waitFor(() => expect(seen.outlet).toBe(false));
+
+    // Beside the chat on a wide screen, the pane hides nothing.
+    view.rerender(<MemoryRouter>{at(false, true)}</MemoryRouter>);
+    await waitFor(() => expect(seen.outlet).toBe(true));
   });
 
   it("floats the Concierge's header over its messages: the mascot's badge, a name pill and round buttons", async () => {
