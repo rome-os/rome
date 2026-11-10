@@ -28,7 +28,7 @@ export function ThisComputerButton({ tooltipSide = "top" }: { tooltipSide?: "top
   // Closing the popover hands focus back to the button, and a focus-opened tooltip would flash
   // right after. The flag holds until the pointer crosses the button's edge or focus leaves it.
   const refocused = useRef(false);
-  const switchId = useId();
+  const labelId = useId();
 
   if (!device) return null;
   const { state } = device;
@@ -91,16 +91,12 @@ export function ThisComputerButton({ tooltipSide = "top" }: { tooltipSide?: "top
           }}
         >
           <div className="flex items-center gap-3 px-2 py-2">
-            <div className="flex min-w-0 flex-1 flex-col">
-              <label htmlFor={switchId} className="text-ui text-foreground">
-                {t("thisComputer.label")}
-              </label>
-              <span className="text-aux text-muted-foreground">
-                {t(`thisComputer.state.${state}`)}
-              </span>
-            </div>
+            {/* Not a <label>: only the switch itself toggles. */}
+            <span id={labelId} className="min-w-0 flex-1 text-ui text-foreground">
+              {t("thisComputer.label")}
+            </span>
             <Switch
-              id={switchId}
+              aria-labelledby={labelId}
               size="sm"
               checked={state !== "disabled"}
               disabled={device.busy}
