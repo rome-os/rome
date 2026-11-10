@@ -35,6 +35,8 @@ struct UpdateScreen: View {
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     bottom
+                        .frame(maxWidth: Metrics.buttonWidth)
+                        .frame(maxWidth: .infinity)
                         .padding(.horizontal, 20)
                         .padding(.top, 12)
                         .padding(.bottom, 18)
@@ -62,6 +64,8 @@ struct UpdateScreen: View {
                 }
                 .overlay(alignment: .bottom) {
                     bottom
+                        .frame(maxWidth: Metrics.buttonWidth)
+                        .frame(maxWidth: .infinity)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 18)
                 }

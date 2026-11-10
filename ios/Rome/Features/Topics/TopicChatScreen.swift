@@ -103,6 +103,7 @@ struct TopicChatScreen: View {
             .animation(.easeOut(duration: 0.2), value: showsStarters)
             .disabled(starting != nil)
             .padding(.horizontal, Metrics.pagePadding)
+            .readableColumn()
             .padding(.top, 6)
             .padding(.bottom, 8)
         }
@@ -117,6 +118,11 @@ struct TopicChatScreen: View {
         }
     }
 
+    private func markRead(_ store: TranscriptStore) {
+        store.markRead()
+        workspace.topics.markRead(store.sessionId)
+    }
+
     @ViewBuilder
     private var content: some View {
         if let store, store.loaded {
@@ -125,8 +131,8 @@ struct TopicChatScreen: View {
                     .padding(.top, TranscriptSpacing.top(row, after: previous))
             }
             .onTapGesture { composerFocused = false }
-            .onAppear { store.markRead() }
-            .onChange(of: store.arrivals) { store.markRead() }
+            .onAppear { markRead(store) }
+            .onChange(of: store.arrivals) { markRead(store) }
         } else if let starting {
             // The chat is being started: the message waits as a pending bubble.
             ScrollView {
@@ -137,6 +143,7 @@ struct TopicChatScreen: View {
                 }
                 .padding(.horizontal, Metrics.pagePadding)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+                .readableColumn()
             }
             .defaultScrollAnchor(.bottom)
         } else if store != nil {
