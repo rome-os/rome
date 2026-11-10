@@ -246,12 +246,20 @@ describe("file browser asset revalidation", () => {
     rmSync(rootDir, { recursive: true, force: true });
   });
 
-  it("returns an empty 304 for a matching If-None-Match", async () => {
+  it.each([
+    ["the current ETag", (etag: string): string => etag],
+    [
+      "a list containing the current ETag",
+      (etag: string): string => `"stale", ${etag} , W/"other"`,
+    ],
+    ["a wildcard", (_etag: string): string => "*"],
+    ["the current ETag without W/", (etag: string): string => etag.slice(2)],
+  ] as const)("returns an empty 304 for %s", async (_case, header) => {
     const initial = await app.request(url);
     const etag = initial.headers.get("ETag")!;
     expect(Buffer.from(await initial.arrayBuffer())).toEqual(image);
 
-    const response = await app.request(url, { headers: { "If-None-Match": etag } });
+    const response = await app.request(url, { headers: { "If-None-Match": header(etag) } });
     expect(response.status).toBe(304);
     expect(response.headers.get("ETag")).toBe(etag);
     expect(response.headers.get("Cache-Control")).toBe("private, no-cache");
@@ -259,8 +267,11 @@ describe("file browser asset revalidation", () => {
     expect(await response.text()).toBe("");
   });
 
-  it("returns the full image with validators for a mismatched If-None-Match", async () => {
-    const response = await app.request(url, { headers: { "If-None-Match": 'W/"stale"' } });
+  it.each([
+    'W/"stale"',
+    '"stale", W/"other"',
+  ])("returns the full image with validators for a mismatched If-None-Match %s", async (header) => {
+    const response = await app.request(url, { headers: { "If-None-Match": header } });
     const { mtimeMs, size } = statSync(join(rootDir, "photo.png"));
     expect(response.status).toBe(200);
     expect(response.headers.get("ETag")).toBe(`W/"${Math.trunc(mtimeMs)}-${size}"`);

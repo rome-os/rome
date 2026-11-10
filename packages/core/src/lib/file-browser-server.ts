@@ -1944,7 +1944,15 @@ export function createAssetHandler(scope: FileBrowserScope): Handler {
       const file = describeFile(logicalPath);
       const { mtimeMs, size } = statSync(resolvedPath);
       const etag = `W/"${Math.trunc(mtimeMs)}-${size}"`;
-      if (c.req.header("If-None-Match") === etag) {
+      if (
+        c.req
+          .header("If-None-Match")
+          ?.split(",")
+          .some((entry) => {
+            const tag = entry.trim();
+            return tag === "*" || tag.replace(/^W\//, "") === etag.replace(/^W\//, "");
+          })
+      ) {
         return new Response(null, {
           headers: { "Cache-Control": "private, no-cache", ETag: etag },
           status: 304,
