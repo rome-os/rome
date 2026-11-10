@@ -75,7 +75,7 @@ let fetchMock: ReturnType<typeof rs.fn<typeof fetch>>;
 beforeEach(async () => {
   await i18n.changeLanguage("en");
   client = new QueryClient({
-    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    defaultOptions: { queries: { retry: false, staleTime: 10_000 }, mutations: { retry: false } },
   });
   messages = [message("ask", [question])];
   approvals = [];
@@ -203,7 +203,7 @@ describe("TaskChatCard", () => {
     expect(requests.map(([url]) => url)).toEqual([`/api/chat/sessions/${chatId}/messages?limit=2`]);
   });
 
-  it("loads a fresh page when live running events remount the waiting card", async () => {
+  it("loads a fresh page when live running events remount the waiting card within staleTime", async () => {
     show();
     await screen.findByText("Which tone?");
     const notify = (running: boolean) => {
@@ -225,8 +225,12 @@ describe("TaskChatCard", () => {
         },
       ]),
     ];
+    expect(
+      Date.now() - client.getQueryState(["task-chat-cards", chatId])!.dataUpdatedAt,
+    ).toBeLessThan(10_000);
     notify(false);
     await screen.findByText("Next question?");
+    expect(screen.queryByText("Which tone?")).toBeNull();
     expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/messages"))).toHaveLength(
       2,
     );

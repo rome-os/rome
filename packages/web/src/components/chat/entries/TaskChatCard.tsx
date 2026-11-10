@@ -150,6 +150,7 @@ function WaitingTaskCard({
     // Waiting questions follow the last user prompt. Pages contain whole turns,
     // so two turns cover that question even when a turn has many message rows.
     queryFn: () => listSessionMessagePage(chatId, { limit: 2 }),
+    refetchOnMount: "always",
   });
   const approvals = useApprovals({ status: "pending" });
   const [submitted, setSubmitted] = useState<{
