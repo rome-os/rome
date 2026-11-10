@@ -102,6 +102,8 @@ enum SnapshotRunner {
             await capture("43-connect-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail")) }
             TranscriptStore.previewPhases = [:]
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
+            // Routine cards with their state, and the rows for cards only the web draws.
+            await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }
             // The drawer over a topic chat: its row selected.
             await capture("05b-drawer-topic", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)
@@ -125,6 +127,12 @@ enum SnapshotRunner {
             await capture("37-apps", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.apps) }
             await capture("39-app-open", style: styleName, in: directory, wait: 2.5) {
                 model.debugCommand = .route([.app(InstalledApp(id: "habits", displayName: "习惯打卡", fullHref: "/full/apps/habits", origin: "local"))])
+            }
+            model.debugCommand = .route([])
+            try? await Task.sleep(for: .seconds(0.6))
+            // A dashboard page a card opened, in the app's web view.
+            await capture("49-dashboard-page", style: styleName, in: directory, wait: 2.5) {
+                model.debugCommand = .route([.page(URL(string: "https://me.romeos.cc/routines")!)])
             }
             model.debugCommand = .route([])
             try? await Task.sleep(for: .seconds(0.6))

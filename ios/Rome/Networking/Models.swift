@@ -176,6 +176,42 @@ struct ApprovalRecord: Codable, Hashable, Sendable {
     var updatedAt: String?
 }
 
+// MARK: - Routines
+
+/// One routine of `GET /routines`, with only what a routine card reads. A
+/// routine is on unless `enabled` is `false`, as the dashboard reads it.
+struct RoutineRef: Decodable, Hashable, Sendable {
+    var id: String
+    var name: String?
+    var key: String?
+    var enabled: Bool?
+}
+
+/// A routine card's state line.
+enum RoutineStatus: Hashable, Sendable {
+    /// No routine was made from the card yet.
+    case notOn
+    case on(routineId: String)
+    case paused(routineId: String)
+
+    /// The routine a card made, as the dashboard's card finds it: by the
+    /// card's key, else, for a card written before keys, by its name among
+    /// routines without a key.
+    static func find(_ part: MessagePart.RoutineDraftPart, in routines: [RoutineRef]) -> RoutineStatus {
+        let match = part.routineKey.map { key in routines.first { $0.key == key } }
+            ?? routines.first { $0.key == nil && $0.name == part.name }
+        guard let match else { return .notOn }
+        return match.enabled == false ? .paused(routineId: match.id) : .on(routineId: match.id)
+    }
+
+    var routineId: String? {
+        switch self {
+        case .notOn: return nil
+        case .on(let id), .paused(let id): return id
+        }
+    }
+}
+
 /// What an approval card shows, derived from the stored part and the server's record.
 enum ApprovalStatus: String, Sendable {
     case pending, approved, executing, executed, rejected, failed
