@@ -326,6 +326,14 @@ final class AppModel {
         case noInstance
         case ready
 
+        /// Signed in, with no instance to open: one stopped, or none listed.
+        var waitsOnAnInstance: Bool {
+            switch self {
+            case .stopped, .noInstance: return true
+            default: return false
+            }
+        }
+
         /// Launching or opening an instance: the opening screen shows.
         var isOpening: Bool {
             switch self {
@@ -384,8 +392,7 @@ final class AppModel {
     private var refreshing = false
     private var foreground = ForegroundGate()
 
-    init() {
-        let cloud = CloudAuth(origin: CloudAuth.configuredOrigin)
+    init(cloud: CloudAuth = CloudAuth(origin: CloudAuth.configuredOrigin)) {
         self.cloud = cloud
         push = PushCenter(registry: cloud)
     }
@@ -531,6 +538,7 @@ final class AppModel {
     /// last instance never covers this one.
     private func connect(to instance: CloudInstance, keepUpdate: Bool = false) async {
         if !keepUpdate { update.reset() }
+        stoppedInstanceID = nil
         phase = .connecting(host: instance.host)
         let account = cloud.account.stamp()
         do {
@@ -873,6 +881,13 @@ final class AppModel {
     /// instance is open, through a cold launch or a sign-in.
     func openFromPush(_ target: PushTarget) async {
         pendingPush = target
+        // A stopped page has no instance open to route from: open the push's
+        // instance, or show its own stopped page.
+        if workspace == nil, phase.waitsOnAnInstance {
+            signInError = nil
+            await openInstance(preferring: target.instanceId, showHint: false)
+            return
+        }
         await routePendingPush()
     }
 
