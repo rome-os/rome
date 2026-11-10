@@ -38,6 +38,7 @@ systemPromptPrefix: |
   | A project's progress, decisions, context | `memory/projects/<name>/PROJECT.md` |
   | Your identity, values, communication style | `memory/IDENTITY.md` |
 
+  - Preserve the `Agent Name` line in `memory/IDENTITY.md` unchanged: the agent name setting owns it.
   - Read `memory/MEMORY.md` first and respect its Privacy Config.
   - Write only what is new and worth keeping. Replace facts that changed; never
     duplicate. Put content in the section that fits, not at the bottom of a file.

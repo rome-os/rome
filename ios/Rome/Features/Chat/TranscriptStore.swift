@@ -46,6 +46,10 @@ final class TranscriptStore {
     private(set) var connectPhases: [String: ConnectPhase] = [:]
     @ObservationIgnored private var connectRuns: [String: Task<Void, Never>] = [:]
     @ObservationIgnored private lazy var connectBrowser = WebSignInBrowser()
+    /// The instance's routines, for routine cards; nil until read, or when
+    /// they cannot be read (a visitor, an error), which leaves the status out.
+    private(set) var routines: [RoutineRef]?
+    @ObservationIgnored private var routinesRead: (at: Date, task: Task<Void, Never>)?
     /// Tool calls fetched for an expanded tool summary, by trace message id.
     private(set) var toolCalls: [String: [ToolCall]] = [:]
 
@@ -418,6 +422,32 @@ final class TranscriptStore {
             // Still running: let the guardian try again.
             stopping = false
         }
+    }
+
+    // MARK: Routines
+
+    func routineStatus(_ part: MessagePart.RoutineDraftPart) -> RoutineStatus? {
+        routines.map { RoutineStatus.find(part, in: $0) }
+    }
+
+    /// Reads the routines for the cards on screen. Cards that appear together
+    /// share one read, and a card seen again a few seconds later reads them
+    /// again, so a routine turned on in the dashboard shows as on.
+    func loadRoutines() async {
+        if let read = routinesRead, Date.now.timeIntervalSince(read.at) < 5 {
+            await read.task.value
+            return
+        }
+        let task = Task { [weak self] in
+            guard let self else { return }
+            do {
+                self.routines = try await self.backend.routines()
+            } catch {
+                // A failed read keeps what was read before; with nothing, the line stays out.
+            }
+        }
+        routinesRead = (.now, task)
+        await task.value
     }
 
     // MARK: Approvals

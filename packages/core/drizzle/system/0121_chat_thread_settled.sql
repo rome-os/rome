@@ -1,0 +1,1 @@
+ALTER TABLE `chat_messages` RENAME COLUMN `chat_thread_chosen` TO `chat_thread_settled`;

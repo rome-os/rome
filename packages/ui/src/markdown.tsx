@@ -151,18 +151,26 @@ export interface MarkdownProps {
 
 interface MdastNode {
   type: string;
+  value?: string;
   children?: MdastNode[];
+  position?: { start: { offset?: number }; end: { offset?: number } };
 }
 
 /**
  * CommonMark reads a closing bare marker (`-`, `* `, `3. `) as an empty list
  * item, which renders as a lone bullet under the list. Nobody means that, so
- * trailing empty items are dropped, along with a list they leave empty.
- * Empty items between filled ones are kept.
+ * trailing empty items are dropped. Empty items between filled ones are
+ * kept. A list whose items are all empty was never a list: a message that is
+ * only "391." or "-" shows as that text.
  */
-function dropTrailingEmptyListItems(node: MdastNode): void {
+function dropTrailingEmptyListItems(node: MdastNode, source: string): void {
   if (!node.children) return;
-  for (const child of node.children) dropTrailingEmptyListItems(child);
+  for (const child of node.children) dropTrailingEmptyListItems(child, source);
+  node.children = node.children.map((child) =>
+    child.type === "list" && child.children?.every((item) => !item.children?.length)
+      ? sourceText(child, source)
+      : child,
+  );
   if (node.type === "list") {
     while (node.children.at(-1)?.children?.length === 0) node.children.pop();
   }
@@ -171,9 +179,21 @@ function dropTrailingEmptyListItems(node: MdastNode): void {
   );
 }
 
+/** A paragraph holding `node`'s Markdown source as plain text. */
+function sourceText(node: MdastNode, source: string): MdastNode {
+  const start = node.position?.start.offset;
+  const end = node.position?.end.offset;
+  const value = start === undefined || end === undefined ? "" : source.slice(start, end).trim();
+  return { type: "paragraph", children: value ? [{ type: "text", value }] : [] };
+}
+
 // Named, since Streamdown keys its shared processor cache by plugin name.
 function remarkDropTrailingEmptyListItems() {
-  return dropTrailingEmptyListItems;
+  return (tree: MdastNode, file: { value?: unknown }) =>
+    dropTrailingEmptyListItems(
+      tree,
+      typeof file.value === "string" ? file.value : String(file.value ?? ""),
+    );
 }
 
 const REMARK_PLUGINS: NonNullable<StreamdownProps["remarkPlugins"]> = [

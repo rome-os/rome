@@ -17,6 +17,9 @@ export interface SessionToolContext {
   /** The level the running turn pushes its first said message at, or
    *  undefined when it pushes nothing. */
   getTurnPushLevel(): NotifyLevel | undefined;
+  /** A message of the chat the running turn answers though no message in it
+   *  started the turn, or undefined when it names none. */
+  getTurnThreadAnchor(): string | undefined;
 }
 
 /**

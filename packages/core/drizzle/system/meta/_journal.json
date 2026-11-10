@@ -827,6 +827,41 @@
       "when": 1794000011000,
       "tag": "0118_concierge_owners",
       "breakpoints": true
+    },
+    {
+      "idx": 119,
+      "version": "6",
+      "when": 1794259109674,
+      "tag": "0119_session_setup_fingerprint",
+      "breakpoints": true
+    },
+    {
+      "idx": 120,
+      "version": "6",
+      "when": 1794259353853,
+      "tag": "0120_chat_threads",
+      "breakpoints": true
+    },
+    {
+      "idx": 121,
+      "version": "6",
+      "when": 1794264310060,
+      "tag": "0121_chat_thread_settled",
+      "breakpoints": true
+    },
+    {
+      "idx": 122,
+      "version": "6",
+      "when": 1794264485094,
+      "tag": "0122_session_superseded_by",
+      "breakpoints": true
+    },
+    {
+      "idx": 123,
+      "version": "6",
+      "when": 1794264934013,
+      "tag": "0123_session_superseded_for",
+      "breakpoints": true
     }
   ]
 }

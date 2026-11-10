@@ -14,6 +14,7 @@ import { AgentAvatar } from "@/components/chat/AgentAvatar";
 import { ChatCodeBlockStateContext } from "@/components/chat/ChatCodeBlock";
 import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
 import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
+import { SessionRenewalNotice } from "./SessionRenewalNotice";
 import { TurnActions, turnCopyText } from "@/components/chat/TurnActions";
 import { DelegatedSubagentGroup } from "@/components/chat/DelegatedSubagentGroup";
 import { MessageRow } from "@/components/chat/MessageRow";
@@ -181,6 +182,7 @@ const RowView = memo(function RowView({
 }) {
   if (row.kind === "user") return <UserMessage msg={row.message} />;
   if (row.kind === "model_switch") return <ModelSwitchNotice model={row.model} />;
+  if (row.kind === "session_renewal") return <SessionRenewalNotice reason={row.reason} />;
   const avatar = <AgentAvatar iconUrl={row.identity.iconUrl} label={row.identity.name} />;
   if (row.kind === "trace") {
     const summary = row.message.traceSummary;
@@ -359,6 +361,7 @@ function StandaloneLiveTail({
 // selectable.
 function rowTurnRef(row: ChatRow): { turnId: string | null; sessionId: string } {
   if (row.kind === "model_switch") return { turnId: null, sessionId: row.sessionId };
+  if (row.kind === "session_renewal") return { turnId: null, sessionId: row.renewedSessionId };
   if (row.kind === "user" || row.kind === "trace") {
     return { turnId: row.message.turnId ?? null, sessionId: row.message.sessionId };
   }

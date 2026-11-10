@@ -39,6 +39,16 @@ export class DrizzleSessionRepository implements SessionRepository {
     return rows[0] ? restore(rows[0]) : null;
   }
 
+  async predecessorOf(id: SessionId): Promise<Session | null> {
+    const rows = await this.db
+      .select()
+      .from(sessions)
+      .where(eq(sessions.supersededBy, id))
+      .orderBy(desc(sessions.lastActiveAt))
+      .limit(1);
+    return rows[0] ? restore(rows[0]) : null;
+  }
+
   async current(continuityKey: ContinuityKey, agentName: AgentName): Promise<Session | null> {
     const rows = await this.db
       .select()
@@ -129,7 +139,12 @@ export class DrizzleSessionRepository implements SessionRepository {
       for (const checkpoint of retiredPending.checkpoints) upsertCheckpoint(tx, checkpoint);
       if (retiredState.continuityKey !== null) {
         tx.update(sessions)
-          .set({ status: "completed", lastActiveAt: retiredState.lastActiveAt })
+          .set({
+            status: "completed",
+            lastActiveAt: retiredState.lastActiveAt,
+            supersededBy: successorState.id,
+            supersededFor: retiredState.supersededFor,
+          })
           .where(exactlyActive(retiredState.continuityKey, retiredState.agentName))
           .run();
       }
@@ -224,6 +239,9 @@ function restore(row: SessionRow): Session {
     model: row.model,
     reasoningEffort: row.reasoningEffort,
     workingDir: row.workingDir,
+    setup: row.setup,
+    supersededBy: row.supersededBy,
+    supersededFor: row.supersededFor,
     createdAt: row.createdAt,
     lastActiveAt: row.lastActiveAt,
   });
@@ -246,7 +264,13 @@ function writeChanges(
   if (changes.has("lastActiveAt")) columns.lastActiveAt = state.lastActiveAt;
   // A completion is final. A stale instance that still believes the session is
   // active never writes that belief back.
-  if (changes.has("status") && state.status !== "active") columns.status = state.status;
+  if (changes.has("status") && state.status !== "active") {
+    columns.status = state.status;
+    if (state.supersededBy) {
+      columns.supersededBy = state.supersededBy;
+      columns.supersededFor = state.supersededFor;
+    }
+  }
   if (Object.keys(columns).length > 0) {
     tx.update(sessions).set(columns).where(eq(sessions.id, state.id)).run();
   }
@@ -264,6 +288,9 @@ function toRow(state: SessionState): SessionRow {
     model: state.model,
     reasoningEffort: state.reasoningEffort,
     workingDir: state.workingDir,
+    setup: state.setup,
+    supersededBy: state.supersededBy,
+    supersededFor: state.supersededFor,
     createdAt: state.createdAt,
     lastActiveAt: state.lastActiveAt,
     status: state.status,

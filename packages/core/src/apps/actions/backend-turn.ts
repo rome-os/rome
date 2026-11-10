@@ -156,7 +156,9 @@ export interface BackendTurnRunnerDeps {
    * at a chat that is archived or gone runs in the main chat. Every backend
    * turn passes here, so a defer's wake-up, a delivery and a recovery are
    * routed alike. Absent, the turn runs where its params say. */
-  resolveTurn?: (params: BackendTurnParams) => Promise<BackendTurnParams>;
+  resolveTurn?: (
+    params: BackendTurnParams,
+  ) => Promise<BackendTurnParams & { threadAnchor?: string }>;
   /** Runs when a webchat continuation starts, after it has waited its turn in
    * the queue, so it resolves its model from the chat's current selection. */
   beforeTurn?: (params: BackendTurnParams) => Promise<unknown>;
@@ -173,7 +175,12 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     workingDir: string | undefined,
     trace: Pick<
       RunParams,
-      "persistTrace" | "persistTranscript" | "persistAnswer" | "inputLabel" | "pushLevel"
+      | "persistTrace"
+      | "persistTranscript"
+      | "persistAnswer"
+      | "inputLabel"
+      | "pushLevel"
+      | "threadAnchor"
     > &
       Pick<RunParams, "shouldRun"> = {},
     deviceFolder?: ThreadContext["deviceFolder"],
@@ -286,7 +293,9 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     asked: BackendTurnParams,
     options?: BackendTurnOptions,
   ): Promise<BackendTurnOutcome> {
-    const params = deps.resolveTurn ? await deps.resolveTurn(asked) : asked;
+    const params: BackendTurnParams & { threadAnchor?: string } = deps.resolveTurn
+      ? await deps.resolveTurn(asked)
+      : asked;
     let outcome: BackendTurnOutcome = "failed";
     // Resolve the continued session's project dir up front so the resumed turn
     // runs where its SDK transcript lives (defer/timer fire on a fresh stack
@@ -317,6 +326,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
             persistTranscript: false,
             ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
             ...(options?.pushLevel ? { pushLevel: options.pushLevel } : {}),
+            ...(params.threadAnchor ? { threadAnchor: params.threadAnchor } : {}),
           };
           for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
             if (msg.type === "turn_start") turnId = msg.turnId;

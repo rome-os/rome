@@ -165,14 +165,15 @@ final class HugeProtocol: URLProtocol, @unchecked Sendable {
     /// Another instance or account never sees a picture cached for this one.
     @Test func theCacheIsScopedToTheWorkspace() {
         let image = UIGraphicsImageRenderer(size: CGSize(width: 2, height: 2)).image { _ in }.cgImage!
-        let before = StoredImageCache.key("projects/a.png")
-        StoredImageCache.store(image, for: before)
-        #expect(StoredImageCache.image(before) != nil)
-        StoredImageCache.reset()
-        let after = StoredImageCache.key("projects/a.png")
+        let cache = StoredImageCache()
+        let before = cache.key("projects/a.png")
+        cache.store(image, for: before)
+        #expect(cache.image(before) != nil)
+        cache.reset()
+        let after = cache.key("projects/a.png")
         #expect(after != before)
-        #expect(StoredImageCache.image(after) == nil)
-        #expect(StoredImageCache.image(before) == nil)
+        #expect(cache.image(after) == nil)
+        #expect(cache.image(before) == nil)
     }
 
     @Test func theSameImageTwiceIsTwoPages() {

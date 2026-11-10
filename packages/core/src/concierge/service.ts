@@ -149,6 +149,8 @@ export interface ConciergeDeps {
     | "getTurnChatMessages"
     | "getReplyTarget"
     | "addBackendMessage"
+    | "placeInChatThread"
+    | "chatThreadSettled"
     | "setSessionTrigger"
     | "listProjects"
   >;
@@ -171,6 +173,9 @@ export interface ConciergeDeps {
   /** The chats the guardian's phone app holds open; nothing said there is pushed. */
   phoneWatching?: Pick<PhoneWatching, "isWatching">;
 }
+
+/** A backend turn where it runs, with the message it answers when it reports on a task. */
+export type ResolvedTurn = BackendTurnParams & { threadAnchor?: string };
 
 export interface SystemTurnOptions {
   quiet?: boolean;
@@ -555,7 +560,7 @@ export class ConciergeService {
    * passes here (alerts, digests, task events, recoveries and the wake-ups of
    * `defer`), so a turn never lands in a chat the guardian closed.
    */
-  async resolveTurn(params: BackendTurnParams): Promise<BackendTurnParams> {
+  async resolveTurn(params: BackendTurnParams): Promise<ResolvedTurn> {
     if (params.channel !== "webchat" || !isConciergeAgent(params.agentName)) return params;
     // The owner a wake-up recorded when it was scheduled, else its chat's.
     // With neither, its chat is gone and nothing says whose it was: it is
@@ -577,7 +582,34 @@ export class ConciergeService {
       chat && !params.prompt.startsWith("<concierge_chat ")
         ? `${await this.turnHeader(chat)}\n\n${params.prompt}`
         : params.prompt;
-    return { ...params, threadId: chatId, sessionId, prompt };
+    const threadAnchor = await this.taskAnchorOf(params.prompt, chatId);
+    return {
+      ...params,
+      threadId: chatId,
+      sessionId,
+      prompt,
+      ...(threadAnchor ? { threadAnchor } : {}),
+    };
+  }
+
+  /**
+   * The message a turn about task rows answers: the source message of the
+   * first row its prompt names that has one in `chatId`. A task event names
+   * a row as `<task id="…">`, and a wake-up of `defer` names it in its name
+   * as `task:<id>`, as the Concierge's instructions ask.
+   */
+  private async taskAnchorOf(prompt: string, chatId: string): Promise<string | undefined> {
+    const ids = [...prompt.matchAll(/<task id="([^"]+)"|\btask:([\w-]+)/g)].map(
+      (match) => match[1] ?? match[2],
+    );
+    for (const id of new Set(ids)) {
+      if (!id) continue;
+      const found = await this.deps.tasks.repo.getWithChat(id);
+      if (found?.sourceMessageId && found.conciergeChat.id === chatId) {
+        return found.sourceMessageId;
+      }
+    }
+    return undefined;
   }
 
   /**

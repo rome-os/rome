@@ -24,6 +24,8 @@ export type ConciergeItem =
   /** Centered time line before `at`, an ISO timestamp. */
   | { kind: "separator"; key: string; at: string }
   | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
+  /** Faint line where the chat's agent session was renewed, for `reason`. */
+  | { kind: "renewal"; key: string; reason: string }
   /**
    * Consecutive messages from one sender. Agent messages of separate turns share a
    * group when they are close enough in time. `typing` adds the typing bubble to
@@ -90,6 +92,7 @@ function itemFor(anchor: ChatMessage, next: ConciergeItem): ConciergeItem {
 
 function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
   if (a.kind === "separator") return b.kind === "separator" && a.key === b.key && a.at === b.at;
+  if (a.kind === "renewal") return b.kind === "renewal" && a.key === b.key && a.reason === b.reason;
   if (a.kind === "notice")
     return (
       b.kind === "notice" &&
@@ -127,6 +130,7 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
     | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
+    | { kind: "renewal"; key: string; reason: string }
     | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
   const slots: Slot[] = [];
   let group: Extract<Slot, { kind: "group" }> | null = null;
@@ -172,6 +176,9 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
           group = null;
         } else if (isRenderable(message)) add(message, "agent");
       }
+    } else if (row.kind === "session_renewal") {
+      slots.push({ kind: "renewal", key: row.key, reason: row.reason });
+      group = null;
     } else if (row.kind === "model_switch") {
       if (row.model === automaticModel) {
         automaticModel = undefined;
@@ -197,7 +204,7 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
   for (const slot of slots) {
     if (slot.kind === "separator") {
       items.push(itemFor(slot.anchor, { kind: "separator", key: slot.key, at: slot.at }));
-    } else if (slot.kind === "notice") {
+    } else if (slot.kind === "notice" || slot.kind === "renewal") {
       items.push(slot);
     } else {
       const entries = slot.messages.map((message) =>

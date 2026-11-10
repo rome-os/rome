@@ -132,6 +132,7 @@ export const AgentConfigSchema = z
         finalText: z.enum(["deliver", "private"]).optional(),
         autoTitle: z.boolean().optional(),
         loadMemory: z.boolean().optional(),
+        freshSessionOnSetupChange: z.boolean().optional(),
       })
       .strict()
       .optional(),

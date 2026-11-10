@@ -240,8 +240,8 @@ struct MarkdownImageView: View {
     }
 
     private func load() async {
-        let key = StoredImageCache.key("md|\(source)")
-        if let cached = StoredImageCache.image(key) {
+        let key = StoredImageCache.shared.key("md|\(source)")
+        if let cached = StoredImageCache.shared.image(key) {
             image = cached
             return
         }
@@ -255,7 +255,7 @@ struct MarkdownImageView: View {
                 imageLog.error("reply image is not an image: \(src, privacy: .public) as \(String(describing: source), privacy: .public), \(data.count) bytes")
                 throw APIError.decoding
             }
-            StoredImageCache.store(decoded, for: key)
+            StoredImageCache.shared.store(decoded, for: key)
             image = decoded
         } catch is CancellationError {
         } catch {
