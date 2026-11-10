@@ -143,8 +143,8 @@ private struct UserImageTile: View {
 
     private func load(_ upload: UploadLines.Upload) async {
         guard let assetLoader else { return }
-        let key = StoredImageCache.key(upload.assetPath)
-        if let cached = StoredImageCache.image(key) {
+        let key = StoredImageCache.shared.key(upload.assetPath)
+        if let cached = StoredImageCache.shared.image(key) {
             loaded = cached
             return
         }
@@ -155,7 +155,7 @@ private struct UserImageTile: View {
                 ImageCompressor.thumbnail(from: data, maxPixel: ComposerImage.thumbnailPixels)
             }.value
             guard let thumbnail else { throw APIError.network }
-            StoredImageCache.store(thumbnail, for: key)
+            StoredImageCache.shared.store(thumbnail, for: key)
             loaded = thumbnail
         } catch is CancellationError {
             // Scrolled away mid-load: the next appear loads it.
@@ -179,15 +179,18 @@ private struct UserImageTile: View {
 }
 
 /// Stored photos already loaded, so scrolling back does not fetch them again.
-/// It holds at most 64 MB of decoded pixels.
+/// It holds at most 64 MB of decoded pixels. The app uses `shared`; a test
+/// makes its own, so it never sees another test's pictures or resets.
 @MainActor
-enum StoredImageCache {
+final class StoredImageCache {
+    static let shared = StoredImageCache()
+
     private final class Box {
         let image: CGImage
         init(_ image: CGImage) { self.image = image }
     }
 
-    private static let cache: NSCache<NSString, Box> = {
+    private let cache: NSCache<NSString, Box> = {
         let cache = NSCache<NSString, Box>()
         cache.totalCostLimit = 64 * 1024 * 1024
         return cache
@@ -195,23 +198,23 @@ enum StoredImageCache {
 
     /// The open workspace's: keys carry it, so a picture loaded for one
     /// instance or account never shows in another.
-    @MainActor private static var scope = UUID()
+    private var scope = UUID()
 
     /// The key for a path in the open workspace. Taken before a load starts,
     /// so a load that ends after a switch lands under the old scope.
-    @MainActor static func key(_ path: String) -> String { "\(scope.uuidString)|\(path)" }
+    func key(_ path: String) -> String { "\(scope.uuidString)|\(path)" }
 
     /// A workspace opened or closed, or a sign-out: nothing cached carries over.
-    @MainActor static func reset() {
+    func reset() {
         scope = UUID()
         cache.removeAllObjects()
     }
 
-    static func image(_ path: String) -> CGImage? {
+    func image(_ path: String) -> CGImage? {
         cache.object(forKey: path as NSString)?.image
     }
 
-    static func store(_ image: CGImage, for path: String) {
+    func store(_ image: CGImage, for path: String) {
         cache.setObject(Box(image), forKey: path as NSString, cost: image.bytesPerRow * image.height)
     }
 }

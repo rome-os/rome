@@ -354,7 +354,7 @@ final class AppModel {
     private(set) var phase: Phase = .launching
     private(set) var workspace: Workspace? {
         // Pictures belong to the workspace that loaded them.
-        didSet { if workspace !== oldValue { StoredImageCache.reset() } }
+        didSet { if workspace !== oldValue { images.reset() } }
     }
     private(set) var instances: [CloudInstance] = []
     private(set) var currentInstanceID: String?
@@ -392,8 +392,12 @@ final class AppModel {
     private var refreshing = false
     private var foreground = ForegroundGate()
 
-    init(cloud: CloudAuth = CloudAuth(origin: CloudAuth.configuredOrigin)) {
+    /// The pictures the open workspace loaded; `shared` in the app.
+    private let images: StoredImageCache
+
+    init(cloud: CloudAuth = CloudAuth(origin: CloudAuth.configuredOrigin), images: StoredImageCache = .shared) {
         self.cloud = cloud
+        self.images = images
         push = PushCenter(registry: cloud)
     }
 

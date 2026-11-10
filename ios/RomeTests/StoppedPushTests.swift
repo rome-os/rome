@@ -37,7 +37,9 @@ final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
         if sessionForB {
             store.set(InstanceSession(token: "t", expiresAt: ISO8601DateFormatter().string(from: future), origin: "https://b.example"), for: "instance.session.https://b.example")
         }
-        return AppModel(cloud: CloudAuth(origin: URL(string: "https://romeos.cc")!, configuration: configuration, store: store))
+        // Its own picture cache: the model resets it on every switch, which
+        // must never reach a test using the app's.
+        return AppModel(cloud: CloudAuth(origin: URL(string: "https://romeos.cc")!, configuration: configuration, store: store), images: StoredImageCache())
     }
 
     private func list(b: String, c: String = "stopped") {
