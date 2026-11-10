@@ -19,7 +19,6 @@ const RESTART_PROBE_TIMEOUT_MS = 5_000;
 // forever reads as "still working" when nobody is. Matches the iOS app and
 // Rome Cloud: a cold image pull plus a slow migration can take this long.
 export const RESTART_TIMEOUT_MS = 40 * 60_000;
-const MAX_RESTART_POLLS = RESTART_TIMEOUT_MS / RESTART_POLL_INTERVAL_MS;
 // Above the server's 15 s Rome Cloud relay budget, so an honest answer still
 // lands; past it the request is treated as lost and the guardian can retry
 // (a duplicate is rejected as `upgrade_in_progress`).
@@ -82,7 +81,9 @@ export function useSystemUpgrade(recheck: () => unknown): SystemUpgrade {
     setRestartTimedOut(false);
     let cancelled = false;
     let timer: number | undefined;
-    let polls = 0;
+    // Wall-clock deadline: a slow probe (up to its own 5 s timeout) must not
+    // stretch the wait past RESTART_TIMEOUT_MS.
+    const deadline = Date.now() + RESTART_TIMEOUT_MS;
     const controller = new AbortController();
     // Reload only when the backend reports the version we're upgrading into.
     // Health reachability alone can't distinguish "upgrade finished" from the
@@ -112,8 +113,7 @@ export function useSystemUpgrade(recheck: () => unknown): SystemUpgrade {
         window.location.reload();
         return;
       }
-      polls += 1;
-      if (polls >= MAX_RESTART_POLLS) {
+      if (Date.now() >= deadline) {
         setRestartTimedOut(true);
         return;
       }

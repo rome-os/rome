@@ -51,6 +51,8 @@ function mockBackend(opts: {
   check: Scripted[];
   // "timeout" plays the request's own deadline firing (fetch rejects).
   upgrade?: (Scripted | "timeout")[];
+  // Each build-info probe answers this late (on the test's timers).
+  buildDelayMs?: number;
 }) {
   const checks = [...opts.check];
   const upgrades = [...(opts.upgrade ?? [])];
@@ -74,7 +76,10 @@ function mockBackend(opts: {
       if (next === "timeout") throw new DOMException("signal timed out", "TimeoutError");
       return json(next);
     }
-    if (url === "/api/build-info") return json({ status: 200, body: { version: "1.1.0" } });
+    if (url === "/api/build-info") {
+      if (opts.buildDelayMs) await new Promise((r) => setTimeout(r, opts.buildDelayMs));
+      return json({ status: 200, body: { version: "1.1.0" } });
+    }
     throw new Error(`unexpected request: ${url}`);
   }) as typeof fetch);
   return { upgradeRequests };
@@ -224,5 +229,32 @@ describe("UpgradeIndicator", () => {
     }) as HTMLButtonElement;
     expect(cancel.disabled).toBe(false);
     expect(confirm.disabled).toBe(false);
+  });
+
+  it("gives up after 40 minutes of wall-clock time even when each probe is slow", async () => {
+    rs.useFakeTimers({ shouldAdvanceTime: true });
+    // The old backend never comes back on the target, and every probe takes 4 s.
+    mockBackend({
+      check: [available("1.1.0", "1.2.0")],
+      upgrade: [{ status: 202, body: { status: "upgrading", target: "1.2.0" } }],
+      buildDelayMs: 4_000,
+    });
+    renderIndicator();
+    const user = userEvent.setup({ advanceTimers: rs.advanceTimersByTime });
+
+    try {
+      await user.click(await screen.findByRole("button", { name: ARROW }));
+      await user.click(await screen.findByRole("button", { name: "Upgrade and restart" }));
+      expect(await screen.findByText("Milo is restarting")).toBeTruthy();
+
+      await rs.advanceTimersByTimeAsync(40 * 60_000 + 8_000);
+
+      await waitFor(() =>
+        expect(screen.getByText("The upgrade is taking longer than expected")).toBeTruthy(),
+      );
+      expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
+    } finally {
+      rs.useRealTimers();
+    }
   });
 });
