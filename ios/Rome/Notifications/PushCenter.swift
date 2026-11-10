@@ -13,6 +13,9 @@ protocol DeviceRegistry: AnyObject {
     var accountGeneration: Int { get }
     func registerDevice(_ device: DeviceRegistration) async throws
     func unregisterDevice(token: String) async throws
+    /// Replaces the instances Rome Cloud sends this device's pushes for.
+    /// An older Rome Cloud without the route throws.
+    func subscribeDevice(_ subscriptions: DeviceSubscriptions) async throws
 }
 
 /// The system's notification settings and APNs registration.
@@ -71,6 +74,13 @@ final class PushCenter {
     /// the next one; another account registers the same token again.
     @ObservationIgnored private var sentToken: String?
     @ObservationIgnored private var sentAccount: Int?
+    /// The instances in the app's list: this phone wants pushes from each.
+    /// Nil until Rome Cloud's list is read.
+    @ObservationIgnored private var wantedInstances: [String]?
+    /// What Rome Cloud last accepted, for which token and account. Not kept
+    /// across launches, so each launch sends the set once more.
+    @ObservationIgnored private var sentSubscriptions: DeviceSubscriptions?
+    @ObservationIgnored private var sentSubscriptionsAccount: Int?
 
     init(
         registry: DeviceRegistry,
@@ -129,6 +139,7 @@ final class PushCenter {
                 try? await registry.unregisterDevice(token: registered)
             }
             sentToken = nil
+            sentSubscriptions = nil
             store.save(nil)
         }
     }
@@ -156,7 +167,33 @@ final class PushCenter {
             store.save(token)
         } catch {
             // Rome Cloud may not know the route yet, or is unreachable.
+            return
         }
+        await subscribe()
+    }
+
+    /// Rome Cloud's instance list, read again: pushes come from each instance
+    /// on it, as the guardian or as a visitor.
+    func listChanged(instanceIds: [String]) async {
+        wantedInstances = instanceIds
+        await subscribe()
+    }
+
+    /// Sends the wanted set once this launch's token is registered, and again
+    /// when the set or the account changes. A refusal stays quiet: an older
+    /// Rome Cloud has no such route, and the next change or launch tries again.
+    private func subscribe() async {
+        let account = registry.accountGeneration
+        guard enabledByUser, let token = sentToken, sentAccount == account,
+              let wanted = wantedInstances, registry.canRegisterDevice
+        else { return }
+        let subscriptions = DeviceSubscriptions(token: token, instanceIds: wanted)
+        guard subscriptions != sentSubscriptions || account != sentSubscriptionsAccount else { return }
+        do {
+            try await registry.subscribeDevice(subscriptions)
+            sentSubscriptions = subscriptions
+            sentSubscriptionsAccount = account
+        } catch {}
     }
 
     /// Removes this phone from Rome Cloud's list, then runs `clear`, which drops
@@ -167,6 +204,9 @@ final class PushCenter {
         }
         sentToken = nil
         sentAccount = nil
+        wantedInstances = nil
+        sentSubscriptions = nil
+        sentSubscriptionsAccount = nil
         store.save(nil)
         await clear()
     }

@@ -25,18 +25,20 @@ struct PushTarget: Equatable, Sendable {
 
 /// What a tapped push does once an instance is open.
 enum PushRoute: Equatable {
-    /// The push is for the open instance, or for one this account cannot open
-    /// now: show its Concierge.
+    /// The push is for the open instance, or for one this account no longer
+    /// lists: show the open instance's Concierge.
     case openConcierge
     /// The push is for another running instance: switch to it first.
     case switchTo(CloudInstance)
+    /// The push is for another instance of this account that is not running:
+    /// its stopped page, not the open instance's chat.
+    case showStopped(CloudInstance)
 
     static func decide(_ target: PushTarget, currentInstanceID: String?, instances: [CloudInstance]) -> PushRoute {
         guard target.instanceId != currentInstanceID,
-              let instance = instances.first(where: { $0.id == target.instanceId }),
-              instance.isRunning
+              let instance = instances.first(where: { $0.id == target.instanceId })
         else { return .openConcierge }
-        return .switchTo(instance)
+        return instance.isRunning ? .switchTo(instance) : .showStopped(instance)
     }
 }
 
@@ -97,6 +99,20 @@ struct DeviceRegistration: Encodable, Equatable, Sendable {
     /// The hex form APNs and Rome Cloud use for a device token.
     static func hex(_ deviceToken: Data) -> String {
         deviceToken.map { String(format: "%02x", $0) }.joined()
+    }
+}
+
+/// The body of `PUT /api/devices/subscriptions` on Rome Cloud: every
+/// instance this device takes pushes from, which replaces the set it had.
+/// Ids are Rome Cloud's, as `v1/instances` lists them; their order does not count.
+struct DeviceSubscriptions: Encodable, Equatable, Sendable {
+    let token: String
+    let instanceIds: [String]
+
+    init(token: String, instanceIds: [String]) {
+        self.token = token
+        var seen = Set<String>()
+        self.instanceIds = instanceIds.sorted().filter { seen.insert($0).inserted }
     }
 }
 

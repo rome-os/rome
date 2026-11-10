@@ -415,8 +415,8 @@ final class CloudAuth {
     // MARK: Devices
 
     /// Builds a call to Rome Cloud's device list for this phone's push token.
-    nonisolated static func deviceRequest(origin: URL, accessToken: String, method: String, body: Data) -> URLRequest {
-        var request = URLRequest(url: origin.appending(path: "api/devices"))
+    nonisolated static func deviceRequest(origin: URL, accessToken: String, method: String, path: String = "api/devices", body: Data) -> URLRequest {
+        var request = URLRequest(url: origin.appending(path: path))
         request.httpMethod = method
         // Sign-out waits on the removal, so a slow Cloud must not hold it long.
         request.timeoutInterval = 10
@@ -430,11 +430,11 @@ final class CloudAuth {
     /// Unlike `cloudRequest`, a 401 here keeps the credential: it can mean a
     /// Rome Cloud without the device route, and `v1/instances` catches a
     /// credential that really expired.
-    private func deviceCall(_ method: String, body: some Encodable) async throws {
+    private func deviceCall(_ method: String, path: String = "api/devices", body: some Encodable) async throws {
         guard let credential = store.value(CloudCredential.self, for: Key.credential) else {
             throw AuthError.cloudUnauthorized
         }
-        let request = Self.deviceRequest(origin: origin, accessToken: credential.accessToken, method: method, body: try JSONEncoder().encode(body))
+        let request = Self.deviceRequest(origin: origin, accessToken: credential.accessToken, method: method, path: path, body: try JSONEncoder().encode(body))
         let (_, status) = try await perform(request)
         guard (200..<300).contains(status) else { throw AuthError.sessionRejected }
     }
@@ -534,5 +534,9 @@ extension CloudAuth: DeviceRegistry {
 
     func unregisterDevice(token: String) async throws {
         try await deviceCall("DELETE", body: ["token": token])
+    }
+
+    func subscribeDevice(_ subscriptions: DeviceSubscriptions) async throws {
+        try await deviceCall("PUT", path: "api/devices/subscriptions", body: subscriptions)
     }
 }

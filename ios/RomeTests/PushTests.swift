@@ -31,9 +31,15 @@ import Testing
         #expect(PushRoute.decide(PushTarget(instanceId: "b"), currentInstanceID: "a", instances: instances) == .switchTo(instances[1]))
     }
 
-    @Test func unknownOrStoppedInstanceStaysOnTheOpenOne() {
+    @Test func unknownInstanceStaysOnTheOpenOne() {
         #expect(PushRoute.decide(PushTarget(instanceId: "gone"), currentInstanceID: "a", instances: instances) == .openConcierge)
-        #expect(PushRoute.decide(PushTarget(instanceId: "c"), currentInstanceID: "a", instances: instances) == .openConcierge)
+    }
+
+    /// A push from a stopped instance shows its stopped page, not the open
+    /// instance's Chat. Fails before the change, which stayed on "a".
+    @Test func stoppedInstanceShowsItsStoppedPage() {
+        #expect(PushRoute.decide(PushTarget(instanceId: "c"), currentInstanceID: "a", instances: instances) == .showStopped(instances[2]))
+        #expect(PushRoute.decide(PushTarget(instanceId: "c"), currentInstanceID: nil, instances: instances) == .showStopped(instances[2]))
     }
 }
 
@@ -185,6 +191,124 @@ import Testing
     }
 }
 
+/// A visitor's pushes name their own chats: their main chat goes by its own
+/// id (`concierge-v-…`), their topic chats by theirs.
+@Suite struct VisitorPushTests {
+    let main = "concierge-v-acc1"
+    let topics = [ConciergeChat(id: "concierge-v-acc1", name: "", main: true, unread: 0), ConciergeChat(id: "t-9", name: "Trip", main: false, unread: 0)]
+
+    @Test func aTapOpensTheVisitorsChat() {
+        #expect(PushRoute.topicChat(for: PushTarget(instanceId: "i", chatId: main), topics: topics) == nil)
+        #expect(PushRoute.topicChat(for: PushTarget(instanceId: "i", chatId: "t-9"), topics: topics) == "t-9")
+    }
+
+    /// The phone watches the chat on screen by the id the server knows it by.
+    @Test func theWatchNamesTheVisitorsMainChat() {
+        #expect(PushPresentation.serverChat(conciergeChatID, mainServerID: main) == main)
+        #expect(PushPresentation.serverChat("t-9", mainServerID: main) == "t-9")
+        var watch = ChatWatch()
+        let frames = watch.move(to: PushPresentation.serverChat(conciergeChatID, mainServerID: main))
+        #expect(frames.map(\.topic) == ["chat.watch:\(main)"])
+    }
+
+    /// A push for the chat on screen shows no banner, and opening a chat
+    /// clears its delivered pushes, a visitor's main chat included.
+    @Test func theChatOnScreenHoldsAndClearsItsPushes() {
+        let push: [AnyHashable: Any] = ["rome": ["instanceId": "i", "chatId": main]]
+        #expect(!PushPresentation.shows(PushTarget(userInfo: push), visibleChat: conciergeChatID, instanceID: "i", mainServerID: main))
+        #expect(PushPresentation.shows(PushTarget(userInfo: push), visibleChat: "t-9", instanceID: "i", mainServerID: main))
+        #expect(PushPresentation.belongs(push, to: conciergeChatID, instanceID: "i", mainServerID: main))
+        #expect(!PushPresentation.belongs(push, to: "t-9", instanceID: "i", mainServerID: main))
+        // The same chat id on another instance is another chat.
+        #expect(!PushPresentation.belongs(push, to: conciergeChatID, instanceID: "j", mainServerID: main))
+    }
+}
+
+/// Rome Cloud sends a device the pushes of the instances it subscribed to:
+/// each one in the app's list, as the guardian or as a visitor.
+@MainActor @Suite struct DeviceSubscriptionTests {
+    private func center(_ registry: FakeRegistry) -> PushCenter {
+        PushCenter(registry: registry, system: FakeSystem(.on), defaults: UserDefaults(suiteName: "push-\(UUID())")!, store: .memory())
+    }
+
+    @Test func subscribesToTheListAfterRegistering() async {
+        let registry = FakeRegistry()
+        let push = center(registry)
+        // The list arrives before the token: nothing goes until the device exists.
+        await push.listChanged(instanceIds: ["b", "a"])
+        #expect(registry.calls.isEmpty)
+        await push.didRegister(deviceToken: Data([0xAB]))
+        #expect(registry.calls == ["register ab", "subscribe ab a,b"])
+    }
+
+    @Test func followsTheListAndSendsOnlyChanges() async {
+        let registry = FakeRegistry()
+        let push = center(registry)
+        await push.didRegister(deviceToken: Data([0xAB]))
+        await push.listChanged(instanceIds: ["a", "b"])
+        await push.listChanged(instanceIds: ["b", "a"])
+        await push.listChanged(instanceIds: ["a"])
+        await push.listChanged(instanceIds: [])
+        #expect(registry.calls == ["register ab", "subscribe ab a,b", "subscribe ab a", "subscribe ab "])
+    }
+
+    /// An older Rome Cloud has no route: it stays quiet and is asked again on the next change.
+    @Test func anOlderCloudIsAskedAgainLater() async {
+        let registry = FakeRegistry()
+        registry.subscriptionsMissing = true
+        let push = center(registry)
+        await push.didRegister(deviceToken: Data([0xAB]))
+        await push.listChanged(instanceIds: ["a"])
+        registry.subscriptionsMissing = false
+        await push.listChanged(instanceIds: ["a"])
+        await push.listChanged(instanceIds: ["a"])
+        #expect(registry.calls == ["register ab", "subscribe ab a", "subscribe ab a"])
+    }
+
+    @Test func anotherAccountSubscribesAgain() async {
+        let registry = FakeRegistry()
+        let push = center(registry)
+        await push.didRegister(deviceToken: Data([0xAB]))
+        await push.listChanged(instanceIds: ["a"])
+        registry.accountGeneration += 1
+        await push.upload()
+        await push.listChanged(instanceIds: ["c"])
+        #expect(registry.calls == ["register ab", "subscribe ab a", "register ab", "subscribe ab a", "subscribe ab c"])
+    }
+
+    /// Sign-out removes the device, which ends its subscriptions; the next
+    /// account starts from its own list.
+    @Test func signOutForgetsTheList() async {
+        let registry = FakeRegistry()
+        let push = center(registry)
+        await push.didRegister(deviceToken: Data([0xAB]))
+        await push.listChanged(instanceIds: ["a"])
+        await push.signOut { registry.calls.append("clear") }
+        registry.accountGeneration += 1
+        await push.didRegister(deviceToken: Data([0xAB]))
+        #expect(registry.calls == ["register ab", "subscribe ab a", "unregister ab", "clear", "register ab"])
+    }
+
+    @Test func switchedOffSendsNothing() async {
+        let registry = FakeRegistry()
+        let push = center(registry)
+        await push.didRegister(deviceToken: Data([0xAB]))
+        await push.setEnabled(false)
+        await push.listChanged(instanceIds: ["a"])
+        #expect(registry.calls == ["register ab", "unregister ab"])
+    }
+
+    @Test func bodyAndRequestMatchRomeCloud() throws {
+        let body = try #require(try JSONSerialization.jsonObject(with: JSONEncoder().encode(DeviceSubscriptions(token: "ab", instanceIds: ["b", "a", "b"]))) as? [String: Any])
+        #expect(body["token"] as? String == "ab")
+        #expect(body["instanceIds"] as? [String] == ["a", "b"])
+        let request = CloudAuth.deviceRequest(origin: URL(string: "https://romeos.cc")!, accessToken: "cred", method: "PUT", path: "api/devices/subscriptions", body: Data("{}".utf8))
+        #expect(request.url?.absoluteString == "https://romeos.cc/api/devices/subscriptions")
+        #expect(request.httpMethod == "PUT")
+        #expect(request.value(forHTTPHeaderField: "Authorization") == "Bearer cred")
+    }
+}
+
 @MainActor @Suite struct NotificationSwitchTests {
     private func center(_ registry: FakeRegistry, _ system: FakeSystem, defaults: UserDefaults = UserDefaults(suiteName: "push-\(UUID())")!) -> PushCenter {
         PushCenter(registry: registry, system: system, defaults: defaults, store: .memory())
@@ -290,6 +414,14 @@ private final class FakeRegistry: DeviceRegistry {
     func unregisterDevice(token: String) async throws {
         calls.append("unregister \(token)")
         if fails { throw AuthError.sessionRejected }
+    }
+
+    /// An older Rome Cloud answers the subscription route with 404.
+    var subscriptionsMissing = false
+
+    func subscribeDevice(_ subscriptions: DeviceSubscriptions) async throws {
+        calls.append("subscribe \(subscriptions.token) \(subscriptions.instanceIds.joined(separator: ","))")
+        if subscriptionsMissing { throw AuthError.sessionRejected }
     }
 }
 
