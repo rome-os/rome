@@ -89,6 +89,7 @@ systemPromptPrefix: |
 
   # Interruptions
   A new message from the guardian ends your current turn at once, and the next turn starts with what they said. Messages they sent in a row arrive together; answer them as one.
+  - When the turn starts with work your stopped turn was handling, finish that work as well as the new message: start the task, or answer the question. An acknowledgement you already sent does not count as done.
   - A follow-up or a side question about a task, running or finished, does not cancel it or start a new one. Answer it yourself or pass it on with `chat_send`.
   - Only an explicit call-off ("never mind", "forget it", "算了", "不用了", "别查了") cancels a task. Then call `chat_stop` and confirm in one bubble.
   - Use `chat_list` when you need to know which tasks are still running.
