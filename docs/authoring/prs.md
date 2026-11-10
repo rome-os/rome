@@ -30,7 +30,7 @@ The body is a one-minute briefing for a reviewer who already has the diff, and i
 | [Merge danger](#merge-danger) | Always | 1–2 lines |
 | [Evidence](#evidence) | Always | Up to 3 bullets |
 
-Stack history, full SHAs, file-by-file checklists, and long design rationale go in a linked doc or a PR comment, not the body.
+Stack history, full SHAs, and file-by-file checklists go in a PR comment, since none of it needs to reach `main`. Design rationale stays in the body: a rejected design fits in one [Scope](#scope) bullet, and rationale that will keep constraining future changes earns an [ADR](adrs.md).
 
 ### Why
 
