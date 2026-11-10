@@ -100,7 +100,8 @@
       "idle": "Idle",
       "needsYou": "Waiting for your answer",
       "working": "Working on it",
-      "tasksMore": "{{title}} · +{{count}}",
+      "tasks": "Working on: {{title}}",
+      "tasksMore": "Working on: {{title}} + {{count}} more",
       "tool": {
         "startingTask": "Starting a task",
         "messagingTask": "Writing to a task chat",

@@ -4,6 +4,9 @@ import { cn } from "@/lib/utils";
 import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
 import { RomeMascot } from "./RomeMascot";
 
+/** The kinds that are work under way, whose status line shimmers. */
+const WORKING = new Set<ConciergeActivity["kind"]>(["working", "tool", "tasks"]);
+
 /**
  * The translucent surface every piece of a Concierge chat's floating header
  * sits on: the mascot's badge, the name pill and the round buttons. It blurs
@@ -64,6 +67,9 @@ export function ConciergeHeaderStatus({
           className={cn(
             "max-w-full truncate text-aux",
             activity.kind === "needsYou" ? "text-warning-fg" : "text-muted-foreground",
+            // A light band sweeps the line while work is under way; a
+            // question waiting on the owner and idle stay still.
+            WORKING.has(activity.kind) && "shimmer",
             !status && "sr-only",
           )}
         >
@@ -90,6 +96,6 @@ function statusText(
     case "tasks":
       return activity.more > 0
         ? t("concierge.activity.tasksMore", { title: activity.title, count: activity.more })
-        : activity.title;
+        : t("concierge.activity.tasks", { title: activity.title });
   }
 }

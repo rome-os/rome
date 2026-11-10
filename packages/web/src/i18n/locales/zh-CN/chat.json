@@ -100,7 +100,8 @@
       "idle": "空闲",
       "needsYou": "等你回复",
       "working": "正在处理",
-      "tasksMore": "{{title}} · 另 {{count}} 个",
+      "tasks": "正在处理：{{title}}",
+      "tasksMore": "正在处理：{{title}} 等 {{count}} 个",
       "tool": {
         "startingTask": "正在开始任务",
         "messagingTask": "正在给任务对话发消息",

@@ -2177,7 +2177,7 @@ describe("Chat Concierge empty state", () => {
     expect(badge.querySelector(".rome-mascot")).not.toBeNull();
     expect(badge.className).toContain("rounded-full");
     expect(within(pill).getByText("Concierge")).toBeTruthy();
-    expect(within(pill).getByText("Book the flight")).toBeTruthy();
+    expect(within(pill).getByText("concierge.activity.tasks")).toBeTruthy();
     expect(
       header.querySelector("[data-concierge-header-status]")!.getAttribute("data-activity"),
     ).toBe("tasks");
