@@ -30,34 +30,41 @@ export const CONCIERGE_LEADING_SLOT = "conciergeHeaderLeading";
  *
  * Its root lays out as `contents`: the badge and the pill are items of the
  * header's grid, the badge in its first row and the pill in its second, and
- * the side buttons centre on the badge in the first row.
+ * the side buttons centre on the badge in the first row. Without the badge,
+ * the pill takes the first row and the buttons centre on it.
  */
 export function ConciergeHeaderStatus({
   name,
   activity,
+  badge = true,
 }: {
   name: ReactNode;
   activity: ConciergeActivity;
+  /** Whether the mascot's badge shows. Without it the pill takes the badge's row. */
+  badge?: boolean;
 }) {
   const { t } = useTranslation("chat");
   const status = statusText(activity, t);
   const busy = activity.kind !== "idle";
   return (
     <div data-concierge-header-status data-activity={activity.kind} className="contents">
-      <div
-        data-concierge-header-badge
-        className={cn(
-          "pointer-events-auto col-start-2 row-start-1 flex size-14 items-center justify-center justify-self-center rounded-full",
-          FLOATING_SURFACE,
-        )}
-      >
-        {/* About 60% of the badge, so the bob and the squash keep inside it. */}
-        <RomeMascot alive={busy && activity.kind !== "needsYou"} className="h-8 w-auto" />
-      </div>
+      {badge ? (
+        <div
+          data-concierge-header-badge
+          className={cn(
+            "pointer-events-auto col-start-2 row-start-1 flex size-11 items-center justify-center justify-self-center rounded-full",
+            FLOATING_SURFACE,
+          )}
+        >
+          {/* About 60% of the badge, so the bob and the squash keep inside it. */}
+          <RomeMascot alive={busy && activity.kind !== "needsYou"} className="h-6.5 w-auto" />
+        </div>
+      ) : null}
       <div
         data-concierge-header-pill
         className={cn(
-          "pointer-events-auto relative col-start-2 row-start-2 -mt-2 flex min-w-0 max-w-full flex-col items-center justify-self-center rounded-full px-4 py-1 text-center leading-tight",
+          badge ? "row-start-2 -mt-2" : "row-start-1",
+          "pointer-events-auto relative col-start-2 flex min-w-0 max-w-full flex-col items-center justify-self-center rounded-full px-4 py-1 text-center leading-tight",
           FLOATING_SURFACE,
         )}
       >

@@ -2157,6 +2157,23 @@ describe("Chat Concierge empty state", () => {
     await waitFor(() => expect(seen.outlet).toBe(true));
   });
 
+  it("leaves the mascot's badge out while the chat has no messages, which draws its own", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await screen.findByRole("region", { name: "concierge.empty.title" });
+    const header = document.querySelector<HTMLElement>("[data-concierge-header]")!;
+    expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
+    // The pill takes the badge's row, and the buttons centre on it.
+    const pill = header.querySelector<HTMLElement>("[data-concierge-header-pill]")!;
+    expect(pill.className).toContain("row-start-1");
+    expect(within(pill).getByText("Concierge")).toBeTruthy();
+    expect(within(header).getByRole("button", { name: "navbar.more" })).toBeTruthy();
+  });
+
   it("floats the Concierge's header over its messages: the mascot's badge, a name pill and round buttons", async () => {
     mockConciergeActivity.mockReturnValue({ kind: "tasks", title: "Book the flight", more: 0 });
     mockUseSessionIdentity.mockReturnValue({
@@ -2164,7 +2181,17 @@ describe("Chat Concierge empty state", () => {
       pinnedAgentMention: null,
       archivedAt: null,
     });
+    rs.mocked(listSessionMessages).mockResolvedValueOnce([
+      {
+        id: "m-1",
+        sessionId: "concierge",
+        role: "user" as const,
+        content: "hello",
+        createdAt: "2026-10-26T00:00:00.000Z",
+      },
+    ]);
     const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await screen.findByTestId("user-row");
     const header = await waitFor(() => {
       const found = document.querySelector<HTMLElement>("[data-concierge-header]");
       if (!found) throw new Error("no header");

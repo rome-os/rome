@@ -655,7 +655,7 @@
     /* A Concierge chat's floating header: the mascot's badge, the name pill
        under it with the status line, and the gaps around them. The messages
        start below it. */
-    --rome-concierge-header-height: 7rem;
+    --rome-concierge-header-height: 6.25rem;
     /* How far a Concierge chat's messages start below the top of their
        column: the header, plus the phone's safe area, where the header
        reaches the top of the screen. */

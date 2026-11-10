@@ -2098,6 +2098,8 @@ export function Chat({
       // here; a topic chat's own name is in the chat list.
       name={conciergeName || "Concierge"}
       activity={conciergeActivity}
+      // A chat with no messages yet draws its own large mascot.
+      badge={!conciergeEmpty}
     />
   ) : null;
 
