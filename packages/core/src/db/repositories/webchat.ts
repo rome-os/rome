@@ -459,6 +459,31 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
   where a."status" = 'pending'
   and json_extract(a."payload", '$.channelContext.threadId') is not null
 ))`.mapWith(Boolean);
+// When the session's newest wait began, unix seconds, or null when nothing
+// waits: the newest card of those `sessionAwaitingGuardian` counts open, or
+// the newest approval still pending in this chat.
+export const sessionAwaitingGuardianSince = sql<number | null>`nullif(max(
+  coalesce((
+    select max(cast(m."created_at" as integer)) from "rome_agent_messages" m, json_each(m."content") part
+    where m."session_id" = "rome_sessions"."id" and m."role" = 'assistant'
+    and json_valid(m."content")
+    and m."rowid" > coalesce((
+      select max(u."rowid") from "rome_agent_messages" u
+      where u."session_id" = "rome_sessions"."id" and u."role" = 'user'
+    ), 0)
+    and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
+  ), -1),
+  coalesce((
+    select max(cast(a."created_at" as integer)) from "approvals" a
+    where a."status" = 'pending'
+    and json_extract(a."payload", '$.channelContext.threadId') = "rome_sessions"."id"
+  ), -1)
+), -1)`;
+// When the guardian last said something in the session, unix seconds, or null.
+export const sessionOwnerSpokeAt = sql<number | null>`(
+  select max(cast(u."created_at" as integer)) from "rome_agent_messages" u
+  where u."session_id" = "rome_sessions"."id" and u."role" = 'user'
+)`;
 const SESSION_DELETE_CHUNK_SIZE = 500;
 const SQL_LIKE_ESCAPE = "\\";
 
@@ -792,6 +817,11 @@ export class WebChatRepository {
   protected readonly messageCountColumn: SQL<number> = sessionSelectFields.messageCount;
   /** Whether a listed session waits on the guardian, as a column of its row. */
   protected readonly awaitingGuardianColumn: SQL<boolean> = sessionAwaitingGuardian;
+
+  /** When a session's newest wait on the guardian began, unix seconds, or null. */
+  protected readonly awaitingGuardianSinceColumn: SQL<number | null> = sessionAwaitingGuardianSince;
+  /** When the session's owner last said something in it, unix seconds, or null. */
+  protected readonly ownerSpokeAtColumn: SQL<number | null> = sessionOwnerSpokeAt;
 
   /** The columns a listed session is read with. */
   protected sessionFields() {
@@ -1533,6 +1563,33 @@ export class WebChatRepository {
       .from(romeSessions)
       .where(inArray(romeSessions.id, [...sessionIds]));
     return new Set(rows.filter((row) => row.awaiting).map((row) => row.id));
+  }
+
+  /**
+   * When each of `sessionIds` that waits on the guardian began its newest
+   * wait, epoch milliseconds: its newest open card or newest pending
+   * approval. Sessions that wait on nothing, or name no chat, are left out.
+   */
+  async awaitingGuardianSince(sessionIds: readonly string[]): Promise<Map<string, number>> {
+    if (sessionIds.length === 0) return new Map();
+    const rows = await this.db
+      .select({ id: romeSessions.id, since: this.awaitingGuardianSinceColumn })
+      .from(romeSessions)
+      .where(inArray(romeSessions.id, [...sessionIds]));
+    return new Map(
+      rows.flatMap((row) =>
+        row.since === null ? [] : [[row.id, Number(row.since) * 1000] as const],
+      ),
+    );
+  }
+
+  /** When the session's owner last said something in it, epoch milliseconds, or null. */
+  async ownerSpokeAt(sessionId: string): Promise<number | null> {
+    const [row] = await this.db
+      .select({ at: this.ownerSpokeAtColumn })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, sessionId));
+    return row?.at == null ? null : Number(row.at) * 1000;
   }
 
   /** Omit ownerKey to list all owners. NULL matches none, and the guardian includes NULL-owned sessions. */

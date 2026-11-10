@@ -80,13 +80,27 @@ describe("conciergeActivity", () => {
     expect(conciergeActivity(facts({ tasks: [task()] }))).toEqual({ kind: "idle" });
   });
 
-  it("puts a card waiting here or in a task chat ahead of everything", () => {
-    const busy = { turn: { running: true, tool: "core:chat_start" }, reportPending: true };
-    expect(conciergeActivity(facts({ ...busy, awaitingGuardian: true }))).toEqual({
+  it("puts its own turn ahead of a card waiting here or in a task chat", () => {
+    const turn = { running: true, tool: "core:chat_start" };
+    expect(conciergeActivity(facts({ turn, awaitingGuardian: true }))).toEqual({
+      kind: "tool",
+      tool: "startingTask",
+    });
+    expect(conciergeActivity(facts({ turn, tasks: [task({ awaitingGuardian: true })] }))).toEqual({
+      kind: "tool",
+      tool: "startingTask",
+    });
+  });
+
+  it("puts a card waiting here or in a task chat ahead of a report and running tasks", () => {
+    const rest = { reportPending: true, tasks: [task({ running: true })] };
+    expect(conciergeActivity(facts({ ...rest, awaitingGuardian: true }))).toEqual({
       kind: "needsYou",
     });
     expect(
-      conciergeActivity(facts({ ...busy, tasks: [task({ awaitingGuardian: true })] })),
+      conciergeActivity(
+        facts({ reportPending: true, tasks: [task({ running: true, awaitingGuardian: true })] }),
+      ),
     ).toEqual({ kind: "needsYou" });
   });
 
@@ -139,6 +153,10 @@ function world() {
   let reads = 0;
   const tools = new Map<string, string>();
   const awaiting = new Set<string>();
+  /** When a waiting chat's wait began; one not set began now. */
+  const waitBegan = new Map<string, number>();
+  /** When the owner last spoke in each Concierge chat. */
+  const spoke = new Map<string, number>();
   const pending: string[] = [];
   const rows: (ActivityTaskRow & { conciergeChat: string })[] = [];
   const chats = new Map<string, string>([
@@ -150,7 +168,9 @@ function world() {
     isRunning: (id) => running.has(id),
     isBusy: (id) => running.has(id) && !quiet.has(id),
     openTool: (id) => tools.get(id) ?? null,
-    awaitingGuardianOf: async (ids) => new Set(ids.filter((id) => awaiting.has(id))),
+    awaitingGuardianSince: async (ids) =>
+      new Map(ids.filter((id) => awaiting.has(id)).map((id) => [id, waitBegan.get(id) ?? now])),
+    ownerSpokeAt: async (chatId) => spoke.get(chatId) ?? null,
     tasksOf: async (chatId) => {
       reads += 1;
       return rows.filter((row) => row.conciergeChat === chatId);
@@ -179,6 +199,8 @@ function world() {
     reads: () => reads,
     tools,
     awaiting,
+    waitBegan,
+    spoke,
     pending,
     rows,
     chats,
@@ -380,17 +402,57 @@ describe("ConciergeActivityTracker", () => {
     expect(w.last("topic")).toEqual({ kind: "idle" });
   });
 
-  it("shows a pending approval or an open card while a turn runs, and clears it once answered", async () => {
+  it("says its own turn's work over a fresh wait, and the wait once the turn ends", async () => {
     const w = world();
     await flush();
     // An approval asked for while the agent works on.
     w.running.add("main");
+    w.tools.set("main", "core:web_search");
     w.awaiting.add("main");
     await w.tracker.sessionChanged("main");
-    expect(w.last("main")).toEqual({ kind: "needsYou" });
-    w.awaiting.delete("main");
+    expect(w.last("main")).toEqual({ kind: "tool", tool: "searchingWeb" });
+    w.tools.delete("main");
     await w.tracker.sessionChanged("main");
+    w.advance(TOOL_HOLD_MS);
+    await flush();
     expect(w.last("main")).toEqual({ kind: "working" });
+    // The turn ends with the approval still pending.
+    w.running.delete("main");
+    await w.tracker.sessionChanged("main");
+    expect(w.last("main")).toEqual({ kind: "needsYou" });
+  });
+
+  it("shows only a wait that began after the owner last spoke, and clears it when they speak", async () => {
+    const w = world();
+    await flush();
+    // A task chat's card the owner had seen before they last spoke here.
+    w.rows.push({ id: "t1", title: "Old", chatId: "task-1", updatedAt: 5, conciergeChat: "main" });
+    w.awaiting.add("task-1");
+    w.waitBegan.set("task-1", 100);
+    w.spoke.set("main", 500);
+    await w.tracker.sessionChanged("task-1");
+    w.advance(1_000);
+    await flush();
+    expect(w.last("main") ?? { kind: "idle" }).toEqual({ kind: "idle" });
+
+    // A new card in another task chat after that.
+    w.rows.push({ id: "t2", title: "New", chatId: "task-2", updatedAt: 6, conciergeChat: "main" });
+    w.awaiting.add("task-2");
+    w.waitBegan.set("task-2", 900);
+    await w.tracker.sessionChanged("task-2");
+    expect(w.last("main")).toEqual({ kind: "needsYou" });
+
+    // The owner speaks in the Concierge chat: their message refreshes it.
+    w.spoke.set("main", 2_000);
+    await w.tracker.sessionChanged("main");
+    w.advance(1_000);
+    await flush();
+    expect(w.last("main")).toEqual({ kind: "idle" });
+  });
+
+  it("shows an open card while a quiet background turn runs, and clears it once answered", async () => {
+    const w = world();
+    await flush();
 
     // An open card while a quiet background turn runs.
     w.running.add("topic");

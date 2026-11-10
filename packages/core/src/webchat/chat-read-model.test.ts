@@ -553,6 +553,62 @@ describe("ChatReadModel", () => {
     });
   });
 
+  describe("awaitingGuardianSince and ownerSpokeAt", () => {
+    const card = [{ type: "pending_interaction", interaction: { kind: "question" } }];
+
+    it("tells when the newest open card or pending approval began, and when the owner last spoke", async () => {
+      const chat = dashboardChat("chat-1");
+      dashboardChat("quiet");
+      links.prompt(
+        fixture.say({ id: "q", chat, from: "guardian", at: new Date(10_000) }),
+        "chat-1",
+        "t1",
+      );
+      // An app speaking for the guardian is not the owner speaking.
+      fixture.say({
+        id: "app",
+        chat,
+        from: "automated::1::app:inbox",
+        at: new Date(15_000),
+      });
+      fixture.say({
+        id: "c1",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(20_000),
+        parts: card,
+      });
+      fixture.say({
+        id: "c2",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(30_000),
+        parts: card,
+      });
+
+      expect(await repo.awaitingGuardianSince(["chat-1", "quiet", "missing"])).toEqual(
+        new Map([["chat-1", 30_000]]),
+      );
+      expect(await repo.ownerSpokeAt("chat-1")).toBe(10_000);
+      expect(await repo.ownerSpokeAt("quiet")).toBeNull();
+
+      // A newer pending approval is the newest wait.
+      await testDb.db.insert(approvals).values({
+        id: "approval-1",
+        type: "action_execution",
+        status: "pending",
+        executionState: "idle",
+        requestedBy: "main",
+        description: "approve",
+        payload: { channelContext: { threadId: "chat-1" } },
+        createdAt: new Date(40_000),
+      });
+      expect(await repo.awaitingGuardianSince(["chat-1"])).toEqual(new Map([["chat-1", 40_000]]));
+    });
+  });
+
   describe("unreadCount", () => {
     it("counts lines from Rome after the read mark, up to the cap", async () => {
       const chat = dashboardChat("chat-1");
