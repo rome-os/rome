@@ -348,27 +348,6 @@
   }
 }
 
-/* Document (chat ChatBubble): a long agent message read as a page. The body
-   keeps its size and leading, and the space between blocks tightens a step, so
-   a long answer reads as one piece rather than a stack of separate blocks. */
-.rome-chat-document {
-  --markdown-block-space-between: var(--rome-space-3);
-  --markdown-heading-1-space-before: var(--rome-space-6);
-  --markdown-heading-2-space-before: var(--rome-space-6);
-  --markdown-heading-2-space-after: var(--rome-space-1);
-  --markdown-heading-3-space-before: var(--rome-space-5);
-  --markdown-heading-3-space-after: var(--rome-space-1);
-  --markdown-heading-4-space-before: var(--rome-space-4);
-  --markdown-heading-4-space-after: var(--rome-space-1);
-  --markdown-heading-floor-space-before: var(--rome-space-4);
-  --markdown-list-space-block: var(--rome-space-2);
-  --markdown-code-block-space-block: var(--rome-space-4);
-  --markdown-blockquote-space-block: var(--rome-space-4);
-  --markdown-table-space-block: var(--rome-space-4);
-  --markdown-rule-space-block: var(--rome-space-4);
-  --markdown-media-space-block: var(--rome-space-4);
-}
-
 /* Sent bubble (chat ChatBubble): the content sits on the primary fill, so the
    color tokens markdown reads are re-mapped onto the primary foreground for
    the bubble's children. The bubble itself keeps the real `--primary` for its

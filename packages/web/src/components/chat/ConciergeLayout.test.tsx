@@ -339,7 +339,7 @@ describe("Concierge layout", () => {
       expect(short).toContain("bg-surface-muted");
       const long = bubbleOf("The long one.").className.split(/\s+/);
       expect(long).toContain("w-full");
-      expect(long).toContain("rome-chat-document");
+      expect(long).toContain("rome-markdown-document");
       expect(long).not.toContain("bg-surface-muted");
       expect(capOf(bubbleOf("The long one.")).className.split(/\s+/)).toContain("max-w-2xl");
     });

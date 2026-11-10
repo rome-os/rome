@@ -97,6 +97,28 @@
   --markdown-media-space-block: var(--rome-space-3);
 }
 
+/* A long answer read as a page rather than as a turn of chat. The body keeps
+   its size and leading, and the space between blocks tightens a step, so the
+   answer reads as one piece rather than a stack of separate blocks. Put the
+   class on the prose root or on any ancestor of it. */
+.rome-markdown-document {
+  --markdown-block-space-between: var(--rome-space-3);
+  --markdown-heading-1-space-before: var(--rome-space-6);
+  --markdown-heading-2-space-before: var(--rome-space-6);
+  --markdown-heading-2-space-after: var(--rome-space-1);
+  --markdown-heading-3-space-before: var(--rome-space-5);
+  --markdown-heading-3-space-after: var(--rome-space-1);
+  --markdown-heading-4-space-before: var(--rome-space-4);
+  --markdown-heading-4-space-after: var(--rome-space-1);
+  --markdown-heading-floor-space-before: var(--rome-space-4);
+  --markdown-list-space-block: var(--rome-space-2);
+  --markdown-code-block-space-block: var(--rome-space-4);
+  --markdown-blockquote-space-block: var(--rome-space-4);
+  --markdown-table-space-block: var(--rome-space-4);
+  --markdown-rule-space-block: var(--rome-space-4);
+  --markdown-media-space-block: var(--rome-space-4);
+}
+
 .rome-markdown > * {
   margin-block: 0;
 }

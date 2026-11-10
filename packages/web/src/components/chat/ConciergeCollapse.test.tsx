@@ -637,7 +637,7 @@ describe("Concierge forwarded report", () => {
 
     expect(bubbles()).toHaveLength(1);
     const [bubble] = bubbles();
-    expect(bubble.className).toContain("rome-chat-document");
+    expect(bubble.className).toContain("rome-markdown-document");
     expect(bubble.className).not.toContain("border-l-3");
     expect(bubble.firstElementChild?.contains(chip())).toBe(true);
     expect(bubble.contains(toggles()[0])).toBe(true);
@@ -664,7 +664,7 @@ describe("Concierge forwarded report", () => {
     expect(bubbles()).toHaveLength(2);
     const [lead, report] = bubbles();
     expect(lead.textContent).toBe("Here it is");
-    expect(lead.className).not.toContain("rome-chat-document");
+    expect(lead.className).not.toContain("rome-markdown-document");
     expect(lead.contains(chip())).toBe(false);
     expect(report.contains(chip())).toBe(true);
   });

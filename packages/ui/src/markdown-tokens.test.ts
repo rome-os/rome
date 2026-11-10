@@ -171,6 +171,13 @@ describe("Markdown semantic tokens", () => {
     }
   });
 
+  it("tightens the space between blocks for a document, and keeps its type", () => {
+    const document = declarations(markdownCss, ".rome-markdown-document");
+    expectToken(document, "block-space-between", "var(--rome-space-3)");
+    expect(document).not.toContain("font-size");
+    expect(document).not.toContain("line-height");
+  });
+
   it("rebinds the same tokens for compact mode", () => {
     for (const [name, value] of Object.entries(compactType)) expectToken(compact, name, value);
     expect(compact).not.toContain("font-weight");

@@ -8,7 +8,7 @@ export type ChatBubbleTone = "sent" | "received" | "muted" | "document";
  * the primary color, `received` is an agent text block on the muted surface,
  * and `muted` is a sent message that never reached the agent. `document` is an
  * agent text block read as a page: no fill, as wide as its box allows, with
- * the tighter Markdown rhythm of `.rome-chat-document` in globals.css. It keeps
+ * the tighter Markdown rhythm of `.rome-markdown-document`. It keeps
  * the same padding, so its text lines up with the bubbles around it.
  *
  * A `sent` bubble re-maps the markdown color tokens inside it (see
@@ -27,7 +27,7 @@ export const ChatBubble = forwardRef<
         tone === "sent" && "rome-bubble-on-primary bg-primary text-primary-foreground",
         tone === "received" && "bg-surface-muted text-foreground",
         tone === "muted" && "bg-surface-muted text-foreground",
-        tone === "document" && "rome-chat-document w-full text-foreground",
+        tone === "document" && "rome-markdown-document w-full text-foreground",
         className,
       )}
       {...props}
