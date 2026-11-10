@@ -602,26 +602,27 @@ struct MarkdownTable: View {
         .padding(.vertical, 7)
     }
 
-    /// Its content at its natural width, up to `max`, past which it wraps.
-    private struct CappedWidth: Layout {
-        let max: CGFloat
-
-        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
-            guard let child = subviews.first else { return .zero }
-            let ideal = child.sizeThatFits(.unspecified).width
-            return child.sizeThatFits(ProposedViewSize(width: Swift.min(ideal, max), height: nil))
-        }
-
-        func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
-            subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: nil))
-        }
-    }
-
     /// "Header: value, Header: value" for one row, as plain text.
     nonisolated static func spoken(_ row: [String], header: [String]) -> String {
         zip(header, row).map { name, value in
             let name = MarkdownParser.plain(name), value = MarkdownParser.plain(value)
             return name.isEmpty ? value : "\(name): \(value)"
         }.joined(separator: ", ")
+    }
+}
+
+/// Its content at its natural width, up to `max`, past which it wraps or
+/// is cut: a short text hugs, a long one stops at the cap.
+struct CappedWidth: Layout {
+    let max: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        let ideal = child.sizeThatFits(.unspecified).width
+        return child.sizeThatFits(ProposedViewSize(width: Swift.min(ideal, max), height: nil))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: nil))
     }
 }

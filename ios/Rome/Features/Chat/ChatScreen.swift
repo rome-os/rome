@@ -298,8 +298,9 @@ struct ChatHeader: View {
 }
 
 /// A Concierge chat's identity at the top: a round avatar with the mascot,
-/// overlapping a glass pill with the Concierge's name and, while it does
-/// something, a status line under it.
+/// a small name tag over its lower edge, and, while the Concierge does
+/// something, the status in a capsule of its own below. A short name never
+/// sits lost in a capsule stretched by a long status.
 struct ChatIdentity: View {
     let name: String
     /// Nil or idle: the name alone, and the pill shrinks back.
@@ -321,14 +322,20 @@ struct ChatIdentity: View {
     }
 
     static let avatarSize: CGFloat = 50
-    /// How far the avatar reaches down over the pill.
-    static let overlap: CGFloat = 8
+    /// How far the name tag reaches up over the avatar's lower edge.
+    static let overlap: CGFloat = 6
+    /// The name tag's padding around its text.
+    static let tagPadding = (horizontal: CGFloat(8), vertical: CGFloat(2.5))
+    /// The widest the name runs before it is cut: about eight CJK characters.
+    static func nameWidth(for size: DynamicTypeSize) -> CGFloat { ScaledFont.scaled(12, for: size) * 8.5 }
+    /// The widest the status capsule grows, on an iPad too.
+    static let statusWidth: CGFloat = 360
 
     /// The identity's height with the name alone, at the current text size:
     /// what the header row is laid out for.
     static func restingHeight(for size: DynamicTypeSize) -> CGFloat {
-        let name = UIFont.systemFont(ofSize: ScaledFont.scaled(14, for: size), weight: .semibold).lineHeight
-        return avatarSize - overlap + (overlap + 1) + name + 5
+        let name = UIFont.systemFont(ofSize: ScaledFont.scaled(12, for: size), weight: .medium).lineHeight
+        return avatarSize - overlap + name + tagPadding.vertical * 2
     }
 
     /// Holds the identity at the top of a fixed-height slot: the slot is the
@@ -348,48 +355,57 @@ struct ChatIdentity: View {
     private var status: String? { activity?.statusLine }
     private var busy: Bool { activity?.isBusy ?? false }
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
-        VStack(spacing: -Self.overlap) {
-            // A solid disc on the glass pill: two overlapping layers never
-            // share a color (DESIGN.md 1). Busy, the mascot bobs and glances;
-            // at rest it blinks; under Reduce Motion it stays still.
-            Mascot(alive: busy && !reduceMotion, blinks: !reduceMotion, pokes: pokes)
-                .frame(height: 28)
-                .frame(width: Self.avatarSize, height: Self.avatarSize)
-                .background(Palette.elevated, in: Circle())
-                .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
-                .shadow(color: Palette.avatarShadow, radius: 4, x: 0, y: 1)
-                // The avatar: a soft tap and a reaction, nothing else.
-                .contentShape(Circle())
-                .onTapGesture {
-                    guard !still else { return }
-                    haptic.impactOccurred()
-                    haptic.prepare()
-                    pokes += 1
+        VStack(spacing: 4) {
+            VStack(spacing: -Self.overlap) {
+                // A solid disc: two overlapping layers never share a color
+                // (DESIGN.md 1). Busy, the mascot bobs and glances; at rest it
+                // blinks; under Reduce Motion it stays still.
+                Mascot(alive: busy && !reduceMotion, blinks: !reduceMotion, pokes: pokes)
+                    .frame(height: 28)
+                    .frame(width: Self.avatarSize, height: Self.avatarSize)
+                    .background(Palette.elevated, in: Circle())
+                    .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
+                    .shadow(color: Palette.avatarShadow, radius: 4, x: 0, y: 1)
+                    // The avatar: a soft tap and a reaction, nothing else.
+                    .contentShape(Circle())
+                    .onTapGesture {
+                        guard !still else { return }
+                        haptic.impactOccurred()
+                        haptic.prepare()
+                        pokes += 1
+                    }
+                    .onAppear { if !still { haptic.prepare() } }
+                // The name tag, over the avatar's lower edge; wider than the
+                // avatar for a long name, cut at the end past about eight CJK
+                // characters.
+                CappedWidth(max: Self.nameWidth(for: dynamicTypeSize)) {
+                    Text(verbatim: name)
+                        .romeFont(12, .medium)
+                        .foregroundStyle(Palette.fg)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
-                .onAppear { if !still { haptic.prepare() } }
-                .zIndex(1)
-            VStack(spacing: 1) {
-                Text(verbatim: name)
-                    .romeFont(14, .semibold)
-                    .foregroundStyle(Palette.fg)
-                if let status {
-                    StatusLine(text: status, shimmers: busy && !reduceMotion)
-                }
+                .padding(.horizontal, Self.tagPadding.horizontal)
+                    .padding(.vertical, Self.tagPadding.vertical)
+                    .modifier(HeaderCapsule())
+                    .zIndex(1)
             }
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .padding(.horizontal, 12)
-            // Clear of the avatar's edge, which reaches `overlap` into the pill.
-            .padding(.top, Self.overlap + 1)
-            .padding(.bottom, 5)
-            .frame(minWidth: 72)
-            // Frosted like the composer, so what scrolls under blurs out.
-            .background(Palette.headerPillTint, in: Capsule())
-            .glassSurface(Capsule(), frost: Frost.composer)
-            // A new state switches at once: no resize or fade.
-            .transaction { $0.animation = nil }
+            if let status {
+                // The status in its own capsule: one muted line, cut at the end.
+                StatusLine(text: status, shimmers: busy && !reduceMotion)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .modifier(HeaderCapsule())
+                    .frame(maxWidth: Self.statusWidth)
+            }
         }
+        // A new state switches at once: no resize or fade.
+        .transaction { $0.animation = nil }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: status.map { "\(name), \($0)" } ?? name))
         .accessibilityAddTraits(.isHeader)
@@ -400,6 +416,16 @@ struct ChatIdentity: View {
             announcement.accessibilitySpeechAnnouncementPriority = .low
             AccessibilityNotification.Announcement(announcement).post()
         }
+    }
+}
+
+/// The surface of the header's name tag and status capsule: frosted like
+/// the composer and solid enough that rows scrolling under never show.
+private struct HeaderCapsule: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(Palette.headerPillTint, in: Capsule())
+            .glassSurface(Capsule(), frost: Frost.composer)
     }
 }
 

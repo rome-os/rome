@@ -310,6 +310,11 @@ final class Workspace {
         agentName = await backend.agentName()
     }
 
+    #if DEBUG
+    /// Snapshot runs only: another name in the header.
+    func debugSetAgentName(_ name: String?) { agentName = name }
+    #endif
+
     /// The main chat's name in its header: the Concierge's own, else "Chat".
     var mainChatTitle: String { agentName ?? String(localized: "Chat") }
 

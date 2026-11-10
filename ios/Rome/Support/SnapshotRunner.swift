@@ -55,6 +55,22 @@ enum SnapshotRunner {
             model.openDemo()
             try? await Task.sleep(for: .seconds(2))
             await capture("04-chat", style: styleName, in: directory) {}
+            // The header: the mascot with its name tag, and the status in a
+            // capsule of its own, in each state.
+            if let workspace = model.workspace {
+                let main = workspace.mainChatServerID ?? conciergeChatID
+                await capture("57-header-idle", style: styleName, in: directory, wait: 0.8) { workspace.topics.setActivity(nil, for: main) }
+                await capture("57b-header-working", style: styleName, in: directory, wait: 0.8) { workspace.topics.setActivity(.working, for: main) }
+                await capture("57c-header-long-task", style: styleName, in: directory, wait: 0.8) {
+                    workspace.topics.setActivity(.tasks(title: "整理本周所有会议纪要，并发给团队每个人确认", more: 2), for: main)
+                }
+                await capture("57d-header-long-name", style: styleName, in: directory, wait: 0.8) {
+                    workspace.debugSetAgentName("米洛的超级长名字小管家助手")
+                    workspace.topics.setActivity(.working, for: main)
+                }
+                workspace.debugSetAgentName("Milo")
+                workspace.topics.setActivity(nil, for: main)
+            }
             // Reply on an Agent message in no chat thread: quoted above the composer.
             await capture("04b-chat-quote", style: styleName, in: directory, wait: 1) {
                 guard let chat = model.workspace?.concierge,
