@@ -23,8 +23,12 @@ final class FakeBackend: RomeBackend {
     /// Runs while the newest page is in flight.
     var duringNewestFetch: (() async -> Void)?
 
+    /// Set, every message read fails with it.
+    var messagesError: APIError?
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         pageLimits.append(limit)
+        if let messagesError { throw messagesError }
         let end = before.flatMap { cursor in stored.firstIndex { $0.id == cursor } } ?? stored.count
         let start = max(0, end - limit)
         let page = MessagePage(messages: Array(stored[start..<end]), nextCursor: start > 0 ? stored[start].id : nil)

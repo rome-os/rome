@@ -35,22 +35,43 @@ final class TaskWaitStore {
     }
 
     /// Reads the task's last two turns and the pending approvals, once per
-    /// call: there is no polling, the task's live state asks again.
+    /// call: there is no polling, the task's live state asks again. A read
+    /// that fails keeps the card already shown, so its controls stay for a
+    /// retry; only a read that answers can clear it.
     func load() async {
         loads += 1
         let mine = loads
         async let page = try? backend.messages(sessionId: chatId, before: nil, limit: 2)
         async let approvals = try? backend.pendingApprovals()
-        let messages = await page?.messages ?? []
-        let pending = await approvals ?? []
+        let messages = await page?.messages
+        let pending = await approvals
         guard mine == loads else { return }
-        card = Self.card(messages: messages, approvals: pending, chatId: chatId)
+        guard case .set(let next) = Self.update(card, messages: messages, approvals: pending, chatId: chatId) else {
+            loaded = true
+            return
+        }
+        card = next
         if case .approval(let approval) = card {
             approvalRecord = try? await backend.approval(id: approval.id)
         } else {
             approvalRecord = nil
         }
         loaded = true
+    }
+
+    /// What a load does to the card. A failed read (nil) keeps it.
+    enum Update: Equatable {
+        case keep
+        case set(Card?)
+    }
+
+    /// The task's page decides; the approvals read is optional (a visitor's
+    /// is refused), so without it a shown approval stays and questions
+    /// still update.
+    nonisolated static func update(_ current: Card?, messages: [ChatMessage]?, approvals: [PendingApproval]?, chatId: String) -> Update {
+        guard let messages else { return .keep }
+        if approvals == nil, case .approval = current { return .keep }
+        return .set(card(messages: messages, approvals: approvals ?? [], chatId: chatId))
     }
 
     /// The task's open card: its latest open question, or a pending approval

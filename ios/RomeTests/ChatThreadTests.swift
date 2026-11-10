@@ -94,6 +94,9 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(lines([message("u", role: "user", at: 0, thread: "old"), message("a", at: 10, thread: "old")]) == ["a": 2])
         // A lone reply counts as one, never "0 replies".
         #expect(lines([message("a", at: 0, thread: "old")]) == ["a": 1])
+        // A first message from before threads (no chatThreadId) is loaded but
+        // not counted: its one reply still reads "1 reply". Fails before the change.
+        #expect(lines([message("legacy", role: "user", at: 0), message("a", at: 10, thread: "legacy")]) == ["a": 1])
     }
 
     /// Two stretches next to each other never both show it: the later keeps it.

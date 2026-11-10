@@ -49,6 +49,37 @@ private func approval(_ id: String, chat: String = "task-1", at seconds: TimeInt
         #expect(card([], [approval("old", at: 5), approval("new", at: 9)]) == .approval(approval("new", at: 9)))
     }
 
+    /// Offline, a failed answer and a failed refresh keep the card and its
+    /// controls for a retry. Fails before the change: the card was cleared.
+    @Test func aFailedReadKeepsTheCard() async {
+        let backend = FakeBackend()
+        backend.stored = [message("m", [question], at: 0)]
+        let store = TaskWaitStore(chatId: "task-1", backend: backend)
+        await store.load()
+        guard case .question(let part, let key) = store.card else { Issue.record("no question"); return }
+        backend.answerError = .network
+        backend.messagesError = .network
+        await store.answer(part, key: key, answers: [])
+        #expect(store.error == "Could not send. Please try again.")
+        #expect(store.card == .question(part, key: key))
+        // Back online, a read that answers with nothing open clears it.
+        backend.messagesError = nil
+        backend.stored = [message("m", [question], at: 0), message("r", role: "user", [result("q1")], at: 5)]
+        await store.load()
+        #expect(store.card == nil)
+    }
+
+    /// Without the approvals read (offline, or a visitor's refusal), a shown
+    /// approval stays, and a question still follows the task's page.
+    @Test func withoutApprovalsAShownApprovalStays() {
+        let shown = TaskWaitStore.Card.approval(approval("ap", at: 10))
+        #expect(TaskWaitStore.update(shown, messages: [], approvals: nil, chatId: "task-1") == .keep)
+        #expect(TaskWaitStore.update(nil, messages: nil, approvals: [], chatId: "task-1") == .keep)
+        guard case .set(.question?) = TaskWaitStore.update(nil, messages: [message("m", [question], at: 0)], approvals: nil, chatId: "task-1") else {
+            Issue.record("the question did not show"); return
+        }
+    }
+
     @Test func onlyAWaitingIdleTaskShowsACard() {
         #expect(TaskWaitView.waits(ChatSession(id: "t", name: "", awaitingGuardian: true)))
         #expect(!TaskWaitView.waits(ChatSession(id: "t", name: "", running: true, awaitingGuardian: true)))

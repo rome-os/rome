@@ -248,13 +248,15 @@ enum TranscriptBuilder {
     /// is not in the run, perhaps not loaded), or it has four or more. Two
     /// runs next to each other never both get one: the later keeps it. The
     /// count is the thread's loaded messages, less its first when that is
-    /// loaded: what is left are replies.
+    /// loaded and counted: what is left are replies.
     static func threadLines(_ messages: [ChatMessage]) -> [String: Int] {
         let shown = messages.filter { !$0.isTrace && $0.parts.contains(where: \.isVisible) }
         var sizes: [String: Int] = [:]
         for message in shown { if let root = message.chatThreadId { sizes[root, default: 0] += 1 } }
-        let loaded = Set(shown.map(\.id))
-        func replies(_ thread: String) -> Int { (sizes[thread] ?? 0) - (loaded.contains(thread) ? 1 : 0) }
+        // A first message counts only where it is placed in its own thread;
+        // one from before threads (no chatThreadId) is not in `sizes`.
+        let counted = Set(shown.filter { $0.chatThreadId == $0.id }.map(\.id))
+        func replies(_ thread: String) -> Int { (sizes[thread] ?? 0) - (counted.contains(thread) ? 1 : 0) }
 
         struct Run { let thread: String?; var messages: [ChatMessage] }
         var runs: [Run] = []
