@@ -27,7 +27,7 @@ describe("ConciergeHeaderStatus", () => {
         activity={{ kind: "tasks", title: "Book the flight", more: 2 }}
       />,
     );
-    expect(screen.getByText("Working on: Book the flight + 2 more")).toBeTruthy();
+    expect(screen.getByText("Book the flight +2")).toBeTruthy();
     expect(mascot(container).hasAttribute("data-alive")).toBe(true);
   });
 
@@ -45,17 +45,17 @@ describe("ConciergeHeaderStatus", () => {
   });
 
   // jsdom has no AnimationEvent, so React never hears the squash end there.
-  it("says a lone running task as work in progress", () => {
+  it("says a lone running task by its title alone", () => {
     render(
       <ConciergeHeaderStatus
         name="Milo"
         activity={{ kind: "tasks", title: "Tokyo time", more: 0 }}
       />,
     );
-    expect(screen.getByText("Working on: Tokyo time")).toBeTruthy();
+    expect(screen.getByText("Tokyo time")).toBeTruthy();
   });
 
-  it("words it in Chinese", async () => {
+  it("uses the same short form in Chinese", async () => {
     await i18n.changeLanguage("zh-CN");
     try {
       const { rerender } = render(
@@ -64,14 +64,14 @@ describe("ConciergeHeaderStatus", () => {
           activity={{ kind: "tasks", title: "东京时间", more: 0 }}
         />,
       );
-      expect(screen.getByText("正在处理：东京时间")).toBeTruthy();
+      expect(screen.getByText("东京时间")).toBeTruthy();
       rerender(
         <ConciergeHeaderStatus
           name="Milo"
           activity={{ kind: "tasks", title: "东京时间", more: 2 }}
         />,
       );
-      expect(screen.getByText("正在处理：东京时间 等 2 个")).toBeTruthy();
+      expect(screen.getByText("东京时间 +2")).toBeTruthy();
     } finally {
       await i18n.changeLanguage("en");
     }
