@@ -126,10 +126,25 @@ describe("usage-limit continuation", () => {
       /** The runtime session has not completed a turn, so it holds no model pin. */
       unpinned?: boolean;
       runtimeActiveAt?: Date;
+      /** The chat's agent. */
+      agent?: string;
+      ownerKey?: string;
     } = {},
   ) {
     const { error = MID_RUN, pin = "anthropic", guardianPrompt = "Finish the work" } = options;
-    await repo.createSession(id, id, undefined, "default", null, "default", "assistant:coder");
+    const agent = options.agent ?? "assistant:coder";
+    await repo.createSession(
+      id,
+      id,
+      undefined,
+      "default",
+      null,
+      "default",
+      agent,
+      "webchat",
+      null,
+      options.ownerKey ? { ownerKey: options.ownerKey } : {},
+    );
     await repo.recordUserInput(
       `${id}-input`,
       id,
@@ -144,7 +159,7 @@ describe("usage-limit continuation", () => {
     if (pin || options.unpinned) {
       await db.db.insert(sessions).values({
         id: `${id}-runtime`,
-        agentName: "assistant:coder",
+        agentName: agent,
         chatId: id,
         provider: options.unpinned ? null : pin,
         channelThreadKey: `webchat:${id}`,
@@ -552,8 +567,6 @@ describe("usage-limit continuation", () => {
       { ownerKey: "visitor:someone" },
       { triggerKind: "routine" },
       { triggerKind: "concierge" },
-      { agentName: "core:concierge" },
-      { agentName: "concierge" },
       { archivedAt: new Date() },
       { chatId: null },
     ])("leaves an out-of-scope chat stopped: %j", async (change) => {
@@ -565,12 +578,91 @@ describe("usage-limit continuation", () => {
       expect(agent.calls).toHaveLength(0);
     });
 
-    it("leaves the Concierge main chat to its own recovery", async () => {
-      await stopped("concierge");
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(0);
+    describe("a Concierge chat", () => {
+      const CONCIERGE = "core:concierge";
+      // The main chat has no owner. A topic chat records the guardian as its owner.
+      const chats = [
+        ["main chat", "concierge", undefined],
+        ["topic chat", "0192a8f0-topic", "guardian"],
+      ] as const;
+
+      it.each(
+        chats,
+      )("continues its %s when no provider move followed the limit", async (_label, id, ownerKey) => {
+        await stopped(id, { agent: CONCIERGE, ownerKey });
+        const { agent, runner } = backend();
+        start(runner);
+        await clearAndSweep();
+        expect(agent.calls).toHaveLength(1);
+        expect(agent.calls[0]).toMatchObject({
+          agentName: CONCIERGE,
+          sessionId: `${id}-runtime`,
+          initiatedBy: "system",
+          inputLabel: "Usage limit recovery",
+          threadContext: { channel: "webchat", threadId: id },
+        });
+      });
+
+      it("continues in the session that replaced the stopped turn's, which holds no pin yet", async () => {
+        await stopped("concierge", { agent: CONCIERGE, error: REFUSED, refusedByDashboard: true });
+        // A setup change renewed the session: the old one is completed, and its successor is active and unpinned.
+        await db.db
+          .update(sessions)
+          .set({ status: "completed", supersededBy: "concierge-renewed" })
+          .where(eq(sessions.id, "concierge-runtime"));
+        await db.db.insert(sessions).values({
+          id: "concierge-renewed",
+          agentName: CONCIERGE,
+          chatId: "concierge",
+          provider: null,
+          channelThreadKey: "webchat:concierge",
+          createdAt: new Date(),
+          lastActiveAt: new Date(),
+          status: "active",
+        });
+        const { agent, runner } = backend();
+        start(runner);
+        await clearAndSweep();
+        expect(agent.calls.map((call) => call.sessionId)).toEqual(["concierge-renewed"]);
+      });
+
+      it.each(
+        chats,
+      )("leaves its %s alone once a recovery turn follows the limit", async (_label, id, ownerKey) => {
+        await stopped(id, { agent: CONCIERGE, ownerKey });
+        // Its provider move ran a recovery turn, which is now the chat's newest.
+        rs.setSystemTime(NOW + 1000);
+        await repo.appendTraceBlocks({
+          messageId: `${id}-recovery-trace`,
+          sessionId: id,
+          turnId: "recovery-turn",
+          startSeq: 0,
+          blocks: [
+            { type: "turn_start", turnId: "recovery-turn", sessionId: `${id}-runtime` },
+            { type: "turn_end", turnId: "recovery-turn", status: "completed", durationMs: 1 },
+          ],
+        });
+        const { agent, runner } = backend();
+        start(runner);
+        await clearAndSweep();
+        expect(agent.calls).toHaveLength(0);
+      });
+
+      it("leaves the wording it alone treats as a quota failure to its own recovery", async () => {
+        await stopped("concierge", { agent: CONCIERGE, error: { error: "You've hit your limit" } });
+        const { agent, runner } = backend();
+        start(runner);
+        await clearAndSweep();
+        expect(agent.calls).toHaveLength(0);
+      });
+
+      it("leaves a visitor's Concierge chat alone", async () => {
+        await stopped("0192a8f0-visitor", { agent: CONCIERGE, ownerKey: "visitor:someone" });
+        const { agent, runner } = backend();
+        start(runner);
+        await clearAndSweep();
+        expect(agent.calls).toHaveLength(0);
+      });
     });
   });
 

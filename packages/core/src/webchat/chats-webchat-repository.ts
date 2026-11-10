@@ -13,7 +13,6 @@ import { automatedSource, speaksForGuardian } from "./automated-source.js";
 
 import { randomUUID } from "node:crypto";
 import type { TranscriptPart } from "@rome/api-types/chat";
-import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import type {
   Account,
   AgentInputState,
@@ -22,7 +21,6 @@ import type {
   InputStatusEvent,
 } from "@rome-os/app-runtime";
 import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
-import { CONCIERGE_AGENT_ID } from "../concierge/privacy.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import { partsText, type SaidBy } from "../chats/storage/message.js";
@@ -528,8 +526,10 @@ export class ChatsWebChatRepository extends WebChatRepository {
    * trace began at or after `sinceMs` or its runtime session was active then.
    * A turn that began earlier and was active since is listed, and the caller
    * decides by its last activity. A turn still running, or ended any other
-   * way, is not listed. Concierge chats are left out: they recover on their
-   * own. Oldest first. Eligibility is for `canContinueAfterRestart` to decide.
+   * way, is not listed. A Concierge chat is listed like any other: when it moved
+   * to another provider on its own, its recovery turn is its newest turn, and
+   * when it could not move, its stopped turn still is. Oldest first.
+   * Eligibility is for `canContinueAfterRestart` to decide.
    */
   getLatestErroredTurns(sinceMs: number): ErroredTurn[] {
     const since = Math.floor(sinceMs / 1000);
@@ -549,8 +549,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
         ORDER BY n.created_at DESC, n.rowid DESC LIMIT 1
       )
       WHERE s.type = 'channel' AND s.chat_platform = 'webchat'
-        AND s.id <> ${CONCIERGE_CHAT_ID}
-        AND coalesce(s.agent_name, '') NOT IN (${CONCIERGE_AGENT_ID}, 'concierge')
         AND (
           t.created_at >= ${since}
           OR EXISTS (SELECT 1 FROM ${sessions} r WHERE r.chat_id = s.id AND r.last_active_at >= ${since})
