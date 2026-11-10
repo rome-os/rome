@@ -2557,7 +2557,7 @@ export function Chat({
                 floor={floorEl}
                 header={conciergeHeaderWith(
                   <IconButton
-                    size="md"
+                    size={floating ? "md" : "sm"}
                     label={t("thread.close")}
                     icon={<X />}
                     onClick={replyDraft.closeThread}
