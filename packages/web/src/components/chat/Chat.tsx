@@ -47,6 +47,7 @@ import { SessionLoadingTitle } from "@/components/chat/SessionLoadingTitle";
 import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
+import { TaskChatContext } from "@/components/chat/task-chat";
 import {
   prettyAgentName,
   mainAgentDisplayName as resolveMainAgentDisplayName,
@@ -509,6 +510,7 @@ export function Chat({
     pinnedAgentMention: identityAgentMention,
     archivedAt,
     forkable,
+    isTaskChat,
   } = useSessionIdentity(mainSessionId);
   // The main chat is never archived or deleted, so its menu offers neither.
   const isMainChat = concierge && mainSessionId === conciergeMainChatId;
@@ -2353,38 +2355,40 @@ export function Chat({
                     <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
                   ) : null}
                   <ChatThreadsProvider value={chatThreads}>
-                    <MessageList
-                      rows={rows}
-                      live={{
-                        isStreaming: displayedStreaming,
-                        runningTurnId,
-                        quiet: activeSessionStream?.quiet,
-                        snapshot: currentSnapshot,
-                        textStore: liveTextStore,
-                        blockIx: activeSessionStream?.assistantBlockIx,
-                        textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
-                        identity: mainIdentity,
-                      }}
-                      selection={
-                        shareMode
-                          ? {
-                              selectedTurns: selectedShareTurns,
-                              selectableSessionId: mainSessionId,
-                              onToggleTurn: toggleShareTurn,
-                            }
-                          : undefined
-                      }
-                      contentRef={attachContent}
-                      onOpenLiveTrace={openLiveTraceDrawer}
-                      onOpenStoredTrace={openStoredTraceDrawer}
-                      onOpenSubagentTrace={openSubagentTraceDrawer}
-                      activeTraceTarget={traceDrawerTarget}
-                      subagentIconByName={subagentIconByName}
-                      actions={blockActions}
-                      feedback
-                      fork={forkable}
-                      variant={variant}
-                    />
+                    <TaskChatContext.Provider value={isTaskChat}>
+                      <MessageList
+                        rows={rows}
+                        live={{
+                          isStreaming: displayedStreaming,
+                          runningTurnId,
+                          quiet: activeSessionStream?.quiet,
+                          snapshot: currentSnapshot,
+                          textStore: liveTextStore,
+                          blockIx: activeSessionStream?.assistantBlockIx,
+                          textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
+                          identity: mainIdentity,
+                        }}
+                        selection={
+                          shareMode
+                            ? {
+                                selectedTurns: selectedShareTurns,
+                                selectableSessionId: mainSessionId,
+                                onToggleTurn: toggleShareTurn,
+                              }
+                            : undefined
+                        }
+                        contentRef={attachContent}
+                        onOpenLiveTrace={openLiveTraceDrawer}
+                        onOpenStoredTrace={openStoredTraceDrawer}
+                        onOpenSubagentTrace={openSubagentTraceDrawer}
+                        activeTraceTarget={traceDrawerTarget}
+                        subagentIconByName={subagentIconByName}
+                        actions={blockActions}
+                        feedback
+                        fork={forkable}
+                        variant={variant}
+                      />
+                    </TaskChatContext.Provider>
                   </ChatThreadsProvider>
                 </>
               ) : (
