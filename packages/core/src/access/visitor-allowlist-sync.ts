@@ -6,7 +6,7 @@ import {
   instanceCredentialId,
   onInstanceTokenChanged,
 } from "../instance/instance-identity.js";
-import { normalizePublicAccessEmail } from "../access/public-access-config.js";
+import { normalizeVisitorEmail } from "./visitor-email.js";
 import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
 
 export type { VisitorAllowList } from "./dashboard-access-store.js";
@@ -119,9 +119,7 @@ export class VisitorAllowListSync {
     if (this.latest && list.revision < this.latest.revision) return false;
     const emails = Array.from(
       new Set(
-        list.emails
-          .map(normalizePublicAccessEmail)
-          .filter((email): email is string => email !== null),
+        list.emails.map(normalizeVisitorEmail).filter((email): email is string => email !== null),
       ),
     ).sort();
     this.latest = { emails, revision: list.revision };
