@@ -41,6 +41,10 @@ final class FakeSocket: NodeSocket, @unchecked Sendable {
     private let lock = NSLock()
     private var sentFrames: [String] = []
     private var isClosed = false
+    private var pingTotal = 0
+    private var pingBehavior = PingBehavior.pong
+
+    enum PingBehavior { case pong, hang, fail }
 
     init() {
         let (stream, continuation) = AsyncThrowingStream<String?, Error>.makeStream()
@@ -61,6 +65,22 @@ final class FakeSocket: NodeSocket, @unchecked Sendable {
     }
 
     func send(_ text: String) async throws { lock.withLock { sentFrames.append(text) } }
+
+    var pings: Int { lock.withLock { pingTotal } }
+    func pingsAre(_ behavior: PingBehavior) { lock.withLock { pingBehavior = behavior } }
+
+    func ping() async throws {
+        let behavior = lock.withLock { () -> PingBehavior in
+            pingTotal += 1
+            return pingBehavior
+        }
+        switch behavior {
+        case .pong: return
+        case .fail: throw NodeSocketClosed(code: nil)
+        // No pong: only the caller's timeout, or cancellation, ends it.
+        case .hang: try await Task.sleep(for: .seconds(3600))
+        }
+    }
 
     func close() {
         lock.withLock { isClosed = true }
@@ -127,8 +147,12 @@ final class HostRig {
     let defaults = UserDefaults(suiteName: "rome-node-\(UUID().uuidString)")!
     private(set) var host: NodeHost!
     private(set) var rejections = 0
+    private let pingInterval: TimeInterval
+    private let pingTimeout: TimeInterval
 
-    init() {
+    init(pingInterval: TimeInterval = 25, pingTimeout: TimeInterval = 10) {
+        self.pingInterval = pingInterval
+        self.pingTimeout = pingTimeout
         ConfigProtocol.reset()
         host = makeHost()
         host.onCredentialRejected = { [unowned self] in rejections += 1 }
@@ -146,7 +170,7 @@ final class HostRig {
                 delays.add(delay)
                 try await Task.sleep(for: .milliseconds(5))
             },
-            random: { 0.5 }, name: { "Test iPhone" }
+            random: { 0.5 }, name: { "Test iPhone" }, pingInterval: pingInterval, pingTimeout: pingTimeout
         )
     }
 
@@ -200,6 +224,7 @@ final class HostRig {
         let socket = await rig.online()
         socket.end(code: 4002)
         #expect(await eventually { rig.host.status == .stopped(.superseded) })
+        #expect(await eventually { socket.closed }, "a socket that ended is closed, not left to its session")
         try? await Task.sleep(for: .milliseconds(100))
         #expect(rig.gateway.attempts.count == 1, "no reconnect")
         #expect(rig.delays.values.isEmpty)
@@ -215,6 +240,7 @@ final class HostRig {
         let socket = await rig.online()
         socket.end(code: 4001)
         #expect(await eventually { rig.host.status == .stopped(.revoked) })
+        #expect(await eventually { socket.closed })
         try? await Task.sleep(for: .milliseconds(100))
         #expect(rig.gateway.attempts.count == 1)
         #expect(rig.delays.values.isEmpty)
@@ -224,12 +250,73 @@ final class HostRig {
         let rig = HostRig()
         let first = await rig.online()
         first.end(code: 1006)
+        #expect(await eventually { first.closed }, "each reconnect closes the socket it leaves")
         // Two more attempts fail (no socket to hand out): 1 s, 2 s, 4 s, here at a jitter of exactly 1.
         #expect(await eventually { rig.delays.values.count >= 3 })
         #expect(Array(rig.delays.values.prefix(3)) == [1, 2, 4])
         #expect(rig.host.status == .connecting)
         rig.gateway.enqueue(FakeSocket())
         #expect(await eventually { rig.host.status == .online })
+    }
+
+    @Test func pongsKeepItOnline() async {
+        let rig = HostRig(pingInterval: 0.03, pingTimeout: 0.5)
+        let socket = await rig.online()
+        #expect(await eventually { socket.pings >= 3 })
+        #expect(rig.host.status == .online)
+        #expect(!socket.closed)
+    }
+
+    @Test func aPingThatGetsNoPongClosesTheSocketAndReconnects() async {
+        let rig = HostRig(pingInterval: 0.03, pingTimeout: 0.05)
+        let first = FakeSocket()
+        first.pingsAre(.hang)
+        _ = await rig.online(first)
+        #expect(await eventually { first.closed }, "no pong within the timeout")
+        #expect(await eventually { rig.host.status != .online })
+        // The backoff takes over, and a socket that answers brings it back.
+        #expect(await eventually { !rig.delays.values.isEmpty })
+        #expect(rig.gateway.attempts.count >= 1)
+        let second = FakeSocket()
+        rig.gateway.enqueue(second)
+        #expect(await eventually { rig.host.status == .online && rig.gateway.attempts.count >= 2 })
+        #expect(await eventually { second.pings >= 1 })
+    }
+
+    @Test func aPingThatFailsClosesTheSocketAndReconnects() async {
+        let rig = HostRig(pingInterval: 0.03, pingTimeout: 0.5)
+        let first = FakeSocket()
+        first.pingsAre(.fail)
+        _ = await rig.online(first)
+        #expect(await eventually { first.closed })
+        #expect(await eventually { !rig.delays.values.isEmpty })
+        rig.gateway.enqueue(FakeSocket())
+        #expect(await eventually { rig.host.status == .online && rig.gateway.attempts.count >= 2 })
+    }
+
+    @Test func leavingTheFrontStopsThePings() async {
+        let rig = HostRig(pingInterval: 0.03, pingTimeout: 0.5)
+        let socket = await rig.online()
+        #expect(await eventually { socket.pings >= 1 })
+        rig.host.setActive(false)
+        #expect(await eventually { socket.closed })
+        let before = socket.pings
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(socket.pings <= before + 1)
+    }
+
+    @Test func theUpgradeRequestRefusesRedirects() {
+        let transport = WebSocketTransport()
+        let task = URLSession.shared.dataTask(with: URL(string: "https://gateway.test/ws")!)
+        let redirect = HTTPURLResponse(url: URL(string: "https://gateway.test/ws")!, statusCode: 302, httpVersion: nil, headerFields: ["Location": "https://elsewhere.test/ws"])!
+        var answered = false
+        var followed: URLRequest? = URLRequest(url: URL(string: "https://elsewhere.test/ws")!)
+        transport.urlSession(URLSession.shared, task: task, willPerformHTTPRedirection: redirect, newRequest: URLRequest(url: URL(string: "https://elsewhere.test/ws")!)) { request in
+            answered = true
+            followed = request
+        }
+        #expect(answered)
+        #expect(followed == nil, "the credential never goes to another host")
     }
 
     @Test func cloudSayingTheDeviceSessionIsInvalidEndsTheSignIn() async {

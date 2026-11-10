@@ -72,15 +72,15 @@ enum HealthFixtures {
 
     static func date(_ text: String) -> Date { RomeDate.parse(text)! }
 
-    static func calendar(_ zone: String) -> Calendar {
-        var calendar = Calendar(identifier: .gregorian)
+    static func calendar(_ zone: String, _ identifier: Calendar.Identifier = .gregorian) -> Calendar {
+        var calendar = Calendar(identifier: identifier)
         calendar.timeZone = TimeZone(identifier: zone)!
         calendar.firstWeekday = 2
         return calendar
     }
 
-    static func actions(_ reader: HealthReading, zone: String = "Asia/Shanghai") -> HealthActions {
-        let calendar = calendar(zone)
+    static func actions(_ reader: HealthReading, zone: String = "Asia/Shanghai", calendar identifier: Calendar.Identifier = .gregorian) -> HealthActions {
+        let calendar = calendar(zone, identifier)
         return HealthActions(reader: reader, now: { now }, calendar: { calendar })
     }
 
@@ -131,8 +131,26 @@ enum HealthFixtures {
     }
 
     @Test func everyActivityNameHasHealthKitsType() {
-        for name in WorkoutActivities.names { #expect(LiveHealth.activityTypes[name] != nil, "\(name)") }
+        for name in WorkoutActivities.names { #expect(LiveHealth.activityTypes[name]?.isEmpty == false, "\(name)") }
         #expect(Set(WorkoutActivities.names) == Set(LiveHealth.activityTypes.keys))
+    }
+
+    @Test func danceMeansBothOfHealthKitsDanceTypes() throws {
+        #expect(LiveHealth.activityTypes["dance"] == [.socialDance, .cardioDance])
+        #expect(LiveHealth.activityName(.socialDance) == "dance")
+        #expect(LiveHealth.activityName(.cardioDance) == "dance")
+        let predicate = try #require(LiveHealth.activityPredicate("dance") as? NSCompoundPredicate)
+        #expect(predicate.compoundPredicateType == .or)
+        #expect(predicate.subpredicates.count == 2, "a workout of either type matches")
+        #expect(LiveHealth.activityPredicate("running") != nil)
+        #expect(LiveHealth.activityPredicate("quidditch") == nil)
+    }
+
+    @Test func everyHealthKitTypeNamesItsActivityBack() {
+        for (name, types) in LiveHealth.activityTypes {
+            for type in types { #expect(LiveHealth.activityName(type) == name, "\(name)") }
+        }
+        #expect(LiveHealth.activityName(.fencing) == "other", "a kind outside the list reads as other")
     }
 
     @Test func sleepAnalysisIsAnAliasOfSleep() {
@@ -219,6 +237,38 @@ enum HealthFixtures {
         let start = try #require(HealthDates.parse("2026-11-01T00:00", endOfDay: false, calendar: angeles))
         let end = try #require(HealthDates.parse("2026-11-02T00:00", endOfDay: false, calendar: angeles))
         #expect(end.timeIntervalSince(start) == 25 * 3600)
+    }
+
+    @Test func aPhoneOnAnotherCalendarStillSpeaksGregorian() async throws {
+        let zone = TimeZone(identifier: "Asia/Shanghai")!
+        for identifier in [Calendar.Identifier.buddhist, .japanese, .republicOfChina, .islamicUmmAlQura, .hebrew] {
+            let phone = HealthFixtures.calendar("Asia/Shanghai", identifier)
+            // Parsed as Gregorian, whatever the phone's calendar says the year is.
+            #expect(HealthDates.parse("2026-11-09", endOfDay: false, calendar: phone) == HealthFixtures.date("2026-11-08T16:00:00Z"), "\(identifier)")
+            #expect(HealthDates.parse("2026-11-09", endOfDay: true, calendar: phone) == HealthFixtures.date("2026-11-09T16:00:00Z"), "\(identifier)")
+            #expect(HealthDates.parse("2026-11-08T18:00:30.5", endOfDay: false, calendar: phone) == HealthFixtures.date("2026-11-08T10:00:30Z").addingTimeInterval(0.5), "\(identifier)")
+            #expect(HealthDates.parse("2026-02-30", endOfDay: false, calendar: phone) == nil, "\(identifier)")
+            #expect(phone.timeZone == zone)
+
+            let health = FakeHealth()
+            let actions = HealthFixtures.actions(health, calendar: identifier)
+            let days = try HealthFixtures.ok(await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount","start":"2026-11-03","end":"2026-11-05","interval":"day"}"#)))
+            #expect(days["startISO"]?.string == "2026-11-03T00:00:00+08:00", "\(identifier)")
+            #expect(days["endISO"]?.string == "2026-11-06T00:00:00+08:00", "\(identifier)")
+            #expect(days["results"]?.array?.first?["buckets"]?.array?.count == 3, "\(identifier)")
+            let times = try HealthFixtures.ok(await actions.run("health.stats", args: parseJSON(#"{"type":"sleep","start":"2026-11-08T18:00","end":"2026-11-09T12:00"}"#)))
+            #expect(times["startISO"]?.string == "2026-11-08T18:00:00+08:00", "\(identifier)")
+            #expect(times["endISO"]?.string == "2026-11-09T12:00:00+08:00", "\(identifier)")
+            let today = try HealthFixtures.ok(await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)))
+            #expect(today["startISO"]?.string == "2026-11-09T00:00:00+08:00", "\(identifier)")
+            #expect(today["timeZoneIdentifier"]?.string == "Asia/Shanghai")
+            // Months are Gregorian months, not the phone calendar's.
+            _ = try HealthFixtures.ok(await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount","start":"2026-10-15","end":"2026-11-20","interval":"month"}"#)))
+            #expect(health.quantityRequests.last?.buckets.map(\.start) == [HealthFixtures.date("2026-09-30T16:00:00Z"), HealthFixtures.date("2026-10-31T16:00:00Z")], "\(identifier)")
+            // Samples read the same window.
+            _ = try HealthFixtures.ok(await actions.run("health.samples", args: parseJSON(#"{"type":"heartRate","start":"2026-11-09"}"#)))
+            #expect(health.sampleRequests.last?.window.start == HealthFixtures.date("2026-11-08T16:00:00Z"), "\(identifier)")
+        }
     }
 
     @Test func withOnlyAnEndTheWindowIsThatDay() async throws {
@@ -653,6 +703,52 @@ enum HealthFixtures {
         // limit and includeMetadata may change between pages.
         let changed = await actions.run("health.samples", args: parseJSON(#"{"type":"heartRate","limit":3,"includeMetadata":true,"cursor":"\#(cursor)"}"#))
         #expect((try? HealthFixtures.ok(changed)) != nil)
+    }
+
+    private func forged(_ json: String) -> String { CloudAuth.base64URL(Data(json.utf8)) }
+
+    @Test func aForgedCursorIsRefusedAndNeverCrashes() async throws {
+        let forgeries = [
+            #"{"q":"","t":1e100,"s":0,"ws":0,"we":1}"#,
+            #"{"q":"","t":-1e100,"s":0,"ws":0,"we":1}"#,
+            #"{"q":"","t":0,"s":0,"ws":0,"we":1e100}"#,
+            #"{"q":"","t":0,"s":0,"ws":-1e100,"we":1}"#,
+            #"{"q":"","t":1.5,"s":0,"ws":0,"we":1}"#,
+            #"{"q":"","t":0,"s":0,"ws":0.5,"we":1}"#,
+            #"{"q":"","t":0,"s":0.5,"ws":0,"we":1}"#,
+            #"{"q":"","t":0,"s":-1,"ws":0,"we":1}"#,
+            #"{"q":"","t":0,"s":1e100,"ws":0,"we":1}"#,
+            #"{"q":"","t":0,"s":100000,"ws":0,"we":1}"#,
+            #"{"q":"","t":0,"s":0,"ws":5,"we":5}"#,
+            #"{"q":"","t":0,"s":0,"ws":9,"we":5}"#,
+            #"{"q":"","t":9223372036854775807,"s":0,"ws":0,"we":1}"#,
+            #"{"q":"","t":0,"s":0,"ws":0,"we":9223372036854775807}"#,
+            #"{"q":"","t":-1e30,"s":0,"ws":0,"we":1}"#,
+            #"{"q":"","t":300000000000000,"s":0,"ws":0,"we":1}"#,
+            #"{"q":"","t":"5","s":0,"ws":0,"we":1}"#,
+            #"{"q":"","t":null,"s":0,"ws":0,"we":1}"#,
+            #"{"q":"","t":5}"#,
+            #"{"q":7,"t":5,"s":0,"ws":0,"we":1}"#,
+            #"[]"#, #"7"#, #"null"#,
+        ]
+        for json in forgeries { #expect(SampleCursor(forged(json)) == nil, "\(json)") }
+        let health = store()
+        let actions = HealthFixtures.actions(health)
+        for json in forgeries {
+            let result = await actions.run("health.samples", args: parseJSON(#"{"type":"heartRate","cursor":"\#(forged(json))"}"#))
+            #expect(HealthFixtures.code(result) == "invalid_args", "\(json)")
+        }
+        #expect(health.reads == 0 && health.accessRequests == 0, "a forged cursor touches nothing")
+    }
+
+    @Test func aCursorRoundTripsAndAGoodNumberIsKept() throws {
+        let window = DateInterval(start: HealthFixtures.date("2026-11-03T00:00:00Z"), end: HealthFixtures.date("2026-11-09T10:30:00.123Z"))
+        let cursor = SampleCursor(query: "heartRate|2026-11-03||desc||", window: window, startMs: 1_794_240_000_000, skip: 7)
+        let decoded = try #require(SampleCursor(cursor.encoded))
+        #expect(decoded == cursor)
+        #expect(decoded.window == window)
+        // The extremes of a date the wire can name are still fine.
+        #expect(SampleCursor(forged(#"{"q":"","t":-62135596800000,"s":0,"ws":-62135596800000,"we":253402300799999}"#)) != nil)
     }
 
     @Test func aPageThatFillsExactlyHasNoNextCursor() async throws {

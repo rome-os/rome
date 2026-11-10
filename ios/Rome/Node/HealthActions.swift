@@ -279,6 +279,8 @@ struct HealthActions: Sendable {
     /// Off: the health actions are refused before Health is touched.
     var enabled = HealthSwitch()
     var now: @Sendable () -> Date = { Date() }
+    /// The phone's calendar. Only its time zone and first weekday count: the
+    /// wire speaks Gregorian dates (see `HealthDates.wire`).
     var calendar: @Sendable () -> Calendar = { Calendar.current }
 
     static let actions = ["system.info", "health.stats", "health.samples"]
@@ -450,7 +452,7 @@ struct HealthActions: Sendable {
     }
 
     private func stats(_ args: JSONValue?) async throws -> NodeActionResult {
-        let calendar = self.calendar()
+        let calendar = HealthDates.wire(self.calendar())
         let fields = try object(args, allowed: ["types", "type", "start", "end", "interval", "aggregate", "unit", "activity"])
         let items = try statsItems(fields)
         let window = try windowArgs(fields, calendar: calendar)
@@ -556,7 +558,7 @@ struct HealthActions: Sendable {
     // MARK: health.samples
 
     private func samples(_ args: JSONValue?) async throws -> NodeActionResult {
-        let calendar = self.calendar()
+        let calendar = HealthDates.wire(self.calendar())
         let fields = try object(args, allowed: ["type", "start", "end", "limit", "order", "cursor", "sources", "includeMetadata", "activity"])
         guard let name = try string(fields["type"], "type") else { throw ActionFailure.invalid("type is required.") }
         let type = try healthType(named: name)
@@ -686,12 +688,25 @@ struct HealthActions: Sendable {
 // MARK: - Dates
 
 enum HealthDates {
+    /// The calendar the wire uses: Gregorian in the phone's time zone, with the
+    /// phone's first weekday for week buckets. A phone set to the Buddhist or
+    /// Japanese calendar still reads `2026-11-09` as 9 November 2026, and
+    /// reports hours, days and months by the Gregorian calendar.
+    static func wire(_ phone: Calendar) -> Calendar {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = phone.timeZone
+        calendar.firstWeekday = phone.firstWeekday
+        calendar.minimumDaysInFirstWeek = phone.minimumDaysInFirstWeek
+        return calendar
+    }
+
     /// An ISO 8601 instant (`Z` or an offset), a date-time without offset
     /// (`YYYY-MM-DDTHH:mm`, `:ss`, fractions) or a `YYYY-MM-DD` date: the last
     /// two in the calendar's time zone. A time that happens twice when the
     /// clocks go back is its first one; one that never happens moves on.
     /// `endOfDay`: a date means the start of the next day, the end of that one.
-    static func parse(_ text: String, endOfDay: Bool, calendar: Calendar) -> Date? {
+    static func parse(_ text: String, endOfDay: Bool, calendar phone: Calendar) -> Date? {
+        let calendar = wire(phone)
         let parts = text.split(separator: "-", omittingEmptySubsequences: false)
         if parts.count == 3, parts[0].count == 4, parts[1].count == 2, parts[2].count == 2,
            text.allSatisfy({ $0 == "-" || $0.isASCII && $0.isNumber }),
@@ -749,6 +764,9 @@ struct SampleCursor: Equatable, Sendable {
     let startMs: Int64
     let skip: Int
 
+    /// Milliseconds from year 1 to year 9999: what a date the wire can name comes to.
+    static let years: ClosedRange<Int64> = -62_135_596_800_000...253_402_300_799_999
+
     static func milliseconds(_ date: Date) -> Int64 { Int64((date.timeIntervalSince1970 * 1000).rounded()) }
 
     static func date(_ milliseconds: Int64) -> Date { Date(timeIntervalSince1970: Double(milliseconds) / 1000) }
@@ -776,15 +794,22 @@ struct SampleCursor: Equatable, Sendable {
     init?(_ text: String) {
         var base64 = text.replacingOccurrences(of: "-", with: "+").replacingOccurrences(of: "_", with: "/")
         while base64.count % 4 != 0 { base64 += "=" }
+        // A cursor is whatever the caller sends back: every number must be an
+        // exact whole number in range, or the cursor is refused. A plain
+        // `Int64(x)` traps on 1e100.
         guard let data = Data(base64Encoded: base64),
               let value = try? JSONDecoder().decode(JSONValue.self, from: data),
-              let query = value["q"]?.string, let start = value["t"]?.number, let skip = value["s"]?.number,
-              let windowStart = value["ws"]?.number, let windowEnd = value["we"]?.number,
-              skip >= 0, skip < 100_000, windowStart < windowEnd
+              let query = value["q"]?.string,
+              let start = value["t"]?.number.flatMap({ Int64(exactly: $0) }),
+              let skip = value["s"]?.number.flatMap({ Int(exactly: $0) }),
+              let windowStart = value["ws"]?.number.flatMap({ Int64(exactly: $0) }),
+              let windowEnd = value["we"]?.number.flatMap({ Int64(exactly: $0) }),
+              Self.years.contains(start), Self.years.contains(windowStart), Self.years.contains(windowEnd),
+              (0..<100_000).contains(skip), windowStart < windowEnd
         else { return nil }
         self.init(
-            query: query, window: DateInterval(start: Self.date(Int64(windowStart)), end: Self.date(Int64(windowEnd))),
-            startMs: Int64(start), skip: Int(skip)
+            query: query, window: DateInterval(start: Self.date(windowStart), end: Self.date(windowEnd)),
+            startMs: start, skip: skip
         )
     }
 

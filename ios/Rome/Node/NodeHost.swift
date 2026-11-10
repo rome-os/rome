@@ -58,6 +58,9 @@ protocol NodeSocket: Sendable {
     /// Throws `NodeSocketClosed` when the socket ends.
     func receive() async throws -> String?
     func send(_ text: String) async throws
+    /// A WebSocket ping, answered when the pong comes. Throws when the socket
+    /// is gone, and ends early (throwing) when the calling task is cancelled.
+    func ping() async throws
     func close()
 }
 
@@ -97,6 +100,8 @@ final class NodeHost {
 
     @ObservationIgnored private let credentials: NodeCredentials
     @ObservationIgnored private let reader: HealthReading
+    @ObservationIgnored private let pingInterval: TimeInterval
+    @ObservationIgnored private let pingTimeout: TimeInterval
     @ObservationIgnored private let healthSwitch: HealthSwitch
     @ObservationIgnored private let executor: NodeExecutor
     @ObservationIgnored private let audit: NodeAuditing
@@ -126,8 +131,12 @@ final class NodeHost {
         pause: @escaping @Sendable (TimeInterval) async throws -> Void = { try await Task.sleep(for: .seconds($0)) },
         random: @escaping @Sendable () -> Double = { Double.random(in: 0..<1) },
         now: @escaping @Sendable () -> Date = { Date() },
-        name: @escaping @Sendable () async -> String = { await MainActor.run { UIDevice.current.name } }
+        name: @escaping @Sendable () async -> String = { await MainActor.run { UIDevice.current.name } },
+        pingInterval: TimeInterval = 25,
+        pingTimeout: TimeInterval = 10
     ) {
+        self.pingInterval = pingInterval
+        self.pingTimeout = pingTimeout
         self.credentials = credentials
         reader = health.reader
         let healthOn = defaults.object(forKey: Defaults.health) as? Bool ?? true
@@ -308,7 +317,26 @@ final class NodeHost {
         }
     }
 
+    /// Reads frames until the socket ends, for any reason. The socket is
+    /// closed on every way out, so a reconnect never leaves a transport and its
+    /// session behind. A ping goes out every `pingInterval`: one that fails or
+    /// gets no pong in `pingTimeout` closes the socket, so the read ends and
+    /// the backoff takes over, as when a wifi drop leaves a socket half open.
     private func serve(_ socket: NodeSocket, session: NodeSession) async throws {
+        let heartbeat = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(self?.pingInterval ?? 25))
+                guard !Task.isCancelled, let self else { return }
+                do { try await self.ping(socket) } catch {
+                    if !Task.isCancelled { socket.close() }
+                    return
+                }
+            }
+        }
+        defer {
+            heartbeat.cancel()
+            socket.close()
+        }
         try await withTaskCancellationHandler {
             while true {
                 guard let text = try await socket.receive() else { continue }
@@ -316,6 +344,23 @@ final class NodeHost {
             }
         } onCancel: {
             socket.close()
+        }
+    }
+
+    /// One ping, given `pingTimeout` for its pong.
+    private func ping(_ socket: NodeSocket) async throws {
+        let timeout = pingTimeout
+        try await withThrowingTaskGroup(of: Void.self) { group in
+            group.addTask { try await socket.ping() }
+            group.addTask {
+                try await Task.sleep(for: .seconds(timeout))
+                throw NodeSocketClosed(code: nil)
+            }
+            // The first to finish decides: a pong is fine, the timer is a loss.
+            defer { group.cancelAll() }
+            try await group.next()
+            group.cancelAll()
+            _ = try? await group.next()
         }
     }
 
@@ -412,6 +457,29 @@ final class WebSocketTransport: NSObject, NodeSocket, URLSessionWebSocketDelegat
     func send(_ text: String) async throws {
         guard let task = lock.withLock({ self.task }) else { throw NodeSocketClosed(code: nil) }
         try await task.send(.string(text))
+    }
+
+    func ping() async throws {
+        guard let task = lock.withLock({ self.task }) else { throw NodeSocketClosed(code: nil) }
+        // A cancelled ping closes the socket, which answers the pong handler with an error.
+        try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                task.sendPing { error in
+                    if let error { continuation.resume(throwing: error) } else { continuation.resume() }
+                }
+            }
+        } onCancel: {
+            close()
+        }
+    }
+
+    /// The upgrade request goes only where the Gateway config said, with its
+    /// credential: a redirect is refused.
+    func urlSession(
+        _ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse,
+        newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void
+    ) {
+        completionHandler(nil)
     }
 
     func close() {

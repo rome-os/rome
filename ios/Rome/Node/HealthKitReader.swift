@@ -24,21 +24,28 @@ final class LiveHealth: HealthReading, @unchecked Sendable {
         "dietaryEnergyConsumed": .dietaryEnergyConsumed, "dietaryWater": .dietaryWater,
     ]
 
-    static let activityTypes: [String: HKWorkoutActivityType] = [
-        "walking": .walking, "running": .running, "cycling": .cycling, "hiking": .hiking, "swimming": .swimming,
-        "yoga": .yoga, "pilates": .pilates, "elliptical": .elliptical, "rowing": .rowing, "stairClimbing": .stairClimbing,
-        "dance": .socialDance, "coreTraining": .coreTraining, "flexibility": .flexibility, "cooldown": .cooldown,
-        "functionalStrengthTraining": .functionalStrengthTraining, "traditionalStrengthTraining": .traditionalStrengthTraining,
-        "highIntensityIntervalTraining": .highIntensityIntervalTraining, "mixedCardio": .mixedCardio,
-        "crossTraining": .crossTraining, "jumpRope": .jumpRope, "kickboxing": .kickboxing, "boxing": .boxing,
-        "martialArts": .martialArts, "tennis": .tennis, "badminton": .badminton, "tableTennis": .tableTennis,
-        "basketball": .basketball, "soccer": .soccer, "golf": .golf, "skiing": .downhillSkiing, "snowboarding": .snowboarding,
-        "skating": .skatingSports, "surfing": .surfingSports, "climbing": .climbing, "other": .other,
+    /// HealthKit's types for each name. Dance is two there: social and cardio.
+    static let activityTypes: [String: [HKWorkoutActivityType]] = [
+        "walking": [.walking], "running": [.running], "cycling": [.cycling], "hiking": [.hiking], "swimming": [.swimming],
+        "yoga": [.yoga], "pilates": [.pilates], "elliptical": [.elliptical], "rowing": [.rowing], "stairClimbing": [.stairClimbing],
+        "dance": [.socialDance, .cardioDance], "coreTraining": [.coreTraining], "flexibility": [.flexibility], "cooldown": [.cooldown],
+        "functionalStrengthTraining": [.functionalStrengthTraining], "traditionalStrengthTraining": [.traditionalStrengthTraining],
+        "highIntensityIntervalTraining": [.highIntensityIntervalTraining], "mixedCardio": [.mixedCardio],
+        "crossTraining": [.crossTraining], "jumpRope": [.jumpRope], "kickboxing": [.kickboxing], "boxing": [.boxing],
+        "martialArts": [.martialArts], "tennis": [.tennis], "badminton": [.badminton], "tableTennis": [.tableTennis],
+        "basketball": [.basketball], "soccer": [.soccer], "golf": [.golf], "skiing": [.downhillSkiing], "snowboarding": [.snowboarding],
+        "skating": [.skatingSports], "surfing": [.surfingSports], "climbing": [.climbing], "other": [.other],
     ]
 
-    private static func activityName(_ type: HKWorkoutActivityType) -> String {
-        if type == .cardioDance { return "dance" }
-        return activityTypes.first { $0.value == type }?.key ?? "other"
+    static func activityName(_ type: HKWorkoutActivityType) -> String {
+        activityTypes.first { $0.value.contains(type) }?.key ?? "other"
+    }
+
+    /// Workouts of a kind: any of its HealthKit types.
+    static func activityPredicate(_ activity: String) -> NSPredicate? {
+        guard let types = activityTypes[activity] else { return nil }
+        let each = types.map { HKQuery.predicateForWorkouts(with: $0) }
+        return each.count == 1 ? each[0] : NSCompoundPredicate(orPredicateWithSubpredicates: each)
     }
 
     static func quantityType(_ type: HealthType) -> HKQuantityType? {
@@ -162,9 +169,7 @@ final class LiveHealth: HealthReading, @unchecked Sendable {
 
     func workouts(in window: DateInterval, activity: String?) async throws -> [WorkoutRecord] {
         var predicates = [HKQuery.predicateForSamples(withStart: window.start, end: window.end, options: [])]
-        if let activity, let type = Self.activityTypes[activity] {
-            predicates.append(HKQuery.predicateForWorkouts(with: type))
-        }
+        if let activity, let predicate = Self.activityPredicate(activity) { predicates.append(predicate) }
         let found = try await fetch(HKObjectType.workoutType(), predicate: NSCompoundPredicate(andPredicateWithSubpredicates: predicates), limit: nil, ascending: true)
         return found.compactMap { ($0 as? HKWorkout).map(Self.record) }
     }
@@ -184,9 +189,7 @@ final class LiveHealth: HealthReading, @unchecked Sendable {
             guard !sources.isEmpty else { return [] }
             predicates.append(HKQuery.predicateForObjects(from: sources))
         }
-        if let activity = request.activity, let type = Self.activityTypes[activity] {
-            predicates.append(HKQuery.predicateForWorkouts(with: type))
-        }
+        if let activity = request.activity, let predicate = Self.activityPredicate(activity) { predicates.append(predicate) }
         let found = try await fetch(sampleType, predicate: NSCompoundPredicate(andPredicateWithSubpredicates: predicates), limit: request.limit, ascending: request.ascending)
         let unit = request.type.units.first
         return found.compactMap { sample in
