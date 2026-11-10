@@ -4,6 +4,10 @@ import type { InputStatusEvent } from "@rome-os/app-runtime";
 import type { AgentTurnHandle, AgentTurnInput } from "./agent-session.js";
 import type { ModelSession } from "../domain/model-port.js";
 import { AgentInputQueue } from "./agent-input-queue.js";
+import { INTERRUPTED_WORK_NOTE, NEW_INPUT_NOTE } from "../domain/input-queue.js";
+
+const interruptedPrompt = (interrupted: string[], inputs: string[]) =>
+  [INTERRUPTED_WORK_NOTE, ...interrupted, NEW_INPUT_NOTE, ...inputs].join("\n\n");
 
 /** A turn that says nothing and never ends; a stop goes to `stop`. */
 function fakeHandle(
@@ -203,8 +207,48 @@ describe("input priority", () => {
     expect(s.steer).not.toHaveBeenCalled();
     expect(s.interrupts).toEqual([{ turnId: "turn-1", reason: "superseded" }]);
     s.queue.finish("turn-1");
-    // `a` was consumed, so it is in the provider's history and is not repeated.
+    expect(s.started.map((input) => input.prompt)).toEqual(["a", interruptedPrompt(["a"], ["b"])]);
+    // `a` was read in turn-1, so it stays consumed there.
+    expect(s.lastState("a")).toBe("consumed");
+    expect(s.statuses.filter((status) => status.inputId === "a").at(-1)?.turnId).toBe("turn-1");
+  });
+
+  it("re-sends nothing from a superseded turn that completed", async () => {
+    const s = prioritySetup();
+    s.submit("a");
+    await s.queue.beforeSend("turn-1");
+    s.queue.ready("turn-1");
+    await s.queue.observe({ type: "input_status", inputId: "a", state: "consumed" }, "turn-1");
+    s.submit("b", "now");
+    s.queue.finish("turn-1", true);
     expect(s.started.map((input) => input.prompt)).toEqual(["a", "b"]);
+  });
+
+  it("names a request once across two supersedes in a row", async () => {
+    const s = prioritySetup();
+    s.submit("today", "now");
+    s.queue.ready("turn-1");
+    await s.queue.observe({ type: "input_status", inputId: "today", state: "consumed" }, "turn-1");
+    s.submit("yesterday", "now");
+    s.queue.finish("turn-1");
+    s.queue.ready("turn-2");
+    await s.queue.observe(
+      { type: "input_status", inputId: "yesterday", state: "consumed" },
+      "turn-2",
+    );
+    s.submit("hello", "now");
+    s.queue.finish("turn-2");
+    expect(s.started.map((input) => input.prompt)).toEqual([
+      "today",
+      interruptedPrompt(["today"], ["yesterday"]),
+      interruptedPrompt(["today", "yesterday"], ["hello"]),
+    ]);
+    // A turn that completes hands on nothing.
+    s.queue.ready("turn-3");
+    await s.queue.observe({ type: "input_status", inputId: "hello", state: "consumed" }, "turn-3");
+    s.queue.finish("turn-3", true);
+    s.submit("next");
+    expect(s.started.at(-1)?.prompt).toBe("next");
   });
 
   it("carries an input the provider never consumed into the next turn", async () => {
@@ -250,7 +294,7 @@ describe("input priority", () => {
     expect(s.lastState("b")).toBe("accepted");
     s.submit("c", "now");
     s.queue.finish("turn-1");
-    expect(s.started.at(-1)?.prompt).toBe("b\n\nc");
+    expect(s.started.at(-1)?.prompt).toBe(interruptedPrompt(["a"], ["b", "c"]));
   });
 
   it("keeps a guardian stop from replaying anything", async () => {

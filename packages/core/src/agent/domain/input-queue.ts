@@ -50,6 +50,12 @@ export interface InputTurn<T> {
   readonly bound: readonly T[];
   /** `first` and `bound` in the order the turn's prompt holds them. */
   readonly prompted: readonly T[];
+  /**
+   * Consumed inputs of earlier turns that a `now` input stopped before they
+   * finished, in order. The prompt names them as interrupted work ahead of
+   * `prompted`. Their status stays `consumed`.
+   */
+  readonly interrupted: readonly T[];
   /** Inputs steered into the turn, in dispatch order. */
   readonly steered: readonly T[];
   /** The provider has begun the turn and can be steered. */
@@ -80,6 +86,16 @@ export function arrive<T>(turn: InputTurn<T> | undefined, priority: InputPriorit
   return { landing: turn.ready && !turn.sealed ? "steered" : "queued", supersede: false };
 }
 
+/** What a superseded turn hands the next one. */
+export interface Carried<T> {
+  /** Inputs the provider never consumed. The next turn prompts them again. */
+  readonly inputs: readonly T[];
+  /** Inputs the provider consumed in a turn that did not finish. The next turn names them as interrupted work. */
+  readonly interrupted: readonly T[];
+}
+
+export const NOTHING_CARRIED: Carried<never> = { inputs: [], interrupted: [] };
+
 /**
  * The turn `first` starts, and what stays queued. It takes every input a
  * superseded turn carried over, in front and in order. A `now` input also takes
@@ -89,15 +105,16 @@ export function arrive<T>(turn: InputTurn<T> | undefined, priority: InputPriorit
 export function startTurn<T extends QueuedInput>(
   first: T,
   queued: readonly T[],
-  carried: readonly T[],
+  carried: Carried<T>,
 ): { turn: InputTurn<T>; queued: T[] } {
   const absorbed = first.priority === "now" ? queued.filter((q) => q.priority === "now") : [];
   const rest = queued.filter((q) => !absorbed.includes(q));
   return {
     turn: {
       first,
-      bound: [...carried, ...absorbed],
-      prompted: [...carried, first, ...absorbed],
+      bound: [...carried.inputs, ...absorbed],
+      prompted: [...carried.inputs, first, ...absorbed],
+      interrupted: carried.interrupted,
       steered: [],
       ready: false,
       sealed: false,
@@ -107,16 +124,37 @@ export function startTurn<T extends QueuedInput>(
   };
 }
 
-/** One prompt holding every input, in order, with all their images. */
+/** The line that tells the model the inputs after it are work its stopped turn left unfinished. */
+export const INTERRUPTED_WORK_NOTE =
+  "Your previous turn was stopped before it finished. It was handling:";
+
+/** The line that separates interrupted work from the new input. */
+export const NEW_INPUT_NOTE = "New message:";
+
+/**
+ * One prompt holding every input, in order, with all their images. Interrupted
+ * work, when there is any, comes first under `INTERRUPTED_WORK_NOTE`, then the
+ * parts under `NEW_INPUT_NOTE`.
+ */
 export function joinPrompts<I extends { prompt: string; images?: string[] }>(
   first: I,
   parts: readonly I[],
+  interrupted: readonly I[] = [],
 ): I {
-  if (parts.length === 1) return first;
+  if (parts.length === 1 && interrupted.length === 0) return first;
+  const prompts = parts.map((part) => part.prompt);
   return {
     ...first,
-    prompt: parts.map((part) => part.prompt).join("\n\n"),
-    images: parts.flatMap((part) => part.images ?? []),
+    prompt: (interrupted.length > 0
+      ? [
+          INTERRUPTED_WORK_NOTE,
+          ...interrupted.map((part) => part.prompt),
+          NEW_INPUT_NOTE,
+          ...prompts,
+        ]
+      : prompts
+    ).join("\n\n"),
+    images: [...interrupted, ...parts].flatMap((part) => part.images ?? []),
   };
 }
 
@@ -207,16 +245,34 @@ export function boundFollow<T>(
 }
 
 /**
- * What a superseded turn carries over: every input it prompted or steered that
- * the provider did not consume and that is not queued again. The provider never
- * saw these, or saw them only in a turn it dropped (Claude resumes from its
- * transcript, which lacks an input it had not read yet). They keep prompt
- * order, so a turn that itself took carried inputs keeps them before `first`.
+ * What a superseded turn carries over. `inputs` holds every input it prompted
+ * or steered that the provider did not consume and that is not queued again.
+ * The provider never saw these, or saw them only in a turn it dropped (Claude
+ * resumes from its transcript, which lacks an input it had not read yet). They
+ * keep prompt order, so a turn that itself took carried inputs keeps them
+ * before `first`.
+ *
+ * Unless the turn `completed`, `interrupted` holds the work it left unfinished:
+ * the interrupted work it took, then the inputs it consumed, each once. The
+ * model read them, but its partial answer can make them look handled. A turn
+ * that completed hands no interrupted work on, so nothing it answered is sent
+ * again.
  */
-export function carryOver<T extends QueuedInput>(turn: InputTurn<T>, queued: readonly T[]): T[] {
-  return [...turn.prompted, ...turn.steered].filter(
-    (input) => input.state !== "consumed" && input.state !== "cancelled" && !queued.includes(input),
-  );
+export function carryOver<T extends QueuedInput>(
+  turn: InputTurn<T>,
+  queued: readonly T[],
+  completed: boolean,
+): Carried<T> {
+  const taken = [...turn.prompted, ...turn.steered];
+  return {
+    inputs: taken.filter(
+      (input) =>
+        input.state !== "consumed" && input.state !== "cancelled" && !queued.includes(input),
+    ),
+    interrupted: completed
+      ? []
+      : [...new Set([...turn.interrupted, ...taken.filter((input) => input.state === "consumed")])],
+  };
 }
 
 /**
@@ -239,13 +295,20 @@ export function endTurn<T extends QueuedInput>(
   return updates;
 }
 
-/** The next turn starts with the first queued input, else the first carried one. */
+/**
+ * The next turn starts with the first queued input, else the first carried one.
+ * Interrupted work never starts a turn on its own: it waits for an input.
+ */
 export function nextInput<T>(
   queued: readonly T[],
-  carried: readonly T[],
-): { next?: T; queued: T[]; carried: T[] } {
-  if (queued.length > 0) return { next: queued[0], queued: queued.slice(1), carried: [...carried] };
-  return { next: carried[0], queued: [], carried: carried.slice(1) };
+  carried: Carried<T>,
+): { next?: T; queued: T[]; carried: Carried<T> } {
+  if (queued.length > 0) return { next: queued[0], queued: queued.slice(1), carried };
+  return {
+    next: carried.inputs[0],
+    queued: [],
+    carried: { ...carried, inputs: carried.inputs.slice(1) },
+  };
 }
 
 /** An input in one of these states will see no further status. */

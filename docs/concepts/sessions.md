@@ -237,6 +237,7 @@ A conversational input is one independently submitted user message. Its identity
 
 - WebChat persists an input before dispatch. Sending during a turn attempts non-interrupting provider steering. It does not start a concurrent turn or replace the active output stream.
 - An input may set `priority: "now"` instead of the default `next`. It then ends the running turn with the reason `superseded` and starts the next turn, which takes the inputs the ended turn never consumed, in order, and every other queued `now` input. See [opt-in interrupting input](../adrs/opt-in-interrupting-input.md).
+- When a `now` input stops a turn before it completes, the inputs that turn had consumed are handed to the next turn as interrupted work. Its prompt names them first as work the stopped turn was handling, each once, and they stay consumed. Interrupted work passes on through further superseded turns until one completes. A turn that completed hands on nothing.
 - Provider acceptance and consumption are distinct. An accepted input is not shown as consumed until the provider includes it in context.
 - A definitely unconsumed input can start the next turn. If the provider already holds it, the next turn adopts it without sending another copy.
 - An uncertain delivery is not automatically retried. After a backend restart, unfinished inputs remain visible with unconfirmed delivery. They are not silently replayed.

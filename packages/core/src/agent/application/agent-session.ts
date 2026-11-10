@@ -2683,7 +2683,12 @@ class AgentSessionImpl implements AgentSession {
     this.status = "idle";
     this.currentTurnId = undefined;
     this.emitStatus();
-    this.inputs.finish(sink.turnId);
+    // A turn the provider finished before the stop reached it completed, so its
+    // inputs are not handed on as interrupted work.
+    this.inputs.finish(
+      sink.turnId,
+      turnStatus({ terminal: sink.saidTerminal, stoppedByRome: false }) === "completed",
+    );
   }
 
   private clearSubagentLinks(sink: TurnSink): void {
