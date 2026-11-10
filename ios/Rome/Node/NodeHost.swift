@@ -5,8 +5,8 @@ import UIKit
 // This iPhone as a rome-node device, ported from connectHost() and
 // connectGateway() in packages/rome-node-core. The app's Rome Cloud sign-in
 // (`romemob_` token and its device session) is the device's identity, as the
-// Mac app's is: signed in means connected, unless the switch in Settings is
-// off. The connection lives while the app is in front.
+// Mac app's is. It connects only once the person turns the switch in Settings
+// on (off by default), and lives while the app is in front and signed in.
 
 /// The app's Rome Cloud sign-in, as the host reads it.
 @MainActor
