@@ -1,9 +1,10 @@
 import SwiftUI
 
 /// A chat thread over its chat: the chat stays behind it, blurred and
-/// dimmed, so the thread reads as part of the conversation. Its messages sit
-/// above its own composer, which sends into the thread and closes it. A tap
-/// beside the messages, or the close button, closes it too.
+/// dimmed, so the thread reads as part of the conversation. It covers the
+/// header and the transcript only: the chat's own composer stays below it
+/// and sends into the thread while it is open. A tap beside the messages,
+/// or the close button, closes it.
 struct ThreadOverlay: View {
     let thread: ThreadStore
     let chat: TranscriptStore
@@ -11,10 +12,6 @@ struct ThreadOverlay: View {
     let onOpenChat: (String, String) -> Void
     let onClose: () -> Void
 
-    @State private var draft = ""
-    /// The thread's composer takes no photos; the draft keeps none.
-    @State private var attachments = ComposerAttachments()
-    @State private var focused = false
     @State private var shown = false
     @State private var visibleHeight: CGFloat = 0
 
@@ -24,13 +21,14 @@ struct ThreadOverlay: View {
             Rectangle()
                 .fill(.ultraThinMaterial)
                 .overlay(Palette.scrim.opacity(0.35))
-                .ignoresSafeArea()
+                // Up under the status bar, and down behind the composer, which
+                // stays on top of it.
+                .ignoresSafeArea(.container, edges: [.top, .bottom])
                 .opacity(shown ? 1 : 0)
                 .onTapGesture { close() }
             VStack(spacing: 0) {
                 // In place from the first frame: it stands for the header below.
                 header
-                VStack(spacing: 0) {
                 ScrollView {
                     VStack(spacing: 0) {
                         ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
@@ -50,30 +48,13 @@ struct ThreadOverlay: View {
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { visibleHeight = $0 }
                 .defaultScrollAnchor(.bottom)
                 .scrollDismissesKeyboard(.interactively)
-                Composer(text: $draft, placeholder: String(localized: "Reply"), focused: $focused) {
-                    if chat.send(draft, fromComposer: true, thread: thread.target) {
-                        draft = ""
-                        close()
-                    }
-                }
-                .padding(.horizontal, Metrics.pagePadding)
-                .padding(.top, 6)
-                .padding(.bottom, 8)
-                }
                 .opacity(shown ? 1 : 0)
                 .offset(y: shown ? 0 : 36)
             }
         }
-        .modifier(ThreadDraft(chat: chat, thread: thread, text: $draft, attachments: attachments))
         .onAppear {
             withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { shown = true }
-            // The keyboard comes up as the thread lands, ready for the reply.
-            Task {
-                try? await Task.sleep(for: .milliseconds(150))
-                focused = true
-            }
         }
-        .accessibilityAddTraits(.isModal)
     }
 
     /// The chat's own header, laid over it unchanged: the mascot pill in the
@@ -94,8 +75,9 @@ struct ThreadOverlay: View {
         .frame(height: 52)
     }
 
+    /// The composer keeps its text and focus: closed unsent, the text stays
+    /// for the chat.
     private func close() {
-        focused = false
         withAnimation(.easeOut(duration: 0.2)) { shown = false }
         Task {
             try? await Task.sleep(for: .milliseconds(200))
@@ -123,22 +105,5 @@ struct ThreadRepliesLine: View {
         .buttonStyle(.plain)
         .frame(maxWidth: .infinity, alignment: guardian ? .trailing : .leading)
         .padding(.leading, guardian ? 0 : 8)
-    }
-}
-
-/// The thread's composer keeps its own draft, under the thread's key, so a
-/// send that did not get through comes back here.
-private struct ThreadDraft: ViewModifier {
-    let chat: TranscriptStore
-    let thread: ThreadStore
-    @Binding var text: String
-    let attachments: ComposerAttachments
-
-    func body(content: Content) -> some View {
-        if let drafts = chat.drafts {
-            content.composerDraft(drafts.store, chat: DraftStore.threadChat(drafts.chat, messageId: thread.anchor.id), text: $text, attachments: attachments, transcript: chat)
-        } else {
-            content
-        }
     }
 }

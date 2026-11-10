@@ -61,6 +61,14 @@ struct TopicChatScreen: View {
                 chatKey: chatId ?? draftKey
             )
         }
+        // Over the header and the transcript; the composer below stays in place.
+        .overlay {
+            if let store, let thread = store.thread {
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, onOpenChat: onOpenChat) { store.closeThread() }
+            }
+        }
+        // Reply or a tap on a message: the composer is ready for the reply.
+        .onChange(of: store?.thread != nil) { _, open in if open { composerFocused = true } }
         .alert("Rename chat", isPresented: $renaming) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) {}
@@ -71,7 +79,7 @@ struct TopicChatScreen: View {
             }
         }
         .pageBackground()
-        .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store)
+        .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onThread: { store?.reopenThread($0) })
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 10) {
@@ -84,7 +92,7 @@ struct TopicChatScreen: View {
                 if showsStarters {
                     ConciergeStarters { send(text: $0.text) }
                 }
-                Composer(text: $draft, placeholder: String(localized: "Message"), focused: $composerFocused, attachments: attachments) { send() }
+                Composer(text: $draft, placeholder: store?.thread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) { send() }
             }
             .animation(.easeOut(duration: 0.2), value: showsStarters)
             .disabled(starting != nil)
@@ -92,14 +100,6 @@ struct TopicChatScreen: View {
             .padding(.top, 6)
             .padding(.bottom, 8)
         }
-        .overlay {
-            if let store, let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, onOpenChat: onOpenChat) { store.closeThread() }
-            }
-        }
-        // The chat's own keyboard goes down under an opened thread.
-        .onChange(of: store?.thread != nil) { _, open in if open { composerFocused = false } }
-        .task(id: "\(store?.sessionId ?? "")|\(store?.loaded ?? false)") { if let store, store.loaded { await store.reopenThreadDraft() } }
         .onAppear { store?.start() }
         // A blank chat that just started its chat keeps this view.
         .onChange(of: chatId) { store?.start() }
@@ -156,9 +156,11 @@ struct TopicChatScreen: View {
         guard !attachments.isPreparing else { return }
         let images = attachments.images
         if let store {
-            if store.send(draft, images: images, fromComposer: true) {
+            // While a chat thread is open, the composer sends into it.
+            if store.send(draft, images: images, fromComposer: true, thread: store.thread?.target) {
                 draft = ""
                 _ = attachments.take()
+                store.closeThread()
             }
             return
         }

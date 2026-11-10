@@ -5,6 +5,9 @@ import SwiftUI
 struct Draft: Equatable, Sendable {
     var text: String
     var photos: [ComposerImage]
+    /// A send from a chat thread that did not get through: the thread it
+    /// was for. Nil for anything typed in the chat's own composer.
+    var thread: ThreadTarget? = nil
 }
 
 /// A message the guardian has in a chat's transcript, to tell whether an
@@ -99,7 +102,6 @@ final class DraftStore {
     func sending(chat: String, inputId: String, text: String, photos: [ComposerImage], fromComposer: Bool = false, thread: ThreadTarget? = nil) {
         unsettled.insert(inputId)
         let folder = folder(chat)
-        let threadFile = folder.appending(path: Self.threadFile)
         let slot = folder.appending(path: "sending-\(Self.safe(inputId))", directoryHint: .isDirectory)
         let live = folder.appending(path: "live", directoryHint: .isDirectory)
         if fromComposer {
@@ -110,55 +112,8 @@ final class DraftStore {
         let root = root
         disk.run {
             if fromComposer { try? FileManager.default.removeItem(at: live) }
-            Self.write(slot, text: text, photos: photos, root: root)
-            // The thread the message was for, so a relaunch takes it back there.
-            if let thread, let data = try? JSONEncoder().encode(thread) { try? data.write(to: threadFile, options: .atomic) }
-        }
-    }
-
-    // MARK: Chat threads
-
-    /// The draft key of a chat thread's composer: a send from the thread that
-    /// does not get through comes back there, not in the chat's composer.
-    nonisolated static func threadChat(_ chat: String, messageId: String) -> String {
-        "\(chat)\(threadSeparator)\(messageId)"
-    }
-
-    nonisolated private static let threadSeparator = "~thread~"
-    nonisolated private static let threadFile = "thread.json"
-
-    /// The chat threads of `chat` holding a send that did not get through,
-    /// oldest first. Text only typed there waits for the thread to be opened.
-    func threadDrafts(chat: String) async -> [ThreadTarget] {
-        let prefix = Self.safe(Self.threadChat(chat, messageId: ""))
-        let base = instanceFolder
-        return await disk.value([]) {
-            ((try? FileManager.default.contentsOfDirectory(at: base, includingPropertiesForKeys: [.contentModificationDateKey])) ?? [])
-                .filter { $0.lastPathComponent.hasPrefix(prefix) }
-                .filter { folder in
-                    let items = (try? FileManager.default.contentsOfDirectory(atPath: folder.path(percentEncoded: false))) ?? []
-                    return items.contains { $0.hasPrefix("sending-") }
-                }
-                .sorted { Self.modified($0) < Self.modified($1) }
-                .compactMap { folder in
-                    (try? Data(contentsOf: folder.appending(path: DraftStore.threadFile))).flatMap { try? JSONDecoder().decode(ThreadTarget.self, from: $0) }
-                }
-        }
-    }
-
-    /// The thread a draft was kept for is gone: the draft goes into the
-    /// chat's own composer, as a send that did not get through.
-    func unthread(chat: String, messageId: String) {
-        let source = folder(Self.threadChat(chat, messageId: messageId)), target = folder(chat)
-        disk.run {
-            let manager = FileManager.default
-            try? manager.createDirectory(at: target, withIntermediateDirectories: true)
-            for item in (try? manager.contentsOfDirectory(atPath: source.path(percentEncoded: false))) ?? []
-            where item == "live" || item.hasPrefix("sending-") {
-                let name = item == "live" ? "sending-thread-\(UUID().uuidString)" : item
-                try? manager.moveItem(at: source.appending(path: item, directoryHint: .isDirectory), to: target.appending(path: name, directoryHint: .isDirectory))
-            }
-            try? manager.removeItem(at: source)
+            // With the thread it was for, so a relaunch takes it back there.
+            Self.write(slot, text: text, photos: photos, root: root, thread: thread)
         }
     }
 
@@ -292,6 +247,8 @@ final class DraftStore {
     private struct Manifest: Codable {
         var text: String
         var photos: [UUID]
+        /// Absent from slots written before chat threads, and for chat sends.
+        var thread: ThreadTarget?
     }
 
     /// A blank chat's folder holding a failed start's message for the next one.
@@ -305,6 +262,14 @@ final class DraftStore {
     nonisolated private static func merged(_ drafts: [Draft]) -> Draft {
         let texts = drafts.map { $0.text.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
         return Draft(text: texts.joined(separator: "\n\n"), photos: drafts.flatMap(\.photos))
+    }
+
+    /// The thread a merged draft goes back to: only when everything in it
+    /// was sent to that one thread. Anything typed for the chat keeps it there.
+    nonisolated static func thread(of drafts: [Draft]) -> ThreadTarget? {
+        let parts = drafts.filter { !$0.text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || !$0.photos.isEmpty }
+        guard let first = parts.first?.thread, parts.allSatisfy({ $0.thread == first }) else { return nil }
+        return first
     }
 
     /// The live draft with every unsent slot merged in, oldest first.
@@ -336,8 +301,8 @@ final class DraftStore {
             removeIfEmpty(folder)
             return nil
         }
-        let draft = Draft(text: all.text, photos: Array(photos.prefix(photoLimit)))
-        write(live, text: draft.text, photos: draft.photos, root: root)
+        let draft = Draft(text: all.text, photos: Array(photos.prefix(photoLimit)), thread: thread(of: drafts))
+        write(live, text: draft.text, photos: draft.photos, root: root, thread: draft.thread)
         // Photos past four wait in their own slot for the next draft.
         if photos.count > photoLimit {
             let kept = folder.appending(path: "sending-kept-\(UUID().uuidString)", directoryHint: .isDirectory)
@@ -354,7 +319,7 @@ final class DraftStore {
         return transcript.contains { $0.id == id }
     }
 
-    nonisolated private static func write(_ slot: URL, text: String, photos: [ComposerImage], root: URL) {
+    nonisolated private static func write(_ slot: URL, text: String, photos: [ComposerImage], root: URL, thread: ThreadTarget? = nil) {
         let manager = FileManager.default
         do {
             try manager.createDirectory(at: slot, withIntermediateDirectories: true)
@@ -368,7 +333,7 @@ final class DraftStore {
                 let file = slot.appending(path: "\(photo.id.uuidString).jpg")
                 if !manager.fileExists(atPath: file.path(percentEncoded: false)) { try photo.jpeg.write(to: file, options: .atomic) }
             }
-            let manifest = Manifest(text: text, photos: photos.map(\.id))
+            let manifest = Manifest(text: text, photos: photos.map(\.id), thread: thread)
             try JSONEncoder().encode(manifest).write(to: slot.appending(path: "draft.json"), options: .atomic)
         } catch {
             // A draft that cannot be written is lost, as it was before drafts.
@@ -382,9 +347,8 @@ final class DraftStore {
         try? url.setResourceValues(values)
     }
 
-    /// A folder left with nothing but its thread note is empty too.
     nonisolated private static func removeIfEmpty(_ dir: URL) {
-        if let items = try? FileManager.default.contentsOfDirectory(atPath: dir.path(percentEncoded: false)), items.allSatisfy({ $0 == threadFile }) {
+        if let items = try? FileManager.default.contentsOfDirectory(atPath: dir.path(percentEncoded: false)), items.isEmpty {
             try? FileManager.default.removeItem(at: dir)
         }
     }
@@ -397,7 +361,7 @@ final class DraftStore {
             guard let jpeg = try? Data(contentsOf: slot.appending(path: "\(id.uuidString).jpg")) else { return nil }
             return ComposerImage(id: id, jpeg: jpeg)
         }
-        return Draft(text: manifest.text, photos: photos)
+        return Draft(text: manifest.text, photos: photos, thread: manifest.thread)
     }
 
     nonisolated private static func modified(_ url: URL) -> Date {
@@ -467,6 +431,8 @@ private struct ComposerDraft: ViewModifier {
     /// The chat's transcript; the restore waits for it to load. Nil for a
     /// blank chat, which has none.
     let transcript: TranscriptStore?
+    /// A restored draft was a send from a chat thread: reopen it there.
+    let onThread: ((ThreadTarget) -> Void)?
     /// A prompt to put in the composer, unsent, then cleared. It waits for the
     /// restore, so it never takes the place of a draft still loading.
     let prefill: Binding<String?>
@@ -490,6 +456,7 @@ private struct ComposerDraft: ViewModifier {
                     if text.isEmpty && attachments.images.isEmpty {
                         text = draft.text
                         attachments.restore(draft.photos)
+                        if let thread = draft.thread { onThread?(thread) }
                     }
                 }
                 restored = true
@@ -521,7 +488,7 @@ private struct ComposerDraft: ViewModifier {
 extension View {
     /// Keeps the composer's text and photos as the chat's draft, and puts a
     /// `prefill` prompt after it.
-    func composerDraft(_ store: DraftStore, chat: String, text: Binding<String>, attachments: ComposerAttachments, transcript: TranscriptStore?, prefill: Binding<String?> = .constant(nil), onPrefill: @escaping () -> Void = {}) -> some View {
-        modifier(ComposerDraft(store: store, chat: chat, text: text, attachments: attachments, transcript: transcript, prefill: prefill, onPrefill: onPrefill))
+    func composerDraft(_ store: DraftStore, chat: String, text: Binding<String>, attachments: ComposerAttachments, transcript: TranscriptStore?, onThread: ((ThreadTarget) -> Void)? = nil, prefill: Binding<String?> = .constant(nil), onPrefill: @escaping () -> Void = {}) -> some View {
+        modifier(ComposerDraft(store: store, chat: chat, text: text, attachments: attachments, transcript: transcript, onThread: onThread, prefill: prefill, onPrefill: onPrefill))
     }
 }

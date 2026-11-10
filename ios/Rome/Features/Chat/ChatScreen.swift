@@ -36,10 +36,18 @@ struct ChatScreen: View {
                 banners
             }
         }
+        // Over the header and the transcript; the composer below stays in place.
+        .overlay {
+            if let thread = store.thread {
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, onOpenChat: onOpenChat) { store.closeThread() }
+            }
+        }
+        // Reply or a tap on a message: the composer is ready for the reply.
+        .onChange(of: store.thread != nil) { _, open in if open { composerFocused = true } }
         .pageBackground()
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
-        .composerDraft(workspace.drafts, chat: workspace.concierge.sessionId, text: $draft, attachments: attachments, transcript: workspace.concierge, prefill: Binding(
+        .composerDraft(workspace.drafts, chat: workspace.concierge.sessionId, text: $draft, attachments: attachments, transcript: workspace.concierge, onThread: { store.reopenThread($0) }, prefill: Binding(
             get: { workspace.composerPrefill },
             set: { workspace.composerPrefill = $0 }
         )) { composerFocused = true }
@@ -55,12 +63,14 @@ struct ChatScreen: View {
                     if ConciergeStarters.visible(loaded: store.loaded, rows: store.rows) {
                         ConciergeStarters { store.send($0.text) }
                     }
-                    Composer(text: $draft, placeholder: String(localized: "Message"), focused: $composerFocused, attachments: attachments) {
+                    // While a chat thread is open, the composer sends into it.
+                    Composer(text: $draft, placeholder: store.thread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) {
                         // A photo still being made small would land in the next message.
                         guard !attachments.isPreparing else { return }
-                        if store.send(draft, images: attachments.images, fromComposer: true) {
+                        if store.send(draft, images: attachments.images, fromComposer: true, thread: store.thread?.target) {
                             draft = ""
                             _ = attachments.take()
+                            store.closeThread()
                         }
                     }
                 }
@@ -70,14 +80,6 @@ struct ChatScreen: View {
                 .padding(.bottom, 8)
             }
         }
-        .overlay {
-            if let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, onOpenChat: onOpenChat) { store.closeThread() }
-            }
-        }
-        // The chat's own keyboard goes down under an opened thread.
-        .onChange(of: store.thread != nil) { _, open in if open { composerFocused = false } }
-        .task(id: "\(store.sessionId)|\(store.loaded)") { if store.loaded { await store.reopenThreadDraft() } }
     }
 
     #if DEBUG
