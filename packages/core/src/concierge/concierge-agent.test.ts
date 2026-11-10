@@ -53,6 +53,15 @@ describe("the Concierge agent", () => {
       "even when you stay silent",
     ])
       expect(rule).toContain(text);
+    const taskListRule = concierge.systemPromptPrefix
+      .split("# Task list\n")[1]
+      .split("\n")
+      .find((line) => line.startsWith("- A delivered result"));
+    expect(taskListRule).toContain(
+      "`chat_card` first for task question cards or pending approvals",
+    );
+    expect(taskListRule).toContain("otherwise `say` or `chat_forward`");
+    expect(taskListRule).toContain("then write the row with the `messageId` it returned");
   });
 
   it("can find and delete the routine that watches a task row", () => {
