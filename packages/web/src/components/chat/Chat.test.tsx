@@ -11,6 +11,7 @@ import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
 import { requestConciergeJump } from "@/components/concierge/concierge-jump";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
+import type { ConciergeActivity } from "@/components/concierge/concierge-activity";
 import { Chat } from "./Chat";
 import enChat from "@/i18n/locales/en/chat.json";
 import zhChat from "@/i18n/locales/zh-CN/chat.json";
@@ -81,9 +82,15 @@ rs.mock("@/components/chat/use-session-identity", () => ({
   useSessionIdentity: mockUseSessionIdentity,
 }));
 
-// The pill is tested on its own; here only whether the navbar offers it.
-rs.mock("@/components/concierge/ConciergeTasksPill", () => ({
-  ConciergeTasksPill: () => <span data-testid="tasks-pill" />,
+// The activity and the task list are tested on their own; here only what the
+// header shows of them.
+const mockConciergeActivity = rs.hoisted(() => rs.fn((): ConciergeActivity => ({ kind: "idle" })));
+rs.mock("@/components/concierge/use-concierge-activity", () => ({
+  useConciergeActivity: mockConciergeActivity,
+}));
+const mockOpenTaskList = rs.hoisted(() => rs.fn());
+rs.mock("@/components/concierge/ConciergeTaskList", () => ({
+  useConciergeTaskList: () => ({ open: mockOpenTaskList, sheet: null }),
 }));
 
 rs.mock("@/pages/free/workspace-context", () => ({
@@ -470,6 +477,7 @@ class MockEventSource {
 }
 
 beforeEach(() => {
+  mockConciergeActivity.mockReturnValue({ kind: "idle" });
   appsPanel.collapsed = true;
   stickToBottom.isAtBottom = true;
   mockUseSessionIdentity.mockReturnValue({
@@ -2095,24 +2103,80 @@ describe("Chat Concierge empty state", () => {
     expect(guidance()).toBeNull();
   });
 
-  it("puts the tasks pill in the navbar beside the Concierge's name, and in no other chat's", async () => {
+  it("centres the Concierge's name and status in a bar with no title row, and leaves other chats' bars as they were", async () => {
+    mockConciergeActivity.mockReturnValue({ kind: "tasks", title: "Book the flight", more: 0 });
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
       pinnedAgentMention: null,
       archivedAt: null,
     });
     const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
-    const pill = await screen.findByTestId("tasks-pill");
-    const name = screen.getByText("Concierge");
-    expect(name.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(name.parentElement).toBe(pill.parentElement);
-    // The name keeps its width beside the pill; the label after it gives way.
-    expect(name.className).toContain("shrink-0");
+    const status = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-concierge-header-status]");
+      if (!found) throw new Error("no status");
+      return found;
+    });
+    const header = status.closest<HTMLElement>("[data-concierge-header]")!;
+    expect(header.className).toContain("grid-cols-[1fr_auto_1fr]");
+    // Left, middle, right: the status is the middle column, the menu the right.
+    const [left, middle, right] = Array.from(header.children);
+    expect(left.childElementCount).toBe(0);
+    expect(middle.contains(status)).toBe(true);
+    expect(within(right as HTMLElement).getByRole("button", { name: "navbar.more" })).toBeTruthy();
+    expect(within(status).getByText("Concierge")).toBeTruthy();
+    expect(within(status).getByText("Book the flight")).toBeTruthy();
+    expect(status.getAttribute("data-activity")).toBe("tasks");
+    expect(document.querySelector("[data-concierge-tasks-pill]")).toBeNull();
     view.unmount();
 
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Plan the launch",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
     renderChat(<Chat sessionId="session-1" />);
-    await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
-    expect(screen.queryByTestId("tasks-pill")).toBeNull();
+    expect(await screen.findByText("Plan the launch")).toBeTruthy();
+    expect(document.querySelector("[data-concierge-header]")).toBeNull();
+    expect(document.querySelector("[data-concierge-header-status]")).toBeNull();
+  });
+
+  it("says what the Concierge is doing under its name", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    mockConciergeActivity.mockReturnValue({ kind: "tool", tool: "startingTask" });
+    const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    expect(await screen.findByText("concierge.activity.tool.startingTask")).toBeTruthy();
+    view.unmount();
+
+    mockConciergeActivity.mockReturnValue({ kind: "needsYou" });
+    const waiting = renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    expect((await screen.findByText("concierge.activity.needsYou")).className).toContain(
+      "text-warning-fg",
+    );
+    waiting.unmount();
+
+    // Idle, the line is there for a screen reader only.
+    mockConciergeActivity.mockReturnValue({ kind: "idle" });
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    expect((await screen.findByText("concierge.activity.idle")).className).toContain("sr-only");
+  });
+
+  it("opens the task list from a plain Tasks item in a Concierge chat's menu", async () => {
+    const user = userEvent.setup();
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    const item = screen.getByRole("menuitem", { name: "concierge.tasks.title" });
+    expect(item.textContent).toBe("concierge.tasks.title");
+    await user.click(item);
+    expect(mockOpenTaskList).toHaveBeenCalledTimes(1);
   });
 
   it("offers no Archive or Delete for the main chat, and both for a topic chat", async () => {
@@ -2127,6 +2191,7 @@ describe("Chat Concierge empty state", () => {
     );
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "concierge.tasks.title",
       "share.title",
     ]);
     await user.keyboard("{Escape}");
@@ -2152,8 +2217,7 @@ describe("Chat Concierge empty state", () => {
     const main = renderChat(
       <Chat sessionId="concierge" variant="concierge" conciergeName="Milo" />,
     );
-    await screen.findByTestId("tasks-pill");
-    expect(screen.getByText("Milo")).toBeTruthy();
+    expect(await screen.findByText("Milo")).toBeTruthy();
     expect(screen.queryByText("Concierge")).toBeNull();
     main.unmount();
 
@@ -2170,8 +2234,7 @@ describe("Chat Concierge empty state", () => {
         conciergeName="Milo"
       />,
     );
-    await screen.findByTestId("tasks-pill");
-    expect(screen.getByText("Calendar")).toBeTruthy();
+    expect(await screen.findByText("Calendar")).toBeTruthy();
     expect(screen.queryByText("Milo")).toBeNull();
   });
 
@@ -2188,7 +2251,7 @@ describe("Chat Concierge empty state", () => {
       archivedAt: null,
     });
     const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
-    await screen.findByTestId("tasks-pill");
+    await screen.findByText("Concierge");
     expect(screen.queryByText("Rome")).toBeNull();
     view.unmount();
 

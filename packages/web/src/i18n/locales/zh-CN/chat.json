@@ -68,13 +68,6 @@
       "replyText": {
         "done": "我已经完成了"
       },
-      "pill": {
-        "needsYou_one": "任务，{{count}} 项等你处理",
-        "needsYou_other": "任务，{{count}} 项等你处理",
-        "doing_one": "任务，{{count}} 项进行中",
-        "doing_other": "任务，{{count}} 项进行中",
-        "idle": "任务"
-      },
       "emptyTitle": "还没有任务",
       "emptyDescription": "{{name}} 正在做、计划做或盯着的任务会显示在这里。"
     },
@@ -110,16 +103,15 @@
       "tasksMore": "{{title}} · 另 {{count}} 个",
       "tool": {
         "startingTask": "正在开始任务",
-        "messagingTask": "正在给任务发消息",
-        "readingTask": "正在查看任务",
+        "messagingTask": "正在给任务对话发消息",
+        "readingChat": "正在查看对话",
         "stoppingTask": "正在停止任务",
         "updatingTasks": "正在更新任务",
-        "startingTopic": "正在开启话题",
+        "startingTopic": "正在开启话题对话",
         "checkingFollows": "正在查看你的关注",
         "searchingWeb": "正在搜索网页",
         "readingPage": "正在阅读网页"
-      },
-      "tasksLabel": "任务"
+      }
     }
   },
   "reply": {

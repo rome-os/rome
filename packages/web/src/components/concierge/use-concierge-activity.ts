@@ -28,7 +28,7 @@ export function useConciergeActivity(input: {
   const { chatId, streaming, awaitingGuardian, snapshot } = input;
   const enabled = chatId !== null;
   const { tasks } = useConciergeTasks({ enabled });
-  const { sessions } = useChatSessions("active", undefined, { enabled });
+  const { sessions, invalidate } = useChatSessions("active", undefined, { enabled });
   const [liveRunning, setLiveRunning] = useState<ReadonlyMap<string, boolean>>(new Map());
 
   useLiveEvents(
@@ -36,16 +36,27 @@ export function useConciergeActivity(input: {
     {
       session_running: {
         schema: sessionRunningSchema,
-        fn: ({ sessionId, running }) =>
+        fn: ({ sessionId, running }) => {
           setLiveRunning((prev) => {
             if (prev.get(sessionId) === running) return prev;
             const next = new Map(prev);
             next.set(sessionId, running);
             return next;
-          }),
+          });
+          // A stop can leave a card open, and only the list carries awaitingGuardian.
+          if (!running) void invalidate();
+        },
       },
     },
-    { enabled },
+    {
+      enabled,
+      // Events missed while disconnected are gone: the list and the snapshot
+      // the new connection sends start over.
+      onReconnect: () => {
+        setLiveRunning(new Map());
+        void invalidate();
+      },
+    },
   );
 
   const taskChats = useMemo<TaskChatActivity[]>(() => {

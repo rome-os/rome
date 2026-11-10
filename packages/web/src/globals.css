@@ -129,6 +129,43 @@
     rome-mascot-glance 3.6s ease-in-out infinite;
 }
 
+/* A press: a squash and one blink, over whatever it was doing. */
+.rome-mascot[data-poked] {
+  transform-origin: 50% 100%;
+  animation: rome-mascot-squash 420ms ease-out;
+}
+
+.rome-mascot[data-poked] .rome-mascot-eyes {
+  animation: rome-mascot-poke-blink 420ms ease-out;
+}
+
+@keyframes rome-mascot-squash {
+  0%,
+  100% {
+    transform: scale(1, 1);
+  }
+
+  30% {
+    transform: scale(1.12, 0.82);
+  }
+
+  60% {
+    transform: scale(0.95, 1.06);
+  }
+}
+
+@keyframes rome-mascot-poke-blink {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+
+  25%,
+  55% {
+    transform: scaleY(0.1);
+  }
+}
+
 @keyframes rome-mascot-blink {
   0%,
   92%,
@@ -173,7 +210,9 @@
 @media (prefers-reduced-motion: reduce) {
   .rome-mascot-eyes,
   .rome-mascot[data-alive] .rome-mascot-figure,
-  .rome-mascot[data-alive] .rome-mascot-eyes {
+  .rome-mascot[data-alive] .rome-mascot-eyes,
+  .rome-mascot[data-poked],
+  .rome-mascot[data-poked] .rome-mascot-eyes {
     animation: none;
   }
 }

@@ -68,13 +68,6 @@
       "replyText": {
         "done": "I've done this"
       },
-      "pill": {
-        "needsYou_one": "Tasks, {{count}} needs you",
-        "needsYou_other": "Tasks, {{count}} need you",
-        "doing_one": "Tasks, {{count}} in progress",
-        "doing_other": "Tasks, {{count}} in progress",
-        "idle": "Tasks"
-      },
       "emptyTitle": "No tasks yet",
       "emptyDescription": "Tasks {{name}} is working on, planning, or watching appear here."
     },
@@ -110,16 +103,15 @@
       "tasksMore": "{{title}} · +{{count}}",
       "tool": {
         "startingTask": "Starting a task",
-        "messagingTask": "Messaging a task",
-        "readingTask": "Checking on a task",
+        "messagingTask": "Writing to a task chat",
+        "readingChat": "Reading a chat",
         "stoppingTask": "Stopping a task",
         "updatingTasks": "Updating tasks",
-        "startingTopic": "Starting a topic",
+        "startingTopic": "Starting a topic chat",
         "checkingFollows": "Checking what you follow",
         "searchingWeb": "Searching the web",
         "readingPage": "Reading a page"
-      },
-      "tasksLabel": "Tasks"
+      }
     }
   },
   "reply": {

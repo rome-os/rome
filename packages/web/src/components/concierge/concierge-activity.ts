@@ -9,7 +9,7 @@ import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 export type ConciergeToolActivity =
   | "startingTask"
   | "messagingTask"
-  | "readingTask"
+  | "readingChat"
   | "stoppingTask"
   | "updatingTasks"
   | "startingTopic"
@@ -48,13 +48,13 @@ export interface ConciergeActivityInput {
   tasks: readonly TaskChatActivity[];
 }
 
-// Tools whose work the guardian sees as the reply itself: the header says
-// "working" while the Concierge is in them, not a tool of its own.
+// The tools the header names. Any other tool, `say` included, reads as plain
+// work.
 const TOOL_ACTIVITY: Record<string, ConciergeToolActivity> = {
   chat_start: "startingTask",
   chat_send: "messagingTask",
-  chat_read: "readingTask",
-  chat_list: "readingTask",
+  chat_read: "readingChat",
+  chat_list: "readingChat",
   chat_stop: "stoppingTask",
   task_upsert: "updatingTasks",
   task_list: "updatingTasks",
@@ -75,23 +75,26 @@ function bareToolName(tool: string): string {
   return afterNamespace.toLowerCase();
 }
 
-/** The tool the streaming turn is in now: its latest call with no result yet. */
+/**
+ * The tool the streaming turn is in now: its latest call whose result has not
+ * arrived, paired by the call's `id` and the result's `toolUseId`. A call
+ * without an id is open until a later result without one arrives.
+ */
 export function openToolOf(snapshot: TraceSnapshot | null): string | null {
   if (!snapshot) return null;
+  const blocks = [...snapshot.segments]
+    .sort((a, b) => a.ordinal - b.ordinal)
+    .flatMap((segment) => (segment.kind === "run" ? segment.blocks : [segment.block]));
   const finished = new Set<string>();
-  let open: string | null = null;
-  for (const segment of snapshot.segments) {
-    const blocks = segment.kind === "run" ? segment.blocks : [segment.block];
-    for (const block of blocks) {
-      if (block.type === "tool_result" && block.toolUseId) finished.add(block.toolUseId);
-    }
+  for (const block of blocks) {
+    if (block.type === "tool_result" && block.toolUseId) finished.add(block.toolUseId);
   }
-  for (const segment of snapshot.segments) {
-    const blocks = segment.kind === "run" ? segment.blocks : [segment.block];
-    for (const block of blocks) {
-      if (block.type !== "tool_use") continue;
-      if (block.toolUseId && finished.has(block.toolUseId)) continue;
-      open = block.tool;
+  let open: string | null = null;
+  for (const block of blocks) {
+    if (block.type === "tool_use") {
+      if (!block.id || !finished.has(block.id)) open = block.tool;
+    } else if (block.type === "tool_result" && !block.toolUseId) {
+      open = null;
     }
   }
   return open;

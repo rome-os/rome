@@ -1,7 +1,15 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
 import type { ConciergeActivity } from "./concierge-activity";
 import { RomeMascot } from "./RomeMascot";
+
+/**
+ * The phone header's middle, which the open Concierge chat fills with its
+ * {@link ConciergeHeaderStatus}: the header is drawn outside the chat, and the
+ * chat alone knows what its turn is doing.
+ */
+export const CONCIERGE_PHONE_STATUS_SLOT = "conciergePhoneStatus";
 
 /**
  * The middle of a Concierge chat's header: the mascot, the chat's name and,
@@ -13,7 +21,7 @@ export function ConciergeHeaderStatus({
   name,
   activity,
 }: {
-  name: string;
+  name: ReactNode;
   activity: ConciergeActivity;
 }) {
   const { t } = useTranslation("chat");

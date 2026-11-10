@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { cn } from "@/lib/utils";
 
 /**
@@ -7,16 +8,25 @@ import { cn } from "@/lib/utils";
  * the chat canvas, so it reads in both themes.
  *
  * At rest it blinks now and then. `alive` makes it bob and glance while
- * something is being done. Reduced motion keeps it still.
+ * something is being done. A press squashes it and makes it blink once, and
+ * does nothing else, so it stays out of the accessibility tree. Reduced motion
+ * keeps it still.
  */
 export function RomeMascot({ alive = false, className }: { alive?: boolean; className?: string }) {
+  const [poked, setPoked] = useState(false);
   return (
     <svg
       viewBox="0 0 51 47.53"
       fill="none"
       aria-hidden
       data-alive={alive || undefined}
-      className={cn("rome-mascot shrink-0 text-foreground", className)}
+      data-poked={poked || undefined}
+      onPointerDown={() => setPoked(true)}
+      // Only the squash runs on the svg itself; the eyes' animations bubble up from inside.
+      onAnimationEnd={(event) => {
+        if (event.target === event.currentTarget) setPoked(false);
+      }}
+      className={cn("rome-mascot shrink-0 cursor-default select-none text-foreground", className)}
     >
       <g className="rome-mascot-figure" fill="currentColor">
         <path d="M9.27213 35.3331H38.9233C41.3072 35.3331 43.5668 34.27 45.0866 32.4335L48.0715 28.8265C48.7983 27.9482 49.1158 26.8016 48.9444 25.6747L45.8596 5.39837C45.5623 3.44405 43.8819 2 41.9051 2H16.9889C14.4932 2 12.1405 3.16467 10.6273 5.14922L2.81921 15.3892C2.19692 16.2053 1.91212 17.2294 2.02374 18.2496L3.30773 29.9857C3.64065 33.0287 6.21098 35.3331 9.27213 35.3331Z" />

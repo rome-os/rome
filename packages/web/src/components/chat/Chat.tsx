@@ -18,6 +18,7 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
+  ListChecks,
   MoreHorizontal,
   PanelRightOpen,
   Share2,
@@ -33,7 +34,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
-import { SlotContent } from "@/components/slot";
+import { SlotContent, useSlotOutlet } from "@/components/slot";
 import "react-medium-image-zoom/dist/styles.css";
 import { cn } from "@/lib/utils";
 import { usePresentationMode } from "@/lib/presentation-mode";
@@ -103,7 +104,12 @@ import {
   ConciergeTopicEmptyState,
 } from "@/components/chat/ConciergeEmptyState";
 import { onConciergeJump } from "@/components/concierge/concierge-jump";
-import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
+import {
+  CONCIERGE_PHONE_STATUS_SLOT,
+  ConciergeHeaderStatus,
+} from "@/components/concierge/ConciergeHeaderStatus";
+import { useConciergeTaskList } from "@/components/concierge/ConciergeTaskList";
+import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
   AgentMention,
@@ -2034,38 +2040,57 @@ export function Chat({
 
   const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
 
-  const navbar = (
+  const conciergeActivity = useConciergeActivity({
+    chatId: concierge ? (mainSessionId ?? null) : null,
+    streaming: isActiveSessionStreaming,
+    awaitingGuardian,
+    snapshot: currentSnapshot,
+  });
+  const conciergeTaskList = useConciergeTaskList(concierge ? (mainSessionId ?? null) : null);
+  const phoneStatusOutlet = useSlotOutlet(CONCIERGE_PHONE_STATUS_SLOT);
+  const conciergeStatus = concierge ? (
+    <ConciergeHeaderStatus
+      name={
+        sessionLoading && !isMainChat ? (
+          <SessionLoadingTitle />
+        ) : (
+          (isMainChat && conciergeName) || sessionName?.trim() || t("sidebar.newChat")
+        )
+      }
+      activity={conciergeActivity}
+    />
+  ) : null;
+
+  const navbarTitle = (
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      {untitledEmptyChat ? null : (
+        <>
+          <SessionAvatar
+            iconUrl={pinnedAgentMention?.iconUrl}
+            label={pinnedAgentMention?.appLabel}
+            model={model}
+            reasoningEffort={reasoningEffort}
+          />
+          {sessionLoading ? (
+            <SessionLoadingTitle />
+          ) : (
+            <span className="truncate text-ui text-foreground">
+              {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
+            </span>
+          )}
+          {/* The agent's app beside a titled chat. */}
+          {sessionName?.trim() && pinnedAgentMention && (
+            <span className="shrink-0 truncate text-aux text-muted-foreground">
+              {pinnedAgentMention.appLabel}
+            </span>
+          )}
+        </>
+      )}
+    </div>
+  );
+
+  const navbarActions = (
     <>
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        {untitledEmptyChat ? null : (
-          <>
-            <SessionAvatar
-              iconUrl={pinnedAgentMention?.iconUrl}
-              label={pinnedAgentMention?.appLabel}
-              model={model}
-              reasoningEffort={reasoningEffort}
-            />
-            {sessionLoading ? (
-              <SessionLoadingTitle />
-            ) : (
-              <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
-                {(isMainChat && conciergeName) ||
-                  sessionName?.trim() ||
-                  pinnedAgentMention?.appLabel ||
-                  t("sidebar.newChat")}
-              </span>
-            )}
-            {concierge ? <ConciergeTasksPill chatId={mainSessionId ?? null} /> : null}
-            {/* The agent's app beside a titled chat. The Concierge's is always
-                Rome, so it shows none. */}
-            {!concierge && sessionName?.trim() && pinnedAgentMention && (
-              <span className="shrink-0 truncate text-aux text-muted-foreground">
-                {pinnedAgentMention.appLabel}
-              </span>
-            )}
-          </>
-        )}
-      </div>
       {mainSessionId && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
@@ -2077,6 +2102,12 @@ export function Chat({
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
+            {concierge ? (
+              <DropdownMenuItem onSelect={conciergeTaskList.open}>
+                <ListChecks className="size-4" />
+                {t("concierge.tasks.title")}
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem onSelect={() => enterShareMode()}>
               <Share2 className="size-4" />
               {t("share.title", "Share chat")}
@@ -2124,6 +2155,25 @@ export function Chat({
     </>
   );
 
+  // A Concierge chat's bar has no title row: the status sits in the middle of
+  // the bar, and the equal side columns keep it centred over the chat.
+  const navbar = concierge ? (
+    <div
+      data-concierge-header
+      className="grid h-full min-w-0 flex-1 grid-cols-[1fr_auto_1fr] items-center gap-2"
+    >
+      <div />
+      <div className="flex min-w-0 justify-center">{conciergeStatus}</div>
+      <div className="flex items-center justify-end gap-1">{navbarActions}</div>
+      {conciergeTaskList.sheet}
+    </div>
+  ) : (
+    <>
+      {navbarTitle}
+      {navbarActions}
+    </>
+  );
+
   const page = (
     <TooltipProvider delayDuration={150}>
       {sessionEventIds.map((sid) => (
@@ -2156,10 +2206,18 @@ export function Chat({
               says it already, so the bar keeps only its height and controls
               and the page does not move when the first message starts the
               session. */}
+          {concierge && phoneStatusOutlet ? (
+            <SlotContent name={CONCIERGE_PHONE_STATUS_SLOT}>{conciergeStatus}</SlotContent>
+          ) : null}
           {navbarSlot ? (
             <SlotContent name={navbarSlot}>{navbar}</SlotContent>
           ) : (
-            <div className="z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
+            <div
+              className={cn(
+                "z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden",
+                concierge ? "px-2" : "pl-4 pr-2",
+              )}
+            >
               {navbar}
             </div>
           )}
