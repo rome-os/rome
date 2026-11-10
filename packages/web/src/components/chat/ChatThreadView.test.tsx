@@ -3,6 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rst
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { ReplyToPart } from "@rome/api-types/chat";
 import { chatSessionTopicName } from "@rome/api-types/live-events";
 import i18n from "@/i18n";
@@ -15,7 +16,7 @@ import {
 } from "@/test/fake-websocket";
 import { MemoryRouter } from "react-router-dom";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
-import { ChatThreadView } from "./ChatThreadView";
+import { ChatThreadView, chatThreadQueryKey } from "./ChatThreadView";
 import { ConciergeTranscript } from "./ConciergeTranscript";
 import { buildRows } from "./chat-view";
 import type { BlockActions } from "./MessageList";
@@ -342,5 +343,61 @@ describe("ChatThreadView", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
+  });
+
+  it("stays open on a press inside a layer its content opened in a portal", async () => {
+    const onClose = rs.fn();
+    render(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={onClose}
+          renderMessages={(messages) => (
+            <>
+              {paragraphs(messages)}
+              {createPortal(<div>popover padding</div>, document.body)}
+            </>
+          )}
+        />,
+      ),
+    );
+    await screen.findByText("Which day?");
+    fireEvent.pointerDown(screen.getByText("popover padding"));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("puts a cached thread's newest message above the composer once its floor is measured", async () => {
+    // A list's content is 1000px tall, plus the floor it keeps clear of.
+    const tops: number[] = [];
+    rs.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return 1000 + (Number.parseFloat(this.style.paddingBottom) || 0);
+    });
+    rs.spyOn(HTMLElement.prototype, "scrollTop", "set").mockImplementation((value: number) => {
+      tops.push(value);
+    });
+    const floor = document.createElement("div");
+    floor.getBoundingClientRect = () => ({ height: 150 }) as DOMRect;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Opened before: its messages are drawn at once, before the floor is measured.
+    client.setQueryData(chatThreadQueryKey("concierge", "a1"), thread);
+    render(
+      <QueryClientProvider client={client}>
+        <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
+          <ChatThreadView
+            sessionId="concierge"
+            messageId="a1"
+            onClose={() => {}}
+            floor={floor}
+            renderMessages={paragraphs}
+          />
+        </LiveEventsClientContext.Provider>
+      </QueryClientProvider>,
+    );
+    await screen.findByText("Which day?");
+    await waitFor(() => expect(tops.at(-1)).toBe(1150));
+    rs.restoreAllMocks();
   });
 });

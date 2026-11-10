@@ -2581,15 +2581,10 @@ export function Chat({
                     }}
                     actions={{
                       ...blockActions,
-                      interactionResults: threadInteractionResults(
-                        threadMessages,
-                        mainSessionId,
-                        mainIdentity,
-                        {
-                          messages: displayMessages,
-                          results: blockActions.interactionResults,
-                        },
-                      ),
+                      interactionResults: threadInteractionResults(threadMessages, {
+                        messages: displayMessages,
+                        results: blockActions.interactionResults,
+                      }),
                     }}
                     contentRef={ignoreThreadContent}
                   />

@@ -1,5 +1,12 @@
 import { useQuery } from "@tanstack/react-query";
-import { type PointerEvent, type ReactNode, useEffect, useRef, useState } from "react";
+import {
+  type PointerEvent,
+  type ReactNode,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
@@ -89,13 +96,28 @@ export function ChatThreadView({
     (message) => message.role === "user" || message.role === "assistant",
   );
   const count = messages.length;
-  // The newest message is at the bottom, in view.
-  useEffect(() => {
+  // The newest message is at the bottom, in view: when a message arrives, and
+  // when the composer's floor is measured or grows while the thread is read
+  // at its bottom. A cached thread draws its messages before the floor is
+  // measured, so the first scroll alone would leave the newest behind it.
+  const following = useRef(true);
+  const shownCount = useRef(0);
+  useLayoutEffect(() => {
     const list = listRef.current;
-    if (list && count > 0) list.scrollTop = list.scrollHeight;
-  }, [count]);
+    if (!list || count === 0) return;
+    if (count !== shownCount.current) following.current = true;
+    shownCount.current = count;
+    if (following.current) list.scrollTop = list.scrollHeight;
+  }, [count, floorHeight]);
+  const onScroll = () => {
+    const list = listRef.current;
+    if (list) following.current = list.scrollHeight - list.scrollTop - list.clientHeight < 8;
+  };
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    // A layer the thread's content opened in a portal (a popover, a menu)
+    // bubbles here through React, though it lies outside the overlay.
+    if (!event.currentTarget.contains(event.target as Node)) return;
     if ((event.target as Element).closest(CONTENT)) return;
     onClose();
   };
@@ -114,6 +136,7 @@ export function ChatThreadView({
       />
       <div
         ref={listRef}
+        onScroll={onScroll}
         className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain concierge-header-clear"
         style={{ paddingBottom: floorHeight }}
       >
