@@ -555,17 +555,26 @@ allow-list has 28 types, which `system.info` names. Any other type is
 `health_off`, `unsupported_action`, `audit_unavailable`, and `health_failed` for
 anything else.
 
-**Settings → iPhone use → Apple Health** (on by default, kept across launches, greyed
-while the phone is off limits) lets the user stop Rome reading Health without
-disconnecting the phone. Off, `health.stats` and `health.samples` fail with
-`health_off` before Health is touched, and are still recorded in the audit log.
-`system.info` still lists them, so an agent can explain. Turning it on while iOS
-has never been asked shows the system's access sheet at once. Once iOS has been
-asked it shows nothing more.
+**Settings → iPhone use → Apple Health** is off by default. Health values go to the
+user's Rome and to the AI model behind it, so the user turns this on, and the
+switch carries a line saying so ("Your Rome and its AI model can read the Health
+data you allow"). The choice is kept across launches, and the switch is greyed
+while the phone is off limits. While it is off, `health.stats` and `health.samples`
+fail with `health_off` before Health is touched, and are still recorded in the
+audit log. The error and the `usage` text in `system.info` tell the agent that the
+user must turn the switch on, on the phone. `system.info` still lists the actions,
+so an agent can explain. Turning the switch on while iOS has never been asked shows
+the system's access sheet at once. Once iOS has been asked it shows nothing more.
 
-With the switch on, the app asks for Health access when the first health request
-arrives if the sheet has not been shown yet, with the system's own sheet, and asks
-only to read. Release builds hold no write permission.
+The system sheet's text (`NSHealthShareUsageDescription`) says the same: when the
+Rome asks, the Health data the user allows is sent to the Rome and its AI model, and
+the app never changes Health data. The app asks only to read, and Release builds
+hold no write permission.
+
+The phone is a device only while the app is past its sign-in screen. If the app
+shows the sign-in screen while a Cloud credential is still kept, for example after
+an instance sign-in failed, the phone disconnects and answers `target_unavailable`
+until the user signs in again.
 
 The phone keeps a light audit log like the desktop's, as JSON lines in the app's
 Application Support folder: each request is written before it runs (time, sender,

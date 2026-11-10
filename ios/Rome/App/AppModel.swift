@@ -334,6 +334,15 @@ final class AppModel {
             }
         }
 
+        /// Not on the sign-in screen: the phone may be a device. The sign-in
+        /// screen and the browser sign-in are not, even with a credential kept.
+        var isSignedIn: Bool {
+            switch self {
+            case .signedOut, .signingIn: return false
+            default: return true
+            }
+        }
+
         /// Launching or opening an instance: the opening screen shows.
         var isOpening: Bool {
             switch self {
@@ -351,7 +360,11 @@ final class AppModel {
         static let hintShown = "autoOpenHintShown"
     }
 
-    private(set) var phase: Phase = .launching
+    private(set) var phase: Phase = .launching {
+        // Every path to the sign-in screen disconnects the device, and every
+        // path back connects it again.
+        didSet { if phase.isSignedIn != oldValue.isSignedIn { node.setSignedIn(phase.isSignedIn) } }
+    }
     private(set) var workspace: Workspace? {
         // Pictures belong to the workspace that loaded them.
         didSet { if workspace !== oldValue { images.reset() } }

@@ -302,19 +302,19 @@ struct HealthActions: Sendable {
             daily buckets split a night at midnight, so for one night use a window such as the previous day 18:00 to 12:00. \
             workouts gives count, durationMinutes, activeEnergyKcal, distanceMeters for workouts that start in the window. \
             A type the user has not allowed, or that has no data, has no value. \
-            If the user turned Apple Health off for Rome on the iPhone, the request fails with health_off. Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
+            Apple Health is off for Rome until the user turns it on in Settings → iPhone use → Apple Health on the phone. While it is off the request fails with health_off, and only the user can change that on the phone. Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
             """,
         "health.samples": """
             Raw records, newest first. Args: type (string, required; same names as health.stats), start, end (as health.stats), \
             limit 1-1000 (default 100), order desc (default) | asc by start, cursor (nextCursor of the previous reply), \
             sources (array of app names or bundle ids), includeMetadata (bool, default false), activity (workouts only). \
-            A reply with nextCursor has more. Fails with health_off if the user turned Apple Health off for Rome on the iPhone. Example: {"type":"heartRate","start":"2026-11-08","limit":50}
+            A reply with nextCursor has more. Fails with health_off while Apple Health is off for Rome: the user must turn it on in Settings → iPhone use → Apple Health on the phone. Example: {"type":"heartRate","start":"2026-11-08","limit":50}
             """,
     ]
 
     func run(_ action: String, args: JSONValue?) async -> NodeActionResult {
         if Self.actions.contains(action), action != "system.info", !enabled.isOn {
-            return .failed(code: "health_off", message: "The user turned off Apple Health for Rome on this iPhone.")
+            return .failed(code: "health_off", message: "Apple Health is off for Rome on this iPhone. The user must turn it on in Settings → iPhone use → Apple Health on the phone.")
         }
         do {
             switch action {

@@ -17,7 +17,7 @@ struct NodeSettingsGroup: View {
             }
             .accessibilityElement(children: .combine)
             // Greyed while the phone is off limits altogether.
-            SettingsRow(systemImage: "heart", title: "Apple Health") {
+            SettingsRow(systemImage: "heart", title: "Apple Health", last: true) {
                 Toggle("Apple Health", isOn: Binding(get: { node.isHealthEnabled }, set: { on in node.setHealthEnabled(on) }))
                     .labelsHidden()
                     .tint(Palette.primary)
@@ -25,6 +25,16 @@ struct NodeSettingsGroup: View {
             }
             .opacity(node.isEnabled ? 1 : 0.45)
             .accessibilityElement(children: .combine)
+            // Health goes to the Rome and its AI model: said where it is switched on.
+            Text("Your Rome and its AI model can read the Health data you allow.")
+                .romeFont(13)
+                .foregroundStyle(Palette.sub)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.leading, 58)
+                .padding(.trailing, 14)
+                .padding(.bottom, 12)
+                .overlay(alignment: .bottom) { Rectangle().fill(Palette.hair).frame(height: 0.5) }
             SettingsRow(systemImage: "dot.radiowaves.left.and.right", title: "Status") {
                 HStack(spacing: 6) {
                     Circle().fill(node.status.color).frame(width: 7, height: 7)

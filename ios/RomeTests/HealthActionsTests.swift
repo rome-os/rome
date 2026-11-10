@@ -366,6 +366,12 @@ enum HealthFixtures {
         #expect(usage.contains("with or without offset (without offset = the phone's time zone"))
         #expect(HealthActions.usage["health.stats"]?.contains("health_off") == true)
         #expect(HealthActions.usage["health.samples"]?.contains("health_off") == true)
+        for action in ["health.stats", "health.samples"] {
+            let text = HealthActions.usage[action] ?? ""
+            #expect(text.contains("Settings → iPhone use → Apple Health"), "\(action)")
+            #expect(text.contains("on the phone"), "\(action)")
+        }
+        #expect(HealthActions.usage["health.stats"]?.contains("off for Rome until the user turns it on") == true, "off is the default")
     }
 
     @Test func unknownActionIsUnsupported() async {
@@ -398,7 +404,8 @@ enum HealthFixtures {
             #expect(HealthFixtures.code(result) == "health_off", "\(action) \(args)")
         }
         guard case .failed(_, let message) = await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)) else { return }
-        #expect(message == "The user turned off Apple Health for Rome on this iPhone.")
+        #expect(message.contains("Settings → iPhone use → Apple Health"), "the agent is told where the user turns it on")
+        #expect(message.contains("on the phone"))
         #expect(health.accessRequests == 0 && health.reads == 0)
         // Other actions are not Health's to refuse.
         #expect(HealthFixtures.code(await actions.run("health.write", args: nil)) == "unsupported_action")

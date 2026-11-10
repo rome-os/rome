@@ -362,16 +362,28 @@ final class HostRig {
         #expect(rig.makeHost().isEnabled)
     }
 
-    @Test func theAppleHealthSwitchIsOnByDefaultAndKept() async {
+    @Test func theAppleHealthSwitchIsOffByDefaultAndKept() async {
         let rig = HostRig()
-        #expect(rig.host.isHealthEnabled)
-        rig.host.setHealthEnabled(false)
-        #expect(!rig.host.isHealthEnabled)
-        #expect(rig.makeHost().isHealthEnabled == false, "kept across launches")
+        #expect(!rig.host.isHealthEnabled, "Health data goes to an AI model: the guardian turns it on")
+        #expect(rig.host.isEnabled, "the device switch stays on by default")
+        #expect(rig.defaults.object(forKey: "nodeHealthEnabled") == nil, "nothing is stored until it is chosen")
         rig.host.setHealthEnabled(true)
-        #expect(rig.makeHost().isHealthEnabled)
-        // Independent of the device switch.
-        #expect(rig.host.isEnabled)
+        #expect(rig.host.isHealthEnabled)
+        #expect(rig.makeHost().isHealthEnabled, "kept across launches")
+        rig.host.setHealthEnabled(false)
+        #expect(!rig.makeHost().isHealthEnabled)
+        #expect(rig.host.isEnabled, "independent of the device switch")
+    }
+
+    @Test func aFreshInstallRefusesHealthRequestsUntilTheSwitchIsOn() async throws {
+        let rig = HostRig()
+        let socket = await rig.online()
+        socket.push(#"{"id":"r1","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#)
+        #expect(await eventually { socket.sent.count == 1 })
+        let error = parseJSON(socket.sent[0])["payload"]?["error"]
+        #expect(error?["code"]?.string == "health_off")
+        #expect(error?["message"]?.string?.contains("Settings → iPhone use → Apple Health") == true)
+        #expect(rig.health.reads == 0 && rig.health.accessRequests == 0)
     }
 
     @Test func turningHealthOnAsksOnlyWhileIOSHasNeverBeenAsked() async {
@@ -395,6 +407,7 @@ final class HostRig {
     @Test func withTheSwitchOffARequestOnTheSocketGetsHealthOff() async throws {
         let rig = HostRig()
         let socket = await rig.online()
+        rig.host.setHealthEnabled(true)
         rig.host.setHealthEnabled(false)
         socket.push(#"{"id":"r9","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#)
         #expect(await eventually { socket.sent.count == 1 })
@@ -405,6 +418,40 @@ final class HostRig {
         socket.push(#"{"id":"r10","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#)
         #expect(await eventually { socket.sent.count == 2 })
         #expect(parseJSON(socket.sent[1])["payload"]?["ok"]?.bool == true)
+    }
+
+    @Test func aPhoneThatShowsSignedOutIsNotADeviceWhateverCredentialItKeeps() async {
+        let rig = HostRig()
+        // The sign-in screen with a credential still in the Keychain (a failed instance sign-in).
+        rig.host.setSignedIn(false)
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.setActive(true)
+        rig.host.sync()
+        try? await Task.sleep(for: .milliseconds(80))
+        #expect(rig.credentials.deviceCredential != nil)
+        #expect(rig.gateway.attempts.isEmpty, "signed out on screen: not connected")
+        #expect(rig.host.status == .off)
+        #expect(!rig.host.isSignedIn)
+
+        rig.host.setSignedIn(true)
+        #expect(await eventually { rig.host.status == .online })
+        #expect(rig.gateway.attempts.count == 1)
+    }
+
+    @Test func movingToTheSignInScreenDisconnectsAndComingBackReconnects() async {
+        let rig = HostRig()
+        let socket = await rig.online()
+        rig.host.setSignedIn(false)
+        #expect(socket.closed)
+        #expect(rig.host.status == .off)
+        rig.host.setSignedIn(false)
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.setActive(true)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(rig.gateway.attempts.count == 1, "foreground alone does not bring it back")
+        rig.host.setSignedIn(true)
+        #expect(await eventually { rig.host.status == .online })
+        #expect(rig.gateway.attempts.count == 2)
     }
 
     @Test func itConnectsOnlyWhileTheAppIsInFront() async {

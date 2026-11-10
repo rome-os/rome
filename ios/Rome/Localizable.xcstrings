@@ -3303,6 +3303,16 @@
         }
       }
     },
+    "Your Rome and its AI model can read the Health data you allow." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "开启后，你的 Rome 及其 AI 模型可以读取你允许的健康数据。"
+          }
+        }
+      }
+    },
     "Your Rome has not come back on %@. Check it in Rome Cloud, or try again." : {
       "localizations" : {
         "zh-Hans" : {

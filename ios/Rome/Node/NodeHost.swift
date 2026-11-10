@@ -91,8 +91,9 @@ final class NodeHost {
     private(set) var status = Status.off
     /// The guardian's switch in Settings: on unless turned off.
     private(set) var isEnabled: Bool
-    /// The guardian's "Apple Health" switch: on unless turned off. Off, the
-    /// health actions are refused with `health_off`.
+    /// The guardian's "Apple Health" switch: off until turned on. Health data
+    /// goes to the Rome and its AI model, so it is the guardian's choice. Off,
+    /// the health actions are refused with `health_off`.
     private(set) var isHealthEnabled: Bool
     /// Goes up when a request has been answered, so Settings reloads its list.
     private(set) var requestSerial = 0
@@ -117,6 +118,9 @@ final class NodeHost {
     @ObservationIgnored private var active = false
     /// The account ended; nothing connects until the next sign-in.
     @ObservationIgnored private var accountOver = false
+    /// The app is in a signed-in phase: not on the sign-in screen, whatever
+    /// credential is still kept. Set by `AppModel` whenever its phase changes.
+    @ObservationIgnored private(set) var isSignedIn = true
     @ObservationIgnored private var running: (device: String, account: Int, task: Task<Void, Never>)?
     @ObservationIgnored private var inFlight = 0
     @ObservationIgnored private var drain: Task<Void, Never>?
@@ -139,7 +143,7 @@ final class NodeHost {
         self.pingTimeout = pingTimeout
         self.credentials = credentials
         reader = health.reader
-        let healthOn = defaults.object(forKey: Defaults.health) as? Bool ?? true
+        let healthOn = defaults.object(forKey: Defaults.health) as? Bool ?? false
         healthSwitch = HealthSwitch(healthOn)
         isHealthEnabled = healthOn
         var health = health
@@ -202,6 +206,14 @@ final class NodeHost {
         sync()
     }
 
+    /// The app moved to or from the sign-in screen. A phone that shows signed out
+    /// is not a device, whatever Cloud credential it still holds.
+    func setSignedIn(_ value: Bool) {
+        guard value != isSignedIn else { return }
+        isSignedIn = value
+        sync()
+    }
+
     /// Signed out, or the sign-in was rejected: disconnect, and stay off.
     func accountEnded() {
         accountOver = true
@@ -209,9 +221,9 @@ final class NodeHost {
     }
 
     /// Starts, restarts or stops the connection to match the switch, the
-    /// sign-in and the app being in front. Safe to call at any time.
+    /// sign-in (a credential, and the app's phase) and the app being in front. Safe to call at any time.
     func sync() {
-        guard isEnabled, !accountOver, let credential = credentials.deviceCredential else {
+        guard isEnabled, !accountOver, isSignedIn, let credential = credentials.deviceCredential else {
             stop()
             return
         }
