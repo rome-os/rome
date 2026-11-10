@@ -10,9 +10,11 @@ import {
 } from "./window";
 import {
   readDeviceEnabled,
+  readNotificationsEnabled,
   readRuntimeTarget,
   registerIpcHandlers,
   writeDeviceEnabled,
+  writeNotificationsEnabled,
   writeRuntimeTarget,
 } from "./ipc";
 import { isQuitting, requestStopAndQuit, setupLifecycle } from "./lifecycle";
@@ -97,12 +99,14 @@ async function bootstrap() {
     registerAuditHandlers(audit);
     // The credential file is shared by every build on this computer, so a dev
     // window would connect as the same device and take over its connection.
+    const deviceListeners = new Set<() => void>();
     const deviceHost = !devDashboardUrl
       ? new DeviceHost({
           cloudOrigin: cloudAccount.cloudOrigin,
           deviceName: deviceName(),
           credential: () => cloudAccount.credential(),
           enabled: readDeviceEnabled,
+          notificationsEnabled: readNotificationsEnabled,
           onRevoked: async () => {
             await controller.signOut();
           },
@@ -111,6 +115,7 @@ async function bootstrap() {
           // Rome Cloud also sends each push to the desktop apps of the person it is for.
           onNotification: (notification) =>
             showDesktopNotification(notification, {
+              enabled: readNotificationsEnabled,
               mainWindow: () => (mainWindow && !mainWindow.isDestroyed() ? mainWindow : null),
               openInstance: () => controller.activeTarget().instance,
               showMainWindow: async () => {
@@ -121,6 +126,7 @@ async function bootstrap() {
             }),
           onStatus: (status) => {
             keepAwake.sync(status);
+            for (const listener of deviceListeners) listener();
             // Only the app's own pages and the open Rome hear it, as with device:get.
             const origin = controller.activeTarget().instance?.origin;
             for (const window of BrowserWindow.getAllWindows()) {
@@ -148,6 +154,10 @@ async function bootstrap() {
         writeDeviceEnabled(enabled);
         await deviceHost?.stop();
         await device.start();
+      },
+      setNotificationsEnabled: (enabled: boolean) => {
+        writeNotificationsEnabled(enabled);
+        deviceHost?.refresh();
       },
     };
     const active = controller.activeTarget();
@@ -280,6 +290,10 @@ async function bootstrap() {
       },
       runtime,
       floatingPill,
+      device: {
+        status: device.status,
+        onChange: (listener) => deviceListeners.add(listener),
+      },
     });
     setupUpdater();
     // The Rome keeps running in Rome Cloud; quitting only disconnects this

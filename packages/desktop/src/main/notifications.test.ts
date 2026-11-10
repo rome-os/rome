@@ -70,12 +70,17 @@ function fakeWindow(state: { visible?: boolean; focused?: boolean; url?: string 
 }
 
 function setup(
-  options: { window?: ReturnType<typeof fakeWindow> | null; openId?: string | null } = {},
+  options: {
+    window?: ReturnType<typeof fakeWindow> | null;
+    openId?: string | null;
+    enabled?: boolean;
+  } = {},
 ) {
   const window = options.window === undefined ? fakeWindow() : options.window;
   const created: FakeNotification[] = [];
   const shown: string[] = [];
   const deps: NotificationDeps = {
+    enabled: () => options.enabled ?? true,
     mainWindow: () => window,
     openInstance: () =>
       options.openId === null ? null : { id: options.openId ?? "inst-1", origin: ORIGIN },
@@ -101,6 +106,15 @@ beforeEach(() => {
 });
 
 describe("showDesktopNotification", () => {
+  it("drops it when the user turned notifications off, even with no window", () => {
+    const { deps, created } = setup({ window: null, enabled: false });
+    showDesktopNotification({ ...base, level: "active", body: "secret-body-text" }, deps);
+    expect(created).toEqual([]);
+    expect(logs.info).toEqual([
+      "Desktop notification dropped: notifications are turned off in the app",
+    ]);
+  });
+
   it("does nothing while the Rome window is visible and focused", () => {
     const { deps, created } = setup();
     showDesktopNotification(base, deps);

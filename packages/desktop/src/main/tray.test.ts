@@ -29,7 +29,8 @@ rs.mock("./logger", () => ({
 
 import type { RuntimeStatus } from "./runtime/provider";
 import type { Runtime } from "./runtime/runtime";
-import { setupTray, statusLabel } from "./tray";
+import type { DeviceStatus } from "./cloud/device-host";
+import { deviceLabel, setupTray, statusLabel } from "./tray";
 
 function status(partial: Partial<RuntimeStatus>): RuntimeStatus {
   return {
@@ -84,5 +85,34 @@ describe("setupTray", () => {
     expect(labels).toContain("Quit Rome");
     expect(labels).toContain("Status: Ready");
     expect(labels?.some((label) => /agent|Stopping/.test(label ?? ""))).toBe(false);
+  });
+});
+
+describe("deviceLabel", () => {
+  const device = (partial: Partial<Extract<DeviceStatus, { deviceId: string }>>): DeviceStatus => ({
+    state: "connected",
+    deviceId: "d1",
+    name: "Mac",
+    connection: "connected",
+    computerUse: true,
+    notifications: true,
+    ...partial,
+  });
+
+  it("says nothing while signed out", () => {
+    expect(deviceLabel({ state: "off" })).toBeNull();
+  });
+
+  it("names the connection and, when it is off, Computer use", () => {
+    expect(deviceLabel(device({}))).toBe("This Mac: Connected");
+    expect(deviceLabel(device({ computerUse: false, state: "disabled" }))).toBe(
+      "This Mac: Connected · Computer use off",
+    );
+    expect(deviceLabel(device({ connection: "connecting", state: "connecting" }))).toBe(
+      "This Mac: Connecting…",
+    );
+    expect(
+      deviceLabel(device({ connection: "offline", computerUse: false, state: "disabled" })),
+    ).toBe("This Mac: Offline · Computer use off");
   });
 });

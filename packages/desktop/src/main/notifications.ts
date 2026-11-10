@@ -23,6 +23,8 @@ export interface NativeNotification {
 }
 
 export interface NotificationDeps {
+  /** The user's choice to show notifications. Off, they are received and dropped. */
+  enabled(): boolean;
   /** The main Rome window, or null when none exists. */
   mainWindow(): NotifiableWindow | null;
   /** The Rome the app has open, or null while it has none. */
@@ -84,10 +86,14 @@ async function onClick(n: GatewayNotification, deps: NotificationDeps): Promise<
 }
 
 /**
- * Shows a notification Rome Cloud sent over the device Gateway, unless the Rome window is in
- * front. No level means silent. The body is never logged.
+ * Shows a notification Rome Cloud sent over the device Gateway, unless the user turned
+ * notifications off or the Rome window is in front. No level means silent. The body is never logged.
  */
 export function showDesktopNotification(n: GatewayNotification, deps: NotificationDeps): void {
+  if (!deps.enabled()) {
+    log.info("Desktop notification dropped: notifications are turned off in the app");
+    return;
+  }
   const window = deps.mainWindow();
   if (window && !window.isDestroyed() && window.isVisible() && window.isFocused()) {
     log.info("Desktop notification skipped: the Rome window is in front");

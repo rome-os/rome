@@ -29,12 +29,23 @@ export function isElectronShell(): boolean {
 /** This computer as a device of the signed-in account, as the Mac app reports it. */
 export type DesktopDeviceStatus =
   | { state: "off" }
-  | { state: "disabled" | "connecting" | "connected" | "offline"; deviceId: string; name: string };
+  | {
+      /** `disabled` while Computer use is off, whatever the connection is. */
+      state: "disabled" | "connecting" | "connected" | "offline";
+      deviceId: string;
+      name: string;
+      /** The app's Gateway connection. Only an app that always connects reports these three. */
+      connection?: "connecting" | "connected" | "offline";
+      computerUse?: boolean;
+      notifications?: boolean;
+    };
 
 /** The Mac app's device controls, which it offers only to the Rome it opened. */
 export interface DesktopDeviceBridge {
   get(): Promise<DesktopDeviceStatus>;
   setEnabled(enabled: boolean): Promise<DesktopDeviceStatus>;
+  /** Turns the app's notifications on or off. Older apps lack it. */
+  setNotificationsEnabled?(enabled: boolean): Promise<DesktopDeviceStatus>;
   /** Opens this computer's audit log in the app's local window. Older apps lack it. */
   openAuditLog?(): Promise<void>;
   onStatus(callback: (status: DesktopDeviceStatus) => void): () => void;

@@ -147,13 +147,19 @@
     "signOutError": "Couldn't log out. Please try again."
   },
   "thisComputer": {
+    "notifications": "Notifications",
     "label": "Let Rome use this computer",
     "auditLog": "View audit log",
     "tooltip": {
       "connected": "Rome can use this computer",
       "connecting": "Connecting…",
       "offline": "Rome can't reach this computer right now",
-      "disabled": "Rome can't use this computer"
+      "disabled": "Rome can't use this computer",
+      "limited": {
+        "connected": "Connected · Computer use off",
+        "connecting": "Connecting… · Computer use off",
+        "offline": "Offline · Computer use off"
+      }
     },
     "state": {
       "connected": "Connected",

@@ -29,10 +29,15 @@ export function ThisComputerButton({ tooltipSide = "top" }: { tooltipSide?: "top
   // right after. The flag holds until the pointer crosses the button's edge or focus leaves it.
   const refocused = useRef(false);
   const switchId = useId();
+  const notificationsId = useId();
 
   if (!device) return null;
   const { state } = device;
-  const label = t(`thisComputer.tooltip.${state}`);
+  // An app that always connects reports the connection apart from Computer use.
+  const label =
+    device.connection && device.computerUse === false
+      ? t(`thisComputer.tooltip.limited.${device.connection}`)
+      : t(`thisComputer.tooltip.${state}`);
 
   return (
     <TooltipProvider delayDuration={150}>
@@ -107,6 +112,20 @@ export function ThisComputerButton({ tooltipSide = "top" }: { tooltipSide?: "top
               onCheckedChange={device.onEnabledChange}
             />
           </div>
+          {device.notifications ? (
+            <div className="flex items-center gap-3 px-2 py-2">
+              <label htmlFor={notificationsId} className="min-w-0 flex-1 text-ui text-foreground">
+                {t("thisComputer.notifications")}
+              </label>
+              <Switch
+                id={notificationsId}
+                size="sm"
+                checked={device.notifications.enabled}
+                disabled={device.busy}
+                onCheckedChange={device.notifications.onChange}
+              />
+            </div>
+          ) : null}
           {device.openAuditLog ? (
             <>
               <Separator className="my-1" />

@@ -8,6 +8,9 @@ const device = {
   get: (): Promise<DeviceStatus> => ipcRenderer.invoke("device:get"),
   setEnabled: (enabled: boolean): Promise<DeviceStatus> =>
     ipcRenderer.invoke("device:setEnabled", enabled),
+  /** Whether the app shows Rome Cloud's notifications. The connection stays up either way. */
+  setNotificationsEnabled: (enabled: boolean): Promise<DeviceStatus> =>
+    ipcRenderer.invoke("device:setNotificationsEnabled", enabled),
   /** A folder on this computer from the system dialog, or null when the user cancels. */
   pickFolder: (defaultPath?: string): Promise<{ path: string; home: string } | null> =>
     ipcRenderer.invoke("device:pickFolder", defaultPath),
@@ -165,7 +168,15 @@ interface RuntimeTarget {
 
 type DeviceStatus =
   | { state: "off" }
-  | { state: "disabled" | "connecting" | "connected" | "offline"; deviceId: string; name: string };
+  | {
+      /** `disabled` while Computer use is off, whatever the connection is. */
+      state: "disabled" | "connecting" | "connected" | "offline";
+      deviceId: string;
+      name: string;
+      connection: "connecting" | "connected" | "offline";
+      computerUse: boolean;
+      notifications: boolean;
+    };
 
 interface CloudState {
   signedIn: boolean;

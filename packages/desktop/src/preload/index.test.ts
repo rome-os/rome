@@ -32,7 +32,14 @@ describe("preload bridge", () => {
     expect(remote.audit).toBeUndefined();
     // The device bridge can open the local audit window, but carries nothing from the log.
     expect(Object.keys(remote.device as object).sort()).toEqual(
-      ["get", "onStatus", "openAuditLog", "pickFolder", "setEnabled"].sort(),
+      [
+        "get",
+        "onStatus",
+        "openAuditLog",
+        "pickFolder",
+        "setEnabled",
+        "setNotificationsEnabled",
+      ].sort(),
     );
   });
 

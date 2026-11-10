@@ -4,7 +4,7 @@ rs.mock("../logger", () => ({
   createLogger: () => ({ error: rs.fn(), info: rs.fn(), warn: rs.fn() }),
 }));
 
-import type { HostEvent, HostOptions } from "@rome-os/node-core/host";
+import type { HostEvent, HostOptions, LimitedHostOptions } from "@rome-os/node-core/host";
 import { DeviceHost, type DeviceHostOptions, type DeviceStatus } from "./device-host";
 
 const credential = {
@@ -13,11 +13,11 @@ const credential = {
 };
 
 /** A Gateway connection the test drives: events go in, and it ends when told. */
-function fakeGateway() {
-  const calls: HostOptions[] = [];
+function fakeGateway<T extends HostOptions | LimitedHostOptions = HostOptions>() {
+  const calls: T[] = [];
   let end: (error?: Error) => void = () => undefined;
   const connect = rs.fn(
-    (options: HostOptions) =>
+    (options: T) =>
       new Promise<void>((resolve, reject) => {
         calls.push(options);
         end = (error) => (error ? reject(error) : resolve());
@@ -42,6 +42,7 @@ const audit = {
 
 function host(overrides: Partial<DeviceHostOptions> = {}) {
   const gateway = fakeGateway();
+  const limited = fakeGateway<LimitedHostOptions>();
   const statuses: DeviceStatus[] = [];
   const options: DeviceHostOptions = {
     cloudOrigin: "https://romeos.cc",
@@ -53,9 +54,10 @@ function host(overrides: Partial<DeviceHostOptions> = {}) {
     onStatus: (status) => statuses.push(status),
     audit,
     connect: gateway.connect,
+    connectLimited: limited.connect,
     ...overrides,
   };
-  return { subject: new DeviceHost(options), options, gateway, statuses };
+  return { subject: new DeviceHost(options), options, gateway, limited, statuses };
 }
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -70,17 +72,100 @@ describe("DeviceHost", () => {
     expect(subject.status()).toEqual({ state: "off" });
   });
 
-  it("stays disconnected while the user has turned the device off", async () => {
-    const { subject, gateway, options } = host({ enabled: () => false });
+  it("stays connected, in a limited mode, while Computer use is off", async () => {
+    const { subject, gateway, limited, options } = host({ enabled: () => false });
     subject.start();
     await settle();
+    // Nothing that can run programs is connected, and the login shell's PATH is not needed.
     expect(gateway.connect).not.toHaveBeenCalled();
     expect(options.prepare).not.toHaveBeenCalled();
+    expect(limited.connect).toHaveBeenCalledTimes(1);
+    expect(limited.calls[0].audit).toBe(audit);
     expect(subject.status()).toEqual({
       state: "disabled",
       deviceId: credential.deviceSessionId,
       name: "RayBook",
+      connection: "connecting",
+      computerUse: false,
+      notifications: true,
     });
+  });
+
+  it("reports the real connection while Computer use is off, with the old state kept", async () => {
+    const { subject, limited, statuses } = host({ enabled: () => false });
+    subject.start();
+    await settle();
+    limited.emit({ type: "connection", status: "online" });
+    expect(subject.status()).toMatchObject({
+      state: "disabled",
+      connection: "connected",
+      computerUse: false,
+    });
+    limited.emit({ type: "connection", status: "retrying" });
+    expect(subject.status()).toMatchObject({ state: "disabled", connection: "offline" });
+    // Pages that predate `connection` only ever see "disabled".
+    expect(new Set(statuses.map((status) => status.state))).toEqual(new Set(["disabled"]));
+    expect(statuses.map((status) => (status.state === "off" ? null : status.connection))).toEqual([
+      "connecting",
+      "connected",
+      "offline",
+    ]);
+  });
+
+  it("gives notifications to the limited connection too", async () => {
+    const onNotification = rs.fn();
+    const { subject, limited } = host({ enabled: () => false, onNotification });
+    subject.start();
+    await settle();
+    expect(limited.calls[0].onNotification).toBe(onNotification);
+  });
+
+  it("reconnects in the other mode when Computer use changes", async () => {
+    let enabled = false;
+    const { subject, gateway, limited } = host({ enabled: () => enabled });
+    await subject.start();
+    expect(limited.connect).toHaveBeenCalledTimes(1);
+    // What setEnabled in the app does: stop, then start.
+    await subject.stop();
+    expect(limited.calls[0].signal.aborted).toBe(true);
+    enabled = true;
+    await subject.start();
+    await settle();
+    expect(gateway.connect).toHaveBeenCalledTimes(1);
+    expect(subject.status()).toMatchObject({ state: "connecting", computerUse: true });
+    gateway.emit({ type: "connection", status: "online" });
+    expect(subject.status()).toMatchObject({ state: "connected", connection: "connected" });
+    await subject.stop();
+    enabled = false;
+    await subject.start();
+    await settle();
+    expect(limited.connect).toHaveBeenCalledTimes(2);
+    expect(subject.status()).toMatchObject({ state: "disabled", computerUse: false });
+  });
+
+  it("reads the notifications choice when the status is given, and reports a change", async () => {
+    let on = true;
+    const { subject, statuses } = host({ notificationsEnabled: () => on });
+    await subject.start();
+    expect(subject.status()).toMatchObject({ notifications: true });
+    on = false;
+    statuses.length = 0;
+    subject.refresh();
+    expect(statuses).toHaveLength(1);
+    expect(statuses[0]).toMatchObject({ notifications: false });
+    expect(subject.status()).toMatchObject({ notifications: false });
+  });
+
+  it("signs the app out when Rome Cloud revokes a limited connection", async () => {
+    const { subject, limited, options } = host({ enabled: () => false });
+    subject.start();
+    await settle();
+    limited.emit({ type: "connection", status: "revoked" });
+    limited.emit({ type: "connection", status: "stopped" });
+    limited.end(new Error("Authorization revoked. Explicit authorization is required."));
+    await settle();
+    expect(options.onRevoked).toHaveBeenCalledTimes(1);
+    expect(subject.status()).toEqual({ state: "off" });
   });
 
   it("passes notifications from the Gateway connection to the app", async () => {
@@ -123,6 +208,9 @@ describe("DeviceHost", () => {
       state: "connected",
       deviceId: credential.deviceSessionId,
       name: "Ray's MacBook",
+      connection: "connected",
+      computerUse: true,
+      notifications: true,
     });
     gateway.emit({ type: "connection", status: "retrying" });
     expect(statuses.map((status) => status.state)).toEqual(["connecting", "connected", "offline"]);
@@ -184,10 +272,13 @@ describe("DeviceHost", () => {
       state: "offline",
       deviceId: credential.deviceSessionId,
       name: "RayBook",
+      connection: "offline",
+      computerUse: true,
+      notifications: true,
     });
   });
 
-  it("resolves start once the status says whether it connects", async () => {
+  it("resolves start once the status says how it connects", async () => {
     let enabled = false;
     const { subject } = host({ enabled: () => enabled });
     await subject.start();

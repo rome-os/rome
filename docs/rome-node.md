@@ -479,19 +479,34 @@ the app quits. Programs run as the user who runs the app. Before it connects,
 the app adopts the PATH of the user's login shell, because an app opened from
 Finder or the Dock gets only the system directories.
 
-The user can turn the computer off as a device and on again. The choice persists
-across restarts: while it is off, the app stays signed in and opens the Rome, but
-does not connect the computer. Settings → Devices in the Rome the app opened shows
-a "This device" card whose menu has Connect or Disconnect, only inside the app.
+While the app runs signed in it is always connected to the Gateway. It disconnects
+only when the user signs out, the app quits, the network is lost, or Rome Cloud
+revokes the device, so the device's connected or offline state is real. Two
+independent choices apply on top of the connection, and both persist across restarts.
+
+- **Computer use** (on by default, "Let Rome use this computer") decides whether Rome may
+  run programs and read files on this computer. Turning it off keeps the connection but
+  switches it to a limited one. That connection is built without the executor, so no
+  program or file code is reachable from it. It answers `system.info` with
+  `computerUse: false` and an empty `actions` list. Every other request gets the error
+  `computer_use_off` as a normal reply, so a caller does not wait for a timeout.
+  Binary requests get an error frame, and `system.info` leaves out `transferVersion`, so
+  `rome-node cp` stops early. These refusals are not written to the audit log, because
+  nothing ran. Turning Computer use on or off reconnects in the other mode.
+- **Notifications** (on by default) decides whether the app shows Rome Cloud's
+  notifications. Off, the app still receives them and drops them.
+
+Settings → Devices in the Rome the app opened shows
+a "This device" card whose menu has Connect or Disconnect, which turn Computer use on and off, only inside the app.
 The menu cannot remove this computer. It links to Rome Cloud, which can. The app answers the
 card's requests only from the top frame of that Rome's origin. Other pages in its
 window, and the Rome in a browser, cannot read or change the device.
 
-While the computer is on as a device, the app keeps its display from sleeping,
+While Computer use is on and the computer is connected, the app keeps its display from sleeping,
 and macOS does not idle-sleep while the display stays on. A lost connection keeps
 the hold for 30 minutes, because a computer that sleeps during an outage does not
 reconnect on its own. After that the app releases the hold and takes it again
-once the device reconnects. Turning the device off, signing out, Rome Cloud
+once the device reconnects. Turning Computer use off, signing out, Rome Cloud
 revoking the device, or quitting the app releases it at once. Closing the lid or
 choosing Sleep still sleeps the computer.
 
@@ -508,10 +523,10 @@ string up to 128 characters. Both are optional. It has no `id` or `from`, which 
 relayed peer message has, so it can only come from the Gateway. A client ignores it
 without an `onNotification` handler, as `rome-node` does, and ignores any message that
 does not match. The app shows it as a system notification, silent unless `level` is
-`active`, and skips it while its Rome window is visible and in front. Clicking it shows
-the window, and opens the chat if the notification is for the Rome the app has open.
-With the device switched off the app has no Gateway connection and gets no
-notifications. macOS only shows them from a signed app.
+`active`, and skips it while its Rome window is visible and in front or while the
+Notifications choice is off. Clicking it shows the window, and opens the chat if the
+notification is for the Rome the app has open. The connection is up with Computer use
+on or off, so both get notifications. macOS only shows them from a signed app.
 
 The app keeps its credential in its own encrypted store and never reads the CLI's
 configuration directory. `rome-node connect` on the same computer is a separate
