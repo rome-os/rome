@@ -4,5 +4,9 @@
 <dict>
 	<key>aps-environment</key>
 	<string>$(ROME_APS_ENVIRONMENT)</string>
+	<key>com.apple.developer.healthkit</key>
+	<true/>
+	<key>com.apple.developer.healthkit.access</key>
+	<array/>
 </dict>
 </plist>

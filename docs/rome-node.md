@@ -535,6 +535,111 @@ configuration directory. `rome-node connect` on the same computer is a separate
 device. Each configuration directory holds one identity, so `ROME_NODE_CONFIG_DIR`
 lets one computer connect to several accounts.
 
+## iPhone
+
+The native iOS app (`ios/`) connects the iPhone as a device, with Apple Health
+as its first capability. It needs no server change: the app's own Rome Cloud
+sign-in (a `romemob_` token and its device session) is the device identity,
+exactly as for the Mac app. Gateway and Cloud already accept it, and the iPhone
+shows up in `rome-node device` and Settings → Devices with `platform: "ios"`.
+An iPad works the same way. Only the device word changes: its settings say iPad,
+as in **Settings → iPad use → Can Rome use this iPad**, and so do the messages
+an agent reads.
+
+The phone ports `connectHost()` and `connectGateway()`: `GET /v1/gateway/config`,
+then a WSS connection with the token in the `Authorization` header, never in the
+URL (WS only to loopback in a Debug build against a local Cloud). The backoff is
+1 s to 60 s with jitter. Close code 4001 (revoked) and 4002 (replaced) stop it.
+`invalid_device_session` from Cloud signs the app out, as any rejected credential
+does. The phone speaks text envelopes only and ignores binary frames, so its
+`system.info` has no `frameVersion` or `transferVersion`.
+
+The phone connects only after the user turns on **Settings → iPhone use → Can Rome
+use this iPhone**. The switch is off by default and kept across launches, so nothing
+connects until the user chooses it. Signed in with the switch on, the phone is a
+device. It is online only while the app is in front: iOS suspends a background app's sockets, and Health's data is
+unreadable while the phone is locked. When the app leaves the front, requests
+under way finish their replies, then the connection closes. Signing out
+disconnects. A device that is not connected answers `target_unavailable`.
+
+`system.info` returns `{name, platform: "ios", actions, usage, audit}`. `usage`
+holds each action's argument help, which is how an agent learns them from
+`rome-node device describe`. The actions are read-only:
+
+- `health.stats` — aggregates over a window: `types` (or `type`), `start`, `end`
+  (ISO 8601 with or without an offset, where no offset means the phone's time
+  zone, or `YYYY-MM-DD` in the phone's time zone, by default today from local
+  midnight to now), `interval` (`total`, `hour`, `day`, `week`, `month`, at most
+  1000 buckets), `aggregate` (`sum`, `avg`, `min`, `max`, `latest`), `unit`,
+  `activity`. HealthKit merges overlapping sources, as the Health app does.
+  `sleep` merges stages and sources so no minute counts twice and adds minutes per
+  stage. `workouts` gives `count`, `durationMinutes`, `activeEnergyKcal` and
+  `distanceMeters`. HealthKit does not sum `sleep`, `mindfulSession` and `workouts`,
+  so the phone reads their records one by one, over a window of at most 366 days
+  per request. A longer window is `invalid_args`.
+- `health.samples` — raw records of one `type`, newest first by default: `limit`
+  (1 to 1000, default 100), `order`, `cursor` (the previous reply's `nextCursor`),
+  `sources`, `includeMetadata`, `activity`.
+
+```sh
+rome-node device run <iphone> health.stats --args '{"types":["stepCount","sleep","restingHeartRate","workouts"]}'
+rome-node device run <iphone> health.stats --args '{"type":"stepCount","start":"2026-11-03","end":"2026-11-09","interval":"day"}'
+rome-node device run <iphone> health.samples --args '{"type":"heartRate","limit":50}'
+```
+
+Every reply carries `startISO`, `endISO` and `timeZoneIdentifier`. A metric with
+no readable value is omitted, never 0. HealthKit hides whether read access was
+denied, so a type the user did not allow looks like a type with no data. The
+allow-list has 28 types, which `system.info` names. Any other type is
+`unsupported_type`. Errors: `invalid_args`, `unsupported_type`, `health_unavailable`
+(no HealthKit on this device), `health_locked` (the phone is locked),
+`health_off`, `unsupported_action`, `audit_unavailable`, `busy`, and `health_failed`
+for anything else. The phone answers at most 4 requests at once. Another request
+gets `busy` before it is recorded or Health is read, and `system.info` is always
+answered.
+
+**Settings → iPhone use → Apple Health** is a row that shows On or Off and opens the
+Apple Health page. The switch ("Allow Rome to read Health") is on that page and is
+off by default. Health values go to the user's Rome and to the AI model behind it,
+so the page shows what the Rome can do with Health as three short chats, each with
+a request and the Rome's answer in the app's own chat bubbles, and where the data
+goes: from the iPhone to the Rome and on to its AI model provider. Three short
+promises follow. Health is read only when the Rome asks and is never changed. Rome
+never sells it, uses it for ads, or uses it to train AI models, and the user's AI
+provider's terms apply to what it receives. Results can stay in the
+Rome's chats and memory. A link opens the privacy policy. The choice is kept across launches, and the row and the
+switch are dimmed while the phone is off limits (the page still opens). While the
+switch is off, `health.stats` and `health.samples`
+fail with `health_off` before Health is touched, and are still recorded in the
+audit log. The error and the `usage` text in `system.info` tell the agent that the
+user must turn the switch on, on the phone. `system.info` still lists the actions,
+so an agent can explain. Turning the switch on while iOS has never been asked shows
+the system's access sheet at once. Once iOS has been asked it shows nothing more.
+
+The system sheet's text (`NSHealthShareUsageDescription`) says the same: when the
+Rome asks, the Health data the user allows is sent to the Rome and its AI model, and
+the app never changes Health data. The app asks only to read, and Release builds
+hold no write permission.
+
+The phone is a device only while the app is past its sign-in screen. If the app
+shows the sign-in screen while a Cloud credential is still kept, for example after
+an instance sign-in failed, the phone disconnects and answers `target_unavailable`
+until the user signs in again.
+
+The phone keeps a light audit log like the desktop's, as JSON lines in the app's
+Application Support folder: each request is written before it runs (time, sender,
+action, args), then its outcome, result count, the window the reply named and the
+duration. It keeps 30 days and
+never holds a health value. If a record cannot be written the request is refused
+with `audit_unavailable`, and `system.info` still answers and reports the log's state.
+Settings → iPhone use → Recent activity lists the last 50 in words, by day (what was
+read, the window, how many, or why it failed), without ids or JSON. The log keeps
+`from`, but Rome Cloud gives a Rome's caller no name the phone could look up, so
+the rows do not name the Rome that asked.
+
+Signing out, and a sign-in to Rome Cloud, empty the log and turn both switches off
+again, so nothing of one account carries over to the next.
+
 ## Binary frames
 
 Gateway also relays binary WebSocket messages. One binary message is one frame,
