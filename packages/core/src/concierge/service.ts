@@ -160,7 +160,6 @@ export interface ConciergeDeps {
     | "getReplyTarget"
     | "addBackendMessage"
     | "placeInChatThread"
-    | "chatThreadSettled"
     | "setSessionTrigger"
     | "listProjects"
     | "onMessageInserted"
@@ -190,7 +189,7 @@ export interface ConciergeDeps {
 }
 
 /** A backend turn where it runs, with the message it answers when it reports on a task. */
-export type ResolvedTurn = BackendTurnParams & { threadAnchor?: string };
+export type ResolvedTurn = BackendTurnParams & { reportedTask?: string };
 
 export interface SystemTurnOptions {
   quiet?: boolean;
@@ -470,24 +469,43 @@ export class ConciergeService {
    * A Concierge chat is being archived or deleted. Its follows, its unfinished
    * tasks and the events owed to it move to its owner's main chat, and the
    * Concierge says so there. A main chat is never retired: this throws for one.
+   * Answers the main chat the chat's work moved to, or null when it is no
+   * Concierge chat. After a delete, call `chatGone` once the chat is gone.
    */
-  async retireChat(chatId: string, how: RetiredHow): Promise<void> {
+  async retireChat(chatId: string, how: RetiredHow): Promise<string | null> {
     const chat = await this.deps.webchatRepo.getSession(chatId);
     if (chatId === CONCIERGE_CHAT_ID || (chat && this.isMainChat(chat)))
       throw new Error("The main Concierge chat cannot be archived or deleted");
-    if (!chat || !isConciergeChat(chat)) return;
+    if (!chat || !isConciergeChat(chat)) return null;
     const owner = ownerOf(chat);
     const main = await this.ensureChatId(owner);
     const follows = (await this.attachedFollowing?.moveToMainChat(chatId, storedChatId(main))) ?? 0;
     const tasks = await this.deps.tasks.repo.moveToMainChat(chatId, storedChatId(main));
     log.info("concierge chat retired", { chatId, how, follows, tasks });
-    if (follows === 0 && tasks === 0) return;
+    // A deleted chat is still there now: its caller tells the activity once
+    // it is gone, so finished rows read as the main chat's by then.
+    if (how === "archived") await this.chatGone(chatId, main);
+    if (follows === 0 && tasks === 0) return main;
     void this.runSystemTurn(
       main,
       `<concierge_chat_retired name="${attr(chat.name)}" how="${how}" follows="${follows}" tasks="${tasks}"/>`,
       { quiet: true, inputLabel: "Concierge chat retired" },
     ).catch((error: unknown) =>
       log.warn("retired chat notice failed", {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return main;
+  }
+
+  /**
+   * A retired Concierge chat is archived or deleted now, and its tasks are
+   * `mainChatId`'s. Finished rows stay on the retired chat, so no row write
+   * tells the activity that their task chats now move the main chat.
+   */
+  async chatGone(chatId: string, mainChatId: string): Promise<void> {
+    await this.activity?.retired(chatId, mainChatId).catch((error: unknown) =>
+      log.warn("concierge activity retire failed", {
         error: error instanceof Error ? error.message : String(error),
       }),
     );
@@ -628,34 +646,33 @@ export class ConciergeService {
       chat && !params.prompt.startsWith("<concierge_chat ")
         ? `${await this.turnHeader(chat)}\n\n${params.prompt}`
         : params.prompt;
-    const threadAnchor = await this.taskAnchorOf(params.prompt, chatId);
+    const reportedTask = await this.reportedTaskOf(params.prompt, chatId);
     return {
       ...params,
       threadId: chatId,
       sessionId,
       prompt,
-      ...(threadAnchor ? { threadAnchor } : {}),
+      ...(reportedTask ? { reportedTask } : {}),
     };
   }
 
   /**
-   * The message a turn about task rows answers: the source message of the
-   * first row its prompt names that has one in `chatId`. A task event names
-   * a row as `<task id="…">`, and a wake-up of `defer` names it in its name
-   * as `task:<id>`, as the Concierge's instructions ask.
+   * The one task row a turn reports on: the row its prompt names, when it is
+   * `chatId`'s. A turn naming several rows reports on none that a line can be
+   * filed under. A task event names a row as `<task id="…">`, and a wake-up
+   * of `defer` names it in its name as `task:<id>`, as the Concierge's
+   * instructions ask.
    */
-  private async taskAnchorOf(prompt: string, chatId: string): Promise<string | undefined> {
+  private async reportedTaskOf(prompt: string, chatId: string): Promise<string | undefined> {
     const ids = [...prompt.matchAll(/<task id="([^"]+)"|\btask:([\w-]+)/g)].map(
       (match) => match[1] ?? match[2],
     );
-    for (const id of new Set(ids)) {
-      if (!id) continue;
-      const found = await this.deps.tasks.repo.getWithChat(id);
-      if (found?.sourceMessageId && found.conciergeChat.id === chatId) {
-        return found.sourceMessageId;
-      }
-    }
-    return undefined;
+    // Which of several tasks a line reports on is not ours to guess.
+    const named = new Set(ids.filter(Boolean));
+    if (named.size !== 1) return undefined;
+    const [id] = named;
+    const found = id ? await this.deps.tasks.repo.getWithChat(id) : null;
+    return found && found.conciergeChat.id === chatId ? found.row.id : undefined;
   }
 
   /**

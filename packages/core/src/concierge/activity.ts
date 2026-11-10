@@ -74,6 +74,8 @@ export interface ConciergeActivitySources {
    * that started it when it is a task chat, else none.
    */
   chatsMovedBy(sessionId: string): Promise<string[]>;
+  /** Forgets every answer of {@link chatsMovedBy} that names `chatId`. */
+  forgetChatsMovedTo(chatId: string): void;
 }
 
 interface ChatState {
@@ -288,6 +290,22 @@ export class ConciergeActivityTracker {
   private clearTimer(state: ChatState): void {
     if (state.timer) clearTimeout(state.timer);
     state.timer = null;
+  }
+
+  /**
+   * A topic chat is being archived or deleted, and its tasks are now
+   * `mainChatId`'s. Every task chat it moved, finished rows' included, is
+   * read again on its next change, and the main chat is read now, so a task
+   * still at work there shows.
+   */
+  async retired(chatId: string, mainChatId: string): Promise<void> {
+    if (this.stopped) return;
+    this.sources.forgetChatsMovedTo(chatId);
+    for (const [taskId, chat] of this.chatOfTask) {
+      if (chat === chatId) this.chatOfTask.set(taskId, mainChatId);
+    }
+    this.forget(chatId);
+    await this.refresh(mainChatId);
   }
 
   /**

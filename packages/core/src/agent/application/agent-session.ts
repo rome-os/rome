@@ -253,8 +253,8 @@ export interface SendTurnOptions {
    * arrives. Absent, the turn acts for no one.
    */
   actor?: TurnActor;
-  /** The message the turn answers though it did not start it (TurnFacts.threadAnchor). */
-  threadAnchor?: string;
+  /** The Concierge task the turn reports on, which no message of the owner started (TurnFacts.reportedTask). */
+  reportedTask?: string;
 }
 
 export interface AgentSessionStatusEvent {
@@ -933,7 +933,7 @@ function sessionSetupOf(
         sharedContext: () => opening.sharedContext,
         pushLevel: () => undefined,
         actor: () => undefined,
-        threadAnchor: () => undefined,
+        reportedTask: () => undefined,
         inTurn: (fn) => fn(),
       };
       const tools = romeTools(
@@ -1190,7 +1190,7 @@ async function openSession(
   const turnFacts = (
     refs: TurnExecRefs,
     pushLevel: () => PushLevel | undefined = () => undefined,
-    threadAnchor: () => string | undefined = () => undefined,
+    reportedTask: () => string | undefined = () => undefined,
   ): TurnFacts => ({
     agentName: key.agentName,
     continuityKey: key.channelThreadKey,
@@ -1211,13 +1211,13 @@ async function openSession(
     sharedContext: refs.getSharedContext,
     pushLevel,
     actor: refs.getActor,
-    threadAnchor,
+    reportedTask,
     inTurn: refs.bindTurnCtx,
   });
   const liveTurn = turnFacts(
     sessionExecRefs,
     () => impl.currentTurnPushLevelRef,
-    () => impl.currentTurnThreadAnchorRef,
+    () => impl.currentTurnReportedTaskRef,
   );
 
   const makeExecuteSubagent =
@@ -1749,7 +1749,7 @@ interface TurnSink {
   initiatedBy?: "user" | "system";
   pushLevel?: PushLevel;
   actor?: TurnActor;
-  threadAnchor?: string;
+  reportedTask?: string;
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
   subagentCallsByToolUse: Map<string, { key: SubagentCallKey; call: SubagentCall }>;
@@ -2037,8 +2037,8 @@ class AgentSessionImpl implements AgentSession {
     this.continuationPending = true;
   }
 
-  get currentTurnThreadAnchorRef(): string | undefined {
-    return this.currentSink?.threadAnchor;
+  get currentTurnReportedTaskRef(): string | undefined {
+    return this.currentSink?.reportedTask;
   }
 
   get currentTurnSharedContextRef(): Record<string, unknown> | undefined {
@@ -3159,7 +3159,7 @@ class AgentSessionImpl implements AgentSession {
       initiatedBy: options?.initiatedBy ?? "user",
       pushLevel: options?.pushLevel,
       actor: options?.actor,
-      threadAnchor: options?.threadAnchor,
+      reportedTask: options?.reportedTask,
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
       subagentCallsByToolUse: new Map(),

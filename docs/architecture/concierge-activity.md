@@ -36,6 +36,7 @@ flowchart LR
 - **A quiet turn, one the owner is not meant to see, counts as work only once it says something,** as the transcript shows it.
 - **A turn running never answers what waits on the owner.** A card or an approval waits until it is answered or resolved, whatever runs meanwhile: an agent works on with an approval pending, and a background turn runs past an open card. The header says the turn's work while it runs and the wait once it ends.
 - **No activity stays stale.** Every chat whose activity is not idle has its facts read again at least every 30 s, so a fact that changes without telling still shows, and a busy chat that is archived or deleted is told idle.
+- **A retired topic chat's task chats move the main chat.** When a topic chat is archived or deleted, every task chat it had, a finished row's included, counts toward the main chat from then on, and the main chat is read again at once.
 - **The activity is said as a kind and its parameters, never as text.** Each client words it in its own language, so a server change never changes a client's copy.
 - **Tools and kinds are only ever added, and a client reads one it does not know without failing:** an unknown tool is plain work, and an unknown kind reads as idle, over whatever the chat showed before. A client never drops an event or fails to load the chats list over a value it does not know.
 - **It reaches the chat's owner only,** on the owner's own `concierge.activity` live-events topic, and only when it changes. Like the chat, it does not exist for anyone else, the guardian included.

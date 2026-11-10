@@ -37,7 +37,7 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
     sharedContext: () => undefined,
     pushLevel: () => undefined,
     actor: () => undefined,
-    threadAnchor: () => undefined,
+    reportedTask: () => undefined,
     inTurn: (fn) => fn(),
     ...overrides,
   };

@@ -30,7 +30,9 @@ export interface ReplyDraft {
   sessionId: string | null;
   target: ReplyTarget | null;
   /** Picks the reply. In a chat that keeps chat threads it also opens the
-   *  thread view on the replied message's thread. */
+   *  thread view, when the replied message is in a chat thread. A reply to a
+   *  message in none stays in the chat's timeline, and sending it starts the
+   *  message's thread. */
   set: (target: ReplyTarget) => void;
   /** Drops the reply, and closes the thread view with it. Answers the
    *  draft's change count after it, for `restore`. */
@@ -47,9 +49,9 @@ export interface ReplyDraft {
   has: (messageId: string) => boolean;
   jump: (messageId: string) => void;
   /**
-   * Whether the chat keeps chat threads. Then the reply bar and the thread
-   * view are one state: opening either opens both, and closing either (the
-   * reply bar's ✕, Esc, a click outside, a send) closes both.
+   * Whether the chat keeps chat threads. Then an open thread view always has
+   * its reply bar: closing either (the reply bar's ✕, Esc, a click outside, a
+   * send) closes both.
    */
   threads: boolean;
   /** A message of the chat thread the thread view shows, or null when it is closed. While it is open, the composer sends into that thread. */
@@ -89,6 +91,7 @@ export function useReplyDraftState({
   jump,
   focusComposer,
   threads = false,
+  inThread = () => true,
 }: {
   chatId: string | undefined;
   sessionId: string | null;
@@ -97,6 +100,8 @@ export function useReplyDraftState({
   focusComposer: () => void;
   /** The chat keeps chat threads: a reply opens its thread view. */
   threads?: boolean;
+  /** Whether a message is in a chat thread, as the loaded timeline shows it. */
+  inThread?: (messageId: string) => boolean;
 }): ReplyDraft {
   // The reply and the thread view are one state, so they change together.
   const [draft, setDraft] = useState<{ target: ReplyTarget | null; thread: string | null }>(CLOSED);
@@ -112,20 +117,29 @@ export function useReplyDraftState({
     setDraft(CLOSED);
   }, [chatId]);
 
+  const inThreadRef = useRef(inThread);
+  inThreadRef.current = inThread;
   // The one place the reply bar and the thread view open: in a chat that
-  // keeps chat threads, a reply always opens its thread too.
+  // keeps chat threads, a reply to a message in a thread opens that thread
+  // too, and `openThread` always does.
   const opened = useCallback(
-    (next: ReplyTarget) => ({ target: next, thread: threads ? next.messageId : null }),
+    (next: ReplyTarget, openView = inThreadRef.current(next.messageId)) => ({
+      target: next,
+      thread: threads && openView ? next.messageId : null,
+    }),
     [threads],
   );
-  const set = useCallback(
-    (next: ReplyTarget) => {
+  const pick = useCallback(
+    (next: ReplyTarget, openView?: boolean) => {
       changes.current += 1;
-      setDraft(opened(next));
+      // A reply picked inside an open thread view keeps it open: the view
+      // shows its whole thread, older than the loaded timeline too.
+      setDraft((current) => opened(next, openView ?? (current.thread !== null || undefined)));
       requestAnimationFrame(() => focusRef.current());
     },
     [opened],
   );
+  const set = useCallback((next: ReplyTarget) => pick(next), [pick]);
   const clear = useCallback(() => {
     changes.current += 1;
     setDraft(CLOSED);
@@ -139,7 +153,7 @@ export function useReplyDraftState({
     },
     [opened],
   );
-  const openThread = set;
+  const openThread = useCallback((next: ReplyTarget) => pick(next, true), [pick]);
   const closeThread = clear;
   const has = useCallback((messageId: string) => messageIds.has(messageId), [messageIds]);
 

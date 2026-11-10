@@ -4312,21 +4312,22 @@ describe("Webchat API", () => {
         expect(sent.status).toBe(200);
         await drainTurn(app, sent);
       }
-      // The guardian's message starts its chat thread, which the Concierge reads.
-      expect(sentTurns[0]?.prompt).toMatch(
-        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)" thread="\1" chosen="false"\/>\n\nhello$/,
-      );
+      // The Concierge reads which message it is: one sent from the composer is in no thread.
+      const first = sentTurns[0]?.prompt.match(
+        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)"\/>\n\nhello$/,
+      )?.[1];
+      expect(first).toBeTruthy();
       expect(sentTurns[1]?.prompt).toBe("hello");
 
-      // The next message joins that thread for now, and reads what it is about.
+      // One sent from a thread view reads the thread and what it is about.
       const next = await app.request(`/chat/sessions/topic-1/turns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: "and later?" }),
+        body: JSON.stringify({ text: "and later?", chatThread: first }),
       });
       await drainTurn(app, next);
       expect(sentTurns[2]?.prompt).toMatch(
-        /<chat_thread message_id="[^"]+" thread="[^"]+" about="hello" chosen="false"\/>/,
+        new RegExp(`<chat_thread message_id="[^"]+" thread="${first}" about="hello"/>`),
       );
     });
 
@@ -6249,11 +6250,18 @@ describe("Webchat API", () => {
       expect(await repo.get(row.id)).toMatchObject({ state: "doing", sessionId: null });
     });
 
-    it("keeps the main Concierge chat, and retires a topic chat before archiving or deleting it", async () => {
+    it("keeps the main Concierge chat, retires a topic chat before deleting it, and tells the activity after", async () => {
       const retired: [string, string][] = [];
+      const gone: [string, boolean][] = [];
       deps.concierge = {
         taskOfChat: async () => null,
-        retireChat: async (chatId: string, how: string) => void retired.push([chatId, how]),
+        retireChat: async (chatId: string, how: string) => {
+          retired.push([chatId, how]);
+          return "concierge";
+        },
+        // The activity hears of a deleted chat once it is gone, as an archive.
+        chatGone: async (chatId: string) =>
+          void gone.push([chatId, (await deps.webchatRepo.getSession(chatId)) === null]),
       } as never;
       const topic = (id: string) =>
         deps.webchatRepo.createSession(
@@ -6299,6 +6307,7 @@ describe("Webchat API", () => {
         ["topic-1", "archived"],
         ["topic-2", "deleted"],
       ]);
+      expect(gone).toEqual([["topic-2", true]]);
     });
 
     it("lists a quiet backend turn as quiet, and an ordinary one without the flag", async () => {

@@ -47,6 +47,7 @@ import { SessionLoadingTitle } from "@/components/chat/SessionLoadingTitle";
 import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
+import { TaskChatContext } from "@/components/chat/task-chat";
 import {
   prettyAgentName,
   mainAgentDisplayName as resolveMainAgentDisplayName,
@@ -106,6 +107,7 @@ import {
   ChatThreadsProvider,
   placeLive,
   type ThreadPlacement,
+  placed,
   useChatThreadsValue,
 } from "@/components/chat/reply/chat-threads";
 import {
@@ -509,6 +511,7 @@ export function Chat({
     pinnedAgentMention: identityAgentMention,
     archivedAt,
     forkable,
+    isTaskChat,
   } = useSessionIdentity(mainSessionId);
   // The main chat is never archived or deleted, so its menu offers neither.
   const isMainChat = concierge && mainSessionId === conciergeMainChatId;
@@ -761,6 +764,7 @@ export function Chat({
     return onConciergeJump((messageId) => void showSourceMessage(messageId));
   }, [concierge, showSourceMessage]);
 
+  const threadedRef = useRef<ReadonlySet<string>>(new Set());
   const displayedMessageIds = useMemo(
     () => new Set(displayMessages.map((message) => message.id)),
     [displayMessages],
@@ -771,8 +775,10 @@ export function Chat({
     messageIds: displayedMessageIds,
     jump: jumpToMessage,
     focusComposer: () => composerRef.current?.focus(),
-    // A Concierge chat keeps chat threads: Reply and a quote open the thread view.
+    // A Concierge chat keeps chat threads: Reply on a message in one, and a
+    // quote, open the thread view.
     threads: concierge,
+    inThread: (messageId) => threadedRef.current.has(messageId),
   });
 
   const enterShareMode = useCallback(() => {
@@ -2253,6 +2259,12 @@ export function Chat({
     displayMessages.map((message) => [message.id, message.chatThreadId ?? null]),
   );
   const chatThreads = useChatThreadsValue(displayMessages, rethreaded);
+  // Every message in a chat thread, roots included, as the timeline shows them now.
+  threadedRef.current = new Set(
+    placed(displayMessages, rethreaded).flatMap((message) =>
+      message.chatThreadId ? [message.id, message.chatThreadId] : [],
+    ),
+  );
   const conciergeHeader = concierge ? (
     <>
       {threadOpen ? null : conciergeHeaderWith(navbarActions)}
@@ -2353,38 +2365,40 @@ export function Chat({
                     <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
                   ) : null}
                   <ChatThreadsProvider value={chatThreads}>
-                    <MessageList
-                      rows={rows}
-                      live={{
-                        isStreaming: displayedStreaming,
-                        runningTurnId,
-                        quiet: activeSessionStream?.quiet,
-                        snapshot: currentSnapshot,
-                        textStore: liveTextStore,
-                        blockIx: activeSessionStream?.assistantBlockIx,
-                        textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
-                        identity: mainIdentity,
-                      }}
-                      selection={
-                        shareMode
-                          ? {
-                              selectedTurns: selectedShareTurns,
-                              selectableSessionId: mainSessionId,
-                              onToggleTurn: toggleShareTurn,
-                            }
-                          : undefined
-                      }
-                      contentRef={attachContent}
-                      onOpenLiveTrace={openLiveTraceDrawer}
-                      onOpenStoredTrace={openStoredTraceDrawer}
-                      onOpenSubagentTrace={openSubagentTraceDrawer}
-                      activeTraceTarget={traceDrawerTarget}
-                      subagentIconByName={subagentIconByName}
-                      actions={blockActions}
-                      feedback
-                      fork={forkable}
-                      variant={variant}
-                    />
+                    <TaskChatContext.Provider value={isTaskChat}>
+                      <MessageList
+                        rows={rows}
+                        live={{
+                          isStreaming: displayedStreaming,
+                          runningTurnId,
+                          quiet: activeSessionStream?.quiet,
+                          snapshot: currentSnapshot,
+                          textStore: liveTextStore,
+                          blockIx: activeSessionStream?.assistantBlockIx,
+                          textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
+                          identity: mainIdentity,
+                        }}
+                        selection={
+                          shareMode
+                            ? {
+                                selectedTurns: selectedShareTurns,
+                                selectableSessionId: mainSessionId,
+                                onToggleTurn: toggleShareTurn,
+                              }
+                            : undefined
+                        }
+                        contentRef={attachContent}
+                        onOpenLiveTrace={openLiveTraceDrawer}
+                        onOpenStoredTrace={openStoredTraceDrawer}
+                        onOpenSubagentTrace={openSubagentTraceDrawer}
+                        activeTraceTarget={traceDrawerTarget}
+                        subagentIconByName={subagentIconByName}
+                        actions={blockActions}
+                        feedback
+                        fork={forkable}
+                        variant={variant}
+                      />
+                    </TaskChatContext.Provider>
                   </ChatThreadsProvider>
                 </>
               ) : (
@@ -2581,15 +2595,10 @@ export function Chat({
                     }}
                     actions={{
                       ...blockActions,
-                      interactionResults: threadInteractionResults(
-                        threadMessages,
-                        mainSessionId,
-                        mainIdentity,
-                        {
-                          messages: displayMessages,
-                          results: blockActions.interactionResults,
-                        },
-                      ),
+                      interactionResults: threadInteractionResults(threadMessages, {
+                        messages: displayMessages,
+                        results: blockActions.interactionResults,
+                      }),
                     }}
                     contentRef={ignoreThreadContent}
                   />

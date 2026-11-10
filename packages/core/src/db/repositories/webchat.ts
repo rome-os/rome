@@ -22,6 +22,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 import {
+  approvals,
   sharedChats,
   webchatProjects,
   romeSessions,
@@ -85,11 +86,11 @@ export interface StoredWebchatMessage {
 
 /**
  * Where a message goes among its chat's chat threads: into the thread of
- * the message `in` names, into the most recently active thread, or into a
- * thread of its own. With `settle` it stays there for good: its sender chose
- * the thread, or the Concierge placed it. A settled message is never moved.
+ * the message `in` names, or into a thread of its own. With `settle` it
+ * stays there for good: its sender chose the thread, or a task's thread took
+ * it. A settled message is never moved.
  */
-export type ChatThreadPlacement = ({ in: string } | { latest: true } | { starts: true }) & {
+export type ChatThreadPlacement = ({ in: string } | { starts: true }) & {
   settle?: boolean;
 };
 
@@ -459,11 +460,10 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
   where a."status" = 'pending'
   and json_extract(a."payload", '$.channelContext.threadId') is not null
 ))`.mapWith(Boolean);
-// When the session's newest wait began, unix seconds, or null when nothing
-// waits: the newest card of those `sessionAwaitingGuardian` counts open, or
-// the newest approval still pending in this chat.
-export const sessionAwaitingGuardianSince = sql<number | null>`nullif(max(
-  coalesce((
+// When the session's newest open card was said, unix seconds, or null: the
+// newest card of those `sessionAwaitingGuardian` counts open. Pending
+// approvals are read apart, once per call, by `awaitingGuardianSince`.
+export const sessionAwaitingCardSince = sql<number | null>`(
     select max(cast(m."created_at" as integer)) from "rome_agent_messages" m, json_each(m."content") part
     where m."session_id" = "rome_sessions"."id" and m."role" = 'assistant'
     and json_valid(m."content")
@@ -472,13 +472,7 @@ export const sessionAwaitingGuardianSince = sql<number | null>`nullif(max(
       where u."session_id" = "rome_sessions"."id" and u."role" = 'user'
     ), 0)
     and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
-  ), -1),
-  coalesce((
-    select max(cast(a."created_at" as integer)) from "approvals" a
-    where a."status" = 'pending'
-    and json_extract(a."payload", '$.channelContext.threadId') = "rome_sessions"."id"
-  ), -1)
-), -1)`;
+)`;
 // When the guardian last said something in the session, unix seconds, or null.
 export const sessionOwnerSpokeAt = sql<number | null>`(
   select max(cast(u."created_at" as integer)) from "rome_agent_messages" u
@@ -818,8 +812,8 @@ export class WebChatRepository {
   /** Whether a listed session waits on the guardian, as a column of its row. */
   protected readonly awaitingGuardianColumn: SQL<boolean> = sessionAwaitingGuardian;
 
-  /** When a session's newest wait on the guardian began, unix seconds, or null. */
-  protected readonly awaitingGuardianSinceColumn: SQL<number | null> = sessionAwaitingGuardianSince;
+  /** When a session's newest open card was said, unix seconds, or null. */
+  protected readonly awaitingCardSinceColumn: SQL<number | null> = sessionAwaitingCardSince;
   /** When the session's owner last said something in it, unix seconds, or null. */
   protected readonly ownerSpokeAtColumn: SQL<number | null> = sessionOwnerSpokeAt;
 
@@ -873,12 +867,6 @@ export class WebChatRepository {
   /** The chat thread message `messageId` of chat `sessionId` is in, else the
    *  one it would start, or null when the chat holds no such message. */
   async chatThreadOf(_sessionId: string, _messageId: string): Promise<string | null> {
-    return null;
-  }
-
-  /** Whether message `messageId` of chat `sessionId` is settled in its chat
-   *  thread, or null when the chat holds no such message. */
-  async chatThreadSettled(_sessionId: string, _messageId: string): Promise<boolean | null> {
     return null;
   }
 
@@ -1572,15 +1560,28 @@ export class WebChatRepository {
    */
   async awaitingGuardianSince(sessionIds: readonly string[]): Promise<Map<string, number>> {
     if (sessionIds.length === 0) return new Map();
-    const rows = await this.db
-      .select({ id: romeSessions.id, since: this.awaitingGuardianSinceColumn })
+    const ids = [...sessionIds];
+    const cards = await this.db
+      .select({ id: romeSessions.id, since: this.awaitingCardSinceColumn })
       .from(romeSessions)
-      .where(inArray(romeSessions.id, [...sessionIds]));
-    return new Map(
-      rows.flatMap((row) =>
-        row.since === null ? [] : [[row.id, Number(row.since) * 1000] as const],
-      ),
-    );
+      .where(inArray(romeSessions.id, ids));
+    // The pending approvals are read once for all the chats, as
+    // `sessionAwaitingGuardian` does, rather than once per chat: the
+    // approvals table keeps every resolved row and has no index to find a
+    // chat's.
+    const threadId = sql<string>`json_extract(${approvals.payload}, '$.channelContext.threadId')`;
+    const pending = await this.db
+      .select({ id: threadId, since: sql<number>`max(cast(${approvals.createdAt} as integer))` })
+      .from(approvals)
+      .where(and(eq(approvals.status, "pending"), inArray(threadId, ids)))
+      .groupBy(threadId);
+    const since = new Map<string, number>();
+    for (const row of [...cards, ...pending]) {
+      if (row.since === null) continue;
+      const at = Number(row.since) * 1000;
+      since.set(row.id, Math.max(at, since.get(row.id) ?? at));
+    }
+    return since;
   }
 
   /** When the session's owner last said something in it, epoch milliseconds, or null. */

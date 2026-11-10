@@ -2315,7 +2315,7 @@ describe("Chat Concierge empty state", () => {
     mockConciergeActivity.mockReturnValue({ kind: "needsYou" });
     const waiting = renderChat(<Chat sessionId="concierge" variant="concierge" />);
     expect((await screen.findByText("concierge.activity.needsYou")).className).toContain(
-      "text-warning-fg",
+      "text-muted-foreground",
     );
     waiting.unmount();
 
