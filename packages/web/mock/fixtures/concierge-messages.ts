@@ -1,4 +1,4 @@
-// Long and rich Concierge answers, shaped like real ones: a trip plan with a
+// Long and rich agent answers, shaped like real Concierge ones: a trip plan with a
 // table, a release digest full of links and inline code, a morning digest, and
 // a task chat report long enough to fold.
 

@@ -4,6 +4,8 @@ import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { TranscriptEntry } from "@/components/chat/TranscriptEntry";
+import { messageLayout } from "@/components/chat/message-layout";
+import { cn } from "@/lib/utils";
 import { ApprovalCard } from "../approval/ApprovalCard";
 import { AgentCallView } from "./AgentCallView";
 import { SystemInputView } from "./SystemInputView";
@@ -140,11 +142,14 @@ export function renderSingleEntry(
       const blockIx = textBlockIx(block);
       const disclosureStateKey =
         turnId !== undefined && blockIx !== undefined ? `${turnId}:${blockIx}` : undefined;
+      // A long or rich text reads as a document, as in the Concierge. Compact
+      // text keeps its own fold and type.
+      const document = !compact && messageLayout(block.content) === "document";
       // In the transcript every text block is its own bubble, so consecutive
       // narration reads as separate utterances under one speaker.
       if (transcript) {
         return (
-          <ChatBubble key={key} tone="received">
+          <ChatBubble key={key} tone={document ? "document" : "received"}>
             <TextBlock
               content={block.content}
               compact={compact}
@@ -157,21 +162,23 @@ export function renderSingleEntry(
       // narration reads as separate utterances under one speaker (not a run-on
       // paragraph). Same text styling as the final answer. The final answer
       // renders bare, as before.
-      return block.turnPhase === "commentary" ? (
-        <div key={key} className="mb-3">
-          <TextBlock
-            content={block.content}
-            compact={compact}
-            disclosureStateKey={disclosureStateKey}
-          />
-        </div>
-      ) : (
+      const text = (
         <TextBlock
           key={key}
           content={block.content}
           compact={compact}
           disclosureStateKey={disclosureStateKey}
         />
+      );
+      const commentary = block.turnPhase === "commentary";
+      if (!commentary && !document) return text;
+      return (
+        <div
+          key={key}
+          className={cn(commentary && "mb-3", document && "rome-markdown-document max-w-2xl")}
+        >
+          {text}
+        </div>
       );
     }
     case "turn_recap":
