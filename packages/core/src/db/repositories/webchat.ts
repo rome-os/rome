@@ -3078,6 +3078,9 @@ export class WebChatRepository {
         role: romeAgentMessages.role,
         content: romeAgentMessages.content,
         senderId: romeAgentMessages.senderId,
+        // `queued` for an input linked to the turn that has not reached it:
+        // a later turn takes it.
+        inputState: romeAgentMessages.inputState,
       })
       .from(romeAgentMessages)
       .where(

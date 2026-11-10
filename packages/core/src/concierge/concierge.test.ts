@@ -72,6 +72,8 @@ interface Row {
   /** The chat thread the row is in, and whether it is placed there for good. */
   chatThread?: string;
   settled?: boolean;
+  /** Where the input stands; `queued` waits for a later turn. */
+  inputState?: string;
 }
 
 const textOf = (content: string): string => {
@@ -652,6 +654,22 @@ describe("Concierge tools", () => {
       await expect(s.tool("say", { text: "x", answers: "elsewhere" })).resolves.toMatchObject({
         isError: true,
       });
+    });
+
+    it("leaves a message queued behind the turn to the turn that takes it", async () => {
+      const s = setup();
+      guardianSays(s, { id: "g1", chatThread: "older", inputState: "consumed" });
+      guardianSays(s, { id: "g2", chatThread: "older", inputState: "queued" });
+
+      await s.tool("say", { text: "About the first", thread: "new" });
+      expect(threadOf(s, "g1")).toBe("g1");
+      expect(threadOf(s, "g2")).toBe("older");
+
+      // The next turn takes g2, and its first answer places it.
+      const g2 = s.messages.get(CONCIERGE_CHAT)!.find((row) => row.id === "g2")!;
+      g2.inputState = "consumed";
+      await s.tool("say", { text: "About the second", thread: "new" });
+      expect(threadOf(s, "g2")).toBe("g2");
     });
 
     it("a turn the guardian did not start joins the thread of the message it answers", async () => {

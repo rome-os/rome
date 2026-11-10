@@ -338,8 +338,11 @@ export async function buildConciergeTools(
     answers: string | undefined,
   ): Promise<ChatThreadPlacement> => {
     const { chatId, turnId } = currentTurn();
+    // Only the guardian's messages this turn has taken: one still queued
+    // behind it is placed by the turn that takes it, once the Concierge has
+    // seen it.
     const prompts = (await webchatRepo.getTurnChatMessages(chatId, turnId))
-      .filter((row) => row.role === "user")
+      .filter((row) => row.role === "user" && row.inputState !== "queued")
       .map((row) => row.id);
     if (answers !== undefined && !prompts.includes(answers)) {
       throw new Error(

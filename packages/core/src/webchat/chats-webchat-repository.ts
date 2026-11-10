@@ -720,6 +720,9 @@ export class ChatsWebChatRepository extends WebChatRepository {
         role: row.role,
         content: row.content,
         senderId: row.turn_sender_id,
+        // `queued` for an input linked to the turn that has not reached it:
+        // a later turn takes it.
+        inputState: row.input_state,
       }));
   }
 
