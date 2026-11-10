@@ -279,6 +279,9 @@ final class InstanceUpdater {
 
     private var backend: RomeBackend?
     private var instanceID: String?
+    /// The instance an upgrade is waited on while no workspace is open
+    /// (`waitWithoutInstance`), until the wait ends.
+    var waitingInstanceID: String? { reconnect == nil ? nil : instanceID }
     /// Tries to reach an instance that Rome Cloud reports as not running yet,
     /// used while it restarts with no backend open.
     private var reconnect: (() async -> Void)?

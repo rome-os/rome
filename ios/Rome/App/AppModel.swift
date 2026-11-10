@@ -879,6 +879,9 @@ final class AppModel {
     /// instance is open, through a cold launch or a sign-in.
     func openFromPush(_ target: PushTarget) async {
         pendingPush = target
+        // The stopped page waits on this instance's upgrade: the wait reopens
+        // it, and the push routes then. Opening it now would end the wait.
+        if workspace == nil, update.waitingInstanceID == target.instanceId { return }
         // A stopped page has no instance open to route from: open the push's
         // instance, or show its own stopped page.
         if workspace == nil, phase.waitsOnAnInstance {

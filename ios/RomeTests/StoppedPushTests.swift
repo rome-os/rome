@@ -6,14 +6,17 @@ import Testing
 /// shared with suites that may run at the same time.
 final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var list = #"{"items":[]}"#
+    /// Other paths, answered as given; anything else is a 404.
+    nonisolated(unsafe) static var other: [String: (Int, String)] = [:]
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
-        let found = request.url?.path() == "/v1/instances"
-        let response = HTTPURLResponse(url: request.url!, statusCode: found ? 200 : 404, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        let path = request.url?.path() ?? ""
+        let (status, body) = path == "/v1/instances" ? (200, Self.list) : (Self.other[path] ?? (404, "{}"))
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data((found ? Self.list : "{}").utf8))
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
         client?.urlProtocolDidFinishLoading(self)
     }
     override func stopLoading() {}
@@ -24,14 +27,16 @@ final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
 @Suite(.serialized) struct StoppedPushTests {
     private static let keys = ["lastInstanceID", "lastInstanceRecord"]
 
-    private func model() -> AppModel {
+    private func model(sessionForB: Bool = true) -> AppModel {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [InstanceListProtocol.self]
         let store = MemoryStore()
         store.set(CloudCredential(accessToken: "phone-token", deviceSessionId: "d1"), for: "cloud.credential")
         // A fresh session for B, so opening it asks Rome Cloud for nothing more.
         let future = Date().addingTimeInterval(3600)
-        store.set(InstanceSession(token: "t", expiresAt: ISO8601DateFormatter().string(from: future), origin: "https://b.example"), for: "instance.session.https://b.example")
+        if sessionForB {
+            store.set(InstanceSession(token: "t", expiresAt: ISO8601DateFormatter().string(from: future), origin: "https://b.example"), for: "instance.session.https://b.example")
+        }
         return AppModel(cloud: CloudAuth(origin: URL(string: "https://romeos.cc")!, configuration: configuration, store: store))
     }
 
@@ -65,6 +70,38 @@ final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
             #expect(app.phase != .stopped(instanceName: "B"))
             #expect(app.phase != .stopped(instanceName: "C"))
             app.workspace?.stop()
+        }
+    }
+
+    /// The stopped page waits on B's upgrade. A tap for B keeps that wait;
+    /// a tap for another instance moves on. Fails before the change: the
+    /// tap for B showed B's stopped page afresh, which ended the wait.
+    @Test func aTapForTheUpgradingInstanceKeepsWaiting() async {
+        await withCleanDefaults {
+            UserDefaults.standard.set(try? JSONEncoder().encode(PendingUpgrade(target: "1.2.0", since: .now, from: "1.1.0")), forKey: "pendingUpgrade.b")
+            defer {
+                UserDefaults.standard.removeObject(forKey: "pendingUpgrade.b")
+                InstanceListProtocol.other = [:]
+            }
+            // B restarts on its new release: Rome Cloud still lists it, but cannot sign in to it yet.
+            InstanceListProtocol.other = [
+                "/api/auth/cloud/native/start": (200, #"{"authorization_request":{"client_id":"rome-instance","state":"s-1"},"origin":"https://b.example"}"#),
+                "/v1/instances/b/authorizations": (409, #"{"error":"instance_not_ready"}"#),
+            ]
+            list(b: "running")
+            let app = model(sessionForB: false)
+            await app.openInstance(preferring: "b", showHint: false)
+            #expect(app.phase == .stopped(instanceName: "B"))
+            #expect(app.update.waitingInstanceID == "b")
+            // Rome Cloud now reports it stopped mid-restart; a push from B is tapped.
+            list(b: "stopped")
+            await app.openFromPush(PushTarget(instanceId: "b"))
+            #expect(app.update.waitingInstanceID == "b")
+            #expect(app.phase == .stopped(instanceName: "B"))
+            // A push from C, stopped too, shows C's page instead.
+            await app.openFromPush(PushTarget(instanceId: "c"))
+            #expect(app.phase == .stopped(instanceName: "C"))
+            #expect(app.update.waitingInstanceID == nil)
         }
     }
 
