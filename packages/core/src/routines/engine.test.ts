@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { RoutineEngine } from "./engine.js";
+import { runWithSessionActor } from "../access/session-actor.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
@@ -128,11 +129,15 @@ describe("RoutineEngine run records", () => {
     await engine.start();
 
     await fire?.({});
+    await runWithSessionActor({ kind: "guardian", userId: "g", via: "cookie" }, () =>
+      engine.runNow(id),
+    );
+    // Run now with no person pressing it: the agent, or a CLI over loopback.
     await engine.runNow(id);
 
     const recorded = await runs.findByRoutineId(id);
     const firedBy = await Promise.all(recorded.map((run) => runs.findFiredBy(run.executionId)));
-    expect(firedBy.sort()).toEqual(["run_now", "schedule"]);
+    expect(firedBy.sort()).toEqual(["run_now", "run_now_background", "schedule"]);
   });
   it("keeps no trigger payload in the run or the action's record when the routine says so", async () => {
     const routines = new RoutinesRepository(testDb.db);

@@ -2,6 +2,13 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { routineRuns, routines } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
+import { actorOfOwner } from "../../access/owner-actor.js";
+import {
+  currentSessionActor,
+  guardianActor,
+  type SessionActor,
+} from "../../access/session-actor.js";
+import { actionExecutionContext } from "../../apps/actions/context.js";
 import {
   ACTIVE_ROUTINE_RUN_STATUSES,
   type DeleteRoutineResult,
@@ -28,6 +35,45 @@ export function toRoutine(row: RoutineRow): Routine {
   };
 }
 
+/**
+ * A routine row as the dashboard's `/routines` routes answer it. Who created
+ * it stays in core: only the routine engine reads it ({@link RoutinesRepository.creatorOf}).
+ */
+export function publicRoutineRow<T extends RoutineRow>(row: T): Omit<T, "createdBy"> {
+  const { createdBy: _createdBy, ...rest } = row;
+  return rest;
+}
+
+/**
+ * Who a routine its creator names for a person serves, by owner key
+ * ("guardian", "visitor:<account>"), such as a Concierge's digest.
+ */
+export interface RoutineOwner {
+  owner: string;
+}
+
+/**
+ * Who a routine created now acts for. One that names its person, or an
+ * owner (as {@link RoutineOwner}), acts for them. An app's routine is the
+ * guardian's. Otherwise the person of the action or request creating it; an
+ * action that acts for no one (a turn with more than one person's input)
+ * makes it act for no one. Core work outside any action, with no person, is
+ * the guardian's.
+ */
+export async function routineCreator(
+  db: DrizzleDb,
+  given: { createdBy?: SessionActor | RoutineOwner; managedBy?: string },
+): Promise<SessionActor | null> {
+  if (given.createdBy && "owner" in given.createdBy) {
+    return (await actorOfOwner(db, given.createdBy.owner)) ?? { kind: "anonymous" };
+  }
+  if (given.createdBy !== undefined) return given.createdBy;
+  if (given.managedBy) return (await guardianActor(db)) ?? null;
+  const store = actionExecutionContext.getStore();
+  if (store) return store.actor ?? { kind: "anonymous" };
+  return (await currentSessionActor()) ?? (await guardianActor(db)) ?? null;
+}
+
 export class RoutinesRepository {
   constructor(private db: DrizzleDb) {}
 
@@ -44,6 +90,21 @@ export class RoutinesRepository {
   async findById(id: string) {
     const rows = await this.db.select().from(routines).where(eq(routines.id, id));
     return rows[0] ?? null;
+  }
+
+  /**
+   * The person a routine's fires act for, as stored: who created it, or the
+   * guardian for one no person made, or `anonymous` for one made in work that
+   * acts for no one. Null for a row from before the record, whose fires act
+   * for its chat's owner. Undefined when no such routine exists.
+   */
+  async creatorOf(id: string): Promise<SessionActor | null | undefined> {
+    const rows = await this.db
+      .select({ createdBy: routines.createdBy })
+      .from(routines)
+      .where(eq(routines.id, id));
+    if (rows.length === 0) return undefined;
+    return (rows[0].createdBy as SessionActor | null) ?? null;
   }
 
   /** The trigger type shared by every routine named `name`. Names are not
@@ -132,9 +193,12 @@ export class RoutinesRepository {
     enabled?: boolean;
     nextRunAt?: Date;
     keepTriggerPayload?: boolean;
+    /** Who its fires act for; absent, {@link routineCreator} decides. */
+    createdBy?: SessionActor | RoutineOwner;
   }): Promise<string> {
     const id = uuid();
     const now = new Date();
+    const createdBy = await routineCreator(this.db, data);
     await this.db.insert(routines).values({
       id,
       name: data.name,
@@ -145,6 +209,7 @@ export class RoutinesRepository {
       actionName: data.actionName,
       args: data.args as unknown,
       keepTriggerPayload: data.keepTriggerPayload ?? true,
+      createdBy,
       createdAt: now,
       lastFiredAt: null,
       nextRunAt: data.nextRunAt ?? null,

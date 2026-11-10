@@ -7,6 +7,7 @@ import type { AgentEvent } from "../../types.js";
 import type { JournalEntry } from "./replay.js";
 import type { MainBackendTurnRunner } from "./backend-turn.js";
 import { createLogger } from "../../logger.js";
+import { withoutSessionActor, type SessionActor } from "../../access/session-actor.js";
 
 const log = createLogger("approval-handler");
 
@@ -22,6 +23,14 @@ interface ApprovalPayload {
   sessionId?: string;
   agentName?: string;
   channelThreadKey?: string;
+}
+
+/** The person an execution acted for, as its row records, for {@link ApprovalHandler}'s requester. */
+export function executionRequester(executions: {
+  findById(id: string): Promise<{ actor?: unknown } | null>;
+}): (rootExecutionId: string) => Promise<SessionActor | undefined> {
+  return async (rootExecutionId) =>
+    ((await executions.findById(rootExecutionId))?.actor as SessionActor | null) ?? undefined;
 }
 
 export interface ActionApprovalResolutionObserver {
@@ -63,6 +72,14 @@ export class ApprovalHandler {
      * conversation found". Undefined ⇒ keep the default-dir fallback. */
     private resolveWorkingDir?: (channel: string, threadId: string) => Promise<string | undefined>,
     private resolutionObserver?: ActionApprovalResolutionObserver,
+    /**
+     * The person the turn that asked for the approval acted for, read from the
+     * approval's root execution. The approved action and the resumed turn act
+     * for them, never for the guardian who approved. Absent, for no one.
+     */
+    private requesterOf: (
+      rootExecutionId: string,
+    ) => Promise<SessionActor | undefined> = async () => undefined,
   ) {}
 
   async onApproved(approvalId: string): Promise<void> {
@@ -149,7 +166,20 @@ export class ApprovalHandler {
     );
   }
 
-  private async executeApprovedAction(
+  /**
+   * Runs the approved action and the resumed turn outside the approver's
+   * request: both name the requester explicitly, so the guardian who clicked
+   * Approve is never who they act for.
+   */
+  private executeApprovedAction(
+    approvalId: string,
+    payload: ApprovalPayload,
+    emit?: (msg: AgentEvent & { agent?: string }) => void,
+  ): Promise<void> {
+    return withoutSessionActor(() => this.runApprovedAction(approvalId, payload, emit));
+  }
+
+  private async runApprovedAction(
     approvalId: string,
     payload: ApprovalPayload,
     emit?: (msg: AgentEvent & { agent?: string }) => void,
@@ -171,9 +201,12 @@ export class ApprovalHandler {
       });
 
       // The engine records the root call and its journal with every approval,
-      // so approving replays the root and resumes at the approved call.
+      // so approving replays the root and resumes at the approved call. It
+      // runs for the person who asked, not the guardian who approved.
+      const requester = await this.requesterOf(payload.rootExecutionId);
       const runContext: ActionRunContext = {
         initiator: `approval:${approvalId}`,
+        ...(requester ? { actor: requester } : {}),
         replayJournal: payload.replayJournal,
         replayRootExecutionId: payload.rootExecutionId,
         channelContext: payload.channelContext,
@@ -211,6 +244,8 @@ export class ApprovalHandler {
         for await (const message of this.agentRunner.run({
           agentName,
           prompt: resultText,
+          // The resumed turn acts for the person whose turn asked.
+          ...(requester ? { actor: requester } : {}),
           sessionId: payload.sessionId,
           channelThreadKey: payload.channelThreadKey,
           // Resume in the session's own project dir so the SDK transcript resume
@@ -297,9 +332,11 @@ export class ApprovalHandler {
           payload.channelContext?.channel ?? "",
           payload.channelContext?.threadId ?? "",
         );
+        const requester = await this.requesterOf(payload.rootExecutionId);
         const params = {
           agentName,
           prompt: `The action "${payload.actionName}" you requested has been rejected by the guardian.`,
+          ...(requester ? { actor: requester } : {}),
           sessionId: payload.sessionId,
           channelThreadKey: payload.channelThreadKey,
           // Resume in the session's own project dir (per-cwd SDK transcript);
@@ -308,9 +345,12 @@ export class ApprovalHandler {
           threadContext: payload.channelContext,
           initiatedBy: "system" as const,
         };
-        for await (const message of this.agentRunner.run(params)) {
-          void message;
-        }
+        // The resumed turn runs outside the rejecting guardian's request.
+        await withoutSessionActor(async () => {
+          for await (const message of this.agentRunner.run(params)) {
+            void message;
+          }
+        });
       } catch (err) {
         log.error("failed to notify agent of rejection", {
           approvalId,
