@@ -153,16 +153,19 @@ export class ConciergeTasksRepository {
   }
 
   /**
-   * The rows of one Concierge chat that the panel shows (as
-   * {@link listForPanel}), and no other chat's. A chat is narrowed to in the
-   * query: a topic chat by the rows that name it, the main chat by its
-   * owner's rows. Which chat a row belongs to is then read as the panel reads
-   * it, so a row whose topic chat is archived or gone is its main chat's.
+   * One Concierge chat's rows that can still be doing something: not
+   * archived, and either still open or finished with a task chat that was
+   * active at or after `activeSince`. A finished row's chat that is resumed
+   * counts, however long ago the row finished, while a finished row whose
+   * chat went quiet does not, so the read stays bounded. A chat is narrowed
+   * to in the query: a topic chat by the rows that name it, the main chat by
+   * its owner's rows. Which chat a row belongs to is then read as the panel
+   * reads it, so a row whose topic chat is archived or gone is its main chat's.
    */
   async listForConciergeChat(
     conciergeChatId: string,
     owner: string,
-    doneSince: Date,
+    activeSince: Date,
   ): Promise<ConciergeTaskWithChat[]> {
     const ofChat =
       conciergeChatId === mainChatIdOf(owner)
@@ -174,10 +177,7 @@ export class ConciergeTasksRepository {
         isNull(conciergeTasks.archivedAt),
         or(
           and(ne(conciergeTasks.state, "done"), ne(conciergeTasks.state, "dropped")),
-          gte(
-            sql`coalesce(${conciergeTasks.completedAt}, ${conciergeTasks.updatedAt})`,
-            doneSince.getTime(),
-          ),
+          gte(romeSessions.activityAt, activeSince),
         ),
       ),
     );

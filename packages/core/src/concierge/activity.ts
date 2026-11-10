@@ -88,6 +88,8 @@ type OwnerEmit = { owner: string; emit: LiveEventEmit };
 
 export class ConciergeActivityTracker {
   private chats = new Map<string, ChatState>();
+  /** The Concierge chat each task row was last read in, so a move refreshes both chats. */
+  private chatOfTask = new Map<string, string>();
   private subscribers = new Set<OwnerEmit>();
   private stopped = false;
   private recheck: ReturnType<typeof setInterval>;
@@ -108,6 +110,7 @@ export class ConciergeActivityTracker {
   /** The facts of `chatId` now, and the activity they make. */
   private async compute(chatId: string): Promise<ConciergeActivity> {
     const rows = await this.sources.tasksOf(chatId);
+    for (const row of rows) this.chatOfTask.set(row.id, chatId);
     const taskChats = rows.flatMap((row) => (row.chatId ? [row.chatId] : []));
     const awaiting = await this.sources.awaitingGuardianOf([chatId, ...taskChats]);
     const pending = new Set(this.sources.reportPending());
@@ -153,6 +156,19 @@ export class ConciergeActivityTracker {
       again: false,
     });
     return shown;
+  }
+
+  /**
+   * A task row was written, and is now `chatId`'s. Reads that chat's facts
+   * again, and those of the chat the row was in before when it moved, so
+   * neither keeps showing it wrongly.
+   */
+  async taskChanged(taskId: string, chatId: string): Promise<void> {
+    if (this.stopped) return;
+    const before = this.chatOfTask.get(taskId);
+    this.chatOfTask.set(taskId, chatId);
+    await this.refresh(chatId);
+    if (before && before !== chatId) await this.refresh(before);
   }
 
   /** Reads the facts of every Concierge chat a change in session `sessionId` can move. */
@@ -307,6 +323,7 @@ export class ConciergeActivityTracker {
     clearInterval(this.recheck);
     for (const state of this.chats.values()) this.clearTimer(state);
     this.chats.clear();
+    this.chatOfTask.clear();
     this.subscribers.clear();
   }
 }

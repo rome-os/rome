@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
-import { chatMessages } from "../schema.js";
+import { chatMessages, romeSessions } from "../schema.js";
 import type { WebChatRepository } from "./webchat.js";
 import { ConciergeTasksRepository } from "./concierge-tasks.js";
 import { renderTaskEvents } from "../../concierge/events.js";
@@ -89,7 +89,7 @@ describe("ConciergeTasksRepository", () => {
     expect(await repo.get(row.id)).toMatchObject({ id: row.id, sessionId: null });
   });
 
-  it("lists one Concierge chat's rows only, with a gone topic chat's rows in its owner's main chat", async () => {
+  it("lists one Concierge chat's live rows only: open ones, and finished ones whose task chat is active", async () => {
     const now = Date.now();
     const concierge = (id: string, ownerKey: string | null) =>
       chats.createSession(
@@ -114,12 +114,30 @@ describe("ConciergeTasksRepository", () => {
     await repo.upsertMany([{ title: "Gone topic's", state: "doing", chatId: "gone-topic" }]);
     await repo.upsertMany([{ title: "Visitor's", state: "doing", chatId: visitorMain }]);
     await repo.upsertMany([{ title: "Old done", state: "done" }], new Date(now - 30 * DAY));
+    // Finished long ago, with a task chat: one resumed now, one quiet since.
+    await chats.createSession("resumed-chat", "Resumed");
+    await chats.createSession("quiet-chat", "Quiet");
+    await testDb.db
+      .update(romeSessions)
+      .set({ activityAt: new Date(now - 30 * DAY) })
+      .where(eq(romeSessions.id, "quiet-chat"));
+    await repo.upsertMany(
+      [
+        { title: "Resumed old task", state: "done", sessionId: "resumed-chat" },
+        { title: "Quiet old task", state: "done", sessionId: "quiet-chat" },
+      ],
+      new Date(now - 30 * DAY),
+    );
     await chats.deleteSession("gone-topic");
     const since = new Date(now - 7 * DAY);
     const titles = async (chatId: string, owner: string) =>
       (await repo.listForConciergeChat(chatId, owner, since)).map(({ row }) => row.title).sort();
 
-    expect(await titles("concierge", "guardian")).toEqual(["Gone topic's", "Main's"]);
+    expect(await titles("concierge", "guardian")).toEqual([
+      "Gone topic's",
+      "Main's",
+      "Resumed old task",
+    ]);
     expect(await titles("topic", "guardian")).toEqual(["Topic's"]);
     expect(await titles(visitorMain, "visitor:a")).toEqual(["Visitor's"]);
   });

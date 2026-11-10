@@ -15,9 +15,10 @@ export function chatThreadQueryKey(sessionId: string, messageId: string) {
 const anyEvent = z.unknown();
 
 // A press on one of these belongs to the thread's content, not the blurred
-// area around it: a message, a card, a bubble's details, the header's pieces.
+// area around it: any bubble of a message, a card, a bubble's details, the
+// header's pieces.
 const CONTENT =
-  "[data-timeline-anchor],[data-chat-card-message],[data-bubble-toolbar],[data-concierge-header-badge],[data-concierge-header-pill],a,button,input,textarea,select,[role=menu]";
+  "[data-concierge-bubble-part],[data-timeline-anchor],[data-chat-card-message],[data-bubble-toolbar],[data-concierge-header-badge],[data-concierge-header-pill],a,button,input,textarea,select,[role=menu]";
 
 /**
  * One chat thread of a Concierge chat on its own (docs/domains/chats.md#chat-thread),

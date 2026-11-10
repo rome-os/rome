@@ -13,7 +13,12 @@ import {
   FakeWebSocket,
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
+import { MemoryRouter } from "react-router-dom";
+import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { ChatThreadView } from "./ChatThreadView";
+import { ConciergeTranscript } from "./ConciergeTranscript";
+import { buildRows } from "./chat-view";
+import type { BlockActions } from "./MessageList";
 import { QuotedReply } from "./reply/QuotedReply";
 import { ReplyBar } from "./reply/ReplyBar";
 import { ReplyDraftProvider, useReplyDraftState, type ReplyDraft } from "./reply/reply-draft";
@@ -236,6 +241,78 @@ describe("ChatThreadView", () => {
     expect(screen.getByText("Milo")).toBeTruthy();
     // No title of its own.
     expect(screen.queryByText(/repl(y|ies)/)).toBeNull();
+  });
+
+  it("keeps open on a press on any bubble of a message, a forwarded report included", async () => {
+    rs.stubGlobal("IntersectionObserver", undefined);
+    rs.stubGlobal(
+      "matchMedia",
+      rs.fn((query: string) => ({
+        matches: false,
+        media: query,
+        addEventListener: rs.fn(),
+        removeEventListener: rs.fn(),
+      })),
+    );
+    thread = [
+      {
+        ...message("a1", "assistant", "x"),
+        turnId: "t1",
+        content: JSON.stringify([
+          { type: "text", content: "Here it is" },
+          {
+            type: "text",
+            content: "# Report\n\nThree hotels near the river.",
+            format: "long",
+            forwardedFrom: { chatId: "task-1", title: "Hotels" },
+          },
+        ]),
+      },
+    ];
+    const onClose = rs.fn();
+    const identity = { name: "Rome", iconUrl: null };
+    render(
+      host(
+        <MemoryRouter>
+          <ChatThreadView
+            sessionId="concierge"
+            messageId="a1"
+            onClose={onClose}
+            renderMessages={(messages) => (
+              <ConciergeTranscript
+                rows={buildRows(messages, new Map(), identity, {
+                  runningTurnId: null,
+                  isStreaming: false,
+                })}
+                live={{
+                  isStreaming: false,
+                  runningTurnId: null,
+                  snapshot: null,
+                  textStore: EMPTY_LIVE_TEXT,
+                  identity,
+                }}
+                actions={
+                  {
+                    onApprovalResolved: () => {},
+                    onSubmitAppComponent: () => {},
+                    onDismissAppComponent: () => {},
+                    interactionResults: new Map(),
+                  } as BlockActions
+                }
+                contentRef={() => {}}
+              />
+            )}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    const report = await screen.findByText("Three hotels near the river.");
+    // Nothing stops the press, so a drag from it still selects text.
+    expect(fireEvent.pointerDown(report)).toBe(true);
+    fireEvent.pointerDown(screen.getByText("Here it is"));
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.pointerDown(screen.getByRole("dialog", { name: "Chat thread" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
   it("closes on Esc and on a press on its blurred area, not on a message or outside it", async () => {

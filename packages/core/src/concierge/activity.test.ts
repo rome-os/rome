@@ -333,6 +333,38 @@ describe("ConciergeActivityTracker", () => {
     ]);
   });
 
+  it("refreshes both chats when a task moves between them, and both settle", async () => {
+    const w = world();
+    await flush();
+    const row = {
+      id: "t1",
+      title: "Plan a dinner",
+      chatId: "task-1",
+      updatedAt: 5,
+      conciergeChat: "topic",
+    };
+    w.rows.push(row);
+    w.awaiting.add("task-1");
+    await w.tracker.sessionChanged("task-1");
+    expect(w.last("topic")).toEqual({ kind: "needsYou" });
+
+    // The task is pointed at a message of the main chat.
+    row.conciergeChat = "main";
+    await w.tracker.taskChanged("t1", "main");
+    expect(w.last("main")).toEqual({ kind: "needsYou" });
+    w.advance(IDLE_GRACE_MS);
+    await flush();
+    expect(w.last("topic")).toEqual({ kind: "idle" });
+
+    // The question is answered and the task chat finishes.
+    w.awaiting.delete("task-1");
+    await w.tracker.sessionChanged("task-1");
+    w.advance(IDLE_GRACE_MS);
+    await flush();
+    expect(w.last("main")).toEqual({ kind: "idle" });
+    expect(w.last("topic")).toEqual({ kind: "idle" });
+  });
+
   it("shows a quiet turn only once it has said something", async () => {
     const w = world();
     await flush();

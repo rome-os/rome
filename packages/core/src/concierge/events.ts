@@ -507,9 +507,12 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     webchatRepo.onMessageInserted((message) => sessionChanged(message.sessionId)),
     approvals.onCreated(approvalChanged),
     approvals.onResolved(approvalChanged),
+    // A write can move the row to another Concierge chat (a new source
+    // message, a forward): its task chat's answer is read again, and both
+    // chats are refreshed.
     tasks.repo.onChange(({ row, conciergeChat }) => {
       if (row.sessionId) movedBy.delete(row.sessionId);
-      void guard(tracker.refresh(conciergeChat.id));
+      void guard(tracker.taskChanged(row.id, conciergeChat.id));
     }),
     coalescer.onChange(reportChanged),
   ];
