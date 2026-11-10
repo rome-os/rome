@@ -3101,6 +3101,7 @@ describe("AgentRunner", () => {
       );
       const session: AgentSession = {
         selectModel: () => {},
+        release: () => {},
         key: { agentName: "test-main", channelThreadKey: "telegram:t-1" },
         sessionId: "sess-1",
         status: "idle",
@@ -3155,6 +3156,7 @@ describe("AgentRunner", () => {
       );
       const session: AgentSession = {
         selectModel: () => {},
+        release: () => {},
         key: { agentName: "test-main", channelThreadKey: "telegram:t-1" },
         sessionId: "sess-1",
         status: "idle",
@@ -3627,6 +3629,98 @@ describe("AgentRunner", () => {
         const current = (await sessionRepository.current(key, "core:test-renewing"))?.id;
         expect(incoming).toBe(current);
         expect(woken).toBe(current);
+      });
+
+      describe("a session in use is never closed or replaced", () => {
+        const errorsOf = (messages: AgentEvent[]) =>
+          messages.filter((message) => message.type === "error");
+        const run = async (runner: AgentRunner, params: { sessionId?: string } = {}) => {
+          const messages = await collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: "Hi",
+              ...(params.sessionId ? { sessionId: params.sessionId } : { channelThreadKey: key }),
+            }),
+          );
+          const start = messages.find((message) => message.type === "turn_start");
+          return {
+            sessionId: start?.type === "turn_start" ? start.sessionId : undefined,
+            errors: errorsOf(messages),
+          };
+        };
+
+        it("resume first, then a renewal: the wake runs, then the chat renews", async () => {
+          const runner = renewingRunner(new MockModelProvider(replies(3)));
+          const first = (await run(runner)).sessionId;
+          const wake = run(runner, { sessionId: first });
+          identity.text = "**Agent Name:** YoYo";
+          const incoming = run(runner);
+
+          const [woken, sent] = await Promise.all([wake, incoming]);
+          expect([woken.errors, sent.errors]).toEqual([[], []]);
+          const current = (await sessionRepository.current(key, "core:test-renewing"))?.id;
+          expect(sent.sessionId).toBe(current);
+        });
+
+        it("a caller that acquired but has not submitted keeps the session from being replaced", async () => {
+          const runner = renewingRunner(new MockModelProvider(replies(4)));
+          const first = (await run(runner)).sessionId;
+          const manager = managers.at(-1)!;
+          // Acquired with no opening, so this acquire itself checks no setup.
+          const held = await manager.open({ agentName: "test-renewing", channelThreadKey: key });
+          identity.text = "**Agent Name:** YoYo";
+
+          const meanwhile = await run(runner);
+          // The held session is still open, and its caller's turn runs on it.
+          const heldTurn = await held.submit({ prompt: "Late" }, { priority: "after" }).turn;
+          const heldEvents = await collectMessages(heldTurn.events());
+
+          expect(meanwhile.sessionId).toBe(first);
+          expect(errorsOf(heldEvents)).toEqual([]);
+          expect((await run(runner)).sessionId).not.toBe(first);
+        });
+
+        it("an acquire abandoned before its submit lets the session go", async () => {
+          const runner = renewingRunner(new MockModelProvider(replies(2)));
+          const first = (await run(runner)).sessionId;
+          // A run whose caller decides not to run, after acquiring.
+          await collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: "Skip",
+              channelThreadKey: key,
+              shouldRun: () => false,
+            }),
+          );
+          identity.text = "**Agent Name:** YoYo";
+
+          expect((await run(runner)).sessionId).not.toBe(first);
+        });
+
+        it("an approval set while a turn runs keeps the session after that turn", async () => {
+          const provider = new MockModelProvider(replies(3));
+          let release!: () => void;
+          const gate = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          const runModel = provider.run.bind(provider);
+          provider.run = async function* (params) {
+            if (provider.calls.length === 1) await gate;
+            yield* runModel(params);
+          };
+          const runner = renewingRunner(provider);
+          const first = (await run(runner)).sessionId;
+          const running = run(runner);
+          await new Promise((resolve) => setTimeout(resolve, 20));
+          identity.text = "**Agent Name:** YoYo";
+          held.add(first!);
+          release();
+          await running;
+
+          const after = await run(runner);
+          expect(after.sessionId).toBe(first);
+          expect(after.errors).toEqual([]);
+        });
       });
 
       it("keeps a session an approval holds mid-turn, and renews it once the hold ends", async () => {

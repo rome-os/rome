@@ -277,6 +277,12 @@ export interface AgentSession {
   onStatusChange(listener: AgentSessionStatusListener): () => void;
   /** Stops the session's running turn, if it has one, and the subagent calls it waits on. */
   stop(reason?: string): Promise<void>;
+  /**
+   * Lets go of the session an `open` or `resume` handed out, when the caller
+   * submits no turn after all, as on an error before its submit. `submit`
+   * lets go of it itself. docs/concepts/sessions.md#session-in-use
+   */
+  release(): void;
   close(reason: "idle" | "shutdown" | "error" | "user"): Promise<void>;
 }
 
@@ -571,6 +577,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         // in the open chat applies from the next turn.
         if (init?.selectionId !== undefined) existing.selectModel(init.selectionId);
         recordAcquire("reuse");
+        existing.lease();
         return existing;
       }
     }
@@ -578,12 +585,15 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     if (current && current.status !== "closed") {
       if (init?.selectionId !== undefined) current.selectModel(init.selectionId);
       recordAcquire("reuse");
+      current.lease();
       return current;
     }
     const inflight = acquireLocks.get(k);
     if (inflight) {
       recordAcquire("coalesced");
-      return await inflight;
+      const shared = await inflight;
+      shared.lease();
+      return shared;
     }
     recordAcquire(reopen ? "reopen" : "cold");
     const promise = (async () => {
@@ -600,7 +610,9 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     })();
     acquireLocks.set(k, promise);
     try {
-      return await promise;
+      const opened = await promise;
+      opened.lease();
+      return opened;
     } finally {
       acquireLocks.delete(k);
     }
@@ -1971,14 +1983,36 @@ class AgentSessionImpl implements AgentSession {
     return this.activeForkedTurnCount > 0;
   }
 
-  /** A turn runs or waits, or a forked turn runs: the session is in use, as
-   *  opposed to only finishing the cleanup of a turn that has ended. */
+  /**
+   * Callers that acquired the session and have neither submitted their turn
+   * nor let it go. While any holds it, the session is in use: no reset,
+   * idle eviction or replacement closes it. docs/concepts/sessions.md#session-in-use
+   */
+  private leases = 0;
+
+  /** Taken by `Sessions` when it hands the session to a caller. */
+  lease(): void {
+    this.leases += 1;
+  }
+
+  release(): void {
+    if (this.leases === 0) return;
+    this.leases -= 1;
+    // Whoever waits for the session to go quiet hears it.
+    if (this.leases === 0) this.emitStatus();
+  }
+
+  /** In use: a caller holds it, a turn runs or waits, or a forked turn runs,
+   *  as opposed to only finishing the cleanup of a turn that has ended. */
   get hasTurnInProgress(): boolean {
-    return this.status !== "idle" || this.inputs.busy || this.hasActiveForkedTurns;
+    return (
+      this.leases > 0 || this.status !== "idle" || this.inputs.busy || this.hasActiveForkedTurns
+    );
   }
 
   get isQuiescentForRotation(): boolean {
     return (
+      this.leases === 0 &&
       this.status === "idle" &&
       !this.turnMutex.isLocked() &&
       !this.hasActiveForkedTurns &&
@@ -2973,6 +3007,8 @@ class AgentSessionImpl implements AgentSession {
     if (!isQueueInput(priority)) {
       const landed = afterLanding(this.turnMutex.isLocked());
       const handle = this.startTurn(input, turnOptions);
+      // The turn now holds the session, so the caller's hold ends.
+      this.release();
       return {
         ...(input.inputId ? { inputId: input.inputId } : {}),
         turnId: handle.id,
@@ -2984,6 +3020,8 @@ class AgentSessionImpl implements AgentSession {
       { ...input, inputId: input.inputId ?? uuidv7() },
       { ...turnOptions, priority, ...(onInputStatus ? { onInputStatus } : {}) },
     );
+    // The queued input now holds the session, so the caller's hold ends.
+    this.release();
     // The queue ends its own turn. A system turn (a backend continuation) runs
     // outside the queue, so a `now` input ends it here.
     const sink = this.currentSink;
@@ -3472,8 +3510,9 @@ class AgentSessionImpl implements AgentSession {
       }
       this.currentTurnCtx = null;
 
-      if (!this.keepAlive) {
-        // Phase 3: close on every turn boundary; Phase 4 flips this.
+      if (!this.keepAlive && this.leases === 0) {
+        // Phase 3: close on every turn boundary; Phase 4 flips this. A
+        // caller that holds the session keeps it open for its own turn.
         await this.close("user");
       }
     } catch (err) {

@@ -54,7 +54,7 @@ import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import { createAgentTurnRef } from "../../agent/index.js";
-import type { AgentTurnHandle } from "../../agent/index.js";
+import type { AgentSession, AgentTurnHandle } from "../../agent/index.js";
 import { openedInChat, withRomeSession } from "../../core/session-conversation.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
@@ -1490,6 +1490,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let sourceSessionId: string;
     let threadContext: ThreadContext;
     let sourceCheckpoint: ForkSourceCheckpoint | null = null;
+    // The source session is held from its acquire until the fork's own turn
+    // holds it, or until this route gives up on the fork.
+    let heldSource: AgentSession | undefined;
+    const letSourceGo = () => {
+      heldSource?.release();
+      heldSource = undefined;
+    };
     try {
       const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
       const turnStatus = traceRow
@@ -1545,6 +1552,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           reasoningEffort: await resolveRequestedReasoningEffort(undefined),
         },
       );
+      heldSource = source;
       await openedInChat(deps.webchatRepo, source, input.session.id);
       sourceSessionId = source.sessionId;
       const storedCheckpoint = await deps.sessionRepository.deprecatedCheckpoint(
@@ -1561,6 +1569,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // Distinguishable so the branch route can tell the user this turn has
         // no branch point (a promoted fork chat's own first answer is the
         // common case) rather than implying a transient failure.
+        letSourceGo();
         return "no_turn_checkpoint";
       }
       sourceCheckpoint = {
@@ -1569,6 +1578,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         checkpointId: storedCheckpoint.checkpointId,
       };
     } catch (err) {
+      letSourceGo();
       log.warn("turn fork skipped: source session could not be acquired", {
         sessionId: input.session.id,
         turnId: input.turnId,
@@ -1578,7 +1588,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return null;
     }
 
-    if (!sourceCheckpoint) return null;
+    if (!sourceCheckpoint) {
+      letSourceGo();
+      return null;
+    }
 
     const iterator = deps.agentRunner
       .runForked({
@@ -1601,6 +1614,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     try {
       first = await iterator.next();
     } catch (err) {
+      letSourceGo();
       log.warn("failed to start turn fork", {
         sessionId: input.session.id,
         turnId: input.turnId,
@@ -1609,6 +1623,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
       return null;
     }
+    // The fork's own turn now holds the source session, or there is none.
+    letSourceGo();
     if (first.done || first.value.type !== "turn_start") {
       log.warn("turn fork did not emit turn_start", {
         sessionId: input.session.id,
@@ -3820,6 +3836,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       );
       await openedInChat(deps.webchatRepo, agentSess, sessionId);
     } catch (err) {
+      // A session opened before the failure is let go, since no turn follows.
+      agentSess?.release();
       const modelError = toModelResolutionErrorPayload(err);
       if (modelError) {
         const turnId = randomUUID();
@@ -4635,8 +4653,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           selectionId: modelSelection?.id ?? null,
         },
       );
-      await openedInChat(deps.webchatRepo, opened, chatId);
-      return opened.sessionId;
+      // Only its id is wanted: no turn follows, so the session is let go.
+      try {
+        await openedInChat(deps.webchatRepo, opened, chatId);
+        return opened.sessionId;
+      } finally {
+        opened.release();
+      }
     },
     async sendAsGuardian(chatId, text) {
       const inputId = randomUUID();

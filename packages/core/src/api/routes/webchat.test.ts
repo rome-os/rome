@@ -642,6 +642,7 @@ describe("Webchat API", () => {
     );
     const agent: AgentSession = {
       selectModel: () => {},
+      release: () => {},
       key: { agentName: "main", channelThreadKey: "webchat:test" },
       sessionId: "agent-session",
       status: "running",
@@ -2843,6 +2844,7 @@ describe("Webchat API", () => {
         return {
           sessionId: "runtime-topic",
           key: { agentName: "core:concierge", channelThreadKey: "webchat:topic-1" },
+          release: () => {},
         };
       }),
       find: () => undefined,
@@ -5237,6 +5239,7 @@ describe("Webchat API", () => {
         },
       };
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5576,6 +5579,7 @@ describe("Webchat API", () => {
         },
       };
       const acquireSource = rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5665,6 +5669,7 @@ describe("Webchat API", () => {
         runForked,
       };
       const acquireSource = rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       const exactCheckpoint = rs
@@ -5740,6 +5745,7 @@ describe("Webchat API", () => {
         runForked,
       };
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue(null);
@@ -5790,6 +5796,7 @@ describe("Webchat API", () => {
         },
       };
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5868,6 +5875,7 @@ describe("Webchat API", () => {
         },
       };
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -7578,7 +7586,7 @@ describe("Webchat API", () => {
 });
 
 /** A fake session scripts only how it starts a turn; `withSubmit` gives it the rest. */
-type FakeSession = Omit<AgentSession, "submit" | "fork" | "selectModel"> & {
+type FakeSession = Omit<AgentSession, "submit" | "fork" | "selectModel" | "release"> & {
   startTurn(input: AgentTurnInput, options?: SubmitOptions): AgentTurnHandle;
 };
 
@@ -7607,6 +7615,7 @@ function fakeSessionManager(
 function withSubmit(fake: FakeSession): AgentSession {
   return Object.assign(fake, {
     selectModel: () => {},
+    release: () => {},
     submit: (input: AgentTurnInput, options: SubmitOptions = {}): AgentInputReceipt => {
       const handle = fake.startTurn(input, options);
       if (input.inputId) {

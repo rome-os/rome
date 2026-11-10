@@ -30,7 +30,7 @@ A continuity key is the value that whatever opens a session, and comes back to i
 - A session that a reset replaced is superseded, not ended: whatever still names it by id, such as a scheduled wake-up, reaches the chat's current session, whatever reset replaced it. A session completed any other way cannot be resumed.
 - A resume by id and a reset of the same chat never overlap: the resume settles which session is current only once no reset of that chat is under way.
 - A wake-up an agent schedules for itself carries the agent's own note: why it waits, what to do on waking, and what it concerns, with when and from which turn it was set. The woken turn reads the note whichever session wakes. When the wake-up reaches a newer session than the one that set it, its turn also carries the [continuation](#continuation) notice. A wake-up set before notes existed carries none, and reaches the current session with the notice.
-- While something waits to resume a session in the middle of a turn, no reset replaces it. The reset happens on the first turn after the wait ends. A session with a turn in progress is never replaced either: a message sent meanwhile steers or queues as it always does, and the reset happens on the next turn that finds the session idle.
+- While something waits to resume a session in the middle of a turn, no reset replaces it. The reset happens on the first turn after the wait ends. A session [in use](#session-in-use) is never replaced either: a message sent meanwhile steers or queues as it always does, and the reset happens on the next turn that finds the session free.
 - An approval holds its session for a day: a pending one from when it was asked for, an executing one from when it was approved. A request never answered, or an execution a crash left running, would otherwise keep the chat on one session for good. The cost is that an approval answered after a day resumes in a newer session, which reads the chat's earlier messages through the [continuation](#continuation) notice rather than holding them in context.
 - A chat shows a faint line where its session was replaced, with the reason: the setup changed, an idle or daily reset, or a working folder that is gone. The line is part of the new session's first turn, so it stays after a reload, counts as nothing unread and sends no push.
 - Sessions never reads what a continuity key means. Only the code that minted it may parse it.
@@ -58,6 +58,16 @@ Memory, follows and tasks are not part of it, since a session reads them while i
 - An agent whose policy asks for it gets a fresh session in the same chat when its setup changed since its session opened. The check runs before each turn opened by continuity key. A session resumed by its id is never replaced. The Concierge's chats work this way, since one of them can run on one session for days.
 - A session that recorded no setup opened before setups were recorded, and is replaced on its next turn under such a policy.
 - A replacement for a changed setup sends no message or push: the chat shows only the line where the session was renewed. It carries the [continuation](#continuation) notice until a turn of its own succeeds, so a first open that fails does not lose it.
+
+## Session in use
+
+A session is in use from the moment a caller acquires it, by opening or resuming it, until the turn that caller submits has run, or until the caller lets it go without one, as on an error before its turn. Turns that are running or queued, and forked turns, keep it in use too.
+
+**Contracts:**
+
+- Only a session that is not in use and has finished its last turn's cleanup is closed or replaced, whatever the reason: a renewal for a changed setup, an idle or daily reset, a working folder that is gone, or an idle eviction. A reset due on a session in use waits for the next acquire that finds it free.
+- A resume by id and a reset of the same chat never overlap, and a session one caller acquired is never closed under another caller's turn.
+- Deleting a chat, or the project it belongs to, is the exception: it closes the chat's session even while a turn runs, since that turn's chat is gone.
 
 ## Model pin
 
