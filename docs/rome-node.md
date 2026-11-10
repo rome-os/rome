@@ -287,7 +287,7 @@ is committed with WAL and `synchronous=FULL`, and on macOS also `fullfsync`,
 before the program starts, the folder is read, or a push creates its part file.
 If that commit fails, the host replies `audit_unavailable` and runs nothing. The
 message tells the caller where to look: `rome-node audit status` for the CLI, and
-**Rome → Audit Log…** for the app. `system.info` changes nothing and answers as
+**Rome → Computer Use Log…** for the app. `system.info` changes nothing and answers as
 usual, with `audit: { state: "ok" | "unavailable", code?, message? }`, so Settings →
 Devices can show why a device refuses requests. The `end` record is written after
 the action and before the reply. A failed `end` stays in memory and is written
@@ -325,8 +325,8 @@ most every 5 seconds when a request arrives. To start over, move the file away.
 first 256 KiB of a payload. The full stored payload of the app's log can be read
 with `rome-node audit show <seq> --content stdout --db ~/.rome-desktop/audit/audit.db`
 (`stdin`, `stderr`, and `file` work the same way). The desktop app shows its
-log in **Rome → Audit Log…**, also in the tray menu, and Settings → Devices in the
-Rome it opened offers **View audit log** in this computer's menu. That window is a
+log in **Rome → Computer Use Log…**, also in the tray menu, and Settings → Devices in the
+Rome it opened offers **Computer use log** in this computer's menu. That window is a
 local page of the app with the device pages' layout. The Rome's page can only ask
 the app to open it (`device.openAuditLog`). The log is read through channels that
 answer the app's own `file:` pages, so remote pages never receive any of it.

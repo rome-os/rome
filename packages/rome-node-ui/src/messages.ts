@@ -165,7 +165,7 @@ const en: NodeUiMessages = {
     disabled: "Turned off",
   },
   manage: {
-    auditLog: "View audit log",
+    auditLog: "Computer use log",
     menu: "Device actions",
     rename: "Rename",
     renameTitle: "Rename device",
@@ -298,7 +298,7 @@ const zhCN: NodeUiMessages = {
     disabled: "已关闭",
   },
   manage: {
-    auditLog: "查看审计日志",
+    auditLog: "电脑操作记录",
     menu: "设备操作",
     rename: "重命名",
     renameTitle: "重命名设备",

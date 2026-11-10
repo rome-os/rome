@@ -89,7 +89,7 @@ async function bootstrap() {
     runtime = controller.runtime;
     const keepAwake = new KeepAwake(powerSaveBlocker);
     // Opened before the device connects, and never fatal: an unavailable log makes this
-    // computer refuse remote requests and shows why in Rome → Audit Log…
+    // computer refuse remote requests and shows why in Rome → Computer Use Log…
     const audit = await openAudit();
     if (audit.state.state === "unavailable")
       log.warn(`Audit log unavailable: ${audit.state.message}`);
