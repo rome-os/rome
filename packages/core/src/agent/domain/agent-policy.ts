@@ -16,6 +16,13 @@ export interface AgentPolicy {
   autoTitle: boolean;
   /** Whether the system prompt carries the memory index, project summaries, and runtime paths. */
   loadMemory: boolean;
+  /**
+   * Whether a session opened by continuity key is replaced by a fresh one in
+   * the same chat when the agent's setup changed since it opened: its
+   * instructions, its identity, or its tools. A session resumed by id is
+   * never replaced. docs/concepts/sessions.md#setup
+   */
+  freshSessionOnSetupChange: boolean;
 }
 
 export function resolveAgentPolicy(agent: {
@@ -26,5 +33,6 @@ export function resolveAgentPolicy(agent: {
     finalText: agent.policy?.finalText ?? "deliver",
     autoTitle: agent.policy?.autoTitle ?? true,
     loadMemory: agent.policy?.loadMemory ?? agent.name === "main",
+    freshSessionOnSetupChange: agent.policy?.freshSessionOnSetupChange ?? false,
   };
 }

@@ -89,6 +89,7 @@ const TITLE_TURN: TurnFacts = {
   threadContext: () => undefined,
   sharedContext: () => undefined,
   pushLevel: () => undefined,
+  threadAnchor: () => undefined,
   inTurn: (fn) => fn(),
 };
 

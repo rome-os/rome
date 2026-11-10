@@ -724,6 +724,17 @@ export interface TurnStartEvent {
   /** Session the turn runs on — stable across turns of a conversation. */
   sessionId: string;
   userPrompt: string;
+  /** Set on the first turn of a session that replaced the chat's earlier
+   *  one in a reset: why, and the new session's id. */
+  sessionRenewal?: SessionRenewal;
+}
+
+/** Why a reset replaced a chat's session: its agent's setup changed, its
+ *  chat's reset policy found it idle or a day old, or the folder its
+ *  transcript lived in is gone. A host may add reasons. */
+export interface SessionRenewal {
+  reason: "setup" | "idle" | "daily" | "working_dir" | (string & {});
+  sessionId: string;
 }
 
 /** Turn bracketing: the last event of a turn's stream, emitted after the
@@ -1693,6 +1704,10 @@ export interface ChannelMessage {
   timestamp: Date;
   replyTo?: MessageReplyReference;
   thread?: { kind: "dm" | "group" | "topic"; name?: string };
+  /** The chat thread the message is in, in a chat that keeps them, such as
+   *  a Concierge chat: the id of the thread's first message. Not a platform
+   *  thread. Absent when the message is in none. */
+  chatThread?: string;
   addressing?: MessageAddressing;
   raw?: unknown;
   /** Where this message sits in a channel read, as an opaque token. Set on

@@ -15,6 +15,7 @@ const threadContext = {
 const baseContext: DeferContext = {
   agentName: "main",
   sessionId: "agent-session-1",
+  scheduledAt: new Date("2026-11-09T12:00:00Z"),
   channelContext: threadContext,
 };
 
@@ -25,6 +26,7 @@ describe("runDefer", () => {
       {
         kind: "event",
         name: "CI on #12",
+        note: "Check the run and tell the guardian.",
         event: {
           eventName: "github.check_suite",
           filter: [{ field: "pr", equals: "12" }],
@@ -54,7 +56,7 @@ describe("runDefer", () => {
       threadId: "sess-1",
       channelUserId: "guardian-1",
       agentName: "main",
-      text: "📨 Event arrived: CI on #12",
+      text: expect.stringContaining("📨 Event arrived: CI on #12\n<defer_note"),
       attachEvent: true,
     });
   });
@@ -74,6 +76,7 @@ describe("runDefer", () => {
       {
         kind: "event",
         name: "CI",
+        note: "Check the run and tell the guardian.",
         event: { eventName: "provider:event:github.workflow_run", filter },
       },
       { context: baseContext, createRoutine, prepareEventWait },
@@ -98,7 +101,12 @@ describe("runDefer", () => {
     }));
     await expect(
       runDefer(
-        { kind: "event", name: "CI", event: { eventName: "provider:event:github.workflow_run" } },
+        {
+          kind: "event",
+          name: "CI",
+          note: "Check the run and tell the guardian.",
+          event: { eventName: "provider:event:github.workflow_run" },
+        },
         { context: baseContext, createRoutine, prepareEventWait },
       ),
     ).rejects.toThrow("GitHub refused the webhook on acme/widgets");
@@ -113,7 +121,12 @@ describe("runDefer", () => {
       warning: "Nothing has emitted it since Rome started",
     }));
     const result = await runDefer(
-      { kind: "event", name: "reply", event: { eventName: "provider:event:gmail.new_message" } },
+      {
+        kind: "event",
+        name: "reply",
+        note: "Check the run and tell the guardian.",
+        event: { eventName: "provider:event:gmail.new_message" },
+      },
       { context: baseContext, createRoutine, prepareEventWait },
     );
     expect(createRoutine).toHaveBeenCalledTimes(1);
@@ -127,7 +140,12 @@ describe("runDefer", () => {
     const prepareEventWait = rs.fn();
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-t" });
     await runDefer(
-      { kind: "time", name: "x", fireAtMs: NOW + 5 * MINUTE_MS },
+      {
+        kind: "time",
+        name: "x",
+        note: "Check the run and tell the guardian.",
+        fireAtMs: NOW + 5 * MINUTE_MS,
+      },
       { context: baseContext, createRoutine, prepareEventWait },
     );
     expect(prepareEventWait).not.toHaveBeenCalled();
@@ -136,7 +154,12 @@ describe("runDefer", () => {
   it("creates a one-off UTC routine targeting the dispatcher", async () => {
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-1" });
     const result = await runDefer(
-      { kind: "time", name: "检查 GitHub CI", fireAtMs: NOW + 5 * MINUTE_MS },
+      {
+        kind: "time",
+        name: "检查 GitHub CI",
+        note: "Check the run and tell the guardian.",
+        fireAtMs: NOW + 5 * MINUTE_MS,
+      },
       { context: baseContext, createRoutine },
     );
 
@@ -172,7 +195,11 @@ describe("runDefer", () => {
     // The agent-supplied name is the routine name; the wakeup prompt is a simple
     // time's-up nudge that just references it (the woken agent has full context).
     expect(args.name).toBe("检查 GitHub CI");
-    expect(args.args.text).toBe("⏰ Time's up: 检查 GitHub CI");
+    expect(args.args.text).toBe(
+      "⏰ Time's up: 检查 GitHub CI\n" +
+        '<defer_note scheduled_at="2026-11-09T12:00:00.000Z">\n' +
+        "Check the run and tell the guardian.\n</defer_note>",
+    );
     expect(args.args).not.toHaveProperty("messageId");
     expect(args.args).not.toHaveProperty("attachEvent");
   });
@@ -181,11 +208,17 @@ describe("runDefer", () => {
     const createRoutine = rs.fn();
     await expect(
       runDefer(
-        { kind: "time", name: "x", fireAtMs: NOW + 5 * MINUTE_MS },
+        {
+          kind: "time",
+          name: "x",
+          note: "Check the run and tell the guardian.",
+          fireAtMs: NOW + 5 * MINUTE_MS,
+        },
         {
           context: {
             agentName: "main",
             sessionId: "agent-session-1",
+            scheduledAt: new Date("2026-11-09T12:00:00Z"),
           },
           createRoutine,
         },
@@ -198,7 +231,12 @@ describe("runDefer", () => {
     const createRoutine = rs.fn().mockRejectedValue(new Error("boom"));
     await expect(
       runDefer(
-        { kind: "time", name: "x", fireAtMs: NOW + 5 * MINUTE_MS },
+        {
+          kind: "time",
+          name: "x",
+          note: "Check the run and tell the guardian.",
+          fireAtMs: NOW + 5 * MINUTE_MS,
+        },
         { context: baseContext, createRoutine },
       ),
     ).rejects.toThrow("boom");
@@ -207,11 +245,17 @@ describe("runDefer", () => {
   it("carries the channel coords from channelContext into the resume args", async () => {
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-2" });
     await runDefer(
-      { kind: "time", name: "watch deploy", fireAtMs: NOW + 1 * MINUTE_MS },
+      {
+        kind: "time",
+        name: "watch deploy",
+        note: "Check the run and tell the guardian.",
+        fireAtMs: NOW + 1 * MINUTE_MS,
+      },
       {
         context: {
           agentName: "main",
           sessionId: "agent-session-tg-9",
+          scheduledAt: new Date("2026-11-09T12:00:00Z"),
           channelContext: { channel: "telegram", threadId: "tg-9" },
         },
         createRoutine,
@@ -226,14 +270,19 @@ describe("runDefer", () => {
       agentName: "main",
     });
     expect(args.args).not.toHaveProperty("channelThreadKey");
-    expect(args.args.text).toBe("⏰ Time's up: watch deploy");
+    expect(args.args.text).toContain("⏰ Time's up: watch deploy\n<defer_note");
     expect(args.args).not.toHaveProperty("ownerKey");
   });
 
   it("records whose chat it was scheduled in, so the wake-up reaches them after the chat is gone", async () => {
     const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-3" });
     await runDefer(
-      { kind: "time", name: "check back", fireAtMs: NOW + 5 * MINUTE_MS },
+      {
+        kind: "time",
+        name: "check back",
+        note: "Check the run and tell the guardian.",
+        fireAtMs: NOW + 5 * MINUTE_MS,
+      },
       { context: { ...baseContext, ownerKey: "visitor:a" }, createRoutine },
     );
     expect(createRoutine.mock.calls[0][0].args).toMatchObject({ ownerKey: "visitor:a" });

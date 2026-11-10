@@ -90,6 +90,8 @@ export interface SubagentSession {
     context: { threadContext?: ThreadContext; sharedContext?: Record<string, unknown> },
   ): { turnId: string; events: AsyncIterable<StreamAgentEvent> };
   stop(reason?: string): Promise<void>;
+  /** Lets go of the session when no turn is submitted on it after all. */
+  release(): void;
 }
 
 /** The subagent turn's log. Best effort: a failed write is logged. */
@@ -134,13 +136,19 @@ export function createSubagentCalls(deps: {
       return await from.sessions.resume(request.resumeSessionId, subagent, from.at);
     }
     const session = await from.sessions.open(subagent, from.at);
-    await deps.dashboard.addSubagentSession(
-      newSubagentSession(session.id, subagent, parent, {
-        chat: from.chat,
-        turnId: from.key.turnId,
-        agentName: from.agentName,
-      }),
-    );
+    try {
+      await deps.dashboard.addSubagentSession(
+        newSubagentSession(session.id, subagent, parent, {
+          chat: from.chat,
+          turnId: from.key.turnId,
+          agentName: from.agentName,
+        }),
+      );
+    } catch (err) {
+      // No turn follows on a session the call could not record.
+      session.release();
+      throw err;
+    }
     return session;
   };
 

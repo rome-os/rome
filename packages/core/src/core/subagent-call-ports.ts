@@ -42,6 +42,7 @@ function subagentSession(child: AgentSession): SubagentSession {
       };
     },
     stop: (reason) => child.stop(reason),
+    release: () => child.release(),
   };
 }
 
@@ -72,17 +73,28 @@ export function subagentSessions(
         { agentName: subagent, channelThreadKey: storeSubagentParent(parentLink) },
         opening(at, inherited),
       );
-      await openedInChat(webchatRepo, child, undefined);
+      await held(child, () => openedInChat(webchatRepo, child, undefined));
       return subagentSession(child);
     },
     async resume(id, subagent, at) {
       const child = await manager.resume({ id, agent: subagent }, opening(at, inherited));
       // Naming the chat lets the resume fill a row whose record failed when
       // the subagent was minted.
-      await openedInChat(webchatRepo, child, id);
+      await held(child, () => openedInChat(webchatRepo, child, id));
       return subagentSession(child);
     },
   };
+}
+
+/** Runs `step` on a session just acquired, letting it go when the step fails,
+ *  since no turn follows (docs/concepts/sessions.md#session-in-use). */
+async function held(child: AgentSession, step: () => Promise<unknown>): Promise<void> {
+  try {
+    await step();
+  } catch (err) {
+    child.release();
+    throw err;
+  }
 }
 
 /** A subagent's turns in the live turns registry, recorded in its own chat. */

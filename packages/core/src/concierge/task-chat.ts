@@ -94,5 +94,6 @@ function saidIn(place: Place, line: StoredLine, link: TurnLink | undefined): Sai
     ...(line.senderName === undefined ? {} : { senderName: line.senderName }),
     body: { text: messageContentText(line.parts) ?? "" },
     at: line.at,
+    ...(line.chatThread === undefined ? {} : { chatThread: line.chatThread }),
   };
 }

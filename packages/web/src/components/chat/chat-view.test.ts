@@ -259,6 +259,43 @@ describe("buildRows model switch notice", () => {
   });
 });
 
+describe("buildRows session renewal notice", () => {
+  const idMap = new Map([[MAIN, MAIN_IDENTITY]]);
+  const turn = (turnId: string, renewal?: { reason: string; sessionId: string }) => [
+    mk(MAIN, "user", turnId, [{ type: "text", content: `ask ${turnId}` }]),
+    mk(MAIN, "trace", turnId, [], {
+      traceSummary: {
+        distinctApps: [],
+        totalSteps: 0,
+        invocationCounts: {},
+        ...(renewal ? { sessionRenewal: renewal } : {}),
+      },
+    }),
+    mk(MAIN, "assistant", turnId, [{ type: "text", content: `reply ${turnId}` }]),
+  ];
+
+  it("puts one faint line, with its reason, before the first turn of a renewed session", () => {
+    const renewal = { reason: "setup", sessionId: "runtime-2" };
+    const rows = buildRows(
+      [...turn("t1"), ...turn("t2", renewal), ...turn("t3", renewal)],
+      idMap,
+      MAIN_IDENTITY,
+      { runningTurnId: null, isStreaming: false },
+    );
+
+    expect(rows.map((r) => r.kind)).toEqual([
+      "user",
+      "agent",
+      "session_renewal",
+      "user",
+      "agent",
+      "user",
+      "agent",
+    ]);
+    expect(rows[2]).toMatchObject({ kind: "session_renewal", reason: "setup", turnId: "t2" });
+  });
+});
+
 describe("isLastTurnFailed", () => {
   const trace = (sessionId: string, turnId: string, turnStatus?: "completed" | "error") =>
     mk(sessionId, "trace", turnId, [], {

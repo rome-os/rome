@@ -673,7 +673,13 @@ describe("ChatsWebChatRepository", () => {
       state: "accepted",
     });
     expect(await repo.getTurnChatMessages("chat-1", "turn-1")).toEqual([
-      { id: "in-1", role: "user", content: text("Status?"), senderId: "concierge" },
+      {
+        id: "in-1",
+        role: "user",
+        content: text("Status?"),
+        senderId: "concierge",
+        inputState: "accepted",
+      },
     ]);
   });
 

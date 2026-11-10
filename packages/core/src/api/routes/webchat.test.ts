@@ -642,6 +642,7 @@ describe("Webchat API", () => {
     );
     const agent: AgentSession = {
       selectModel: () => {},
+      release: () => {},
       key: { agentName: "main", channelThreadKey: "webchat:test" },
       sessionId: "agent-session",
       status: "running",
@@ -2843,6 +2844,7 @@ describe("Webchat API", () => {
         return {
           sessionId: "runtime-topic",
           key: { agentName: "core:concierge", channelThreadKey: "webchat:topic-1" },
+          release: () => {},
         };
       }),
       find: () => undefined,
@@ -4310,10 +4312,22 @@ describe("Webchat API", () => {
         expect(sent.status).toBe(200);
         await drainTurn(app, sent);
       }
-      expect(sentTurns[0]?.prompt).toBe(
-        '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n<concierge_owner role="visitor" email="ann@example.com"/>\n\nhello',
+      // The guardian's message starts its chat thread, which the Concierge reads.
+      expect(sentTurns[0]?.prompt).toMatch(
+        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)" thread="\1" chosen="false"\/>\n\nhello$/,
       );
       expect(sentTurns[1]?.prompt).toBe("hello");
+
+      // The next message joins that thread for now, and reads what it is about.
+      const next = await app.request(`/chat/sessions/topic-1/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "and later?" }),
+      });
+      await drainTurn(app, next);
+      expect(sentTurns[2]?.prompt).toMatch(
+        /<chat_thread message_id="[^"]+" thread="[^"]+" about="hello" chosen="false"\/>/,
+      );
     });
 
     it("sends a Concierge turn on the selection a background switch just stored", async () => {
@@ -5225,6 +5239,7 @@ describe("Webchat API", () => {
         },
       };
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5564,6 +5579,7 @@ describe("Webchat API", () => {
         },
       };
       const acquireSource = rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5653,6 +5669,7 @@ describe("Webchat API", () => {
         runForked,
       };
       const acquireSource = rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       const exactCheckpoint = rs
@@ -5728,6 +5745,7 @@ describe("Webchat API", () => {
         runForked,
       };
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue(null);
@@ -5778,6 +5796,7 @@ describe("Webchat API", () => {
         },
       };
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5856,6 +5875,7 @@ describe("Webchat API", () => {
         },
       };
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -7566,7 +7586,7 @@ describe("Webchat API", () => {
 });
 
 /** A fake session scripts only how it starts a turn; `withSubmit` gives it the rest. */
-type FakeSession = Omit<AgentSession, "submit" | "fork" | "selectModel"> & {
+type FakeSession = Omit<AgentSession, "submit" | "fork" | "selectModel" | "release"> & {
   startTurn(input: AgentTurnInput, options?: SubmitOptions): AgentTurnHandle;
 };
 
@@ -7595,6 +7615,7 @@ function fakeSessionManager(
 function withSubmit(fake: FakeSession): AgentSession {
   return Object.assign(fake, {
     selectModel: () => {},
+    release: () => {},
     submit: (input: AgentTurnInput, options: SubmitOptions = {}): AgentInputReceipt => {
       const handle = fake.startTurn(input, options);
       if (input.inputId) {
