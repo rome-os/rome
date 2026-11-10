@@ -54,6 +54,18 @@ import Testing
         #expect(TopicChatsStore.title(store.chat("topic-1")) == "Kyoto trip")
     }
 
+    /// A chat read beside the pinned drawer (iPad) loses its badge at once.
+    @Test func readingAChatClearsItsBadge() async {
+        let backend = FakeBackend()
+        backend.topicChats = [ConciergeChat(id: "topic-1", name: "Trip", main: false, unread: 3), ConciergeChat(id: "topic-2", name: "Books", main: false, unread: 1)]
+        let store = TopicChatsStore(backend: backend)
+        store.start()
+        await settle()
+        store.markRead("topic-1")
+        #expect(store.chat("topic-1")?.unread == 0)
+        #expect(store.chat("topic-2")?.unread == 1)
+    }
+
     @Test func renameSendsTheNameAndUpdatesTheDrawer() async {
         let backend = FakeBackend()
         backend.topicChats = [ConciergeChat(id: "topic-1", name: "Old", main: false, unread: 0)]

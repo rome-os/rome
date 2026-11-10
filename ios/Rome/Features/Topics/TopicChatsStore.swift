@@ -76,6 +76,13 @@ final class TopicChatsStore {
         }
     }
 
+    /// The chat was read: its badge clears now, not at the next refetch. A
+    /// pinned drawer (iPad) shows the list beside the chat being read.
+    func markRead(_ chatId: String) {
+        guard let index = chats.firstIndex(where: { $0.id == chatId }), (chats[index].unread ?? 0) > 0 else { return }
+        chats[index].unread = 0
+    }
+
     /// What the Concierge is doing in a chat; nil when it shows no status line.
     func activity(for chatId: String?) -> ConciergeActivity? {
         guard let chatId, let activity = activities[chatId], activity != .idle else { return nil }
