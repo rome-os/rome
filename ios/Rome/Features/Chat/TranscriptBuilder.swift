@@ -41,8 +41,9 @@ enum TranscriptRow: Identifiable, Hashable {
     case connect(id: String, part: MessagePart.ConnectCardPart, sessionId: String)
     case error(id: String, text: String)
     case tools(id: String, traceMessageId: String, count: Int)
-    /// Under the first message of a chat thread with replies: how many.
-    /// `guardian`: that message is the guardian's, so the line sits right.
+    /// Under an Agent message that ends a stretch of a chat thread, where the
+    /// thread goes on beyond that stretch: how many replies it has.
+    /// `guardian`: the message is the guardian's, so the line sits right.
     case threadReplies(id: String, messageId: String, count: Int, guardian: Bool)
     case typing
 
@@ -120,7 +121,7 @@ enum TranscriptBuilder {
         var entries: [Entry] = []
         // A stored message replaces the pending bubble it came from.
         let storedIDs = Set(messages.map(\.id))
-        let replies = options.showThreads ? threadReplies(messages) : [:]
+        let replies = options.showThreads ? threadLines(messages) : [:]
 
         // Messages come in the store's order, which follows the server's turns.
         for message in messages {
@@ -229,15 +230,47 @@ enum TranscriptBuilder {
         return output
     }
 
-    /// Replies per chat thread, by its first message, for threads with any:
-    /// the other messages placed in it that show something.
-    static func threadReplies(_ messages: [ChatMessage]) -> [String: Int] {
+    /// Where the "N replies" line goes, by message id, and its count.
+    ///
+    /// The timeline is cut into runs: messages next to each other in one
+    /// chat thread (a message in none is a run of its own). A run's line sits
+    /// under its last Agent message, and only where it helps: the thread has
+    /// messages outside the run (later ones elsewhere, or its first message
+    /// is not in the run, perhaps not loaded), or it has four or more. Two
+    /// runs next to each other never both get one: the later keeps it. The
+    /// count is the thread's loaded messages, less one.
+    static func threadLines(_ messages: [ChatMessage]) -> [String: Int] {
+        let shown = messages.filter { !$0.isTrace && $0.parts.contains(where: \.isVisible) }
         var sizes: [String: Int] = [:]
-        for message in messages where !message.isTrace {
-            guard let root = message.chatThreadId, message.parts.contains(where: \.isVisible) else { continue }
-            sizes[root, default: 0] += 1
+        for message in shown { if let root = message.chatThreadId { sizes[root, default: 0] += 1 } }
+
+        struct Run { let thread: String?; var messages: [ChatMessage] }
+        var runs: [Run] = []
+        for message in shown {
+            if let thread = message.chatThreadId, runs.last?.thread == thread {
+                runs[runs.count - 1].messages.append(message)
+            } else {
+                runs.append(Run(thread: message.chatThreadId, messages: [message]))
+            }
         }
-        return sizes.compactMapValues { $0 > 1 ? $0 - 1 : nil }
+        func qualifies(_ run: Run) -> String? {
+            guard let thread = run.thread, let size = sizes[thread],
+                  let last = run.messages.last(where: { !$0.isUser }) else { return nil }
+            let rootHere = run.messages.contains { $0.id == thread }
+            let elsewhere = size > run.messages.count || !rootHere
+            return elsewhere || size >= 4 ? last.id : nil
+        }
+        var lines: [String: Int] = [:]
+        var laterKept = false
+        for run in runs.reversed() {
+            if !laterKept, let id = qualifies(run), let thread = run.thread, let size = sizes[thread] {
+                lines[id] = size - 1
+                laterKept = true
+            } else {
+                laterKept = false
+            }
+        }
+        return lines
     }
 
     /// Answers the guardian already gave, read from their `interaction_result` parts.

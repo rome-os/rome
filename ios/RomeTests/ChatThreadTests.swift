@@ -52,35 +52,62 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
     }
 }
 
-/// The "N replies" line under a thread's first message, in Concierge chats only.
+/// Where the "N replies" line shows: under the last Agent message of a
+/// stretch of a thread, and only where it helps.
 @Suite struct ThreadRepliesRowTests {
-    private let messages = [
-        message("r", role: "user", "plan a trip", at: 0, thread: "r"),
-        message("a1", "sure", at: 10, thread: "r"),
-        message("w", role: "user", "weather?", at: 20, thread: "w"),
-        message("a2", "mild", at: 30, thread: "w"),
-        message("a3", "hotel picked", at: 40, thread: "r"),
-        message("lone", "hello", at: 50),
-    ]
+    private func lines(_ messages: [ChatMessage]) -> [String: Int] { TranscriptBuilder.threadLines(messages) }
 
-    private func replies(_ options: TranscriptBuilder.Options) -> [TranscriptRow] {
-        TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: options).filter {
-            if case .threadReplies = $0 { return true } else { return false }
-        }
+    /// A plain question and answer never shows it.
+    @Test func aQuestionAndItsAnswerShowNothing() {
+        #expect(lines([message("q", role: "user", at: 0, thread: "q"), message("a", at: 10, thread: "q")]).isEmpty)
+        #expect(lines([message("q", role: "user", at: 0), message("a", at: 10)]).isEmpty)
     }
 
-    @Test func aThreadsFirstMessageCountsItsReplies() {
-        #expect(replies(.init(showThreads: true)) == [
-            .threadReplies(id: "replies-r", messageId: "r", count: 2, guardian: true),
-            .threadReplies(id: "replies-w", messageId: "w", count: 1, guardian: true),
-        ])
-        #expect(replies(.init()).isEmpty)
-        // Right under the message it counts.
+    /// Interrupted by another thread: both stretches show it, and the
+    /// interruption, a plain question and answer, does not.
+    @Test func anInterruptedThreadShowsItOnEachStretch() {
+        let messages = [
+            message("r", role: "user", at: 0, thread: "r"), message("a1", at: 10, thread: "r"),
+            message("w", role: "user", at: 20, thread: "w"), message("a2", at: 30, thread: "w"),
+            message("a3", at: 40, thread: "r"), message("u", role: "user", at: 50, thread: "r"),
+        ]
+        #expect(lines(messages) == ["a1": 3, "a3": 3])
+        // In the rows: right under that Agent message, never under the guardian's.
         let rows = TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: .init(showThreads: true))
-        let index = rows.firstIndex { $0.id == "replies-r" }!
-        #expect(rows[index - 1].id == "r:0")
-        #expect(rows[index].messageId == "r")
-        #expect(rows[index - 1].messageId == "r")
+        let index = rows.firstIndex { $0.id == "replies-a1" }!
+        #expect(rows[index - 1].id == "a1:0")
+        #expect(rows[index] == .threadReplies(id: "replies-a1", messageId: "a1", count: 3, guardian: false))
+        #expect(TranscriptBuilder.rows(messages: messages, pending: [], answers: [:], options: .init()).allSatisfy {
+            if case .threadReplies = $0 { return false } else { return true }
+        })
+    }
+
+    @Test func aLongThreadShowsItOnce() {
+        let messages = (0..<4).map { message("m\($0)", role: $0.isMultiple(of: 2) ? "user" : "assistant", at: Double($0) * 10, thread: "m0") }
+        #expect(lines(messages) == ["m3": 3])
+    }
+
+    /// The thread's first message is not loaded (an older page): the
+    /// stretch still says there is more.
+    @Test func aThreadWhoseStartIsNotLoadedShowsIt() {
+        #expect(lines([message("u", role: "user", at: 0, thread: "old"), message("a", at: 10, thread: "old")]) == ["a": 1])
+    }
+
+    /// Two stretches next to each other never both show it: the later keeps it.
+    @Test func neighboursKeepOnlyTheLaterLine() {
+        let messages = [
+            message("x", role: "user", at: 0, thread: "oldX"), message("xa", at: 10, thread: "oldX"),
+            message("y", role: "user", at: 20, thread: "oldY"), message("ya", at: 30, thread: "oldY"),
+        ]
+        #expect(lines(messages) == ["ya": 1])
+        // A stretch in between that shows nothing lets both show.
+        let apart = messages[0...1] + [message("p", role: "user", at: 15), message("pa", at: 16)] + messages[2...3]
+        #expect(lines(Array(apart)) == ["xa": 1, "ya": 1])
+    }
+
+    /// A stretch of only the guardian's messages has no Agent message to carry it.
+    @Test func onlyAgentMessagesCarryIt() {
+        #expect(lines([message("u1", role: "user", at: 0, thread: "old"), message("u2", role: "user", at: 10, thread: "old")]).isEmpty)
     }
 }
 

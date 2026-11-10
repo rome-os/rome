@@ -356,8 +356,6 @@ struct AgentBubble: View {
             }
         }
         .contentShape(.contextMenuPreview, shape)
-        // A tap opens its chat thread; a link or "Show more" in it wins.
-        .onTapGesture { menu.onReply?() }
         .bubbleMenu(text: text, menu: menu)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.trailing, forwardedFrom == nil ? 64 : 32)

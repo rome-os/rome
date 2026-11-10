@@ -543,14 +543,19 @@ final class DemoBackend: RomeBackend {
             for row in 0..<3 { for column in 0..<5 { context.fill(CGRect(x: 200 + column * 85, y: 220 + row * 95, width: 50, height: 60)) } }
         }.jpegData(compressionQuality: 0.8)
         // A long chat, to scroll far from the bottom.
+        // The last two chapters are one long chat thread: four messages, so
+        // its answer carries the replies line.
         messages["topic-books"] = (0..<24).flatMap { index -> [ChatMessage] in
             let time = at(8, 0, daysAgo: 1).addingTimeInterval(Double(index) * 600)
+            let root: String? = index >= 22 ? "b22" : nil
             return [
-                user("b\(index)", "第 \(index + 1) 章讲了什么？", at: time, session: "topic-books"),
-                agent("第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"),
+                threaded(user("b\(index)", "第 \(index + 1) 章讲了什么？", at: time, session: "topic-books"), root),
+                threaded(agent("第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"), root),
             ]
         }
-        // Two chat threads: the plan (three replies), and the weather asked in between.
+        // Two chat threads: the plan, interrupted by the weather, so both of
+        // its stretches carry the replies line; the weather's question and
+        // answer carry none.
         messages["topic-trip"] = [
             threaded(user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"), "k1"),
             threaded(agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"), "k1"),
