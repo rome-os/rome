@@ -2103,7 +2103,7 @@ describe("Chat Concierge empty state", () => {
     expect(guidance()).toBeNull();
   });
 
-  it("centres the Concierge's name and status in a bar with no title row, and leaves other chats' bars as they were", async () => {
+  it("floats the Concierge's header over its messages: the mascot's badge, a name pill and round buttons", async () => {
     mockConciergeActivity.mockReturnValue({ kind: "tasks", title: "Book the flight", more: 0 });
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
@@ -2111,21 +2111,27 @@ describe("Chat Concierge empty state", () => {
       archivedAt: null,
     });
     const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
-    const status = await waitFor(() => {
-      const found = document.querySelector<HTMLElement>("[data-concierge-header-status]");
-      if (!found) throw new Error("no status");
+    const header = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-concierge-header]");
+      if (!found) throw new Error("no header");
       return found;
     });
-    const header = status.closest<HTMLElement>("[data-concierge-header]")!;
-    expect(header.className).toContain("grid-cols-[1fr_auto_1fr]");
-    // Left, middle, right: the status is the middle column, the menu the right.
-    const [left, middle, right] = Array.from(header.children);
-    expect(left.childElementCount).toBe(0);
-    expect(middle.contains(status)).toBe(true);
-    expect(within(right as HTMLElement).getByRole("button", { name: "navbar.more" })).toBeTruthy();
-    expect(within(status).getByText("Concierge")).toBeTruthy();
-    expect(within(status).getByText("Book the flight")).toBeTruthy();
-    expect(status.getAttribute("data-activity")).toBe("tasks");
+    // No bar: it sits over the messages, which start below it.
+    expect(header.className).toContain("absolute");
+    expect(header.className).not.toMatch(/\bbg-|\bborder-b\b/);
+    const scroller = header.parentElement!.querySelector<HTMLElement>(".overflow-y-auto")!;
+    expect(scroller.className).toContain("pt-[var(--rome-concierge-header-height)]");
+    const badge = header.querySelector<HTMLElement>("[data-concierge-header-badge]")!;
+    const pill = header.querySelector<HTMLElement>("[data-concierge-header-pill]")!;
+    expect(badge.querySelector(".rome-mascot")).not.toBeNull();
+    expect(badge.className).toContain("rounded-full");
+    expect(within(pill).getByText("Concierge")).toBeTruthy();
+    expect(within(pill).getByText("Book the flight")).toBeTruthy();
+    expect(
+      header.querySelector("[data-concierge-header-status]")!.getAttribute("data-activity"),
+    ).toBe("tasks");
+    const more = within(header).getByRole("button", { name: "navbar.more" });
+    expect(more.className).toContain("rounded-full");
     expect(document.querySelector("[data-concierge-tasks-pill]")).toBeNull();
     view.unmount();
 
@@ -2137,7 +2143,9 @@ describe("Chat Concierge empty state", () => {
     renderChat(<Chat sessionId="session-1" />);
     expect(await screen.findByText("Plan the launch")).toBeTruthy();
     expect(document.querySelector("[data-concierge-header]")).toBeNull();
-    expect(document.querySelector("[data-concierge-header-status]")).toBeNull();
+    expect(screen.getByRole("button", { name: "navbar.more" }).className).not.toContain(
+      "rounded-full",
+    );
   });
 
   it("says what the Concierge is doing under its name", async () => {

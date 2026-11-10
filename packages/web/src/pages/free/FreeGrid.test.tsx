@@ -6,7 +6,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
-import { SlotContent, SlotOutlet, SlotProvider } from "@/components/slot";
+import { SlotOutlet, SlotProvider } from "@/components/slot";
 import * as conciergeModule from "@/hooks/use-concierge" with { rstest: "importActual" };
 import { FreeGrid } from "./FreeGrid";
 import { selectTool, setActiveSession } from "./use-free-cells";
@@ -38,15 +38,10 @@ rs.mock("@/components/chat/use-session-identity", () => ({
 const chatHost = rs.hoisted(() => ({
   onSessionLayout: undefined as ((id: string, layout: unknown[] | null) => void) | undefined,
 }));
-// Like the real Chat, it fills the phone header's status wherever the header offers one.
 rs.mock("@/components/chat/Chat", () => ({
   Chat: (props: { onSessionLayout?: (id: string, layout: unknown[] | null) => void }) => {
     chatHost.onSessionLayout = props.onSessionLayout;
-    return (
-      <SlotContent name="conciergePhoneStatus">
-        <span data-testid="phone-status" />
-      </SlotContent>
-    );
+    return null;
   },
 }));
 rs.mock("./AppWidget", () => ({
@@ -253,18 +248,16 @@ describe("FreeGrid mobile header", () => {
   }
   const header = (container: HTMLElement) => container.querySelector<HTMLElement>(".header")!;
 
-  const phoneStatus = (container: HTMLElement) =>
-    header(container).querySelector<HTMLElement>("[data-testid='phone-status']");
+  const moreButton = (container: HTMLElement) =>
+    within(header(container)).findByRole("button", { name: "More actions" });
 
-  it("gives a Concierge chat's status the middle of the header, centred on the whole bar", async () => {
+  it("leaves a Concierge chat's bar without a title, since the chat floats its own header", async () => {
     concierge.chatId = "concierge";
-    const { container } = renderAt("/chat/concierge");
-    await waitFor(() => expect(phoneStatus(container)).not.toBeNull());
-    const middle = phoneStatus(container)!.parentElement!;
-    expect(middle.className).toContain("absolute");
-    expect(middle.className).toContain("inset-x-0");
-    expect(middle.className).toContain("mx-auto");
-    // No title row of its own: the chat's status carries the name.
+    identity.current = { sessionName: "Concierge" };
+    const { container } = renderAt("/chat/concierge", { agentName: "Milo" });
+    await moreButton(container);
+    expect(header(container).textContent).not.toContain("Milo");
+    expect(header(container).textContent).not.toContain("Concierge");
     expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();
   });
 
@@ -281,81 +274,35 @@ describe("FreeGrid mobile header", () => {
     expect(header(second.container).textContent).not.toContain("Milo");
   });
 
-  it("names the agent's app beside a titled chat, but not in a Concierge chat's header", async () => {
+  it("names the agent's app beside a titled chat", async () => {
     concierge.chatId = "concierge";
-    const pinned = (appLabel: string, agentName: string) => ({
-      appId: appLabel.toLowerCase(),
-      appLabel,
-      agentName,
-      iconUrl: null,
-    });
-    identity.current = {
-      sessionName: "Concierge",
-      pinnedAgentMention: pinned("Rome", "core:concierge"),
-    };
-    const first = renderAt("/chat/concierge");
-    await waitFor(() => expect(phoneStatus(first.container)).not.toBeNull());
-    expect(header(first.container).textContent).not.toContain("Rome");
-    first.unmount();
-
     identity.current = {
       sessionName: "Plan the launch",
-      pinnedAgentMention: pinned("Workflow Studio", "workflow-planner"),
+      pinnedAgentMention: {
+        appId: "workflow-studio",
+        appLabel: "Workflow Studio",
+        agentName: "workflow-planner",
+        iconUrl: null,
+      },
     };
-    const second = renderAt("/chat/some-other-chat");
-    await waitFor(() => expect(header(second.container).textContent).toContain("Workflow Studio"));
+    const { container } = renderAt("/chat/some-other-chat");
+    await waitFor(() => expect(header(container).textContent).toContain("Workflow Studio"));
   });
 
-  it("opens the main chat at /message with the Concierge's header", async () => {
-    concierge.chatId = "concierge";
-    identity.current = { sessionName: "Concierge" };
-    const { container } = renderAt(
-      "/message",
-      { agentName: "Milo" },
-      <FreeGrid sessionId="concierge" />,
-    );
-    await waitFor(() => expect(phoneStatus(container)).not.toBeNull());
-    await waitFor(() => expect(document.title).toContain("Milo"));
-  });
-
-  it("leads a Concierge chat's menu with a plain Tasks item, and offers no Delete for the main chat", async () => {
+  it("offers no Delete for the main chat in the phone header's menu", async () => {
     concierge.chatId = "concierge";
     identity.current = { sessionName: "Concierge" };
     const user = userEvent.setup();
     const main = renderAt("/message", {}, <FreeGrid sessionId="concierge" />);
-    await user.click(
-      await within(header(main.container)).findByRole("button", { name: "More actions" }),
-    );
-    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
-      "Tasks",
-      "Share chat",
-    ]);
-    await user.click(screen.getByRole("menuitem", { name: "Tasks" }));
-    // Beside a wide pane the list opens as the pane's Tasks tab.
-    expect(await screen.findByRole("tab", { name: /Tasks/ })).toBeTruthy();
-    expect(screen.queryByRole("menu")).toBeNull();
+    await user.click(await moreButton(main.container));
+    expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
+    await user.keyboard("{Escape}");
     main.unmount();
 
     identity.current = { sessionName: "Plan the launch" };
     const other = renderAt("/chat/some-other-chat");
-    await user.click(
-      await within(header(other.container)).findByRole("button", { name: "More actions" }),
-    );
+    await user.click(await moreButton(other.container));
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
-    expect(screen.queryByRole("menuitem", { name: "Tasks" })).toBeNull();
-  });
-
-  it("leaves every other chat's header without a status", async () => {
-    concierge.chatId = "concierge";
-    const { container } = renderAt("/chat/some-other-chat");
-    await waitFor(() => expect(header(container).querySelector("button")).not.toBeNull());
-    expect(phoneStatus(container)).toBeNull();
-  });
-
-  it("leaves the header without a status until the main chat is loaded", async () => {
-    const { container } = renderAt("/chat/concierge");
-    await waitFor(() => expect(header(container).querySelector("button")).not.toBeNull());
-    expect(phoneStatus(container)).toBeNull();
   });
 });
 

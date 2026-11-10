@@ -34,7 +34,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
-import { SlotContent, useSlotOutlet } from "@/components/slot";
+import { SlotContent, SlotOutlet } from "@/components/slot";
 import "react-medium-image-zoom/dist/styles.css";
 import { cn } from "@/lib/utils";
 import { usePresentationMode } from "@/lib/presentation-mode";
@@ -105,8 +105,9 @@ import {
 } from "@/components/chat/ConciergeEmptyState";
 import { onConciergeJump } from "@/components/concierge/concierge-jump";
 import {
-  CONCIERGE_PHONE_STATUS_SLOT,
+  CONCIERGE_LEADING_SLOT,
   ConciergeHeaderStatus,
+  FLOATING_SURFACE,
 } from "@/components/concierge/ConciergeHeaderStatus";
 import { useConciergeTaskList } from "@/components/concierge/ConciergeTaskList";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
@@ -2047,7 +2048,10 @@ export function Chat({
     snapshot: currentSnapshot,
   });
   const conciergeTaskList = useConciergeTaskList(concierge ? (mainSessionId ?? null) : null);
-  const phoneStatusOutlet = useSlotOutlet(CONCIERGE_PHONE_STATUS_SLOT);
+  // A Concierge chat's header buttons sit on round badges like its pill.
+  const actionBadge = concierge
+    ? cn("rounded-full text-foreground", FLOATING_SURFACE)
+    : "text-muted-foreground hover:text-foreground";
   const conciergeStatus = concierge ? (
     <ConciergeHeaderStatus
       name={
@@ -2095,10 +2099,10 @@ export function Chat({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <IconButton
-              size="sm"
+              size={concierge ? "md" : "sm"}
               label={t("navbar.more")}
               icon={<MoreHorizontal />}
-              className="text-muted-foreground hover:text-foreground"
+              className={actionBadge}
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
@@ -2134,7 +2138,8 @@ export function Chat({
       )}
       {!toolTrace.paneOpen && (
         <IconButton
-          size="sm"
+          size={concierge ? "md" : "sm"}
+          className={concierge ? actionBadge : undefined}
           data-coach="add-widget"
           aria-expanded={false}
           onClick={() => toolTrace.setPaneCollapsed(false)}
@@ -2155,19 +2160,30 @@ export function Chat({
     </>
   );
 
-  // A Concierge chat's bar has no title row: the status sits in the middle of
-  // the bar, and the equal side columns keep it centred over the chat.
-  const navbar = concierge ? (
+  // A Concierge chat's header floats over its messages: no bar, just the
+  // mascot's badge with the name pill under it in the middle, and round
+  // buttons either side, centred on the pill. The equal side columns keep the
+  // middle centred over the chat. Only its pieces take the pointer, so the
+  // messages under the gaps stay reachable.
+  const conciergeHeader = concierge ? (
     <div
       data-concierge-header
-      className="grid h-full min-w-0 flex-1 grid-cols-[1fr_auto_1fr] items-center gap-2"
+      className="pointer-events-none absolute inset-x-0 top-0 z-20 grid grid-cols-[1fr_minmax(0,max-content)_1fr] items-center gap-x-2 px-2 pt-2 max-md:pt-[calc(var(--rome-safe-area-top)+0.5rem)] md:px-3"
     >
-      <div />
-      <div className="flex min-w-0 justify-center">{conciergeStatus}</div>
-      <div className="flex items-center justify-end gap-1">{navbarActions}</div>
+      {/* The phone shell's back and menu buttons move in here. */}
+      <SlotOutlet
+        name={CONCIERGE_LEADING_SLOT}
+        className="pointer-events-auto col-start-1 row-start-2 flex items-center gap-1 justify-self-start md:hidden"
+      />
+      {conciergeStatus}
+      <div className="pointer-events-auto col-start-3 row-start-2 flex items-center gap-1 justify-self-end">
+        {navbarActions}
+      </div>
       {conciergeTaskList.sheet}
     </div>
-  ) : (
+  ) : null;
+
+  const navbar = (
     <>
       {navbarTitle}
       {navbarActions}
@@ -2206,18 +2222,12 @@ export function Chat({
               says it already, so the bar keeps only its height and controls
               and the page does not move when the first message starts the
               session. */}
-          {concierge && phoneStatusOutlet ? (
-            <SlotContent name={CONCIERGE_PHONE_STATUS_SLOT}>{conciergeStatus}</SlotContent>
-          ) : null}
-          {navbarSlot ? (
+          {concierge ? (
+            conciergeHeader
+          ) : navbarSlot ? (
             <SlotContent name={navbarSlot}>{navbar}</SlotContent>
           ) : (
-            <div
-              className={cn(
-                "z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden",
-                concierge ? "px-2" : "pl-4 pr-2",
-              )}
-            >
+            <div className="z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
               {navbar}
             </div>
           )}
@@ -2242,8 +2252,12 @@ export function Chat({
               ref={attachScroller}
               className={cn(
                 "relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
-                // Concierge has no timeline rail, so no lane for it.
-                !concierge && "@min-[48rem]/transcript:pl-8",
+                // Concierge has no timeline rail, so no lane for it. Its
+                // header floats over the messages, so the first one starts
+                // below it, and a jump to a message stops below it too.
+                concierge
+                  ? "pt-[var(--rome-concierge-header-height)] scroll-pt-[var(--rome-concierge-header-height)] max-md:pt-[calc(var(--rome-concierge-header-height)+var(--rome-safe-area-top))] max-md:scroll-pt-[calc(var(--rome-concierge-header-height)+var(--rome-safe-area-top))]"
+                  : "@min-[48rem]/transcript:pl-8",
               )}
             >
               {conciergeEmpty ? (

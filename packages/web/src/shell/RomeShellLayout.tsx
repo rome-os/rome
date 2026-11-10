@@ -19,7 +19,12 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { UpgradeCountdownBanner } from "../components/upgrade-countdown-banner";
 import { IconButton } from "../components/ui/icon-button";
 import { MobileBackdrop } from "../components/ui/mobile-backdrop";
-import { SlotOutlet } from "../components/slot";
+import { SlotContent, SlotOutlet, useSlotOutlet } from "../components/slot";
+import { cn } from "@/lib/utils";
+import {
+  CONCIERGE_LEADING_SLOT,
+  FLOATING_SURFACE,
+} from "@/components/concierge/ConciergeHeaderStatus";
 import { SLIDE_MS, useSwipeSidebar } from "./use-swipe-sidebar";
 import { AppGrid } from "./AppGrid";
 import { APP_NAV } from "./builtin-nav";
@@ -106,6 +111,29 @@ export function RomeShellLayout() {
   // hides the chat list. That is a desktop arrangement: below `md` the sidebar
   // is a slide-over, so a collapse saved on desktop must not empty the drawer.
   const onChat = isChatPath(location.pathname);
+  // Whether the open page is a Concierge chat, whose header floats over it.
+  const conciergeHeader = useSlotOutlet(CONCIERGE_LEADING_SLOT);
+  const leadingButtons = (className?: string) => (
+    <>
+      {onChat ? (
+        // A chat is the detail of the chat list: this goes up to it.
+        <IconButton
+          size="md"
+          label={t("nav.chatList")}
+          icon={<ChevronLeft aria-hidden />}
+          onClick={() => setChatListOpen(true)}
+          className={className}
+        />
+      ) : null}
+      <IconButton
+        size="md"
+        label={t("nav.openSidebar")}
+        icon={<HamburgerMenuIcon aria-hidden />}
+        onClick={() => setSidebarOpen(true)}
+        className={className}
+      />
+    </>
+  );
   const showChats = isDesktop && onChat && !collapsed;
   const phoneChatList = !isDesktop && onChat && chatListOpen && !hideSidebar;
   const sidebarShortcut = sidebarShortcutForPlatform();
@@ -553,31 +581,28 @@ export function RomeShellLayout() {
           style={
             {
               "--rome-chat-left": sidebarWidth,
+              // With no bar above it, the page runs to the top of the screen.
+              ...(conciergeHeader && !hideSidebar
+                ? {
+                    "--rome-mobile-header-height": "0px",
+                    "--rome-mobile-content-height": "var(--rome-viewport-height)",
+                  }
+                : {}),
             } as CSSProperties
           }
         >
-          {!hideSidebar ? (
+          {!hideSidebar && conciergeHeader ? (
+            // A Concierge chat floats its own header over its messages, so
+            // the bar steps aside and its buttons move into that header.
+            <SlotContent name={CONCIERGE_LEADING_SLOT}>
+              {leadingButtons(cn("rounded-full", FLOATING_SURFACE))}
+            </SlotContent>
+          ) : !hideSidebar ? (
             <header
               data-mobile-header
               className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border bg-background px-2 pt-safe md:hidden"
             >
-              <div className="flex shrink-0 items-center">
-                {onChat ? (
-                  // A chat is the detail of the chat list: this goes up to it.
-                  <IconButton
-                    size="md"
-                    label={t("nav.chatList")}
-                    icon={<ChevronLeft aria-hidden />}
-                    onClick={() => setChatListOpen(true)}
-                  />
-                ) : null}
-                <IconButton
-                  size="md"
-                  label={t("nav.openSidebar")}
-                  icon={<HamburgerMenuIcon aria-hidden />}
-                  onClick={() => setSidebarOpen(true)}
-                />
-              </div>
+              <div className="flex shrink-0 items-center">{leadingButtons()}</div>
               {/* The chat page fills this with the session's identity + app
                   tabs + actions, mirroring the desktop chat navbar. Other routes
                   leave it empty, so the Rome wordmark fallback shows. */}
