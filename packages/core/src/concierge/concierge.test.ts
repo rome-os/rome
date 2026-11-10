@@ -225,6 +225,7 @@ function setup(
     openSession: rs.fn(async (chatId: string) => `opened-${chatId}`),
     sendAsGuardian: rs.fn(async () => {}),
     isRunning: rs.fn(() => false),
+    isBusy: rs.fn(() => false),
     openTool: rs.fn(() => null),
     onTurnChange: rs.fn(() => () => {}),
     activeTurns: rs.fn(() => []),

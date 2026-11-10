@@ -424,6 +424,13 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
   const tracker = new ConciergeActivityTracker({
     now: () => Date.now(),
     isRunning: running,
+    isBusy: (chatId) => {
+      try {
+        return service.dashboard.chats.isBusy(chatId);
+      } catch {
+        return false;
+      }
+    },
     openTool: (chatId) => {
       try {
         return service.dashboard.chats.openTool(chatId);

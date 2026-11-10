@@ -6332,6 +6332,33 @@ describe("Webchat API", () => {
       await runtime.flushAll();
     });
 
+    it("counts a quiet backend turn as busy only once it says something", async () => {
+      const sessionId = "sess-quiet-busy";
+      await deps.webchatRepo.createSession(sessionId, "Quiet busy");
+      const { runtime } = createWebchatRuntime(deps);
+      const changes: string[] = [];
+      runtime.onTurnChange((id) => changes.push(id));
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const task = runtime.enqueueSessionTask(sessionId, () => gate, { quiet: true });
+      await rs.waitFor(() => expect(runtime.isRunning(sessionId)).toBe(true));
+      expect(runtime.isBusy(sessionId)).toBe(false);
+
+      const told = changes.length;
+      await deps.webchatRepo.addBackendMessage(sessionId, "quiet-turn", [
+        { type: "text", content: "Done." },
+      ]);
+      expect(runtime.isBusy(sessionId)).toBe(true);
+      expect(changes.length).toBeGreaterThan(told);
+
+      release();
+      await task;
+      await runtime.flushAll();
+      expect(runtime.isBusy(sessionId)).toBe(false);
+    });
+
     it("emits message_insert when a turn recap row is inserted", async () => {
       const sessionId = "sess-recap-events";
       const turnId = "turn-recap-events";

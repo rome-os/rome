@@ -30,6 +30,13 @@ export const TOOL_HOLD_MS = 1_500;
  */
 export const IDLE_GRACE_MS = 1_000;
 
+/**
+ * How often every chat that is not idle has its facts read again. Each fact
+ * the activity reads tells it when it changes; this catches one that changed
+ * by a path that does not, so a stale "working" or "needs you" never stays.
+ */
+export const RECHECK_MS = 30_000;
+
 /** One of a Concierge chat's task rows, as the activity reads it. */
 export interface ActivityTaskRow {
   id: string;
@@ -43,6 +50,8 @@ export interface ActivityTaskRow {
 export interface ConciergeActivitySources {
   now(): number;
   isRunning(chatId: string): boolean;
+  /** Whether the chat runs a turn its owner sees: a quiet turn counts once it has said something. */
+  isBusy(chatId: string): boolean;
   openTool(chatId: string): string | null;
   /** Which of the chats wait on their owner: a card or a pending approval. */
   awaitingGuardianOf(chatIds: readonly string[]): Promise<Set<string>>;
@@ -81,8 +90,20 @@ export class ConciergeActivityTracker {
   private chats = new Map<string, ChatState>();
   private subscribers = new Set<OwnerEmit>();
   private stopped = false;
+  private recheck: ReturnType<typeof setInterval>;
 
-  constructor(private sources: ConciergeActivitySources) {}
+  constructor(private sources: ConciergeActivitySources) {
+    this.recheck = setInterval(() => this.recheckBusy(), RECHECK_MS);
+    this.recheck.unref?.();
+  }
+
+  /** Reads again every chat whose activity is not idle and is not being read now. */
+  private recheckBusy(): void {
+    for (const [chatId, state] of this.chats) {
+      if (state.shown.kind === "idle" || state.refreshing) continue;
+      void this.refresh(chatId);
+    }
+  }
 
   /** The facts of `chatId` now, and the activity they make. */
   private async compute(chatId: string): Promise<ConciergeActivity> {
@@ -92,7 +113,7 @@ export class ConciergeActivityTracker {
     const pending = new Set(this.sources.reportPending());
     // A running turn has answered whatever waited, as the chat list reads it.
     const waits = (id: string) => awaiting.has(id) && !this.sources.isRunning(id);
-    const running = this.sources.isRunning(chatId);
+    const running = this.sources.isBusy(chatId);
     return conciergeActivity({
       awaitingGuardian: waits(chatId),
       turn: { running, tool: running ? this.sources.openTool(chatId) : null },
@@ -232,12 +253,24 @@ export class ConciergeActivityTracker {
     state.timer = null;
   }
 
-  /** Drops a chat that is gone, with its timer. */
+  /**
+   * Drops a chat that is gone or archived, with its timer. Its owner is told
+   * it is idle, so a screen still showing it does not keep its last activity.
+   */
   forget(chatId: string): void {
     const state = this.chats.get(chatId);
     if (!state) return;
     this.clearTimer(state);
     this.chats.delete(chatId);
+    if (state.shown.kind === "idle") return;
+    const event: ConciergeActivityEvent = {
+      chatId,
+      activity: { kind: "idle" },
+      at: this.sources.now(),
+    };
+    for (const subscriber of this.subscribers) {
+      if (subscriber.owner === state.owner) subscriber.emit("concierge_activity", event);
+    }
   }
 
   /**
@@ -271,6 +304,7 @@ export class ConciergeActivityTracker {
   /** Stops every timer and tells no one any more. */
   stop(): void {
     this.stopped = true;
+    clearInterval(this.recheck);
     for (const state of this.chats.values()) this.clearTimer(state);
     this.chats.clear();
     this.subscribers.clear();

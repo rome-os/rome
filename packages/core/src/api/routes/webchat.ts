@@ -717,6 +717,8 @@ interface ActiveWebchatStream {
   agentTurnId?: string;
   /** A backend turn that is housekeeping for its agent; see `BackendTurnOptions`. */
   quiet?: boolean;
+  /** A quiet turn has said something in its chat, so it shows as running from then on. */
+  spoke?: boolean;
   /** A Stop request reached the stream's turn. */
   stopRequested?: boolean;
   startedAt: string;
@@ -812,6 +814,11 @@ export interface WebchatRuntime {
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
   /**
+   * Whether the chat is running a turn its owner sees: any but a quiet one
+   * that has not said anything yet, as the transcript shows it.
+   */
+  isBusy(sessionId: string): boolean;
+  /**
    * The tool the chat's running turn is in now: its latest call whose result
    * has not come back, as the trace names it. Null when it is in none.
    */
@@ -886,6 +893,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     for (const listener of runningListeners) listener(event);
     notifyTurn(sessionId);
   };
+  const isSessionBusy = (sessionId: string): boolean =>
+    (activeStreams.get(sessionId) ?? []).some(
+      (stream) => !stream.finished && (!stream.quiet || stream.spoke),
+    ) || deps.agentTurnStreamRegistry.listBySession(sessionId).length > 0;
+  // A quiet turn shows once it says something.
+  deps.webchatRepo.onMessageInserted((message) => {
+    if (message.role !== "assistant") return;
+    let changed = false;
+    for (const stream of activeStreams.get(message.sessionId) ?? []) {
+      if (!stream.finished && stream.quiet && !stream.spoke) {
+        stream.spoke = true;
+        changed = true;
+      }
+    }
+    if (changed) notifyTurn(message.sessionId);
+  });
   // The latest open call of the session's newest unfinished stream.
   const openTool = (sessionId: string): string | null => {
     const streams = (activeStreams.get(sessionId) ?? []).filter((stream) => !stream.finished);
@@ -4730,6 +4753,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     },
     isRunning: isSessionRunning,
+    isBusy: isSessionBusy,
     openTool,
     onTurnChange(listener) {
       turnListeners.add(listener);

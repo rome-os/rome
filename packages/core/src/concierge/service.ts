@@ -119,6 +119,8 @@ export interface TaskChats {
    */
   openSession(chatId: string): Promise<string>;
   isRunning(chatId: string): boolean;
+  /** Whether the chat runs a turn its owner sees: any but a quiet one that has said nothing yet. */
+  isBusy(chatId: string): boolean;
   /** The tool the chat's running turn is in now, as the trace names it, or null. */
   openTool(chatId: string): string | null;
   /**

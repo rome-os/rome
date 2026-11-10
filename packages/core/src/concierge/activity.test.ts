@@ -11,6 +11,7 @@ import {
   type ConciergeActivitySources,
   ConciergeActivityTracker,
   IDLE_GRACE_MS,
+  RECHECK_MS,
   TOOL_HOLD_MS,
 } from "./activity.js";
 
@@ -105,6 +106,9 @@ describe("conciergeActivity", () => {
 function world() {
   let now = 1_000;
   const running = new Set<string>();
+  /** Chats whose running turn is quiet and has said nothing yet. */
+  const quiet = new Set<string>();
+  let reads = 0;
   const tools = new Map<string, string>();
   const awaiting = new Set<string>();
   const pending: string[] = [];
@@ -116,9 +120,13 @@ function world() {
   const sources: ConciergeActivitySources = {
     now: () => now,
     isRunning: (id) => running.has(id),
+    isBusy: (id) => running.has(id) && !quiet.has(id),
     openTool: (id) => tools.get(id) ?? null,
     awaitingGuardianOf: async (ids) => new Set(ids.filter((id) => awaiting.has(id))),
-    tasksOf: async (chatId) => rows.filter((row) => row.conciergeChat === chatId),
+    tasksOf: async (chatId) => {
+      reads += 1;
+      return rows.filter((row) => row.conciergeChat === chatId);
+    },
     reportPending: () => pending,
     ownerOf: async (chatId) => chats.get(chatId) ?? null,
     chatsOf: async (owner) =>
@@ -138,6 +146,9 @@ function world() {
     tracker,
     told,
     running,
+    quiet,
+    /** How many times a chat's facts were read. */
+    reads: () => reads,
     tools,
     awaiting,
     pending,
@@ -159,7 +170,7 @@ const flush = async () => {
 
 describe("ConciergeActivityTracker", () => {
   beforeEach(() => {
-    rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    rs.useFakeTimers({ toFake: ["setTimeout", "clearTimeout", "setInterval", "clearInterval"] });
   });
   afterEach(() => {
     rs.useRealTimers();
@@ -294,6 +305,52 @@ describe("ConciergeActivityTracker", () => {
     ]);
   });
 
+  it("shows a quiet turn only once it has said something", async () => {
+    const w = world();
+    await flush();
+    w.running.add("main");
+    w.quiet.add("main");
+    await w.tracker.sessionChanged("main");
+    expect(w.last("main")).toEqual({ kind: "idle" });
+    w.quiet.delete("main");
+    await w.tracker.sessionChanged("main");
+    expect(w.last("main")).toEqual({ kind: "working" });
+  });
+
+  it("reads a busy chat again on the recheck, so a change no trigger told does not stay", async () => {
+    const w = world();
+    await flush();
+    w.running.add("main");
+    await w.tracker.sessionChanged("main");
+    expect(w.last("main")).toEqual({ kind: "working" });
+    // The turn ends by a path that tells the tracker nothing.
+    w.running.delete("main");
+    w.advance(RECHECK_MS);
+    await flush();
+    w.advance(IDLE_GRACE_MS);
+    await flush();
+    expect(w.last("main")).toEqual({ kind: "idle" });
+  });
+
+  it("leaves idle chats alone on the recheck", async () => {
+    const w = world();
+    await flush();
+    const before = w.reads();
+    w.advance(RECHECK_MS * 2);
+    await flush();
+    expect(w.reads()).toBe(before);
+  });
+
+  it("tells the owner a busy chat that is archived or gone is idle", async () => {
+    const w = world();
+    await flush();
+    w.running.add("topic");
+    await w.tracker.sessionChanged("topic");
+    w.chats.delete("topic");
+    await w.tracker.refresh("topic");
+    expect(w.last("topic")).toEqual({ kind: "idle" });
+  });
+
   it("forgets a chat that is gone, with its held timer, and tells nothing after stop", async () => {
     const w = world();
     await flush();
@@ -302,7 +359,8 @@ describe("ConciergeActivityTracker", () => {
     await w.tracker.sessionChanged("main");
     w.tools.delete("main");
     await w.tracker.sessionChanged("main");
-    expect(rs.getTimerCount()).toBe(1);
+    // The held tool's timer, and the recheck.
+    expect(rs.getTimerCount()).toBe(2);
 
     w.chats.delete("main");
     w.advance(TOOL_HOLD_MS);
