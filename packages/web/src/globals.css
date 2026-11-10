@@ -639,7 +639,7 @@
 @layer base {
   :root {
     /* Mobile shell geometry when the page is rendered edge-to-edge (for
-       example inside the Expo WKWebView). Indirect the system env() values so
+       example inside the iOS app's WKWebView). Indirect the system env() values so
        layout tests can exercise real, non-zero safe-area geometry. */
     --rome-safe-area-top: env(safe-area-inset-top);
     --rome-safe-area-inset-bottom: env(safe-area-inset-bottom);
@@ -673,15 +673,12 @@
   html,
   body {
     /* Stop the document from rubber-banding past its own ends. Inner scrollers
-       already set `overscroll-contain`, and the native shell passes
-       `bounces={false}`, but the page's own viewport scroller still bounced on
-       iOS because nothing constrained it. Both elements carry the rule: which
+       already set `overscroll-contain`, but the page's own viewport scroller
+       still bounced on iOS because nothing constrained it. Both elements carry the rule: which
        one defines the viewport scroller depends on the route's overflow.
 
-       Deliberately ungated. The Expo shell sets no marker on the document the
-       way Electron sets `.is-electron`, so there is nothing to scope this to —
-       and scoping it there would leave mobile Safari, which has the same bug,
-       still bouncing. The cost is that ordinary mobile browsers lose native
+       Deliberately ungated: scoping it to an app shell would leave mobile
+       Safari, which has the same bug, still bouncing. The cost is that ordinary mobile browsers lose native
        pull-to-refresh and desktop loses its rubber-band. Both are the app-like
        tradeoff we want: the dashboard refetches on its own, so a gesture whose
        only effect is reloading the bundle is not worth preserving. */
