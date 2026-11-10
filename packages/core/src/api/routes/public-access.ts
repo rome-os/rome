@@ -7,20 +7,7 @@ import {
   normalizePublicAccessConfig,
   type PublicAccessConfig,
 } from "../../access/public-access-config.js";
-import { isValidAppId } from "../../apps/packaging/app-id.js";
 import type { ApiDeps } from "../deps.js";
-
-// Access matches app ids as plain strings, so the dashboard's route is where a
-// malformed app id is dropped, both when the guardian saves and when the saved
-// setting is shown back to them.
-function withValidAppIds(config: PublicAccessConfig): PublicAccessConfig {
-  return {
-    allowedApps: config.allowedApps.filter(isValidAppId),
-    cloudEmailAccess: Object.fromEntries(
-      Object.entries(config.cloudEmailAccess).filter(([appId]) => isValidAppId(appId)),
-    ),
-  };
-}
 
 export function publicAccessRoutes(deps: ApiDeps): Hono {
   const app = new Hono();
@@ -33,14 +20,14 @@ export function publicAccessRoutes(deps: ApiDeps): Hono {
 
     const config =
       rows.length > 0 && rows[0].value
-        ? withValidAppIds(normalizePublicAccessConfig(rows[0].value))
+        ? normalizePublicAccessConfig(rows[0].value)
         : DEFAULT_PUBLIC_ACCESS_CONFIG;
     return c.json(config);
   });
 
   app.put("/public-access", async (c) => {
     const body = await c.req.json().catch(() => null);
-    const config = withValidAppIds(normalizePublicAccessConfig(body));
+    const config: PublicAccessConfig = normalizePublicAccessConfig(body);
 
     const now = new Date();
     await deps.db
