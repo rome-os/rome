@@ -102,6 +102,13 @@ enum SnapshotRunner {
             await capture("43-connect-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail")) }
             TranscriptStore.previewPhases = [:]
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
+            // Chat threads: the replies lines, then one thread open over its chat.
+            await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
+            await capture("51-thread-open", style: styleName, in: directory, wait: 1.5) {
+                model.workspace?.topicStore("topic-trip").openThread(at: "k1")
+            }
+            model.workspace?.topicStore("topic-trip").closeThread()
+            try? await Task.sleep(for: .seconds(0.4))
             // Routine cards with their state, and the rows for cards only the web draws.
             await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }
             // The drawer over a topic chat: its row selected.

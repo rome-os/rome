@@ -92,6 +92,23 @@ final class FakeBackend: RomeBackend {
     /// Off, every send fails, as it always did here.
     var sendSucceeds = false
 
+    /// What each send asked for its chat thread, in order.
+    var sentThreads: [ThreadTarget?] = []
+    /// A thread read's answer, by the message asked for; missing ones fail.
+    var threads: [String: [ChatMessage]] = [:]
+    var threadReads: [String] = []
+
+    func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
+        threadReads.append(messageId)
+        guard let thread = threads[messageId] else { throw APIError.notFound }
+        return thread
+    }
+
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn {
+        sentThreads.append(thread)
+        return try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority)
+    }
+
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
         sentFiles = files
         calls.append(files.isEmpty ? "send \(sessionId) \(text)" : "send \(sessionId) \(text) [\(files.count) files]")

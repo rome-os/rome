@@ -17,11 +17,55 @@ extension EnvironmentValues {
 
 /// The guardian's bubble: coral, right-aligned, fully round. Photos sent with
 /// it sit above the text.
+/// The long-press menu of a message bubble: its time on top, then Reply
+/// where a thread can open, Copy and Share.
+struct BubbleMenu {
+    /// When the message was written; nil leaves the title out.
+    var date: Date? = nil
+    /// Opens the message's chat thread; nil where there are none.
+    var onReply: (() -> Void)? = nil
+    /// Inside a thread: the text is selectable instead, and there is no menu.
+    var inThread = false
+}
+
+/// The menu's items, shared by both bubbles.
+private struct BubbleMenuItems: View {
+    let text: String
+    let menu: BubbleMenu
+
+    var body: some View {
+        Section {
+            if let onReply = menu.onReply {
+                Button(action: onReply) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
+            }
+            CopyButton(text: text)
+            ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
+        } header: {
+            if let date = menu.date { Text(verbatim: RelativeTime.separator(date)) }
+        }
+    }
+}
+
+private extension View {
+    /// The bubble lifts under the finger with the system's menu; inside a
+    /// thread its text is selected the system's way instead.
+    @ViewBuilder
+    func bubbleMenu(text: String, menu: BubbleMenu) -> some View {
+        if menu.inThread {
+            // Its own tap, so one on the message never closes the thread.
+            self.textSelection(.enabled).onTapGesture {}
+        } else {
+            self.contextMenu { BubbleMenuItems(text: text, menu: menu) }
+        }
+    }
+}
+
 struct UserBubble: View {
     let text: String
     var images: [UserImage] = []
     let pending: PendingSend.State?
     var onRetry: () -> Void = {}
+    var menu = BubbleMenu()
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
@@ -43,7 +87,8 @@ struct UserBubble: View {
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                            .contextMenu { CopyButton(text: text) }
+                            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
+                            .bubbleMenu(text: text, menu: menu)
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
@@ -228,6 +273,7 @@ struct AgentBubble: View {
     let forwardedFrom: MessagePart.ForwardedFrom?
     let position: BubblePosition
     var onOpenChat: (String, String) -> Void = { _, _ in }
+    var menu = BubbleMenu()
     @State private var expanded = false
     /// The reply's laid-out height, measured: Chinese fits far fewer
     /// characters on a line than English, so characters cannot tell.
@@ -309,7 +355,10 @@ struct AgentBubble: View {
                 Capsule().fill(Palette.sub.opacity(0.55)).frame(width: 3).padding(.vertical, 10).padding(.leading, 5)
             }
         }
-        .contextMenu { CopyButton(text: text) }
+        .contentShape(.contextMenuPreview, shape)
+        // A tap opens its chat thread; a link or "Show more" in it wins.
+        .onTapGesture { menu.onReply?() }
+        .bubbleMenu(text: text, menu: menu)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.trailing, forwardedFrom == nil ? 64 : 32)
     }
@@ -394,6 +443,8 @@ enum TranscriptSpacing {
         if case .separator = row { return 20 }
         if case .separator = previous { return 14 }
         if case .typing = row { return 14 }
+        // Right under the message whose thread it counts.
+        if case .threadReplies = row { return 4 }
         if row.isGuardian != previous.isGuardian { return 18 }
         if row.isGuardian { return 6 }
         switch (row, previous) {

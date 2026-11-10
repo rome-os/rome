@@ -32,6 +32,12 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     var content: String
     var createdAt: String
     var traceSummary: TraceSummary?
+    /// The first message of the chat thread this one is in; nil when it is
+    /// alone, or on an instance without chat threads.
+    var chatThreadId: String? = nil
+    /// The instance sent `chatThreadId`, null included: it has chat threads.
+    /// An older instance leaves the field out.
+    var knowsThreads = false
 
     var date: Date { RomeDate.parse(createdAt) ?? .distantPast }
 
@@ -39,6 +45,55 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
 
     var isUser: Bool { role == "user" }
     var isTrace: Bool { role == "trace" }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId
+    }
+}
+
+extension ChatMessage {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        sessionId = try container.decode(String.self, forKey: .sessionId)
+        turnId = try container.decodeIfPresent(String.self, forKey: .turnId)
+        role = try container.decode(String.self, forKey: .role)
+        content = try container.decode(String.self, forKey: .content)
+        createdAt = try container.decode(String.self, forKey: .createdAt)
+        traceSummary = try container.decodeIfPresent(TraceSummary.self, forKey: .traceSummary)
+        chatThreadId = try container.decodeIfPresent(String.self, forKey: .chatThreadId)
+        knowsThreads = container.contains(.chatThreadId)
+    }
+
+    /// Writes `chatThreadId` as null when the instance sent it as null, so a
+    /// kept copy reads back the same.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(sessionId, forKey: .sessionId)
+        try container.encodeIfPresent(turnId, forKey: .turnId)
+        try container.encode(role, forKey: .role)
+        try container.encode(content, forKey: .content)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(traceSummary, forKey: .traceSummary)
+        if knowsThreads { try container.encode(chatThreadId, forKey: .chatThreadId) }
+    }
+
+    /// The chat thread it is in, by its first message: its own id when alone.
+    var threadRoot: String { chatThreadId ?? id }
+}
+
+/// Where a message sent from a chat thread goes. An instance with chat
+/// threads takes `chatThread`; an older one places a reply by
+/// `replyToMessageId` (every supported release has it).
+struct ThreadTarget: Hashable, Sendable {
+    /// A message of the open thread.
+    let messageId: String
+    let instanceKnowsThreads: Bool
+
+    var body: [String: JSONValue] {
+        instanceKnowsThreads ? ["chatThread": .string(messageId)] : ["replyToMessageId": .string(messageId)]
+    }
 }
 
 struct TraceSummary: Codable, Hashable, Sendable {

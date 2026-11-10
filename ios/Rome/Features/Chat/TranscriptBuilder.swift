@@ -11,6 +11,8 @@ struct PendingSend: Identifiable, Hashable, Sendable {
     var images: [ComposerImage] = []
     let createdAt: Date
     var state: State
+    /// Sent from a chat thread: a retry goes to the same thread.
+    var thread: ThreadTarget? = nil
 }
 
 /// A photo in the guardian's bubble: the one being sent, or a stored upload.
@@ -39,13 +41,17 @@ enum TranscriptRow: Identifiable, Hashable {
     case connect(id: String, part: MessagePart.ConnectCardPart, sessionId: String)
     case error(id: String, text: String)
     case tools(id: String, traceMessageId: String, count: Int)
+    /// Under the first message of a chat thread with replies: how many.
+    /// `guardian`: that message is the guardian's, so the line sits right.
+    case threadReplies(id: String, messageId: String, count: Int, guardian: Bool)
     case typing
 
     var id: String {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _), .approval(let id, _, _), .question(let id, _, _, _),
-             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .error(let id, _), .tools(let id, _, _):
+             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .error(let id, _), .tools(let id, _, _),
+             .threadReplies(let id, _, _, _):
             return id
         case .typing:
             return "typing"
@@ -54,7 +60,29 @@ enum TranscriptRow: Identifiable, Hashable {
 
     var isGuardian: Bool {
         if case .userText = self { return true }
+        if case .threadReplies(_, _, _, let guardian) = self { return guardian }
         return false
+    }
+
+    /// The stored message a row was drawn from; nil for a pending send and
+    /// rows of no one message.
+    var messageId: String? {
+        switch self {
+        case .userText(let id, _, _, let pending):
+            return pending == nil ? Self.message(ofPart: id) : nil
+        case .agentText(let id, _, _, _, _):
+            return Self.message(ofPart: id)
+        case .threadReplies(_, let messageId, _, _):
+            return messageId
+        default:
+            return nil
+        }
+    }
+
+    /// A part row's id is `<message id>:<part index>`.
+    static func message(ofPart id: String) -> String? {
+        guard let colon = id.lastIndex(of: ":") else { return nil }
+        return String(id[..<colon])
     }
 }
 
@@ -68,6 +96,8 @@ enum TranscriptBuilder {
     struct Options {
         /// Task chats show their tool summaries; Concierge has none.
         var showTools = false
+        /// Concierge chats mark a chat thread's first message with its replies.
+        var showThreads = false
         var typing = false
     }
 
@@ -90,6 +120,7 @@ enum TranscriptBuilder {
         var entries: [Entry] = []
         // A stored message replaces the pending bubble it came from.
         let storedIDs = Set(messages.map(\.id))
+        let replies = options.showThreads ? threadReplies(messages) : [:]
 
         // Messages come in the store's order, which follows the server's turns.
         for message in messages {
@@ -133,6 +164,9 @@ enum TranscriptBuilder {
                 case .interactionResult, .other:
                     continue
                 }
+            }
+            if !rows.isEmpty, let count = replies[message.id] {
+                rows.append(.threadReplies(id: "replies-\(message.id)", messageId: message.id, count: count, guardian: message.isUser))
             }
             if !rows.isEmpty {
                 entries.append(Entry(id: message.id, date: message.date, guardian: message.isUser, rows: rows, bubbleIndexes: bubbles))
@@ -193,6 +227,17 @@ enum TranscriptBuilder {
         closeRun()
         if options.typing { output.append(.typing) }
         return output
+    }
+
+    /// Replies per chat thread, by its first message, for threads with any:
+    /// the other messages placed in it that show something.
+    static func threadReplies(_ messages: [ChatMessage]) -> [String: Int] {
+        var sizes: [String: Int] = [:]
+        for message in messages where !message.isTrace {
+            guard let root = message.chatThreadId, message.parts.contains(where: \.isVisible) else { continue }
+            sizes[root, default: 0] += 1
+        }
+        return sizes.compactMapValues { $0 > 1 ? $0 - 1 : nil }
     }
 
     /// Answers the guardian already gave, read from their `interaction_result` parts.

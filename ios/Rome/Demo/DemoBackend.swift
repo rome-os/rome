@@ -130,10 +130,29 @@ final class DemoBackend: RomeBackend {
         let all = messages[sessionId] ?? []
         let end = before.flatMap { cursor in all.firstIndex { $0.id == cursor } } ?? all.count
         let start = max(0, end - limit)
-        return MessagePage(messages: Array(all[start..<end]), nextCursor: start > 0 ? all[start].id : nil)
+        return MessagePage(messages: Array(all[start..<end]).map(Self.withThreads), nextCursor: start > 0 ? all[start].id : nil)
+    }
+
+    /// The demo is an instance with chat threads: every message says its thread.
+    private static func withThreads(_ message: ChatMessage) -> ChatMessage {
+        var message = message
+        message.knowsThreads = true
+        return message
+    }
+
+    func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
+        try await pause(0.25)
+        let all = messages[sessionId] ?? []
+        guard let anchor = all.first(where: { $0.id == messageId }) else { throw APIError.notFound }
+        let root = anchor.chatThreadId ?? anchor.id
+        return all.filter { !$0.isTrace && ($0.chatThreadId == root || $0.id == anchor.id) }.map(Self.withThreads)
     }
 
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
+        try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority, thread: nil)
+    }
+
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread target: ThreadTarget?) async throws -> CreatedTurn {
         try await pause(0.35)
         if text.contains("失败") { throw APIError.network }
         // Stored the way the server stores it: a line per file after the text.
@@ -143,7 +162,15 @@ final class DemoBackend: RomeBackend {
             return "- File \(index + 1): [\(file.name)](</\(path)>)"
         }
         let stored = ([text] + (lines.isEmpty ? [] : [lines.joined(separator: "\n")])).filter { !$0.isEmpty }.joined(separator: "\n\n")
-        insert(sessionId, user(inputId, stored, at: .now, session: sessionId))
+        // A send from a chat thread lands in it, and so does the answer.
+        let thread = target.flatMap { target in (messages[sessionId] ?? []).first { $0.id == target.messageId } }.map { $0.chatThreadId ?? $0.id }
+        if let thread, let index = messages[sessionId]?.firstIndex(where: { $0.id == thread }), messages[sessionId]?[index].chatThreadId == nil {
+            // A message alone starts the thread the reply opens.
+            messages[sessionId]?[index].chatThreadId = thread
+            bus.emit(LiveTopic.chat(sessionId), .messageThread(sessionId: sessionId, messageId: thread, chatThreadId: thread))
+        }
+        insert(sessionId, threaded(user(inputId, stored, at: .now, session: sessionId), thread))
+        if let thread { bus.emit(LiveTopic.chat(sessionId), .messageThread(sessionId: sessionId, messageId: inputId, chatThreadId: thread)) }
         let turnId = "turn-\(nextID())"
         setRunning(sessionId, turnId)
         let topic = topicChats.firstIndex { $0.id == sessionId }
@@ -151,9 +178,9 @@ final class DemoBackend: RomeBackend {
         Task {
             try? await pause(concierge ? 1.8 : 3.5)
             if concierge {
-                insert(sessionId, agent("好，我记下了。", at: .now, session: sessionId))
+                insert(sessionId, threaded(agent("好，我记下了。", at: .now, session: sessionId), thread))
                 try? await pause(0.7)
-                insert(sessionId, agent("需要开任务的话，我会把它放进任务里，做完告诉你。", at: .now, session: sessionId))
+                insert(sessionId, threaded(agent("需要开任务的话，我会把它放进任务里，做完告诉你。", at: .now, session: sessionId), thread))
                 // An untitled topic chat is named from its first message.
                 if let topic, topicChats[topic].name.isEmpty {
                     let name = String(text.prefix(16))
@@ -383,6 +410,7 @@ final class DemoBackend: RomeBackend {
     }
 
     private func insert(_ sessionId: String, _ message: ChatMessage) {
+        let message = Self.withThreads(message)
         messages[sessionId, default: []].append(message)
         bus.emit(LiveTopic.chat(sessionId), .messageInsert(message))
     }
@@ -397,6 +425,14 @@ final class DemoBackend: RomeBackend {
 
     private func json(_ parts: [JSONValue]) -> String {
         String(data: (try? JSONEncoder().encode(parts)) ?? Data(), encoding: .utf8) ?? "[]"
+    }
+
+    /// The message, placed in the chat thread that starts at `root`.
+    private func threaded(_ message: ChatMessage, _ root: String?) -> ChatMessage {
+        var message = message
+        message.chatThreadId = root
+        message.knowsThreads = true
+        return message
     }
 
     private func user(_ id: String, _ text: String, at date: Date, session: String = conciergeChatID) -> ChatMessage {
@@ -511,10 +547,14 @@ final class DemoBackend: RomeBackend {
                 agent("第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"),
             ]
         }
+        // Two chat threads: the plan (three replies), and the weather asked in between.
         messages["topic-trip"] = [
-            user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"),
-            agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"),
-            agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/api/projects/asset/hotel.jpg?path=projects%2Fdemo%2Ftrip%2Fhotel.jpg)\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip"),
+            threaded(user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"), "k1"),
+            threaded(agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"), "k1"),
+            threaded(user("k4", "顺便看下四月京都的天气。", at: at(8, 58), session: "topic-trip"), "k4"),
+            threaded(agent("四月白天 15–20 度，早晚凉，带件外套。月初樱花还在。", at: at(8, 59), session: "topic-trip"), "k4"),
+            threaded(agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/api/projects/asset/hotel.jpg?path=projects%2Fdemo%2Ftrip%2Fhotel.jpg)\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip"), "k1"),
+            threaded(user("k6", "就按它排。", at: at(9, 24), session: "topic-trip"), "k1"),
         ]
         // A photo the guardian sent, stored the way the server stores it, and a long reply.
         let kitchen = "projects/demo/home/kitchen.jpg"

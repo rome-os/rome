@@ -90,10 +90,18 @@ struct TopicChatScreen: View {
             .padding(.top, 6)
             .padding(.bottom, 8)
         }
+        .overlay {
+            if let store, let thread = store.thread {
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, onOpenChat: onOpenChat) { store.closeThread() }
+            }
+        }
+        // The chat's own keyboard goes down under an opened thread.
+        .onChange(of: store?.thread != nil) { _, open in if open { composerFocused = false } }
         .onAppear { store?.start() }
         // A blank chat that just started its chat keeps this view.
         .onChange(of: chatId) { store?.start() }
         .onDisappear {
+            store?.closeThread()
             store?.stop()
             // Left blank, the chat is never made, and its draft goes with it.
             if chatId == nil && starting == nil { workspace.drafts.discard(chat: draftKey) }

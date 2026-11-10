@@ -70,6 +70,13 @@ struct ChatScreen: View {
                 .padding(.bottom, 8)
             }
         }
+        .overlay {
+            if let thread = store.thread {
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, onOpenChat: onOpenChat) { store.closeThread() }
+            }
+        }
+        // The chat's own keyboard goes down under an opened thread.
+        .onChange(of: store.thread != nil) { _, open in if open { composerFocused = false } }
     }
 
     #if DEBUG
@@ -184,15 +191,30 @@ struct ConciergeRow: View {
     let store: TranscriptStore
     let tasks: TasksStore
     let onOpenChat: (String, String) -> Void
+    /// Drawn in an open chat thread: no menus or thread links, text selectable.
+    var inThread = false
+
+    /// The message's time, and Reply on the Agent's messages outside a thread.
+    private func menu(reply: Bool) -> BubbleMenu {
+        let message = row.messageId.flatMap(store.message)
+        let onReply: (() -> Void)? = reply && !inThread
+            ? row.messageId.map { id in { store.openThread(at: id) } }
+            : nil
+        return BubbleMenu(date: message?.date, onReply: onReply, inThread: inThread)
+    }
 
     var body: some View {
         switch row {
         case .separator(_, let date):
             TimeSeparator(date: date)
         case .userText(let id, let text, let images, let pending):
-            UserBubble(text: text, images: images, pending: pending) { store.retry(id) }
+            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, menu: menu(reply: false))
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat)
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat, menu: menu(reply: true))
+        case .threadReplies(_, let messageId, let count, let guardian):
+            if !inThread {
+                ThreadRepliesLine(count: count, guardian: guardian) { store.openThread(at: messageId) }
+            }
         case .taskCard(_, let chatId, let title):
             let name = tasks.title(forChat: chatId, fallback: title)
             TaskCard(title: name) {
@@ -201,10 +223,20 @@ struct ConciergeRow: View {
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
         case .approval, .question, .webOnly, .routineDraft, .tools, .connect:
+            // In a thread a tap on a card stays on it, never closing the thread.
             InteractionRow(row: row, store: store)
+                .keepsTaps(inThread)
         case .error(_, let text):
             ErrorLine(text: text)
         }
+    }
+}
+
+private extension View {
+    /// Takes the taps on its own content, so they never reach a view behind.
+    @ViewBuilder
+    func keepsTaps(_ on: Bool) -> some View {
+        if on { self.onTapGesture {} } else { self }
     }
 }
 
