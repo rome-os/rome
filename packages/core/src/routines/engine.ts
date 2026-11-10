@@ -289,6 +289,9 @@ export class RoutineEngine {
         const context: ActionRunContext = {
           initiator: `routine:${routine.name}`,
           ...(actor ? { actor } : {}),
+          // The root row takes the run's id, so an approval of this fire finds
+          // it (and the person it acted for) under its root execution id.
+          executionId: rootExecutionId,
           rootExecutionId,
           whenWorkersBusy: "queue",
           ...(keep ? {} : { omitFromRecord: ["__triggerPayload"] }),

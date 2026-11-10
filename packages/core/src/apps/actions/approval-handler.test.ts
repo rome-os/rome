@@ -1,6 +1,10 @@
 import { describe, it, expect, afterEach, rs } from "@rstest/core";
 import { runWithSessionActor } from "../../access/session-actor.js";
 import { actionCaller, sendForCaller } from "./caller-notify.js";
+import { RoutinesRepository } from "../../db/repositories/routines.js";
+import { RoutineRunsRepository } from "../../db/repositories/routine-runs.js";
+import { RoutineEngine } from "../../routines/engine.js";
+import { systemClock } from "../../lib/clock.js";
 import { callAction } from "./call-action.js";
 import { actionExecutionContext } from "./context.js";
 import { buildAgentConfig } from "../../test/helpers.js";
@@ -246,6 +250,58 @@ describe("ApprovalHandler", () => {
 
       expect(pushes).toEqual([{ body: "X is done", recipient: "acct-v" }]);
       expect(run.mock.calls[0]?.[0]).toMatchObject({ actor: visitor });
+    });
+
+    it("approves a visitor's routine fire as that visitor, finding it by the run's root id", async () => {
+      const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
+      const pushes: unknown[] = [];
+      // A routine whose action needs approval, then notifies with no chat.
+      const notifyMe = recordingAction("notify_me", {
+        requiresApproval: true,
+        execute: async () => {
+          await sendForCaller(
+            {
+              send: async (content) => {
+                pushes.push(content);
+                return { kind: "ok", attempted: 1, sent: 1, failed: 0 };
+              },
+            },
+            async () => null,
+            actionCaller(actionExecutionContext.getStore()),
+            { body: "It is 5" },
+          );
+          return { status: "ok", data: null };
+        },
+      });
+      await setup({ actions: [notifyMe.action] });
+      const routines = new RoutinesRepository(rome.db);
+      const routineId = await actionExecutionContext.run(
+        { executionId: "e", rootExecutionId: "e", initiator: "agent:main", actor: visitor },
+        () =>
+          routines.create({
+            name: "remind me",
+            trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "17:00" },
+            actionName: "notify_me",
+            args: {},
+          }),
+      );
+      const engine = new RoutineEngine(
+        routines,
+        new RoutineRunsRepository(rome.db),
+        rome.actionEngine,
+        0,
+        systemClock,
+      );
+      const run = await engine.runNow(routineId);
+      expect(run.status).toBe("pending_approval");
+      const [approval] = await rome.repos.approvals.findPending();
+      await rome.repos.approvals.resolvePending(approval!.id, "approve", "test-guardian");
+
+      await runWithSessionActor({ kind: "guardian", userId: "seat", via: "cookie" }, () =>
+        rome.approvalHandler.onApproved(approval!.id),
+      );
+
+      expect(pushes).toEqual([{ body: "It is 5", recipient: "acct-v" }]);
     });
 
     it("resumes a rejected request's turn for the person who asked", async () => {
