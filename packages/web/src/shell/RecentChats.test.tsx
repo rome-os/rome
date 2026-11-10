@@ -4,7 +4,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rst
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { Suspense } from "react";
+import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 import i18n from "@/i18n";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import type { LiveEventsClient } from "@/lib/live-events";
@@ -181,6 +182,101 @@ describe("RecentChats", () => {
     const task = await screen.findByRole("link", { name: /Find flights/ });
     expect(task.getAttribute("href")).toBe("/chat/task-1");
     expect(screen.queryByRole("link", { name: /Milo|Concierge/ })).toBeNull();
+  });
+
+  it("gives a task chat's row the same status, menu and link as a common chat's", async () => {
+    const user = userEvent.setup();
+    const row = (id: string, name: string, extra: Partial<MockSession> = {}) =>
+      ({
+        id,
+        name,
+        createdAt: new Date().toISOString(),
+        activityAt: new Date().toISOString(),
+        lastSeenActivityAt: null,
+        unread: true,
+        running: false,
+        projectName: "default",
+        projectPath: "default",
+        ...extra,
+      }) as MockSession;
+    mockSessions([
+      row("task-1", "Find flights", { triggerKind: "concierge" }),
+      row("mine", "My own chat"),
+    ]);
+    renderRecentChats();
+    const rowOf = async (name: string) =>
+      (await screen.findByRole("link", { name })).closest<HTMLElement>("[data-chat-row]")!;
+    const shape = async (name: string) => {
+      const chatRow = await rowOf(name);
+      const status = within(chatRow).queryByRole("img")?.getAttribute("aria-label") ?? null;
+      await user.click(within(chatRow).getByRole("button", { name: "Chat actions" }));
+      const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
+      await user.keyboard("{Escape}");
+      return { status, items, className: chatRow.className };
+    };
+    const task = await shape("Find flights");
+    expect(task.status).toBe("Done · new replies");
+    expect(task).toEqual(await shape("My own chat"));
+  });
+
+  it("marks the row it opens at once, while the router still holds the old chat", async () => {
+    mockSessions(
+      ["task-1", "mine"].map(
+        (id) =>
+          ({
+            id,
+            name: id === "mine" ? "My own chat" : "Find flights",
+            createdAt: new Date().toISOString(),
+            activityAt: new Date().toISOString(),
+            lastSeenActivityAt: null,
+            unread: false,
+            projectName: "default",
+            projectPath: "default",
+            ...(id === "task-1" ? { triggerKind: "concierge" } : {}),
+          }) as MockSession,
+      ),
+    );
+    // The task chat's page holds its render until released, so the router's
+    // transition stays open, as on a long chat that takes a moment.
+    let release = () => {};
+    let released = false;
+    const held = new Promise<void>((resolve) => {
+      release = () => {
+        released = true;
+        resolve();
+      };
+    });
+    function Page() {
+      const { id } = useParams();
+      if (id === "task-1" && !released) throw held;
+      return null;
+    }
+    render(
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter initialEntries={["/chat/mine"]}>
+          <RecentChats />
+          <LocationProbe />
+          <Suspense fallback={null}>
+            <Routes>
+              <Route path="/chat/:id" element={<Page />} />
+            </Routes>
+          </Suspense>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const rowOf = async (name: string) =>
+      (await screen.findByRole("link", { name })).closest<HTMLElement>("[data-chat-row]")!;
+    expect((await rowOf("My own chat")).className).toContain("bg-surface shadow-1");
+    await userEvent.setup().click(await screen.findByRole("link", { name: "Find flights" }));
+    expect((await rowOf("Find flights")).className).toContain("bg-surface shadow-1");
+    expect((await rowOf("My own chat")).className).not.toContain("bg-surface shadow-1");
+    expect(screen.getByTestId("location-path").textContent).toBe("/chat/mine");
+
+    await act(async () => release());
+    await waitFor(() =>
+      expect(screen.getByTestId("location-path").textContent).toBe("/chat/task-1"),
+    );
+    expect((await rowOf("Find flights")).className).toContain("bg-surface shadow-1");
   });
 
   it("applies the status filter to task chats like any other chat", async () => {

@@ -11,7 +11,15 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
@@ -319,7 +327,29 @@ export function RecentChats({
     () => (cachedSessions ?? []).filter((s) => chatKind(s, conciergeChatId) === "topic"),
     [cachedSessions, conciergeChatId],
   );
-  const activeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
+  const routeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
+  // The router renders a navigation as a transition, so the location stays
+  // on the old chat until the new one has rendered, which takes a moment
+  // when the old one is long. The row a click opens is marked at once, as an
+  // urgent update, and gives way when the location arrives.
+  const [openingSessionId, setOpeningSessionId] = useState<string | null>(null);
+  useEffect(() => setOpeningSessionId(null), [routeSessionId]);
+  const activeSessionId = openingSessionId ?? routeSessionId;
+  const markOpening = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      const link = (event.target as Element).closest("a[href]");
+      if (!link || link.getAttribute("target")) return;
+      const opened = activeSessionFromPath(
+        new URL(link.getAttribute("href") ?? "", window.location.origin).pathname,
+        conciergeChatId,
+      );
+      if (opened && opened !== routeSessionId) setOpeningSessionId(opened);
+    },
+    [conciergeChatId, routeSessionId],
+  );
 
   // A chat that starts running before the list has it, such as a task chat
   // Concierge just started, would show only when its first turn ends. The
@@ -922,7 +952,10 @@ export function RecentChats({
             {headerControls}
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 scrollbar-idle-hidden">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 scrollbar-idle-hidden"
+          onClickCapture={markOpening}
+        >
           {conciergeChatId ? (
             <ConciergeChats
               mainChatId={conciergeChatId}
