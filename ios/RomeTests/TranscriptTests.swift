@@ -239,8 +239,13 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         let origin = URL(string: "https://me.romeos.cc")!
         #expect(InstancePages.chat(origin: origin, sessionId: "topic-1").absoluteString == "https://me.romeos.cc/chat/topic-1")
         #expect(InstancePages.chat(origin: origin, sessionId: nil) == origin)
-        // The main chat opens by its id on the server, or the dashboard's chat page.
-        #expect(InstancePages.chat(origin: origin, sessionId: conciergeChatID, mainChatServerID: "c-42").absoluteString == "https://me.romeos.cc/chat/c-42")
-        #expect(InstancePages.chat(origin: origin, sessionId: conciergeChatID).absoluteString == "https://me.romeos.cc/chat")
+        // The main chat opens at `/message`, the dashboard's address for it.
+        #expect(InstancePages.chat(origin: origin, sessionId: conciergeChatID, mainChatServerID: "c-42").absoluteString == "https://me.romeos.cc/message")
+        // Before the main chat's server id is known: `/message` too, never
+        // `/chat`, which starts a new chat on the dashboard.
+        #expect(InstancePages.chat(origin: origin, sessionId: conciergeChatID).absoluteString == "https://me.romeos.cc/message")
+        // A visitor's main chat goes by its own id: it is still their main chat.
+        #expect(InstancePages.chat(origin: origin, sessionId: "concierge-v-acc1", mainChatServerID: "concierge-v-acc1").absoluteString == "https://me.romeos.cc/message")
+        #expect(InstancePages.chat(origin: origin, sessionId: "chat-site", mainChatServerID: "concierge-v-acc1").absoluteString == "https://me.romeos.cc/chat/chat-site")
     }
 }

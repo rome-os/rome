@@ -16,13 +16,14 @@ extension EnvironmentValues {
 
 /// The dashboard pages the app links to.
 enum InstancePages {
-    /// A chat's page: `/chat/<id>`. The main chat goes by its id on the
-    /// server; until that is known, `/chat`.
+    /// A chat's page: `/chat/<id>` for a topic or task chat. The main chat,
+    /// a visitor's too, is `/message`: the dashboard opens the signed-in
+    /// person's main chat there (every supported release has the route),
+    /// while `/chat` starts a new chat.
     static func chat(origin: URL, sessionId: String?, mainChatServerID: String? = nil) -> URL {
         guard let sessionId, !sessionId.isEmpty else { return origin }
-        let chat = origin.appending(path: "chat")
-        guard sessionId == conciergeChatID else { return chat.appending(path: sessionId) }
-        return mainChatServerID.map { chat.appending(path: $0) } ?? chat
+        if sessionId == conciergeChatID || sessionId == mainChatServerID { return origin.appending(path: "message") }
+        return origin.appending(path: "chat").appending(path: sessionId)
     }
 
     /// Settings → Connections.

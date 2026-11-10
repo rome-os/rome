@@ -129,7 +129,7 @@ private func rows(_ items: [[String: Any]]) -> [TranscriptRow] {
     @Test func theLinkGoesWhereTheRoutineCanBeTurnedOn() {
         let origin = URL(string: "https://me.romeos.cc")!
         #expect(RoutineCardText.destination(.notOn, origin: origin, sessionId: "topic-1", mainChatServerID: nil).absoluteString == "https://me.romeos.cc/chat/topic-1")
-        #expect(RoutineCardText.destination(nil, origin: origin, sessionId: conciergeChatID, mainChatServerID: "c-42").absoluteString == "https://me.romeos.cc/chat/c-42")
+        #expect(RoutineCardText.destination(nil, origin: origin, sessionId: conciergeChatID, mainChatServerID: "c-42").absoluteString == "https://me.romeos.cc/message")
         #expect(RoutineCardText.destination(.paused(routineId: "r2"), origin: origin, sessionId: "topic-1", mainChatServerID: nil).absoluteString == "https://me.romeos.cc/routines/r2")
     }
 
