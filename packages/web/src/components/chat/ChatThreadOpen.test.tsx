@@ -19,9 +19,9 @@ import {
 } from "./reply/chat-threads";
 import { ReplyDraftProvider, useReplyDraftState } from "./reply/reply-draft";
 
-// The "N replies" line of a Concierge chat's transcript (the iOS rule,
-// rome-os/rome#1953): where it shows, what it counts, and that it opens the
-// thread. A tap on a message itself opens nothing.
+// The "N replies" line of a Concierge chat's transcript: where it shows, what
+// it counts, and that it opens the thread. A tap on a message itself opens
+// nothing.
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({
   useDashboardIdentity: () => ({
@@ -59,103 +59,71 @@ const a = (id: string, thread: string | null): ThreadTimelineMessage => ({
   chatThreadId: thread,
 });
 
+/** A message in no chat thread. */
+const free = (id: string, role: "user" | "assistant" = "user"): ThreadTimelineMessage => ({
+  id,
+  role,
+  chatThreadId: null,
+});
+
 describe("threadRepliesLines", () => {
-  it("shows none for a question and its answer alone", () => {
-    expect(threadRepliesLines([g("q1"), a("a1", "q1")])).toEqual(new Map());
-    expect(threadRepliesLines([g("q1"), a("a1", "q1"), a("a2", "q1")])).toEqual(new Map());
+  it("shows none for messages in no thread: a plain question and its answer", () => {
+    expect(threadRepliesLines([free("q1"), free("a1", "assistant")])).toEqual(new Map());
   });
 
-  it("shows one for a thread of 4 or more messages, under its last agent message", () => {
+  it("shows one under the root, counting its replies", () => {
     expect(threadRepliesLines([g("q1"), a("a1", "q1"), g("q2", "q1"), a("a2", "q1")])).toEqual(
-      new Map([["a2", 3]]),
+      new Map([["q1", 3]]),
     );
   });
 
-  it("shows one when the thread's first message is not in the run, so earlier parts exist", () => {
-    // The first message is on an older page, not loaded.
-    expect(threadRepliesLines([g("q2", "q1"), a("a2", "q1")])).toEqual(new Map([["a2", 1]]));
-  });
-
-  it("shows one when the thread goes on elsewhere", () => {
-    const timeline = [g("q1"), a("a1", "q1"), g("w1"), a("w2", "w1"), g("q2", "q1"), a("a2", "q1")];
-    // The first run has more of its thread later, and the last run has its
-    // first message earlier. The weather run between them shows none, so
-    // neither neighbours a line.
-    expect(threadRepliesLines(timeline)).toEqual(
-      new Map([
-        ["a1", 3],
-        ["a2", 3],
-      ]),
+  it("counts a root that was in no thread when the thread started at it", () => {
+    // A task's result came back to the message that started it.
+    expect(threadRepliesLines([free("q1"), free("ack", "assistant"), a("result", "q1")])).toEqual(
+      new Map([["q1", 1]]),
     );
   });
 
-  it("never shows on two neighbouring runs: the later one keeps it", () => {
-    const timeline = [
-      g("x1"),
-      a("x2", "x1"),
-      g("y1"),
-      a("y2", "y1"),
-      g("x3", "x1"),
-      a("x4", "x1"),
-      g("y3", "y1"),
-      a("y4", "y1"),
-    ];
-    // Every run qualifies; each later run takes the line from the one before it.
-    expect(threadRepliesLines(timeline)).toEqual(
-      new Map([
-        ["y4", 3],
-        ["y2", 3],
-      ]),
-    );
+  it("shows none for a root with no replies, or one not loaded", () => {
+    expect(threadRepliesLines([g("q1")])).toEqual(new Map());
+    expect(threadRepliesLines([g("q2", "q1"), a("a2", "q1")])).toEqual(new Map());
   });
 
-  it("puts none under the guardian's messages, nor on a run with no agent message", () => {
-    expect(threadRepliesLines([g("q1"), g("q2", "q1"), g("q3", "q1"), g("q4", "q1")])).toEqual(
-      new Map(),
-    );
-  });
-
-  it("follows a message the Concierge places in a thread later", () => {
-    const loaded = [g("q1"), a("a1", "q1"), g("q2", null), a("a2", null)];
-    expect(threadRepliesLines(loaded)).toEqual(new Map());
-    // The live event places q2 and a2 in q1's thread: one run of 4.
-    const placed = loaded.map((m) => (m.chatThreadId === null ? { ...m, chatThreadId: "q1" } : m));
-    expect(threadRepliesLines(placed)).toEqual(new Map([["a2", 3]]));
+  it("follows a message placed in a thread later", () => {
+    const loaded = [g("q1"), a("a1", "q1"), free("q2"), free("a2", "assistant")];
+    expect(threadRepliesLines(loaded)).toEqual(new Map([["q1", 1]]));
+    const moved = loaded.map((m) => (m.chatThreadId === null ? { ...m, chatThreadId: "q1" } : m));
+    expect(threadRepliesLines(moved)).toEqual(new Map([["q1", 3]]));
   });
 });
 
 describe("live thread placements", () => {
   it("apply while the loaded message still is where they were made", () => {
-    const loaded = [g("q1"), a("a1", "q1"), g("q2", null), a("a2", null)];
+    const loaded = [g("q1"), a("a1", "q1"), free("q2"), free("a2", "assistant")];
     const live = new Map<string, ThreadPlacement>([
       ["q2", { from: null, to: "q1" }],
       ["a2", { from: null, to: "q1" }],
     ]);
-    expect(threadRepliesLines(placed(loaded, live))).toEqual(new Map([["a2", 3]]));
+    expect(threadRepliesLines(placed(loaded, live))).toEqual(new Map([["q1", 3]]));
   });
 
-  it("give way to a reload that says otherwise, so a missed final placement leaves no stray line", () => {
-    // The plain send first joined the latest thread; the Concierge's final
-    // placement (a new thread) was missed while the connection was down.
-    const live = new Map<string, ThreadPlacement>([
-      ["q2", { from: null, to: "q1" }],
-      ["a2", { from: null, to: "q1" }],
-    ]);
+  it("give way to a reload that says otherwise", () => {
+    const live = new Map<string, ThreadPlacement>([["q2", { from: null, to: "q1" }]]);
     const reloaded = [g("q1"), a("a1", "q1"), g("q2", "q2"), a("a2", "q2")];
-    expect(threadRepliesLines(placed(reloaded, live))).toEqual(new Map());
+    expect(threadRepliesLines(placed(reloaded, live))).toEqual(
+      new Map([
+        ["q1", 1],
+        ["q2", 1],
+      ]),
+    );
   });
 
-  it("build on a reload between the provisional and the final placement", () => {
-    // The plain send first joined the latest thread.
+  it("build on a reload between two placements", () => {
     let live = placeLive(new Map(), "q2", "q1", null);
-    live = placeLive(live, "a2", "q1", null);
-    // A reload loads it there too, before the Concierge's final placement.
-    const reloaded = [g("q1"), a("a1", "q1"), g("q2", "q1"), a("a2", "q1")];
-    expect(threadRepliesLines(placed(reloaded, live))).toEqual(new Map([["a2", 3]]));
-    // The final placement starts a thread of its own, over what the reload said.
+    const reloaded = [g("q1"), a("a1", "q1"), g("q2", "q1")];
+    expect(threadRepliesLines(placed(reloaded, live))).toEqual(new Map([["q1", 2]]));
     live = placeLive(live, "q2", "q2", "q1");
-    live = placeLive(live, "a2", "q2", "q1");
-    expect(threadRepliesLines(placed(reloaded, live))).toEqual(new Map());
+    expect(threadRepliesLines(placed(reloaded, live))).toEqual(new Map([["q1", 1]]));
   });
 });
 
@@ -236,12 +204,12 @@ function renderTranscript() {
 }
 
 describe("the replies line in the transcript", () => {
-  it("sits under the run's last agent message and opens its thread", () => {
+  it("sits under the thread's root and opens its thread", () => {
     const thread = renderTranscript();
     const line = screen.getByRole("button", { name: "3 replies" });
-    expect(line.getAttribute("data-thread-replies")).toBe("a2");
+    expect(line.getAttribute("data-thread-replies")).toBe("m1");
     fireEvent.click(line);
-    expect(thread()).toBe("a2");
+    expect(thread()).toBe("m1");
   });
 
   it("is the way in from the transcript: a tap on a message opens nothing", () => {
