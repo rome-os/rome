@@ -9,29 +9,29 @@ import {
   createGuardianSession,
   issueGuardianSession,
   shouldSecureCookie,
-} from "../../lib/auth.js";
+} from "../../access/auth.js";
 import {
   createCloudGuardian,
   getGuardianAuthState,
   setGuardianAccount,
-} from "../../lib/guardian-auth-state.js";
+} from "../../access/guardian-auth-state.js";
 import {
   backgroundNote,
   followRequest,
   readOnboardingSurvey,
   type OnboardingSurvey,
-} from "../../lib/cloud-onboarding.js";
+} from "../../instance/cloud-onboarding.js";
 import {
   applySetupDefaults,
   defaultGuardianName,
   writeGuardianBackground,
-} from "../../lib/guardian-profile.js";
+} from "../../people/guardian-profile.js";
 import {
   isInstanceLinked,
   isValidInstanceToken,
   persistInstanceToken,
-} from "../../lib/instance-identity.js";
-import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
+} from "../../instance/instance-identity.js";
+import { getInstanceOrigin, getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 import { beginDashboardVisitorFlow } from "./visitor-auth.js";

@@ -267,3 +267,61 @@ describe("input priority", () => {
     expect(s.lastState("a")).toBe("unknown");
   });
 });
+
+describe("who an input turn acts for", () => {
+  const guardian = { kind: "guardian", userId: "seat" };
+  const visitor = { kind: "visitor", accountId: "acct-v" };
+
+  function actorSetup() {
+    const startedWith: Array<{ actor?: object }> = [];
+    const mixed: string[] = [];
+    const steer = rs.fn<ModelSession["steerUserInput"] & {}>().mockResolvedValue("accepted");
+    const queue = new AgentInputQueue(
+      (_input, options) => {
+        startedWith.push(options);
+        return fakeHandle(`turn-${startedWith.length}`);
+      },
+      () => ({ steerUserInput: steer }),
+      rs.fn(),
+      (turnId) => mixed.push(turnId),
+    );
+    const submit = (
+      inputId: string,
+      actor?: { kind: string; userId?: string; accountId?: string },
+      priority?: "now",
+    ) =>
+      queue.submit(
+        { inputId, prompt: inputId },
+        { ...(actor ? { actor } : {}), ...(priority ? { priority } : {}) },
+      );
+    return { queue, submit, startedWith, mixed, steer };
+  }
+
+  it("marks a running turn mixed when another person's input is steered into it", async () => {
+    const s = actorSetup();
+    const a = s.submit("a", guardian);
+    await s.queue.beforeSend(a.turnId);
+    s.queue.ready(a.turnId);
+    s.submit("b", { kind: "guardian", userId: "seat" });
+    await tick();
+    expect(s.mixed).toEqual([]);
+    await s.queue.observe({ type: "input_status", inputId: "b", state: "consumed" }, a.turnId);
+    s.submit("c", visitor);
+    await tick();
+    expect(s.steer.mock.calls.map(([input]) => input.inputId)).toEqual(["b", "c"]);
+    expect(s.mixed).toEqual([a.turnId]);
+  });
+
+  it("starts a turn that bundles two people's inputs as acting for no one", async () => {
+    const s = actorSetup();
+    const a = s.submit("a", guardian);
+    // Two inputs sent "now" stop the running turn and start the next one together.
+    s.submit("b", guardian, "now");
+    s.submit("c", visitor, "now");
+    s.queue.finish(a.turnId);
+    await tick();
+    expect(s.startedWith).toHaveLength(2);
+    expect(s.startedWith[0]?.actor).toBe(guardian);
+    expect(s.startedWith[1]).not.toHaveProperty("actor");
+  });
+});

@@ -23,6 +23,14 @@ describe("toTraceEvent", () => {
     ).not.toHaveProperty("isError");
   });
 
+  it("keeps the session renewal a turn_start announces, and adds none to another", () => {
+    const start = { type: "turn_start" as const, turnId: "t1", sessionId: "s2", userPrompt: "hi" };
+    expect(
+      toTraceEvent({ ...start, sessionRenewal: { reason: "setup", sessionId: "s2" } }),
+    ).toMatchObject({ sessionRenewal: { reason: "setup", sessionId: "s2" } });
+    expect(toTraceEvent(start)).not.toHaveProperty("sessionRenewal");
+  });
+
   it("preserves an opaque Rome session reference on session_init", () => {
     expect(
       toTraceEvent({

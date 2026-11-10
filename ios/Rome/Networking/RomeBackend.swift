@@ -74,6 +74,8 @@ protocol RomeBackend: AnyObject, Sendable {
     func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply
     /// `GET /api/concierge/connectors`: every service Chat can use, and its state.
     func connectors() async throws -> [ConnectorState]
+    /// `GET /api/routines`: the guardian's routines. A visitor gets an error.
+    func routines() async throws -> [RoutineRef]
     /// Tells Chat in `chatId` that `service` is connected, so it goes on.
     func notifyServiceConnected(chatId: String, service: String) async
 }
@@ -211,6 +213,11 @@ final class LiveBackend: RomeBackend {
         return (body["connectors"]?.array ?? []).compactMap(ConnectorState.init(json:))
     }
 
+    func routines() async throws -> [RoutineRef] {
+        // A visitor's 403 only leaves the card's status out; it is no lost session.
+        try await client.get("/routines", reportsUnauthorized: false)
+    }
+
     func notifyServiceConnected(chatId: String, service: String) async {
         _ = try? await client.post("/concierge/chats/\(escape(chatId))/service-connected", json: .object(["service": .string(service)]))
     }
@@ -307,6 +314,7 @@ extension RomeBackend {
 
     func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply { throw APIError.notFound }
     func connectors() async throws -> [ConnectorState] { [] }
+    func routines() async throws -> [RoutineRef] { throw APIError.notFound }
     func notifyServiceConnected(chatId: String, service: String) async {}
     /// Stand-ins (demo, tests) are no guardian of a real instance.
     func isGuardian() async -> Bool { false }

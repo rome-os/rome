@@ -19,8 +19,6 @@ import {
   ArchiveRestore,
   ArrowDown,
   MoreHorizontal,
-  Pin,
-  PinOff,
   PanelRightOpen,
   Share2,
   Trash2,
@@ -99,6 +97,7 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
+import { ChatThreadView, KEEPS_CHAT_THREAD_OPEN } from "@/components/chat/ChatThreadView";
 import {
   ConciergeEmptyState,
   ConciergeTopicEmptyState,
@@ -141,7 +140,8 @@ import {
   type PostTurnResult,
   updateSessionModel,
 } from "@/lib/chat-api";
-import { useArchiveSession, usePinSession } from "@/lib/session-events";
+import { useArchiveSession } from "@/lib/session-events";
+import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import {
   snapshotWorkspaceForSend,
   useWorkspaceContextRegistry,
@@ -201,6 +201,7 @@ const traceSummarySchema: z.ZodType<TraceSummary> = z.lazy(() =>
     terminalError: z.string().optional(),
     plan: agentPlanSchema.optional(),
     model: z.string().optional(),
+    sessionRenewal: z.object({ reason: z.string(), sessionId: z.string() }).optional(),
   }),
 );
 
@@ -212,6 +213,7 @@ const chatMessageSchema: z.ZodType<ChatMessage> = z.object({
   content: z.string(),
   createdAt: z.string(),
   traceSummary: traceSummarySchema.nullable().optional(),
+  chatThreadId: z.string().nullable().optional(),
 });
 
 const sessionNameSchema = z.object({
@@ -456,12 +458,14 @@ export function Chat({
     sessionName,
     model,
     largeModelSelection: storedModelSelection,
-    isSideChat,
+    isForkChat,
     reasoningEffort,
     pinnedAgentMention: identityAgentMention,
     archivedAt,
-    pinnedAt,
+    forkable,
   } = useSessionIdentity(mainSessionId);
+  // The main chat is never archived or deleted, so its menu offers neither.
+  const isMainChat = concierge && mainSessionId === conciergeMainChatId;
   // The open chat's model pick, shown as soon as the guardian makes it. It is
   // stored on the chat and the next turn runs on it.
   const [pickedModel, setPickedModel] = useState<{ sessionId: string; value: string } | null>(null);
@@ -491,7 +495,6 @@ export function Chat({
   const [archivedOverride, setArchivedOverride] = useState<boolean | undefined>(undefined);
   const isArchived = archivedOverride ?? archivedAt != null;
   const setArchived = useArchiveSession();
-  const setPinned = usePinSession();
   // The override is only a momentary optimistic flip for the navbar handlers.
   // Once the session read reflects the server's archived state (including an
   // archive/unarchive triggered from the sidebar, which refetches via the
@@ -590,9 +593,9 @@ export function Chat({
   // The main session's id, empty while a draft has none. Keys the running turn
   // and live stream (send, stop, reattach, live trace, onSessionMessage).
   const activeSessionId = mainSessionId ?? "";
-  // A side chat promoted to a chat still runs on its branch (#1384), whose
+  // A fork chat promoted to a chat still runs on its branch (#1384), whose
   // model the picker does not hold.
-  const chatModelPickable = !!mainSessionId && !isSideChat;
+  const chatModelPickable = !!mainSessionId && !isForkChat;
 
   // Ordered, unique turn ids of the main session — the selectable share unit.
   const mainTurnIds = useMemo(() => {
@@ -715,6 +718,8 @@ export function Chat({
     messageIds: displayedMessageIds,
     jump: jumpToMessage,
     focusComposer: () => composerRef.current?.focus(),
+    // A Concierge chat keeps chat threads: Reply and a quote open the thread view.
+    threads: concierge,
   });
 
   const enterShareMode = useCallback(() => {
@@ -888,7 +893,7 @@ export function Chat({
       // best-effort — the list refresh below reconciles either way
     }
     notifySessionsChanged();
-    navigate("/chat");
+    navigate(MAIN_CHAT_PATH);
   }, [mainSessionId, notifySessionsChanged, navigate]);
 
   // Archive (read-only soft-hide) or restore the current chat. Archiving does
@@ -914,15 +919,6 @@ export function Chat({
       setArchivedOverride(true);
     }
   }, [mainSessionId, setArchived]);
-
-  const handlePin = useCallback(async () => {
-    if (!mainSessionId) return;
-    try {
-      await setPinned(mainSessionId, !pinnedAt);
-    } catch {
-      // Server truth remains unchanged; the next sessions event reconciles.
-    }
-  }, [mainSessionId, pinnedAt, setPinned]);
 
   useEffect(() => {
     onSessionMessageRef.current?.({ sessionId: activeSessionId, turnId: activeStreamTurnId });
@@ -1719,6 +1715,7 @@ export function Chat({
               formData.set(name, value);
             }
           }
+          if (snapshot.chatThread) formData.set("chatThread", snapshot.chatThread);
           for (const upload of snapshot.uploads) {
             formData.append("files", upload.file);
           }
@@ -2052,7 +2049,7 @@ export function Chat({
               <SessionLoadingTitle />
             ) : (
               <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
-                {(concierge && mainSessionId === conciergeMainChatId && conciergeName) ||
+                {(isMainChat && conciergeName) ||
                   sessionName?.trim() ||
                   pinnedAgentMention?.appLabel ||
                   t("sidebar.newChat")}
@@ -2080,15 +2077,11 @@ export function Chat({
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => void handlePin()}>
-              {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
-              {pinnedAt ? t("navbar.unpin") : t("navbar.pin")}
-            </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => enterShareMode()}>
               <Share2 className="size-4" />
               {t("share.title", "Share chat")}
             </DropdownMenuItem>
-            {isArchived ? (
+            {isMainChat ? null : isArchived ? (
               <DropdownMenuItem onSelect={() => void handleUnarchive()}>
                 <ArchiveRestore className="size-4" />
                 {t("navbar.unarchive")}
@@ -2099,10 +2092,12 @@ export function Chat({
                 {t("navbar.archive")}
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem variant="destructive" onSelect={() => setDeleteConfirmOpen(true)}>
-              <Trash2 className="size-4" />
-              {t("navbar.delete")}
-            </DropdownMenuItem>
+            {isMainChat ? null : (
+              <DropdownMenuItem variant="destructive" onSelect={() => setDeleteConfirmOpen(true)}>
+                <Trash2 className="size-4" />
+                {t("navbar.delete")}
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -2238,6 +2233,7 @@ export function Chat({
                     subagentIconByName={subagentIconByName}
                     actions={blockActions}
                     feedback
+                    fork={forkable}
                     variant={variant}
                   />
                 </>
@@ -2306,7 +2302,19 @@ export function Chat({
                     !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
                   )}
                 />
-                <div className="pointer-events-auto relative mx-auto max-w-5xl">
+                <div
+                  className="pointer-events-auto relative mx-auto max-w-5xl"
+                  {...{ [KEEPS_CHAT_THREAD_OPEN]: "" }}
+                >
+                  {concierge && mainSessionId && replyDraft.thread ? (
+                    <ChatThreadView
+                      key={replyDraft.thread}
+                      sessionId={mainSessionId}
+                      messageId={replyDraft.thread}
+                      onClose={replyDraft.closeThread}
+                      className="absolute inset-x-0 bottom-full z-10 mb-2"
+                    />
+                  ) : null}
                   {/* Sits on the composer's top-right corner, clear of the
                       centered jump to latest. */}
                   {mainSessionId && (

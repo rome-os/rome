@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ResolvedApp } from "../apps/state.js";
-import { setInstanceTokenInMemory } from "../lib/instance-identity.js";
+import { setInstanceTokenInMemory } from "../instance/instance-identity.js";
 import { RomeCloudFavorService } from "./rome-cloud-service.js";
 import type { FavorActionRequestView } from "./types.js";
 

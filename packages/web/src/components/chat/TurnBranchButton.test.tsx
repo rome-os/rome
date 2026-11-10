@@ -115,7 +115,7 @@ describe("TurnBranchButton", () => {
 
   it("shows the generic failure on other errors", async () => {
     rs.spyOn(globalThis, "fetch").mockResolvedValue(
-      Response.json({ error: "Couldn't start side chat from this conversation" }, { status: 409 }),
+      Response.json({ error: "Couldn't fork a chat from this conversation" }, { status: 409 }),
     );
     render(<TurnBranchButton sessionId="chat-session" turnId="turn-4" />);
 

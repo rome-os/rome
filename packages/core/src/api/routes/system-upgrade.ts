@@ -1,9 +1,9 @@
 import { Hono } from "hono";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
 import { getBuildInfo } from "../../build-info.js";
-import { cloudBearer } from "../../lib/instance-identity.js";
-import { getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
-import type { SystemUpgradeService } from "../../system-upgrade/service.js";
+import { cloudBearer } from "../../instance/instance-identity.js";
+import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
+import type { SystemUpgradeService } from "../../instance/system-upgrade/service.js";
 
 export interface SystemUpgradeRoutesDeps {
   systemUpgradeService: SystemUpgradeService;

@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime } from "./webchat.js";
 import { Session } from "../../agent/index.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
-import { runWithSessionActor } from "../../lib/session-actor.js";
+import { runWithSessionActor } from "../../access/session-actor.js";
 import { webchatChannel, webchatCaller } from "../../chats/dashboard/dashboard-account.js";
 import {
   buildAgent,
@@ -38,7 +38,7 @@ import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../agent/index.js";
 import { guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
-import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
+import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { reportOf } from "../../test/kit/model-accounts.js";
@@ -642,6 +642,7 @@ describe("Webchat API", () => {
     );
     const agent: AgentSession = {
       selectModel: () => {},
+      release: () => {},
       key: { agentName: "main", channelThreadKey: "webchat:test" },
       sessionId: "agent-session",
       status: "running",
@@ -2843,6 +2844,7 @@ describe("Webchat API", () => {
         return {
           sessionId: "runtime-topic",
           key: { agentName: "core:concierge", channelThreadKey: "webchat:topic-1" },
+          release: () => {},
         };
       }),
       find: () => undefined,
@@ -4310,10 +4312,22 @@ describe("Webchat API", () => {
         expect(sent.status).toBe(200);
         await drainTurn(app, sent);
       }
-      expect(sentTurns[0]?.prompt).toBe(
-        '<concierge_chat id="topic-1" name="Calendar" main="false"/>\n<concierge_owner role="visitor" email="ann@example.com"/>\n\nhello',
+      // The guardian's message starts its chat thread, which the Concierge reads.
+      expect(sentTurns[0]?.prompt).toMatch(
+        /^<concierge_chat id="topic-1" name="Calendar" main="false"\/>\n<concierge_owner role="visitor" email="ann@example.com"\/>\n<chat_thread message_id="([^"]+)" thread="\1" chosen="false"\/>\n\nhello$/,
       );
       expect(sentTurns[1]?.prompt).toBe("hello");
+
+      // The next message joins that thread for now, and reads what it is about.
+      const next = await app.request(`/chat/sessions/topic-1/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "and later?" }),
+      });
+      await drainTurn(app, next);
+      expect(sentTurns[2]?.prompt).toMatch(
+        /<chat_thread message_id="[^"]+" thread="[^"]+" about="hello" chosen="false"\/>/,
+      );
     });
 
     it("sends a Concierge turn on the selection a background switch just stored", async () => {
@@ -4461,24 +4475,24 @@ describe("Webchat API", () => {
       expect(await deps.webchatRepo.getSession(sessionId)).toMatchObject({
         largeModelSelection: null,
       });
-      // A side chat promoted to a chat keeps the model it branched with.
+      // A fork chat promoted to a chat keeps the model it branched with.
       await deps.settingsRepo.set("enableModelSelector", true);
       await deps.webchatRepo.ensureRomeSession({
-        id: "promoted-side-chat",
+        id: "promoted-fork-chat",
         parentSessionId: sessionId,
         type: "fork",
-        name: "Side chat",
+        name: "Fork chat",
         agentName: "main",
       });
-      await deps.webchatRepo.promoteForkToChat("promoted-side-chat");
-      const sideChat = await app.request("/chat/sessions/promoted-side-chat/model", {
+      await deps.webchatRepo.promoteForkToChat("promoted-fork-chat");
+      const forkChat = await app.request("/chat/sessions/promoted-fork-chat/model", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ largeModelSelection: "gpt-6-luna" }),
       });
-      expect(sideChat.status).toBe(409);
-      await expect(sideChat.json()).resolves.toEqual({
-        error: "A side chat keeps the model it branched with",
+      expect(forkChat.status).toBe(409);
+      await expect(forkChat.json()).resolves.toEqual({
+        error: "A fork chat keeps the model it branched with",
       });
       const missing = await app.request("/chat/sessions/does-not-exist/model", {
         method: "PATCH",
@@ -5225,6 +5239,7 @@ describe("Webchat API", () => {
         },
       };
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5517,7 +5532,7 @@ describe("Webchat API", () => {
     });
   });
 
-  describe("turn side-chat branch route", () => {
+  describe("turn fork-chat branch route", () => {
     const SESSION_ID = "sess-branch-routes";
     const TURN_ID = "turn-branch-1";
 
@@ -5554,7 +5569,7 @@ describe("Webchat API", () => {
             sessionId: "branch-fork-session",
             userPrompt: params.prompt,
           };
-          yield { type: "result", content: "Here is the side-chat answer." };
+          yield { type: "result", content: "Here is the fork-chat answer." };
           yield {
             type: "turn_end",
             turnId: "branch-fork-turn",
@@ -5564,6 +5579,7 @@ describe("Webchat API", () => {
         },
       };
       const acquireSource = rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5617,7 +5633,7 @@ describe("Webchat API", () => {
         }),
       );
       expect(showApp).not.toHaveBeenCalled();
-      // A side chat is a conversation: it asks to be left resumable, keyed by
+      // A fork chat is a conversation: it asks to be left resumable, keyed by
       // the fork's own id with no model-selection suffix — exactly what
       // handleChatSend will derive for it on a follow-up.
       expect(forkParams!.persistThreadKey?.("branch-fork-session")).toBe(
@@ -5653,6 +5669,7 @@ describe("Webchat API", () => {
         runForked,
       };
       const acquireSource = rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       const exactCheckpoint = rs
@@ -5717,7 +5734,7 @@ describe("Webchat API", () => {
 
       expect(res.status).toBe(409);
       await expect(res.json()).resolves.toEqual({
-        error: "Couldn't start side chat from this conversation",
+        error: "Couldn't fork a chat from this conversation",
       });
     });
 
@@ -5728,6 +5745,7 @@ describe("Webchat API", () => {
         runForked,
       };
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue(null);
@@ -5768,7 +5786,7 @@ describe("Webchat API", () => {
             sessionId: "branch-fork-session",
             userPrompt: params.prompt,
           };
-          yield { type: "result", content: "Here is the side-chat answer." };
+          yield { type: "result", content: "Here is the fork-chat answer." };
           yield {
             type: "turn_end",
             turnId: "branch-fork-turn",
@@ -5778,6 +5796,7 @@ describe("Webchat API", () => {
         },
       };
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5846,7 +5865,7 @@ describe("Webchat API", () => {
             sessionId: "branch-fork-session",
             userPrompt: params.prompt,
           };
-          yield { type: "result", content: "Here is the side-chat answer." };
+          yield { type: "result", content: "Here is the fork-chat answer." };
           yield {
             type: "turn_end",
             turnId: "branch-fork-turn",
@@ -5856,6 +5875,7 @@ describe("Webchat API", () => {
         },
       };
       rs.spyOn(deps.agentSessionManager, "open").mockResolvedValue({
+        release: () => {},
         sessionId: "live-source-session",
       } as AgentSession);
       rs.spyOn(deps.sessionRepository, "deprecatedCheckpoint").mockResolvedValue({
@@ -5930,7 +5950,7 @@ describe("Webchat API", () => {
     });
   });
 
-  describe("continuable side chats", () => {
+  describe("continuable fork chats", () => {
     const FORK_ID = "branch-session-continuable";
     const LEGACY_FORK_ID = "branch-session-legacy";
     // A branch as it ships now: born type "webchat" with lineage intact.
@@ -6379,6 +6399,30 @@ describe("Webchat API", () => {
       expect(assistantReplies[0]!.content).toContain("Done — I sent the message.");
     });
 
+    it("carries agent renames on both status transports and removes listeners on close", async () => {
+      const listeners = new Set<(event: string, data: unknown) => void>();
+      deps.agentNameEvents = {
+        subscribe(emit) {
+          listeners.add(emit);
+          return () => {
+            listeners.delete(emit);
+          };
+        },
+      };
+      const { routes: app, runtime } = createWebchatRuntime(deps);
+      const emit = rs.fn();
+      const unsubscribe = runtime.subscribeStatusEvents(emit);
+      const response = await app.request("/chat/status/events");
+      const reader = response.body!.getReader();
+      const received = readSseUntil(reader, "event: agent_name_changed");
+      for (const listener of listeners) listener("agent_name_changed", { agentName: "Pebble" });
+      expect(emit).toHaveBeenCalledExactlyOnceWith("agent_name_changed", { agentName: "Pebble" });
+      expect(await received).toContain('data: {"agentName":"Pebble"}');
+      unsubscribe();
+      await reader.cancel();
+      expect(listeners.size).toBe(0);
+    });
+
     it("reports a running chat in the list and on the status stream", async () => {
       const sessionId = "sess-status";
       await deps.webchatRepo.createSession(sessionId, "Status");
@@ -6509,8 +6553,8 @@ describe("Webchat API", () => {
       await reader.cancel();
     });
 
-    it("refuses a backend continuation on a side chat", async () => {
-      // Side chats hold no scheduled wake-ups (they get no defer tool) and do
+    it("refuses a backend continuation on a fork chat", async () => {
+      // Fork chats hold no scheduled wake-ups (they get no defer tool) and do
       // not host approval continuations. Resuming one here would reopen its
       // session without the detached surface, so the refusal is deliberate and
       // keeps the failure loud.
@@ -7566,7 +7610,7 @@ describe("Webchat API", () => {
 });
 
 /** A fake session scripts only how it starts a turn; `withSubmit` gives it the rest. */
-type FakeSession = Omit<AgentSession, "submit" | "fork" | "selectModel"> & {
+type FakeSession = Omit<AgentSession, "submit" | "fork" | "selectModel" | "release"> & {
   startTurn(input: AgentTurnInput, options?: SubmitOptions): AgentTurnHandle;
 };
 
@@ -7595,6 +7639,7 @@ function fakeSessionManager(
 function withSubmit(fake: FakeSession): AgentSession {
   return Object.assign(fake, {
     selectModel: () => {},
+    release: () => {},
     submit: (input: AgentTurnInput, options: SubmitOptions = {}): AgentInputReceipt => {
       const handle = fake.startTurn(input, options);
       if (input.inputId) {

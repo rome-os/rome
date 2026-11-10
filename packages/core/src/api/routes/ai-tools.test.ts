@@ -8,7 +8,7 @@ import { aiToolsRoutes } from "./ai-tools.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../agent/index.js";
 import { settings } from "../../db/schema.js";
-import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
+import { setInstanceTokenInMemory } from "../../instance/instance-identity.js";
 import { reportOf } from "../../test/kit/model-accounts.js";
 
 const {
@@ -78,7 +78,7 @@ describe("AI tools status API", () => {
         openai: reportOf("available"),
         anthropic: reportOf("unauthorized"),
       };
-      const refresh = rs.spyOn(deps.modelAccounts, "refresh").mockResolvedValue(undefined);
+      const refresh = rs.spyOn(deps.modelAccounts, "refresh").mockResolvedValue(true);
       rs.spyOn(deps.modelAccounts, "read").mockReturnValue(refreshed);
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
@@ -100,7 +100,7 @@ describe("AI tools status API", () => {
     const testDb = createTestDb();
     try {
       const deps = await buildTestDeps(testDb.db);
-      const refresh = rs.spyOn(deps.modelAccounts, "refresh").mockResolvedValue(undefined);
+      const refresh = rs.spyOn(deps.modelAccounts, "refresh").mockResolvedValue(true);
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       await app.request("/ai-tools/refresh?provider=anthropic", { method: "POST" });
@@ -401,7 +401,7 @@ describe("Codex shared account routes", () => {
     try {
       const deps = await buildTestDeps(testDb.db);
       const logout = rs.spyOn(deps.codexAccountService, "revoke");
-      const refresh = rs.spyOn(deps.modelAccounts, "refresh").mockResolvedValue(undefined);
+      const refresh = rs.spyOn(deps.modelAccounts, "refresh").mockResolvedValue(true);
       const app = new Hono().route("/", aiToolsRoutes(deps));
 
       const response = await app.request("/ai-tools/codex/logout", { method: "POST" });
@@ -572,6 +572,7 @@ describe("AI tools Anthropic-compatible credentials API", () => {
       expect(provider).toBe("anthropic");
       refreshStarted();
       await gate;
+      return true;
     });
 
     const response = Promise.resolve(
@@ -644,6 +645,7 @@ describe("Claude logout API", () => {
       });
       const refreshSpy = rs.spyOn(deps.modelAccounts, "refresh").mockImplementation(async () => {
         await refreshGate;
+        return true;
       });
       const app = new Hono().route("/", aiToolsRoutes(deps));
 

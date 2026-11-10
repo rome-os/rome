@@ -9,7 +9,7 @@ import {
   DEFAULT_DASHBOARD_ACCESS_CONFIG,
   normalizeDashboardAccessConfig,
   type DashboardAccessConfig,
-} from "../../lib/dashboard-access-config.js";
+} from "../../access/dashboard-access-config.js";
 import type { ApiDeps } from "../deps.js";
 
 export function dashboardAccessRoutes(deps: ApiDeps): Hono {

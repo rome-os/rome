@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { ROME_CREDITS_PROXY_SECRET } from "./rome-credits-proxy.js";
-import { setInstanceTokenInMemory } from "../../../../lib/instance-identity.js";
+import { setInstanceTokenInMemory } from "../../../../instance/instance-identity.js";
 import { romeCreditsProxyRoutes } from "./rome-credits-proxy-route.js";
 
 const CLOUD = "https://cloud.example";

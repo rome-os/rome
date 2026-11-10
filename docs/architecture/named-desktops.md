@@ -2,7 +2,7 @@
 
 A **named desktop** is an X display of its own for one owner, such as the personal WeChat client. It is separate from the shared desktop, `:99`, which the container's s6 services start beside Rome's Chrome. The guardian watches a named desktop at `/desktop/<name>`, the way `/desktop` shows the shared one.
 
-Desktops are static. A fixed table in [`packages/core/src/desktops.ts`](../../packages/core/src/desktops.ts) maps each name to an X display, an RFB port and a websockify port. Adding a desktop means adding a row.
+Desktops are static. A fixed table in [`packages/core/src/desktops/desktops.ts`](../../packages/core/src/desktops/desktops.ts) maps each name to an X display, an RFB port and a websockify port. Adding a desktop means adding a row.
 
 | Name | Display | RFB port | websockify port | Present when |
 | --- | --- | --- | --- | --- |

@@ -56,7 +56,7 @@ import type { Account, RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { agentMessageOutbound } from "../../chats/history/messages-agent.js";
-import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
+import { sessionOwnerKey, type SessionActor } from "../../access/session-actor.js";
 import type { ChatRef } from "../../chats/storage/place.js";
 
 export interface StoredTurnFeedback {
@@ -77,7 +77,27 @@ export interface StoredWebchatMessage {
   senderName?: string | null;
   replyToPlatformMessageId?: string | null;
   contextInjectedTurnId?: string | null;
+  /** The chat thread the message is in (docs/domains/chats.md#chat-thread),
+   *  or null when it is in none. */
+  chatThreadId?: string | null;
   createdAt: Date;
+}
+
+/**
+ * Where a message goes among its chat's chat threads: into the thread of
+ * the message `in` names, into the most recently active thread, or into a
+ * thread of its own. With `settle` it stays there for good: its sender chose
+ * the thread, or the Concierge placed it. A settled message is never moved.
+ */
+export type ChatThreadPlacement = ({ in: string } | { latest: true } | { starts: true }) & {
+  settle?: boolean;
+};
+
+/** A message was placed in a chat thread. */
+export interface ChatThreadPlaced {
+  sessionId: string;
+  messageId: string;
+  chatThreadId: string;
 }
 
 export interface StoredSharedChat {
@@ -256,7 +276,7 @@ export interface EnsureRomeSessionInput {
   agentName: string | null;
   projectName?: string;
   projectPath?: string | null;
-  /** A side chat keeps the folder of the chat it branched from. */
+  /** A fork chat keeps the folder of the chat it branched from. */
   deviceFolder?: DeviceFolder | null;
   sourceChannel?: string | null;
   sourceThreadId?: string | null;
@@ -307,6 +327,7 @@ export interface TraceBatch {
 }
 
 export type WebchatMessageInsertedListener = (message: StoredWebchatMessage) => void;
+export type ChatThreadPlacedListener = (event: ChatThreadPlaced) => void;
 export type WebchatSessionNameChangedListener = (event: {
   sessionId: string;
   name: string;
@@ -788,6 +809,63 @@ export class WebChatRepository {
     for (const listener of this.messageInsertedListeners) {
       listener(message);
     }
+  }
+
+  private chatThreadPlacedListeners = new Set<ChatThreadPlacedListener>();
+
+  /** Told when a message is placed in a chat thread after it was said. */
+  onChatThreadPlaced(listener: ChatThreadPlacedListener): () => void {
+    this.chatThreadPlacedListeners.add(listener);
+    return () => {
+      this.chatThreadPlacedListeners.delete(listener);
+    };
+  }
+
+  protected emitChatThreadPlaced(event: ChatThreadPlaced): void {
+    for (const listener of this.chatThreadPlacedListeners) listener(event);
+  }
+
+  /**
+   * Places message `messageId` of chat `sessionId` in a chat thread. A
+   * message whose sender chose its thread is never moved. Answers the
+   * thread the message is in after, or null when the chat holds no such
+   * message or keeps no chat threads. Chat threads live in Chats, so this
+   * repository keeps none.
+   */
+  async placeInChatThread(
+    _sessionId: string,
+    _messageId: string,
+    _placement: ChatThreadPlacement,
+  ): Promise<string | null> {
+    return null;
+  }
+
+  /** The chat thread message `messageId` of chat `sessionId` is in, else the
+   *  one it would start, or null when the chat holds no such message. */
+  async chatThreadOf(_sessionId: string, _messageId: string): Promise<string | null> {
+    return null;
+  }
+
+  /** Whether message `messageId` of chat `sessionId` is settled in its chat
+   *  thread, or null when the chat holds no such message. */
+  async chatThreadSettled(_sessionId: string, _messageId: string): Promise<boolean | null> {
+    return null;
+  }
+
+  /**
+   * The messages of the chat thread that message `messageId` of chat
+   * `sessionId` is in, in the order they were said. A message in no chat
+   * thread is alone in its own. Empty when the chat holds no such message.
+   */
+  async getChatThreadMessages(
+    _sessionId: string,
+    _messageId: string,
+  ): Promise<
+    Array<
+      StoredWebchatMessage & { inputState: import("@rome-os/app-runtime").AgentInputState | null }
+    >
+  > {
+    return [];
   }
 
   onSessionNameChanged(listener: WebchatSessionNameChangedListener): () => void {
@@ -1886,6 +1964,7 @@ export class WebChatRepository {
     content: string,
     actor?: SessionActor,
     saidBy?: Account,
+    _chatThread?: ChatThreadPlacement,
   ): Promise<boolean> {
     return this.db.transaction((tx) => {
       const createdAt = new Date();
@@ -2134,6 +2213,7 @@ export class WebChatRepository {
     role: string,
     parts: TranscriptPart[],
     id: string = randomUUID(),
+    _chatThread?: ChatThreadPlacement,
   ): Promise<StoredWebchatMessage> {
     const message = await this.db.transaction((tx) => {
       const createdAt = new Date();
@@ -2243,8 +2323,16 @@ export class WebChatRepository {
     sessionId: string,
     turnId: string,
     parts: TranscriptPart[],
+    options: { chatThread?: ChatThreadPlacement } = {},
   ): Promise<StoredWebchatMessage> {
-    return this.insertBackendMessage(sessionId, turnId, "assistant", parts);
+    return this.insertBackendMessage(
+      sessionId,
+      turnId,
+      "assistant",
+      parts,
+      undefined,
+      options.chatThread,
+    );
   }
 
   /**
@@ -2990,6 +3078,9 @@ export class WebChatRepository {
         role: romeAgentMessages.role,
         content: romeAgentMessages.content,
         senderId: romeAgentMessages.senderId,
+        // `queued` for an input linked to the turn that has not reached it:
+        // a later turn takes it.
+        inputState: romeAgentMessages.inputState,
       })
       .from(romeAgentMessages)
       .where(

@@ -113,17 +113,6 @@ export async function archiveSession(sessionId: string, archived: boolean): Prom
   return jsonOrThrow<ChatSession>(res);
 }
 
-/** Pin or unpin a top-level guardian chat. */
-export async function pinSession(sessionId: string, pinned: boolean): Promise<ChatSession> {
-  const res = await fetch(`/api/chat/sessions/${sessionId}/pin`, {
-    method: "PATCH",
-    credentials: "include",
-    headers: JSON_HEADERS,
-    body: JSON.stringify({ pinned }),
-  });
-  return jsonOrThrow<ChatSession>(res);
-}
-
 /** Rename a top-level webchat session. `name` should be trimmed by the caller;
  * the server also trims, rejects empty, and caps length. */
 export async function renameSession(sessionId: string, name: string): Promise<ChatSession> {
@@ -216,6 +205,23 @@ export async function listSessionMessagePage(
   });
   if (res.status === 404) return null;
   return jsonOrThrow<ChatMessagePage>(res);
+}
+
+/**
+ * The messages of the chat thread `messageId` is in, oldest first, in one
+ * page. A message in no chat thread comes back alone. `null` when the
+ * session does not exist.
+ */
+export async function listChatThreadMessages(
+  sessionId: string,
+  messageId: string,
+): Promise<ChatMessage[] | null> {
+  const params = new URLSearchParams({ thread: messageId });
+  const res = await fetch(`/api/chat/sessions/${sessionId}/messages?${params}`, {
+    credentials: "include",
+  });
+  if (res.status === 404) return null;
+  return (await jsonOrThrow<ChatMessagePage>(res)).messages;
 }
 
 export interface ListRomeSessionsOptions {

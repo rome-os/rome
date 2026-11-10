@@ -9,8 +9,8 @@ import {
   persistInstanceToken,
   proveIdentity,
   type ProveIdentityResult,
-} from "../../lib/instance-identity.js";
-import { getInstanceOrigin, getRomeCloudOrigin } from "../../lib/rome-cloud-origin.js";
+} from "../../instance/instance-identity.js";
+import { getInstanceOrigin, getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { RELAY_SETTING_KEY } from "../../relay/settings.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";

@@ -1,8 +1,8 @@
 import type { FavorRequiredActionDefinition } from "@rome-os/app-runtime";
 import type { ResolvedApp } from "../apps/state.js";
-import { cloudBearer } from "../lib/instance-identity.js";
-import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
-import type { RomeAppViewer } from "../lib/visitor-session.js";
+import { cloudBearer } from "../instance/instance-identity.js";
+import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
+import type { RomeAppViewer } from "../access/visitor-session.js";
 import type {
   FavorActionDispatchClaim,
   FavorActionDispatchResult,

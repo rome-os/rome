@@ -145,6 +145,7 @@ function historyRowToMessage(row: StoredWebchatHistoryMessage): ChannelMessage {
     text: contentToText(row.content),
     attachments: [],
     timestamp: row.createdAt,
+    ...(row.chatThreadId ? { chatThread: row.chatThreadId } : {}),
     thread: {
       kind: "dm",
       ...(row.sessionName ? { name: row.sessionName } : {}),

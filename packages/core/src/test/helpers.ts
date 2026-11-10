@@ -58,15 +58,16 @@ import { createBackendTurnRunner } from "../apps/actions/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
 import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
-import { PublicAccessState } from "../lib/public-access-state.js";
-import { DashboardAccessState } from "../lib/dashboard-access-state.js";
-import { DashboardAccessStore } from "../lib/dashboard-access-store.js";
-import { VisitorAllowListSync } from "../lib/visitor-allowlist-sync.js";
+import { Permissions } from "../access/permissions.js";
+import { loadAppPermissions } from "../apps/app-permissions.js";
+import { DashboardAccessState } from "../access/dashboard-access-state.js";
+import { DashboardAccessStore } from "../access/dashboard-access-store.js";
+import { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
 import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.js";
 import { EventBusTriggerProvider } from "../routines/event-bus-trigger-provider.js";
 import { EventBus } from "../events/event-bus.js";
 import { RelayDrainer } from "../relay/drainer.js";
-import { SystemUpgradeService } from "../system-upgrade/service.js";
+import { SystemUpgradeService } from "../instance/system-upgrade/service.js";
 import { createOgImageStore } from "../apps/og/store.js";
 import type {
   ChannelMessage,
@@ -134,9 +135,9 @@ import { createAppStoreService } from "../apps/store-service.js";
 import { type CatalogEvent, isResolvedApp } from "../apps/state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../lib/feedback-client.js";
-import { assembleDiagnosticBundle } from "../lib/diagnostics.js";
+import { assembleDiagnosticBundle } from "../instance/diagnostics.js";
 import type { ApiDeps } from "../api/deps.js";
-import type { FavorService } from "../favors/types.js";
+import type { FavorService } from "../favors/index.js";
 import { Hono } from "hono";
 import { mkdtempSync } from "node:fs";
 import { mkdir, rm } from "node:fs/promises";
@@ -744,10 +745,10 @@ export async function buildTestDeps(
 
   // Mirror daemon boot: the auth-edge snapshot is loaded from the persisted
   // `publicAccess` setting before serving (src/index.ts). Tests that change
-  // the setting after construction refresh via setAllowedApps(), exactly like
-  // the /api/public-access PUT handler.
-  const publicAccessState = new PublicAccessState();
-  await publicAccessState.load(db);
+  // the setting after construction refresh via permissions.replace(), exactly
+  // like the /api/public-access PUT handler.
+  const permissions = new Permissions();
+  await loadAppPermissions(db, permissions);
   const dashboardAccessState = new DashboardAccessState();
   await dashboardAccessState.load(db);
   // Not linked, so a test that saves the allow-list never reaches the network.
@@ -839,7 +840,7 @@ export async function buildTestDeps(
     codexAccountService,
     claudeAccount,
     romeCreditsProxy: romeCreditsProxyRoutes("127.0.0.1"),
-    publicAccessState,
+    permissions,
     dashboardAccessState,
     dashboardAccessStore,
     visitorAllowListSync,

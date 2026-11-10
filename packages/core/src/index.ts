@@ -1,8 +1,9 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
+import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { WebChatDashboardSessions } from "./webchat/webchat-dashboard-sessions.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
-import { createNodeDevicesService } from "./lib/node-devices.js";
+import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
 import { createGuardianLinkAdmission, GuardianLinkCodes } from "./people/guardian-link-code.js";
 import { createAgentsGuardianLink } from "./people/agents-guardian.js";
@@ -10,7 +11,7 @@ import { dirname, join } from "node:path";
 import { fork } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";
 import { loadConfig } from "./config.js";
-import { resolveCloudAuthEnabled } from "./lib/cloud-auth-gate.js";
+import { resolveCloudAuthEnabled } from "./access/cloud-auth-gate.js";
 import { createLogger } from "./logger.js";
 import {
   cloudBearer,
@@ -21,33 +22,33 @@ import {
   seedInstanceTokenFromEnv,
   proveIdentity,
   onInstanceLinked,
-} from "./lib/instance-identity.js";
-import { startInstanceIdentityHeartbeat } from "./lib/instance-identity-heartbeat.js";
+} from "./instance/instance-identity.js";
+import { startInstanceIdentityHeartbeat } from "./instance/instance-identity-heartbeat.js";
 import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
-import { assembleDiagnosticBundle } from "./lib/diagnostics.js";
+import { assembleDiagnosticBundle } from "./instance/diagnostics.js";
 import { NotifyClient } from "./lib/notify-client.js";
-import { CloudProfileClient } from "./lib/cloud-profile.js";
-import { getGuardianAuthState, recordResolvedAccount } from "./lib/guardian-auth-state.js";
+import { CloudProfileClient } from "./instance/cloud-profile.js";
+import { getGuardianAuthState, recordResolvedAccount } from "./access/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./apps/rome-cloud-relay.js";
 import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
-import { createNodeCallerProvisioner } from "./lib/rome-node-provisioning.js";
-import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./lib/rome-cloud-origin.js";
-import { resolveInstanceSlug } from "./lib/runtime.js";
+import { createNodeCallerProvisioner } from "./desktops/rome-node-provisioning.js";
+import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./instance/rome-cloud-origin.js";
+import { resolveInstanceSlug } from "./instance/runtime.js";
 import {
   applyInstanceSlug,
   decideAdoptedSlug,
   INSTANCE_SLUG_SETTING_KEY,
-} from "./lib/instance-env.js";
+} from "./instance/instance-env.js";
 import { UsageOutboxRepository } from "./db/repositories/usage-outbox.js";
 import { createUsageAppDirectory } from "./usage/app-directory.js";
 import { SKILL_REVIEW_INITIATOR, UsageAttributionResolver } from "./usage/attribution.js";
 import { UsageRecorder } from "./usage/recorder.js";
 import { credentialFingerprint, UsageReporter, type RomeCloudAccess } from "./usage/reporter.js";
-import { type SessionActor, withoutSessionActor } from "./lib/session-actor.js";
-import { reportBootVersion, commitBootVersion } from "./lib/boot-version-report.js";
+import { type SessionActor, withoutSessionActor } from "./access/session-actor.js";
+import { reportBootVersion, commitBootVersion } from "./instance/boot-version-report.js";
 import { getBuildInfo } from "./build-info.js";
-import { containerUptimeMs } from "./lib/runtime.js";
+import { containerUptimeMs } from "./instance/runtime.js";
 import {
   AppActionSchemaCache,
   appActionSchemaCacheBuild,
@@ -144,7 +145,7 @@ import { WechatApp } from "./connections/kinds/wechat-user/wechat-app.js";
 import { SentinelLogRepository } from "./db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "./apps/repositories/approvals.js";
 import { SettingsRepository } from "./db/repositories/settings.js";
-import { ComputerUseService } from "./computer-use/service.js";
+import { ComputerUseService } from "./desktops/computer-use.js";
 import { AppKeysRepository } from "./apps/repositories/app-keys.js";
 import { AppKeyInjector } from "./apps/app-keys/injector.js";
 import { PoliciesRepository } from "./db/repositories/policies.js";
@@ -168,7 +169,7 @@ import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
 import { ActionRegistryImpl } from "./apps/actions/registry.js";
 import { ActionLoader } from "./apps/actions/loader.js";
 import { ActionEngine } from "./apps/actions/engine.js";
-import { readMemoryHeadroom } from "./apps/actions/memory-headroom.js";
+import { readMemoryHeadroom } from "./instance/memory-headroom.js";
 import { defaultWorkerCap } from "./apps/actions/worker-cap.js";
 import { isFirstPartyAction } from "./apps/first-party-action.js";
 import { bumpModuleEnvEpoch } from "./apps/actions/module-loader.js";
@@ -205,11 +206,15 @@ import {
 } from "./core/session-opening.js";
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
+import { registerAgentNameAction } from "./people/agent-name.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
-import { VisitorProfilesRepository } from "./db/repositories/visitor-profiles.js";
+import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
+import { privateOwnerOf } from "./concierge/privacy.js";
+import { legacyRoutineActor } from "./routines/legacy-actor.js";
+import { continuationActor } from "./webchat/continuation-actor.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
@@ -228,6 +233,7 @@ import { EventSources } from "./events/event-sources.js";
 import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
+import { routineWorkerCalls } from "./routines/for-apps.js";
 import { EventCatalog } from "./event-catalog.js";
 import {
   resolveOneOffDate,
@@ -240,16 +246,22 @@ import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
 import { linkGuardianToAccount } from "./people/guardian-mapping.js";
 import type { EmailInboundResult } from "./connections/kinds/email/email-control.js";
 import { startApi, type ApiHandle, type ApiDeps } from "./api/index.js";
-import { SystemUpgradeService } from "./system-upgrade/service.js";
+import { SystemUpgradeService } from "./instance/system-upgrade/service.js";
 import { HostExecutionService } from "./apps/host-execution/service.js";
 import { createHostWorkerRecovery } from "./apps/host-execution/worker-recovery.js";
-import { resolveAutoUpgradeEnabled } from "./lib/auto-upgrade-gate.js";
-import { PublicAccessState } from "./lib/public-access-state.js";
-import { DashboardAccessState } from "./lib/dashboard-access-state.js";
-import { DashboardAccessStore } from "./lib/dashboard-access-store.js";
-import { VisitorAllowListSync, syncStoredVisitorAllowList } from "./lib/visitor-allowlist-sync.js";
+import { resolveAutoUpgradeEnabled } from "./instance/auto-upgrade-gate.js";
+import { Permissions } from "./access/permissions.js";
+import { loadAppPermissions } from "./apps/app-permissions.js";
+import { DashboardAccessState } from "./access/dashboard-access-state.js";
+import { DashboardAccessStore } from "./access/dashboard-access-store.js";
+import {
+  VisitorAllowListSync,
+  syncStoredVisitorAllowList,
+} from "./access/visitor-allowlist-sync.js";
 import { PhoneWatching } from "./lib/phone-watching.js";
-import { ApprovalHandler } from "./apps/actions/approval-handler.js";
+import { DashboardActivity } from "./lib/dashboard-activity.js";
+import { callerNotifyService } from "./apps/actions/caller-notify.js";
+import { ApprovalHandler, executionRequester } from "./apps/actions/approval-handler.js";
 import { createBackendTurnRunner } from "./apps/actions/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { PolicyEngine } from "./core/policy-engine.js";
@@ -339,14 +351,16 @@ import {
   sanitizeDrainUrl,
   type RelayDrainSetting,
 } from "./relay/settings.js";
-import { RomeCloudFavorService } from "./favors/rome-cloud-service.js";
-import { FavorDispatchRunner } from "./favors/dispatcher.js";
+import {
+  FavorDispatchRunner,
+  FavorRequirementSync,
+  RomeCloudFavorService,
+} from "./favors/index.js";
 import { ChatEvents as ChatsEvents } from "./chats/storage/events.js";
 import { chatsWiring } from "./chats-wiring.js";
 import { inboundRecording } from "./connections/inbound-recording.js";
 import { messagesSaid } from "./sessions/messages-said.js";
 import { ChatsWebChatRepository } from "./webchat/chats-webchat-repository.js";
-import { FavorRequirementSync } from "./favors/catalog-sync.js";
 
 async function main() {
   const config = loadConfig();
@@ -966,6 +980,9 @@ async function main() {
     actionEngine,
     30_000,
     systemClock,
+    // A routine from before routines recorded their creator acts for its
+    // chat's owner, as its fires did then.
+    (routine) => legacyRoutineActor(routine, { db, webchatRepo }),
   );
   deactivateRoutine = (id) => routineEngine.deactivate(id);
   const scheduleTriggerProvider = new ScheduleTriggerProvider(routinesRepo, () =>
@@ -1104,6 +1121,9 @@ async function main() {
   // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
   // `notify.send` back to this same instance. The Concierge pushes through it too.
   const notifyClient = new NotifyClient();
+  // A chat private to one person rings them when an action in it notifies.
+  const privateOwnerOfChat = async (chatId: string) =>
+    privateOwnerOf(await webchatRepo.getSession(chatId));
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
   // created below, by the time any turn finishes. The API layer attaches the
   // dashboard it runs task chats on.
@@ -1113,6 +1133,9 @@ async function main() {
   // The chats the guardian's phone app holds open, from the live-events socket;
   // the Concierge does not push what it says in one of them.
   const phoneWatching = new PhoneWatching();
+  // Whether the guardian is at a web dashboard, from the same socket; while
+  // they are, the Concierge pushes nothing to the phone.
+  const dashboardActivity = new DashboardActivity();
   const concierge = new ConciergeService({
     skillCatalog,
     settingsRepo,
@@ -1132,6 +1155,7 @@ async function main() {
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
     notify: notifyClient,
     phoneWatching,
+    dashboardActivity,
   });
   const channelSurface: ChannelSurfaces = (channel) => {
     if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
@@ -1173,6 +1197,8 @@ async function main() {
         eventSources,
         sessionTools: (context) => buildConciergeTools(concierge, context),
       }),
+      // A session an approval waits to resume mid-turn stays until it ends.
+      heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
@@ -1262,6 +1288,10 @@ async function main() {
     },
   });
 
+  const agentNameEvents = registerAgentNameAction(actionRegistry, {
+    settingsRepo,
+    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
+  });
   startConciergeEvents(concierge, turnListeners);
   // The Concierge reaches the connector's watch actions as itself.
   startConciergeFollowing(concierge, {
@@ -1290,6 +1320,8 @@ async function main() {
     backendTurnRunner,
     resolveContinuationWorkingDir,
     appConnections,
+    // An approved action, and the turn it resumes, act for whoever's turn asked.
+    executionRequester(actionExecutionsRepo),
   );
 
   // Learn whether this boot's release version differs from the last completed
@@ -1357,8 +1389,9 @@ async function main() {
     // The `resume_session` action's orchestrator. Real runner in main;
     // the worker gets a BackendTurnRunnerProxy.
     backendTurnRunner,
-    // Real push sender in main; the worker gets a NotifyServiceProxy.
-    notify: notifyClient,
+    // Real push sender in main, to the person the calling chat serves; the
+    // worker gets a NotifyServiceProxy.
+    notify: callerNotifyService(notifyClient, privateOwnerOfChat),
     // Image generation capability: provider-neutral registry the generate_image
     // action consumes. Codex is the only provider today; its report reads
     // the same model accounts the model resolver gates on.
@@ -1911,35 +1944,37 @@ async function main() {
     });
   });
 
-  const workerRpcServer = new WorkerRpcServer({
-    channelsService,
-    connectionRegistry,
-    channelOf,
-    chatSettings,
-    routinesRepo,
-    routineEngine,
-    eventService,
-    appLifecycle,
-    appStore,
-    systemUpgrade: systemUpgradeService,
-    hasAgent: (name) => agentLoader.find(name) !== undefined,
-    hasRegisteredAction: (name) => actionRegistry.has(name),
-    isExplicitAction: (name) => actionRegistry.isExplicit(name),
-    validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
-    // Same allow-list resolution as the agent session's tool gate.
-    hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
-    backendTurnRunner,
-    notify: notifyClient,
-    feedback: feedbackClient,
-    cloudProfile: cloudProfileClient,
-    agentNames: agentNameResolver,
-    appConnections,
-    appIdForAction: (actionName) => {
-      const metadata = actionRegistry.getMetadata(actionName);
-      return metadata?.ownerType === "app" ? metadata.ownerId : null;
+  const workerRpcServer = new WorkerRpcServer(
+    {
+      channelsService,
+      connectionRegistry,
+      channelOf,
+      chatSettings,
+      eventService,
+      appLifecycle,
+      appStore,
+      systemUpgrade: systemUpgradeService,
+      hasAgent: (name) => agentLoader.find(name) !== undefined,
+      hasRegisteredAction: (name) => actionRegistry.has(name),
+      isExplicitAction: (name) => actionRegistry.isExplicit(name),
+      validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
+      // Same allow-list resolution as the agent session's tool gate.
+      hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
+      backendTurnRunner,
+      notify: notifyClient,
+      privateOwnerOf: privateOwnerOfChat,
+      feedback: feedbackClient,
+      cloudProfile: cloudProfileClient,
+      agentNames: agentNameResolver,
+      appConnections,
+      appIdForAction: (actionName) => {
+        const metadata = actionRegistry.getMetadata(actionName);
+        return metadata?.ownerType === "app" ? metadata.ownerId : null;
+      },
+      sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
-    sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
-  });
+    routineWorkerCalls({ routinesRepo, routineEngine }),
+  );
   actionEngine.setWorkerRpcServer(workerRpcServer);
   actionEngine.startWorkerWarmPool();
   // Fallback for worker→main RPC issued from action bodies that run in the main
@@ -1974,9 +2009,9 @@ async function main() {
       }
     }
   };
-  const publicAccessState = new PublicAccessState();
+  const permissions = new Permissions();
   try {
-    await publicAccessState.load(db);
+    await loadAppPermissions(db, permissions);
   } catch (err) {
     log.warn("Failed to load publicAccess settings; starting with empty allow-list", {
       error: err instanceof Error ? err.message : String(err),
@@ -2050,6 +2085,7 @@ async function main() {
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
+      agentNameEvents,
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,
@@ -2117,11 +2153,12 @@ async function main() {
       codexAccountService,
       claudeAccount,
       romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
-      publicAccessState,
+      permissions,
       dashboardAccessState,
       dashboardAccessStore,
       visitorAllowListSync,
       phoneWatching,
+      dashboardActivity,
       relayDrainer,
       bootVersionReport,
       favorService,
@@ -2292,8 +2329,25 @@ async function main() {
 
   // The API, actions and agents are ready. One continuation runs at a time,
   // outside boot, and each rechecks its chat after waiting in the webchat queue.
-  void continueInterruptedTurns(endedTurns, webchatRepo, backendTurnRunner).catch((error) => {
+  // Each continuation acts for the person whose turn it continues.
+  const continuationActorOf = (turn: { sessionId: string; turnId: string }) =>
+    continuationActor(db, webchatRepo, turn);
+  void continueInterruptedTurns(
+    endedTurns,
+    webchatRepo,
+    backendTurnRunner,
+    Date.now(),
+    continuationActorOf,
+  ).catch((error) => {
     log.warn("restart continuations failed", { error: String(error) });
+  });
+  // Subscribes after the first account read may have settled, so it also reads the
+  // remembered state: a limit that ended while Rome was down is swept now.
+  const stopUsageLimitContinuation = startUsageLimitContinuation({
+    accounts: modelAccounts,
+    repo: webchatRepo,
+    runner: backendTurnRunner,
+    actorOf: continuationActorOf,
   });
 
   // Best-effort instance-identity check. Fire-and-forget: announces
@@ -2404,6 +2458,7 @@ async function main() {
     capabilityDiscovery.stop();
     shutdownLog.info("capability discovery stopped");
 
+    stopUsageLimitContinuation();
     stopCodexLoginChoice();
     unsubscribeInstanceLinked();
     visitorAllowListSync.stop();

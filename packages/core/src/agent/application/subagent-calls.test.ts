@@ -27,6 +27,7 @@ function fakeSession(id: string, events: () => AsyncIterable<StreamAgentEvent>) 
       return { turnId: `${id}-turn`, events: events() };
     },
     stop: rs.fn(async () => undefined),
+    release: rs.fn(),
   };
   return { session, submitted };
 }

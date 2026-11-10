@@ -8,6 +8,7 @@ The memory system provides persistent, git-tracked knowledge that survives acros
 
 - The entire memory directory is a git repository: every change (by agents or the [guardian](people.md#guardian)) is tracked with full commit history and can be reverted.
 - Key files load into agent context at session start. Person profiles and journal entries load on demand when relevant.
+- The agent name setting owns the `Agent Name` line in `IDENTITY.md`. When the guardian asks for a rename, the agent updates the setting and identity note together. The dashboard refreshes without a reload.
 - Privacy boundaries are part of memory itself: topics marked off-limits must not be remembered.
 
 **Not to be confused with:**

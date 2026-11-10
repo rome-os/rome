@@ -5,8 +5,8 @@ import {
 } from "@rome/api-types/chat";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { guardianAuth } from "../../db/schema.js";
-import { VisitorProfilesRepository } from "../../db/repositories/visitor-profiles.js";
-import type { SessionActor } from "../../lib/session-actor.js";
+import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
+import type { SessionActor } from "../../access/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import {

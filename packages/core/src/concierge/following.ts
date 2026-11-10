@@ -10,6 +10,7 @@
 // each batch, in the Concierge chat each follow reports to, and digest ones at
 // the guardian's digest times, in the main chat (alerts.ts).
 
+import { withoutSessionActor } from "../access/session-actor.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   CONCIERGE_FOLLOW_DEFAULT_RULES,
@@ -266,6 +267,8 @@ export interface ConciergeFollowing {
    */
   unfollow(source: string, target: string, owner?: ConciergeOwner): Promise<{ removed: boolean }>;
   rules(owner?: ConciergeOwner): Promise<ConciergeFollowRules>;
+  /** When `owner`'s quiet window `at` falls in ends, in their time zone, or null outside quiet hours. */
+  quietUntil(at: number, owner: ConciergeOwner): Promise<number | null>;
   /** Changes the fields given and answers the rules as stored. */
   setRules(
     input: Partial<ConciergeFollowRules>,
@@ -822,6 +825,9 @@ export function startConciergeFollowing(
             trigger,
             actionName: CONCIERGE_DIGEST_ACTION,
             args,
+            // It acts for the person whose Concierge it serves, whoever's
+            // request set the digest times.
+            createdBy: { owner },
           });
       if (existing) await deps.routines.update(id, { trigger, args, enabled: true });
       await reactivate(id);
@@ -900,6 +906,10 @@ export function startConciergeFollowing(
           actionName: CONCIERGE_FOLLOW_ACTION,
           args,
           keepTriggerPayload: false,
+          // One watcher serves every owner who follows this target, so it
+          // acts for no one person. What it finds goes to each owner's own
+          // Concierge chat, which is private to them.
+          createdBy: { kind: "anonymous" },
         });
       }
       await reactivate(id);
@@ -1206,6 +1216,8 @@ export function startConciergeFollowing(
 
     rules: async (owner = GUARDIAN_OWNER) => rulesOf(await readStored(), owner),
 
+    quietUntil,
+
     async setRules(change, owner = GUARDIAN_OWNER) {
       const stored = await readStored();
       const next = parseFollowRules({ ...rulesOf(stored, owner), ...change });
@@ -1375,8 +1387,10 @@ export function startConciergeFollowing(
     void following
       .reconcile()
       .catch((error: unknown) => log.warn("follow reconcile failed", { error: messageOf(error) }));
-  const firstReconcile = setTimeout(runReconcile, RECONCILE_DELAY_MS);
-  const reconcileTimer = setInterval(runReconcile, RECONCILE_INTERVAL_MS);
+  const firstReconcile = withoutSessionActor(() => setTimeout(runReconcile, RECONCILE_DELAY_MS));
+  const reconcileTimer = withoutSessionActor(() =>
+    setInterval(runReconcile, RECONCILE_INTERVAL_MS),
+  );
   firstReconcile.unref?.();
   reconcileTimer.unref?.();
   // Important items owed from before a restart.

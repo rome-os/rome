@@ -26,7 +26,13 @@ A continuity key is the value that whatever opens a session, and comes back to i
 **Contracts:**
 
 - At most one session per continuity key and agent is active. A reset completes that session and starts the next one under the same continuity key, so the next message continues where the chat left off.
-- A chat's reset policy decides when its session is due for a reset. In code, the rule is `evaluateProviderSessionReset` in [`packages/core/src/agent/domain/session-reset.ts`](../../packages/core/src/agent/domain/session-reset.ts), and the opener reads the policy from Chat settings and hands it over when it opens a session by continuity key. A session resumed by its id takes none, since it is resumed as it is.
+- A chat's reset policy decides when its session is due for a reset. In code, the rule is `evaluateProviderSessionReset` in [`packages/core/src/agent/domain/session-reset.ts`](../../packages/core/src/agent/domain/session-reset.ts), and the opener reads the policy from Chat settings and hands it over when it opens a session by continuity key. The policy is checked only when that open is [cold](#renewal).
+- A session that a reset replaced is superseded, not ended: whatever still names it by id, such as a scheduled wake-up, reaches the chat's current session, whatever reset replaced it. A session completed any other way cannot be resumed.
+- A resume by id that names a session a reset has just replaced reaches its successor, so a resume never fails because a reset ran meanwhile. A resume judges each session on the row it read, and follows a row it read as superseded to the chat's current session.
+- A wake-up an agent schedules for itself carries the agent's own note: why it waits, what to do on waking, and what it concerns, with when and from which turn it was set. The woken turn reads the note whichever session wakes. When the wake-up reaches a newer session than the one that set it, its turn also carries the [continuation](#continuation) notice. A wake-up set before notes existed carries none, and reaches the current session with the notice.
+- A reset happens only when a session is opened cold. See [Renewal](#renewal).
+- An approval holds its session for a day: a pending one from when it was asked for, an executing one from when it was approved. A request never answered, or an execution a crash left running, would otherwise keep the chat on one session for good. The cost is that an approval answered after a day resumes in a newer session, which reads the chat's earlier messages through the [continuation](#continuation) notice rather than holding them in context.
+- A chat shows a faint line where its session was replaced, with the reason: the setup changed, an idle or daily reset, or a working folder that is gone. The line is part of the new session's first turn, so it stays after a reload, counts as nothing unread and sends no push.
 - Sessions never reads what a continuity key means. Only the code that minted it may parse it.
 - A session can have no continuity key. A subagent and a one-shot fork are found only by their id.
 - Where the continuity key is stored is a storage decision, separate from this contract. Today it is a column on the session (`channel_thread_key`).
@@ -36,6 +42,47 @@ A continuity key is the value that whatever opens a session, and comes back to i
 - **Session id** — the id names one session. The continuity key names the run of sessions a chat has had, and finds the current one.
 - **[Chat](../domains/chats.md#chat)** — a chat is a place where messages are said. A continuity key is how that chat finds its agent's session, and a session may have one without being in any chat. A session never names a chat. Which chat has a session is [Participation](../domains/participation.md)'s question, asked by the session's id. Until Participation has that query, the web chat side answers it and records it on the session's stored row (`chatOfSession` and `recordSessionInChat` in [`packages/core/src/db/repositories/webchat.ts`](../../packages/core/src/db/repositories/webchat.ts)). One exception remains while each turn picks its own chat (ZHA-157): the opener names the chat a turn records in with the turn's input (`romeSessionId`), and the session hands it to the ports that ask for it. The chat side, not the session, names that chat on the session's start event (`romeSession`).
 
+## Setup
+
+A session's setup is what it takes when it opens and keeps for its life. It counts exactly these:
+
+- the agent's own instructions and the charter (`CHARTER.md`), the guardian's rules for every agent
+- its identity (`IDENTITY.md`), which holds its name
+- its tools: Rome's tools with their schemas, the provider's tools it declares, the MCP servers it declares, and the shape its answer must take.
+
+Memory, follows and tasks are not part of it, since a session reads them while it runs. Nor is the guardian's profile (`GUARDIAN.md`), which the agent writes down as it learns about the guardian. Nor are the instance's runtime facts (its folders, address and mailbox) or the list of installed apps, which change with the instance rather than with the agent. A change to any of these does not replace a session. Which actions the agent may call is read on every turn, so a grant or a revoke applies on the next turn without a new session.
+
+**Contracts:**
+
+- A change to an agent's setup reaches a session only when a fresh session opens.
+- An agent whose policy asks for it gets a fresh session in the same chat when its setup changed since its stored session opened, the next time the chat opens it cold ([Renewal](#renewal)). The Concierge's chats work this way, since one of them could otherwise run on one session for days.
+- A session that recorded no setup opened before setups were recorded, and is replaced on its next cold open under such a policy.
+- A replacement for a changed setup sends no message or push: the chat shows only the line where the session was renewed. It carries the [continuation](#continuation) notice until a turn of its own succeeds.
+
+## Renewal
+
+A renewal replaces a chat's session with a fresh one, on a new provider thread, for a changed [setup](#setup) or a reset its chat's policy says is due. It happens only when a session is opened cold: opened by continuity key while it is not live in memory.
+
+**Contracts:**
+
+- A live session is never renewed. Until its idle eviction it keeps the prompt, tools, MCP servers, answer shape and model it opened with, and every turn sent to it meanwhile runs on it. The next cold open after the eviction compares the stored setup with the agent's current one and renews when they differ.
+- A resume by id, such as a wake-up, resumes the session it names as it is, or the chat's current session when a reset superseded it. It never renews.
+- While an approval holds a session, a cold open resumes it instead of renewing it. The first cold open after the hold ends renews it.
+- A renewal opens the new session exactly as a fresh open would, from the agent's setup as it is then. Its model comes from the agent's tier or model as they map now, never the retired session's [model pin](#model-pin). A model the guardian picked for the chat still applies.
+- The successor is written, with its setup, its reason and the working folder, and the retired session marked superseded, only once the fresh thread has opened. If that open fails, nothing is written, and the next cold open tries again on a fresh thread, never the retired one.
+
+## Session in use
+
+A session is in use from the moment a caller acquires it, by opening or resuming it, until it submits a turn, or lets it go without one, as on an error before its turn. A submitted turn is admitted from its submit until it ends, whatever submitted it: a message, a backend action or a wake-up, at any priority. Forked turns keep the session in use too.
+
+**Contracts:**
+
+- A session is replaced only by a [renewal](#renewal) when it is opened cold, so a session in use is never replaced.
+- Only the idle sweeper closes a session from outside, and only one with no caller holding it, no turn admitted or running, and its last turn's cleanup finished. Shutdown closes every session, since the process ends.
+- A caller that acquired a session and has not submitted yet keeps it from being closed.
+- A session whose close has begun is never handed to a caller: the next open waits for that close to finish and opens cold. An open that finishes after a shutdown reaches no turn.
+- Deleting a chat, or the project it belongs to, is the exception: it closes the chat's session even while a turn runs, since that turn's chat is gone.
+
 ## Model pin
 
 A session remembers the concrete model that produced its history — the **session model pin** — and requests exactly that model on every later turn and resume ([ADR](../adrs/pinned-session-model-fails-closed.md)). Except for [Concierge provider failover](../adrs/concierge-provider-failover.md), a pinned session does not move to another model on its own. Its prompt cache survives an entitlement or setting change mid-thread.
@@ -44,7 +91,7 @@ A session remembers the concrete model that produced its history — the **sessi
 
 - A successful turn establishes or updates the pin. Only the Concierge chat may change providers automatically through [provider failover](../adrs/concierge-provider-failover.md), and its note names the reason. A temporary error gets one delayed retry first. A single-model limit tries another model on the same provider first. Concierge keeps its manual model menu when the model selector is off. Other pinned sessions never drift to another model on their own. A session with no pin resolves from the agent's exact `modelId`, when configured, or its tier until its next successful turn records a pin.
 - Resolution precedence for a turn is **explicit guardian selection → session pin → agent modelId → agent tier**. An explicit model selection (the webchat model selector) wins over both pins, and the successful turn then re-pins the session to the model that actually ran. Choosing a model is therefore the rescue path for a session stranded by a pin whose model cannot run.
-- The webchat model selector stays available after a chat's first message. A pick is stored on the chat, and the next turn runs on it, also when the chat's session is already open. Auto clears the pick, so the session pin decides again. A side chat promoted to a chat, and a chat with a handoff open, show no selector.
+- The webchat model selector stays available after a chat's first message. A pick is stored on the chat, and the next turn runs on it, also when the chat's session is already open. Auto clears the pick, so the session pin decides again. A fork chat promoted to a chat, and a chat with a handoff open, show no selector.
 - A pick on the same provider continues the model thread on the new model. A pick on another provider starts a new thread, which has seen none of the chat, so its first turn carries a [continuation](#continuation) notice.
 - The chat shows a short centered note before the first turn that ran on another model than the session's previous turn. It names the model that ran, as the turn's accounting records it, so two picks that a custom provider maps to one model show no note.
 - Outside Concierge provider failover, a pinned model is **fail-closed**: if it cannot run (logged out, quota-exhausted, or entitlement lost), the turn fails with a structured resolution error rather than silently substituting another model. Recovery is an explicit selection, or a new session whose configured model is available.
@@ -67,6 +114,7 @@ Rome's transcript is the conversation, and a model thread is a cache of it. When
 - The notice goes on the first turn of a thread that replaced one holding the chat: a pick on another provider in an open chat, or a session reopened on another provider than its recorded thread. It rides on that thread's turns until one returns a result, since a turn that fails may never have reached the thread.
 - A thread that starts in a session also gets the `<thread_context>` block on its first turn.
 - The notice names no channel. The thread's channel and thread id are in its thread context.
+- A session that replaced another of an agent renewed on [setup](#setup) changes carries the notice until a turn of its own succeeds, like a thread on another provider.
 - A new chat, a new generation (the chat-settings reset policy), and a thread that resumes add no notice. Subagent sessions carry none.
 
 ## Turn
@@ -87,6 +135,10 @@ A turn is one request to an agent plus the agent work that follows until the age
 - After startup, Rome continues eligible guardian-authored turns in top-level dashboard chats, one chat at a time. Only turns this startup just ended qualify. Archived chats, visitor chats, automations, subagents, summons, handoffs, forks and other channels do not qualify. A newer guardian message outside the interrupted turn, or a newer turn, cancels the continuation. Each cut-off turn gets at most one continuation attempt. If a restart cuts off that continuation, it stays failed with the restart notice.
 - Automatic continuation requires timestamped activity less than 24 hours before startup.
 - A restart continuation tells the agent to read the chat, check actual state, and do only what remains. An uncertain side effect requires asking the guardian before repeating it. This instruction does not guarantee that the agent avoids duplicate effects.
+- When a provider's usage limit ends, Rome continues eligible guardian-authored turns the limit stopped, one chat at a time. A chat qualifies when its newest turn ended in a usage limit, whether the limit stopped the turn mid-run or refused it before it started. The provider is the one the error names, else the one in the model pin of the chat's active runtime session, and only chats on the provider that is available again continue. A refusal on another provider than the chat's pin stays stopped, because the chat resumes on its pin. A chat with no provider to name, or no active runtime session to resume, stays stopped. Sign-in errors, spend limits, credit balances and other errors do not qualify. A Concierge chat qualifies like any other. When it moved to another provider on its own, its recovery turn is its newest turn, so it is not continued again. Eligibility and cancellation follow the restart continuation. A limit that applies again stops the sweep until its next end, and Rome reads the account again after each failed continuation to learn it. If that read fails, the sweep ends, and the remaining chats wait for the next read that works.
+- Rome reads a provider's account two minutes after a stated usage limit ends, and also at its other reads. A read that works and shows the provider available starts a sweep, including the first read after startup, so a limit that ended while Rome was down is handled. A turn with no activity in the day before the sweep stays stopped, however recently it began.
+- A usage-limit continuation gets at most one attempt per stopped turn. A turn that a continuation produced is never continued, so a continuation that hits the limit again stays stopped. A turn that was dropped before it ran, because a newer message arrived or the provider was limited again, is not an attempt.
+- A usage-limit continuation gives the agent the restart continuation's instructions. It quotes at most 1000 characters of the stopped request, and says to read the chat for the rest when the request was cut. For a request refused before it started, it also says that no part of it was done and that it is the request to act on.
 - Cancelling provider execution does not close the chat. The next message opens usable execution state and resumes available history without replaying the cancelled message.
 - A turn's outcome and wall-clock duration come from the [event](#event) that closes it, and its model attribution and token cost come from the accounting on its terminal event. Neither is read from fields mirrored onto individual messages.
 
@@ -107,7 +159,7 @@ History, lazy trace reads, and raw downloads follow the same session-wide decisi
 Activity includes user, assistant, trace, and notification rows. Notifications record real out-of-band conversation messages.
 Reading, renaming, pinning, and unknown metadata roles do not count. A session that, with its ancestors, has no conversation messages is not an archive candidate.
 Each read batches session and ancestor message times in one recursive query, without reading trace payloads.
-There are no session-type exceptions: an old subagent remains visible under an active ancestor, and a fork, promoted side chat, or channel thread can stay active on its own messages under an idle source.
+There are no session-type exceptions: an old subagent remains visible under an active ancestor, and a fork, promoted fork chat, or channel thread can stay active on its own messages under an idle source.
 A new message reactivates the session and its descendants, not its ancestors or siblings.
 If every session in a tree is idle, all of its traces are archived.
 

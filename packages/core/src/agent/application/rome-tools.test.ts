@@ -15,6 +15,8 @@ const TURN: TurnFacts = {
   threadContext: () => undefined,
   sharedContext: () => undefined,
   pushLevel: () => undefined,
+  actor: () => undefined,
+  threadAnchor: () => undefined,
   inTurn: (fn) => fn(),
 };
 
@@ -223,11 +225,12 @@ describe("defer", () => {
     const result = await tools({ defer: { schedule, finalText: "deliver" } }).callTool(
       "ask_user",
       "defer",
-      { name: "check CI", afterMinutes: 5 },
+      { name: "check CI", note: "Read CI run 42 and tell the guardian.", afterMinutes: 5 },
     );
     expect(schedule).toHaveBeenCalledWith(TURN, {
       kind: "time",
       name: "check CI",
+      note: "Read CI run 42 and tell the guardian.",
       fireAtMs: expect.any(Number),
     });
     expect(result.isError).toBeFalsy();
@@ -252,7 +255,7 @@ describe("defer", () => {
     const result = await tools({ defer: { schedule, finalText: "deliver" } }).callTool(
       "ask_user",
       "defer",
-      { name: "x", at: "2020-01-01T00:00:00Z" },
+      { note: "n", name: "x", at: "2020-01-01T00:00:00Z" },
     );
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("defer fires in the past");
@@ -264,7 +267,7 @@ describe("defer", () => {
     const result = await tools({ defer: { schedule, finalText: "deliver" } }).callTool(
       "ask_user",
       "defer",
-      { name: "x", afterMinutes: 5 },
+      { note: "n", name: "x", afterMinutes: 5 },
     );
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain("no thread to wake");

@@ -20,7 +20,7 @@ rs.mock("../../connections/integrations/github-shell-integration.js", () => ({
   syncGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
   clearGithubShellIntegrationForProvider: rs.fn(async (..._a: unknown[]) => {}),
 }));
-rs.mock("../../lib/guardian-auth-state.js", () => ({
+rs.mock("../../access/guardian-auth-state.js", () => ({
   getGuardianAuthState: rs.fn(async () => ({
     exists: true,
     userId: "guardian-1",
@@ -31,8 +31,8 @@ rs.mock("../../lib/guardian-auth-state.js", () => ({
 import type { DrizzleDb } from "../../db/index.js";
 import { oauthPendingAttempts } from "../../db/schema.js";
 import { createTestDb } from "../../test/db.js";
-import { COOKIE_NAME, createGuardianSession } from "../../lib/auth.js";
-import { setInstanceTokenInMemory } from "../../lib/instance-identity.js";
+import { COOKIE_NAME, createGuardianSession } from "../../access/auth.js";
+import { setInstanceTokenInMemory } from "../../instance/instance-identity.js";
 import { SHOPIFY_INSTALL_URL } from "../../connections/oauth/oauth-providers.js";
 import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
 import { ConnectionRegistry } from "../../connections/registry.js";

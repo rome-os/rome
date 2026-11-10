@@ -74,6 +74,10 @@ const meta = {
             restore: fn(),
             has: () => true,
             jump: fn(),
+            threads: false,
+            thread: null,
+            openThread: fn(),
+            closeThread: fn(),
           }}
         >
           <div className="min-h-screen bg-chat-canvas p-4">

@@ -13,7 +13,13 @@ import { automatedSource, speaksForGuardian } from "./automated-source.js";
 
 import { randomUUID } from "node:crypto";
 import type { TranscriptPart } from "@rome/api-types/chat";
-import type { Account, AgentInputState, ChatId, InputStatusEvent } from "@rome-os/app-runtime";
+import type {
+  Account,
+  AgentInputState,
+  AgentTurnFailure,
+  ChatId,
+  InputStatusEvent,
+} from "@rome-os/app-runtime";
 import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
@@ -22,6 +28,7 @@ import { MessageRepository } from "../chats/storage/message-repository.js";
 import { type ChatRef, chatKey, type Place, placeIn } from "../chats/storage/place.js";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import {
+  type ChatThreadPlacement,
   type EnsureRomeSessionInput,
   type InterruptedTurn,
   type MessagePageCursor,
@@ -39,7 +46,7 @@ import {
   sessions,
 } from "../db/schema.js";
 import { isWebchatChat, storedSessionType } from "../db/session-kind.js";
-import type { SessionActor } from "../lib/session-actor.js";
+import type { SessionActor } from "../access/session-actor.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { ChatReadModel, chatsSessionAwaitingGuardian } from "./chat-read-model.js";
 import {
@@ -51,6 +58,20 @@ import type { MessagePart } from "../types.js";
 
 /** The dashboard's platform: Rome's own chat behind the guardian's sign-in. */
 export const WEBCHAT_PLATFORM = "webchat";
+
+/** A turn that ended in an error, as its trace records the error. */
+export interface ErroredTurn {
+  turn: InterruptedTurn;
+  /** The error block's own fields. The block names its provider only when a resolution error wrote it. */
+  failure: Pick<
+    AgentTurnFailure,
+    "message" | "code" | "reason" | "httpStatus" | "providerError"
+  > & {
+    provider?: string;
+  };
+  /** The provider in the model pin of the runtime session that resumes the chat, null before a turn completed in it. */
+  pinnedProvider: string | null;
+}
 
 /** Where a session stands in Chats, and as whom it speaks there. */
 interface Standing {
@@ -247,7 +268,15 @@ export class ChatsWebChatRepository extends WebChatRepository {
     const sayAll = (role: "user" | "assistant", at: Date) => {
       for (const { message, standing } of inChat) {
         if (message.role !== role) continue;
-        this.say(standing, message.id, role, partsOf(message.content), message.turnId, at);
+        this.say(
+          standing,
+          message.id,
+          role,
+          partsOf(message.content),
+          message.turnId,
+          undefined,
+          at,
+        );
       }
     };
     this.db.transaction(() => {
@@ -304,13 +333,14 @@ export class ChatsWebChatRepository extends WebChatRepository {
     content: string,
     actor?: SessionActor,
     saidBy?: Account,
+    chatThread?: ChatThreadPlacement,
   ): Promise<boolean> {
     const standing = this.standingOf(sessionId);
     if (!standing) return super.recordUserInput(id, sessionId, content, actor, saidBy);
     const parts = partsOf(content);
     // The input, its queued link and the session's activity commit together,
     // so an input on record is always one the session can admit.
-    return this.db.transaction(() => {
+    const recorded = this.db.transaction(() => {
       const recorded = this.lines.record({
         direction: "toRome",
         key: id,
@@ -334,10 +364,63 @@ export class ChatsWebChatRepository extends WebChatRepository {
         at: new Date(),
       });
       if (!recorded) return false;
+      if (chatThread) this.place(standing, id, chatThread);
       this.links.prompt(recorded.id, sessionId, null, "queued");
       this.advanceActivity(sessionId, recorded.at);
       return true;
     });
+    const thread = recorded && chatThread ? this.lines.chatThreadOf(standing.place.chat, id) : null;
+    if (thread) this.emitChatThreadPlaced({ sessionId, messageId: id, chatThreadId: thread });
+    return recorded;
+  }
+
+  override async placeInChatThread(
+    sessionId: string,
+    messageId: string,
+    placement: ChatThreadPlacement,
+  ): Promise<string | null> {
+    const standing = this.standingOf(sessionId);
+    if (!standing || this.lines.idOf(standing.place.chat, messageId) === null) return null;
+    const moved = this.db.transaction(() => this.place(standing, messageId, placement));
+    const thread = this.lines.chatThreadOf(standing.place.chat, messageId);
+    if (moved && thread) this.emitChatThreadPlaced({ sessionId, messageId, chatThreadId: thread });
+    return thread;
+  }
+
+  override async chatThreadSettled(sessionId: string, messageId: string): Promise<boolean | null> {
+    const standing = this.standingOf(sessionId);
+    return standing ? this.lines.chatThreadSettled(standing.place.chat, messageId) : null;
+  }
+
+  override async chatThreadOf(sessionId: string, messageId: string): Promise<string | null> {
+    const standing = this.standingOf(sessionId);
+    return standing ? this.lines.chatThreadOf(standing.place.chat, messageId) : null;
+  }
+
+  override async getChatThreadMessages(
+    sessionId: string,
+    messageId: string,
+  ): Promise<TranscriptLine[]> {
+    const standing = this.standingOf(sessionId);
+    const thread = standing ? this.lines.chatThreadOf(standing.place.chat, messageId) : null;
+    if (!thread) return [];
+    return this.selectLines([sessionId], sql`WHERE role IN ('user', 'assistant')`, thread);
+  }
+
+  /**
+   * Put the line keyed `key` where `standing` is in the chat thread
+   * `placement` names. Answers whether it was placed. Runs inside the
+   * caller's transaction when there is one.
+   */
+  private place(standing: Standing, key: string, placement: ChatThreadPlacement): boolean {
+    const chat = standing.place.chat;
+    const thread =
+      "in" in placement
+        ? (this.lines.chatThreadOf(chat, placement.in) ?? key)
+        : "latest" in placement
+          ? (this.lines.latestChatThread(chat) ?? key)
+          : key;
+    return this.lines.placeInChatThread(chat, key, thread, { settle: placement.settle === true });
   }
 
   /** Rechecked at dispatch: only an unchanged guardian root chat can continue. */
@@ -438,6 +521,116 @@ export class ChatsWebChatRepository extends WebChatRepository {
       .slice(0, 1000);
   }
 
+  /**
+   * Who wrote the messages that started `turn`, by the account each records
+   * ("guardian", "visitor:<account>"), each once. More than one means the
+   * turn held more than one person's input. An agent's message names no one.
+   */
+  getTurnPromptSenders(turn: Pick<InterruptedTurn, "sessionId" | "turnId">): string[] {
+    return this.db
+      .all<{ sender: string }>(sql`
+      SELECT DISTINCT m.sender_account_id AS sender
+      FROM agent_turn_messages l
+      JOIN ${romeSessions} s ON s.id = l.session_id
+      JOIN ${CHAT_MESSAGES} m ON m.id = l.message_id
+        AND m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+      WHERE l.session_id = ${turn.sessionId} AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
+        AND m.sender_agent IS NULL AND m.sender_account_id IS NOT NULL
+    `)
+      .map((row) => row.sender);
+  }
+
+  /**
+   * The newest turn of each dashboard chat that ended in an error, when its
+   * trace began at or after `sinceMs` or its runtime session was active then.
+   * A turn that began earlier and was active since is listed, and the caller
+   * decides by its last activity. A turn still running, or ended any other
+   * way, is not listed. A Concierge chat is listed like any other: when it moved
+   * to another provider on its own, its recovery turn is its newest turn, and
+   * when it could not move, its stopped turn still is. Oldest first.
+   * Eligibility is for `canContinueAfterRestart` to decide.
+   */
+  getLatestErroredTurns(sinceMs: number): ErroredTurn[] {
+    const since = Math.floor(sinceMs / 1000);
+    // One index probe per chat finds its newest trace, so the work follows the
+    // number of chats and only a chat with recent activity has its blocks read.
+    const traces = this.db.all<{
+      messageId: string;
+      sessionId: string;
+      turnId: string | null;
+      agentName: string | null;
+    }>(sql`
+      SELECT t.id AS messageId, t.session_id AS sessionId, t.turn_id AS turnId, s.agent_name AS agentName
+      FROM ${romeSessions} s
+      JOIN ${romeAgentMessages} t ON t.id = (
+        SELECT n.id FROM ${romeAgentMessages} n
+        WHERE n.session_id = s.id AND n.role = 'trace'
+        ORDER BY n.created_at DESC, n.rowid DESC LIMIT 1
+      )
+      WHERE s.type = 'channel' AND s.chat_platform = 'webchat'
+        AND (
+          t.created_at >= ${since}
+          OR EXISTS (SELECT 1 FROM ${sessions} r WHERE r.chat_id = s.id AND r.last_active_at >= ${since})
+        )
+      ORDER BY t.created_at, t.rowid
+    `);
+    const errored: ErroredTurn[] = [];
+    for (const trace of traces) {
+      const blocks = this.db
+        .all<{ content: string }>(sql`
+          SELECT content FROM ${romeAgentTraceBlocks}
+          WHERE message_id = ${trace.messageId}
+            AND json_extract(content, '$.type') IN ('turn_start', 'error', 'turn_end')
+          ORDER BY seq
+        `)
+        .flatMap(({ content }) => {
+          try {
+            return [JSON.parse(content) as Record<string, unknown>];
+          } catch {
+            return [];
+          }
+        });
+      const newestFirst = blocks.slice().reverse();
+      const begun = newestFirst.find((block) => block.type === "turn_start");
+      if (!begun) continue;
+      const after = newestFirst.slice(0, newestFirst.indexOf(begun));
+      const error = after.find((block) => block.type === "error");
+      const end = after.find((block) => block.type === "turn_end");
+      if (!error || end?.status !== "error" || typeof error.error !== "string") continue;
+      // A turn the dashboard refused before any model session opened names the
+      // chat in `turn_start`, not a runtime. Either way, the chat's active runtime resumes it.
+      const named = typeof begun.sessionId === "string" ? begun.sessionId : "";
+      const runtime = this.db.get<{ id: string; provider: string | null }>(sql`
+        SELECT id, provider FROM ${sessions}
+        WHERE status = 'active' AND channel_thread_key IS NOT NULL
+          AND (id = ${named} OR chat_id = ${trace.sessionId})
+        ORDER BY id = ${named} DESC, last_active_at DESC
+        LIMIT 1
+      `);
+      const text = (value: unknown) => (typeof value === "string" ? value : undefined);
+      errored.push({
+        turn: {
+          agentName: trace.agentName ?? text(begun.agent) ?? "main",
+          messageId: trace.messageId,
+          sessionId: trace.sessionId,
+          turnId: text(begun.turnId) ?? trace.turnId ?? "",
+          runtimeSessionId: runtime?.id ?? null,
+          prompt: text(begun.userPrompt) ?? "",
+        },
+        failure: {
+          message: error.error,
+          provider: text(error.provider),
+          code: text(error.code) as AgentTurnFailure["code"],
+          reason: text(error.reason) as AgentTurnFailure["reason"],
+          httpStatus: typeof error.httpStatus === "number" ? error.httpStatus : undefined,
+          providerError: text(error.providerError),
+        },
+        pinnedProvider: runtime?.provider ?? null,
+      });
+    }
+    return errored;
+  }
+
   override async recoverInterruptedInputs(): Promise<void> {
     await super.recoverInterruptedInputs();
     // A process crash can occur between the durable dispatch marker and the
@@ -487,17 +680,19 @@ export class ChatsWebChatRepository extends WebChatRepository {
     role: string,
     parts: TranscriptPart[],
     id?: string,
+    chatThread?: ChatThreadPlacement,
   ): Promise<StoredWebchatMessage> {
     const standing = role === "assistant" ? this.standingOf(sessionId) : null;
     if (!standing) return super.insertBackendMessage(sessionId, turnId, role, parts, id);
     const key = id ?? randomUUID();
-    const at = this.say(standing, key, "assistant", parts as MessagePart[], turnId);
+    const at = this.say(standing, key, "assistant", parts as MessagePart[], turnId, chatThread);
     const message: StoredWebchatMessage = {
       id: key,
       sessionId,
       turnId,
       role,
       content: JSON.stringify(parts),
+      ...(chatThread ? { chatThreadId: this.lines.chatThreadOf(standing.place.chat, key) } : {}),
       createdAt: new Date(Math.floor(at.getTime() / 1000) * 1000),
     };
     this.emitMessageInserted(message);
@@ -655,6 +850,9 @@ export class ChatsWebChatRepository extends WebChatRepository {
         role: row.role,
         content: row.content,
         senderId: row.turn_sender_id,
+        // `queued` for an input linked to the turn that has not reached it:
+        // a later turn takes it.
+        inputState: row.input_state,
       }));
   }
 
@@ -785,6 +983,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     role: "user" | "assistant",
     parts: MessagePart[],
     turnId: string | null,
+    chatThread?: ChatThreadPlacement,
     at: Date = new Date(),
   ): Date {
     this.db.transaction(() => {
@@ -799,6 +998,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
       });
       const id = recorded?.id ?? this.lines.idOf(standing.place.chat, key);
       if (id === null) throw new Error(`Dashboard line ${key} could not be recorded`);
+      if (chatThread) this.place(standing, key, chatThread);
       if (turnId && role === "user") this.links.prompt(id, standing.sessionId, turnId);
       if (turnId && role === "assistant") this.links.answer(id, standing.sessionId, turnId);
       this.advanceActivity(standing.sessionId, at);
@@ -806,17 +1006,25 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return at;
   }
 
-  private selectLines(sessionIds: readonly string[], where: SQL = sql``): TranscriptLine[] {
+  private selectLines(
+    sessionIds: readonly string[],
+    where: SQL = sql``,
+    chatThread?: string,
+  ): TranscriptLine[] {
     // Partitioning by turn keeps a turn's user, assistant and trace lines
     // contiguous even when a later turn's prompt was said before an earlier
-    // turn's reply.
+    // turn's reply. A chat thread reads in the order its lines were said.
+    const order =
+      chatThread === undefined
+        ? sql`ORDER BY session_id,
+          MIN(created_at) OVER (PARTITION BY session_id, COALESCE(turn_id, id)),
+          turn_id, created_at, line_order, seq`
+        : sql`ORDER BY created_at, seq`;
     return this.db
       .all<LineRow>(sql`
-        SELECT * FROM ${sessionLines(sessionIds)}
+        SELECT * FROM ${sessionLines(sessionIds, chatThread)}
         ${where}
-        ORDER BY session_id,
-          MIN(created_at) OVER (PARTITION BY session_id, COALESCE(turn_id, id)),
-          turn_id, created_at, line_order, seq
+        ${order}
       `)
       .map(storedLine);
   }
@@ -889,6 +1097,7 @@ interface LineRow {
    *  the agent for a line an agent said. */
   turn_sender_id: string | null;
   source_id: string | null;
+  chat_thread_id: string | null;
   line_order: number;
   seq: number;
 }
@@ -905,6 +1114,7 @@ function storedLine(row: LineRow): TranscriptLine {
     inputState: row.input_state,
     role: row.role,
     content: row.content,
+    chatThreadId: row.chat_thread_id,
     createdAt: new Date(row.created_at * 1000),
   };
 }
@@ -921,7 +1131,7 @@ function storedLine(row: LineRow): TranscriptLine {
  * puts a turn's first prompt before its trace, and the trace before the
  * turn's other lines.
  */
-export function sessionLines(sessionIds: readonly string[]) {
+export function sessionLines(sessionIds: readonly string[], chatThread?: string) {
   const ids = JSON.stringify(sessionIds);
   return sql`(
     SELECT m.key AS id, s.id AS session_id,
@@ -935,6 +1145,7 @@ export function sessionLines(sessionIds: readonly string[]) {
       m.sender_name, COALESCE(m.sender_agent, m.sender_account_id) AS turn_sender_id,
       CASE WHEN m.sender_agent IS NOT NULL THEN m.sender_agent
            WHEN m.sender_account_id GLOB 'automated::*' THEN m.sender_account_id END AS source_id,
+      m.chat_thread_id AS chat_thread_id,
       -- A turn's first prompt goes before its trace in the same second; every
       -- other line goes after it, in the order it was said, as a steered
       -- input after the card it answers.
@@ -948,6 +1159,14 @@ export function sessionLines(sessionIds: readonly string[]) {
     JOIN ${CHAT_MESSAGES} m ON m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
       -- A session sees the place from when it started there.
       AND m.said_at >= s.created_at
+      ${
+        // A line from before chat threads is in none, so the thread its own
+        // key names holds it. A line that is in a thread, even one that
+        // started here and moved on, is read by that thread alone.
+        chatThread === undefined
+          ? sql``
+          : sql`AND (m.chat_thread_id = ${chatThread} OR (m.chat_thread_id IS NULL AND m.key = ${chatThread}))`
+      }
     -- Only a prompt or answer link says whose turn a line is: one caught up
     -- on is read by who said it.
     LEFT JOIN agent_turn_messages l ON l.message_id = m.id AND l.session_id = s.id
@@ -960,6 +1179,7 @@ export function sessionLines(sessionIds: readonly string[]) {
       CASE json_extract(r.actor, '$.kind') WHEN 'guardian' THEN 'guardian'
         WHEN 'visitor' THEN 'visitor:' || json_extract(r.actor, '$.accountId') END AS sender_id,
       json_extract(r.actor, '$.email') AS sender_name, r.sender_id AS turn_sender_id, r.sender_id AS source_id,
+      NULL AS chat_thread_id,
       -- A session in no chat keeps its rows in the order they were written;
       -- beside a chat's lines, a trace goes after its turn's first prompt.
       CASE WHEN s.chat_id IS NULL THEN 0 ELSE 1 END AS line_order,
@@ -967,6 +1187,7 @@ export function sessionLines(sessionIds: readonly string[]) {
     FROM rome_agent_messages r JOIN rome_sessions s ON s.id = r.session_id
     WHERE r.session_id IN (SELECT value FROM json_each(${ids}))
       AND (s.chat_id IS NULL OR r.role = 'trace')
+      ${chatThread === undefined ? sql`` : sql`AND 0`}
   )`;
 }
 

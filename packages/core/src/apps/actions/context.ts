@@ -7,7 +7,7 @@ import {
 import type { ActionEngine } from "./engine.js";
 import type { ActionRunObserver } from "./runtime-events.js";
 import type { ThreadContext } from "../../core/types.js";
-import type { SessionActor } from "../../lib/session-actor.js";
+import type { SessionActor } from "../../access/session-actor.js";
 
 export interface ActionExecutionStore {
   actionName?: string;

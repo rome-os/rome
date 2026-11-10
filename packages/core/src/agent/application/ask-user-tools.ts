@@ -17,7 +17,7 @@ export interface DeferTool {
 }
 
 const DEFER_DESCRIPTION =
-  "Schedule a wake-up later in THIS SAME conversation, with full context intact — use it when you're " +
+  "Schedule a wake-up later in this same conversation — use it when you're " +
   "watching something that isn't ready yet (a CI run, a build, a reply) instead of ending the turn empty. " +
   "Give a short `name` for what you're watching (it becomes the routine's name) and exactly one of " +
   "`afterMinutes`, `at`, or `event`. Prefer `event` when something announces completion (CI finished, a PR " +
@@ -42,8 +42,14 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
       (defer.finalText === "private" ? DEFER_END_OF_TURN_TEXT_PRIVATE : DEFER_END_OF_TURN),
     inputSchema: {
       type: "object",
-      required: ["name"],
+      required: ["name", "note"],
       properties: {
+        note: {
+          type: "string",
+          description:
+            "A self-contained note to yourself, delivered when you wake: why you are waiting, what to do then, and the concrete targets (links, message ids, task ids). " +
+            "Write it for a reader who has not seen this conversation: the session that wakes may be a newer one, without this turn in its context.",
+        },
         name: {
           type: "string",
           description:

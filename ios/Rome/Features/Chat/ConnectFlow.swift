@@ -78,7 +78,7 @@ struct ConnectRunner {
     var attempts = ConnectTiming.attempts
 
     /// Where a connect entry that needs the guardian's own page sends them.
-    static let settingsConnectionsPath = "/settings/connections"
+    nonisolated static let settingsConnectionsPath = "/settings/connections"
 
     enum Failure: Error, Equatable {
         case reason(String)

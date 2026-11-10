@@ -12,8 +12,8 @@ import {
   type ModelAccountReport,
   type ModelAccounts,
 } from "../agent/index.js";
-import { instanceCredentialId, onInstanceTokenChanged } from "../lib/instance-identity.js";
-import { getRomeCloudOrigin } from "../lib/rome-cloud-origin.js";
+import { instanceCredentialId, onInstanceTokenChanged } from "../instance/instance-identity.js";
+import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
 import { fetchRomeCredits } from "../agent/index.js";
 
 /** Credits are used only while the account can spend them. */

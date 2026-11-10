@@ -112,7 +112,7 @@ chat starts with a `<device_folder>` block that names the folder and the device,
 and tells the agent to run programs there with `rome-node device run <id> exec`
 and `cwd` set to the folder. The block repeats on every turn so that it stays in
 context after compaction. Subagents get it from the turn's thread context. A
-side chat copies the folder into its own session, and
+fork chat copies the folder into its own session, and
 a deferred continuation reads it from its chat, so their later turns keep it.
 
 Limits:
@@ -122,7 +122,7 @@ Limits:
   the remote program. Output is not streamed.
 - The folder is the default `cwd` for the agent's commands, not a sandbox. `exec`
   runs as the device's OS user.
-- Only webchat chats and their side chats store a device folder.
+- Only webchat chats and their fork chats store a device folder.
 
 ## Local client protocol
 

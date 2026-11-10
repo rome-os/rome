@@ -2,8 +2,10 @@ import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { Hono } from "hono";
 import { eq } from "drizzle-orm";
 import { routinesRoutes } from "./routines.js";
+import { runWithSessionActor } from "../../access/session-actor.js";
 import { createTestDb, buildTestDeps, type TestDb } from "../../test/helpers.js";
 import { RoutineRunsRepository } from "../../db/repositories/routine-runs.js";
+import { RoutinesRepository } from "../../db/repositories/routines.js";
 import { actionExecutions, routineRuns, routines } from "../../db/schema.js";
 import { ActionEngine } from "../../apps/actions/engine.js";
 import { ActionRegistryImpl } from "../../apps/actions/registry.js";
@@ -143,6 +145,37 @@ describe("Routines API", () => {
     const body = (await res.json()) as { id: string; name: string; trigger: Trigger };
     expect(body.name).toBe("daily-standup");
     expect(body.trigger).toEqual(trigger);
+  });
+
+  it("records who turned a routine on, and answers no route with it", async () => {
+    const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
+    const created = await runWithSessionActor(visitor, () =>
+      app.request("/routines", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "remind me",
+          trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "17:00" },
+          actionName: "send_message",
+          args: {},
+        }),
+      }),
+    );
+    const body = (await created.json()) as Record<string, unknown> & { id: string };
+    expect(body).not.toHaveProperty("createdBy");
+    expect(await new RoutinesRepository(testDb.db).creatorOf(body.id)).toEqual(visitor);
+
+    const listed = (await (await app.request("/routines")).json()) as Record<string, unknown>[];
+    expect(listed.length).toBeGreaterThan(0);
+    for (const row of listed) expect(row).not.toHaveProperty("createdBy");
+
+    const patched = await app.request(`/routines/${body.id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: "remind me later" }),
+    });
+    expect(await patched.json()).not.toHaveProperty("createdBy");
+    expect(JSON.stringify(listed)).not.toContain("v@example.com");
   });
 
   it("stores a caller key and answers a repeat create with 409 and the existing id", async () => {

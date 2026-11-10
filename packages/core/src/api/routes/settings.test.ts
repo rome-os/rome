@@ -5,9 +5,9 @@ import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../t
 import { seedBaseline } from "../../test/seeds.js";
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../agent/index.js";
 import { GUARDIAN_TIMEZONE_SETTING_KEY } from "../../routines/guardian-timezone.js";
-import { COOKIE_NAME, createSession } from "../../lib/auth.js";
-import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";
-import { PUBLIC_ACCESS_SETTING_KEY } from "../../apps/public-access-config.js";
+import { COOKIE_NAME, createSession } from "../../access/auth.js";
+import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
+import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";
 
 const GUARDIAN_COOKIE = `${COOKIE_NAME}=${createSession("alex")}`;
 
@@ -170,16 +170,16 @@ describe("Settings API", () => {
   });
 
   it("rejects publicAccess, which only PUT /public-access can apply", async () => {
-    const setConfig = rs.spyOn(deps.publicAccessState, "setConfig");
+    const setConfig = rs.spyOn(deps.permissions, "replace");
 
     const res = await putSettings(app, {
-      [PUBLIC_ACCESS_SETTING_KEY]: { allowedApps: ["notes"] },
+      [APP_PERMISSIONS_SETTING_KEY]: { allowedApps: ["notes"] },
       theme: "dark",
     });
 
     expect(res.status).toBe(400);
     expect((await res.json()).error).toContain("/api/public-access");
-    expect(await deps.settingsRepo.get(PUBLIC_ACCESS_SETTING_KEY)).toBeNull();
+    expect(await deps.settingsRepo.get(APP_PERMISSIONS_SETTING_KEY)).toBeNull();
     expect(await deps.settingsRepo.get("theme")).toBeNull();
     expect(setConfig).not.toHaveBeenCalled();
   });

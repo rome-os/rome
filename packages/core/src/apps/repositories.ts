@@ -9,7 +9,7 @@ import { openChannelChat, type OpenSpeakerDeps } from "../connections/open-chat.
 import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import { applyGuardianProfile } from "../lib/guardian-profile.js";
+import { applyGuardianProfile } from "../people/guardian-profile.js";
 import { type AppChatReadsDeps, appChatReads } from "./chat-reads.js";
 import { type AppChatWritesDeps, appChatWrites } from "./chat-writes.js";
 

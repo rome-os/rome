@@ -100,7 +100,7 @@ enum UpdateGate {
             return String(localized: "Asking Rome Cloud to start the update…")
         case .updating(let target, _):
             switch progress {
-            case .downloading: return String(localized: "Downloading \(target)…")
+            case .downloading: return String(localized: "Upgrading to \(target)…")
             case .restarting: return String(localized: "Restarting your Rome…")
             case .almostDone: return String(localized: "Almost done…")
             }
@@ -279,6 +279,13 @@ final class InstanceUpdater {
 
     private var backend: RomeBackend?
     private var instanceID: String?
+    /// The instance an upgrade is waited on while no workspace is open
+    /// (`waitWithoutInstance`). Nil once the wait ends, a timeout or a
+    /// failure included: then nothing reopens the instance on its own.
+    var waitingInstanceID: String? {
+        guard reconnect != nil, case .updating = state else { return nil }
+        return instanceID
+    }
     /// Tries to reach an instance that Rome Cloud reports as not running yet,
     /// used while it restarts with no backend open.
     private var reconnect: (() async -> Void)?
