@@ -663,7 +663,7 @@ describe("ModelResolver", () => {
         refreshIntervalMs: null,
       });
       await accounts.refresh("anthropic");
-      let failureRefresh: Promise<void> | undefined;
+      let failureRefresh: Promise<boolean> | undefined;
       const r = createModelResolver({
         providers: [claude, codex],
         accounts: {

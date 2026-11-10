@@ -1,7 +1,7 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { ModelAccount } from "../domain/model-account.js";
 import type { ModelAccountReport } from "../domain/model-account-report.js";
-import { createModelAccounts } from "./model-accounts.js";
+import { createModelAccounts, RESET_GRACE_MS } from "./model-accounts.js";
 
 const readAt = new Date("2026-11-07T00:00:00.000Z");
 const available: ModelAccountReport = { state: "available", account: { loggedIn: true } };
@@ -100,6 +100,57 @@ describe("createModelAccounts", () => {
     accounts.close();
   });
 
+  it("says whether the read worked: false when it failed, true when it did", async () => {
+    const codex = fakeAccount(available);
+    const claude = fakeAccount(available);
+    const accounts = createModelAccounts({
+      accounts: { openai: codex.account, anthropic: claude.account },
+      startRefresh: false,
+      refreshIntervalMs: null,
+      now: () => readAt,
+    });
+    const reads: Array<[string, string, boolean | undefined]> = [];
+    accounts.onChanged((provider, change, succeeded) => reads.push([provider, change, succeeded]));
+
+    expect(await accounts.refresh("openai")).toBe(true);
+    (codex.account.report as ReturnType<typeof rs.fn>).mockRejectedValueOnce(new Error("down"));
+    expect(await accounts.refresh("openai")).toBe(false);
+    // The failed read kept the last answer, and still told the listeners it settled.
+    expect(accounts.read().openai).toBe(available);
+    expect(reads).toEqual([
+      ["openai", "refreshed", true],
+      ["openai", "refreshed", false],
+    ]);
+
+    // Every provider read must have worked.
+    (claude.account.report as ReturnType<typeof rs.fn>).mockRejectedValueOnce(new Error("down"));
+    expect(await accounts.refresh()).toBe(false);
+    expect(await accounts.refresh()).toBe(true);
+    accounts.close();
+  });
+
+  it("gives a refresh that joins a read in flight that read's result", async () => {
+    const codex = fakeAccount(available);
+    const accounts = createModelAccounts({
+      accounts: { openai: codex.account },
+      startRefresh: false,
+      refreshIntervalMs: null,
+    });
+    let fail!: (error: Error) => void;
+    (codex.account.report as ReturnType<typeof rs.fn>).mockImplementationOnce(
+      () =>
+        new Promise((_resolve, reject) => {
+          fail = reject;
+        }),
+    );
+    const first = accounts.refresh("openai");
+    const second = accounts.refresh("openai");
+    fail(new Error("down"));
+    expect(await Promise.all([first, second])).toEqual([false, false]);
+    expect(codex.reads()).toBe(1);
+    accounts.close();
+  });
+
   it("tells listeners when the authorized state flips and after every read", async () => {
     const codex = fakeAccount(available);
     const accounts = createModelAccounts({
@@ -184,5 +235,132 @@ describe("createModelAccounts", () => {
       error: "down",
     });
     accounts.close();
+  });
+});
+
+describe("createModelAccounts reading at the end of a usage limit", () => {
+  const HOUR = 60 * 60 * 1000;
+  const start = Date.parse("2026-11-07T00:00:00.000Z");
+  const limitedFor = (ms: number): ModelAccountReport => ({
+    state: "usage_limit_reached",
+    usageLimitUntil: new Date(start + ms).toISOString(),
+    account: { loggedIn: true },
+  });
+  const tick = (ms: number) => rs.advanceTimersByTimeAsync(ms);
+
+  function setup(initial: ModelAccountReport, startRefresh = false) {
+    rs.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
+    rs.setSystemTime(start);
+    const codex = fakeAccount(initial);
+    const accounts = createModelAccounts({
+      accounts: { openai: codex.account },
+      startRefresh,
+      refreshIntervalMs: null,
+      now: () => new Date(Date.now()),
+    });
+    return { codex, accounts };
+  }
+  afterEach(() => {
+    rs.useRealTimers();
+  });
+
+  it("reads the account a grace after the stated end, not at it", async () => {
+    const { codex, accounts } = setup(limitedFor(HOUR));
+    await accounts.refresh();
+    const reads = codex.reads();
+    const changes: string[] = [];
+    accounts.onChanged((_provider, change) => changes.push(change));
+
+    await tick(HOUR);
+    expect(codex.reads()).toBe(reads);
+    await tick(RESET_GRACE_MS - 1);
+    expect(codex.reads()).toBe(reads);
+    codex.set(available);
+    await tick(1);
+
+    expect(codex.reads()).toBe(reads + 1);
+    expect(changes).toEqual(["refreshed"]);
+    expect(accounts.read().openai?.state).toBe("available");
+    expect(rs.getTimerCount()).toBe(0);
+    accounts.close();
+  });
+
+  it("arms again when a read moves the end, and not for the old time", async () => {
+    const { codex, accounts } = setup(limitedFor(HOUR));
+    await accounts.refresh();
+    expect(rs.getTimerCount()).toBe(1);
+    codex.set(limitedFor(3 * HOUR));
+    await accounts.refresh();
+    expect(rs.getTimerCount()).toBe(1);
+
+    const reads = codex.reads();
+    await tick(HOUR + RESET_GRACE_MS);
+    expect(codex.reads()).toBe(reads);
+    await tick(2 * HOUR);
+    expect(codex.reads()).toBe(reads + 1);
+    accounts.close();
+  });
+
+  it("arms nothing for an available provider or an end that has passed, and drops the timer once it clears", async () => {
+    const { codex, accounts } = setup(available);
+    await accounts.refresh();
+    expect(rs.getTimerCount()).toBe(0);
+    codex.set(limitedFor(-HOUR));
+    await accounts.refresh();
+    expect(rs.getTimerCount()).toBe(0);
+    codex.set(limitedFor(HOUR));
+    await accounts.refresh();
+    expect(rs.getTimerCount()).toBe(1);
+    codex.set(available);
+    await accounts.refresh();
+    expect(rs.getTimerCount()).toBe(0);
+    accounts.close();
+  });
+
+  it("reaches an end more than 24.8 days away in steps, without firing at once", async () => {
+    const maxTimer = 2 ** 31 - 1;
+    const { codex, accounts } = setup(limitedFor(40 * 24 * HOUR));
+    await accounts.refresh();
+    const reads = codex.reads();
+
+    await tick(maxTimer - 1);
+    expect(codex.reads()).toBe(reads);
+    await tick(1);
+    // The step reads the account, which still reports the limit, and the rest is armed.
+    expect(codex.reads()).toBe(reads + 1);
+    expect(rs.getTimerCount()).toBe(1);
+
+    await tick(40 * 24 * HOUR + RESET_GRACE_MS - maxTimer);
+    expect(codex.reads()).toBe(reads + 2);
+    accounts.close();
+  });
+
+  it("goes on in steps when a read fails, and stops once the end has passed", async () => {
+    const maxTimer = 2 ** 31 - 1;
+    const { codex, accounts } = setup(limitedFor(40 * 24 * HOUR));
+    await accounts.refresh();
+    const reads = codex.reads();
+    const report = codex.account.report as ReturnType<typeof rs.fn>;
+
+    report.mockRejectedValueOnce(new Error("down"));
+    await tick(maxTimer);
+    expect(codex.reads()).toBe(reads + 1);
+    expect(rs.getTimerCount()).toBe(1);
+
+    report.mockRejectedValueOnce(new Error("down"));
+    await tick(40 * 24 * HOUR + RESET_GRACE_MS - maxTimer);
+    expect(codex.reads()).toBe(reads + 2);
+    // The end has passed and the read failed: nothing arms a read for it again.
+    expect(rs.getTimerCount()).toBe(0);
+    accounts.close();
+  });
+
+  it("arms nothing before the first read, and clears its timers when closed", async () => {
+    const { accounts } = setup(limitedFor(HOUR));
+    expect(rs.getTimerCount()).toBe(0);
+    await accounts.refresh();
+    expect(rs.getTimerCount()).toBe(1);
+    accounts.close();
+    expect(rs.getTimerCount()).toBe(0);
   });
 });
