@@ -638,10 +638,10 @@ final class AppModel {
         signInError = nil
         browserSignIn = nil
         // The stopped page a push led to tries that instance first; still
-        // stopped, the one this phone opened last opens instead.
-        let stopped = stoppedInstanceID
-        stoppedInstanceID = nil
-        await openInstance(preferring: stopped, showHint: false)
+        // stopped, the one this phone opened last opens instead. The page's
+        // instance is kept until one opens (`connect`), so a retry that
+        // leaves the page up still tries it next time.
+        await openInstance(preferring: stoppedInstanceID, showHint: false)
     }
 
     /// A tapped push for an instance that is not running: the open one closes

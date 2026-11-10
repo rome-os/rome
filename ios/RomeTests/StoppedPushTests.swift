@@ -67,4 +67,26 @@ final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
             app.workspace?.stop()
         }
     }
+
+    /// A retry that finds the pushed instance still stopped keeps its page,
+    /// so the next retry still opens it, not the instance opened last.
+    /// Fails before the change: the second retry opened C.
+    @Test func aFailedRetryKeepsThePushedInstance() async {
+        await withCleanDefaults {
+            UserDefaults.standard.set("c", forKey: "lastInstanceID")
+            list(b: "stopped")
+            let app = model()
+            await app.openFromPush(PushTarget(instanceId: "b"))
+            await app.openInstance(preferring: "b", showHint: false)
+            #expect(app.phase == .stopped(instanceName: "B"))
+            // Both still stopped: the retry leaves B's page up.
+            await app.retry()
+            #expect(app.phase == .stopped(instanceName: "B"))
+            // Both started in Rome Cloud: the retry opens B.
+            list(b: "running", c: "running")
+            await app.retry()
+            #expect(app.currentInstanceID == "b")
+            app.workspace?.stop()
+        }
+    }
 }
