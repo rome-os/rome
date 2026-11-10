@@ -283,7 +283,7 @@ struct ChatIdentity: View {
     @State private var pokes = 0
     @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
 
-    static let avatarSize: CGFloat = 42
+    static let avatarSize: CGFloat = 50
     /// How far the avatar reaches down over the pill.
     static let overlap: CGFloat = 8
 
@@ -292,7 +292,7 @@ struct ChatIdentity: View {
             // A solid disc on the glass pill: two overlapping layers never
             // share a color (DESIGN.md 1).
             Mascot(blinks: !still, pokes: pokes)
-                .frame(height: 22)
+                .frame(height: 28)
                 .frame(width: Self.avatarSize, height: Self.avatarSize)
                 .background(Palette.elevated, in: Circle())
                 .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
