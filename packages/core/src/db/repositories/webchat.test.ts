@@ -123,7 +123,7 @@ describe("WebChatRepository", () => {
     const deps = {
       db: testDb.db,
       webchatRepo: repo,
-      settingsRepo: { get: async () => "Ray" },
+      settingsRepo: { get: async (key: string) => (key === "agentName" ? "Milo" : "Ray") },
       agentLoader: { list: () => [buildAgent("core:concierge")] },
       appCatalog: { get: () => undefined },
     } as never;
@@ -134,7 +134,7 @@ describe("WebChatRepository", () => {
     );
     expect(senders.get("concierge-input")).toMatchObject({
       kind: "automated",
-      name: "Concierge",
+      name: "Milo",
       onBehalfOf: { kind: "guardian", name: "Ray" },
     });
     await repo.recordUserInput(
@@ -149,8 +149,8 @@ describe("WebChatRepository", () => {
       messageId: "concierge-quote",
       ownRowOnly: true,
     });
-    expect(quote).toMatchObject({ ok: true, part: { author: "automated", name: "Concierge" } });
-    if (quote.ok) expect(quote.promptLine).toContain("Concierge: Status?");
+    expect(quote).toMatchObject({ ok: true, part: { author: "automated", name: "Milo" } });
+    if (quote.ok) expect(quote.promptLine).toContain("Milo: Status?");
   });
 
   it.each([
