@@ -226,6 +226,21 @@ describe("ConciergeActivityTracker", () => {
     expect(visitor).toEqual([]);
   });
 
+  it("always sends a finite time, also for a chat first read by a refresh that left it idle", async () => {
+    const w = world();
+    await flush();
+    w.chats.set("fresh", "guardian");
+    await w.tracker.refresh("fresh");
+    const heard: ConciergeActivityEvent[] = [];
+    w.tracker.subscribe("guardian", (_event, data) => heard.push(data as ConciergeActivityEvent));
+    await flush();
+    const fresh = heard.find((event) => event.chatId === "fresh");
+    expect(fresh?.activity).toEqual({ kind: "idle" });
+    expect(Number.isFinite(fresh?.at)).toBe(true);
+    // And as JSON, the way it travels.
+    expect(typeof JSON.parse(JSON.stringify(fresh)).at).toBe("number");
+  });
+
   it("says working the moment the turn starts, and only on a change", async () => {
     const w = world();
     await flush();

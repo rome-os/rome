@@ -96,23 +96,47 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
   return map;
 }
 
+// (session, toolUseId) → the message holding that id's latest card. A tool id
+// like `item_0` recurs across turns, so the key alone does not say which card
+// a result answers; the message does.
+function latestCardMessages(messages: ChatMessage[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const msg of messages) {
+    if (msg.role !== "assistant") continue;
+    for (const b of parseMessageEntries(msg)) {
+      if (b.type === "pending_interaction") {
+        map.set(interactionResultKey(msg.sessionId, b.toolUseId), msg.id);
+      }
+    }
+  }
+  return map;
+}
+
 /**
  * The card results a chat thread's own transcript reads: those its fetched
  * messages record, which can lie well before the main timeline's loaded
- * page, then those of the main timeline, which may be newer.
+ * page, then the main timeline's, which may be newer, but only for a card the
+ * thread shows as the same message. A result for a later card that reuses the
+ * tool id leaves the thread's own card as it was.
  */
 export function threadInteractionResults(
   threadMessages: ChatMessage[],
   sessionId: string,
   mainIdentity: AgentIdentity,
-  mainResults: ChatView["interactionResults"],
+  main: { messages: ChatMessage[]; results: ChatView["interactionResults"] },
 ): ChatView["interactionResults"] {
-  const own = buildChatView(
+  const results = buildChatView(
     new Map([[sessionId, threadMessages]]),
     sessionId,
     mainIdentity,
   ).interactionResults;
-  return new Map([...own, ...mainResults]);
+  const threadCards = latestCardMessages(threadMessages);
+  const mainCards = latestCardMessages(main.messages);
+  for (const [key, output] of main.results) {
+    const card = threadCards.get(key);
+    if (card !== undefined && card === mainCards.get(key)) results.set(key, output);
+  }
+  return results;
 }
 
 export function buildChatView(

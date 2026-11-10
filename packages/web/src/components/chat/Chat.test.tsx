@@ -66,8 +66,11 @@ rs.mock("@/hooks/use-tab-status", () => ({
   useChatTabStatus: mockUseChatTabStatus,
 }));
 
+// `initReactI18next` too: any module that loads the app's i18n setup passes
+// it to `i18next.use()`, which throws on an undefined plugin.
 rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t }),
+  initReactI18next: { type: "3rdParty", init: () => {} },
 }));
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({

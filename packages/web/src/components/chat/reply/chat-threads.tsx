@@ -110,6 +110,25 @@ export function useChatThreadsValue(
   );
 }
 
+/**
+ * `rethreaded` with a live placement of `messageId` in `to`, made over
+ * `loaded`, the thread the currently loaded message has. A placement held
+ * from before a reload rebases on what the reload said, so the next one still
+ * applies.
+ */
+export function placeLive(
+  rethreaded: ReadonlyMap<string, ThreadPlacement>,
+  messageId: string,
+  to: string,
+  loaded: string | null,
+): ReadonlyMap<string, ThreadPlacement> {
+  const held = rethreaded.get(messageId);
+  if (held?.from === loaded && held.to === to) return rethreaded;
+  const next = new Map(rethreaded);
+  next.set(messageId, { from: loaded, to });
+  return next;
+}
+
 /** `messages` with each live placement that still holds applied. */
 export function placed(
   messages: readonly ThreadTimelineMessage[],

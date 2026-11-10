@@ -12,6 +12,7 @@ import type { BlockActions, LivePreview } from "./MessageList";
 import {
   ChatThreadsProvider,
   placed,
+  placeLive,
   type ThreadPlacement,
   type ThreadTimelineMessage,
   threadRepliesLines,
@@ -141,6 +142,19 @@ describe("live thread placements", () => {
       ["a2", { from: null, to: "q1" }],
     ]);
     const reloaded = [g("q1"), a("a1", "q1"), g("q2", "q2"), a("a2", "q2")];
+    expect(threadRepliesLines(placed(reloaded, live))).toEqual(new Map());
+  });
+
+  it("build on a reload between the provisional and the final placement", () => {
+    // The plain send first joined the latest thread.
+    let live = placeLive(new Map(), "q2", "q1", null);
+    live = placeLive(live, "a2", "q1", null);
+    // A reload loads it there too, before the Concierge's final placement.
+    const reloaded = [g("q1"), a("a1", "q1"), g("q2", "q1"), a("a2", "q1")];
+    expect(threadRepliesLines(placed(reloaded, live))).toEqual(new Map([["a2", 3]]));
+    // The final placement starts a thread of its own, over what the reload said.
+    live = placeLive(live, "q2", "q2", "q1");
+    live = placeLive(live, "a2", "q2", "q1");
     expect(threadRepliesLines(placed(reloaded, live))).toEqual(new Map());
   });
 });

@@ -208,7 +208,8 @@ export class ConciergeActivityTracker {
     const state: ChatState = this.chats.get(chatId) ?? {
       owner,
       shown: { kind: "idle" },
-      shownAt: Number.NEGATIVE_INFINITY,
+      // A real time from the start: a snapshot sends it as the event's `at`.
+      shownAt: this.sources.now(),
       idleSince: null,
       timer: null,
       refreshing: false,

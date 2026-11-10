@@ -104,6 +104,7 @@ import { ChatThreadView } from "@/components/chat/ChatThreadView";
 import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
 import {
   ChatThreadsProvider,
+  placeLive,
   type ThreadPlacement,
   useChatThreadsValue,
 } from "@/components/chat/reply/chat-threads";
@@ -479,21 +480,15 @@ export function Chat({
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   // Where live `message_chat_thread` events placed messages since they loaded,
   // for the "N replies" lines, each with the thread the loaded message had
-  // then. `loadedThreads` is that loaded value, kept current every render.
+  // then. `loadedThreads` is that loaded value, kept current every render, so
+  // a placement after a reload builds on what the reload said.
   const [rethreaded, setRethreaded] = useState<ReadonlyMap<string, ThreadPlacement>>(new Map());
   const loadedThreads = useRef<ReadonlyMap<string, string | null>>(new Map());
   const handleMessageChatThread = useCallback(
     ({ messageId, chatThreadId }: { messageId: string; chatThreadId: string }) =>
-      setRethreaded((prev) => {
-        const held = prev.get(messageId);
-        if (held?.to === chatThreadId) return prev;
-        const next = new Map(prev);
-        next.set(messageId, {
-          from: held ? held.from : (loadedThreads.current.get(messageId) ?? null),
-          to: chatThreadId,
-        });
-        return next;
-      }),
+      setRethreaded((prev) =>
+        placeLive(prev, messageId, chatThreadId, loadedThreads.current.get(messageId) ?? null),
+      ),
     [],
   );
   // Inline share flow: pick turns directly on the transcript.
@@ -2569,7 +2564,10 @@ export function Chat({
                         threadMessages,
                         mainSessionId,
                         mainIdentity,
-                        blockActions.interactionResults,
+                        {
+                          messages: displayMessages,
+                          results: blockActions.interactionResults,
+                        },
                       ),
                     }}
                     contentRef={ignoreThreadContent}
