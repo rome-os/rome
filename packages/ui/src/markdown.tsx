@@ -230,6 +230,7 @@ interface HastNode {
   type: string;
   tagName?: string;
   properties?: Record<string, unknown>;
+  value?: string;
   children?: HastNode[];
 }
 
@@ -247,10 +248,39 @@ function rehypeDeferImages() {
   return deferImages;
 }
 
-// Last, so the sanitizer that runs before it cannot strip what it adds.
+const LIST_ITEM_BLOCKS = new Set(["ul", "ol", "p", "pre", "blockquote", "table", "div"]);
+
+const isBlock = (node: HastNode | undefined) =>
+  node?.type === "element" && LIST_ITEM_BLOCKS.has(node.tagName ?? "");
+
+function trimListItemWhitespace(node: HastNode): void {
+  if (node.type === "element" && node.tagName === "li" && node.children) {
+    const children = node.children;
+    node.children = children.filter(
+      (child, index) =>
+        !(
+          child.type === "text" &&
+          !child.value?.trim() &&
+          (isBlock(children[index - 1]) || isBlock(children[index + 1]))
+        ),
+    );
+  }
+  for (const child of node.children ?? []) trimListItemWhitespace(child);
+}
+
+// The newlines Markdown leaves between a list item's text and a nested list
+// carry nothing, but prose that keeps soft breaks sets list items to
+// pre-wrap, where each one draws an empty line under the nested list. Named,
+// since Streamdown keys its shared processor cache by plugin name.
+function rehypeTrimListItemWhitespace() {
+  return trimListItemWhitespace;
+}
+
+// Last, so the sanitizer that runs before them cannot strip what they change.
 const REHYPE_PLUGINS: NonNullable<StreamdownProps["rehypePlugins"]> = [
   ...Object.values(defaultRehypePlugins),
   rehypeDeferImages,
+  rehypeTrimListItemWhitespace,
 ];
 
 const DEFAULT_TOKENS: MarkdownThemeTokens = {

@@ -97,26 +97,47 @@
   --markdown-media-space-block: var(--rome-space-3);
 }
 
-/* A long answer read as a page rather than as a turn of chat. The body keeps
-   its size and leading, and the space between blocks tightens a step, so the
-   answer reads as one piece rather than a stack of separate blocks. Put the
-   class on the prose root or on any ancestor of it. */
-.rome-markdown-document {
+/* Prose inside a chat message. A message is a turn of conversation, not an
+   article, so its headings label sections rather than title a page: the top
+   two sit one step above the body and the rest at the body size, all at the
+   heading weight. Bold sets lighter than a heading, so a bold lead-in on
+   every line of a list marks each line without shouting. Leading and the
+   space between blocks tighten a step, so a long answer reads as one piece.
+   Put the class on the prose root or on any ancestor of it. Compact prose
+   rebinds its own type on the root, which wins over this class. */
+.rome-markdown-message {
+  --markdown-body-line-height: var(--rome-line-height-140);
+  --markdown-strong-font-weight: 500;
+
+  --markdown-heading-1-font-size: var(--rome-font-size-17);
+  --markdown-heading-1-line-height: var(--rome-line-height-141);
+  --markdown-heading-2-font-size: var(--rome-font-size-16);
+  --markdown-heading-2-line-height: var(--rome-line-height-140);
+  --markdown-heading-3-font-size: var(--rome-font-size-16);
+  --markdown-heading-3-line-height: var(--rome-line-height-140);
+  --markdown-heading-4-font-size: var(--rome-font-size-16);
+  --markdown-heading-4-line-height: var(--rome-line-height-140);
+  --markdown-heading-floor-font-size: var(--rome-font-size-16);
+  --markdown-heading-floor-line-height: var(--rome-line-height-140);
+
   --markdown-block-space-between: var(--rome-space-3);
-  --markdown-heading-1-space-before: var(--rome-space-6);
-  --markdown-heading-2-space-before: var(--rome-space-6);
+  --markdown-heading-1-space-before: var(--rome-space-4);
+  --markdown-heading-1-space-after: var(--rome-space-1);
+  --markdown-heading-2-space-before: var(--rome-space-4);
   --markdown-heading-2-space-after: var(--rome-space-1);
-  --markdown-heading-3-space-before: var(--rome-space-5);
+  --markdown-heading-3-space-before: var(--rome-space-3);
   --markdown-heading-3-space-after: var(--rome-space-1);
-  --markdown-heading-4-space-before: var(--rome-space-4);
+  --markdown-heading-4-space-before: var(--rome-space-3);
   --markdown-heading-4-space-after: var(--rome-space-1);
-  --markdown-heading-floor-space-before: var(--rome-space-4);
+  --markdown-heading-floor-space-before: var(--rome-space-3);
+  --markdown-heading-floor-space-after: var(--rome-space-1);
   --markdown-list-space-block: var(--rome-space-2);
-  --markdown-code-block-space-block: var(--rome-space-4);
-  --markdown-blockquote-space-block: var(--rome-space-4);
-  --markdown-table-space-block: var(--rome-space-4);
-  --markdown-rule-space-block: var(--rome-space-4);
-  --markdown-media-space-block: var(--rome-space-4);
+  --markdown-list-item-space-block: var(--rome-space-0);
+  --markdown-code-block-space-block: var(--rome-space-3);
+  --markdown-blockquote-space-block: var(--rome-space-3);
+  --markdown-table-space-block: var(--rome-space-3);
+  --markdown-rule-space-block: var(--rome-space-3);
+  --markdown-media-space-block: var(--rome-space-3);
 }
 
 .rome-markdown > * {
@@ -125,6 +146,12 @@
 
 .rome-markdown > * + * {
   margin-block-start: var(--markdown-block-space-between);
+}
+
+/* Streamdown renders bold as a span with its own semibold utility, so the
+   token is spent on the span's hook, not only on a strong element. */
+.rome-markdown :is(strong, [data-streamdown="strong"]) {
+  font-weight: var(--markdown-strong-font-weight);
 }
 
 .rome-markdown [data-streamdown^="heading-"] {

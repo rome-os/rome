@@ -168,6 +168,27 @@ describe("Markdown", () => {
     expect(classes).not.toContain("font-medium");
   });
 
+  it("leaves no blank text beside a nested list, which soft-break prose would draw as an empty line", () => {
+    const { container } = render(
+      <Markdown preserveSoftBreaks>
+        {"1. **First**\n   - a\n   - b\n2. **Second**\n   - c"}
+      </Markdown>,
+    );
+
+    const items = container.querySelectorAll("ol > li");
+    expect(items).toHaveLength(2);
+    for (const item of items) {
+      const blank = [...item.childNodes].filter(
+        (node) => node.nodeType === Node.TEXT_NODE && !node.textContent?.trim(),
+      );
+      expect(blank).toHaveLength(0);
+    }
+    // A soft break inside an item's own text is kept.
+    cleanup();
+    const soft = render(<Markdown preserveSoftBreaks>{"- one\n  two"}</Markdown>);
+    expect(soft.container.querySelector("li")?.textContent).toBe("one\ntwo");
+  });
+
   it("shortens a link whose text is a long hash, and keeps the whole hash in its tooltip", () => {
     const sha = "d37eb0f1c4a9e2b7f3d1a6c8e0b5f9a2d4c7e1b3";
     renderMd(`Merged as [${sha}](https://example.com/commit/${sha}).`);

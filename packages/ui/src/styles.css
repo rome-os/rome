@@ -457,6 +457,9 @@
   --markdown-heading-floor-font-size: var(--rome-font-size-16);
   --markdown-heading-floor-line-height: var(--rome-line-height-150);
   --markdown-heading-font-weight: 600;
+  /* Bold carries the heading's weight by default. A surface that bolds often,
+     such as a chat message, may set it lighter than its headings. */
+  --markdown-strong-font-weight: 600;
   --markdown-heading-letter-spacing: 0;
 
   --markdown-block-space-between: var(--rome-space-4);

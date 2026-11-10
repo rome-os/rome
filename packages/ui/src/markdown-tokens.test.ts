@@ -171,11 +171,20 @@ describe("Markdown semantic tokens", () => {
     }
   });
 
-  it("tightens the space between blocks for a document, and keeps its type", () => {
-    const document = declarations(markdownCss, ".rome-markdown-document");
-    expectToken(document, "block-space-between", "var(--rome-space-3)");
-    expect(document).not.toContain("font-size");
-    expect(document).not.toContain("line-height");
+  it("sets message prose with small headings, a lighter bold and a tighter rhythm", () => {
+    const message = declarations(markdownCss, ".rome-markdown-message");
+    expectToken(message, "heading-1-font-size", "var(--rome-font-size-17)");
+    expectToken(message, "heading-2-font-size", "var(--rome-font-size-16)");
+    expectToken(message, "heading-3-font-size", "var(--rome-font-size-16)");
+    expectToken(message, "strong-font-weight", "500");
+    expectToken(message, "body-line-height", "var(--rome-line-height-140)");
+    expectToken(message, "block-space-between", "var(--rome-space-3)");
+    // The body keeps its size: a message reads at the same size as other prose.
+    expect(message).not.toContain("--markdown-body-font-size");
+    expectToken(normal, "strong-font-weight", "600");
+    expect(
+      declarations(markdownCss, '.rome-markdown :is(strong, [data-streamdown="strong"])'),
+    ).toContain("font-weight: var(--markdown-strong-font-weight);");
   });
 
   it("rebinds the same tokens for compact mode", () => {
