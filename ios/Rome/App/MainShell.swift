@@ -394,6 +394,10 @@ struct MainShell: View {
     /// Swaps the stack's root with no motion of its own; the drawer's slide is
     /// the only movement the guardian sees.
     private func show(_ picked: MainSection) {
+        // The page left behind stays in the tree (Chat only fades out), so its
+        // composer would keep the keyboard; with the drawer pinned no drawer
+        // opening has taken it first.
+        Keyboard.dismiss()
         var instant = Transaction()
         instant.disablesAnimations = true
         withTransaction(instant) {

@@ -44,7 +44,13 @@ import Testing
         window.frame = CGRect(x: 0, y: 0, width: 1194, height: 834)
         window.rootViewController = host
         window.isHidden = false
-        defer { window.isHidden = true }
+        // The scene holds its windows: let this one go, or the shell keeps
+        // running in the test process after the test.
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
 
         var stacks: [UINavigationController] = []
         for sizeClass in [UIUserInterfaceSizeClass.regular, .compact, .regular] {
