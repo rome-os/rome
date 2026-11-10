@@ -4,6 +4,7 @@ import SwiftUI
 /// device and read Apple Health, what the connection is doing, and the
 /// activity it has answered.
 struct NodeSettingsGroup: View {
+    let onHealth: () -> Void
     let onRequests: () -> Void
     @Environment(AppModel.self) private var model
 
@@ -16,25 +17,24 @@ struct NodeSettingsGroup: View {
                     .tint(Palette.primary)
             }
             .accessibilityElement(children: .combine)
-            // Greyed while the phone is off limits altogether.
-            SettingsRow(systemImage: "heart", title: "Apple Health", last: true) {
-                Toggle("Apple Health", isOn: Binding(get: { node.isHealthEnabled }, set: { on in node.setHealthEnabled(on) }))
-                    .labelsHidden()
-                    .tint(Palette.primary)
-                    .disabled(!node.isEnabled)
+            // Its own page says what the switch does. Dimmed while the phone is off limits, but still opens.
+            let health = HealthRowState(healthOn: node.isHealthEnabled, deviceOn: node.isEnabled)
+            Button(action: onHealth) {
+                SettingsRow(systemImage: "heart", title: "Apple Health") {
+                    HStack(spacing: 6) {
+                        Text(verbatim: health.value).romeFont(17).foregroundStyle(Palette.sub)
+                        Image(systemName: "chevron.right")
+                            .romeFont(13, .semibold)
+                            .foregroundStyle(Palette.sub)
+                    }
+                }
+                .opacity(health.opacity)
             }
-            .opacity(node.isEnabled ? 1 : 0.45)
-            .accessibilityElement(children: .combine)
-            // Health goes to the Rome and its AI model: said where it is switched on.
-            Text("Your Rome and its AI model can read the Health data you allow.")
-                .romeFont(13)
-                .foregroundStyle(Palette.sub)
-                .fixedSize(horizontal: false, vertical: true)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.leading, 58)
-                .padding(.trailing, 14)
-                .padding(.bottom, 12)
-                .overlay(alignment: .bottom) { Rectangle().fill(Palette.hair).frame(height: 0.5) }
+            .buttonStyle(RowPressStyle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Apple Health")
+            .accessibilityValue(Text(verbatim: health.value))
+            .accessibilityAddTraits(.isButton)
             SettingsRow(systemImage: "dot.radiowaves.left.and.right", title: "Status") {
                 HStack(spacing: 6) {
                     Circle().fill(node.status.color).frame(width: 7, height: 7)

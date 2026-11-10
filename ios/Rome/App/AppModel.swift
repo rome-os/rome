@@ -983,6 +983,8 @@ final class AppModel {
     var debugCommand: DebugCommand?
     /// Text size the snapshot runner forces, to check large Dynamic Type.
     var dynamicTypeOverride: DynamicTypeSize?
+    /// The part of the Apple Health page the snapshot runner scrolls to: "where", "end", or the top.
+    var debugHealthScroll: String?
 
     func debugSetPhase(_ phase: Phase) {
         workspace?.stop()

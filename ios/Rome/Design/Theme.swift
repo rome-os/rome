@@ -41,6 +41,8 @@ enum Palette {
     static let runningText = dynamic(0x0069CA, 0x58B0FF)
     static let runningSoft = dynamic(rgba: (0x0089ED, 0.10), (0x39A3FF, 0.16))
     static let success = dynamic(0x5B7A4A, 0x4AC06C)
+    /// Apple's Health pink (system pink): only the heart on the Apple Health page wears it.
+    static let healthPink = dynamic(0xFF2D55, 0xFF375F)
 
     /// Letter tiles of apps with no icon, one per app by its name
     /// (`AppTile.colorIndex`). White letters read on each, light and dark.

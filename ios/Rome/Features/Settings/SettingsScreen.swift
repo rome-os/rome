@@ -108,6 +108,7 @@ struct SettingsRow<Trailing: View>: View {
 struct SettingsScreen: View {
     let workspace: Workspace
     let onInstances: () -> Void
+    let onHealth: () -> Void
     let onRequests: () -> Void
     let onClose: () -> Void
 
@@ -133,7 +134,7 @@ struct SettingsScreen: View {
                     }
                     .padding(.horizontal, 16)
                 }
-                NodeSettingsGroup(onRequests: onRequests)
+                NodeSettingsGroup(onHealth: onHealth, onRequests: onRequests)
                     .padding(.horizontal, 16)
                 SettingsGroup(header: "Other") {
                     SettingsRow(systemImage: "circle.lefthalf.filled", title: "Appearance") {

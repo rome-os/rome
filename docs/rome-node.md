@@ -555,11 +555,17 @@ allow-list has 28 types, which `system.info` names. Any other type is
 `health_off`, `unsupported_action`, `audit_unavailable`, and `health_failed` for
 anything else.
 
-**Settings → iPhone use → Apple Health** is off by default. Health values go to the
-user's Rome and to the AI model behind it, so the user turns this on, and the
-switch carries a line saying so ("Your Rome and its AI model can read the Health
-data you allow"). The choice is kept across launches, and the switch is greyed
-while the phone is off limits. While it is off, `health.stats` and `health.samples`
+**Settings → iPhone use → Apple Health** is a row that shows On or Off and opens the
+Apple Health page. The switch ("Allow Rome to read Health") is on that page and is
+off by default. Health values go to the user's Rome and to the AI model behind it,
+so the page shows what the Rome can do with Health as three short chats, each with
+a request and the Rome's answer in the app's own chat bubbles, and where the data
+goes: from the iPhone to the Rome and on to its AI model provider. Three short
+promises follow. Health is read only when the Rome asks and is never changed. It is
+never sold, used for ads, or used to train AI models. Results can stay in the
+Rome's chats and memory. A link opens the privacy policy. The choice is kept across launches, and the row and the
+switch are dimmed while the phone is off limits (the page still opens). While the
+switch is off, `health.stats` and `health.samples`
 fail with `health_off` before Health is touched, and are still recorded in the
 audit log. The error and the `usage` text in `system.info` tell the agent that the
 user must turn the switch on, on the phone. `system.info` still lists the actions,

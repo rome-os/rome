@@ -26,6 +26,7 @@ enum MainSection: Hashable {
 enum SettingsRoute: Hashable {
     case instances
     case requests
+    case health
 }
 
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
@@ -376,6 +377,7 @@ struct MainShell: View {
             SettingsScreen(
                 workspace: workspace,
                 onInstances: { settingsPath.append(.instances) },
+                onHealth: { settingsPath.append(.health) },
                 onRequests: { settingsPath.append(.requests) },
                 onClose: { showSettings = false }
             )
@@ -388,6 +390,8 @@ struct MainShell: View {
                     })
                 case .requests:
                     NodeRequestsScreen()
+                case .health:
+                    HealthAccessScreen()
                 }
             }
         }
