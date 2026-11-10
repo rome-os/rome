@@ -433,4 +433,131 @@ describe("Share chat", () => {
     const missing = await shareRoutes(deps).request("/share/does-not-exist");
     expect(missing.status).toBe(404);
   });
+
+  describe("in a Concierge chat", () => {
+    // A topic chat and a task chat the Concierge started, each private to the guardian.
+    async function seedConciergeChats(): Promise<void> {
+      await deps.webchatRepo.createSession(
+        "topic",
+        "Trip to Lisbon",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        "core:concierge",
+        "webchat",
+        null,
+        { ownerKey: "guardian" },
+      );
+      await deps.webchatRepo.createSession(
+        "task",
+        "Book a hotel",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        null,
+        "webchat",
+        null,
+        { ownerKey: "guardian" },
+      );
+      await deps.webchatRepo.setSessionTrigger("task", {
+        triggerKind: "concierge",
+        triggerName: "Task",
+      });
+      for (const chat of ["topic", "task"]) {
+        await deps.webchatRepo.addMessage(
+          `${chat}-u`,
+          chat,
+          "user",
+          JSON.stringify([{ type: "text", content: "Plan my trip" }]),
+          `${chat}-turn`,
+        );
+        await deps.webchatRepo.addMessage(
+          `${chat}-a`,
+          chat,
+          "assistant",
+          JSON.stringify([
+            { type: "reply_to", messageId: `${chat}-u`, author: "guardian", text: "Plan my trip" },
+            { type: "text", content: "## Day **one**\nWalk the Alfama." },
+            { type: "task_chat", chatId: "task", title: "Book a hotel" },
+            { type: "text", content: "Day two: Belém." },
+          ]),
+          `${chat}-turn`,
+        );
+        await deps.webchatRepo.addMessage(`${chat}-trace`, chat, "trace", "[]", `${chat}-turn`);
+      }
+    }
+
+    const shareTurns = (manage: ReturnType<typeof createWebchatRuntime>["routes"], id: string) =>
+      manage.request(`/chat/sessions/${id}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ turnIds: [`${id}-turn`] }),
+      });
+
+    it("refuses whole-chat sharing in a main or topic chat, and keeps it in a task chat", async () => {
+      await seedConciergeChats();
+      const manage = createWebchatRuntime(deps).routes;
+
+      expect((await shareTurns(manage, "topic")).status).toBe(403);
+      expect(await deps.webchatRepo.listSharedChatsBySession("topic")).toEqual([]);
+      expect((await shareTurns(manage, "task")).status).toBe(201);
+    });
+
+    it("shares one message's text alone, and lists and revokes it with the chat's shares", async () => {
+      await seedConciergeChats();
+      const manage = createWebchatRuntime(deps).routes;
+
+      const createRes = await manage.request("/chat/sessions/topic/messages/topic-a/share", {
+        method: "POST",
+      });
+      expect(createRes.status).toBe(201);
+      const created = (await createRes.json()) as { id: string; url: string; title: string };
+      expect(created.url).toBe(`/share/${created.id}`);
+      // Named by the message, not by the chat.
+      expect(created.title).toBe("Day one");
+
+      const payload = (await (
+        await shareRoutes(deps).request(`/share/${created.id}`)
+      ).json()) as PublicSharePayload;
+      expect(payload.layout).toEqual([]);
+      expect(payload.snapshot.traces).toEqual({});
+      expect(payload.snapshot.messages).toHaveLength(1);
+      const [message] = payload.snapshot.messages;
+      expect(message?.id).toBe("topic-a");
+      expect(message?.role).toBe("assistant");
+      // The quote and the task card stay behind; only the text parts go.
+      expect(JSON.parse(message?.content ?? "")).toEqual([
+        { type: "text", content: "## Day **one**\nWalk the Alfama.\n\nDay two: Belém." },
+      ]);
+      expect(JSON.stringify(payload)).not.toContain("Trip to Lisbon");
+
+      // The chat's messages after the share leave the link as it was.
+      await deps.webchatRepo.addMessage("later", "topic", "user", "Add day three", "later-turn");
+      const again = (await (
+        await shareRoutes(deps).request(`/share/${created.id}`)
+      ).json()) as PublicSharePayload;
+      expect(again.snapshot).toEqual(payload.snapshot);
+
+      const list = (await (await manage.request("/chat/sessions/topic/shares")).json()) as Array<{
+        id: string;
+      }>;
+      expect(list.map((s) => s.id)).toEqual([created.id]);
+      expect(
+        (await manage.request(`/chat/shares/${created.id}`, { method: "DELETE" })).status,
+      ).toBe(200);
+      expect((await shareRoutes(deps).request(`/share/${created.id}`)).status).toBe(404);
+    });
+
+    it("refuses a trace row, a message of another chat, and an unknown message", async () => {
+      await seedConciergeChats();
+      const manage = createWebchatRuntime(deps).routes;
+      const share = (path: string) => manage.request(path, { method: "POST" });
+
+      expect((await share("/chat/sessions/topic/messages/topic-trace/share")).status).toBe(404);
+      expect((await share("/chat/sessions/topic/messages/task-a/share")).status).toBe(404);
+      expect((await share("/chat/sessions/topic/messages/nope/share")).status).toBe(404);
+    });
+  });
 });

@@ -280,6 +280,34 @@ export interface NewChatBody {
   deviceFolder?: { deviceId?: unknown; path?: unknown } | null;
 }
 
+/**
+ * The text a shared message carries: its text parts joined, read the way the
+ * dashboard reads stored content (a non-JSON string is one text part). Cards,
+ * quotes and every other part are dropped, since they name tasks, threads or
+ * approvals of a chat the link does not open.
+ */
+function shareableMessageText(content: string): string {
+  let parts: unknown;
+  try {
+    parts = JSON.parse(content);
+  } catch {
+    return content.trim();
+  }
+  if (!Array.isArray(parts)) return content.trim();
+  return parts
+    .filter(
+      (part): part is { type: "text"; content: string } =>
+        !!part &&
+        typeof part === "object" &&
+        (part as { type?: unknown }).type === "text" &&
+        typeof (part as { content?: unknown }).content === "string",
+    )
+    .map((part) => part.content)
+    .filter((piece) => piece.trim())
+    .join("\n\n")
+    .trim();
+}
+
 function isStoredWebchatSession(session: StoredWebchatSession): boolean {
   return session.type === "webchat";
 }
@@ -2905,6 +2933,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
     const { session } = lookup;
+    // A Concierge chat mixes chat threads, task reports and digests, so a turn
+    // is the wrong unit to share from it: its owner shares one message instead.
+    if (isConciergeChat(session)) {
+      return c.json({ error: "A Concierge chat can't be shared. Share one message instead." }, 403);
+    }
 
     const body = await c.req
       .json<{ turnIds?: unknown; title?: unknown; layout?: unknown }>()
@@ -2941,6 +2974,56 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       snapshot: JSON.stringify(snapshot),
       layout: JSON.stringify(layout),
       projectPath,
+    });
+    return c.json({ id, url: `/share/${id}`, title }, 201);
+  });
+
+  // One message as a link, from any dashboard chat. The snapshot keeps the
+  // message's text parts and nothing else: no other message, no trace, no
+  // cards, no workspace tiles, and a title from the message itself rather
+  // than the chat's name. It lists and revokes as the chat's other shares do.
+  app.post("/chat/sessions/:id/messages/:messageId/share", async (c) => {
+    const sessionId = c.req.param("id");
+    const messageId = c.req.param("messageId");
+    const lookup = await getTopLevelWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+
+    const row = (await deps.webchatRepo.getMessages(sessionId)).find((m) => m.id === messageId);
+    if (!row || (row.role !== "user" && row.role !== "assistant")) {
+      return c.json({ error: "Message not found" }, 404);
+    }
+    const text = shareableMessageText(row.content);
+    if (!text) return c.json({ error: "The message has no text to share" }, 400);
+
+    const snapshot: ChatShareSnapshot = {
+      mainSessionId: sessionId,
+      messages: [
+        {
+          id: row.id,
+          sessionId: row.sessionId,
+          turnId: row.turnId,
+          role: row.role,
+          content: JSON.stringify([{ type: "text", content: text }]),
+          createdAt: row.createdAt.toISOString(),
+        },
+      ],
+      traces: {},
+    };
+    const firstLine = text.split("\n").find((line) => line.trim()) ?? "";
+    const title = firstLine
+      .replace(/^[\s#>*-]+/, "")
+      .replace(/\*\*|__|`/g, "")
+      .trim()
+      .slice(0, 120);
+
+    const id = generateShareToken();
+    await deps.webchatRepo.createSharedChat({
+      id,
+      sessionId,
+      title,
+      snapshot: JSON.stringify(snapshot),
+      layout: "[]",
+      projectPath: null,
     });
     return c.json({ id, url: `/share/${id}`, title }, 201);
   });

@@ -103,6 +103,7 @@ A dashboard chat where its owner talks with their Concierge: a [main chat](#main
 - The Concierge reads another Concierge chat of the same owner when the question needs it, and not on every turn. What it keeps across chats is what it writes to memory, follows and tasks.
 - While the Concierge is on, the guardian and every visitor on the dashboard allow-list each have their own Concierge. App users have none.
 - A Concierge chat is private to its owner: to anyone else, the guardian included, it does not exist. So is a fork or a subagent session of it, or of a task chat it started, from the moment it is made.
+- Its owner shares one message of it as a [share link](#share-link), never the chat or its turns.
 - Its follows and unfinished tasks go to its owner's main chat when it is archived or deleted, and everything that reported to it stays its owner's.
 - A visitor dropped from the dashboard allow-list keeps their Concierge chats and follows, but their Concierge tells them nothing until they are back on the list.
 - Each follow sends its alerts to one Concierge chat: the one it was followed from, until its owner **moves** it to another. One owner follows one thing once, whatever chat asks for it. Two owners may follow the same thing, and each hears it.
@@ -165,6 +166,15 @@ One thing a participant said or did in a chat.
 - Every message reads as plain text, so any person on any platform, and any agent, can follow the chat. A widget brings its own plain-text line.
 - Acting on a widget is a message of its own, from whoever did it, in the place the widget is in. It says what they meant, such as answering Q3, approving or picking a place, not how they did it: a button on one platform may be a typed reply on another. Without it, someone reading the chat later could not tell what was chosen.
 - A delegate's reply is recorded as said by the agent on the guardian's behalf, under the guardian's account.
+
+## Share link
+
+A read-only copy of part of a dashboard chat, which anyone with its link can open at `/share/<token>` without signing in.
+
+- What can be shared depends on the chat. A common chat, a fork chat and a task chat share chosen turns, from Share chat in the chat's menu, or one message. A [Concierge chat](#concierge-chat) shares one message only, and offers no Share chat.
+- A shared message carries its own text and nothing else from the chat: no other message, no trace, no card, no quote it replies to, no chat thread or task, and no workspace panel. It is titled by its own first line, not by the chat's name.
+- A link is a snapshot made when it is shared. What is said or changed in the chat later does not reach it.
+- A chat's links are listed with it, and its owner revokes any of them. A revoked link opens nothing, and deleting the chat removes its links.
 
 ## Delivery
 
@@ -246,6 +256,7 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 
 ## Decided against
 
+- **Sharing a Concierge chat by its turns.** Its turns mix several chat threads, task reports and digests, and the chat is private to its owner, so a set of turns is the wrong unit. What an owner shares from it is one answer, such as a trip plan.
 - **A New chat button, pinned chats and pinned projects at the top of the chat list.** They showed the same ideas twice beside the main chat, and a person had to choose between the Concierge and a new chat for every request. The main chat is where a person talks to Rome, and a common chat starts from Projects.
 - **Task chats out of the chat list.** The guardian lost sight of work running on their behalf, and the task list and cards were the only way back to it.
 - **Channel as a thing the guardian meets, with its own identity and lifetime.** A channel is one to one with a connected account, so the two words name one thing and the guardian only ever sees the account. Its jobs went to account, connection, connected account and chat. The code's channel layer ([Channels](../architecture/channels.md)) is retired as those words replace it.
