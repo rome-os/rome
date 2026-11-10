@@ -313,8 +313,45 @@ const turn = (
 // chats that mention it, and "brief" matches one title *and* its transcript,
 // which is the session that keeps its title rank and gains a snippet.
 const transcripts: Record<string, ChatMessage[]> = {
-  // The main Concierge chat opens empty, on its starters.
-  [CONCIERGE_CHAT_ID]: [],
+  [CONCIERGE_CHAT_ID]: turn(
+    CONCIERGE_CHAT_ID,
+    1,
+    "2026-08-05T08:42:00.000Z",
+    "Draft the launch email and let Ray know about the plumber.",
+    [
+      { type: "task_chat", chatId: "mock-task-question", title: "Draft launch email" },
+      { type: "task_chat", chatId: "mock-chat-4", title: "Plumber for the leak" },
+    ],
+  ),
+  "mock-task-question": turn(
+    "mock-task-question",
+    1,
+    "2026-08-05T08:41:00.000Z",
+    "Draft the launch email.",
+    [
+      {
+        type: "pending_interaction",
+        toolUseId: "mock-task-tone",
+        appId: "core",
+        render: {
+          kind: "inline",
+          builtin: true,
+          componentId: "question-card",
+          props: {
+            questions: [
+              {
+                id: "tone",
+                question: "Which tone should the launch email use?",
+                type: "single",
+                options: ["Warm", "Plain"],
+                freeText: true,
+              },
+            ],
+          },
+        },
+      },
+    ],
+  ),
   ...Object.fromEntries(
     curatedChats.map((chat) => [
       chat.id,
@@ -784,6 +821,11 @@ const chatSessions: ChatSession[] = [
   },
   { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true, model: "gemini-2.5-pro" },
   { ...session("mock-chat-4", "Plumber for the leak"), awaitingGuardian: true },
+  {
+    ...session("mock-task-question", "Draft launch email"),
+    awaitingGuardian: true,
+    triggerKind: "concierge",
+  },
   // A chat that works in a folder on another computer groups under that folder.
   {
     ...session("mock-chat-device-folder", "Fix the flaky e2e test"),

@@ -525,6 +525,32 @@ describe("Concierge tools", () => {
     expect(await buildConciergeTools(on.service, on.context("core:main"))).toEqual([]);
   });
 
+  it("uses task cards as the needs_user anchor for task questions and approvals", async () => {
+    const s = setup();
+    const tools = await buildConciergeTools(s.service, s.context());
+    const upsert = tools.find((tool) => tool.name === "task_upsert")!;
+    const schema = upsert.inputSchema as {
+      properties: { tasks: { items: { properties: { messageId: { description: string } } } } };
+    };
+    for (const description of [
+      upsert.description,
+      schema.properties.tasks.items.properties.messageId.description,
+    ]) {
+      expect(description).toContain("show a task question or approval with chat_card");
+      expect(description).toContain("otherwise ask with say or chat_forward");
+      expect(description).toContain("Use the returned messageId as the row anchor");
+    }
+    const card = tools.find((tool) => tool.name === "chat_card")!;
+    expect(card.description).toContain("for a task question or approval");
+    expect(card.description).toContain("returned messageId as the needs_user row anchor");
+    expect(card.description).toContain(
+      "An existing task row automatically points to this card in this Concierge chat",
+    );
+    expect(schema.properties.tasks.items.properties.messageId.description).toContain(
+      "chat_card and chat_forward update this anchor automatically",
+    );
+  });
+
   it("say posts one message under the running turn", async () => {
     const s = setup();
     await s.tool("say", { text: "on it" });
@@ -1389,6 +1415,57 @@ describe("Concierge task anchors", () => {
     expect(await s.taskRepo.listForAgent(true)).toEqual([]);
   });
 
+  it("repeated chat_card re-anchors a needs_user row without another task_upsert", async () => {
+    const s = setup();
+    const { chatId, taskId } = text(
+      await s.tool("chat_start", { title: "Flights", brief: "Find flights" }),
+    );
+    const first = text(await s.tool("chat_card", { chatId })).messageId;
+    expect(
+      (
+        await s.tool("task_upsert", {
+          tasks: [{ id: taskId, state: "needs_user", messageId: first, summary: "Pick a flight" }],
+        })
+      ).isError,
+    ).toBeFalsy();
+    expect(await anchorOf(s, taskId)).toBe(first);
+    const second = text(await s.tool("chat_card", { chatId })).messageId;
+    expect(second).not.toBe(first);
+    expect(await anchorOf(s, taskId)).toBe(second);
+    expect(await s.taskRepo.get(taskId)).toMatchObject({
+      state: "needs_user",
+      summary: "Pick a flight",
+    });
+  });
+
+  it("chat_card shows a task without a row without creating one", async () => {
+    const s = setup();
+    const chatId = await s.chats.startChat({}, "guardian");
+    await s.deps.webchatRepo.setSessionTrigger(chatId, {
+      triggerKind: TASK_CHAT_TRIGGER_KIND,
+      triggerName: null,
+    });
+    const result = await s.tool("chat_card", { chatId });
+    expect(result.isError).toBeFalsy();
+    expect(text(result)).toMatchObject({ sent: expect.any(String), messageId: expect.any(String) });
+    expect(await s.taskRepo.findBySession(chatId)).toBeNull();
+    expect(await s.taskRepo.listForAgent(true)).toEqual([]);
+  });
+
+  it("anchors needs_user to chat_card rather than an introductory say", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    await s.tool("say", { text: "The task needs your input." });
+    const { messageId } = text(await s.tool("chat_card", { chatId: "task-1" }));
+    const task = (await s.taskRepo.findBySession("task-1"))!;
+    const result = await s.tool("task_upsert", {
+      tasks: [{ id: task.id, state: "needs_user", messageId }],
+    });
+    expect(result.isError).toBeFalsy();
+    expect(await anchorOf(s, task.id)).toBe(messageId);
+    expect((await s.taskRepo.get(task.id))?.state).toBe("needs_user");
+  });
+
   it("points a new row at the latest thing the Concierge said this turn", async () => {
     const s = setup({ said: false });
     await s.tool("say", { text: "First" });
@@ -1461,7 +1538,7 @@ describe("Concierge task anchors", () => {
     });
     expect(create.isError).toBe(true);
     expect(create.content[0].text).toContain(
-      "tasks[1]: needs_user requires messageId: say or chat_forward the ask first",
+      "tasks[1]: needs_user requires messageId: show a task question or approval with chat_card",
     );
     const update = await s.tool("task_upsert", { tasks: [{ id, state: "needs_user" }] });
     expect(update.isError).toBe(true);

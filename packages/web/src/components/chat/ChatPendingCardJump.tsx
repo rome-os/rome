@@ -29,10 +29,13 @@ export function ChatPendingCardJump({
       // Cards mark their live state: transcript JSON cannot tell a draft from
       // a routine that was already turned on, or an approval resolved elsewhere.
       const cards = content.querySelectorAll<HTMLElement>("[data-chat-pending-card]");
-      // Only an approval waits across turns, since the server holds it until it
-      // is resolved. Any other card stops counting once a newer turn starts.
+      // Approvals and waiting task cards outlive the main Chat's current reply.
+      // Other cards stop counting once a newer turn starts.
       const next = Array.from(cards).find((card) => {
-        if (card.dataset.chatPendingCard !== "approval") {
+        if (
+          card.dataset.chatPendingCard !== "approval" &&
+          !card.closest("[data-chat-task-waiting]")
+        ) {
           const messageId = card.closest<HTMLElement>("[data-chat-card-message]")?.dataset
             .chatCardMessage;
           if (!messageId || !currentReplyMessageIds.has(messageId)) return false;
@@ -54,7 +57,11 @@ export function ChatPendingCardJump({
       subtree: true,
       childList: true,
       attributes: true,
-      attributeFilter: ["data-chat-pending-card", "data-chat-card-message"],
+      attributeFilter: [
+        "data-chat-pending-card",
+        "data-chat-card-message",
+        "data-chat-task-waiting",
+      ],
     });
     scroller.addEventListener("scroll", schedule, { passive: true });
     schedule();
