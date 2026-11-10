@@ -2,6 +2,7 @@ import { and, eq, inArray, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { routineRuns, routines } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
+import { actorOfOwner } from "../../access/owner-actor.js";
 import {
   currentSessionActor,
   guardianActor,
@@ -44,18 +45,30 @@ export function publicRoutineRow<T extends RoutineRow>(row: T): Omit<T, "created
 }
 
 /**
- * Who a routine created now acts for. An app's routine, or one `"guardian"`
- * names, is the guardian's. Otherwise the person of the action or request
- * creating it; an action that acts for no one (a turn with more than one
- * person's input) makes it act for no one. Core work outside any action,
- * with no person, is the guardian's.
+ * Who a routine its creator names for a person serves, by owner key
+ * ("guardian", "visitor:<account>"), such as a Concierge's digest.
+ */
+export interface RoutineOwner {
+  owner: string;
+}
+
+/**
+ * Who a routine created now acts for. One that names its person, or an
+ * owner (as {@link RoutineOwner}), acts for them. An app's routine is the
+ * guardian's. Otherwise the person of the action or request creating it; an
+ * action that acts for no one (a turn with more than one person's input)
+ * makes it act for no one. Core work outside any action, with no person, is
+ * the guardian's.
  */
 export async function routineCreator(
   db: DrizzleDb,
-  given: { createdBy?: SessionActor | "guardian"; managedBy?: string },
+  given: { createdBy?: SessionActor | RoutineOwner; managedBy?: string },
 ): Promise<SessionActor | null> {
-  if (given.createdBy !== undefined && given.createdBy !== "guardian") return given.createdBy;
-  if (given.createdBy === "guardian" || given.managedBy) return (await guardianActor(db)) ?? null;
+  if (given.createdBy && "owner" in given.createdBy) {
+    return (await actorOfOwner(db, given.createdBy.owner)) ?? { kind: "anonymous" };
+  }
+  if (given.createdBy !== undefined) return given.createdBy;
+  if (given.managedBy) return (await guardianActor(db)) ?? null;
   const store = actionExecutionContext.getStore();
   if (store) return store.actor ?? { kind: "anonymous" };
   return (await currentSessionActor()) ?? (await guardianActor(db)) ?? null;
@@ -181,7 +194,7 @@ export class RoutinesRepository {
     nextRunAt?: Date;
     keepTriggerPayload?: boolean;
     /** Who its fires act for; absent, {@link routineCreator} decides. */
-    createdBy?: SessionActor | "guardian";
+    createdBy?: SessionActor | RoutineOwner;
   }): Promise<string> {
     const id = uuid();
     const now = new Date();

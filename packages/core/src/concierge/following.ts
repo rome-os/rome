@@ -825,9 +825,9 @@ export function startConciergeFollowing(
             trigger,
             actionName: CONCIERGE_DIGEST_ACTION,
             args,
-            // The Concierge's own machinery: it acts for no person, whoever's
+            // It acts for the person whose Concierge it serves, whoever's
             // request set the digest times.
-            createdBy: "guardian",
+            createdBy: { owner },
           });
       if (existing) await deps.routines.update(id, { trigger, args, enabled: true });
       await reactivate(id);
@@ -906,7 +906,10 @@ export function startConciergeFollowing(
           actionName: CONCIERGE_FOLLOW_ACTION,
           args,
           keepTriggerPayload: false,
-          createdBy: "guardian",
+          // One watcher serves every owner who follows this target, so it
+          // acts for no one person. What it finds goes to each owner's own
+          // Concierge chat, which is private to them.
+          createdBy: { kind: "anonymous" },
         });
       }
       await reactivate(id);

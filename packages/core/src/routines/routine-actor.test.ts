@@ -11,7 +11,7 @@ import { sendForCaller } from "../apps/actions/caller-notify.js";
 import { privateOwnerOf } from "../concierge/privacy.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
-import { guardianAuth, routines as routinesTable } from "../db/schema.js";
+import { guardianAuth, routines as routinesTable, visitorProfiles } from "../db/schema.js";
 import type { SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/db.js";
@@ -159,6 +159,39 @@ describe("a reminder's push", () => {
     }
     expect(JSON.stringify(await routines.listRoutines())).not.toContain("acct-v");
     expect(await routines.creatorOf(id)).toEqual(visitor);
+  });
+
+  it("fires a visitor's Concierge digest as that visitor, and the guardian's as the guardian", async () => {
+    await testDb.db
+      .insert(visitorProfiles)
+      .values({ accountId: "acct-v", email: "v@example.com", updatedAt: new Date() });
+    const fired: unknown[] = [];
+    const digestEngine = new RoutineEngine(
+      routines,
+      new RoutineRunsRepository(testDb.db),
+      {
+        run: async (_name: string, _args: unknown, context?: ActionRunContext) => {
+          fired.push(context?.actor);
+          return { status: "ok", data: null };
+        },
+      } as unknown as ActionEngine,
+      0,
+      systemClock,
+    );
+    const digest = (owner: string) =>
+      routines.create({
+        name: "Concierge digest at 09:00",
+        trigger: remindAt5.trigger,
+        actionName: "core:concierge_digest",
+        args: { owner },
+        createdBy: { owner },
+      });
+    await digestEngine.runNow(await digest("visitor:acct-v"));
+    await digestEngine.runNow(await digest("guardian"));
+    expect(fired).toEqual([
+      { kind: "visitor", accountId: "acct-v", email: "v@example.com" },
+      { kind: "guardian", userId: "seat-1", via: "loopback" },
+    ]);
   });
 
   it("rings a legacy routine's chat owner", async () => {
