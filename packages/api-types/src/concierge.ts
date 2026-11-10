@@ -1,6 +1,8 @@
 // Wire types of the Concierge task panel, the assistant's own todo list. The
 // server is packages/core/src/concierge and the client is packages/web.
 
+import type { ConciergeActivity } from "./concierge-activity.js";
+
 /** What a task row is doing. The Concierge sets it; the system never derives it. */
 export const CONCIERGE_TASK_STATES = [
   "next",
@@ -29,6 +31,11 @@ export interface ConciergeChatRef {
 export interface ConciergeChatDto extends ConciergeChatRef {
   /** Agent messages since the guardian last read the chat, at most the server's cap. */
   unread: number;
+  /**
+   * What the chat is doing now, as the `concierge.activity` live-events topic
+   * says it, so a fresh load starts right. Absent from servers before it.
+   */
+  activity?: ConciergeActivity;
 }
 
 /** `GET /api/concierge/chats`: the main chat first, then the topic chats, oldest first. */

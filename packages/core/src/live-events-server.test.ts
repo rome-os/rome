@@ -153,6 +153,15 @@ describe("live events WebSocket", () => {
         track(runtime.subscribeSessionEvents(sessionId, emit)),
       subscribeAppCatalog: (emit) => track(subscribeCatalogChanges(catalog, emit)),
       subscribeConciergeTasks: (owner, emit) => track(conciergeTasks.subscribe(emit, owner)),
+      // Each owner's one chat, told on subscribe, as the activity tracker does.
+      subscribeConciergeActivity: (owner, emit) => {
+        emit("concierge_activity", {
+          chatId: owner === "guardian" ? "concierge" : "visitor-main",
+          activity: { kind: "idle" },
+          at: 1,
+        });
+        return track(() => {});
+      },
     };
     server = createServer();
     dashboardAccess = new DashboardAccessState();
@@ -290,6 +299,12 @@ describe("live events WebSocket", () => {
     expect(
       await client.next((m) => m.type === "event" && m.topic === "concierge.tasks"),
     ).toMatchObject({ data: { task: { id: mine.id, title: "Mine" } } });
+
+    // concierge.activity tells the visitor about their own chats only.
+    await client.subscribe("concierge.activity");
+    expect(
+      await client.next((m) => m.type === "event" && m.topic === "concierge.activity"),
+    ).toMatchObject({ event: "concierge_activity", data: { chatId: "visitor-main" } });
   });
 
   it("pushes each write to the Concierge's todo list on concierge.tasks", async () => {

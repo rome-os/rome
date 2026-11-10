@@ -740,6 +740,12 @@ interface ActiveWebchatStream {
   persistedTraceEventCount: number;
   tracePersistPromise: Promise<void> | null;
   segmentBuilder: SegmentBuilder;
+  /**
+   * The turn's tool calls whose results have not come back, by call id, in
+   * the order they started. A call without an id is keyed by its position
+   * and closes at the next result without one.
+   */
+  openTools: Map<string, string>;
   subscribers: Map<string, StreamSubscriber>;
   cleanupTimer: ReturnType<typeof setTimeout> | null;
   onFinish: Promise<void>;
@@ -805,6 +811,16 @@ export interface WebchatRuntime {
   sendAsGuardian(chatId: string, text: string): Promise<void>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
+  /**
+   * The tool the chat's running turn is in now: its latest call whose result
+   * has not come back, as the trace names it. Null when it is in none.
+   */
+  openTool(sessionId: string): string | null;
+  /**
+   * Calls `listener` with the chat's id whenever it starts or stops running a
+   * turn, or its running turn enters or leaves a tool. Returns the unsubscribe.
+   */
+  onTurnChange(listener: (sessionId: string) => void): () => void;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
   activeTurns(sessionId: string): string[];
   /** Stop a turn. A turn that already ended is not an error. */
@@ -858,11 +874,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     deps.agentTurnStreamRegistry.listBySession(sessionId).length > 0;
   // Sessions running right now, so a status stream can open with a snapshot.
   const runningSessions = new Set<string>();
+  /** Listeners told when a session's running turn changes in any way, tools included. */
+  const turnListeners = new Set<(sessionId: string) => void>();
+  const notifyTurn = (sessionId: string): void => {
+    for (const listener of turnListeners) listener(sessionId);
+  };
   const notifyRunning = (sessionId: string): void => {
     const event = { sessionId, running: isSessionRunning(sessionId) };
     if (event.running) runningSessions.add(sessionId);
     else runningSessions.delete(sessionId);
     for (const listener of runningListeners) listener(event);
+    notifyTurn(sessionId);
+  };
+  // The latest open call of the session's newest unfinished stream.
+  const openTool = (sessionId: string): string | null => {
+    const streams = (activeStreams.get(sessionId) ?? []).filter((stream) => !stream.finished);
+    const tools = [...(streams.at(-1)?.openTools.values() ?? [])];
+    return tools.at(-1) ?? null;
   };
   deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
   const subscribeStatusEvents = (emit: LiveEventEmit): (() => void) => {
@@ -1950,6 +1978,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
   };
 
+  // Keeps `stream.openTools` in step with a trace block, and answers whether
+  // it changed.
+  const trackOpenTool = (
+    stream: ActiveWebchatStream,
+    block: ReturnType<typeof toTraceEvent>,
+  ): boolean => {
+    if (block.type === "tool_use") {
+      stream.openTools.set(block.id ?? `anon:${stream.openTools.size}`, block.tool);
+      return true;
+    }
+    if (block.type !== "tool_result") return false;
+    if (block.toolUseId) return stream.openTools.delete(block.toolUseId);
+    const anon = [...stream.openTools.keys()].reverse().find((key) => key.startsWith("anon:"));
+    return anon ? stream.openTools.delete(anon) : false;
+  };
+
   // Push an AgentEvent through the segment builder and emit segment_upsert
   // events for any segments whose payload changed, plus a refreshed summary.
   const emitLiveTraceEvent = (
@@ -1957,6 +2001,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     msg: TraceableEvent & { agent?: string },
   ): void => {
     const block = toTraceEvent(msg);
+    if (trackOpenTool(stream, block)) notifyTurn(stream.sessionId);
     const changed = stream.segmentBuilder.push(block);
     for (const seg of changed) {
       emitToStream(stream, "segment_upsert", seg, `seg:${seg.id}`);
@@ -2046,6 +2091,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       persistedTraceEventCount: 0,
       tracePersistPromise: null,
       segmentBuilder,
+      openTools: new Map(),
       subscribers: new Map(),
       cleanupTimer: null,
       onFinish,
@@ -4676,6 +4722,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     },
     isRunning: isSessionRunning,
+    openTool,
+    onTurnChange(listener) {
+      turnListeners.add(listener);
+      return () => {
+        turnListeners.delete(listener);
+      };
+    },
     activeTurns: (sessionId) =>
       sessionTurns(sessionId).map(
         (turn) => ("agentTurnId" in turn ? turn.agentTurnId : undefined) ?? turn.turnId,

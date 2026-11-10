@@ -11,7 +11,7 @@ import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
 import { requestConciergeJump } from "@/components/concierge/concierge-jump";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
-import type { ConciergeActivity } from "@/components/concierge/concierge-activity";
+import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
 import { SlotProvider, useSlotOutlet } from "@/components/slot";
 import { CONCIERGE_LEADING_SLOT } from "@/components/concierge/ConciergeHeaderStatus";
 import { ToolTasksContext, type ToolTasksHost } from "@/pages/free/tool-tasks";

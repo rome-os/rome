@@ -4,6 +4,7 @@
 // one reminder turn.
 
 import type { AgentTurnFailure, AgentTurnFinishedEvent } from "@rome-os/app-runtime";
+import { CONCIERGE_DONE_DAYS } from "@rome/api-types/concierge";
 import type { AgentTurnFailedBeforeStart, TurnListeners } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
@@ -15,6 +16,8 @@ import {
 } from "./service.js";
 import { hasText, latestSaid, taskChatPlace } from "./task-chat.js";
 import { type DirtyTask, TaskEventCoalescer, type TaskEventDelivery } from "./task-events.js";
+import { ConciergeActivityTracker } from "./activity.js";
+import { isConciergeChat } from "./privacy.js";
 import { openQuestion } from "./transcript.js";
 
 import { failoverReason } from "./failover-reason.js";
@@ -189,6 +192,8 @@ export function startConciergeEvents(
     giveUp: (taskId) => tasks.markNotSynced(taskId),
   });
   service.attachTaskEvents(coalescer);
+
+  const activity = startActivity(service, coalescer);
 
   const onConciergeTurn = async (event: AgentTurnFinishedEvent, chatId: string) => {
     // Read before any await: the reminder's own finish event fires while the
@@ -385,8 +390,125 @@ export function startConciergeEvents(
 
   return () => {
     for (const unsubscribe of unsubscribers) unsubscribe();
+    activity();
     coalescer.stop();
     service.attachTaskEvents(null);
     service.attachFailedBeforeStart(null);
+  };
+}
+
+/** How many sessions the activity remembers the Concierge chat of before it forgets them all. */
+const MOVED_BY_CACHE_LIMIT = 5_000;
+
+/**
+ * Starts telling each Concierge chat's activity (activity.ts): its own turn
+ * and the tool it is in, cards and approvals, its task chats, and the results
+ * the coalescer is about to report. Returns the stop.
+ */
+function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer): () => void {
+  const { tasks, webchatRepo, approvals } = service.deps;
+  const running = (chatId: string): boolean => {
+    try {
+      return service.dashboard.chats.isRunning(chatId);
+    } catch {
+      return false;
+    }
+  };
+
+  // Which Concierge chat each session moves. A task chat's row can be written
+  // after the chat starts, so a row write forgets its session's answer.
+  const movedBy = new Map<string, string[]>();
+  const chatOfTask = async (taskId: string): Promise<string | null> =>
+    (await tasks.repo.getWithChat(taskId))?.conciergeChat.id ?? null;
+
+  const tracker = new ConciergeActivityTracker({
+    now: () => Date.now(),
+    isRunning: running,
+    openTool: (chatId) => {
+      try {
+        return service.dashboard.chats.openTool(chatId);
+      } catch {
+        return null;
+      }
+    },
+    awaitingGuardianOf: (chatIds) => webchatRepo.awaitingGuardianOf(chatIds),
+    tasksOf: async (chatId) => {
+      const since = new Date(Date.now() - CONCIERGE_DONE_DAYS * 24 * 60 * 60 * 1000);
+      return (await tasks.repo.listForPanel(since))
+        .filter((task) => task.conciergeChat.id === chatId)
+        .map((task) => ({
+          id: task.row.id,
+          title: task.row.title,
+          chatId: task.chat?.id ?? null,
+          updatedAt: task.row.updatedAt.getTime(),
+        }));
+    },
+    reportPending: () => coalescer.awaitingReport,
+    ownerOf: async (chatId) =>
+      (await service.conciergeChat(chatId)) ? await service.ownerOfChat(chatId) : null,
+    chatsOf: async (owner) => (await service.listChats(owner)).map((chat) => chat.id),
+    chatsMovedBy: async (sessionId) => {
+      const known = movedBy.get(sessionId);
+      if (known) return known;
+      const chat = await webchatRepo.getSession(sessionId);
+      if (!chat) return [];
+      let moved: string[] = [];
+      if (isConciergeChat(chat)) {
+        moved = [chat.id];
+      } else if (chat.triggerKind === TASK_CHAT_TRIGGER_KIND) {
+        const row = await tasks.repo.findBySession(sessionId);
+        const target = row ? await chatOfTask(row.id) : null;
+        if (target) moved = [target];
+      }
+      if (movedBy.size >= MOVED_BY_CACHE_LIMIT) movedBy.clear();
+      movedBy.set(sessionId, moved);
+      return moved;
+    },
+  });
+  service.attachActivity(tracker);
+
+  const guard = (work: Promise<void>) =>
+    work.catch((error: unknown) =>
+      log.warn("concierge activity update failed", {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  const sessionChanged = (sessionId: string) => void guard(tracker.sessionChanged(sessionId));
+  const approvalChanged = (approval: { payload: unknown }) => {
+    const threadId = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
+      ?.channelContext?.threadId;
+    if (typeof threadId === "string") sessionChanged(threadId);
+  };
+
+  // The rows about to be reported, so a row that stops being one moves its chat too.
+  let reporting = new Set<string>();
+  const reportChanged = () => {
+    const now = new Set(coalescer.awaitingReport);
+    const changed = [...new Set([...reporting, ...now])].filter(
+      (taskId) => reporting.has(taskId) !== now.has(taskId),
+    );
+    reporting = now;
+    for (const taskId of changed) {
+      void guard(
+        chatOfTask(taskId).then((chatId) => (chatId ? tracker.refresh(chatId) : undefined)),
+      );
+    }
+  };
+
+  const unsubscribers = [
+    service.watchTurns(sessionChanged),
+    webchatRepo.onMessageInserted((message) => sessionChanged(message.sessionId)),
+    approvals.onCreated(approvalChanged),
+    approvals.onResolved(approvalChanged),
+    tasks.repo.onChange(({ row, conciergeChat }) => {
+      if (row.sessionId) movedBy.delete(row.sessionId);
+      void guard(tracker.refresh(conciergeChat.id));
+    }),
+    coalescer.onChange(reportChanged),
+  ];
+  return () => {
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    tracker.stop();
+    service.attachActivity(null);
   };
 }

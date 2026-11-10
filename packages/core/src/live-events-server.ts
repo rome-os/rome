@@ -5,8 +5,9 @@
 // Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md. Reach mirrors the SSE routes: the
 // guardian gets every topic, and a visitor on the dashboard allow-list gets
-// every topic but `apps.catalog`. `concierge.tasks` carries the caller's own
-// Concierge rows, and another owner's Concierge or task chat is not found.
+// every topic but `apps.catalog`. `concierge.tasks` and `concierge.activity`
+// carry the caller's own Concierge rows and chats, and another owner's
+// Concierge or task chat is not found.
 //
 // The wire contract lives in @rome/api-types/live-events. `subscribed` precedes
 // the snapshot `chat.status` replays too. The guardian's phone app marks its
@@ -18,6 +19,7 @@ import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
   APP_CATALOG_TOPIC,
+  CONCIERGE_ACTIVITY_TOPIC,
   CHAT_SESSION_TOPIC_PREFIX,
   CHAT_STATUS_TOPIC,
   CHAT_WATCH_TOPIC_PREFIX,
@@ -50,6 +52,8 @@ export interface LiveEventSources {
   subscribeAppCatalog(emit: LiveEventEmit): Unsubscribe;
   /** Emits `task_upsert` for every write to one owner's Concierge todo list. */
   subscribeConciergeTasks(owner: string, emit: LiveEventEmit): Unsubscribe;
+  /** Emits `concierge_activity` for each of one owner's Concierge chats, then for every change. */
+  subscribeConciergeActivity(owner: string, emit: LiveEventEmit): Unsubscribe;
 }
 
 export const MAX_SUBSCRIPTIONS_PER_SOCKET = 32;
@@ -67,6 +71,7 @@ type Topic =
   | { kind: "chat.status" }
   | { kind: "apps.catalog" }
   | { kind: "concierge.tasks" }
+  | { kind: "concierge.activity" }
   | { kind: "chat.session"; sessionId: string }
   | { kind: "chat.watch"; sessionId: string };
 
@@ -74,6 +79,7 @@ function parseTopic(topic: string): Topic | null {
   if (topic === CHAT_STATUS_TOPIC) return { kind: "chat.status" };
   if (topic === APP_CATALOG_TOPIC) return { kind: "apps.catalog" };
   if (topic === CONCIERGE_TASKS_TOPIC) return { kind: "concierge.tasks" };
+  if (topic === CONCIERGE_ACTIVITY_TOPIC) return { kind: "concierge.activity" };
   if (topic.startsWith(CHAT_SESSION_TOPIC_PREFIX)) {
     const sessionId = topic.slice(CHAT_SESSION_TOPIC_PREFIX.length);
     if (SESSION_ID_PATTERN.test(sessionId)) return { kind: "chat.session", sessionId };
@@ -161,6 +167,8 @@ export function attachLiveEventsServer(
           return sources.subscribeAppCatalog(emit);
         case "concierge.tasks":
           return sources.subscribeConciergeTasks(owner, emit);
+        case "concierge.activity":
+          return sources.subscribeConciergeActivity(owner, emit);
         case "chat.session":
           return sources.subscribeChatSession(topic.sessionId, emit);
         case "chat.watch":

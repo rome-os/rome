@@ -2045,12 +2045,7 @@ export function Chat({
 
   const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
 
-  const conciergeActivity = useConciergeActivity({
-    chatId: concierge ? (mainSessionId ?? null) : null,
-    streaming: isActiveSessionStreaming,
-    awaitingGuardian,
-    snapshot: currentSnapshot,
-  });
+  const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
   const conciergeTaskList = useConciergeTaskList(concierge ? (mainSessionId ?? null) : null);
   // A Concierge chat's header buttons sit on round badges like its pill.
   const actionBadge = concierge

@@ -1159,7 +1159,14 @@ export const handlers = [
             Number(b.id === CONCIERGE_CHAT_ID) - Number(a.id === CONCIERGE_CHAT_ID) ||
             a.createdAt.localeCompare(b.createdAt),
         )
-        .map((s) => ({ id: s.id, name: s.name, main: s.id === CONCIERGE_CHAT_ID, unread: 0 })),
+        // Mock mode runs no turns, so every chat is idle.
+        .map((s) => ({
+          id: s.id,
+          name: s.name,
+          main: s.id === CONCIERGE_CHAT_ID,
+          unread: 0,
+          activity: { kind: "idle" as const },
+        })),
     } satisfies ConciergeChatsResponse),
   ),
   http.post("/api/concierge/chats", async ({ request }) => {
@@ -1179,6 +1186,11 @@ export const handlers = [
   ),
   // Held open without events: mock mode runs no tasks.
   http.get("/api/concierge/tasks/events", () => {
+    const stream = new ReadableStream({ start() {} });
+    return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
+  }),
+  // Held open without events: mock mode runs no turns, so no chat's activity changes.
+  http.get("/api/concierge/activity/events", () => {
     const stream = new ReadableStream({ start() {} });
     return new HttpResponse(stream, { headers: { "Content-Type": "text/event-stream" } });
   }),

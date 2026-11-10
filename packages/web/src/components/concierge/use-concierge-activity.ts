@@ -1,85 +1,80 @@
-import { useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
 import { z } from "zod";
-import type { TraceSnapshot } from "@rome/api-types/trace-segments";
-import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
-import { useChatSessions } from "@/hooks/use-chat-sessions";
-import {
-  type ConciergeActivity,
-  conciergeActivity,
-  type TaskChatActivity,
-} from "./concierge-activity";
-import { tasksOfChat } from "./tasks";
-import { useConciergeTasks } from "./use-concierge-tasks";
+import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
+import { CONCIERGE_ACTIVITY_TOPIC } from "@rome/api-types/live-events";
+import { CONCIERGE_CHATS_QUERY_KEY, useConciergeChats } from "@/hooks/use-concierge";
+import { type LiveTopic, useLiveEvents } from "@/hooks/use-live-events";
 
-const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
+const conciergeActivityTopic: LiveTopic = {
+  topic: CONCIERGE_ACTIVITY_TOPIC,
+  sseUrl: "/api/concierge/activity/events",
+};
+
+const TOOLS = [
+  "startingTask",
+  "messagingTask",
+  "readingChat",
+  "stoppingTask",
+  "updatingTasks",
+  "startingTopic",
+  "checkingFollows",
+  "searchingWeb",
+  "readingPage",
+] as const;
+
+// A kind or a tool from a newer server fails the parse, and the event is dropped.
+const activitySchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("idle") }),
+  z.object({ kind: z.literal("needsYou") }),
+  z.object({ kind: z.literal("working") }),
+  z.object({ kind: z.literal("tool"), tool: z.enum(TOOLS) }),
+  z.object({ kind: z.literal("tasks"), title: z.string(), more: z.number() }),
+]) satisfies z.ZodType<ConciergeActivity>;
+
+const activityEventSchema = z.object({
+  chatId: z.string(),
+  activity: activitySchema,
+  at: z.number(),
+});
+
+const IDLE: ConciergeActivity = { kind: "idle" };
 
 /**
- * What a Concierge chat's header shows it doing, from facts only: its own
- * streaming turn and the tool it is in, and whether the task chats it started
- * are running or wait on the guardian. A task chat's running state follows the
- * live `session_running` events, so it changes the moment the turn does.
+ * What Concierge chat `chatId` is doing, as core tells it: the chats list's
+ * `activity` at first, then each `concierge_activity` event on the owner's
+ * `concierge.activity` topic, which also replays every chat on (re)subscribe.
+ * Idle for no chat, and before either has said anything.
  */
-export function useConciergeActivity(input: {
-  chatId: string | null;
-  streaming: boolean;
-  awaitingGuardian: boolean;
-  snapshot: TraceSnapshot | null;
-}): ConciergeActivity {
-  const { chatId, streaming, awaitingGuardian, snapshot } = input;
-  const enabled = chatId !== null;
-  const { tasks } = useConciergeTasks({ enabled });
-  const { sessions, invalidate } = useChatSessions("active", undefined, { enabled });
-  const [liveRunning, setLiveRunning] = useState<ReadonlyMap<string, boolean>>(new Map());
+export function useConciergeActivity(chatId: string | null): ConciergeActivity {
+  const queryClient = useQueryClient();
+  const chats = useConciergeChats();
+  const [live, setLive] = useState<ReadonlyMap<string, ConciergeActivity>>(new Map());
 
   useLiveEvents(
-    chatStatusTopic,
+    conciergeActivityTopic,
     {
-      session_running: {
-        schema: sessionRunningSchema,
-        fn: ({ sessionId, running }) => {
-          setLiveRunning((prev) => {
-            if (prev.get(sessionId) === running) return prev;
+      concierge_activity: {
+        schema: activityEventSchema,
+        fn: ({ chatId: id, activity }) =>
+          setLive((prev) => {
             const next = new Map(prev);
-            next.set(sessionId, running);
+            next.set(id, activity);
             return next;
-          });
-          // A stop can leave a card open, and only the list carries awaitingGuardian.
-          if (!running) void invalidate();
-        },
+          }),
       },
     },
     {
-      enabled,
-      // Events missed while disconnected are gone: the list and the snapshot
-      // the new connection sends start over.
+      enabled: chatId !== null,
+      // The new subscription replays every chat; until then the list's
+      // field is the freshest word.
       onReconnect: () => {
-        setLiveRunning(new Map());
-        void invalidate();
+        setLive(new Map());
+        void queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY });
       },
     },
   );
 
-  const taskChats = useMemo<TaskChatActivity[]>(() => {
-    const byId = new Map((sessions ?? []).map((session) => [session.id, session]));
-    return tasksOfChat(tasks, chatId).flatMap((task) => {
-      if (!task.chat || task.archivedAt !== null) return [];
-      const session = byId.get(task.chat.id);
-      const live = liveRunning.get(task.chat.id);
-      const running = live ?? session?.running ?? false;
-      return [
-        {
-          title: task.title,
-          running,
-          // A running turn has answered whatever waited.
-          awaitingGuardian: !running && (session?.awaitingGuardian ?? false),
-          updatedAt: task.updatedAt,
-        },
-      ];
-    });
-  }, [tasks, chatId, sessions, liveRunning]);
-
-  return useMemo(
-    () => conciergeActivity({ streaming, awaitingGuardian, snapshot, tasks: taskChats }),
-    [streaming, awaitingGuardian, snapshot, taskChats],
-  );
+  if (!chatId) return IDLE;
+  return live.get(chatId) ?? chats.find((chat) => chat.id === chatId)?.activity ?? IDLE;
 }

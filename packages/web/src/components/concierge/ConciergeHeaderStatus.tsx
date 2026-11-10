@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
-import type { ConciergeActivity } from "./concierge-activity";
+import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
 import { RomeMascot } from "./RomeMascot";
 
 /**
