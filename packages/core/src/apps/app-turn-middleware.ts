@@ -21,7 +21,7 @@ export interface TurnMiddlewareLoadFailure {
   error: string;
 }
 
-interface LoadedMiddleware {
+export interface LoadedMiddleware {
   appId: string;
   hook: TurnMiddlewareHook;
 }
@@ -34,15 +34,43 @@ export class AppTurnMiddleware implements TurnMiddleware {
   /** Reloads every `turn-middleware` hook. A hook that fails to load is
    *  dropped and reported, never fatal. */
   async loadFromCatalog(catalog: AppCatalog): Promise<TurnMiddlewareLoadFailure[]> {
-    const failures: TurnMiddlewareLoadFailure[] = [];
-    const next: LoadedMiddleware[] = [];
+    const { middlewares, failures } = await this.read(catalog, catalog.listArtifacts("hook"));
+    this.middlewares = sortByOrder(middlewares);
+    return failures;
+  }
 
-    for (const artifact of catalog.listArtifacts("hook")) {
+  /** Loads one app's `turn-middleware` hooks without adding them. */
+  loadApp(
+    catalog: AppCatalog,
+    appId: string,
+  ): Promise<{ middlewares: LoadedMiddleware[]; failures: TurnMiddlewareLoadFailure[] }> {
+    return this.read(
+      catalog,
+      catalog.listArtifacts("hook").filter((artifact) => artifact.ownerId === appId),
+    );
+  }
+
+  /** Adds one middleware in its order and returns its undo, which removes that middleware only. */
+  add(middleware: LoadedMiddleware): () => void {
+    this.middlewares = sortByOrder([...this.middlewares, middleware]);
+    return () => {
+      this.middlewares = this.middlewares.filter((entry) => entry !== middleware);
+    };
+  }
+
+  private async read(
+    catalog: AppCatalog,
+    artifacts: readonly ArtifactRef[],
+  ): Promise<{ middlewares: LoadedMiddleware[]; failures: TurnMiddlewareLoadFailure[] }> {
+    const failures: TurnMiddlewareLoadFailure[] = [];
+    const middlewares: LoadedMiddleware[] = [];
+
+    for (const artifact of artifacts) {
       if (artifact.publicName !== HOOK_NAME) continue;
       try {
         const hook = await loadAppHook(artifact, catalog, this.options.appRuntimeServices);
         assertTurnMiddleware(hook, artifact);
-        next.push({ appId: artifact.ownerId, hook });
+        middlewares.push({ appId: artifact.ownerId, hook });
       } catch (err) {
         failures.push({
           appId: artifact.ownerId,
@@ -51,11 +79,7 @@ export class AppTurnMiddleware implements TurnMiddleware {
         });
       }
     }
-
-    // Lowest order runs furthest out. The sort is stable, so ties keep catalog order.
-    next.sort((a, b) => a.hook.order - b.hook.order);
-    this.middlewares = next;
-    return failures;
+    return { middlewares, failures };
   }
 
   async run(
@@ -133,4 +157,9 @@ function assertTurnMiddleware(
       `Hook "${artifact.publicName}" from ${artifact.absolutePath} must declare a numeric "order"`,
     );
   }
+}
+
+/** Lowest order runs furthest out. The sort is stable, so ties keep the order they were added in. */
+function sortByOrder(middlewares: LoadedMiddleware[]): LoadedMiddleware[] {
+  return [...middlewares].sort((a, b) => a.hook.order - b.hook.order);
 }

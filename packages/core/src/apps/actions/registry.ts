@@ -36,6 +36,23 @@ export class ActionRegistryImpl implements ActionRegistry {
     );
   }
 
+  /**
+   * Registers an action and returns its undo. The undo removes the entry only
+   * while it is still the one this call added, so an undo left over from an
+   * app's previous version never removes the action its new version added.
+   */
+  add(action: Action, metadata?: ArtifactMetadata): () => void {
+    this.register(action, metadata);
+    const name =
+      metadata && this.identity
+        ? formatArtifactId(metadata.ownerId, action.config.name)
+        : action.config.name;
+    const added = this.actions.get(name);
+    return () => {
+      if (this.actions.get(name) === added) this.unregister(name);
+    };
+  }
+
   unregister(name: string): boolean {
     this.metadata.delete(name);
     return this.actions.delete(name);

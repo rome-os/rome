@@ -38,7 +38,7 @@ export interface TurnLifecycleHookLoadFailure {
   error: string;
 }
 
-interface LoadedLifecycleHook {
+export interface LoadedLifecycleHook {
   appId: string;
   hookName: TurnLifecycleHookName;
   artifactPath: string;
@@ -64,21 +64,54 @@ export class AppTurnHooks implements TurnLifecycleListener {
   }
 
   async loadFromCatalog(catalog: AppCatalog): Promise<TurnLifecycleHookLoadFailure[]> {
-    const failures: TurnLifecycleHookLoadFailure[] = [];
-    const nextStarted: LoadedLifecycleHook[] = [];
-    const nextFinished: LoadedLifecycleHook[] = [];
+    const { hooks, failures } = await this.read(catalog, catalog.listArtifacts("hook"));
+    this.startedHooks = hooks.filter((hook) => hook.hookName === "agent-turn-started");
+    this.finishedHooks = hooks.filter((hook) => hook.hookName === "agent-turn-finished");
+    return failures;
+  }
 
-    for (const artifact of catalog.listArtifacts("hook")) {
+  /** Loads one app's lifecycle hooks without adding them. */
+  loadApp(
+    catalog: AppCatalog,
+    appId: string,
+  ): Promise<{ hooks: LoadedLifecycleHook[]; failures: TurnLifecycleHookLoadFailure[] }> {
+    return this.read(
+      catalog,
+      catalog.listArtifacts("hook").filter((artifact) => artifact.ownerId === appId),
+    );
+  }
+
+  /** Adds one loaded hook and returns its undo, which removes that hook only. */
+  add(hook: LoadedLifecycleHook): () => void {
+    if (hook.hookName === "agent-turn-started") {
+      this.startedHooks = [...this.startedHooks, hook];
+      return () => {
+        this.startedHooks = this.startedHooks.filter((entry) => entry !== hook);
+      };
+    }
+    this.finishedHooks = [...this.finishedHooks, hook];
+    return () => {
+      this.finishedHooks = this.finishedHooks.filter((entry) => entry !== hook);
+    };
+  }
+
+  private async read(
+    catalog: AppCatalog,
+    artifacts: readonly ArtifactRef[],
+  ): Promise<{ hooks: LoadedLifecycleHook[]; failures: TurnLifecycleHookLoadFailure[] }> {
+    const failures: TurnLifecycleHookLoadFailure[] = [];
+    const hooks: LoadedLifecycleHook[] = [];
+
+    for (const artifact of artifacts) {
       if (!isLifecycleHookName(artifact.publicName)) continue;
       try {
         const loaded = await loadLifecycleHook(artifact, catalog, this.appRuntimeServices);
         if (artifact.publicName === "agent-turn-started") {
           assertStartedHook(loaded.hook, artifact);
-          nextStarted.push(loaded);
         } else {
           assertFinishedHook(loaded.hook, artifact);
-          nextFinished.push(loaded);
         }
+        hooks.push(loaded);
       } catch (err) {
         failures.push({
           appId: artifact.ownerId,
@@ -88,10 +121,7 @@ export class AppTurnHooks implements TurnLifecycleListener {
         });
       }
     }
-
-    this.startedHooks = nextStarted;
-    this.finishedHooks = nextFinished;
-    return failures;
+    return { hooks, failures };
   }
 
   started(event: AgentTurnStartedEvent): HookDispatchResult {
