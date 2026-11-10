@@ -467,6 +467,29 @@ describe("buildTraceSnapshot — summary", () => {
     expect(snap.summary.turnStatus).toBeUndefined();
   });
 
+  it("keeps the session renewal its turn_start announced in the summary", () => {
+    const renewed = buildTraceSnapshot({
+      idPrefix: "t",
+      blocks: [
+        {
+          ...turnStart("main"),
+          sessionRenewal: { reason: "setup", sessionId: "session-2" },
+        } as TraceEventDto,
+        { type: "result", content: "done", agent: "main" },
+        turnEnd(900, "main"),
+      ],
+      resolver: testResolver,
+    });
+    const plain = buildTraceSnapshot({
+      idPrefix: "t",
+      blocks: [turnStart("main"), turnEnd(900, "main")],
+      resolver: testResolver,
+    });
+
+    expect(renewed.summary.sessionRenewal).toEqual({ reason: "setup", sessionId: "session-2" });
+    expect(plain.summary.sessionRenewal).toBeUndefined();
+  });
+
   it("stoppedByUser resets when a later turn in the same trace completes normally", () => {
     const blocks: TraceEventDto[] = [
       { type: "result", content: "", agent: "main" },

@@ -7,31 +7,38 @@ const NOW = Date.parse("2026-06-25T12:00:00.000Z");
 describe("parseDeferInput", () => {
   it("requires a non-empty name", () => {
     expect(parseDeferInput({ afterMinutes: 5 }, NOW).ok).toBe(false);
+    // The note is required too: the session that wakes may not be this one.
+    expect(parseDeferInput({ name: "x", afterMinutes: 5 }, NOW)).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("defer.note"),
+    });
+    expect(parseDeferInput({ name: "x", note: "  ", afterMinutes: 5 }, NOW).ok).toBe(false);
     // whitespace-only is trimmed to empty and rejected
-    expect(parseDeferInput({ name: "   ", afterMinutes: 5 }, NOW).ok).toBe(false);
+    expect(parseDeferInput({ note: "n", name: "   ", afterMinutes: 5 }, NOW).ok).toBe(false);
   });
 
   it("trims the name", () => {
-    const r = parseDeferInput({ name: "  check CI  ", afterMinutes: 5 }, NOW);
+    const r = parseDeferInput({ note: "n", name: "  check CI  ", afterMinutes: 5 }, NOW);
     expect(r.ok).toBe(true);
     if (r.ok) expect(r.wakeUp.name).toBe("check CI");
   });
 
   it("requires exactly one of afterMinutes/at", () => {
-    expect(parseDeferInput({ name: "x" }, NOW).ok).toBe(false);
+    expect(parseDeferInput({ note: "n", name: "x" }, NOW).ok).toBe(false);
     expect(
-      parseDeferInput({ name: "x", afterMinutes: 5, at: "2026-06-25T13:00:00Z" }, NOW).ok,
+      parseDeferInput({ note: "n", name: "x", afterMinutes: 5, at: "2026-06-25T13:00:00Z" }, NOW)
+        .ok,
     ).toBe(false);
   });
 
   it("rejects a non-positive or non-integer afterMinutes", () => {
-    expect(parseDeferInput({ name: "x", afterMinutes: 0 }, NOW).ok).toBe(false);
-    expect(parseDeferInput({ name: "x", afterMinutes: -5 }, NOW).ok).toBe(false);
-    expect(parseDeferInput({ name: "x", afterMinutes: 1.5 }, NOW).ok).toBe(false);
+    expect(parseDeferInput({ note: "n", name: "x", afterMinutes: 0 }, NOW).ok).toBe(false);
+    expect(parseDeferInput({ note: "n", name: "x", afterMinutes: -5 }, NOW).ok).toBe(false);
+    expect(parseDeferInput({ note: "n", name: "x", afterMinutes: 1.5 }, NOW).ok).toBe(false);
   });
 
   it("resolves afterMinutes to an absolute minute-aligned instant", () => {
-    const r = parseDeferInput({ name: "check CI", afterMinutes: 5 }, NOW);
+    const r = parseDeferInput({ note: "n", name: "check CI", afterMinutes: 5 }, NOW);
     expect(r.ok).toBe(true);
     if (r.ok && r.wakeUp.kind === "time") {
       expect(r.wakeUp.name).toBe("check CI");
@@ -42,25 +49,27 @@ describe("parseDeferInput", () => {
   it("ceils to the next whole minute when now is mid-minute (never the past)", () => {
     // now at :30s, afterMinutes 1 -> raw 12:01:30 -> ceil -> 12:02:00.
     const now = Date.parse("2026-06-25T12:00:30.000Z");
-    const r = parseDeferInput({ name: "x", afterMinutes: 1 }, now);
+    const r = parseDeferInput({ note: "n", name: "x", afterMinutes: 1 }, now);
     expect(r.ok).toBe(true);
     if (r.ok && r.wakeUp.kind === "time")
       expect(new Date(r.wakeUp.fireAtMs).toISOString()).toBe("2026-06-25T12:02:00.000Z");
   });
 
   it("accepts an absolute ISO instant", () => {
-    const r = parseDeferInput({ name: "x", at: "2026-06-25T18:30:00Z" }, NOW);
+    const r = parseDeferInput({ note: "n", name: "x", at: "2026-06-25T18:30:00Z" }, NOW);
     expect(r.ok).toBe(true);
     if (r.ok && r.wakeUp.kind === "time")
       expect(new Date(r.wakeUp.fireAtMs).toISOString()).toBe("2026-06-25T18:30:00.000Z");
   });
 
   it("rejects an at-instant in the past", () => {
-    expect(parseDeferInput({ name: "x", at: "2020-01-01T00:00:00Z" }, NOW).ok).toBe(false);
+    expect(parseDeferInput({ note: "n", name: "x", at: "2020-01-01T00:00:00Z" }, NOW).ok).toBe(
+      false,
+    );
   });
 
   it("rejects an unparseable at-instant", () => {
-    expect(parseDeferInput({ name: "x", at: "tomorrow" }, NOW).ok).toBe(false);
+    expect(parseDeferInput({ note: "n", name: "x", at: "tomorrow" }, NOW).ok).toBe(false);
   });
 });
 
@@ -69,6 +78,7 @@ describe("parseDeferInput with an event", () => {
     const r = parseDeferInput(
       {
         name: "CI",
+        note: "n",
         event: {
           eventName: "  ci.done ",
           sourcePattern: " connector ",
@@ -90,10 +100,16 @@ describe("parseDeferInput with an event", () => {
 
   it("requires exactly one of afterMinutes/at/event", () => {
     expect(
-      parseDeferInput({ name: "x", afterMinutes: 5, event: { eventName: "ci.done" } }, NOW).ok,
+      parseDeferInput(
+        { note: "n", name: "x", afterMinutes: 5, event: { eventName: "ci.done" } },
+        NOW,
+      ).ok,
     ).toBe(false);
     expect(
-      parseDeferInput({ name: "x", at: "2026-06-25T13:00:00Z", event: { eventName: "e" } }, NOW).ok,
+      parseDeferInput(
+        { note: "n", name: "x", at: "2026-06-25T13:00:00Z", event: { eventName: "e" } },
+        NOW,
+      ).ok,
     ).toBe(false);
   });
 
@@ -101,19 +117,28 @@ describe("parseDeferInput with an event", () => {
   // stripping dropped it without a word. An unknown key at either level is an
   // error naming where it sits.
   it("rejects an unknown key instead of silently dropping it", () => {
-    const top = parseDeferInput({ name: "x", event: { eventName: "e" }, note: "y" }, NOW);
+    const top = parseDeferInput(
+      { note: "n", name: "x", event: { eventName: "e" }, memo: "y" },
+      NOW,
+    );
     expect(top).toMatchObject({ ok: false });
-    if (!top.ok) expect(top.error).toMatch(/^defer: .*note/);
+    if (!top.ok) expect(top.error).toMatch(/^defer: .*memo/);
 
-    const nested = parseDeferInput({ name: "x", event: { eventName: "e", source: "ci" } }, NOW);
+    const nested = parseDeferInput(
+      { note: "n", name: "x", event: { eventName: "e", source: "ci" } },
+      NOW,
+    );
     expect(nested).toMatchObject({ ok: false });
     if (!nested.ok) expect(nested.error).toMatch(/^defer\.event: .*source/);
   });
 
   it("rejects a blank eventName, a blank sourcePattern, or a filter path with an empty segment", () => {
-    expect(parseDeferInput({ name: "x", event: { eventName: "  " } }, NOW).ok).toBe(false);
+    expect(parseDeferInput({ note: "n", name: "x", event: { eventName: "  " } }, NOW).ok).toBe(
+      false,
+    );
     expect(
-      parseDeferInput({ name: "x", event: { eventName: "e", sourcePattern: " " } }, NOW).ok,
+      parseDeferInput({ note: "n", name: "x", event: { eventName: "e", sourcePattern: " " } }, NOW)
+        .ok,
     ).toBe(false);
     expect(
       parseDeferInput(

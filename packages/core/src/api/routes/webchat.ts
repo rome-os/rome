@@ -54,7 +54,7 @@ import type { TurnFeedback } from "@rome/api-types/trace-segments";
 import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import { createAgentTurnRef } from "../../agent/index.js";
-import type { AgentTurnHandle } from "../../agent/index.js";
+import type { AgentSession, AgentTurnHandle } from "../../agent/index.js";
 import { openedInChat, withRomeSession } from "../../core/session-conversation.js";
 import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
@@ -106,12 +106,49 @@ import type {
 import { z } from "zod";
 import { withReplyContext } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
+import type { ChatThreadPlacement } from "../../db/repositories/webchat.js";
+import { messageContentText } from "../../chats/history/messages-agent.js";
 
 const log = createLogger("api:webchat");
 
 const inputPrioritySchema = z.enum(["now", "next"]).optional();
 
 // Client-sent parts never carry a reply: only `replyToMessageId` builds one.
+/** How much of a chat thread's first message the Concierge reads to know what it is about. */
+const CHAT_THREAD_ABOUT_LIMIT = 80;
+
+/**
+ * The line that tells the Concierge which chat thread the guardian's message
+ * is in, what that thread is about (its first message, shortened), and
+ * whether the guardian chose it, so it is never moved. A message that starts
+ * its own thread is about nothing else.
+ */
+function chatThreadLine(
+  messageId: string,
+  thread: string,
+  chosen: boolean,
+  firstMessage: string | null,
+): string {
+  const about =
+    thread !== messageId && firstMessage
+      ? ` about="${xmlAttr(
+          firstMessage.length > CHAT_THREAD_ABOUT_LIMIT
+            ? `${firstMessage.slice(0, CHAT_THREAD_ABOUT_LIMIT - 1)}…`
+            : firstMessage,
+        )}"`
+      : "";
+  return `<chat_thread message_id="${messageId}" thread="${thread}"${about} chosen="${chosen}"/>`;
+}
+
+function xmlAttr(value: string): string {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll("\n", " ");
+}
+
 const isReplyToPart = (part: unknown): boolean =>
   typeof part === "object" && part !== null && (part as { type?: unknown }).type === "reply_to";
 
@@ -852,10 +889,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const unsubscribeSessionName = deps.webchatRepo.onSessionNameChanged((event) => {
       if (event.sessionId === sessionId) emit("session_name", event);
     });
+    const unsubscribeChatThread = deps.webchatRepo.onChatThreadPlaced((event) => {
+      if (event.sessionId === sessionId) emit("message_chat_thread", event);
+    });
     return () => {
       runningListeners.delete(runningListener);
       unsubscribeMessages();
       unsubscribeSessionName();
+      unsubscribeChatThread();
     };
   };
 
@@ -1281,6 +1322,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     sessionId: string,
     { withLayout = false }: { withLayout?: boolean } = {},
   ) => {
+    // One chat thread, named by any of its messages, in one page: threads are short.
+    const threadParam = c.req.query("thread");
+    if (threadParam !== undefined) {
+      if (!threadParam) return c.json({ error: "thread must name a message" }, 400);
+      const messages = await deps.webchatRepo.getChatThreadMessages(sessionId, threadParam);
+      return c.json({
+        messages: await enrichStoredMessages(sessionId, messages),
+        nextCursor: null,
+      });
+    }
     const limitParam = c.req.query("limit");
     const beforeParam = c.req.query("before");
     if (limitParam === undefined && beforeParam === undefined) {
@@ -1439,6 +1490,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let sourceSessionId: string;
     let threadContext: ThreadContext;
     let sourceCheckpoint: ForkSourceCheckpoint | null = null;
+    // The source session is held from its acquire until the fork's own turn
+    // holds it, or until this route gives up on the fork.
+    let heldSource: AgentSession | undefined;
+    const letSourceGo = () => {
+      heldSource?.release();
+      heldSource = undefined;
+    };
     try {
       const traceRow = await deps.webchatRepo.getTraceContentByTurn(input.session.id, input.turnId);
       const turnStatus = traceRow
@@ -1494,6 +1552,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           reasoningEffort: await resolveRequestedReasoningEffort(undefined),
         },
       );
+      heldSource = source;
       await openedInChat(deps.webchatRepo, source, input.session.id);
       sourceSessionId = source.sessionId;
       const storedCheckpoint = await deps.sessionRepository.deprecatedCheckpoint(
@@ -1510,6 +1569,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // Distinguishable so the branch route can tell the user this turn has
         // no branch point (a promoted fork chat's own first answer is the
         // common case) rather than implying a transient failure.
+        letSourceGo();
         return "no_turn_checkpoint";
       }
       sourceCheckpoint = {
@@ -1518,6 +1578,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         checkpointId: storedCheckpoint.checkpointId,
       };
     } catch (err) {
+      letSourceGo();
       log.warn("turn fork skipped: source session could not be acquired", {
         sessionId: input.session.id,
         turnId: input.turnId,
@@ -1527,7 +1588,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return null;
     }
 
-    if (!sourceCheckpoint) return null;
+    if (!sourceCheckpoint) {
+      letSourceGo();
+      return null;
+    }
 
     const forkActor = turnActor(await currentSessionActor(), undefined);
     const iterator = deps.agentRunner
@@ -1553,6 +1617,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     try {
       first = await iterator.next();
     } catch (err) {
+      letSourceGo();
       log.warn("failed to start turn fork", {
         sessionId: input.session.id,
         turnId: input.turnId,
@@ -1561,6 +1626,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
       return null;
     }
+    // The fork's own turn now holds the source session, or there is none.
+    letSourceGo();
     if (first.done || first.value.type !== "turn_start") {
       log.warn("turn fork did not emit turn_start", {
         sessionId: input.session.id,
@@ -3276,6 +3343,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
   type SendBody = {
     inputId?: string;
+    /**
+     * A message of the chat thread this message goes into, as the thread
+     * view sends it. Only a Concierge chat keeps chat threads.
+     */
+    chatThread?: unknown;
     automatedSource?: unknown;
     automatedActorKind?: unknown;
     threadId?: string;
@@ -3364,6 +3436,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         priority: getString("priority"),
         replyToMessageId: getString("replyToMessageId"),
         replyQuote: getString("replyQuote"),
+        chatThread: getString("chatThread"),
       };
     }
     return await c.req.json<SendBody>().catch(() => ({}) as SendBody);
@@ -3573,10 +3646,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const conciergeChat = isConciergeChat(session)
       ? await deps.concierge?.conciergeChat(sessionId)
       : null;
-    const promptText =
-      conciergeChat && deps.concierge
-        ? `${await deps.concierge.turnHeader(conciergeChat)}\n\n${noticedPrompt}`
-        : noticedPrompt;
+    const conciergeHeader =
+      conciergeChat && deps.concierge ? await deps.concierge.turnHeader(conciergeChat) : null;
+    let promptText = conciergeHeader ? `${conciergeHeader}\n\n${noticedPrompt}` : noticedPrompt;
 
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
 
@@ -3693,7 +3765,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     };
 
-    if (!(await deps.webchatRepo.recordUserInput(inputId, sessionId, userContent, actor, saidBy))) {
+    if (body.chatThread !== undefined && typeof body.chatThread !== "string") {
+      return answer({ error: "chatThread must be a message id" }, 400);
+    }
+    // In a Concierge chat a message sent into a chat thread, or as a reply,
+    // stays in that thread. Any other joins the latest thread until the
+    // Concierge places it (docs/domains/chats.md#chat-thread).
+    const chatThread: ChatThreadPlacement | undefined = !isConciergeChat(session)
+      ? undefined
+      : body.chatThread
+        ? { in: body.chatThread, settle: true }
+        : reply
+          ? { in: body.replyToMessageId as string, settle: true }
+          : { latest: true };
+    if (
+      !(await deps.webchatRepo.recordUserInput(
+        inputId,
+        sessionId,
+        userContent,
+        actor,
+        saidBy,
+        chatThread,
+      ))
+    ) {
       const existing = await deps.webchatRepo.getUserInput(sessionId, inputId);
       if (!existing) return answer({ error: "inputId is already in use" }, 409);
       return answer({
@@ -3711,6 +3805,18 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       messageId: inputId,
       text: displayText,
     });
+    // The Concierge reads where the message stands, so it can place it.
+    const placedIn = chatThread ? await deps.webchatRepo.chatThreadOf(sessionId, inputId) : null;
+    if (placedIn && conciergeHeader) {
+      const first = await deps.webchatRepo.getReplyTarget(sessionId, placedIn);
+      const line = chatThreadLine(
+        inputId,
+        placedIn,
+        chatThread?.settle === true,
+        first ? messageContentText(first.content) : null,
+      );
+      promptText = `${conciergeHeader}\n${line}\n\n${noticedPrompt}`;
+    }
 
     let agentSess;
     try {
@@ -3733,6 +3839,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       );
       await openedInChat(deps.webchatRepo, agentSess, sessionId);
     } catch (err) {
+      // A session opened before the failure is let go, since no turn follows.
+      agentSess?.release();
       const modelError = toModelResolutionErrorPayload(err);
       if (modelError) {
         const turnId = randomUUID();
@@ -4551,8 +4659,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           selectionId: modelSelection?.id ?? null,
         },
       );
-      await openedInChat(deps.webchatRepo, opened, chatId);
-      return opened.sessionId;
+      // Only its id is wanted: no turn follows, so the session is let go.
+      try {
+        await openedInChat(deps.webchatRepo, opened, chatId);
+        return opened.sessionId;
+      } finally {
+        opened.release();
+      }
     },
     async sendAsGuardian(chatId, text) {
       const inputId = randomUUID();

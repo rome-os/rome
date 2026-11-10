@@ -45,6 +45,14 @@ export interface TraceTurnStartEvent extends TraceEventBase {
   turnId: string;
   sessionId: string;
   userPrompt: string;
+  /** On the first turn of a session that replaced the chat's earlier one. */
+  sessionRenewal?: TraceSessionRenewal;
+}
+
+/** Why a reset replaced a chat's session, and the new session's id. */
+export interface TraceSessionRenewal {
+  reason: "setup" | "idle" | "daily" | "working_dir" | (string & {});
+  sessionId: string;
 }
 
 /** Follows the terminal result or error and closes its turn. */
@@ -290,6 +298,9 @@ export interface TraceSummary {
   /** The model that produced the turn, from the accounting on its terminal
    *  block. Absent while the turn runs and when the terminal recorded none. */
   model?: string;
+  /** Set when the turn is the first of a session that replaced the chat's
+   *  earlier one, so the chat can show where its session changed. */
+  sessionRenewal?: TraceSessionRenewal;
 }
 
 export interface TraceSnapshot {

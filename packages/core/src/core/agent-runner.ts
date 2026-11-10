@@ -256,6 +256,24 @@ export class AgentRunner {
             }),
           },
         );
+    // The session is in use from here until the turn is submitted, or until
+    // this run lets it go: an early return or an error before the submit.
+    const held = { submitted: false };
+    try {
+      yield* this.runAcquired(session, params, threadContext, held);
+    } finally {
+      if (!held.submitted) session.release();
+    }
+  }
+
+  /** Runs the turn on the session `run` acquired. Sets `held.submitted` once
+   *  the turn has the session. */
+  private async *runAcquired(
+    session: AgentSession,
+    params: RunParams,
+    threadContext: ThreadContext | undefined,
+    held: { submitted: boolean },
+  ): AsyncIterable<AgentEvent> {
     await openedInChat(this.webchatRepo, session, params.romeSessionId);
     const agentName = session.key.agentName;
     // An explicit sessionId is the source of truth for continuations. Use the
@@ -286,7 +304,7 @@ export class AgentRunner {
     // An action's turn waits behind the running one. Its id is allocated by
     // AgentSession and surfaced on the stream's turn_start event.
     if (params.shouldRun && !params.shouldRun()) return;
-    const handle = await session.submit(
+    const receipt = session.submit(
       { prompt: params.prompt, images: params.images },
       {
         priority: "after",
@@ -298,8 +316,11 @@ export class AgentRunner {
         initiatedBy: params.initiatedBy ?? "user",
         ...(params.pushLevel ? { pushLevel: params.pushLevel } : {}),
         ...(params.actor ? { actor: params.actor } : {}),
+        ...(params.threadAnchor ? { threadAnchor: params.threadAnchor } : {}),
       },
-    ).turn;
+    );
+    held.submitted = true;
+    const handle = await receipt.turn;
     this.runLineDeps?.replies?.runs(handle.id, agentName);
     if (lines && this.runLineDeps) {
       if (conversation.promptPersisted && lines.prompt !== null) {

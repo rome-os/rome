@@ -28,6 +28,7 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
   });
   const session: AgentSession = {
     selectModel: () => {},
+    release: () => {},
     key: { agentName: "researcher", channelThreadKey: `subagent:${sessionId}` },
     sessionId,
     status: "idle",

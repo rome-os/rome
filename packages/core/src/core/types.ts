@@ -18,6 +18,10 @@ export interface RunParams extends SdkRunParams {
   pushLevel?: NotifyLevel;
   /** Who the turn acts for, such as the person whose reminder woke it. Absent, no one. */
   actor?: TurnActor;
+  /** A message of the chat this turn answers though no message there started
+   *  it, such as the one that started the task it reports on. Absent, the
+   *  turn names none. */
+  threadAnchor?: string;
   /** Whether the runner saves the turn's trace. Defaults to every channel but
    *  webchat, whose chat route saves the trace of the turns it runs. */
   persistTrace?: boolean;

@@ -242,6 +242,23 @@ describe("Markdown", () => {
     expect(container.querySelector("li li")?.textContent).toBe("b");
   });
 
+  it("shows a message that is only an empty list item as its text", () => {
+    for (const md of ["408.", "391.", "1.", "-", "* "]) {
+      const { container, unmount } = renderMd(md);
+      expect(container.querySelector("li")).toBeNull();
+      expect(container.textContent?.trim()).toBe(md.trim());
+      unmount();
+    }
+  });
+
+  it("shows a list of only empty items as its text, and keeps the text around it", () => {
+    const { container } = renderMd("Done.\n\n1.\n2.");
+
+    expect(container.querySelector("ol")).toBeNull();
+    expect(container.textContent).toContain("Done.");
+    expect(container.textContent).toContain("1.\n2.");
+  });
+
   it("keeps an empty item inside a list", () => {
     const { container } = renderMd("- a\n-\n- b");
 

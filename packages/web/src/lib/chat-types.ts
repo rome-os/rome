@@ -168,6 +168,9 @@ export interface ChatMessage {
   traceArchived?: boolean;
   /** Who sent a user message. Absent when the message recorded no sender. */
   sender?: ChatMessageSender;
+  /** The chat thread the message is in, in a Concierge chat: the id of the
+   *  thread's first message. Absent or null when it is in none. */
+  chatThreadId?: string | null;
 }
 
 export interface ProjectOption {

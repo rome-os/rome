@@ -37,6 +37,7 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
     sharedContext: () => undefined,
     pushLevel: () => undefined,
     actor: () => undefined,
+    threadAnchor: () => undefined,
     inTurn: (fn) => fn(),
     ...overrides,
   };
@@ -122,6 +123,7 @@ describe("romeToolPorts actions run as the turn's actor", () => {
       defer.schedule(turn({ actor: () => visitor }), {
         kind: "time",
         name: "check CI",
+        note: "Check CI.",
         fireAtMs: Date.now() + 60_000,
       }),
     );
@@ -136,7 +138,12 @@ describe("romeToolPorts actions run as the turn's actor", () => {
 describe("romeToolPorts defer", () => {
   it("creates the wake through create_routine, owned by the dashboard chat's owner", async () => {
     const { defer, run, getSession } = ports();
-    await defer.schedule(turn(), { kind: "time", name: "check CI", fireAtMs: Date.now() + 60_000 });
+    await defer.schedule(turn(), {
+      kind: "time",
+      name: "check CI",
+      note: "Check the run and tell the guardian.",
+      fireAtMs: Date.now() + 60_000,
+    });
     expect(getSession).toHaveBeenCalledWith("chat-1");
     expect(run).toHaveBeenCalledWith(
       "create_routine",

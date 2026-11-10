@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "c26186bd-4c13-44fb-bf9d-89d737d4ce7c",
+  "id": "2e0137e6-2789-4d82-8cae-b67d6eec029a",
   "prevId": "061768c7-f34a-418b-afb2-b8ca31142ec0",
   "tables": {
     "account_profiles": {
@@ -3294,13 +3294,6 @@
           "autoincrement": false,
           "default": true
         },
-        "created_by": {
-          "name": "created_by",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "integer",
@@ -3567,6 +3560,13 @@
         },
         "working_dir": {
           "name": "working_dir",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "setup_fingerprint": {
+          "name": "setup_fingerprint",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
