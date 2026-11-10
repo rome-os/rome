@@ -1,72 +1,53 @@
-import { eq } from "drizzle-orm";
-import { settings } from "../db/schema.js";
-import type { DrizzleDb } from "../db/index.js";
-import {
-  DEFAULT_PUBLIC_ACCESS_CONFIG,
-  PUBLIC_ACCESS_SETTING_KEY,
-  normalizePublicAccessConfig,
-  type PublicAccessConfig,
-} from "../apps/app-permissions.js";
+/** Who asks to open something: the guardian, a signed-in visitor, or someone not signed in. */
+export type Principal =
+  | { kind: "guardian" }
+  | { kind: "visitor"; email: string }
+  | { kind: "anonymous" };
 
 /**
- * In-memory cache of public app access policy for the auth-edge probe.
- *
- * Caddy `forward_auth` calls `/api/auth/verify` on every proxied request,
- * so the probe can't afford a DB round-trip to read settings. This state
- * is loaded once at startup and refreshed by the `/api/public-access`
- * PUT handler after each write.
+ * Who besides the guardian may open one thing. Anyone with the link wins over
+ * the listed emails, and the list is kept while the link is on so turning it
+ * off brings the list back. With neither, only the guardian may open it.
  */
-export class PublicAccessState {
-  private allowed: Set<string> = new Set();
-  private cloudEmailAccess: Map<string, Set<string>> = new Map();
+export interface Permission {
+  anyoneWithLink: boolean;
+  /** Normalized visitor emails. */
+  listedEmails: ReadonlySet<string>;
+}
 
-  allowedApps(): ReadonlySet<string> {
-    return new Set(this.allowed);
+export const GUARDIAN_ONLY: Permission = { anyoneWithLink: false, listedEmails: new Set() };
+
+/**
+ * `guardian-only` leaves the answer to the guardian's own session, and to
+ * whatever else lets a principal in, such as the dashboard allow-list.
+ */
+export type Verdict = "allowed" | "sign-in-required" | "forbidden" | "guardian-only";
+
+/** Whether `principal` may open a thing under `permission`. */
+export function decide(permission: Permission, principal: Principal): Verdict {
+  if (permission.anyoneWithLink) return "allowed";
+  if (principal.kind === "guardian") return "allowed";
+  if (permission.listedEmails.size === 0) return "guardian-only";
+  if (principal.kind === "anonymous") return "sign-in-required";
+  return permission.listedEmails.has(principal.email.toLowerCase()) ? "allowed" : "forbidden";
+}
+
+/**
+ * The permission of each thing, by an id Access does not interpret, kept in
+ * memory for `/api/auth/verify`.
+ *
+ * Caddy `forward_auth` calls `/api/auth/verify` on every proxied request, so
+ * the probe can't afford a DB round-trip. Whoever stores the permissions sets
+ * them here at startup and after each write.
+ */
+export class Permissions {
+  private byId: ReadonlyMap<string, Permission> = new Map();
+
+  get(id: string): Permission {
+    return this.byId.get(id) ?? GUARDIAN_ONLY;
   }
 
-  cloudEmailApps(): ReadonlySet<string> {
-    return new Set(this.cloudEmailAccess.keys());
-  }
-
-  cloudEmailsForApp(appId: string): ReadonlySet<string> {
-    return new Set(this.cloudEmailAccess.get(appId) ?? []);
-  }
-
-  isCloudEmailApp(appId: string): boolean {
-    return this.cloudEmailAccess.has(appId);
-  }
-
-  /** True when the app is link-public (listed in `allowedApps`). */
-  isPublicApp(appId: string): boolean {
-    return this.allowed.has(appId);
-  }
-
-  setAllowedApps(allowedApps: Iterable<string>): void {
-    this.allowed = new Set(allowedApps);
-  }
-
-  setCloudEmailAccess(cloudEmailAccess: Record<string, string[]>): void {
-    this.cloudEmailAccess = new Map(
-      Object.entries(cloudEmailAccess).map(([appId, emails]) => [appId, new Set(emails)]),
-    );
-  }
-
-  setConfig(config: { allowedApps: Iterable<string>; cloudEmailAccess: Record<string, string[]> }) {
-    this.setAllowedApps(config.allowedApps);
-    this.setCloudEmailAccess(config.cloudEmailAccess);
-  }
-
-  /** Loads and normalizes the stored policy, updates this snapshot, and returns that config. */
-  async load(db: DrizzleDb): Promise<PublicAccessConfig> {
-    const rows = await db
-      .select()
-      .from(settings)
-      .where(eq(settings.key, PUBLIC_ACCESS_SETTING_KEY));
-    const config =
-      rows.length > 0 && rows[0].value
-        ? normalizePublicAccessConfig(rows[0].value)
-        : DEFAULT_PUBLIC_ACCESS_CONFIG;
-    this.setConfig(config);
-    return config;
+  replace(byId: ReadonlyMap<string, Permission>): void {
+    this.byId = new Map(byId);
   }
 }

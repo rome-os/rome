@@ -244,7 +244,8 @@ import { SystemUpgradeService } from "./instance/system-upgrade/service.js";
 import { HostExecutionService } from "./apps/host-execution/service.js";
 import { createHostWorkerRecovery } from "./apps/host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./instance/auto-upgrade-gate.js";
-import { PublicAccessState } from "./access/permissions.js";
+import { Permissions } from "./access/permissions.js";
+import { loadAppPermissions } from "./apps/app-permissions.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
 import { DashboardAccessStore } from "./access/dashboard-access-store.js";
 import {
@@ -1979,9 +1980,9 @@ async function main() {
       }
     }
   };
-  const publicAccessState = new PublicAccessState();
+  const permissions = new Permissions();
   try {
-    await publicAccessState.load(db);
+    await loadAppPermissions(db, permissions);
   } catch (err) {
     log.warn("Failed to load publicAccess settings; starting with empty allow-list", {
       error: err instanceof Error ? err.message : String(err),
@@ -2122,7 +2123,7 @@ async function main() {
       codexAccountService,
       claudeAccount,
       romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
-      publicAccessState,
+      permissions,
       dashboardAccessState,
       dashboardAccessStore,
       visitorAllowListSync,

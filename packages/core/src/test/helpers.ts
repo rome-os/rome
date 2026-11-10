@@ -58,7 +58,8 @@ import { createBackendTurnRunner } from "../apps/actions/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
 import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
-import { PublicAccessState } from "../access/permissions.js";
+import { Permissions } from "../access/permissions.js";
+import { loadAppPermissions } from "../apps/app-permissions.js";
 import { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { DashboardAccessStore } from "../access/dashboard-access-store.js";
 import { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
@@ -744,10 +745,10 @@ export async function buildTestDeps(
 
   // Mirror daemon boot: the auth-edge snapshot is loaded from the persisted
   // `publicAccess` setting before serving (src/index.ts). Tests that change
-  // the setting after construction refresh via setAllowedApps(), exactly like
-  // the /api/public-access PUT handler.
-  const publicAccessState = new PublicAccessState();
-  await publicAccessState.load(db);
+  // the setting after construction refresh via permissions.replace(), exactly
+  // like the /api/public-access PUT handler.
+  const permissions = new Permissions();
+  await loadAppPermissions(db, permissions);
   const dashboardAccessState = new DashboardAccessState();
   await dashboardAccessState.load(db);
   // Not linked, so a test that saves the allow-list never reaches the network.
@@ -839,7 +840,7 @@ export async function buildTestDeps(
     codexAccountService,
     claudeAccount,
     romeCreditsProxy: romeCreditsProxyRoutes("127.0.0.1"),
-    publicAccessState,
+    permissions,
     dashboardAccessState,
     dashboardAccessStore,
     visitorAllowListSync,

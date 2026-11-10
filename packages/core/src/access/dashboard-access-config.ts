@@ -1,4 +1,4 @@
-import { normalizePublicAccessEmail } from "../apps/app-permissions.js";
+import { normalizeVisitorEmail } from "./visitor-email.js";
 
 export interface DashboardAccessConfig {
   cloudEmailAccess: string[];
@@ -13,7 +13,7 @@ export const DEFAULT_DASHBOARD_ACCESS_CONFIG: DashboardAccessConfig = {
 function normalizeEmailList(raw: unknown): string[] {
   if (!Array.isArray(raw)) return [];
   return Array.from(
-    new Set(raw.map(normalizePublicAccessEmail).filter((email): email is string => email !== null)),
+    new Set(raw.map(normalizeVisitorEmail).filter((email): email is string => email !== null)),
   ).sort();
 }
 

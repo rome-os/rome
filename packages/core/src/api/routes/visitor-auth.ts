@@ -9,7 +9,7 @@ import {
   issueVisitorSession,
   shouldSecureCookie,
 } from "../../access/auth.js";
-import { normalizePublicAccessEmail } from "../../apps/app-permissions.js";
+import { normalizeVisitorEmail } from "../../access/visitor-email.js";
 import { isValidAppId } from "../../apps/packaging/app-id.js";
 import { getInstanceOrigin, getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 import { createLogger } from "../../logger.js";
@@ -212,7 +212,7 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
 
     const data = (await response.json().catch(() => null)) as AccountSessionResponse | null;
     const accountId = typeof data?.accountId === "string" ? data.accountId : null;
-    const email = normalizePublicAccessEmail(data?.email);
+    const email = normalizeVisitorEmail(data?.email);
     const favorViewerToken =
       typeof data?.favorViewerToken === "string" && data.favorViewerToken.trim()
         ? data.favorViewerToken
@@ -278,10 +278,8 @@ export function visitorAuthRoutes(deps: ApiDeps, seams: VisitorAuthSeams = {}): 
       // session. Without this, `ctx.favors.requestAction` on a public app
       // always fails with `visitor_auth_required` because no flow ever sets
       // the visitor cookie on the instance origin.
-      if (
-        !deps.publicAccessState.isCloudEmailApp(appId) &&
-        !deps.publicAccessState.isPublicApp(appId)
-      ) {
+      const permission = deps.permissions.get(appId);
+      if (!permission.anyoneWithLink && permission.listedEmails.size === 0) {
         return c.json({ error: "app_not_publicly_accessible" }, 404);
       }
       pendingEntry = {

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { generateCaddyfile, resolveWebRoot } from "./caddyfile-generator.js";
-import { normalizePublicAccessConfig } from "../apps/app-permissions.js";
+import { normalizeAppPermissionsSetting } from "../apps/app-permissions.js";
 
 const RUNTIME_CONFIG_HANDLE = "handle /runtime-config.js {";
 
@@ -104,7 +104,7 @@ describe("generateCaddyfile with a persisted legacy enableAccessControl flag", (
   };
 
   it("normalizes without the flag and keeps the app policy", () => {
-    const config = normalizePublicAccessConfig(persisted);
+    const config = normalizeAppPermissionsSetting(persisted);
     expect(config).toEqual({
       allowedApps: ["morning-brief"],
       cloudEmailAccess: { "night-brief": ["a@b.co"] },

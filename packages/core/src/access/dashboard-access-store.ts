@@ -5,7 +5,7 @@ import {
   readDashboardAccessRevision,
   type DashboardAccessConfig,
 } from "./dashboard-access-config.js";
-import { normalizePublicAccessEmail } from "../apps/app-permissions.js";
+import { normalizeVisitorEmail } from "./visitor-email.js";
 
 /** The dashboard allow-list as Rome Cloud receives it, with the revision it was saved under. */
 export interface VisitorAllowList {
@@ -79,7 +79,7 @@ export class DashboardAccessStore {
    * or moved to the email since.
    */
   recordVisitorSignIn(email: string, accountId: string): Promise<boolean> {
-    const normalized = normalizePublicAccessEmail(email);
+    const normalized = normalizeVisitorEmail(email);
     if (!normalized || !accountId) return Promise.resolve(false);
     return this.serialize(async () => {
       const stored = await this.settingsRepo.get(DASHBOARD_ACCESS_SETTING_KEY);
@@ -115,7 +115,7 @@ function readVisitorAccounts(stored: unknown): Record<string, string> {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
   const accounts: Record<string, string> = {};
   for (const [email, accountId] of Object.entries(raw)) {
-    const normalized = normalizePublicAccessEmail(email);
+    const normalized = normalizeVisitorEmail(email);
     if (normalized && typeof accountId === "string" && accountId) accounts[normalized] = accountId;
   }
   return accounts;
