@@ -21,7 +21,7 @@ Acceptance items are observable from outside the implementation.
 > Prefer: "- [ ] the test fails when an ad-hoc size enters a migrated file".
 > Over: "- [ ] typography is cleaned up".
 
-Every item names what proves it. A committed test lands in the tree and runs in CI on every later change. A check runs once against the finished branch, and the PR test plan carries its evidence. An implementer builds an item that names neither as a committed test.
+Every item names what proves it. A committed test lands in the tree and runs in CI on every later change. A check runs once against the finished branch, and the PR's [Evidence](prs.md#evidence) section carries its result. An implementer builds an item that names neither as a committed test.
 
 An item earns a committed test when what it names can break later and nothing else catches the break. An item runs once against the finished branch when the type checker, a deleted route, or an existing test already decides it.
 

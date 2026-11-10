@@ -28,7 +28,7 @@ The body is a one-minute briefing for a reviewer who already has the diff, and i
 | [Invariants](#invariants) | When a product rule is added or changed | Up to 3 bullets |
 | [Scope](#scope) | Always | Up to 3 bullets |
 | [Merge danger](#merge-danger) | Always | 1–2 lines |
-| [Evidence](#evidence) | Always | Up to 3 bullets |
+| [Evidence](#evidence) | Always | Up to 3 bullets, or one per task-spec check |
 
 Stack history, full SHAs, and file-by-file checklists go in a PR comment, since none of it needs to reach `main`. Design rationale stays in the body: a rejected design fits in one [Scope](#scope) bullet, and rationale that will keep constraining future changes earns an [ADR](adrs.md).
 
@@ -76,7 +76,7 @@ The behaviors the PR proves, each a scenario and its observable outcome. Mark th
 
 Leave out the checks CI runs on every PR — lint, format, typecheck, the unit suite, the PR title check. List a CI job only when the PR changes what it checks, such as a migration the `db-schema` job validates.
 
-A PR that changes what the dashboard or an app shows pastes before and after screenshots at phone (390×844, touch on) and desktop (1280×900) sizes, plus 320×800 when the view holds a table, a toolbar, or a row of buttons. GitHub hosts pasted images outside the repository, so never commit them. For a dashboard view, `pnpm start:web:mock` is enough. For an app, use `pnpm dev:all` with the changed app rebuilt, since mock mode serves apps from committed bundles under `packages/web/mock/public/recorded-apps`.
+A PR that changes what the dashboard or an app shows pastes screenshots of the changed view at phone (390×844, touch on) and desktop (1280×900, touch off) sizes, plus 320×800 when the view holds a table, a toolbar, or a row of buttons. GitHub hosts pasted images outside the repository, so never commit them. For a dashboard view, `pnpm start:web:mock` is enough. For an app, use `pnpm dev:all` with the changed app rebuilt, since mock mode serves apps from committed bundles under `packages/web/mock/public/recorded-apps`. A phone screenshot shows the layout was designed rather than left to shrink: no sideways scroll, nothing cut off at the edge, and every action reachable without hover.
 
 ### Example
 
