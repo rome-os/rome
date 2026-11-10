@@ -147,7 +147,6 @@
     "signOutError": "Couldn't log out. Please try again."
   },
   "thisComputer": {
-    "notifications": "Notifications",
     "label": "Computer use",
     "auditLog": "Computer use log",
     "tooltip": {

@@ -87,7 +87,6 @@ describe("DeviceHost", () => {
       name: "RayBook",
       connection: "connecting",
       computerUse: false,
-      notifications: true,
     });
   });
 
@@ -141,19 +140,6 @@ describe("DeviceHost", () => {
     await settle();
     expect(limited.connect).toHaveBeenCalledTimes(2);
     expect(subject.status()).toMatchObject({ state: "disabled", computerUse: false });
-  });
-
-  it("reads the notifications choice when the status is given, and reports a change", async () => {
-    let on = true;
-    const { subject, statuses } = host({ notificationsEnabled: () => on });
-    await subject.start();
-    expect(subject.status()).toMatchObject({ notifications: true });
-    on = false;
-    statuses.length = 0;
-    subject.refresh();
-    expect(statuses).toHaveLength(1);
-    expect(statuses[0]).toMatchObject({ notifications: false });
-    expect(subject.status()).toMatchObject({ notifications: false });
   });
 
   it("signs the app out when Rome Cloud revokes a limited connection", async () => {
@@ -210,7 +196,6 @@ describe("DeviceHost", () => {
       name: "Ray's MacBook",
       connection: "connected",
       computerUse: true,
-      notifications: true,
     });
     gateway.emit({ type: "connection", status: "retrying" });
     expect(statuses.map((status) => status.state)).toEqual(["connecting", "connected", "offline"]);
@@ -274,7 +259,6 @@ describe("DeviceHost", () => {
       name: "RayBook",
       connection: "offline",
       computerUse: true,
-      notifications: true,
     });
   });
 

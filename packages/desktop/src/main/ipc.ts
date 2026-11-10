@@ -27,8 +27,6 @@ interface IpcHandlerOptions {
     start(): Promise<void>;
     stop(): Promise<void>;
     setEnabled(enabled: boolean): Promise<void>;
-    /** Whether the app shows Rome Cloud's notifications. Nothing reconnects. */
-    setNotificationsEnabled(enabled: boolean): void;
   };
 }
 
@@ -81,16 +79,16 @@ export function writeDeviceEnabled(enabled: boolean): void {
   writeSetting(DEVICE_ENABLED_KEY, enabled ? "true" : "false");
 }
 
-/** The settings key for the user's choice to show Rome Cloud's notifications. */
+/**
+ * The settings key for the user's choice to show Rome Cloud's notifications. The app's own
+ * Settings page changes it through `settings:set`, which only `file:` pages may call. The
+ * Rome's dashboard has no way to read or change it.
+ */
 const NOTIFICATIONS_ENABLED_KEY = "notifications.enabled";
 
 /** On unless the user turned it off. */
 export function readNotificationsEnabled(): boolean {
   return readSetting(NOTIFICATIONS_ENABLED_KEY) !== "false";
-}
-
-export function writeNotificationsEnabled(enabled: boolean): void {
-  writeSetting(NOTIFICATIONS_ENABLED_KEY, enabled ? "true" : "false");
 }
 
 export function writeRuntimeTarget(target: RuntimeTarget): void {
@@ -149,11 +147,6 @@ export function registerIpcHandlers(
 
   handleFromAppOrInstance("device:setEnabled", instanceOrigin, async (_event, value) => {
     await options.device.setEnabled(z.boolean().parse(value));
-    return options.device.status();
-  });
-
-  handleFromAppOrInstance("device:setNotificationsEnabled", instanceOrigin, (_event, value) => {
-    options.device.setNotificationsEnabled(z.boolean().parse(value));
     return options.device.status();
   });
 

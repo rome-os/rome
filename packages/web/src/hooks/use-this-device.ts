@@ -44,21 +44,6 @@ export function useThisDevice(onChange?: () => void): NodeThisDevice | null | un
     state: status.state,
     connection: status.connection,
     computerUse: status.computerUse,
-    // Only an app that reports the choice and can change it gets the toggle.
-    notifications:
-      typeof status.notifications === "boolean" && bridge.setNotificationsEnabled
-        ? {
-            enabled: status.notifications,
-            onChange(enabled) {
-              setBusy(true);
-              bridge
-                .setNotificationsEnabled?.(enabled)
-                .then(setStatus)
-                .catch(() => undefined)
-                .finally(() => setBusy(false));
-            },
-          }
-        : undefined,
     busy,
     removeUrl: `${import.meta.env.ROME_CLOUD_ORIGIN}/dashboard/settings`,
     // The app opens its own window; the log never reaches this page.

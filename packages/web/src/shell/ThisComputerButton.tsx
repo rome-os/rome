@@ -29,7 +29,6 @@ export function ThisComputerButton({ tooltipSide = "top" }: { tooltipSide?: "top
   // right after. The flag holds until the pointer crosses the button's edge or focus leaves it.
   const refocused = useRef(false);
   const labelId = useId();
-  const notificationsLabelId = useId();
 
   if (!device) return null;
   const { state } = device;
@@ -108,20 +107,6 @@ export function ThisComputerButton({ tooltipSide = "top" }: { tooltipSide?: "top
               onCheckedChange={device.onEnabledChange}
             />
           </div>
-          {device.notifications ? (
-            <div className="flex items-center gap-3 px-2 py-2">
-              <span id={notificationsLabelId} className="min-w-0 flex-1 text-ui text-foreground">
-                {t("thisComputer.notifications")}
-              </span>
-              <Switch
-                aria-labelledby={notificationsLabelId}
-                size="sm"
-                checked={device.notifications.enabled}
-                disabled={device.busy}
-                onCheckedChange={device.notifications.onChange}
-              />
-            </div>
-          ) : null}
           {device.openAuditLog ? (
             <>
               <Separator className="my-1" />

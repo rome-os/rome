@@ -494,7 +494,9 @@ independent choices apply on top of the connection, and both persist across rest
   `rome-node cp` stops early. These refusals are not written to the audit log, because
   nothing ran. Turning Computer use on or off reconnects in the other mode.
 - **Notifications** (on by default) decides whether the app shows Rome Cloud's
-  notifications. Off, the app still receives them and drops them.
+  notifications. Off, the app still receives them and drops them. The switch lives in the
+  app's own Settings window (**Rome → Settings…**), and the Rome's dashboard cannot read or
+  change it.
 
 Settings → Devices in the Rome the app opened shows
 a "This device" card whose menu has Connect or Disconnect, which turn Computer use on and off, only inside the app.

@@ -39,7 +39,6 @@ import {
   readDeviceEnabled,
   readNotificationsEnabled,
   registerIpcHandlers,
-  writeNotificationsEnabled,
 } from "./ipc";
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
@@ -51,7 +50,6 @@ const status: DeviceStatus = {
   name: "Mac",
   connection: "connected",
   computerUse: false,
-  notifications: false,
 };
 
 function register() {
@@ -60,7 +58,6 @@ function register() {
     start: rs.fn(async () => undefined),
     stop: rs.fn(async () => undefined),
     setEnabled: rs.fn(async () => undefined),
-    setNotificationsEnabled: rs.fn(),
   };
   registerIpcHandlers(
     {
@@ -88,53 +85,53 @@ describe("notifications setting", () => {
   it("is on until the user turns it off", () => {
     store.clear();
     expect(readNotificationsEnabled()).toBe(true);
-    writeNotificationsEnabled(false);
+    store.set("notifications.enabled", "false");
     expect(readNotificationsEnabled()).toBe(false);
-    writeNotificationsEnabled(true);
+    store.set("notifications.enabled", "true");
     expect(readNotificationsEnabled()).toBe(true);
   });
 
   it("is a separate setting from Computer use", () => {
     store.clear();
-    writeNotificationsEnabled(false);
+    store.set("notifications.enabled", "false");
     expect(readDeviceEnabled()).toBe(true);
-    expect(store.get("notifications.enabled")).toBe("false");
-    expect(store.has("device.enabled")).toBe(false);
   });
 });
 
-describe("device:setNotificationsEnabled", () => {
+describe("who can change the notifications setting", () => {
   const { device, handlers } = register();
-  const handler = handlers.get("device:setNotificationsEnabled")!;
+  const set = handlers.get("settings:set")!;
+  const get = handlers.get("settings:get")!;
 
-  it("changes the choice and answers with the new status", async () => {
-    expect(await handler(from("file:///Rome.app/settings.html"), false)).toBe(status);
-    expect(device.setNotificationsEnabled).toHaveBeenCalledWith(false);
-    expect(await handler(from(`${ORIGIN}/settings`), true)).toBe(status);
-    expect(device.setNotificationsEnabled).toHaveBeenLastCalledWith(true);
+  it("is the app's own pages, through settings:get and settings:set", async () => {
+    store.clear();
+    const own = from("file:///Rome.app/settings.html");
+    await set(own, "notifications.enabled", "false");
+    expect(store.get("notifications.enabled")).toBe("false");
+    expect(readNotificationsEnabled()).toBe(false);
+    expect(await get(own, "notifications.enabled")).toBe("false");
   });
 
-  it("is refused to other origins and to frames inside the Rome", () => {
-    device.setNotificationsEnabled.mockClear();
+  it("is never the Rome's dashboard, or any other page", () => {
+    store.clear();
     for (const event of [
-      from("https://evil.example/"),
+      from(`${ORIGIN}/settings`),
       from(`${ORIGIN}/app`, {}),
+      from("https://evil.example/"),
       { senderFrame: null },
-    ])
-      expect(() => handler(event, false)).toThrow("not available to this page");
-    expect(device.setNotificationsEnabled).not.toHaveBeenCalled();
-  });
-
-  it("takes only a boolean", () => {
-    for (const value of ["false", 0, null, undefined])
-      expect(() => handler(from(`${ORIGIN}/`), value)).toThrow();
-    expect(device.setNotificationsEnabled).not.toHaveBeenCalledWith("false");
-  });
-
-  it("is trusted the same way as device:setEnabled", () => {
-    for (const event of [from("https://evil.example/"), from(`${ORIGIN}/app`, {})])
-      expect(() => handlers.get("device:setEnabled")!(event, false)).toThrow(
-        "not available to this page",
+    ]) {
+      expect(() => set(event, "notifications.enabled", "false")).toThrow(
+        "settings:set is not available to this page",
       );
+      expect(() => get(event, "notifications.enabled")).toThrow(
+        "settings:get is not available to this page",
+      );
+    }
+    expect(store.has("notifications.enabled")).toBe(false);
+  });
+
+  it("has no device channel for it, so the dashboard's device bridge cannot reach it", () => {
+    expect(handlers.has("device:setNotificationsEnabled")).toBe(false);
+    expect(device.setEnabled).not.toHaveBeenCalled();
   });
 });

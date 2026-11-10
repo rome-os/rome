@@ -15,9 +15,8 @@ type DeviceConnection = "connecting" | "connected" | "offline";
 
 /**
  * This computer as a device of the signed-in account. `off`: signed out, or a launch that does
- * not connect. Signed in, the app is always connected (`connection`), and two choices apply on
- * top of it: `computerUse` (may Rome run programs here) and `notifications` (does the app show
- * Rome Cloud's notifications). `deviceId` is this computer's id in the device list.
+ * not connect. Signed in, the app is always connected (`connection`), and `computerUse` says
+ * whether Rome may run programs here. `deviceId` is this computer's id in the device list.
  *
  * `state` is what pages that predate `connection` read: while Computer use is off it is
  * `disabled`, whatever the connection is, as it was when that switch disconnected the app.
@@ -30,7 +29,6 @@ export type DeviceStatus =
       name: string;
       connection: DeviceConnection;
       computerUse: boolean;
-      notifications: boolean;
     };
 
 export interface DeviceHostOptions {
@@ -40,8 +38,6 @@ export interface DeviceHostOptions {
   credential(): Promise<CloudCredential | null>;
   /** The user's Computer use choice: whether Rome may run programs on this computer. */
   enabled(): boolean;
-  /** The user's choice to show notifications from Rome Cloud. On when omitted. */
-  notificationsEnabled?(): boolean;
   /** Rome Cloud no longer accepts the credential, so the app signs out. */
   onRevoked(): Promise<void>;
   /** Runs once, before the first connection. */
@@ -55,17 +51,6 @@ export interface DeviceHostOptions {
   /** The connection used while Computer use is off. It answers and runs nothing. */
   connectLimited?: (options: LimitedHostOptions) => Promise<void>;
 }
-
-/** What a status holds besides the notifications flag, which is read when the status is given. */
-type Current =
-  | { state: "off" }
-  | {
-      state: DeviceConnection | "disabled";
-      deviceId: string;
-      name: string;
-      connection: DeviceConnection;
-      computerUse: boolean;
-    };
 
 class SignInRequired extends Error {
   constructor() {
@@ -89,20 +74,13 @@ export class DeviceHost {
     done: Promise<void>;
     decided: Promise<void>;
   } | null = null;
-  private current: Current = { state: "off" };
+  private current: DeviceStatus = { state: "off" };
   private prepared: Promise<void> | null = null;
 
   constructor(private readonly options: DeviceHostOptions) {}
 
   status(): DeviceStatus {
-    return this.current.state === "off"
-      ? { state: "off" }
-      : { ...this.current, notifications: this.options.notificationsEnabled?.() ?? true };
-  }
-
-  /** Reports the status again, after the notifications choice changed. Nothing reconnects. */
-  refresh(): void {
-    this.options.onStatus?.(this.status());
+    return this.current;
   }
 
   /**
@@ -219,9 +197,9 @@ export class DeviceHost {
     this.setStatus({ state: "off" });
   }
 
-  private setStatus(status: Current): void {
+  private setStatus(status: DeviceStatus): void {
     if (JSON.stringify(status) === JSON.stringify(this.current)) return;
     this.current = status;
-    this.options.onStatus?.(this.status());
+    this.options.onStatus?.(status);
   }
 }

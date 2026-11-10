@@ -14,7 +14,6 @@ import {
   readRuntimeTarget,
   registerIpcHandlers,
   writeDeviceEnabled,
-  writeNotificationsEnabled,
   writeRuntimeTarget,
 } from "./ipc";
 import { isQuitting, requestStopAndQuit, setupLifecycle } from "./lifecycle";
@@ -106,7 +105,6 @@ async function bootstrap() {
           deviceName: deviceName(),
           credential: () => cloudAccount.credential(),
           enabled: readDeviceEnabled,
-          notificationsEnabled: readNotificationsEnabled,
           onRevoked: async () => {
             await controller.signOut();
           },
@@ -154,10 +152,6 @@ async function bootstrap() {
         writeDeviceEnabled(enabled);
         await deviceHost?.stop();
         await device.start();
-      },
-      setNotificationsEnabled: (enabled: boolean) => {
-        writeNotificationsEnabled(enabled);
-        deviceHost?.refresh();
       },
     };
     const active = controller.activeTarget();

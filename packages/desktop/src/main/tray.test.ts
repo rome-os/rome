@@ -95,7 +95,6 @@ describe("deviceLabel", () => {
     name: "Mac",
     connection: "connected",
     computerUse: true,
-    notifications: true,
     ...partial,
   });
 

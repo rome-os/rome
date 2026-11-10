@@ -147,7 +147,6 @@
     "signOutError": "退出登录失败，请重试。"
   },
   "thisComputer": {
-    "notifications": "通知",
     "label": "电脑操作",
     "auditLog": "电脑操作记录",
     "tooltip": {
