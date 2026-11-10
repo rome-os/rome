@@ -467,7 +467,7 @@ final class AppModel {
     /// Light, dark or automatic, for the whole app; kept across sign-out.
     let appearance = AppearanceSetting()
     /// Keeps the open instance on its latest release.
-    let update = InstanceUpdater()
+    let update: InstanceUpdater
     static let updateCheckHold: Duration = .seconds(1)
 
     /// The open instance's Web dashboard.
@@ -488,8 +488,9 @@ final class AppModel {
     /// How an instance's connection is set up; tests answer it themselves.
     private let instanceConfiguration: () -> URLSessionConfiguration
 
-    init(cloud: CloudAuth = CloudAuth(origin: CloudAuth.configuredOrigin), images: StoredImageCache = .shared, instanceConfiguration: @escaping () -> URLSessionConfiguration = { .default }) {
+    init(cloud: CloudAuth = CloudAuth(origin: CloudAuth.configuredOrigin), images: StoredImageCache = .shared, instanceConfiguration: @escaping () -> URLSessionConfiguration = { .default }, update: InstanceUpdater = InstanceUpdater()) {
         self.cloud = cloud
+        self.update = update
         self.images = images
         self.instanceConfiguration = instanceConfiguration
         push = PushCenter(registry: cloud)

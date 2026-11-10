@@ -390,6 +390,13 @@ final class Counter: @unchecked Sendable {
     }
 }
 
+/// A clock a test moves on by hand, so a wait ends when the test says,
+/// never after real seconds.
+final class UpdateClock: @unchecked Sendable {
+    var date = Date(timeIntervalSince1970: 1_800_000_000)
+    func advance(_ seconds: TimeInterval) { date = date.addingTimeInterval(seconds) }
+}
+
 @MainActor
 @Suite struct UpdateFailureTests {
     /// A relaunch resumes an update that then times out: the failure stays on
@@ -398,16 +405,19 @@ final class Counter: @unchecked Sendable {
         for (from, closes) in [("1.1.189", true), ("1.1.100", false)] {
             let defaults = UserDefaults(suiteName: "UpdateFailureTests-\(UUID().uuidString)")!
             let store = PendingUpgradeStore(defaults: defaults)
-            store.save(PendingUpgrade(target: "1.1.190", since: .now.addingTimeInterval(-UpdateGate.upgradeTimeout + 0.2), from: from), for: "i1")
-            let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults))
+            let clock = UpdateClock()
+            store.save(PendingUpgrade(target: "1.1.190", since: clock.date.addingTimeInterval(-UpdateGate.upgradeTimeout + 60), from: from), for: "i1")
+            let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), pollInterval: .milliseconds(5), now: { clock.date })
             // Restarting: neither the check nor the build answers.
             let backend = FakeBackend()
             backend.check = .failure(APIError.network)
             await updater.attach(backend: backend, instanceID: "i1")
-            // The poll's next look, one interval on, finds the time up.
-            for _ in 0..<80 {
+            #expect(updater.state != .upToDate)
+            // Past the timeout: the poll's next look finds the time up.
+            clock.advance(120)
+            for _ in 0..<400 {
                 if case .failed = updater.state { break }
-                try await Task.sleep(for: .milliseconds(100))
+                try await Task.sleep(for: .milliseconds(5))
             }
             guard case .failed(.timedOut) = updater.state else { Issue.record("\(updater.state)"); continue }
             #expect(updater.blocking)

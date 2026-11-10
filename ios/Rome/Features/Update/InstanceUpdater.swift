@@ -302,9 +302,16 @@ final class InstanceUpdater {
     /// Probes since the last check while waiting; a check runs every few.
     private var probesSinceCheck = 0
 
-    init(store: PendingUpgradeStore = PendingUpgradeStore(), banners: UpdateBannerStore = UpdateBannerStore()) {
+    /// How long the poll waits between looks at an upgrading instance.
+    private let pollInterval: Duration
+    /// The time now; tests move it on instead of waiting.
+    private let now: () -> Date
+
+    init(store: PendingUpgradeStore = PendingUpgradeStore(), banners: UpdateBannerStore = UpdateBannerStore(), pollInterval: Duration = UpdateGate.pollInterval, now: @escaping () -> Date = { .now }) {
         self.store = store
         self.banners = banners
+        self.pollInterval = pollInterval
+        self.now = now
     }
 
     // MARK: Offering
@@ -468,7 +475,7 @@ final class InstanceUpdater {
         do {
             let started = try await backend.startUpgrade(target: latest)
             guard mine == generation else { return }
-            let pending = PendingUpgrade(target: started.target ?? latest, since: .now, from: current)
+            let pending = PendingUpgrade(target: started.target ?? latest, since: now(), from: current)
             store.save(pending, for: instanceID)
             startPolling(pending)
         } catch {
@@ -494,8 +501,8 @@ final class InstanceUpdater {
         poll = nil
         guard let backend, let instanceID else {
             if case .timedOut(let target) = failure, let instanceID {
-                startPolling(PendingUpgrade(target: target, since: .now))
-                store.save(PendingUpgrade(target: target, since: .now), for: instanceID)
+                startPolling(PendingUpgrade(target: target, since: now()))
+                store.save(PendingUpgrade(target: target, since: now()), for: instanceID)
             }
             return
         }
@@ -505,7 +512,7 @@ final class InstanceUpdater {
         noteRunning(result)
         let verdict = UpdateGate.verdict(result)
         if case .unknown = verdict, case .timedOut(let target) = failure {
-            let pending = PendingUpgrade(target: target, since: .now)
+            let pending = PendingUpgrade(target: target, since: now())
             store.save(pending, for: instanceID)
             startPolling(pending)
             return
@@ -532,7 +539,7 @@ final class InstanceUpdater {
             while !Task.isCancelled {
                 guard let self, mine == self.generation else { return }
                 if await self.probe(pending) { return }
-                try? await Task.sleep(for: UpdateGate.pollInterval)
+                try? await Task.sleep(for: self.pollInterval)
             }
         }
     }
@@ -552,7 +559,7 @@ final class InstanceUpdater {
                 }
             }
             progress = .restarting
-            if UpdateGate.pollOutcome(version: nil, target: pending.target, from: pending.from, since: pending.since, now: .now) == .timedOut {
+            if UpdateGate.pollOutcome(version: nil, target: pending.target, from: pending.from, since: pending.since, now: now()) == .timedOut {
                 state = .failed(.timedOut(target: pending.target))
                 return true
             }
@@ -561,7 +568,7 @@ final class InstanceUpdater {
         let version = try? await backend.buildInfo().version
         guard mine == generation else { return true }
         progress = UpdateGate.progress(version: version, target: pending.target)
-        switch UpdateGate.pollOutcome(version: version, target: pending.target, from: pending.from, since: pending.since, now: .now) {
+        switch UpdateGate.pollOutcome(version: version, target: pending.target, from: pending.from, since: pending.since, now: now()) {
         case .done:
             // Long enough to read "Almost done…" before the app opens.
             try? await Task.sleep(for: .milliseconds(800))
@@ -608,7 +615,7 @@ final class InstanceUpdater {
     }
 
     private func expired(_ pending: PendingUpgrade) -> Bool {
-        Date.now.timeIntervalSince(pending.since) >= UpdateGate.upgradeTimeout
+        now().timeIntervalSince(pending.since) >= UpdateGate.upgradeTimeout
     }
 
     #if DEBUG

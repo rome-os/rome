@@ -27,7 +27,7 @@ final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
 @Suite(.serialized) struct StoppedPushTests {
     private static let keys = ["lastInstanceID", "lastInstanceRecord"]
 
-    private func model(sessionForB: Bool = true) -> AppModel {
+    private func model(sessionForB: Bool = true, update: InstanceUpdater = InstanceUpdater()) -> AppModel {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [InstanceListProtocol.self]
         let store = MemoryStore()
@@ -39,7 +39,7 @@ final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
         }
         // Its own picture cache: the model resets it on every switch, which
         // must never reach a test using the app's.
-        return AppModel(cloud: CloudAuth(origin: URL(string: "https://romeos.cc")!, configuration: configuration, store: store), images: StoredImageCache())
+        return AppModel(cloud: CloudAuth(origin: URL(string: "https://romeos.cc")!, configuration: configuration, store: store), images: StoredImageCache(), update: update)
     }
 
     private func list(b: String, c: String = "stopped") {
@@ -112,7 +112,9 @@ final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
     /// that had ended, and did nothing.
     @Test func aTapAfterTheWaitTimedOutOpensTheInstance() async throws {
         await withCleanDefaults {
-            UserDefaults.standard.set(try? JSONEncoder().encode(PendingUpgrade(target: "1.2.0", since: .now.addingTimeInterval(-UpdateGate.upgradeTimeout + 0.3), from: "1.1.0")), forKey: "pendingUpgrade.b")
+            // Its clock moves on by hand: the wait gives up when the test says.
+            let clock = UpdateClock()
+            UserDefaults.standard.set(try? JSONEncoder().encode(PendingUpgrade(target: "1.2.0", since: clock.date.addingTimeInterval(-UpdateGate.upgradeTimeout + 60), from: "1.1.0")), forKey: "pendingUpgrade.b")
             defer {
                 UserDefaults.standard.removeObject(forKey: "pendingUpgrade.b")
                 InstanceListProtocol.other = [:]
@@ -122,14 +124,15 @@ final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
                 "/v1/instances/b/authorizations": (409, #"{"error":"instance_not_ready"}"#),
             ]
             list(b: "running")
-            let app = model(sessionForB: false)
+            let app = model(sessionForB: false, update: InstanceUpdater(pollInterval: .milliseconds(5), now: { clock.date }))
             await app.openInstance(preferring: "b")
             #expect(app.update.waitingInstanceID == "b")
             // Rome Cloud reports B stopped until the wait gives up.
             list(b: "stopped")
-            for _ in 0..<80 {
+            clock.advance(120)
+            for _ in 0..<400 {
                 if case .failed = app.update.state { break }
-                try? await Task.sleep(for: .milliseconds(100))
+                try? await Task.sleep(for: .milliseconds(5))
             }
             guard case .failed(.timedOut) = app.update.state else { Issue.record("\(app.update.state)"); return }
             #expect(app.update.waitingInstanceID == nil)
