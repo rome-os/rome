@@ -616,13 +616,9 @@ describe("Concierge tools", () => {
       await expect(s.tool("say", { text: "x", answers: "elsewhere" })).resolves.toMatchObject({
         isError: true,
       });
-      // The Concierge no longer names a thread.
-      const say = (await buildConciergeTools(s.service, s.context())).find(
-        (tool) => tool.name === "say",
-      )!;
-      expect(Object.keys((say.inputSchema as { properties: object }).properties)).not.toContain(
-        "thread",
-      );
+      // In a turn the guardian started, a named thread changes nothing.
+      const ignored = saidId(await s.tool("say", { text: "Still here", thread: "flights" }));
+      expect(threadOf(s, ignored)).toBeUndefined();
     });
 
     it("puts a task's result and card in the thread of the guardian message that started it", async () => {
@@ -645,6 +641,37 @@ describe("Concierge tools", () => {
       expect(threadOf(s, result)).toBe("g0");
       expect(threadOf(s, card)).toBe("g0");
       expect(threadOf(s, ack)).toBeUndefined();
+    });
+
+    it("keeps a task's story under one root: a later card or forward does not move its anchor", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, { id: "g0" });
+      const ack = saidId(await s.tool("say", { text: "On it" }));
+      const { chatId, taskId } = JSON.parse(
+        (await s.tool("chat_start", { title: "Flights", brief: "Find flights" })).content[0].text,
+      );
+      s.inTurn("task-event-turn");
+      s.threadAnchor(ack);
+      await s.tool("say", { text: "Found 3 flights" });
+
+      // A later turn shows the task's card again: it reports in the task's thread, and the row keeps its anchor.
+      s.inTurn("later-turn");
+      s.threadAnchor(undefined);
+      const card = saidId(await s.tool("chat_card", { chatId }));
+      expect(threadOf(s, card)).toBe("g0");
+      expect((await s.tasks.repo.getWithChat(taskId))?.sourceMessageId).toBe(ack);
+    });
+
+    it("lets a turn about several tasks name the thread a message reports on, never a new one", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, { id: "g0", chatThread: "g0", settled: true, turnId: "older" });
+      s.inTurn("task-events-turn");
+
+      const named = saidId(await s.tool("say", { text: "Both done", thread: "g0" }));
+      expect(threadOf(s, named)).toBe("g0");
+      await expect(s.tool("say", { text: "x", thread: "new" })).resolves.toMatchObject({
+        isError: true,
+      });
     });
 
     it("takes the guardian's words sent on to a task into the task's thread, but never a reply", async () => {
@@ -2378,13 +2405,12 @@ describe("Concierge pushes", () => {
     expect(JSON.stringify(s.pushes)).not.toContain("7291");
   });
 
-  it("keeps a private message off the lock screen when it starts a chat thread", async () => {
+  it("keeps a private message off the lock screen", async () => {
     const s = setup();
     s.pushLevel("active");
     const result = await s.tool("say", {
       text: "Your code is 7291.",
       private: true,
-      thread: "new",
     });
     await s.settle();
     expect(result.isError).toBeFalsy();
