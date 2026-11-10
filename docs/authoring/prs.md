@@ -19,62 +19,92 @@ When the PR touches `packages/app-runtime-sdk/`, `packages/app-web-sdk/`, or `pa
 
 ## Description
 
-The diff already carries what changed and where. Each section below exists because the diff cannot carry it.
+The body is a one-minute briefing for a reviewer who already has the diff, and it becomes the squash commit body. Keep it under about 40 lines. Each section is short, and a section with nothing to say is left out, not filled with a placeholder. Use these `##` headings in this order:
 
-| Section | When |
-|---|---|
-| [What this PR does](#what-this-pr-does) | Always |
-| [Design & Invariants](#design--invariants) | Non-trivial PRs |
-| [Test plan](#test-plan) | Always |
-| [Not in this PR](#not-in-this-pr) | When the PR defers something |
+| Section | When | Length |
+|---|---|---|
+| [Why](#why) | Always | 1–3 sentences |
+| [Sketch](#sketch) | When a sketch beats prose | One small block |
+| [Invariants](#invariants) | When a product rule is added or changed | Up to 3 bullets |
+| [Scope](#scope) | Always | Up to 3 bullets |
+| [Merge danger](#merge-danger) | Always | 1–2 lines |
+| [Evidence](#evidence) | Always | Up to 3 bullets |
 
-A section with nothing to say gets its heading omitted, not filled with a placeholder.
+Stack history, full SHAs, file-by-file checklists, and long design rationale go in a linked doc or a PR comment, not the body.
 
-### What this PR does
+### Why
 
-Open with the problem — what was missing, broken, or accreted — not with what changed.
+Open with the problem — what was missing, broken, or accreted — and the approach, not with what changed.
 
 > Prefer: "Two paths could write the app lockfile, so a crash mid-install stranded the app half-registered."
 > Over: "Adds `installLock` to `AppManager`, updates `install.ts`, adds a test."
 
-### Design & Invariants
+### Sketch
 
-State the design as business rules: the invariants that must stay true, and what counts as a regression. A reader checks each one against the product, without opening the code, so an invariant names no file, function, type, or field. Name the durable home of each new concept — [`docs/concepts/`](../concepts/index.md) for vocabulary, [`docs/architecture/`](../architecture/index.md) for invariants.
+When the shape of the change is clearer as a picture, show it: a `diff` of an API, call tree, component tree, or file tree. Keep only the parts that carry the change. A `refactor:` PR usually uses a sketch in place of Invariants, since its contract is the code structure.
 
-> Prefer: "A guardian stays reachable through a service while at least one of its bots can still talk to them. Removing one bot never cuts off the others."
-> Over: "Teardown deletes `channel_mappings` only when `connectionsHoldingIn(tx, service, needs, exceptId)` is empty."
+```diff
+ AgentSession
+-  sendTurn(input)
+-  submitInput(input, onTurn)
++  submit(input, { priority: now | next | after })
+```
 
-> Prefer: "The routing layer never learns which channel a message arrived on. The adapter absorbs every channel specific."
-> Over: "Adds a `channel` field to `RouteContext` and reads it in `TelegramAdapter`."
+### Invariants
 
-A `refactor:` PR is the exception. Its contract is the code structure, so it names the modules and seams it moves.
+The business rules that must stay true, which a reader checks against the product without opening the code. An invariant names no file, function, type, or field. Name the durable home of a new concept — [`docs/concepts/`](../concepts/index.md) for vocabulary, [`docs/architecture/`](../architecture/index.md) for invariants — instead of explaining it here.
 
-When more than one reasonable design existed, name the alternatives and why this one won. The code preserves no rejected design.
+> Prefer: "A guardian stays reachable through a service while at least one of its bots can still talk to them."
+> Over: "Teardown deletes `channel_mappings` only when `connectionsHoldingIn(...)` is empty."
 
-### Test plan
+### Scope
 
-A checklist of the behaviors the PR proves: `[x]` for what the author verified, `[ ]` for what remains. Each item is a scenario and its observable outcome. Say when a test fails without the change, since that shows the test covers it.
+What the PR covers and what it deliberately leaves out, such as a follow-up or a known gap. When more than one reasonable design existed, one bullet names the rejected one and why. A PR stacked on or blocked by another names it here.
 
-> Prefer: "- [x] Two Telegram bots, remove one: the guardian still reaches Rome through the other. Fails without the fix."
-> Over: "- [x] New cases in `connections.test.ts`."
+### Merge danger
 
-After the checklist, one line says how the behaviors were exercised: unit tests with fakes, tests against a real database, or a manual run in `pnpm dev:all`. The reader weighs each item by it.
+Whether the change is a one-way door (a migration, a deleted record, a published API) or a two-way door that a revert undoes, and its blast radius: who or what it touches, and why that is safe.
 
-Leave out the checks CI runs on every PR — lint, format, typecheck, the unit suite, the PR title check. Their result is on the PR already. List a CI job only when the PR adds or changes what that job checks, such as a migration the `db-schema` job validates.
+> "Two-way door. Blast radius: visitor sign-in. The worst case is one extra small resend."
 
+### Evidence
 
-A PR that changes what the dashboard or an app shows pastes screenshots of the changed view into its description at two sizes. GitHub hosts pasted images outside the repository, so never commit them.
+The behaviors the PR proves, each a scenario and its observable outcome. Mark the ones that fail without the change, since that shows the test covers it. Say how they were exercised when it is not unit tests.
 
-| Size | Viewport | Touch |
-|---|---|---|
-| Phone | 390×844 | On |
-| Desktop | 1280×900 | Off |
+> Prefer: "- Two Telegram bots, remove one: the guardian still reaches Rome through the other. Fails without the fix."
+> Over: "- New cases in `connections.test.ts`."
 
-Add a third at 320×800 when the view holds a table, a toolbar, or a row of buttons, since those overflow first. Take them in your browser's device mode. For a dashboard view, `pnpm start:web:mock` is enough. For an app, use `pnpm dev:all` with the changed app rebuilt and loaded, since mock mode serves apps from committed bundles under `packages/web/mock/public/recorded-apps` and would show the old UI. A phone screenshot shows the phone layout was designed rather than left to shrink: no sideways scroll, nothing cut off at the edge, and every action reachable without hover.
+Leave out the checks CI runs on every PR — lint, format, typecheck, the unit suite, the PR title check. List a CI job only when the PR changes what it checks, such as a migration the `db-schema` job validates.
 
-### Not in this PR
+A PR that changes what the dashboard or an app shows pastes before and after screenshots at phone (390×844, touch on) and desktop (1280×900) sizes, plus 320×800 when the view holds a table, a toolbar, or a row of buttons. GitHub hosts pasted images outside the repository, so never commit them. For a dashboard view, `pnpm start:web:mock` is enough. For an app, use `pnpm dev:all` with the changed app rebuilt, since mock mode serves apps from committed bundles under `packages/web/mock/public/recorded-apps`.
 
-One bullet per deferral, each naming the deferred thing and a one-clause reason or pointer.
+### Example
+
+```markdown
+## Why
+A listed visitor who deleted their Rome Cloud account and signed up again
+with the same email lost the shared instance. The instance remembered
+sign-ins by email, so the new account looked like a repeat and the list
+was never resent.
+
+## Invariants
+- A listed email that signs in with a different account resends the list once.
+- The same account signing in again sends nothing.
+- Removing an email from the list forgets its account.
+
+## Scope
+- Covers re-registration and an email moving between accounts.
+- Old email-only records are dropped, not migrated: each listed visitor
+  resends once on next sign-in. Guessing their account could bring the bug back.
+
+## Merge danger
+Two-way door. Blast radius: visitor sign-in. The worst case is one extra small resend.
+
+## Evidence
+- Same email, new account: resends once. Fails without the fix.
+- Same account from browser then phone: one resend total.
+- Old email-only record: counts once, then the field is gone. Fails without the fix.
+```
 
 ## Tone
 
