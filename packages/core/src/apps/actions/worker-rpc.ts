@@ -23,9 +23,6 @@ import type {
 } from "@rome-os/app-runtime";
 import type { ConnectionRegistry } from "../../connections/registry.js";
 import type { EventService } from "../../events/event-service.js";
-import type { RoutineEngine } from "../../routines/engine.js";
-import type { RoutinesRepository } from "../../db/repositories/routines.js";
-import { toRoutine } from "../../db/repositories/routines.js";
 import type { AppLifecycleService } from "../lifecycle-service.js";
 import type { AppStoreReader } from "../store-service.js";
 import type { SystemUpgradeChecker } from "../../instance/system-upgrade/service.js";
@@ -96,7 +93,6 @@ const EmailIngestInboundParams = z.object({
   signature: z.string(),
 });
 
-const RoutineIdParams = z.object({ routineId: z.string().min(1) });
 // An optional sender-supplied body. `{}` (the legacy no-arg call) is
 // valid; a present body must be a string. `.strict()` so an unknown key on this
 // internal wire contract surfaces as an error rather than being silently
@@ -252,10 +248,6 @@ export interface WorkerRpcServices {
   connectionRegistry: ConnectionRegistry;
   channelOf: ChannelOf;
   chatSettings: ChatSettingsControl;
-  /** Live routine engine + repo — the action worker has no in-process engine,
-   * so it persists a routine then calls `routines.schedule` to activate it here. */
-  routinesRepo: RoutinesRepository;
-  routineEngine: RoutineEngine;
   /** Event coordinator (bus + catalog). `events.publish` / `events.searchCatalog`
    * delegate the business logic here so it is shared with the main-process
    * action path; the handler only validates the wire params. */
@@ -319,14 +311,22 @@ function callerOf(context: IpcCallContext | undefined) {
   return actionCaller(context?.callerActionContext);
 }
 
-export class WorkerRpcServer {
-  private readonly handlers: ReadonlyMap<
-    string,
-    (params: unknown, context?: IpcCallContext) => unknown
-  >;
+/** A method served to app workers: it takes the call's params and returns its result. */
+export type WorkerRpcHandler = (params: unknown, context?: IpcCallContext) => unknown;
 
-  constructor(private services: WorkerRpcServices) {
-    this.handlers = new Map<string, (params: unknown, context?: IpcCallContext) => unknown>(
+export class WorkerRpcServer {
+  private readonly handlers: Map<string, WorkerRpcHandler>;
+
+  /**
+   * `calls` are methods another context serves to app workers, such as
+   * Routines' `routines.schedule`. A name that a built-in method already
+   * takes is refused.
+   */
+  constructor(
+    private services: WorkerRpcServices,
+    calls: Readonly<Record<string, WorkerRpcHandler>> = {},
+  ) {
+    this.handlers = new Map<string, WorkerRpcHandler>(
       Object.entries({
         "channels.list": () => this.services.channelsService.list(),
         "channels.send": (params, context) => this.handleChannelsSend(params, context),
@@ -365,8 +365,6 @@ export class WorkerRpcServer {
         "actions.validateArgs": (params) => this.handleActionsValidateArgs(params),
         "agent.hasAgent": (params) => this.handleAgentHasAgent(params),
         "agent.hasAction": (params) => this.handleAgentHasAction(params),
-        "routines.schedule": (params) => this.handleRoutinesSchedule(params),
-        "routines.cancel": (params) => this.handleRoutinesCancel(params),
         "events.publish": (params) => this.handleEventsPublish(params),
         "events.searchCatalog": (params) => this.handleEventsSearchCatalog(params),
         "apps.create": (params) => this.handleAppsCreate(params),
@@ -405,6 +403,12 @@ export class WorkerRpcServer {
           this.handleAppConnections("invoke", params, context),
       }),
     );
+    for (const [method, handler] of Object.entries(calls)) {
+      if (this.handlers.has(method)) {
+        throw new Error(`WorkerRPC: method ${method} is already served`);
+      }
+      this.handlers.set(method, handler);
+    }
   }
 
   /** Serve every method on a worker's IPC channel. */
@@ -647,24 +651,6 @@ export class WorkerRpcServer {
   private handleAgentHasAction(params: unknown): { hasAction: boolean } {
     const { agentName, actionName } = parseParams("agent.hasAction", AgentHasActionParams, params);
     return { hasAction: this.services.hasAction(agentName, actionName) };
-  }
-
-  private async handleRoutinesSchedule(params: unknown): Promise<{ ok: true }> {
-    const { routineId } = parseParams("routines.schedule", RoutineIdParams, params);
-    const row = await this.services.routinesRepo.findById(routineId);
-    if (!row) throw new Error(`Routine not found: ${routineId}`);
-    if (row.enabled ?? true) {
-      await this.services.routineEngine.activate(toRoutine(row));
-    } else {
-      await this.services.routineEngine.deactivate(routineId);
-    }
-    return { ok: true };
-  }
-
-  private async handleRoutinesCancel(params: unknown): Promise<{ ok: true }> {
-    const { routineId } = parseParams("routines.cancel", RoutineIdParams, params);
-    await this.services.routineEngine.deactivate(routineId);
-    return { ok: true };
   }
 
   private async handleEventsPublish(params: unknown): Promise<{ accepted: true }> {

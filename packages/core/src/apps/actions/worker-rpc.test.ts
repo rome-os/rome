@@ -79,7 +79,6 @@ async function rpc(
 // AppManager was driven) rather than on the handler internals.
 function makeServer(
   overrides: {
-    routinesRepo?: unknown;
     eventBus?: EventBus;
     eventCatalog?: EventCatalog;
     eventService?: EventService;
@@ -114,10 +113,7 @@ function makeServer(
       body: { available: true, browseOrigin: "https://store.example" },
     })),
   };
-  const routineEngine = { activate: rs.fn(async () => {}), deactivate: rs.fn() };
   const services = {
-    routineEngine,
-    routinesRepo: overrides.routinesRepo,
     eventService: overrides.eventService ?? new EventService(eventBus, eventCatalog),
     // catalog/db are only touched by uninstall --purge, which these tests don't
     // exercise, so stub them.
@@ -147,7 +143,6 @@ function makeServer(
     eventCatalog,
     appManager,
     appStore,
-    routineEngine,
   };
 }
 
@@ -738,94 +733,26 @@ describe("WorkerRpcServer param validation", () => {
     expect(response.error).toContain("appStore.listListings: invalid params");
     expect(appStore.listListings).not.toHaveBeenCalled();
   });
-
-  it("rejects routines.cancel with an empty routineId without deactivating anything", async () => {
-    const { server, services } = makeServer({});
-    const fake = connect(server);
-
-    const response = await rpc(fake, "routines.cancel", { routineId: "" });
-
-    expect(response.error).toContain("routines.cancel: invalid params");
-    expect(services.routineEngine.deactivate).not.toHaveBeenCalled();
-  });
-
-  it("deactivates a routine when routineId is valid", async () => {
-    const { server, services } = makeServer({});
-    const fake = connect(server);
-
-    const response = await rpc(fake, "routines.cancel", { routineId: "r-42" });
-
-    expect(response.error).toBeUndefined();
-    expect(response.result).toEqual({ ok: true });
-    expect(services.routineEngine.deactivate).toHaveBeenCalledWith("r-42");
-  });
 });
 
-describe("WorkerRpcServer routines.schedule", () => {
-  const baseRow = {
-    id: "r-7",
-    name: "daily-check",
-    enabled: true,
-    trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", rrule: "FREQ=DAILY" },
-    actionName: "do_thing",
-    args: {},
-    createdAt: new Date(),
-    lastFiredAt: null,
-    nextRunAt: null,
-  };
-
-  it("activates an enabled routine and acks", async () => {
-    const { server, services } = makeServer({
-      routinesRepo: { findById: rs.fn(async () => baseRow) },
+describe("WorkerRpcServer calls from other contexts", () => {
+  it("serves a call another context passes in", async () => {
+    const { services } = makeServer({});
+    const server = new WorkerRpcServer(services, {
+      "probe.echo": async (params) => ({ echoed: params }),
     });
     const fake = connect(server);
 
-    const response = await rpc(fake, "routines.schedule", { routineId: "r-7" });
+    const response = await rpc(fake, "probe.echo", { n: 1 });
 
-    expect(response.error).toBeUndefined();
-    expect(response.result).toEqual({ ok: true });
-    expect(services.routineEngine.activate).toHaveBeenCalledTimes(1);
-    expect(services.routineEngine.deactivate).not.toHaveBeenCalled();
+    expect(response.result).toEqual({ echoed: { n: 1 } });
   });
 
-  it("deactivates a disabled routine instead of activating it", async () => {
-    const { server, services } = makeServer({
-      routinesRepo: { findById: rs.fn(async () => ({ ...baseRow, enabled: false })) },
-    });
-    const fake = connect(server);
-
-    const response = await rpc(fake, "routines.schedule", { routineId: "r-7" });
-
-    expect(response.result).toEqual({ ok: true });
-    expect(services.routineEngine.deactivate).toHaveBeenCalledWith("r-7");
-    expect(services.routineEngine.activate).not.toHaveBeenCalled();
-  });
-
-  it("errors when the routine is not found and touches neither engine path", async () => {
-    const { server, services } = makeServer({
-      routinesRepo: { findById: rs.fn(async () => undefined) },
-    });
-    const fake = connect(server);
-
-    const response = await rpc(fake, "routines.schedule", { routineId: "ghost" });
-
-    expect(response.result).toBeUndefined();
-    expect(response.error).toContain("Routine not found");
-    expect(services.routineEngine.activate).not.toHaveBeenCalled();
-    expect(services.routineEngine.deactivate).not.toHaveBeenCalled();
-  });
-
-  it("rejects routines.schedule with an empty routineId without reading the repo", async () => {
-    const findById = rs.fn();
-    const { server } = makeServer({
-      routinesRepo: { findById },
-    });
-    const fake = connect(server);
-
-    const response = await rpc(fake, "routines.schedule", { routineId: "" });
-
-    expect(response.error).toContain("routines.schedule: invalid params");
-    expect(findById).not.toHaveBeenCalled();
+  it("refuses a call whose name a built-in method already takes", () => {
+    const { services } = makeServer({});
+    expect(() => new WorkerRpcServer(services, { "channels.list": async () => [] })).toThrow(
+      "WorkerRPC: method channels.list is already served",
+    );
   });
 });
 
