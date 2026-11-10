@@ -122,6 +122,20 @@ describe("NotifyClient.send", () => {
     }
   });
 
+  it("maps a 200 that says the instance is not hosted to not_hosted, for any recipient", async () => {
+    const notHosted = { attempted: 0, sent: 0, failed: 0, reason: "not_hosted" };
+    const c = client({ fetchImpl: rs.fn(async () => jsonRes(200, notHosted)) });
+    expect(await c.send({ body: "hi" })).toEqual({ kind: "not_hosted" });
+    expect(await c.send({ body: "hi", recipient: "acct-v" })).toEqual({ kind: "not_hosted" });
+  });
+
+  it("keeps an older Rome Cloud's zero counts, which carry no reason, as ok", async () => {
+    const c = client({
+      fetchImpl: rs.fn(async () => jsonRes(200, { attempted: 0, sent: 0, failed: 0 })),
+    });
+    expect(await c.send({ body: "hi" })).toEqual({ kind: "ok", attempted: 0, sent: 0, failed: 0 });
+  });
+
   it("maps an older Rome Cloud's 400 for an unknown recipient field to outcome_unknown", async () => {
     const c = client({ fetchImpl: rs.fn(async () => jsonRes(400, { error: "invalid_request" })) });
     expect(await c.send({ body: "hi", recipient: "acct-v" })).toEqual({ kind: "outcome_unknown" });

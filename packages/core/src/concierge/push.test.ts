@@ -321,6 +321,7 @@ describe("ConciergePush", () => {
       async (): Promise<SendOutcome> => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }),
       async (): Promise<SendOutcome> => ({ kind: "no_token" }),
       async (): Promise<SendOutcome> => ({ kind: "outcome_unknown" }),
+      async (): Promise<SendOutcome> => ({ kind: "not_hosted" }),
       async (): Promise<SendOutcome> => {
         throw new Error("network down");
       },

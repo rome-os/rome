@@ -18,6 +18,8 @@ export type SendOutcome =
   | { kind: "reenroll" }
   /** Rome Cloud refused the named recipient: not the instance's owner nor on its visitor list. Nothing was sent. */
   | { kind: "recipient_not_allowed" }
+  /** Rome Cloud pushes only for a hosted instance, and this one is not (desktop, self-hosted, test). Nothing was sent. */
+  | { kind: "not_hosted" }
   | { kind: "outcome_unknown" };
 
 /** Structural copy of core's `NotifyContent`. An optional
@@ -80,6 +82,13 @@ export function createSendNotificationAction(
           return { status: "error", error: "instance_reenrollment_required" };
         case "recipient_not_allowed":
           return { status: "error", error: "recipient_not_allowed" };
+        case "not_hosted":
+          // Not a failure to retry: this Rome has no phone push at all.
+          return {
+            status: "error",
+            error:
+              "not_hosted: the notification was not delivered. This Rome is not hosted by Rome Cloud, so it cannot push to a phone.",
+          };
         case "outcome_unknown":
           return { status: "error", error: "notification_outcome_unknown" };
         default: {

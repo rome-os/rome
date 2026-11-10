@@ -16,6 +16,8 @@ export type SendOutcome =
   | { kind: "reenroll" }
   /** Rome Cloud refused the named recipient: not the instance's owner nor on its visitor list. Nothing was sent. */
   | { kind: "recipient_not_allowed" }
+  /** Rome Cloud pushes only for a hosted instance, and this one is not (desktop, self-hosted, test). Nothing was sent. */
+  | { kind: "not_hosted" }
   | { kind: "outcome_unknown" };
 
 /**
@@ -140,6 +142,10 @@ export class NotifyClient implements NotifyService {
       }
       const body: unknown = await res.json();
       if (!isCounts(body)) return { kind: "outcome_unknown" };
+      // An older Rome Cloud sends no `reason`, and its counts stand as they are.
+      if ((body as { reason?: unknown }).reason === "not_hosted" && body.attempted === 0) {
+        return { kind: "not_hosted" };
+      }
       // A Rome Cloud that served the recipient echoes it. One that answers
       // without it may have sent the push to the guardian's devices instead.
       if (content?.recipient !== undefined) {

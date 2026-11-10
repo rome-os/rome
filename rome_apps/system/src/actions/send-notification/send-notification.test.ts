@@ -119,6 +119,11 @@ describe("send_notification action", () => {
       status: "error",
       error: "recipient_not_allowed",
     });
+    expect(await withOutcome({ kind: "not_hosted" }).execute({})).toEqual({
+      status: "error",
+      error:
+        "not_hosted: the notification was not delivered. This Rome is not hosted by Rome Cloud, so it cannot push to a phone.",
+    });
   });
 
   it("rethrows an unexpected error from the notify capability", async () => {
