@@ -23,6 +23,18 @@ const status = (state: DeviceState): DesktopDeviceStatus => ({
   name: "Macbook",
 });
 
+/** What an app that always connects reports: the connection apart from Computer use. */
+const split = (
+  connection: "connected" | "connecting" | "offline",
+  computerUse: boolean,
+): DesktopDeviceStatus => ({
+  state: computerUse ? connection : "disabled",
+  deviceId: "d1",
+  name: "Macbook",
+  connection,
+  computerUse,
+});
+
 function installBridge(initial: DesktopDeviceStatus, { auditLog = true } = {}) {
   let listener: ((next: DesktopDeviceStatus) => void) | null = null;
   const bridge = {
@@ -235,5 +247,62 @@ describe("ThisComputerButton", () => {
     } finally {
       await i18n.changeLanguage("en");
     }
+  });
+
+  describe("with an app that always connects", () => {
+    it("says the connection and that Computer use is off", async () => {
+      installBridge(split("connected", false));
+      render(<ThisComputerButton />);
+      const button = await screen.findByRole("button", {
+        name: "Connected · Computer use off",
+      });
+      // The icon keeps the look of a turned-off computer.
+      expect(button).toBeTruthy();
+      expect(dot()).toBeNull();
+    });
+
+    it.each([
+      ["connecting", "Connecting… · Computer use off"],
+      ["offline", "Offline · Computer use off"],
+    ] as const)("labels a limited %s connection", async (connection, label) => {
+      installBridge(split(connection, false));
+      render(<ThisComputerButton />);
+      expect(await screen.findByRole("button", { name: label })).toBeTruthy();
+    });
+
+    it("keeps the old labels while Computer use is on", async () => {
+      installBridge(split("connected", true));
+      render(<ThisComputerButton />);
+      expect(
+        await screen.findByRole("button", { name: "Rome can use this computer" }),
+      ).toBeTruthy();
+    });
+
+    it("offers only the Computer use switch: notifications are the app's own setting", async () => {
+      // An app that still reports the choice, or can change it, gets no switch for it here.
+      const { bridge } = installBridge({
+        ...split("connected", false),
+        notifications: true,
+      } as never);
+      Object.assign(bridge, { setNotificationsEnabled: rs.fn() });
+      render(<ThisComputerButton />);
+      await userEvent.click(await screen.findByRole("button", { name: /Computer use off/ }));
+      expect(await screen.findAllByRole("switch")).toHaveLength(1);
+      expect(screen.queryByText("Notifications")).toBeNull();
+    });
+
+    it("speaks Chinese", async () => {
+      await i18n.changeLanguage("zh-CN");
+      try {
+        installBridge(split("connected", false));
+        render(<ThisComputerButton />);
+        await userEvent.click(
+          await screen.findByRole("button", { name: "已连接 · 电脑操作已关闭" }),
+        );
+        expect(await screen.findByRole("switch", { name: "电脑操作" })).toBeTruthy();
+      } finally {
+        await i18n.changeLanguage("en");
+      }
+    });
   });
 });

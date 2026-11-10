@@ -79,6 +79,18 @@ export function writeDeviceEnabled(enabled: boolean): void {
   writeSetting(DEVICE_ENABLED_KEY, enabled ? "true" : "false");
 }
 
+/**
+ * The settings key for the user's choice to show Rome Cloud's notifications. The app's own
+ * Settings page changes it through `settings:set`, which only `file:` pages may call. The
+ * Rome's dashboard has no way to read or change it.
+ */
+const NOTIFICATIONS_ENABLED_KEY = "notifications.enabled";
+
+/** On unless the user turned it off. */
+export function readNotificationsEnabled(): boolean {
+  return readSetting(NOTIFICATIONS_ENABLED_KEY) !== "false";
+}
+
 export function writeRuntimeTarget(target: RuntimeTarget): void {
   writeSetting(RUNTIME_TARGET_KEY, JSON.stringify(target));
 }

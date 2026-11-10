@@ -153,7 +153,12 @@
       "connected": "Rome 可以操作这台电脑",
       "connecting": "正在连接…",
       "offline": "Rome 暂时无法连接这台电脑",
-      "disabled": "Rome 不能操作这台电脑"
+      "disabled": "Rome 不能操作这台电脑",
+      "limited": {
+        "connected": "已连接 · 电脑操作已关闭",
+        "connecting": "正在连接… · 电脑操作已关闭",
+        "offline": "离线 · 电脑操作已关闭"
+      }
     }
   },
   "terminal": {

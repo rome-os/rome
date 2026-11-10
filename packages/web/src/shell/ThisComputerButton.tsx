@@ -32,7 +32,11 @@ export function ThisComputerButton({ tooltipSide = "top" }: { tooltipSide?: "top
 
   if (!device) return null;
   const { state } = device;
-  const label = t(`thisComputer.tooltip.${state}`);
+  // An app that always connects reports the connection apart from Computer use.
+  const label =
+    device.connection && device.computerUse === false
+      ? t(`thisComputer.tooltip.limited.${device.connection}`)
+      : t(`thisComputer.tooltip.${state}`);
 
   return (
     <TooltipProvider delayDuration={150}>
