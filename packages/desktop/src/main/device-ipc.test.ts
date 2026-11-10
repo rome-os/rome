@@ -35,11 +35,7 @@ rs.mock("./pick-folder", () => ({ pickFolder: rs.fn() }));
 
 import { ipcMain } from "electron";
 import type { DeviceStatus } from "./cloud/device-host";
-import {
-  readDeviceEnabled,
-  readNotificationsEnabled,
-  registerIpcHandlers,
-} from "./ipc";
+import { readDeviceEnabled, readNotificationsEnabled, registerIpcHandlers } from "./ipc";
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 
