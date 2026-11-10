@@ -74,6 +74,22 @@ final class TestClock: @unchecked Sendable {
         #expect(await audit.recent(limit: 5).first?.outcome == nil)
     }
 
+    @Test func removingAllEmptiesTheLogAndKeepsCounting() async throws {
+        let folder = AuditFolder()
+        let audit = log(folder)
+        let first = try #require(await audit.begin(requestId: "r1", from: "inst-1", action: "health.stats", args: nil))
+        await audit.end(first, outcome: .ok, errorCode: nil, count: 1, window: nil, durationMs: 3)
+        await audit.removeAll()
+        #expect(!FileManager.default.fileExists(atPath: folder.log.path(percentEncoded: false)))
+        #expect(await audit.recent(limit: 50).isEmpty)
+        #expect(await audit.status() == .ok)
+        // The next account's request is written, under a new number: a late end
+        // of the old account's request never lands on it.
+        let next = try #require(await audit.begin(requestId: "r2", from: "inst-2", action: "health.samples", args: nil))
+        #expect(next > first)
+        #expect(await audit.recent(limit: 50).map(\.from) == ["inst-2"])
+    }
+
     @Test func numbersGoOnAcrossRestarts() async {
         let folder = AuditFolder()
         _ = await log(folder).begin(requestId: "r1", from: "a", action: "x", args: nil)
@@ -152,22 +168,31 @@ final class TestClock: @unchecked Sendable {
 /// An audit log a test controls.
 final class FakeAudit: NodeAuditing, @unchecked Sendable {
     var refuse = false
-    private(set) var begun: [(from: String, action: String, args: JSONValue?)] = []
-    private(set) var ended: [(outcome: NodeOutcome, errorCode: String?, count: Int?, window: (start: String, end: String)?)] = []
+    // Requests run at once on the executor's threads: every record goes through the lock.
+    private let lock = NSLock()
+    private var begunRecords: [(from: String, action: String, args: JSONValue?)] = []
+    private var endedRecords: [(outcome: NodeOutcome, errorCode: String?, count: Int?, window: (start: String, end: String)?)] = []
+    var begun: [(from: String, action: String, args: JSONValue?)] { lock.withLock { begunRecords } }
+    var ended: [(outcome: NodeOutcome, errorCode: String?, count: Int?, window: (start: String, end: String)?)] { lock.withLock { endedRecords } }
 
     func status() async -> NodeAuditState { refuse ? .unavailable("down") : .ok }
 
     func begin(requestId: String, from: String, action: String, args: JSONValue?) async -> Int? {
         guard !refuse else { return nil }
-        begun.append((from, action, args))
-        return begun.count
+        return lock.withLock {
+            begunRecords.append((from, action, args))
+            return begunRecords.count
+        }
     }
 
     func end(_ seq: Int, outcome: NodeOutcome, errorCode: String?, count: Int?, window: (start: String, end: String)?, durationMs: Int) async {
-        ended.append((outcome, errorCode, count, window))
+        lock.withLock { endedRecords.append((outcome, errorCode, count, window)) }
     }
 
     func recent(limit: Int) async -> [NodeAuditEntry] { [] }
+
+    private(set) var removals = 0
+    func removeAll() async { removals += 1 }
 }
 
 @Suite struct NodeExecutorTests {

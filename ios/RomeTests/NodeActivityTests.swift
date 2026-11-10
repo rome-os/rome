@@ -13,10 +13,11 @@ import Testing
 
     private func entry(
         _ seq: Int = 1, at time: String = "2026-11-09T01:21:00Z", action: String = "health.stats", args: String,
-        outcome: NodeOutcome? = .ok, error: String? = nil, count: Int? = nil, window: (String, String)? = nil
+        outcome: NodeOutcome? = .ok, error: String? = nil, count: Int? = nil, window: (String, String)? = nil,
+        from: String = "inst"
     ) -> NodeAuditEntry {
         NodeAuditEntry(
-            seq: seq, time: HealthFixtures.date(time), from: "inst", action: action, args: args, outcome: outcome, errorCode: error, count: count,
+            seq: seq, time: HealthFixtures.date(time), from: from, action: action, args: args, outcome: outcome, errorCode: error, count: count,
             windowStart: window.map { HealthFixtures.date($0.0) }, windowEnd: window.map { HealthFixtures.date($0.1) }, durationMs: 5
         )
     }
@@ -26,6 +27,15 @@ import Testing
         let row = formatter.row(entry)
         func plain(_ text: String) -> String { text.replacingOccurrences(of: "\u{202F}", with: " ") }
         return (plain(row.title), plain(row.detail), plain(row.time), row.failed)
+    }
+
+    @Test func eachRowNamesTheRomeThatAsked() {
+        let one = formatter.row(entry(args: #"{"type":"stepCount"}"#, from: "3F9A2C7E-1B2D-4C5E-8F90-A1B2C3D4E5F6"))
+        let other = formatter.row(entry(args: #"{"type":"stepCount"}"#, from: "77d01e4a-0000-4000-8000-000000000000"))
+        #expect(one.sender == "3f9a2c")
+        #expect(other.sender == "77d01e")
+        // A sender shorter than the tag shows whole.
+        #expect(formatter.row(entry(args: #"{"type":"stepCount"}"#, from: "inst")).sender == "inst")
     }
 
     @Test func aSummaryOfTodayNamesTheTypesAndCounts() {

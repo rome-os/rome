@@ -30,8 +30,12 @@ final class FakeHealth: HealthReading, @unchecked Sendable {
 
     func shouldRequestAccess() async -> Bool { neverAsked }
 
+    /// Set, every quantity read waits here until it opens: a read still under way.
+    var gate: ReadGate?
+
     func quantityStats(_ request: QuantityRequest) async throws -> [Double?] {
         reads += 1
+        if let gate { await gate.wait() }
         quantityRequests.append(request)
         return quantities[request.type.name] ?? Array(repeating: nil, count: request.buckets.count)
     }
@@ -63,6 +67,26 @@ final class FakeHealth: HealthReading, @unchecked Sendable {
             return request.ascending ? a.offset < b.offset : a.offset > b.offset
         }
         return found.prefix(request.limit).map(\.element)
+    }
+}
+
+/// Holds back whoever waits on it until it opens.
+actor ReadGate {
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        guard !isOpen else { return }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    /// How many wait now.
+    var waiting: Int { waiters.count }
+
+    func open() {
+        isOpen = true
+        for waiter in waiters { waiter.resume() }
+        waiters = []
     }
 }
 
@@ -836,5 +860,39 @@ enum HealthFixtures {
         let reply = try HealthFixtures.ok(await HealthFixtures.actions(health).run("health.samples", args: parseJSON(#"{"type":"workouts","activity":"running"}"#)))
         #expect(reply["samples"]?.array?.first?["workout"] == parseJSON(#"{"activity":"running","durationMinutes":40,"activeEnergyKcal":320}"#))
         #expect(health.sampleRequests.last?.activity == "running")
+    }
+}
+
+/// Sleep, mindful minutes and workouts are read record by record, so one
+/// request reads a bounded window of them.
+@Suite struct HealthRecordWindowTests {
+    @Test(arguments: ["sleep", "mindfulSession", "workouts"])
+    func aWindowOverAYearOfRecordsIsRefusedBeforeHealthIsRead(type: String) async {
+        let health = FakeHealth()
+        let actions = HealthFixtures.actions(health)
+        let result = await actions.run("health.stats", args: parseJSON(#"{"types":["stepCount","\#(type)"],"start":"2024-11-01","end":"2025-11-02"}"#))
+        #expect(HealthFixtures.code(result) == "invalid_args")
+        #expect(health.reads == 0)
+        #expect(health.accessRequests == 0)
+    }
+
+    @Test func aYearOfSleepIsRead() async throws {
+        let health = FakeHealth()
+        let actions = HealthFixtures.actions(health)
+        // 366 days, a leap year's worth, is the most.
+        _ = try HealthFixtures.ok(await actions.run("health.stats", args: parseJSON(#"{"type":"sleep","start":"2024-01-01","end":"2024-12-31"}"#)))
+        #expect(health.reads == 1)
+    }
+
+    @Test func stepsOverYearsAreStillSummedByHealthKit() async throws {
+        let health = FakeHealth()
+        let actions = HealthFixtures.actions(health)
+        _ = try HealthFixtures.ok(await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount","start":"2020-01-01","end":"2025-12-31","interval":"month"}"#)))
+        #expect(health.reads == 1)
+    }
+
+    @Test func theUsageTellsTheAgentTheLimit() throws {
+        let usage = try #require(HealthActions.usage["health.stats"])
+        #expect(usage.contains("at most 366 days"))
     }
 }

@@ -564,4 +564,82 @@ final class HostRig {
         try? await Task.sleep(for: .milliseconds(50))
         #expect(rig.gateway.attempts.count == 2)
     }
+
+    // MARK: Bounded work
+
+    private func gateHolds(_ gate: ReadGate, _ count: Int) async -> Bool {
+        for _ in 0..<400 {
+            if await gate.waiting == count { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return false
+    }
+
+    @Test func aRequestOverTheCapIsBusyAndSystemInfoStillAnswers() async throws {
+        let rig = HostRig()
+        let gate = ReadGate()
+        rig.health.gate = gate
+        rig.host.setHealthEnabled(true)
+        let socket = await rig.online()
+        func stats(_ id: String) -> String {
+            #"{"id":"\#(id)","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#
+        }
+        for index in 1...NodeHost.maxRequests { socket.push(stats("r\(index)")) }
+        #expect(await gateHolds(gate, NodeHost.maxRequests))
+        socket.push(stats("over"))
+        #expect(await eventually { socket.sent.count == 1 })
+        let busy = parseJSON(socket.sent[0])
+        #expect(busy["id"]?.string == "over")
+        #expect(busy["payload"]?["error"]?["code"]?.string == "busy")
+        #expect(await gate.waiting == NodeHost.maxRequests, "never reached Health")
+        #expect(rig.audit.begun.count == NodeHost.maxRequests, "never recorded: it did not run")
+
+        socket.push(HostRig.request)
+        #expect(await eventually { socket.sent.count == 2 })
+        #expect(parseJSON(socket.sent[1])["payload"]?["ok"]?.bool == true)
+
+        await gate.open()
+        #expect(await eventually { socket.sent.count == 2 + NodeHost.maxRequests })
+        // With room again, the next request runs.
+        socket.push(stats("after"))
+        #expect(await eventually { socket.sent.count == 3 + NodeHost.maxRequests })
+        #expect(parseJSON(try #require(socket.sent.last))["payload"]?["ok"]?.bool == true)
+    }
+
+    // MARK: Another account
+
+    @Test func forgettingTheAccountResetsBothSwitchesAndEmptiesTheLog() async {
+        let rig = HostRig()
+        rig.host.setEnabled(false)
+        rig.host.setHealthEnabled(true)
+        await rig.host.forgetAccount().value
+        #expect(rig.host.isEnabled)
+        #expect(!rig.host.isHealthEnabled)
+        #expect(rig.audit.removals == 1)
+        // Nothing kept for the next launch either.
+        let relaunched = rig.makeHost()
+        #expect(relaunched.isEnabled)
+        #expect(!relaunched.isHealthEnabled)
+    }
+
+    @Test func theNextAccountsHealthRequestsAreRefusedUntilItTurnsHealthOn() async throws {
+        let rig = HostRig()
+        rig.host.setHealthEnabled(true)
+        rig.host.forgetAccount()
+        let socket = await rig.online()
+        socket.push(#"{"id":"r1","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#)
+        #expect(await eventually { socket.sent.count == 1 })
+        #expect(parseJSON(socket.sent[0])["payload"]?["error"]?["code"]?.string == "health_off")
+        #expect(rig.health.reads == 0)
+    }
+
+    @Test func aDeviceTheLastAccountTurnedOffConnectsForTheNext() async {
+        let rig = HostRig()
+        rig.host.setEnabled(false)
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.setActive(true)
+        #expect(rig.host.status == .off)
+        rig.host.forgetAccount()
+        #expect(await eventually { rig.host.status == .online })
+    }
 }

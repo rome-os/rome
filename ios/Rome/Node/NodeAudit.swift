@@ -58,6 +58,8 @@ protocol NodeAuditing: Sendable {
     func end(_ seq: Int, outcome: NodeOutcome, errorCode: String?, count: Int?, window: (start: String, end: String)?, durationMs: Int) async
     /// Newest first.
     func recent(limit: Int) async -> [NodeAuditEntry]
+    /// Empties the log, when the account ends: the next account sees none of it.
+    func removeAll() async
 }
 
 actor NodeAuditLog: NodeAuditing {
@@ -141,6 +143,17 @@ actor NodeAuditLog: NodeAuditing {
             }
         }
         return Array(entries.values.sorted { $0.seq > $1.seq }.prefix(limit))
+    }
+
+    func removeAll() {
+        do {
+            if FileManager.default.fileExists(atPath: filePath) { try FileManager.default.removeItem(at: url) }
+            // Numbers keep counting up, so a late end of a request cut off
+            // with the old account never matches a new request's start.
+            state = .ok
+        } catch {
+            state = .unavailable("The audit log could not be emptied.")
+        }
     }
 
     // MARK: File

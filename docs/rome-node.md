@@ -570,7 +570,9 @@ holds each action's argument help, which is how an agent learns them from
   `activity`. HealthKit merges overlapping sources, as the Health app does.
   `sleep` merges stages and sources so no minute counts twice and adds minutes per
   stage. `workouts` gives `count`, `durationMinutes`, `activeEnergyKcal` and
-  `distanceMeters`.
+  `distanceMeters`. HealthKit does not sum `sleep`, `mindfulSession` and `workouts`,
+  so the phone reads their records one by one, over a window of at most 366 days
+  per request. A longer window is `invalid_args`.
 - `health.samples` — raw records of one `type`, newest first by default: `limit`
   (1 to 1000, default 100), `order`, `cursor` (the previous reply's `nextCursor`),
   `sources`, `includeMetadata`, `activity`.
@@ -586,9 +588,11 @@ no readable value is omitted, never 0. HealthKit hides whether read access was
 denied, so a type the user did not allow looks like a type with no data. The
 allow-list has 28 types, which `system.info` names. Any other type is
 `unsupported_type`. Errors: `invalid_args`, `unsupported_type`, `health_unavailable`
-(no HealthKit, such as an iPad), `health_locked` (the phone is locked),
-`health_off`, `unsupported_action`, `audit_unavailable`, and `health_failed` for
-anything else.
+(no HealthKit on this device), `health_locked` (the phone is locked),
+`health_off`, `unsupported_action`, `audit_unavailable`, `busy`, and `health_failed`
+for anything else. The phone answers at most 4 requests at once. Another request
+gets `busy` before it is recorded or Health is read, and `system.info` is always
+answered.
 
 **Settings → iPhone use → Apple Health** is a row that shows On or Off and opens the
 Apple Health page. The switch ("Allow Rome to read Health") is on that page and is
@@ -624,7 +628,13 @@ duration. It keeps 30 days and
 never holds a health value. If a record cannot be written the request is refused
 with `audit_unavailable`, and `system.info` still answers and reports the log's state.
 Settings → iPhone use → Recent activity lists the last 50 in words, by day (what was
-read, the window, how many, or why it failed), without ids or JSON.
+read, the window, how many, or why it failed), without JSON. Each row names its
+sender by the first 6 characters of the Gateway's `from`. Rome Cloud gives a Rome's
+caller no name the phone could look up, so this short tag is what tells one asking
+Rome from another.
+
+Signing out, and a sign-in to Rome Cloud, empty the log and put both switches back
+to their defaults, so nothing of one account carries over to the next.
 
 ## Binary frames
 

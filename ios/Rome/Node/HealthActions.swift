@@ -285,6 +285,9 @@ struct HealthActions: Sendable {
 
     static let actions = ["system.info", "health.stats", "health.samples"]
 
+    /// The longest window `health.stats` reads sleep, mindful minutes or workouts over.
+    static let maxRecordDays = 366
+
     private static let typeNames = HealthTypes.all.map(\.name).joined(separator: ", ")
 
     /// What `system.info` tells the agent about each action's arguments.
@@ -301,6 +304,7 @@ struct HealthActions: Sendable {
             sleep merges stages and sources so no minute counts twice, with minutes per stage, and is clipped to the window or bucket: \
             daily buckets split a night at midnight, so for one night use a window such as the previous day 18:00 to 12:00. \
             workouts gives count, durationMinutes, activeEnergyKcal, distanceMeters for workouts that start in the window. \
+            sleep, mindfulSession and workouts read at most \(maxRecordDays) days per request. \
             A type the user has not allowed, or that has no data, has no value. \
             Apple Health is off for Rome until the user turns it on in Settings → iPhone use → Apple Health on the phone. While it is off the request fails with health_off, and only the user can change that on the phone. Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
             """,
@@ -469,6 +473,14 @@ struct HealthActions: Sendable {
         }
         guard let buckets = HealthBucket.make(window: window, interval: interval, calendar: calendar) else {
             throw ActionFailure.invalid("That window needs more than \(HealthBucket.limit) \(interval.rawValue) buckets. Use a larger interval or a shorter window.")
+        }
+        // Sleep, mindful minutes and workouts are read record by record, not
+        // summed by HealthKit: one request reads a bounded window of them.
+        if items.contains(where: { !$0.type.isQuantity }),
+           let longest = calendar.date(byAdding: .day, value: Self.maxRecordDays, to: window.start), window.end > longest {
+            throw ActionFailure.invalid(
+                "sleep, mindfulSession and workouts read at most \(Self.maxRecordDays) days per request. Use a shorter window, or one request per year."
+            )
         }
         guard reader.isAvailable else { throw HealthReadError.unavailable }
         try await reader.requestAccess()

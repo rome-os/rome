@@ -1013,6 +1013,17 @@
         }
       }
     },
+    "From %@" : {
+      "comment" : "Recent activity: which Rome sent the request, by the start of its sender id",
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来自 %@"
+          }
+        }
+      }
+    },
     "From “%@”" : {
       "localizations" : {
         "zh-Hans" : {

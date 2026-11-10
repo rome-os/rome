@@ -521,11 +521,12 @@ final class AppModel {
         case .success(let url):
             do {
                 try await cloud.completeSignIn(request, callback: url)
-                node.accountStarted()
                 // Possibly another account: the last one's workspace goes now,
                 // before its data is wiped, so nothing of it writes again.
                 leaveAccount()
                 forgetAccountData()
+                // After the wipe, so the device starts with this account's defaults.
+                node.accountStarted()
                 await openInstance(preferring: nil, showHint: true)
             } catch {
                 signInError = (error as? LocalizedError)?.errorDescription ?? String(localized: "Sign-in did not finish")
@@ -748,8 +749,8 @@ final class AppModel {
     }
 
     /// What this phone keeps for the signed-in account: drafts, kept chats,
-    /// pictures, recent apps, closed update banners, the language last seen
-    /// and the last instance. Gone on
+    /// pictures, recent apps, closed update banners, the language last seen,
+    /// the last instance, and this phone's device switches and activity log. Gone on
     /// sign-out, and before a new Cloud sign-in, which may be another
     /// account's. The account has ended first, so no late write follows.
     private func forgetAccountData() {
@@ -763,6 +764,8 @@ final class AppModel {
         URLCache.shared.removeAllCachedResponses()
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstanceRecord)
+        // The device's switches and its Recent activity.
+        node.forgetAccount()
     }
 
     // MARK: Session expiry

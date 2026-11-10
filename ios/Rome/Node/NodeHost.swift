@@ -88,6 +88,10 @@ final class NodeHost {
         static let health = "nodeHealthEnabled"
     }
 
+    /// Requests answered at once. HealthKit reads are heavy, and an instance
+    /// that sends more gets `busy` instead of a phone that slows to a crawl.
+    static let maxRequests = 4
+
     private(set) var status = Status.off
     /// The guardian's switch in Settings: on unless turned off.
     private(set) var isEnabled: Bool
@@ -184,6 +188,24 @@ final class NodeHost {
         guard on else { return nil }
         return Task { [reader] in
             if await reader.shouldRequestAccess() { try? await reader.requestAccess() }
+        }
+    }
+
+    /// Another account may sign in next: both switches go back to their
+    /// defaults and the activity log is emptied, so nothing of this account
+    /// carries over. The task empties the log, for tests.
+    @discardableResult
+    func forgetAccount() -> Task<Void, Never> {
+        defaults.removeObject(forKey: Defaults.enabled)
+        defaults.removeObject(forKey: Defaults.health)
+        isEnabled = true
+        isHealthEnabled = false
+        healthSwitch.set(false)
+        recent = []
+        sync()
+        return Task { [audit] in
+            await audit.removeAll()
+            requestSerial += 1
         }
     }
 
@@ -377,6 +399,16 @@ final class NodeHost {
     }
 
     private func answer(_ text: String, on socket: NodeSocket, session: NodeSession) {
+        // Over the cap, a request is refused at once, before the audit log or
+        // Health; `system.info` is cheap and always answered.
+        if inFlight >= Self.maxRequests, let request = NodeProtocol.request(in: text), request.action != "system.info" {
+            let reply = NodeProtocol.reply(to: request, .failed(
+                code: "busy",
+                message: "This iPhone is already answering \(Self.maxRequests) requests. Try again when one has finished."
+            ))
+            Task { if session.isLive { try? await socket.send(reply) } }
+            return
+        }
         inFlight += 1
         Task { [executor] in
             let reply = await executor.respond(to: text, session: session)

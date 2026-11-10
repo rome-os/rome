@@ -128,9 +128,16 @@ private struct NodeActivityRowView: View {
                     .minimumScaleFactor(0.8)
             }
             Spacer(minLength: 8)
-            Text(verbatim: row.time)
-                .romeFont(13, monospacedDigits: true)
-                .foregroundStyle(Palette.sub)
+            VStack(alignment: .trailing, spacing: 3) {
+                Text(verbatim: row.time)
+                    .romeFont(13, monospacedDigits: true)
+                    .foregroundStyle(Palette.sub)
+                if !row.sender.isEmpty {
+                    Text("From \(row.sender)")
+                        .romeFont(13, monospacedDigits: true)
+                        .foregroundStyle(Palette.sub)
+                }
+            }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
