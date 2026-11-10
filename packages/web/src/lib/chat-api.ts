@@ -816,6 +816,18 @@ export async function createShare(
   return jsonOrThrow<CreateShareResult>(res);
 }
 
+/** Share one message as a link: a snapshot of its text alone. */
+export async function shareMessage(
+  sessionId: string,
+  messageId: string,
+): Promise<CreateShareResult> {
+  const res = await fetch(
+    `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/share`,
+    { method: "POST", credentials: "include" },
+  );
+  return jsonOrThrow<CreateShareResult>(res);
+}
+
 export async function listShares(sessionId: string): Promise<ShareSummary[]> {
   const res = await fetch(`/api/chat/sessions/${sessionId}/shares`, { credentials: "include" });
   return jsonOrThrow<ShareSummary[]>(res);

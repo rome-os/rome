@@ -67,6 +67,7 @@ import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { pickerDevices, settingsHandlers } from "./settings";
 import { recordedAppHandlers } from "./recorded-apps";
+import { shareHandlers } from "./shares";
 import { curatedChats } from "../fixtures/chats";
 import {
   CONCIERGE_ATTENTION_DIGEST,
@@ -1650,6 +1651,7 @@ export const handlers = [
   // chats the conversation routes serve — one inventory row per chat, its run
   // and message counts read off that chat's transcript.
   ...sessionQueryHandlers(chatSessions, transcripts),
+  ...shareHandlers(chatSessions, transcripts),
   ...settingsHandlers,
   ...connectorHandlers,
   ...recordedAppHandlers,

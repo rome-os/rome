@@ -64,6 +64,7 @@ import {
   type AgentIdentity,
 } from "@/components/chat/chat-view";
 import { ShareBar } from "@/components/chat/ShareBar";
+import { MessageSharingContext } from "@/components/chat/ShareMessageButton";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { useFreeCells } from "@/pages/free/use-free-cells";
 import { useToolTrace } from "@/pages/free/tool-trace";
@@ -781,10 +782,12 @@ export function Chat({
     inThread: (messageId) => threadedRef.current.has(messageId),
   });
 
+  // A Concierge chat is not shared whole: its messages each offer Share.
   const enterShareMode = useCallback(() => {
+    if (concierge) return;
     setSelectedShareTurns(new Set(mainTurnIds));
     setShareMode(true);
-  }, [mainTurnIds]);
+  }, [concierge, mainTurnIds]);
 
   const exitShareMode = useCallback(() => {
     setShareMode(false);
@@ -2159,10 +2162,12 @@ export function Chat({
                 {t("concierge.tasks.title")}
               </DropdownMenuItem>
             ) : null}
-            <DropdownMenuItem onSelect={() => enterShareMode()}>
-              <Share2 className="size-4" />
-              {t("share.title", "Share chat")}
-            </DropdownMenuItem>
+            {concierge ? null : (
+              <DropdownMenuItem onSelect={() => enterShareMode()}>
+                <Share2 className="size-4" />
+                {t("share.title", "Share chat")}
+              </DropdownMenuItem>
+            )}
             {isMainChat ? null : isArchived ? (
               <DropdownMenuItem onSelect={() => void handleUnarchive()}>
                 <ArchiveRestore className="size-4" />
@@ -2638,5 +2643,9 @@ export function Chat({
     </TooltipProvider>
   );
 
-  return <ReplyDraftProvider value={replyDraft}>{page}</ReplyDraftProvider>;
+  return (
+    <ReplyDraftProvider value={replyDraft}>
+      <MessageSharingContext.Provider value>{page}</MessageSharingContext.Provider>
+    </ReplyDraftProvider>
+  );
 }

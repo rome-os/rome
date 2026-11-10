@@ -2340,7 +2340,7 @@ describe("Chat Concierge empty state", () => {
     expect(mockOpenTaskList).toHaveBeenCalledTimes(1);
   });
 
-  it("offers no Archive or Delete for the main chat, and both for a topic chat", async () => {
+  it("offers no Share chat, Archive or Delete for the main chat, and no Share chat for a topic chat", async () => {
     const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
@@ -2353,7 +2353,6 @@ describe("Chat Concierge empty state", () => {
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "concierge.tasks.title",
-      "share.title",
     ]);
     await user.keyboard("{Escape}");
     main.unmount();
@@ -2367,6 +2366,14 @@ describe("Chat Concierge empty state", () => {
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     expect(screen.getByRole("menuitem", { name: "navbar.archive" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "navbar.delete" })).toBeTruthy();
+    expect(screen.queryByRole("menuitem", { name: "share.title" })).toBeNull();
+  });
+
+  it("keeps Share chat for a common chat or a task chat, which are not Concierge chats", async () => {
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="session-1" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    expect(screen.getByRole("menuitem", { name: "share.title" })).toBeTruthy();
   });
 
   it("heads the main chat and a topic chat alike, with the agent's chosen name", async () => {

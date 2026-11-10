@@ -187,6 +187,10 @@
   "message": {
     "copy": "Copy message",
     "copied": "Copied",
+    "share": "Share",
+    "shareCopied": "Link copied",
+    "shareReady": "Link ready",
+    "shareFailed": "Couldn't create the link.",
     "feedback": {
       "thumbsUp": "Mark this turn helpful",
       "thumbsDown": "Mark this turn unhelpful",

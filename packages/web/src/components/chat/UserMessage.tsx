@@ -1,6 +1,7 @@
 import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
+import { ShareMessageButton } from "@/components/chat/ShareMessageButton";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
 import type { ChatMessage } from "@/lib/chat-types";
 import { userMessageText } from "@/components/chat/chat-view";
@@ -88,6 +89,9 @@ export const UserMessage = memo(
               text,
             }}
           />
+        ) : null}
+        {isSettledUserMessage(msg) ? (
+          <ShareMessageButton sessionId={msg.sessionId} messageId={msg.id} />
         ) : null}
       </div>
     );
