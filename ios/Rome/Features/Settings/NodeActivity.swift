@@ -11,9 +11,6 @@ struct NodeActivityRow: Identifiable, Equatable {
     let failed: Bool
     /// The time of day the request came.
     let time: String
-    /// Which Rome asked: the start of the sender's id. Rome Cloud names no
-    /// Rome's caller, so the tag is what tells one asking Rome from another.
-    let sender: String
 }
 
 struct NodeActivityDay: Identifiable, Equatable {
@@ -70,13 +67,8 @@ struct NodeActivityFormatter {
         }
         return NodeActivityRow(
             id: entry.seq, title: title, detail: parts.joined(separator: " · "), failed: failed,
-            time: entry.time.formatted(timeStyle), sender: Self.senderTag(entry.from)
+            time: entry.time.formatted(timeStyle)
         )
-    }
-
-    /// The first 6 characters of the Gateway's sender id, lower-cased.
-    static func senderTag(_ from: String) -> String {
-        String(from.prefix(6)).lowercased()
     }
 
     // MARK: Words

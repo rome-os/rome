@@ -93,7 +93,10 @@ final class NodeHost {
     static let maxRequests = 4
 
     private(set) var status = Status.off
-    /// The guardian's switch in Settings: on unless turned off.
+    /// iPhone or iPad: the word Settings and the agent's messages use.
+    let device: DeviceKind
+    /// The guardian's switch in Settings: off until turned on, so nothing
+    /// connects until the person chooses it.
     private(set) var isEnabled: Bool
     /// The guardian's "Apple Health" switch: off until turned on. Health data
     /// goes to the Rome and its AI model, so it is the guardian's choice. Off,
@@ -133,6 +136,7 @@ final class NodeHost {
         credentials: NodeCredentials,
         audit: NodeAuditing = NodeAuditLog(),
         health: HealthActions = HealthActions(reader: LiveHealth()),
+        device: DeviceKind = .current,
         defaults: UserDefaults = .standard,
         http: URLSession? = nil,
         connect: @escaping NodeSocketFactory = { try await WebSocketTransport.open($0, authorization: $1) },
@@ -150,8 +154,10 @@ final class NodeHost {
         let healthOn = defaults.object(forKey: Defaults.health) as? Bool ?? false
         healthSwitch = HealthSwitch(healthOn)
         isHealthEnabled = healthOn
+        self.device = device
         var health = health
         health.enabled = healthSwitch
+        health.device = device
         self.audit = audit
         self.defaults = defaults
         self.connect = connect
@@ -159,7 +165,7 @@ final class NodeHost {
         self.random = random
         self.now = now
         executor = NodeExecutor(name: name, audit: audit, health: health, now: now)
-        isEnabled = defaults.object(forKey: Defaults.enabled) as? Bool ?? true
+        isEnabled = defaults.object(forKey: Defaults.enabled) as? Bool ?? false
         if let http {
             self.http = http
         } else {
@@ -198,7 +204,7 @@ final class NodeHost {
     func forgetAccount() -> Task<Void, Never> {
         defaults.removeObject(forKey: Defaults.enabled)
         defaults.removeObject(forKey: Defaults.health)
-        isEnabled = true
+        isEnabled = false
         isHealthEnabled = false
         healthSwitch.set(false)
         recent = []
@@ -404,7 +410,7 @@ final class NodeHost {
         if inFlight >= Self.maxRequests, let request = NodeProtocol.request(in: text), request.action != "system.info" {
             let reply = NodeProtocol.reply(to: request, .failed(
                 code: "busy",
-                message: "This iPhone is already answering \(Self.maxRequests) requests. Try again when one has finished."
+                message: "This \(device.name) is already answering \(Self.maxRequests) requests. Try again when one has finished."
             ))
             Task { if session.isLive { try? await socket.send(reply) } }
             return

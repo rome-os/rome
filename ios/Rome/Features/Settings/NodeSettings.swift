@@ -10,9 +10,9 @@ struct NodeSettingsGroup: View {
 
     var body: some View {
         let node = model.node
-        SettingsGroup(header: "iPhone use") {
-            SettingsRow(systemImage: "iphone", title: "Can Rome use this iPhone") {
-                Toggle("Can Rome use this iPhone", isOn: Binding(get: { node.isEnabled }, set: { on in node.setEnabled(on) }))
+        SettingsGroup(header: node.device.groupTitle) {
+            SettingsRow(systemImage: node.device.symbol, title: node.device.useSwitchTitle) {
+                Toggle(node.device.useSwitchTitle, isOn: Binding(get: { node.isEnabled }, set: { on in node.setEnabled(on) }))
                     .labelsHidden()
                     .tint(Palette.primary)
             }
@@ -128,16 +128,9 @@ private struct NodeActivityRowView: View {
                     .minimumScaleFactor(0.8)
             }
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 3) {
-                Text(verbatim: row.time)
-                    .romeFont(13, monospacedDigits: true)
-                    .foregroundStyle(Palette.sub)
-                if !row.sender.isEmpty {
-                    Text("From \(row.sender)")
-                        .romeFont(13, monospacedDigits: true)
-                        .foregroundStyle(Palette.sub)
-                }
-            }
+            Text(verbatim: row.time)
+                .romeFont(13, monospacedDigits: true)
+                .foregroundStyle(Palette.sub)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

@@ -1,5 +1,6 @@
 import Foundation
 import HealthKit
+import SwiftUI
 import Testing
 @testable import Rome
 
@@ -384,18 +385,18 @@ enum HealthFixtures {
     }
 
     @Test func usageSaysSleepIsClippedToTheWindow() {
-        let usage = HealthActions.usage["health.stats"] ?? ""
+        let usage = HealthActions.usage()["health.stats"] ?? ""
         #expect(usage.contains("clipped to the window or bucket"))
         #expect(usage.contains("previous day 18:00 to 12:00"))
-        #expect(usage.contains("with or without offset (without offset = the phone's time zone"))
-        #expect(HealthActions.usage["health.stats"]?.contains("health_off") == true)
-        #expect(HealthActions.usage["health.samples"]?.contains("health_off") == true)
+        #expect(usage.contains("with or without offset (without offset = the iPhone's time zone"))
+        #expect(HealthActions.usage()["health.stats"]?.contains("health_off") == true)
+        #expect(HealthActions.usage()["health.samples"]?.contains("health_off") == true)
         for action in ["health.stats", "health.samples"] {
-            let text = HealthActions.usage[action] ?? ""
+            let text = HealthActions.usage()[action] ?? ""
             #expect(text.contains("Settings → iPhone use → Apple Health"), "\(action)")
-            #expect(text.contains("on the phone"), "\(action)")
+            #expect(text.contains("on the iPhone"), "\(action)")
         }
-        #expect(HealthActions.usage["health.stats"]?.contains("off for Rome until the user turns it on") == true, "off is the default")
+        #expect(HealthActions.usage()["health.stats"]?.contains("off for Rome until the user turns it on") == true, "off is the default")
     }
 
     @Test func unknownActionIsUnsupported() async {
@@ -427,9 +428,9 @@ enum HealthFixtures {
             let result = await actions.run(action, args: parseJSON(args))
             #expect(HealthFixtures.code(result) == "health_off", "\(action) \(args)")
         }
-        guard case .failed(_, let message) = await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)) else { return }
+        guard case .failed(code: _, message: let message) = await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)) else { return }
         #expect(message.contains("Settings → iPhone use → Apple Health"), "the agent is told where the user turns it on")
-        #expect(message.contains("on the phone"))
+        #expect(message.contains("on the iPhone"))
         #expect(health.accessRequests == 0 && health.reads == 0)
         // Other actions are not Health's to refuse.
         #expect(HealthFixtures.code(await actions.run("health.write", args: nil)) == "unsupported_action")
@@ -892,7 +893,62 @@ enum HealthFixtures {
     }
 
     @Test func theUsageTellsTheAgentTheLimit() throws {
-        let usage = try #require(HealthActions.usage["health.stats"])
+        let usage = try #require(HealthActions.usage()["health.stats"])
         #expect(usage.contains("at most 366 days"))
+    }
+}
+
+/// An iPad works as an iPhone does; only the device word changes.
+@Suite struct DeviceWordTests {
+    private func actions(_ device: DeviceKind) -> HealthActions {
+        var actions = HealthFixtures.actions(FakeHealth())
+        actions.device = device
+        return actions
+    }
+
+    @Test func anIPadTellsTheAgentWhereItsSwitchIs() async {
+        var actions = actions(.iPad)
+        actions.enabled = HealthSwitch(false)
+        guard case .failed(code: "health_off", message: let message) = await actions.run("health.stats", args: parseJSON(#"{"type":"stepCount"}"#)) else {
+            Issue.record("expected health_off")
+            return
+        }
+        #expect(message.contains("Settings → iPad use → Apple Health"))
+        #expect(!message.contains("iPhone"))
+        for text in HealthActions.usage(.iPad).values {
+            #expect(!text.contains("iPhone") && !text.contains("phone's"), "\(text.prefix(40))")
+        }
+        #expect(HealthActions.usage(.iPad)["health.stats"]?.contains("Settings → iPad use → Apple Health") == true)
+    }
+
+    @Test func anIPhoneStillSaysIPhone() async {
+        var actions = actions(.iPhone)
+        actions.enabled = HealthSwitch(false)
+        guard case .failed(code: _, message: let message) = await actions.run("health.samples", args: parseJSON(#"{"type":"heartRate"}"#)) else {
+            Issue.record("expected health_off")
+            return
+        }
+        #expect(message.contains("Settings → iPhone use → Apple Health"))
+    }
+
+    @Test func theAuditRefusalNamesTheDevice() async throws {
+        let audit = FakeAudit()
+        audit.refuse = true
+        let executor = NodeExecutor(name: { "iPad" }, audit: audit, health: actions(.iPad))
+        let reply = parseJSON(try #require(await executor.respond(
+            to: #"{"id":"r1","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#,
+            session: NodeSession()
+        )))
+        let message = try #require(reply["payload"]?["error"]?["message"]?.string)
+        #expect(message.hasPrefix("This iPad could not record"))
+        #expect(!message.contains("iPhone"))
+    }
+
+    @Test func settingsCopyFollowsTheDevice() {
+        #expect(DeviceKind.iPad.name == "iPad")
+        #expect(DeviceKind.iPad.symbol == "ipad")
+        #expect(DeviceKind.iPhone.symbol == "iphone")
+        #expect(DeviceKind.iPad.useSwitchTitle == LocalizedStringKey("Can Rome use this iPad"))
+        #expect(DeviceKind.iPhone.groupTitle == LocalizedStringKey("iPhone use"))
     }
 }

@@ -290,48 +290,54 @@ struct HealthActions: Sendable {
 
     private static let typeNames = HealthTypes.all.map(\.name).joined(separator: ", ")
 
+    /// iPhone or iPad: the word in what the agent reads.
+    var device = DeviceKind.iPhone
+
     /// What `system.info` tells the agent about each action's arguments.
-    static let usage: [String: String] = [
-        "system.info": "No arguments.",
-        "health.stats": """
-            Aggregates over a time window. Args: types (array) or type (string), required: \(typeNames). \
-            start, end: ISO 8601 time, with or without offset (without offset = the phone's time zone, e.g. 2026-11-08T18:00), or YYYY-MM-DD in the phone's time zone (an end date means the end of that day); \
-            default today from local midnight to now (with only end, the day that ends there). \
-            interval: total (default) | hour | day | week | month, at most 1000 buckets. \
-            aggregate: sum (default for cumulative types such as stepCount) | avg (default for the rest) | min | max | latest (not for cumulative types). \
-            unit: e.g. km, mi, kg, lb, kcal, kJ, count/min, degF (default per type; ignored for sleep, workouts, mindfulSession). \
-            activity: a workout kind such as running (workouts only). \
-            sleep merges stages and sources so no minute counts twice, with minutes per stage, and is clipped to the window or bucket: \
-            daily buckets split a night at midnight, so for one night use a window such as the previous day 18:00 to 12:00. \
-            workouts gives count, durationMinutes, activeEnergyKcal, distanceMeters for workouts that start in the window. \
-            sleep, mindfulSession and workouts read at most \(maxRecordDays) days per request. \
-            A type the user has not allowed, or that has no data, has no value. \
-            Apple Health is off for Rome until the user turns it on in Settings → iPhone use → Apple Health on the phone. While it is off the request fails with health_off, and only the user can change that on the phone. Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
-            """,
-        "health.samples": """
-            Raw records, newest first. Args: type (string, required; same names as health.stats), start, end (as health.stats), \
-            limit 1-1000 (default 100), order desc (default) | asc by start, cursor (nextCursor of the previous reply), \
-            sources (array of app names or bundle ids), includeMetadata (bool, default false), activity (workouts only). \
-            A reply with nextCursor has more. Fails with health_off while Apple Health is off for Rome: the user must turn it on in Settings → iPhone use → Apple Health on the phone. Example: {"type":"heartRate","start":"2026-11-08","limit":50}
-            """,
-    ]
+    static func usage(_ device: DeviceKind = .iPhone) -> [String: String] {
+        let name = device.name
+        return [
+            "system.info": "No arguments.",
+            "health.stats": """
+                Aggregates over a time window. Args: types (array) or type (string), required: \(typeNames). \
+                start, end: ISO 8601 time, with or without offset (without offset = the \(name)'s time zone, e.g. 2026-11-08T18:00), or YYYY-MM-DD in the \(name)'s time zone (an end date means the end of that day); \
+                default today from local midnight to now (with only end, the day that ends there). \
+                interval: total (default) | hour | day | week | month, at most 1000 buckets. \
+                aggregate: sum (default for cumulative types such as stepCount) | avg (default for the rest) | min | max | latest (not for cumulative types). \
+                unit: e.g. km, mi, kg, lb, kcal, kJ, count/min, degF (default per type; ignored for sleep, workouts, mindfulSession). \
+                activity: a workout kind such as running (workouts only). \
+                sleep merges stages and sources so no minute counts twice, with minutes per stage, and is clipped to the window or bucket: \
+                daily buckets split a night at midnight, so for one night use a window such as the previous day 18:00 to 12:00. \
+                workouts gives count, durationMinutes, activeEnergyKcal, distanceMeters for workouts that start in the window. \
+                sleep, mindfulSession and workouts read at most \(maxRecordDays) days per request. \
+                A type the user has not allowed, or that has no data, has no value. \
+                Apple Health is off for Rome until the user turns it on in Settings → \(name) use → Apple Health on the \(name). While it is off the request fails with health_off, and only the user can change that on the \(name). Example: {"types":["stepCount","sleep","restingHeartRate","workouts"]}
+                """,
+            "health.samples": """
+                Raw records, newest first. Args: type (string, required; same names as health.stats), start, end (as health.stats), \
+                limit 1-1000 (default 100), order desc (default) | asc by start, cursor (nextCursor of the previous reply), \
+                sources (array of app names or bundle ids), includeMetadata (bool, default false), activity (workouts only). \
+                A reply with nextCursor has more. Fails with health_off while Apple Health is off for Rome: the user must turn it on in Settings → \(name) use → Apple Health on the \(name). Example: {"type":"heartRate","start":"2026-11-08","limit":50}
+                """,
+        ]
+    }
 
     func run(_ action: String, args: JSONValue?) async -> NodeActionResult {
         if Self.actions.contains(action), action != "system.info", !enabled.isOn {
-            return .failed(code: "health_off", message: "Apple Health is off for Rome on this iPhone. The user must turn it on in Settings → iPhone use → Apple Health on the phone.")
+            return .failed(code: "health_off", message: "Apple Health is off for Rome on this \(device.name). The user must turn it on in Settings → \(device.name) use → Apple Health on the \(device.name).")
         }
         do {
             switch action {
             case "health.stats": return try await stats(args)
             case "health.samples": return try await samples(args)
-            default: return .failed(code: "unsupported_action", message: "This iPhone does not support this action.")
+            default: return .failed(code: "unsupported_action", message: "This \(device.name) does not support this action.")
             }
         } catch let failure as ActionFailure {
             return .failed(code: failure.code, message: failure.message)
         } catch let error as HealthReadError {
             switch error {
             case .unavailable: return .failed(code: "health_unavailable", message: "Health data is not available on this device.")
-            case .locked: return .failed(code: "health_locked", message: "The iPhone is locked, so Health data cannot be read. Unlock it and try again.")
+            case .locked: return .failed(code: "health_locked", message: "The \(device.name) is locked, so Health data cannot be read. Unlock it and try again.")
             }
         } catch is CancellationError {
             return .failed(code: "health_failed", message: "The request was cancelled.")

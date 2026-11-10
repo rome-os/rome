@@ -126,7 +126,7 @@ struct HealthAccessScreen: View {
     private var dataFlow: some View {
         SettingsGroup(header: "Where your data goes") {
             HStack(alignment: .top, spacing: 4) {
-                FlowNode(symbol: "iphone", label: "This iPhone")
+                FlowNode(symbol: model.node.device.symbol, label: model.node.device.thisDevice)
                 FlowArrow()
                 FlowNode(symbol: "server.rack", label: "Your Rome")
                 FlowArrow()
@@ -136,7 +136,7 @@ struct HealthAccessScreen: View {
             .padding(.vertical, 16)
             .overlay(alignment: .bottom) { Rectangle().fill(Palette.hair).frame(height: 0.5) }
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel("This iPhone, your Rome, your AI model provider")
+            .accessibilityLabel(model.node.device.dataFlowLabel)
             Promise(text: "Read only when your Rome asks. Never changed.")
             Promise(text: "Never sold, used for ads, or used to train AI models.")
             Promise(text: "Results can stay in your Rome's chats and memory.", last: true)

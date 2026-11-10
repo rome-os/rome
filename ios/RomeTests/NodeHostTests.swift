@@ -150,10 +150,13 @@ final class HostRig {
     private let pingInterval: TimeInterval
     private let pingTimeout: TimeInterval
 
-    init(pingInterval: TimeInterval = 25, pingTimeout: TimeInterval = 10) {
+    /// `deviceOn`: the person has turned "Can Rome use this iPhone" on, as
+    /// most tests need; false is a fresh install.
+    init(pingInterval: TimeInterval = 25, pingTimeout: TimeInterval = 10, deviceOn: Bool = true) {
         self.pingInterval = pingInterval
         self.pingTimeout = pingTimeout
         ConfigProtocol.reset()
+        if deviceOn { defaults.set(true, forKey: "nodeEnabled") }
         host = makeHost()
         host.onCredentialRejected = { [unowned self] in rejections += 1 }
     }
@@ -164,7 +167,7 @@ final class HostRig {
         configuration.protocolClasses = [ConfigProtocol.self]
         let delays = delays
         return NodeHost(
-            credentials: credentials, audit: audit, health: HealthFixtures.actions(health), defaults: defaults,
+            credentials: credentials, audit: audit, health: HealthFixtures.actions(health), device: .iPhone, defaults: defaults,
             http: URLSession(configuration: configuration), connect: gateway.factory,
             pause: { delay in
                 delays.add(delay)
@@ -388,9 +391,23 @@ final class HostRig {
         rig.host.setActive(false)
     }
 
+    @Test func aFreshInstallIsNotADeviceUntilTheSwitchIsOn() async {
+        let rig = HostRig(deviceOn: false)
+        #expect(!rig.host.isEnabled, "off by default")
+        #expect(rig.defaults.object(forKey: "nodeEnabled") == nil, "nothing is stored until it is chosen")
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.setActive(true)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(rig.host.status == .off)
+        #expect(ConfigProtocol.requests.isEmpty && rig.gateway.attempts.isEmpty, "nothing connects")
+        rig.host.setEnabled(true)
+        #expect(await eventually { rig.host.status == .online })
+        #expect(rig.makeHost().isEnabled, "kept across launches")
+    }
+
     @Test func theSwitchDisconnectsAndIsKept() async {
         let rig = HostRig()
-        #expect(rig.host.isEnabled, "on by default")
+        #expect(rig.host.isEnabled)
         let socket = await rig.online()
         rig.host.setEnabled(false)
         #expect(rig.host.status == .off)
@@ -410,7 +427,7 @@ final class HostRig {
     @Test func theAppleHealthSwitchIsOffByDefaultAndKept() async {
         let rig = HostRig()
         #expect(!rig.host.isHealthEnabled, "Health data goes to an AI model: the guardian turns it on")
-        #expect(rig.host.isEnabled, "the device switch stays on by default")
+        #expect(rig.host.isEnabled, "turning the device on leaves Health off")
         #expect(rig.defaults.object(forKey: "nodeHealthEnabled") == nil, "nothing is stored until it is chosen")
         rig.host.setHealthEnabled(true)
         #expect(rig.host.isHealthEnabled)
@@ -608,17 +625,16 @@ final class HostRig {
 
     // MARK: Another account
 
-    @Test func forgettingTheAccountResetsBothSwitchesAndEmptiesTheLog() async {
+    @Test func forgettingTheAccountTurnsBothSwitchesOffAndEmptiesTheLog() async {
         let rig = HostRig()
-        rig.host.setEnabled(false)
         rig.host.setHealthEnabled(true)
         await rig.host.forgetAccount().value
-        #expect(rig.host.isEnabled)
+        #expect(!rig.host.isEnabled)
         #expect(!rig.host.isHealthEnabled)
         #expect(rig.audit.removals == 1)
         // Nothing kept for the next launch either.
         let relaunched = rig.makeHost()
-        #expect(relaunched.isEnabled)
+        #expect(!relaunched.isEnabled)
         #expect(!relaunched.isHealthEnabled)
     }
 
@@ -626,6 +642,7 @@ final class HostRig {
         let rig = HostRig()
         rig.host.setHealthEnabled(true)
         rig.host.forgetAccount()
+        rig.host.setEnabled(true)
         let socket = await rig.online()
         socket.push(#"{"id":"r1","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#)
         #expect(await eventually { socket.sent.count == 1 })
@@ -633,13 +650,13 @@ final class HostRig {
         #expect(rig.health.reads == 0)
     }
 
-    @Test func aDeviceTheLastAccountTurnedOffConnectsForTheNext() async {
+    @Test func aDeviceTheLastAccountTurnedOnIsOffForTheNext() async {
         let rig = HostRig()
-        rig.host.setEnabled(false)
-        rig.gateway.enqueue(FakeSocket())
-        rig.host.setActive(true)
-        #expect(rig.host.status == .off)
+        let socket = await rig.online()
         rig.host.forgetAccount()
-        #expect(await eventually { rig.host.status == .online })
+        #expect(rig.host.status == .off)
+        #expect(socket.closed)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(rig.gateway.attempts.count == 1, "the next account turns it on itself")
     }
 }

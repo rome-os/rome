@@ -533,6 +533,16 @@
         }
       }
     },
+    "Can Rome use this iPad" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许 Rome 使用这台 iPad"
+          }
+        }
+      }
+    },
     "Can Rome use this iPhone" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1009,17 +1019,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "仅用于日常健康管理，不构成医疗建议。"
-          }
-        }
-      }
-    },
-    "From %@" : {
-      "comment" : "Recent activity: which Rome sent the request, by the start of its sender id",
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "来自 %@"
           }
         }
       }
@@ -3074,6 +3073,26 @@
         }
       }
     },
+    "This iPad" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPad"
+          }
+        }
+      }
+    },
+    "This iPad, your Rome, your AI model provider" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPad、你的 Rome、你的 AI 模型服务商"
+          }
+        }
+      }
+    },
     "This iPhone" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3768,6 +3787,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "按周"
+          }
+        }
+      }
+    },
+    "iPad use" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPad 使用"
           }
         }
       }

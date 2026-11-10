@@ -542,6 +542,9 @@ as its first capability. It needs no server change: the app's own Rome Cloud
 sign-in (a `romemob_` token and its device session) is the device identity,
 exactly as for the Mac app. Gateway and Cloud already accept it, and the iPhone
 shows up in `rome-node device` and Settings → Devices with `platform: "ios"`.
+An iPad works the same way. Only the device word changes: its settings say iPad,
+as in **Settings → iPad use → Can Rome use this iPad**, and so do the messages
+an agent reads.
 
 The phone ports `connectHost()` and `connectGateway()`: `GET /v1/gateway/config`,
 then a WSS connection with the token in the `Authorization` header, never in the
@@ -551,9 +554,10 @@ URL (WS only to loopback in a Debug build against a local Cloud). The backoff is
 does. The phone speaks text envelopes only and ignores binary frames, so its
 `system.info` has no `frameVersion` or `transferVersion`.
 
-Signed in means connected, unless **Settings → iPhone use → Can Rome use this iPhone**
-is off (on by default, kept across launches). The device is online only while the
-app is in front: iOS suspends a background app's sockets, and Health's data is
+The phone connects only after the user turns on **Settings → iPhone use → Can Rome
+use this iPhone**. The switch is off by default and kept across launches, so nothing
+connects until the user chooses it. Signed in with the switch on, the phone is a
+device. It is online only while the app is in front: iOS suspends a background app's sockets, and Health's data is
 unreadable while the phone is locked. When the app leaves the front, requests
 under way finish their replies, then the connection closes. Signing out
 disconnects. A device that is not connected answers `target_unavailable`.
@@ -628,13 +632,12 @@ duration. It keeps 30 days and
 never holds a health value. If a record cannot be written the request is refused
 with `audit_unavailable`, and `system.info` still answers and reports the log's state.
 Settings → iPhone use → Recent activity lists the last 50 in words, by day (what was
-read, the window, how many, or why it failed), without JSON. Each row names its
-sender by the first 6 characters of the Gateway's `from`. Rome Cloud gives a Rome's
-caller no name the phone could look up, so this short tag is what tells one asking
-Rome from another.
+read, the window, how many, or why it failed), without ids or JSON. The log keeps
+`from`, but Rome Cloud gives a Rome's caller no name the phone could look up, so
+the rows do not name the Rome that asked.
 
-Signing out, and a sign-in to Rome Cloud, empty the log and put both switches back
-to their defaults, so nothing of one account carries over to the next.
+Signing out, and a sign-in to Rome Cloud, empty the log and turn both switches off
+again, so nothing of one account carries over to the next.
 
 ## Binary frames
 

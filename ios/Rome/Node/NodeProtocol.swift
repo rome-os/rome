@@ -130,7 +130,7 @@ struct NodeExecutor: Sendable {
         guard let seq = await audit.begin(requestId: request.id, from: request.from, action: request.action, args: request.args) else {
             return .failed(
                 code: "audit_unavailable",
-                message: "This iPhone could not record the request in its audit log, so it did not run it. Free some storage on the iPhone and try again."
+                message: "This \(health.device.name) could not record the request in its audit log, so it did not run it. Free some storage on the \(health.device.name) and try again."
             )
         }
         let result = await health.run(request.action, args: request.args)
@@ -150,7 +150,7 @@ struct NodeExecutor: Sendable {
             "name": .string(await name()),
             "platform": .string("ios"),
             "actions": .array(HealthActions.actions.map(JSONValue.string)),
-            "usage": .object(HealthActions.usage.mapValues(JSONValue.string)),
+            "usage": .object(HealthActions.usage(health.device).mapValues(JSONValue.string)),
             "audit": await audit.status().json,
         ]), count: nil)
     }
