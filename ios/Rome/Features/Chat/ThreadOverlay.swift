@@ -62,7 +62,7 @@ struct ThreadOverlay: View {
     /// The chat's own header, laid over it unchanged: the same identity in
     /// the middle, still, and the close button where the "…" sits.
     private var header: some View {
-        HStack(alignment: .top) {
+        HStack(alignment: .center) {
             // Where the drawer button sits below, so the identity keeps its place.
             Color.clear.frame(width: 44, height: 44)
             ChatIdentity(name: name, still: true)
@@ -73,7 +73,7 @@ struct ThreadOverlay: View {
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
-        .padding(.bottom, 6)
+        .padding(.bottom, 4)
     }
 
     /// The composer keeps its text and focus: closed unsent, the text stays

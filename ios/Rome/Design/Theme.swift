@@ -25,6 +25,11 @@ enum Palette {
     static let drawerPage = dynamic(0xE4DED4, 0x151210)
     static let cardShadow = dynamic(rgba: (0x3C2814, 0.16), (0x000000, 0.5))
     static let softShadow = dynamic(rgba: (0x1A130F, 0.06), (0x000000, 0.3))
+    /// Behind the chat header's name, over its glass: the dark pill keeps
+    /// its name readable when bright messages pass under it.
+    static let headerPillTint = dynamic(rgba: (0xFFFFFF, 0), (0x000000, 0.28))
+    /// Under the chat header's avatar, so it sits on the pill.
+    static let avatarShadow = dynamic(rgba: (0x3C2814, 0.18), (0x000000, 0.35))
 
     static let primary = dynamic(0xD86F4C, 0xD86F4C)
     static let primaryIcon = dynamic(0xD86F4C, 0xE07C5A)

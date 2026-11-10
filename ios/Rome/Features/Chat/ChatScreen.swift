@@ -254,7 +254,9 @@ struct ChatHeader: View {
     var onArchive: (() -> Void)? = nil
 
     var body: some View {
-        HStack(alignment: .top) {
+        // The identity is centred on the buttons' row and reaches a little
+        // above and below it.
+        HStack(alignment: .center) {
             GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
                 MenuGlyph()
             }
@@ -264,7 +266,7 @@ struct ChatHeader: View {
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
-        .padding(.bottom, 6)
+        .padding(.bottom, 4)
     }
 }
 
@@ -281,16 +283,20 @@ struct ChatIdentity: View {
     @State private var pokes = 0
     @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
 
-    static let avatarSize: CGFloat = 44
+    static let avatarSize: CGFloat = 36
     /// How far the avatar reaches down over the pill.
-    static let overlap: CGFloat = 10
+    static let overlap: CGFloat = 6
 
     var body: some View {
         VStack(spacing: -Self.overlap) {
+            // A solid disc on the glass pill: two overlapping layers never
+            // share a color (DESIGN.md 1).
             Mascot(blinks: !still, pokes: pokes)
-                .frame(height: 20)
+                .frame(height: 18)
                 .frame(width: Self.avatarSize, height: Self.avatarSize)
-                .glassSurface(Circle())
+                .background(Palette.elevated, in: Circle())
+                .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
+                .shadow(color: Palette.avatarShadow, radius: 4, x: 0, y: 1)
                 // The avatar: a soft tap and a reaction, nothing else.
                 .contentShape(Circle())
                 .onTapGesture {
@@ -313,10 +319,13 @@ struct ChatIdentity: View {
             }
             .lineLimit(1)
             .truncationMode(.tail)
-            .padding(.horizontal, 14)
-            .padding(.top, Self.overlap + 4)
-            .padding(.bottom, 6)
-            .glassSurface(Capsule())
+            .padding(.horizontal, 12)
+            .padding(.top, 8)
+            .padding(.bottom, 5)
+            .frame(minWidth: 72)
+            // Frosted like the composer, so what scrolls under blurs out.
+            .background(Palette.headerPillTint, in: Capsule())
+            .glassSurface(Capsule(), frost: Frost.composer)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: status.map { "\(name), \($0)" } ?? name))
