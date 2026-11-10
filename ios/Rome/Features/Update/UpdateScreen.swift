@@ -12,7 +12,7 @@ struct UpdateScreen: View {
 
     private var updater: InstanceUpdater { model.update }
 
-    private var statusLine: String? { UpdateGate.statusLine(updater.state, progress: updater.progress) }
+    private var statusLine: String? { UpdateGate.statusLine(updater.state, progress: updater.progress, agentName: model.workspace?.agentName) }
 
     var body: some View {
         Group {

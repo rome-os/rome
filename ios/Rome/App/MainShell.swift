@@ -246,7 +246,6 @@ struct MainShell: View {
             show(request.topicId.map(MainSection.topic) ?? .chat)
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.sessionExpired)
-        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: model.update.showsBanner && !drawerOpen && !(usesSidebar && sidebarShown))
         // A window that turns wide pins the drawer; the one it pushed aside is closed.
         .onChange(of: usesSidebar) { drawerOpen = false }
         #if DEBUG
@@ -274,7 +273,7 @@ struct MainShell: View {
         #endif
     }
 
-    /// Session expired, or an update offered, at the top of the page's column.
+    /// Session expired, at the top of the page's column.
     @ViewBuilder
     private var banners: some View {
         if model.sessionExpired {
@@ -284,12 +283,6 @@ struct MainShell: View {
             .readableColumn()
             .padding(.top, 58)
             .transition(.move(edge: .top).combined(with: .opacity))
-        } else if model.update.showsBanner, !drawerOpen, !(usesSidebar && sidebarShown) {
-            // The drawer has its own line for it.
-            UpdateBanner(instanceName: workspace.instanceName, onUpdate: { model.update.openPage() }, onClose: { model.update.dismissBanner() })
-                .readableColumn()
-                .padding(.top, 58)
-                .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 

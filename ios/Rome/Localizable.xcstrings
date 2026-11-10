@@ -6,7 +6,37 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ 有新版本可以更新"
+            "value" : "%@ 有新版本了"
+          }
+        }
+      }
+    },
+    "%@ is upgrading to %@…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 正在升级到 %@…"
+          }
+        }
+      }
+    },
+    "%@ needs its guardian to update first" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 要等主人更新后才能继续"
+          }
+        }
+      }
+    },
+    "%@ updated to %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 已升级到 %@"
           }
         }
       }
@@ -681,6 +711,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有提交成功"
+          }
+        }
+      }
+    },
+    "Couldn't start the update. Try again in a moment." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这次没能开始更新，稍后再试试吧。"
           }
         }
       }
@@ -1423,16 +1463,6 @@
         }
       }
     },
-    "Opened “%@”. Switch instances in Settings." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已打开「%@」。可以在设置里切换。"
-          }
-        }
-      }
-    },
     "Opening your Rome" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1763,16 +1793,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法连接 Rome Cloud。请稍后再试。"
-          }
-        }
-      }
-    },
-    "Rome Cloud could not start the update. Try again in a moment." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rome Cloud 未能开始更新。请稍后再试。"
           }
         }
       }
@@ -2435,16 +2455,6 @@
         }
       }
     },
-    "This Rome needs an update from its owner" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这个 Rome 需要所有者先更新"
-          }
-        }
-      }
-    },
     "This card was already answered. The task has been refreshed." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2671,16 +2681,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在更新任务"
-          }
-        }
-      }
-    },
-    "Upgrading to %@…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在升级到 %@…"
           }
         }
       }

@@ -224,7 +224,8 @@ final class Counter: @unchecked Sendable {
     @Test func eachPhaseHasItsLine() {
         #expect(UpdateGate.statusLine(.starting(current: "1.1.183", latest: "1.1.190"), progress: .downloading) == "Asking Rome Cloud to start the update…")
         let updating = InstanceUpdater.State.updating(target: "1.1.190", since: .now)
-        #expect(UpdateGate.statusLine(updating, progress: .downloading) == "Upgrading to 1.1.190…")
+        #expect(UpdateGate.statusLine(updating, progress: .downloading) == "Rome is upgrading to 1.1.190…")
+        #expect(UpdateGate.statusLine(updating, progress: .downloading, agentName: "Milo") == "Milo is upgrading to 1.1.190…")
         #expect(UpdateGate.statusLine(updating, progress: .restarting) == "Restarting your Rome…")
         #expect(UpdateGate.statusLine(updating, progress: .almostDone) == "Almost done…")
     }

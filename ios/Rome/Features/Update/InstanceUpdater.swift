@@ -94,13 +94,13 @@ enum UpdateGate {
 
     /// The update page's one status line while it waits, or nil when it
     /// does not wait.
-    static func statusLine(_ state: InstanceUpdater.State, progress: Progress) -> String? {
+    static func statusLine(_ state: InstanceUpdater.State, progress: Progress, agentName: String? = nil) -> String? {
         switch state {
         case .starting:
             return String(localized: "Asking Rome Cloud to start the update…")
         case .updating(let target, _):
             switch progress {
-            case .downloading: return String(localized: "Upgrading to \(target)…")
+            case .downloading: return String(localized: "\(UpdateCopy.agent(agentName)) is upgrading to \(target)…")
             case .restarting: return String(localized: "Restarting your Rome…")
             case .almostDone: return String(localized: "Almost done…")
             }
@@ -139,7 +139,7 @@ enum UpdateGate {
             case "unversioned_build":
                 return String(localized: "This Rome is a development build and cannot be updated.")
             default:
-                return String(localized: "Rome Cloud could not start the update. Try again in a moment.")
+                return String(localized: "Couldn't start the update. Try again in a moment.")
             }
         }
         return (error as? LocalizedError)?.errorDescription ?? String(localized: "Could not reach your Rome")
@@ -230,6 +230,9 @@ final class InstanceUpdater {
     private(set) var presented = false
     /// The release the guardian closed the banner for, on this instance.
     private(set) var dismissedVersion: String?
+    /// The release an upgrade from this device just reached, said once back
+    /// in the chat. It outlives the reopen that follows the upgrade.
+    private(set) var justUpdated: (instanceID: String, version: String)?
     /// The instance's release when the check last found it behind.
     private var behindOn: String?
 
@@ -321,6 +324,12 @@ final class InstanceUpdater {
         }
     }
 
+    /// The release reached, while it is still to be said.
+    var updatedTo: String? { justUpdated?.version }
+
+    /// The "updated" line was shown.
+    func clearUpdated() { justUpdated = nil }
+
     /// Closes the banner for this release; a newer one shows it again.
     func dismissBanner() {
         guard let offered, let instanceID else { return }
@@ -336,6 +345,7 @@ final class InstanceUpdater {
         self.backend = backend
         self.instanceID = instanceID
         dismissedVersion = banners.dismissed(instanceID)
+        if justUpdated?.instanceID != instanceID { justUpdated = nil }
         await check()
     }
 
@@ -569,7 +579,13 @@ final class InstanceUpdater {
     }
 
     private func finish() async {
-        if let instanceID { store.clear(instanceID) }
+        if let instanceID {
+            store.clear(instanceID)
+            switch state {
+            case .updating(let target, _), .failed(.timedOut(let target)): justUpdated = (instanceID, target)
+            default: break
+            }
+        }
         poll?.cancel()
         poll = nil
         presented = false
@@ -582,6 +598,11 @@ final class InstanceUpdater {
     }
 
     #if DEBUG
+    /// Snapshot runs only: the line said after an upgrade.
+    func debugShowUpdated(_ version: String) {
+        if let instanceID { justUpdated = (instanceID, version) }
+    }
+
     /// Snapshot runs only: show a state without a server round trip.
     func debugShow(_ state: State, progress: UpdateGate.Progress = .downloading) {
         poll?.cancel()

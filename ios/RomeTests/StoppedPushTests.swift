@@ -60,7 +60,7 @@ final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
             let app = model()
             // A cold launch from a push for B, which is stopped.
             await app.openFromPush(PushTarget(instanceId: "b"))
-            await app.openInstance(preferring: "b", showHint: false)
+            await app.openInstance(preferring: "b")
             #expect(app.phase == .stopped(instanceName: "B"))
             // A push from C, stopped as well: its own page.
             await app.openFromPush(PushTarget(instanceId: "c"))
@@ -92,7 +92,7 @@ final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
             ]
             list(b: "running")
             let app = model(sessionForB: false)
-            await app.openInstance(preferring: "b", showHint: false)
+            await app.openInstance(preferring: "b")
             #expect(app.phase == .stopped(instanceName: "B"))
             #expect(app.update.waitingInstanceID == "b")
             // Rome Cloud now reports it stopped mid-restart; a push from B is tapped.
@@ -123,7 +123,7 @@ final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
             ]
             list(b: "running")
             let app = model(sessionForB: false)
-            await app.openInstance(preferring: "b", showHint: false)
+            await app.openInstance(preferring: "b")
             #expect(app.update.waitingInstanceID == "b")
             // Rome Cloud reports B stopped until the wait gives up.
             list(b: "stopped")
@@ -153,7 +153,7 @@ final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
             list(b: "stopped")
             let app = model()
             await app.openFromPush(PushTarget(instanceId: "b"))
-            await app.openInstance(preferring: "b", showHint: false)
+            await app.openInstance(preferring: "b")
             #expect(app.phase == .stopped(instanceName: "B"))
             // Both still stopped: the retry leaves B's page up.
             await app.retry()

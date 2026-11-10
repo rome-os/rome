@@ -63,6 +63,8 @@ struct ChatScreen: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if workspace.conciergeState == .ready {
                 VStack(spacing: 10) {
+                    // Inside the composer's inset, so the last message rests above it too.
+                    UpdatePill(agentName: workspace.agentName)
                     if ConciergeStarters.visible(loaded: store.loaded, rows: store.rows) {
                         ConciergeStarters { store.send($0.text) }
                     }
@@ -104,12 +106,12 @@ struct ChatScreen: View {
     @ViewBuilder
     private var banners: some View {
         VStack(spacing: 8) {
-            if let hint = model.autoOpenHint {
+            if let hint = model.accessNotice {
                 TopBanner(kind: .info, text: hint)
-                    .onTapGesture { model.autoOpenHint = nil }
+                    .onTapGesture { model.accessNotice = nil }
                     .task {
                         try? await Task.sleep(for: .seconds(5))
-                        withAnimation { model.autoOpenHint = nil }
+                        withAnimation { model.accessNotice = nil }
                     }
             }
             if store.loadError == .offline {
@@ -124,9 +126,9 @@ struct ChatScreen: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .padding(.top, model.autoOpenHint != nil || store.loadError == .offline || offersPush ? 10 : 0)
+        .padding(.top, model.accessNotice != nil || store.loadError == .offline || offersPush ? 10 : 0)
         .readableColumn()
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.autoOpenHint)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.accessNotice)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: offersPush)
     }
 

@@ -386,7 +386,6 @@ final class AppModel {
         /// The instance last opened, as Rome Cloud listed it: opened again
         /// when Rome Cloud cannot be reached at launch.
         static let lastInstanceRecord = "lastInstanceRecord"
-        static let hintShown = "autoOpenHintShown"
     }
 
     private(set) var phase: Phase = .launching
@@ -401,8 +400,9 @@ final class AppModel {
     /// set with its error.
     private(set) var browserSignIn: URL?
     private(set) var sessionExpired = false
-    /// Shown once after the app picked an instance among several on its own.
-    var autoOpenHint: String?
+    /// Said once when this account was taken off the open Rome's allow-list
+    /// and another Rome opened in its place.
+    var accessNotice: String?
     /// Goes up when a tapped push asks the shell to show Chat.
     private(set) var chatRequest = ChatRequest(serial: 0, topicId: nil)
     /// A tapped push waiting for an instance to open.
@@ -480,7 +480,7 @@ final class AppModel {
         #endif
         if cloud.hasCredential {
             // A tap that launched the app opens its instance first.
-            await openInstance(preferring: pendingPush?.instanceId, showHint: false)
+            await openInstance(preferring: pendingPush?.instanceId)
         } else {
             phase = .signedOut
         }
@@ -507,7 +507,7 @@ final class AppModel {
                 // before its data is wiped, so nothing of it writes again.
                 leaveAccount()
                 forgetAccountData()
-                await openInstance(preferring: nil, showHint: true)
+                await openInstance(preferring: nil)
             } catch {
                 signInError = (error as? LocalizedError)?.errorDescription ?? String(localized: "Sign-in did not finish")
                 phase = .signedOut
@@ -517,7 +517,7 @@ final class AppModel {
 
     /// Picks and opens an instance. The one this device opened last wins, then
     /// the only running one, then the first running one.
-    func openInstance(preferring id: String?, showHint: Bool) async {
+    func openInstance(preferring id: String?) async {
         let account = cloud.account.stamp()
         do {
             let list = try await cloud.listInstances()
@@ -542,12 +542,7 @@ final class AppModel {
                 }
                 return
             }
-            let pickedAmongMany = running.count > 1 && id == nil && remembered == nil
             await connect(to: chosen)
-            if showHint, pickedAmongMany, !UserDefaults.standard.bool(forKey: Defaults.hintShown) {
-                UserDefaults.standard.set(true, forKey: Defaults.hintShown)
-                autoOpenHint = String(localized: "Opened “\(chosen.name)”. Switch instances in Settings.")
-            }
         } catch {
             guard account.isCurrent else { return }
             if error as? AuthError == .cloudUnauthorized {
@@ -640,7 +635,7 @@ final class AppModel {
         }
         currentInstanceID = nil
         if let next = instances.first(where: \.isRunning) {
-            autoOpenHint = reason
+            accessNotice = reason
             await connect(to: next)
         } else {
             signInError = reason
@@ -683,7 +678,7 @@ final class AppModel {
         // stopped, the one this phone opened last opens instead. The page's
         // instance is kept until one opens (`connect`), so a retry that
         // leaves the page up still tries it next time.
-        await openInstance(preferring: stoppedInstanceID, showHint: false)
+        await openInstance(preferring: stoppedInstanceID)
     }
 
     /// A tapped push for an instance that is not running: the open one closes
@@ -770,7 +765,7 @@ final class AppModel {
         sessionExpired = false
         workspace?.stop()
         workspace = nil
-        await openInstance(preferring: currentInstanceID, showHint: false)
+        await openInstance(preferring: currentInstanceID)
     }
 
     /// Only the guardian can update the instance, so only the guardian's
@@ -928,7 +923,7 @@ final class AppModel {
         // instance, or show its own stopped page.
         if workspace == nil, phase.waitsOnAnInstance {
             signInError = nil
-            await openInstance(preferring: target.instanceId, showHint: false)
+            await openInstance(preferring: target.instanceId)
             return
         }
         await routePendingPush()

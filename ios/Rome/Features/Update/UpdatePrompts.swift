@@ -14,26 +14,58 @@ enum UpdateCopy {
 
     static func banner(_ name: String) -> String { String(localized: "\(shortName(name)) has an update") }
     static func action(_ name: String) -> String { String(localized: "Update \(shortName(name))") }
+    static func updated(_ name: String, version: String) -> String { String(localized: "\(shortName(name)) updated to \(version)") }
+
+    /// The Agent's name as the chat header shows it, or Rome before it is known.
+    static func agent(_ name: String?) -> String {
+        guard let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return "Rome" }
+        return shortName(name)
+    }
 }
 
-/// Slides down when the open Rome has a release it can do without: Update
-/// opens the update page, the cross closes it for that release.
-struct UpdateBanner: View {
-    let instanceName: String
-    let onUpdate: () -> Void
-    let onClose: () -> Void
+/// Just above the composer in Chat and topic chats, centred: the open Rome
+/// has a release it can do without, or an upgrade from this phone just
+/// finished. It sits in the composer's inset, so the last message rests
+/// above it and the header is never covered.
+struct UpdatePill: View {
+    /// The Agent's display name, as the header shows it.
+    let agentName: String?
+
+    @Environment(AppModel.self) private var model
+
+    private var updater: InstanceUpdater { model.update }
 
     var body: some View {
+        let name = UpdateCopy.agent(agentName)
+        Group {
+            if updater.showsBanner {
+                offer(name)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            } else if let version = updater.updatedTo {
+                done(name, version: version)
+                    .transition(.opacity)
+                    // Said once, for about three seconds.
+                    .task(id: version) {
+                        try? await Task.sleep(for: .seconds(3))
+                        withAnimation(.easeOut(duration: 0.4)) { updater.clearUpdated() }
+                    }
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: updater.showsBanner)
+    }
+
+    /// Update opens the update page; the cross closes it for this release.
+    private func offer(_ name: String) -> some View {
         HStack(spacing: 8) {
             Image(systemName: "arrow.down.circle")
-                .romeFont(15, .semibold)
+                .romeFont(14, .semibold)
                 .foregroundStyle(Palette.primaryText)
-            Text(verbatim: UpdateCopy.banner(instanceName))
+            Text(verbatim: UpdateCopy.banner(name))
                 .romeFont(14, .medium)
                 .foregroundStyle(Palette.fg)
                 .lineLimit(1)
-            Spacer(minLength: 4)
-            Button(action: onUpdate) {
+            Button { updater.openPage() } label: {
                 Text("Update")
                     .romeFont(13, .semibold)
                     .foregroundStyle(.white)
@@ -42,7 +74,7 @@ struct UpdateBanner: View {
                     .background(Palette.primary, in: Capsule())
             }
             .buttonStyle(PressScaleStyle())
-            Button(action: onClose) {
+            Button { updater.dismissBanner() } label: {
                 Image(systemName: "xmark")
                     .romeFont(12, .semibold)
                     .foregroundStyle(Palette.sub)
@@ -53,12 +85,25 @@ struct UpdateBanner: View {
             .accessibilityLabel(Text("Close"))
         }
         .padding(.leading, 14)
-        .padding(.trailing, 6)
-        .padding(.vertical, 6)
-        .background(Palette.elevated.opacity(0.9), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .softElevation(radius: 20)
-        .padding(.horizontal, Metrics.pagePadding)
+        .padding(.trailing, 4)
+        .padding(.vertical, 4)
+        .glassSurface(Capsule(), frost: Frost.composer)
+    }
+
+    private func done(_ name: String, version: String) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle")
+                .romeFont(14, .semibold)
+                .foregroundStyle(Palette.primaryText)
+            Text(verbatim: UpdateCopy.updated(name, version: version))
+                .romeFont(14, .medium)
+                .foregroundStyle(Palette.fg)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 14)
+        .frame(height: 36)
+        .glassSurface(Capsule(), frost: Frost.composer)
+        .accessibilityElement(children: .combine)
     }
 }
 
