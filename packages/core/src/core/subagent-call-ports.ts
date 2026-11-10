@@ -32,6 +32,8 @@ function subagentSession(child: AgentSession): SubagentSession {
           sharedContext: context.sharedContext,
           romeSessionId: child.sessionId,
           initiatedBy: "system",
+          // The subagent acts for the person its parent turn acts for.
+          ...(context.actor ? { actor: context.actor } : {}),
         },
       );
       return {

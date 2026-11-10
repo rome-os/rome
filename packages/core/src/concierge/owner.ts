@@ -11,6 +11,15 @@ export type ConciergeOwner = string;
 
 export const GUARDIAN_OWNER: ConciergeOwner = "guardian";
 
+const VISITOR_OWNER_PREFIX = "visitor:";
+
+/** The Rome Cloud account a push for `owner` names: a visitor's, or undefined for the guardian. */
+export function recipientOf(owner: ConciergeOwner): string | undefined {
+  return owner.startsWith(VISITOR_OWNER_PREFIX)
+    ? owner.slice(VISITOR_OWNER_PREFIX.length)
+    : undefined;
+}
+
 /** A chat's owner: the one it records, the guardian when it records none. */
 export function ownerOf(chat: { ownerKey?: string | null }): ConciergeOwner {
   return chat.ownerKey || GUARDIAN_OWNER;

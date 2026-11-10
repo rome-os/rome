@@ -34,7 +34,7 @@ import { type AgentLog } from "../domain/agent-log.js";
 import { type DeferTool } from "./ask-user-tools.js";
 import { type SessionTools, forkSessionTools } from "../domain/session-tools.js";
 import { type ForkOpening, type ForkRequest, keepsFork, openFork } from "../domain/fork.js";
-import { type TurnFacts, type PushLevel } from "../domain/turn-facts.js";
+import { type TurnFacts, type PushLevel, type TurnActor } from "../domain/turn-facts.js";
 import {
   NO_ROME_TOOLS,
   type RomeTool,
@@ -203,6 +203,8 @@ export interface AgentTurnInput {
 export interface ForkedAgentTurnInput extends AgentTurnInput, ForkRequest {
   /** Optional capability tier override for the forked turn. */
   tier?: ModelTier;
+  /** Who the forked turn acts for: the person who asked for the fork. Absent, no one. */
+  actor?: TurnActor;
 }
 
 export type AgentSessionStatus = "idle" | "running" | "closed";
@@ -243,8 +245,14 @@ export interface SendTurnOptions {
    *  stands, or null when Rome holds none. Read only with `promptFacts`. */
   quoted?: PromptMessage | null;
   initiatedBy?: "user" | "system";
-  /** Pushes the first message said in the turn at this level (RunParams.pushLevel). */
+  /** Pushes the messages said in the turn at this level (RunParams.pushLevel). */
   pushLevel?: PushLevel;
+  /**
+   * Who the turn acts for, captured when its input was admitted. Every action
+   * the turn calls runs as this person, however late its tool callback
+   * arrives. Absent, the turn acts for no one.
+   */
+  actor?: TurnActor;
   /** The message the turn answers though it did not start it (TurnFacts.threadAnchor). */
   threadAnchor?: string;
 }
@@ -684,6 +692,8 @@ interface TurnExecRefs {
   attachSubagentCall: (toolUseId: string, call: SubagentCall) => void;
   /** Bind an async tool callback into the owner's OTel context. */
   bindTurnCtx: <T>(fn: () => T) => T;
+  /** Who the running turn acts for; its subagents' turns act for the same person. */
+  getActor: () => TurnActor | undefined;
 }
 
 /** Per-fork identity handed to `buildForkOpenParams` by `fork`. */
@@ -691,6 +701,8 @@ interface ForkTurnContext {
   opening: ForkOpening;
   forkSessionId: string;
   forkTurnId: string;
+  /** Who the forked turn acts for. */
+  actor?: TurnActor;
   /** Model id the fork opens with (caller-resolved tier override, else the source's live model). */
   model: string;
   /**
@@ -920,6 +932,7 @@ function sessionSetupOf(
         threadContext: () => opening.threadContext,
         sharedContext: () => opening.sharedContext,
         pushLevel: () => undefined,
+        actor: () => undefined,
         threadAnchor: () => undefined,
         inTurn: (fn) => fn(),
       };
@@ -1170,6 +1183,7 @@ async function openSession(
     childChannelThreadKey: key.channelThreadKey,
     attachSubagentCall: (toolUseId, call) => impl.addSubagentCall(toolUseId, call),
     bindTurnCtx: inCurrentTurnCtx,
+    getActor: () => impl.currentTurnActorRef,
   };
 
   // The facts the ports behind the Rome tools read, for the turns the refs run.
@@ -1196,6 +1210,7 @@ async function openSession(
     threadContext: refs.getThreadContext,
     sharedContext: refs.getSharedContext,
     pushLevel,
+    actor: refs.getActor,
     threadAnchor,
     inTurn: refs.bindTurnCtx,
   });
@@ -1234,6 +1249,7 @@ async function openSession(
             threadContext: refs.getThreadContext(),
             sharedContext: refs.getSharedContext(),
           },
+          actor: refs.getActor(),
         });
         try {
           refs.attachSubagentCall(toolContext.toolUseId, call);
@@ -1449,6 +1465,7 @@ async function openSession(
       // Forked turns open no agent span; run tool callbacks on the ambient
       // OTel context instead of re-binding into a source turn's span.
       bindTurnCtx: (fn) => fn(),
+      getActor: () => fork.actor,
     };
     const liveOpenParams = lastOpenParams;
     return {
@@ -1731,6 +1748,7 @@ interface TurnSink {
   quoted?: PromptMessage | null;
   initiatedBy?: "user" | "system";
   pushLevel?: PushLevel;
+  actor?: TurnActor;
   threadAnchor?: string;
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
@@ -1949,6 +1967,9 @@ class AgentSessionImpl implements AgentSession {
         sessionId: this.sessionId,
         error: error instanceof Error ? error.message : String(error),
       }),
+    (turnId) => {
+      if (this.currentSink?.turnId === turnId) this.currentSink.actor = undefined;
+    },
   );
   private keepAlive: boolean;
   private onClosed: () => void;
@@ -2004,6 +2025,10 @@ class AgentSessionImpl implements AgentSession {
 
   get currentTurnPushLevelRef(): PushLevel | undefined {
     return this.currentSink?.pushLevel;
+  }
+
+  get currentTurnActorRef(): TurnActor | undefined {
+    return this.currentSink?.actor;
   }
 
   /** The next turn resumes what an earlier session of the chat started, so
@@ -2861,6 +2886,7 @@ class AgentSessionImpl implements AgentSession {
               opening: forkOpening,
               forkSessionId,
               forkTurnId: turnId,
+              ...(input.actor ? { actor: input.actor } : {}),
               model: forkModel?.model ?? sourceModelSession.model,
               emit: (msg) => outbound.push(msg),
             });
@@ -3132,6 +3158,7 @@ class AgentSessionImpl implements AgentSession {
       quoted: options?.quoted ?? null,
       initiatedBy: options?.initiatedBy ?? "user",
       pushLevel: options?.pushLevel,
+      actor: options?.actor,
       threadAnchor: options?.threadAnchor,
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,

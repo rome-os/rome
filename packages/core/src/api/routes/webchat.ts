@@ -787,9 +787,9 @@ export interface WebchatRuntime {
     options?: BackendTurnOptions,
   ): Promise<void>;
   /**
-   * Emits `session_running` whenever a chat starts or stops running a turn,
-   * after first emitting one for every chat running now. Returns the
-   * unsubscribe.
+   * Emits `session_running` when a chat starts or stops a turn, after
+   * replaying every running chat. Also emits `agent_name_changed` on a rename.
+   * Returns the unsubscribe.
    */
   subscribeStatusEvents(emit: LiveEventEmit): () => void;
   /**
@@ -897,9 +897,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const listener = (event: { sessionId: string; running: boolean }) =>
       emit("session_running", event);
     runningListeners.add(listener);
+    const unsubscribeName = deps.agentNameEvents?.subscribe(emit);
     for (const sessionId of runningSessions) listener({ sessionId, running: true });
     return () => {
       runningListeners.delete(listener);
+      unsubscribeName?.();
     };
   };
   // `session_running` here is the open chat's cue to look up the turn to
@@ -1621,6 +1623,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return null;
     }
 
+    const forkActor = turnActor(await currentSessionActor(), undefined);
     const iterator = deps.agentRunner
       .runForked({
         agentName,
@@ -1632,6 +1635,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         label: input.label,
         mode: "exact",
         sourceCheckpoint,
+        // The fork acts for the person who asked for it.
+        ...(forkActor ? { actor: forkActor } : {}),
         // Keyed by the fork's own id, exactly what `handleChatSend` will
         // derive for it later.
         ...(input.continuable ? { persistThreadKey: webchatSessionKey } : {}),
@@ -4361,6 +4366,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const options = {
       ...(replyPushes(actor, saidBy) ? { pushLevel: "active" as const } : {}),
+      // Who the turn acts for, captured now: its tool calls run as this
+      // person however late the model's callback arrives.
+      ...(turnActor(actor, saidBy) ? { actor: turnActor(actor, saidBy) } : {}),
       links: turnLinks,
       priority: priority.data,
       threadContext,
@@ -4744,11 +4752,26 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 }
 
 /**
- * Whether the Concierge's reply to a sent message may reach the guardian's
- * phone (ConciergePush): only a message the guardian wrote, signed in. A
- * message said as someone else (an agent account, an automated source) and a
- * loopback caller acting as the guardian are not the guardian writing.
+ * The person a sent message's turn acts for: the guardian or a visitor who
+ * wrote it. A message said as an agent account, or with no person behind
+ * it, gives none.
+ */
+export function turnActor(
+  actor: SessionActor | undefined,
+  saidBy: Account | undefined,
+): SessionActor | undefined {
+  if (saidBy !== undefined) return undefined;
+  return actor?.kind === "guardian" || actor?.kind === "visitor" ? actor : undefined;
+}
+
+/**
+ * Whether the Concierge's reply to a sent message may reach the sender's
+ * phone (ConciergePush): only a message the guardian or a visitor wrote,
+ * signed in. A message said as someone else (an agent account, an automated
+ * source) and a loopback caller acting as the guardian are not a person
+ * writing.
  */
 export function replyPushes(actor: SessionActor | undefined, saidBy: Account | undefined): boolean {
-  return actor?.kind === "guardian" && actor.via === "cookie" && saidBy === undefined;
+  if (saidBy !== undefined) return false;
+  return actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via === "cookie");
 }

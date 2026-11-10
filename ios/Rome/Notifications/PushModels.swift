@@ -25,18 +25,20 @@ struct PushTarget: Equatable, Sendable {
 
 /// What a tapped push does once an instance is open.
 enum PushRoute: Equatable {
-    /// The push is for the open instance, or for one this account cannot open
-    /// now: show its Concierge.
+    /// The push is for the open instance, or for one this account no longer
+    /// lists: show the open instance's Concierge.
     case openConcierge
     /// The push is for another running instance: switch to it first.
     case switchTo(CloudInstance)
+    /// The push is for another instance of this account that is not running:
+    /// its stopped page, not the open instance's chat.
+    case showStopped(CloudInstance)
 
     static func decide(_ target: PushTarget, currentInstanceID: String?, instances: [CloudInstance]) -> PushRoute {
         guard target.instanceId != currentInstanceID,
-              let instance = instances.first(where: { $0.id == target.instanceId }),
-              instance.isRunning
+              let instance = instances.first(where: { $0.id == target.instanceId })
         else { return .openConcierge }
-        return .switchTo(instance)
+        return instance.isRunning ? .switchTo(instance) : .showStopped(instance)
     }
 }
 

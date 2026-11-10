@@ -326,6 +326,14 @@ final class AppModel {
         case noInstance
         case ready
 
+        /// Signed in, with no instance to open: one stopped, or none listed.
+        var waitsOnAnInstance: Bool {
+            switch self {
+            case .stopped, .noInstance: return true
+            default: return false
+            }
+        }
+
         /// Launching or opening an instance: the opening screen shows.
         var isOpening: Bool {
             switch self {
@@ -346,7 +354,7 @@ final class AppModel {
     private(set) var phase: Phase = .launching
     private(set) var workspace: Workspace? {
         // Pictures belong to the workspace that loaded them.
-        didSet { if workspace !== oldValue { StoredImageCache.reset() } }
+        didSet { if workspace !== oldValue { images.reset() } }
     }
     private(set) var instances: [CloudInstance] = []
     private(set) var currentInstanceID: String?
@@ -361,6 +369,8 @@ final class AppModel {
     private(set) var chatRequest = ChatRequest(serial: 0, topicId: nil)
     /// A tapped push waiting for an instance to open.
     private var pendingPush: PushTarget?
+    /// The instance whose stopped page shows, when a push led there.
+    private var stoppedInstanceID: String?
 
     let cloud: CloudAuth
     let push: PushCenter
@@ -382,9 +392,12 @@ final class AppModel {
     private var refreshing = false
     private var foreground = ForegroundGate()
 
-    init() {
-        let cloud = CloudAuth(origin: CloudAuth.configuredOrigin)
+    /// The pictures the open workspace loaded; `shared` in the app.
+    private let images: StoredImageCache
+
+    init(cloud: CloudAuth = CloudAuth(origin: CloudAuth.configuredOrigin), images: StoredImageCache = .shared) {
         self.cloud = cloud
+        self.images = images
         push = PushCenter(registry: cloud)
     }
 
@@ -473,6 +486,13 @@ final class AppModel {
             // Signed out or into another account meanwhile: that one decides.
             guard account.isCurrent else { return }
             take(list)
+            // A tapped push for a stopped instance: its stopped page at once.
+            if let push = pendingPush, push.instanceId == id,
+               let target = list.first(where: { $0.id == push.instanceId }), !target.isRunning {
+                pendingPush = nil
+                showStopped(target)
+                return
+            }
             let running = list.filter(\.isRunning)
             let remembered = UserDefaults.standard.string(forKey: Defaults.lastInstance)
             let chosen = running.first { $0.id == id } ?? running.first { $0.id == remembered } ?? running.first
@@ -522,6 +542,7 @@ final class AppModel {
     /// last instance never covers this one.
     private func connect(to instance: CloudInstance, keepUpdate: Bool = false) async {
         if !keepUpdate { update.reset() }
+        stoppedInstanceID = nil
         phase = .connecting(host: instance.host)
         let account = cloud.account.stamp()
         do {
@@ -620,7 +641,23 @@ final class AppModel {
     func retry() async {
         signInError = nil
         browserSignIn = nil
-        await openInstance(preferring: nil, showHint: false)
+        // The stopped page a push led to tries that instance first; still
+        // stopped, the one this phone opened last opens instead. The page's
+        // instance is kept until one opens (`connect`), so a retry that
+        // leaves the page up still tries it next time.
+        await openInstance(preferring: stoppedInstanceID, showHint: false)
+    }
+
+    /// A tapped push for an instance that is not running: the open one closes
+    /// and that instance's stopped page shows. The one opened last stays
+    /// remembered, so a relaunch still opens it.
+    private func showStopped(_ instance: CloudInstance) {
+        update.reset()
+        workspace?.stop()
+        workspace = nil
+        currentInstanceID = nil
+        stoppedInstanceID = instance.id
+        phase = .stopped(instanceName: instance.name)
     }
 
     /// The instance open now, as Rome Cloud lists it.
@@ -648,6 +685,7 @@ final class AppModel {
         tokenBox = nil
         instances = []
         currentInstanceID = nil
+        stoppedInstanceID = nil
         sessionExpired = false
     }
 
@@ -845,6 +883,16 @@ final class AppModel {
     /// instance is open, through a cold launch or a sign-in.
     func openFromPush(_ target: PushTarget) async {
         pendingPush = target
+        // The stopped page waits on this instance's upgrade: the wait reopens
+        // it, and the push routes then. Opening it now would end the wait.
+        if workspace == nil, update.waitingInstanceID == target.instanceId { return }
+        // A stopped page has no instance open to route from: open the push's
+        // instance, or show its own stopped page.
+        if workspace == nil, phase.waitsOnAnInstance {
+            signInError = nil
+            await openInstance(preferring: target.instanceId, showHint: false)
+            return
+        }
         await routePendingPush()
     }
 
@@ -860,6 +908,8 @@ final class AppModel {
             // the opened instance shows its chat.
             pendingPush = target
             await switchInstance(to: instance)
+        case .showStopped(let instance):
+            showStopped(instance)
         case .openConcierge:
             let topic = await topicChat(for: target)
             chatRequest = ChatRequest(serial: chatRequest.serial + 1, topicId: topic)
@@ -872,7 +922,8 @@ final class AppModel {
     /// The topic chat a push names, when this account has it; otherwise the
     /// main chat (nil). A chat started since the list was read is fetched.
     private func topicChat(for target: PushTarget) async -> String? {
-        guard let workspace, let chatId = target.chatId, chatId != conciergeChatID else { return nil }
+        // The main chat, a visitor's (`concierge-v-…`) too, is no topic: nothing to fetch.
+        guard let workspace, let chatId = target.chatId, !workspace.isMainChat(chatId) else { return nil }
         var topics = workspace.topics.chats
         if !topics.contains(where: { $0.id == chatId }), let all = try? await workspace.backend.conciergeChats() {
             topics = TopicChatsStore.topics(in: all)

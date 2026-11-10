@@ -608,7 +608,33 @@ describe("WorkerRpcServer param validation", () => {
 
     expect(response.error).toBeUndefined();
     expect(response.result).toEqual({ ok: true });
-    expect(services.backendTurnRunner.runAndDeliver).toHaveBeenCalledWith(params);
+    expect(services.backendTurnRunner.runAndDeliver).toHaveBeenCalledWith(params, undefined);
+  });
+
+  it("wakes the turn for the person of the action that woke it, such as a reminder's creator", async () => {
+    const { server, services } = makeServer({});
+    const worker = connect(server);
+    const visitor = { kind: "visitor", accountId: "acct-v", email: "v@example.com" } as const;
+    const params = {
+      agentName: "main",
+      sessionId: "agent-session-1",
+      channel: "webchat",
+      threadId: "sess-1",
+      prompt: "remind",
+    };
+    await actionExecutionContext.run(
+      {
+        actionName: "system:resume_session",
+        executionId: "e-1",
+        rootExecutionId: "e-1",
+        initiator: "routine:remind me",
+        actor: visitor,
+      },
+      () => worker.call("session.continue", params),
+    );
+    expect(services.backendTurnRunner.runAndDeliver).toHaveBeenCalledWith(params, {
+      actor: visitor,
+    });
   });
 
   it("rejects session.continue without the exact AgentSession identity", async () => {
@@ -1201,6 +1227,44 @@ describe("notify.send dispatch", () => {
 
     expect(response.error).toBeUndefined();
     expect(send).toHaveBeenCalledWith(expectedArg);
+  });
+
+  it("rings the visitor who acted in a shared chat, never the chat's owner, over IPC", async () => {
+    const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
+    const { server, services } = makeServer({ notify: { send } });
+    // A shared chat, private to no one.
+    const privateOwnerOf = rs.fn(async () => null);
+    (services as unknown as { privateOwnerOf: unknown }).privateOwnerOf = privateOwnerOf;
+    const worker = connect(server);
+    const store = {
+      actionName: "system:send_notification",
+      executionId: "execution-1",
+      rootExecutionId: "execution-1",
+      initiator: "agent",
+      actor: { kind: "visitor", accountId: "acct-v", email: "v@example.com" } as const,
+      channelContext: { channel: "webchat", threadId: "guardian-chat", channelUserId: "v" },
+    };
+    await actionExecutionContext.run(store, () => worker.call("notify.send", { body: "hi" }));
+    expect(send).toHaveBeenCalledWith({ body: "hi", recipient: "acct-v" });
+  });
+
+  it("refuses a call over IPC from a shared chat with no one person, sending nothing", async () => {
+    const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
+    const { server, services } = makeServer({ notify: { send } });
+    (services as unknown as { privateOwnerOf: unknown }).privateOwnerOf = async () => null;
+    const worker = connect(server);
+    const store = {
+      actionName: "system:send_notification",
+      executionId: "execution-2",
+      rootExecutionId: "execution-2",
+      initiator: "agent",
+      channelContext: { channel: "webchat", threadId: "shared-chat", channelUserId: "x" },
+    };
+    const result = await actionExecutionContext.run(store, () =>
+      worker.call("notify.send", { body: "hi" }),
+    );
+    expect(result).toEqual({ kind: "recipient_unknown" });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("rejects a non-string body without calling the notify service", async () => {

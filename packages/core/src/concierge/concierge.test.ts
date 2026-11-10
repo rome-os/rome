@@ -2128,13 +2128,15 @@ describe("Concierge pushes", () => {
     const date = new Date(at);
     return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
   };
-  /** Quiet hours from an hour ago to an hour from now. */
-  const quietNow = (s: ReturnType<typeof setup>) =>
+  /** Quiet hours from an hour ago to an hour from now, for `owner` only. */
+  const quietNow = (s: ReturnType<typeof setup>, owner = "guardian") =>
     s.service.attachFollowing({
       rules: async () => ({
         digestTimes: ["09:00"],
         quietHours: { start: hhmm(Date.now() - 3_600_000), end: hhmm(Date.now() + 3_600_000) },
       }),
+      quietUntil: async (_at: number, asked: string) =>
+        asked === owner ? Date.now() + 3_600_000 : null,
     } as unknown as ConciergeFollowing);
 
   it("hands a system turn's push level to the turn it runs", async () => {
@@ -2167,12 +2169,25 @@ describe("Concierge pushes", () => {
     expect(s.pushes.map((push) => push.chatId)).toEqual([TOPIC_CHAT]);
   });
 
-  it("pushes once for a turn that says two messages", async () => {
+  it("pushes a turn's first message at once and holds a second said right after for the merge window", async () => {
     const s = setup();
     s.pushLevel("active");
     await sayIn(s, "The build failed.");
     await sayIn(s, "I restarted it.");
     expect(s.pushes.map((push) => push.body)).toEqual(["The build failed."]);
+  });
+
+  it("pushes the fixed line for a message the Concierge marks private", async () => {
+    const s = setup();
+    s.pushLevel("active");
+    await s.tool("say", { text: "Your code is 7291.", private: true });
+    await s.settle();
+    expect(s.pushes).toEqual([
+      { body: "A task has an update", level: "active", chatId: CONCIERGE_CHAT },
+    ]);
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => textOf(row.content))).toEqual([
+      "Your code is 7291.",
+    ]);
   });
 
   /** A finished task chat whose latest answer is `answer`, with the row the Concierge titled. */
@@ -2252,7 +2267,22 @@ describe("Concierge pushes", () => {
     expect(JSON.stringify(s.pushes)).not.toContain("7291");
   });
 
-  it("pushes nothing from a visitor's Concierge, whose turns the guardian's phone must not show", async () => {
+  it("keeps a private message off the lock screen when it starts a chat thread", async () => {
+    const s = setup();
+    s.pushLevel("active");
+    const result = await s.tool("say", {
+      text: "Your code is 7291.",
+      private: true,
+      thread: "new",
+    });
+    await s.settle();
+    expect(result.isError).toBeFalsy();
+    expect(s.pushes).toEqual([
+      { body: "A task has an update", level: "active", chatId: CONCIERGE_CHAT },
+    ]);
+  });
+
+  it("pushes a visitor's Concierge to that visitor, never to the guardian", async () => {
     const s = setup();
     s.sessions.set("visitor-topic", {
       id: "visitor-topic",
@@ -2264,8 +2294,28 @@ describe("Concierge pushes", () => {
     s.turnIn("visitor-topic");
     s.pushLevel("active");
     await sayIn(s, "Your 3pm moved.");
-    expect(s.pushes).toEqual([]);
+    expect(s.pushes).toEqual([
+      { body: "Your 3pm moved.", level: "active", chatId: "visitor-topic", recipient: "acct-ann" },
+    ]);
     expect(s.messages.get("visitor-topic")).toHaveLength(1);
+  });
+
+  it("holds back a visitor's push in the visitor's quiet hours, not the guardian's", async () => {
+    const s = setup();
+    s.sessions.set("visitor-topic", {
+      id: "visitor-topic",
+      name: "Ann's calendar",
+      triggerKind: null,
+      agentName: CONCIERGE_AGENT_ID,
+      ownerKey: "visitor:acct-ann",
+    });
+    quietNow(s, "visitor:acct-ann");
+    s.turnIn("visitor-topic");
+    s.pushLevel("active");
+    await sayIn(s, "Your 3pm moved.");
+    s.turnIn(CONCIERGE_CHAT);
+    await sayIn(s, "A PR needs your review.");
+    expect(s.pushes.map((push) => push.chatId)).toEqual([CONCIERGE_CHAT]);
   });
 
   it("pushes nothing for a turn the guardian started", async () => {

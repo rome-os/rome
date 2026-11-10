@@ -19,8 +19,9 @@ struct ComposerTextView: UIViewRepresentable {
         let view = PastingTextView()
         view.delegate = context.coordinator
         view.backgroundColor = .clear
-        view.textContainerInset = UIEdgeInsets(top: 14, left: 0, bottom: 14, right: 0)
         view.textContainer.lineFragmentPadding = 0
+        let inset = Self.verticalInset(lineHeight: Self.font(for: context.environment.dynamicTypeSize).lineHeight)
+        view.textContainerInset = UIEdgeInsets(top: inset, left: 0, bottom: inset, right: 0)
         view.isScrollEnabled = false
         view.tintColor = UIColor(Palette.primary)
         view.textColor = UIColor(Palette.fg)
@@ -33,6 +34,10 @@ struct ComposerTextView: UIViewRepresentable {
         context.coordinator.parent = self
         let font = Self.font(for: context.environment.dynamicTypeSize)
         if view.font != font { view.font = font }
+        let inset = Self.verticalInset(lineHeight: font.lineHeight)
+        if view.textContainerInset.top != inset {
+            view.textContainerInset = UIEdgeInsets(top: inset, left: 0, bottom: inset, right: 0)
+        }
         if view.text != text { view.text = text }
         view.placeholder = placeholder
         view.accessibilityLabel = placeholder
@@ -74,6 +79,23 @@ struct ComposerTextView: UIViewRepresentable {
     /// 16 pt at the default text size, scaled the way `romeFont` scales.
     static func font(for size: DynamicTypeSize) -> UIFont {
         .systemFont(ofSize: ScaledFont.scaled(16, for: size))
+    }
+
+    /// The composer's height with one line of text, at the default text size.
+    static let minHeight: CGFloat = 50
+
+    /// Space above and below the text: one line fills `minHeight` exactly,
+    /// centered, and a larger text size keeps at least 14 pt.
+    static func verticalInset(lineHeight: CGFloat) -> CGFloat {
+        max(14, (minHeight - lineHeight) / 2)
+    }
+
+    /// The gap under a control of `height` beside the field, so it is
+    /// centered on the field's last line: on the only line it is centered in
+    /// the composer, at every text size.
+    static func controlBottomPadding(height: CGFloat, size: DynamicTypeSize) -> CGFloat {
+        let lineHeight = font(for: size).lineHeight
+        return verticalInset(lineHeight: lineHeight) + lineHeight / 2 - height / 2
     }
 
     final class Coordinator: NSObject, UITextViewDelegate {

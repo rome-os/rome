@@ -1,3 +1,4 @@
+import { actionExecutionContext } from "./context.js";
 import { describe, expect, it, rs } from "@rstest/core";
 import type { ChatRepository } from "@rome-os/app-runtime";
 import type { Channel } from "../../chats/connected-accounts/connected-account.js";
@@ -230,6 +231,48 @@ describe("backend turn delivery", () => {
     expect(await run()).not.toHaveProperty("inputLabel");
     expect(await run({ pushLevel: "passive" })).toMatchObject({ pushLevel: "passive" });
     expect(await run()).not.toHaveProperty("pushLevel");
+  });
+
+  it("wakes a turn for the person of the action that asks, as a reminder's resume_session does", async () => {
+    const visitor = { kind: "visitor", accountId: "acct-v", email: "v@example.com" } as const;
+    const run = async (store?: { actor?: typeof visitor }) => {
+      const agentRunner = createMockAgentRunner([
+        [
+          { type: "turn_start", turnId: "turn-1", sessionId: "s", userPrompt: "Wake" },
+          { type: "result", content: "" },
+        ],
+      ]);
+      const webchat = {
+        name: "webchat",
+        send: { send: rs.fn(), direct: null, activity: null },
+      } as unknown as Channel;
+      const runner = createBackendTurnRunner({
+        agentRunner,
+        channel: (name) => (name === "webchat" ? webchat : null),
+      });
+      runner.setWebchatRuntime({
+        enqueueSessionTask: async (_sessionId, task) => {
+          await task({ emit: async () => undefined });
+        },
+      });
+      const params = {
+        agentName: "core:main",
+        sessionId: "s",
+        channel: "webchat",
+        threadId: "chat-1",
+        prompt: "It is 5",
+      };
+      const deliver = () => runner.runAndDeliver(params);
+      await (store
+        ? actionExecutionContext.run(
+            { executionId: "e", rootExecutionId: "e", initiator: "routine:remind", ...store },
+            deliver,
+          )
+        : deliver());
+      return agentRunner.calls[0];
+    };
+    expect(await run({ actor: visitor })).toMatchObject({ actor: visitor });
+    expect(await run()).not.toHaveProperty("actor");
   });
 
   it("passes a quiet turn's option to the webchat runtime, and nothing for an ordinary one", async () => {

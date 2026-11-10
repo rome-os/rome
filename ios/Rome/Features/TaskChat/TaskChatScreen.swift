@@ -9,7 +9,7 @@ struct TaskChatScreen: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var model
-    @Environment(\.openURL) private var openURL
+    @Environment(\.openInstancePage) private var openInstancePage
     /// Kept on the workspace, so a failed send's bubble and Retry are still
     /// there when the guardian comes back, and the draft waits for it to load.
     private var store: TranscriptStore { workspace.taskStore(chatId) }
@@ -94,12 +94,12 @@ struct TaskChatScreen: View {
             .animation(.easeInOut(duration: 0.25), value: spinning)
             Menu {
                 Button {
-                    if let url = model.webURL?.appending(path: "chat/\(chatId)") { openURL(url) }
+                    if let origin = model.webURL { openInstancePage(InstancePages.chat(origin: origin, sessionId: chatId)) }
                 } label: {
-                    Label("Open on the web", systemImage: "safari")
+                    Label("Open on the web", systemImage: "globe")
                 }
                 Button {
-                    UIPasteboard.general.url = model.webURL?.appending(path: "chat/\(chatId)")
+                    UIPasteboard.general.url = model.webURL.map { InstancePages.chat(origin: $0, sessionId: chatId) }
                 } label: {
                     Label("Copy link", systemImage: "link")
                 }
@@ -164,7 +164,7 @@ struct TaskChatScreen: View {
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position)
-        case .tools, .approval, .question, .webOnly, .connect:
+        case .tools, .approval, .question, .webOnly, .routineDraft, .connect:
             InteractionRow(row: row, store: store)
         case .error(_, let text):
             ErrorLine(text: text)

@@ -297,8 +297,12 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
 
         // An app's turn waits behind the running one; its events drain in the
         // background as it runs.
+        // The person the calling action acts for, as the IPC boundary captured
+        // it: the turn's tool calls act for them too.
+        const actor = ctx.callerActionContext?.actor;
         const handle = await session.submit(req.input, {
           priority: "after",
+          ...(actor ? { actor } : {}),
           threadContext: req.init?.threadContext,
           sharedContext: req.init?.sharedContext,
           romeSessionId,

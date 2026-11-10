@@ -206,11 +206,15 @@ import {
 } from "./core/session-opening.js";
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
+import { registerAgentNameAction } from "./people/agent-name.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
 import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
+import { privateOwnerOf } from "./concierge/privacy.js";
+import { legacyRoutineActor } from "./routines/legacy-actor.js";
+import { continuationActor } from "./webchat/continuation-actor.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
@@ -254,7 +258,9 @@ import {
   syncStoredVisitorAllowList,
 } from "./access/visitor-allowlist-sync.js";
 import { PhoneWatching } from "./lib/phone-watching.js";
-import { ApprovalHandler } from "./apps/actions/approval-handler.js";
+import { DashboardActivity } from "./lib/dashboard-activity.js";
+import { callerNotifyService } from "./apps/actions/caller-notify.js";
+import { ApprovalHandler, executionRequester } from "./apps/actions/approval-handler.js";
 import { createBackendTurnRunner } from "./apps/actions/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { PolicyEngine } from "./core/policy-engine.js";
@@ -973,6 +979,9 @@ async function main() {
     actionEngine,
     30_000,
     systemClock,
+    // A routine from before routines recorded their creator acts for its
+    // chat's owner, as its fires did then.
+    (routine) => legacyRoutineActor(routine, { db, webchatRepo }),
   );
   deactivateRoutine = (id) => routineEngine.deactivate(id);
   const scheduleTriggerProvider = new ScheduleTriggerProvider(routinesRepo, () =>
@@ -1111,6 +1120,9 @@ async function main() {
   // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
   // `notify.send` back to this same instance. The Concierge pushes through it too.
   const notifyClient = new NotifyClient();
+  // A chat private to one person rings them when an action in it notifies.
+  const privateOwnerOfChat = async (chatId: string) =>
+    privateOwnerOf(await webchatRepo.getSession(chatId));
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
   // created below, by the time any turn finishes. The API layer attaches the
   // dashboard it runs task chats on.
@@ -1120,6 +1132,9 @@ async function main() {
   // The chats the guardian's phone app holds open, from the live-events socket;
   // the Concierge does not push what it says in one of them.
   const phoneWatching = new PhoneWatching();
+  // Whether the guardian is at a web dashboard, from the same socket; while
+  // they are, the Concierge pushes nothing to the phone.
+  const dashboardActivity = new DashboardActivity();
   const concierge = new ConciergeService({
     skillCatalog,
     settingsRepo,
@@ -1139,6 +1154,7 @@ async function main() {
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
     notify: notifyClient,
     phoneWatching,
+    dashboardActivity,
   });
   const channelSurface: ChannelSurfaces = (channel) => {
     if (channel === WEBCHAT_CHANNEL) return WEBCHAT_SURFACE;
@@ -1271,6 +1287,10 @@ async function main() {
     },
   });
 
+  const agentNameEvents = registerAgentNameAction(actionRegistry, {
+    settingsRepo,
+    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
+  });
   startConciergeEvents(concierge, turnListeners);
   // The Concierge reaches the connector's watch actions as itself.
   startConciergeFollowing(concierge, {
@@ -1299,6 +1319,8 @@ async function main() {
     backendTurnRunner,
     resolveContinuationWorkingDir,
     appConnections,
+    // An approved action, and the turn it resumes, act for whoever's turn asked.
+    executionRequester(actionExecutionsRepo),
   );
 
   // Learn whether this boot's release version differs from the last completed
@@ -1366,8 +1388,9 @@ async function main() {
     // The `resume_session` action's orchestrator. Real runner in main;
     // the worker gets a BackendTurnRunnerProxy.
     backendTurnRunner,
-    // Real push sender in main; the worker gets a NotifyServiceProxy.
-    notify: notifyClient,
+    // Real push sender in main, to the person the calling chat serves; the
+    // worker gets a NotifyServiceProxy.
+    notify: callerNotifyService(notifyClient, privateOwnerOfChat),
     // Image generation capability: provider-neutral registry the generate_image
     // action consumes. Codex is the only provider today; its report reads
     // the same model accounts the model resolver gates on.
@@ -1939,6 +1962,7 @@ async function main() {
     hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
     backendTurnRunner,
     notify: notifyClient,
+    privateOwnerOf: privateOwnerOfChat,
     feedback: feedbackClient,
     cloudProfile: cloudProfileClient,
     agentNames: agentNameResolver,
@@ -2059,6 +2083,7 @@ async function main() {
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
+      agentNameEvents,
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,
@@ -2131,6 +2156,7 @@ async function main() {
       dashboardAccessStore,
       visitorAllowListSync,
       phoneWatching,
+      dashboardActivity,
       relayDrainer,
       bootVersionReport,
       favorService,
@@ -2301,7 +2327,16 @@ async function main() {
 
   // The API, actions and agents are ready. One continuation runs at a time,
   // outside boot, and each rechecks its chat after waiting in the webchat queue.
-  void continueInterruptedTurns(endedTurns, webchatRepo, backendTurnRunner).catch((error) => {
+  // Each continuation acts for the person whose turn it continues.
+  const continuationActorOf = (turn: { sessionId: string; turnId: string }) =>
+    continuationActor(db, webchatRepo, turn);
+  void continueInterruptedTurns(
+    endedTurns,
+    webchatRepo,
+    backendTurnRunner,
+    Date.now(),
+    continuationActorOf,
+  ).catch((error) => {
     log.warn("restart continuations failed", { error: String(error) });
   });
   // Subscribes after the first account read may have settled, so it also reads the
@@ -2310,6 +2345,7 @@ async function main() {
     accounts: modelAccounts,
     repo: webchatRepo,
     runner: backendTurnRunner,
+    actorOf: continuationActorOf,
   });
 
   // Best-effort instance-identity check. Fire-and-forget: announces

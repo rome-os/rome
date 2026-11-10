@@ -4,6 +4,9 @@ import { z } from "zod";
 // packages/web/src/lib/live-events.ts. Frames are JSON text.
 
 export const CHAT_STATUS_TOPIC = "chat.status";
+
+/** The agent's display name changed. Carried on chat.status alongside running state. */
+export const agentNameChangedSchema = z.object({ agentName: z.string() });
 /** The Concierge task panel's rows. Its only event is `task_upsert`. */
 export const CONCIERGE_TASKS_TOPIC = "concierge.tasks";
 /**
@@ -16,9 +19,10 @@ export const CONCIERGE_ACTIVITY_TOPIC = "concierge.activity";
 export const APP_CATALOG_TOPIC = "apps.catalog";
 export const CHAT_SESSION_TOPIC_PREFIX = "chat.session:";
 /**
- * The chat the guardian's phone app has on screen. It carries no events: the
- * phone holds it for that one chat, and the Concierge does not push what it
- * says there. Only a phone socket's watch counts ({@link LIVE_EVENTS_CLIENT_HEADER}).
+ * The chat the phone app has on screen, for the guardian or a visitor signed
+ * in on it. It carries no events: the phone holds it for that one chat, and
+ * the Concierge does not push what it says there to that person. Only a phone
+ * socket's watch counts ({@link LIVE_EVENTS_CLIENT_HEADER}).
  */
 export const CHAT_WATCH_TOPIC_PREFIX = "chat.watch:";
 
@@ -40,11 +44,19 @@ export function chatWatchTopicName(chatId: string): string {
   return `${CHAT_WATCH_TOPIC_PREFIX}${chatId}`;
 }
 
-/** Client to server. Subscribing to a topic the socket already holds is a no-op. */
-export const liveEventsClientMessageSchema = z.object({
-  type: z.enum(["subscribe", "unsubscribe"]),
-  topic: z.string().max(256),
-});
+/**
+ * Client to server. Subscribing to a topic the socket already holds is a no-op.
+ * `activity` says whether the person is at this dashboard: `active` after
+ * input, `away` once the tab is hidden, loses focus or closes. While a
+ * person's dashboard counts as active, the Concierge pushes nothing to that
+ * person's phone. A phone socket's signals count for nothing. The server
+ * answers none.
+ */
+export const liveEventsClientMessageSchema = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("subscribe"), topic: z.string().max(256) }),
+  z.object({ type: z.literal("unsubscribe"), topic: z.string().max(256) }),
+  z.object({ type: z.literal("activity"), state: z.enum(["active", "away"]) }),
+]);
 export type LiveEventsClientMessage = z.infer<typeof liveEventsClientMessageSchema>;
 
 /**
