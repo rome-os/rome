@@ -84,6 +84,13 @@ describe("threadRepliesLines", () => {
     );
   });
 
+  it("shows one reply under a message in no thread once the guardian replies to it", () => {
+    // The reply to "168" is placed in the thread its root starts; the root stays as it was.
+    expect(threadRepliesLines([free("q"), free("168", "assistant"), g("r", "168")])).toEqual(
+      new Map([["168", 1]]),
+    );
+  });
+
   it("shows none for a root with no replies, or one not loaded", () => {
     expect(threadRepliesLines([g("q1")])).toEqual(new Map());
     expect(threadRepliesLines([g("q2", "q1"), a("a2", "q1")])).toEqual(new Map());

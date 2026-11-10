@@ -80,9 +80,12 @@ function host(children: ReactNode) {
 function ThreadsDraft({
   onDraft,
   children,
+  threaded = ["a1"],
 }: {
   onDraft: (draft: ReplyDraft) => void;
   children: ReactNode;
+  /** The messages the timeline shows in a chat thread. */
+  threaded?: string[];
 }) {
   const draft = useReplyDraftState({
     chatId: "concierge",
@@ -91,6 +94,7 @@ function ThreadsDraft({
     jump: () => {},
     focusComposer: () => {},
     threads: true,
+    inThread: (messageId) => threaded.includes(messageId),
   });
   onDraft(draft);
   return <ReplyDraftProvider value={draft}>{children}</ReplyDraftProvider>;
@@ -107,6 +111,24 @@ describe("the reply draft of a chat that keeps chat threads", () => {
 
     act(() => draft.closeThread());
     expect(draft.thread).toBeNull();
+    expect(draft.target).toBeNull();
+  });
+
+  it("keeps the timeline on Reply to a message in no thread, with the quote bar on the main composer", () => {
+    let draft!: ReplyDraft;
+    render(
+      <ThreadsDraft onDraft={(next) => (draft = next)} threaded={[]}>
+        <ReplyBar />
+      </ThreadsDraft>,
+    );
+
+    act(() => draft.set({ messageId: "a9", author: "agent", preview: "168" }));
+
+    expect(draft.thread).toBeNull();
+    expect(draft.target?.messageId).toBe("a9");
+    expect(document.querySelector("[data-reply-bar]")?.textContent).toContain("168");
+    // Its ✕ drops the reply.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
     expect(draft.target).toBeNull();
   });
 
@@ -133,7 +155,11 @@ describe("the reply draft of a chat that keeps chat threads", () => {
 
   it("puts a failed send's reply and thread back only when nothing changed since the send", () => {
     let draft!: ReplyDraft;
-    render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
+    render(
+      <ThreadsDraft onDraft={(next) => (draft = next)} threaded={["a1", "b1"]}>
+        {null}
+      </ThreadsDraft>,
+    );
     const a = { messageId: "a1", author: "agent" as const, preview: "Which day?" };
     const b = { messageId: "b1", author: "agent" as const, preview: "Flights?" };
 
