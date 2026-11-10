@@ -842,6 +842,39 @@ describe("Concierge tools", () => {
       expect(await s.tasks.repo.threadRoot(taskId)).toBe("g0");
     });
 
+    it("roots a task started a turn later at the guardian message it was asked in, not the later one", async () => {
+      const s = setup({ said: false });
+      // Turn A: the guardian asks for a task, and the Concierge acknowledges it.
+      s.inTurn("turn-a");
+      guardianSays(s, { id: "eiffel", turnId: "turn-a" });
+      const ack = saidId(await s.tool("say", { text: "On it" }));
+      // Turn B: an unrelated question arrives and is answered before the task starts.
+      s.inTurn("turn-b");
+      guardianSays(s, { id: "times", turnId: "turn-b" });
+      const fiftySix = saidId(await s.tool("say", { text: "56." }));
+      // The task starts in turn B, pointing back at A's acknowledgement.
+      const { taskId } = JSON.parse(
+        (await s.tool("chat_start", { title: "Eiffel Tower", brief: "Find it", messageId: ack }))
+          .content[0].text,
+      );
+
+      expect(await s.tasks.repo.threadRoot(taskId)).toBe("eiffel");
+      expect([threadOf(s, "eiffel"), threadOf(s, ack)]).toEqual(["eiffel", "eiffel"]);
+      expect([threadOf(s, "times"), threadOf(s, fiftySix)]).toEqual([undefined, undefined]);
+
+      // Naming A's message with answers from turn B works too.
+      const named = JSON.parse(
+        (
+          await s.tool("chat_start", {
+            title: "Height in feet",
+            brief: "Convert",
+            answers: "eiffel",
+          })
+        ).content[0].text,
+      );
+      expect(await s.tasks.repo.threadRoot(named.taskId)).toBe("eiffel");
+    });
+
     it("1. roots a task at the thread its guardian message is in, or at that message", async () => {
       const s = setup({ said: false });
       guardianSays(s, { id: "weather", chatThread: "weather", settled: true, turnId: "older" });
