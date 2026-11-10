@@ -289,7 +289,7 @@ struct SettingsScreen: View {
                     }
                     HStack(spacing: 6) {
                         Circle().fill(Palette.success).frame(width: 7, height: 7)
-                        Text(verbatim: "\(workspace.instanceName) · \(workspace.host)").lineLimit(1)
+                        Text(verbatim: InstanceLine.text(host: workspace.host, version: model.update.runningVersion)).lineLimit(1)
                     }
                     .romeFont(14)
                     .foregroundStyle(Palette.sub)
@@ -477,5 +477,14 @@ struct FeedbackSheet: View {
             }
             sending = false
         }
+    }
+}
+
+/// The second line of the Settings header: the instance's domain and the
+/// release it runs, once the update check has said. No placeholder before.
+enum InstanceLine {
+    static func text(host: String, version: String?) -> String {
+        guard let version = version?.trimmingCharacters(in: .whitespaces), !version.isEmpty else { return host }
+        return "\(host) · \(version.hasPrefix("v") ? version : "v" + version)"
     }
 }

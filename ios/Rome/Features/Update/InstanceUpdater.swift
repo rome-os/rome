@@ -235,6 +235,8 @@ final class InstanceUpdater {
     private(set) var justUpdated: (instanceID: String, version: String)?
     /// The instance's release when the check last found it behind.
     private var behindOn: String?
+    /// The release the open instance runs, as its last check answered.
+    private(set) var runningVersion: String?
 
     var blocking: Bool {
         switch state {
@@ -381,6 +383,14 @@ final class InstanceUpdater {
         presented = false
         dismissedVersion = nil
         behindOn = nil
+        runningVersion = nil
+    }
+
+    /// Keeps the release a check that answered reports.
+    private func noteRunning(_ result: Result<UpgradeCheck, Error>) {
+        if case .success(let check) = result, let version = check.current?.version, !version.isEmpty {
+            runningVersion = version
+        }
     }
 
     // MARK: Checking
@@ -407,6 +417,7 @@ final class InstanceUpdater {
         let mine = generation
         let result: Result<UpgradeCheck, Error>
         do { result = .success(try await backend.upgradeCheck()) } catch { result = .failure(error) }
+        noteRunning(result)
         guard mine == generation else { return }
         apply(UpdateGate.verdict(result), latestChanged: false)
     }
@@ -417,6 +428,7 @@ final class InstanceUpdater {
         let mine = generation
         let result: Result<UpgradeCheck, Error>
         do { result = .success(try await backend.upgradeCheck()) } catch { result = .failure(error) }
+        noteRunning(result)
         guard mine == generation, case .updating = state else { return }
         switch UpdateGate.pending(target: pending.target, after: UpdateGate.verdict(result)) {
         case .keepWaiting:
@@ -465,6 +477,7 @@ final class InstanceUpdater {
                 // A newer release came out: show it and let the guardian confirm again.
                 let result: Result<UpgradeCheck, Error>
                 do { result = .success(try await backend.upgradeCheck()) } catch { result = .failure(error) }
+                noteRunning(result)
                 guard mine == generation else { return }
                 apply(UpdateGate.verdict(result), latestChanged: true)
                 return
@@ -489,6 +502,7 @@ final class InstanceUpdater {
         store.clear(instanceID)
         let result: Result<UpgradeCheck, Error>
         do { result = .success(try await backend.upgradeCheck()) } catch { result = .failure(error) }
+        noteRunning(result)
         let verdict = UpdateGate.verdict(result)
         if case .unknown = verdict, case .timedOut(let target) = failure {
             let pending = PendingUpgrade(target: target, since: .now)

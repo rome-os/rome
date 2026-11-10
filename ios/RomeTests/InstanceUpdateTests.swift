@@ -293,6 +293,22 @@ final class Counter: @unchecked Sendable {
         #expect(updater.showsBanner)
     }
 
+    /// Settings shows the domain and the release the instance runs, once
+    /// the check says; the domain alone before, with no placeholder.
+    @Test func settingsNamesTheRunningRelease() async {
+        #expect(InstanceLine.text(host: "yo.romeos.cc", version: nil) == "yo.romeos.cc")
+        #expect(InstanceLine.text(host: "yo.romeos.cc", version: "1.1.190") == "yo.romeos.cc · v1.1.190")
+        #expect(InstanceLine.text(host: "yo.romeos.cc", version: "v1.1.190") == "yo.romeos.cc · v1.1.190")
+        let backend = FakeBackend()
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.189"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
+        let updater = updater(defaults())
+        #expect(updater.runningVersion == nil)
+        await updater.attach(backend: backend, instanceID: "i1")
+        #expect(updater.runningVersion == "1.1.189")
+        updater.reset()
+        #expect(updater.runningVersion == nil)
+    }
+
     @Test func belowTheMinimumBlocksWithNoWayPast() async {
         let backend = FakeBackend()
         backend.check = .success(UpgradeCheck(current: .init(version: "1.1.100"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
