@@ -248,6 +248,12 @@ final class CloudAuth {
         return url.scheme == "https" || (url.scheme == "http" && cloudOrigin.scheme == "http")
     }
 
+    /// The session kept for `instance`, fresh or not: a cached launch opens
+    /// with it and refreshes it after.
+    func storedSession(for instance: CloudInstance) -> InstanceSession? {
+        store.value(InstanceSession.self, for: Key.session(for: instance))
+    }
+
     /// A fresh session for `instance`: the stored one when it has time left, else a new one.
     func session(for instance: CloudInstance, forceRefresh: Bool = false) async throws -> InstanceSession {
         if !forceRefresh, let stored = store.value(InstanceSession.self, for: Key.session(for: instance)), stored.isFresh {
