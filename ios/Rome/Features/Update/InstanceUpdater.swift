@@ -8,7 +8,7 @@ import Observation
 enum UpdateGate {
     /// The oldest instance release with every API the app calls. Raise it
     /// only when the app starts calling an API a newer release brought.
-    static let minimumInstanceVersion = "1.1.185"
+    static let minimumInstanceVersion = "1.1.189"
 
     /// Whether the app works with an instance on `version`. An unknown or
     /// unreadable version is never held against it.
