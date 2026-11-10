@@ -258,6 +258,16 @@ struct AgentBubble: View {
     }
 
     private var folds: Bool { Self.folds(height: fullHeight, size: dynamicTypeSize) }
+    /// Held to the folded height until it is measured, so a long reply is
+    /// folded from its first frame. Unfolded first, it shrank by hundreds of
+    /// points after the list had placed its bottom.
+    private var capped: Bool { Self.capped(measured: fullHeight, expanded: expanded, size: dynamicTypeSize) }
+
+    /// Whether the text is held to the folded height: until it is measured
+    /// (`measured` is 0), and while a long one is folded.
+    nonisolated static func capped(measured: CGFloat, expanded: Bool, size: DynamicTypeSize) -> Bool {
+        !expanded && (measured == 0 || folds(height: measured, size: size))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -277,7 +287,7 @@ struct AgentBubble: View {
             MarkdownText(source: text)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
-                .frame(maxHeight: folds && !expanded ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
+                .frame(maxHeight: capped ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
                 .clipped()
                 .overlay(alignment: .bottom) {
                     if folds && !expanded {

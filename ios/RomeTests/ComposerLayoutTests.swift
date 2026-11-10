@@ -17,3 +17,25 @@ import Testing
         #expect(abs(ComposerTextView.controlBottomPadding(height: 36, size: .large) - 7) < 0.01)
     }
 }
+
+/// A transcript whose content shrank under it never stays scrolled past its end.
+@MainActor
+@Suite struct TranscriptEndTests {
+    @Test func anOffsetPastTheEndGoesBackToTheEnd() {
+        // 2000 pt of rows in an 800 pt view with a 100 pt composer inset: the end is at 1300.
+        #expect(ScrollHandle.clampedOffset(offset: 1700, contentHeight: 2000, viewHeight: 800, topInset: 60, bottomInset: 100) == 1300)
+        #expect(ScrollHandle.clampedOffset(offset: 1300, contentHeight: 2000, viewHeight: 800, topInset: 60, bottomInset: 100) == nil)
+        #expect(ScrollHandle.clampedOffset(offset: 900, contentHeight: 2000, viewHeight: 800, topInset: 60, bottomInset: 100) == nil)
+        // Rows shorter than the view: the end is the top.
+        #expect(ScrollHandle.clampedOffset(offset: 400, contentHeight: 300, viewHeight: 800, topInset: 60, bottomInset: 100) == -60)
+    }
+
+    /// A long reply is held to its folded height before it is measured.
+    @Test func aLongReplyFoldsFromItsFirstFrame() {
+        let long = AgentBubble.foldHeight(for: .large) * 3
+        #expect(AgentBubble.capped(measured: 0, expanded: false, size: .large))
+        #expect(AgentBubble.capped(measured: long, expanded: false, size: .large))
+        #expect(!AgentBubble.capped(measured: long, expanded: true, size: .large))
+        #expect(!AgentBubble.capped(measured: 40, expanded: false, size: .large))
+    }
+}

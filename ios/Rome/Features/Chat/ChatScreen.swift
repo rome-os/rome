@@ -598,6 +598,10 @@ struct TranscriptList<Row: View>: View {
                 // An older page went in above the rows in view: move the offset
                 // by what the content grew and the scroll did not follow, so the
                 // rows stay where they are, mid-glide too.
+                // Content that shrank under a resting list can leave its offset
+                // past the new end: a gap under the last row, or a blank list,
+                // until a scroll. Bring the offset back to the end.
+                if new.contentHeight < old.contentHeight { scrollHandle.clampToEnd() }
                 guard store.placingOlder else { return }
                 let grew = new.contentHeight - old.contentHeight
                 let followed = new.offset - old.offset
@@ -718,6 +722,25 @@ final class ScrollHandle {
         guard let view else { return }
         view.contentOffset.y += dy
         transcriptScrollLog.notice("shifted by \(dy, privacy: .public) to \(view.contentOffset.y, privacy: .public)")
+    }
+
+    /// Moves an offset left past the end of the content back to the end. A
+    /// drag or a glide is left alone: its bounce past the end is its own.
+    func clampToEnd() {
+        guard let view, !view.isDragging, !view.isDecelerating else { return }
+        guard let end = Self.clampedOffset(
+            offset: view.contentOffset.y, contentHeight: view.contentSize.height, viewHeight: view.bounds.height,
+            topInset: view.adjustedContentInset.top, bottomInset: view.adjustedContentInset.bottom
+        ) else { return }
+        transcriptScrollLog.notice("offset \(view.contentOffset.y, privacy: .public) past the end, back to \(end, privacy: .public)")
+        view.setContentOffset(CGPoint(x: view.contentOffset.x, y: end), animated: false)
+    }
+
+    /// The end offset when `offset` lies past it, else nil. Content shorter
+    /// than the view ends at its top.
+    nonisolated static func clampedOffset(offset: CGFloat, contentHeight: CGFloat, viewHeight: CGFloat, topInset: CGFloat, bottomInset: CGFloat) -> CGFloat? {
+        let end = max(contentHeight + bottomInset - viewHeight, -topInset)
+        return offset > end + 0.5 ? end : nil
     }
 
     /// Stops a drag's glide where it is. Returns whether one was moving.
