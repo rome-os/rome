@@ -30,6 +30,7 @@
       "blocked": "弹窗被拦截",
       "checkFailed": "无法检查连接状态"
     },
+    "taskCardAlreadyAnswered": "这张卡片已在别处回复，任务状态已刷新。",
     "openTaskChat": "打开",
     "tasks": {
       "title": "任务",

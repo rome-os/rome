@@ -1,0 +1,291 @@
+// @rstest-environment jsdom
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { MemoryRouter } from "react-router-dom";
+import i18n from "@/i18n";
+import { useLiveEvents } from "@/hooks/use-live-events";
+import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
+import { TaskChatCard } from "./TaskChatCard";
+
+rs.mock("@/hooks/use-live-events", () => ({
+  chatStatusTopic: "chat-status",
+  useLiveEvents: rs.fn(),
+}));
+
+const chatId = "task-chat";
+const question: TranscriptPart = {
+  type: "pending_interaction",
+  toolUseId: "item_0",
+  appId: "core",
+  render: {
+    kind: "inline",
+    builtin: true,
+    componentId: "question-card",
+    props: {
+      questions: [
+        { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
+      ],
+    },
+  },
+};
+const message = (
+  id: string,
+  parts: TranscriptPart[],
+  role: ChatMessage["role"] = "assistant",
+  at = "2026-11-10T10:00:00Z",
+): ChatMessage => ({
+  id,
+  sessionId: chatId,
+  role,
+  content: JSON.stringify(parts),
+  createdAt: at,
+});
+const result: TranscriptPart = {
+  type: "interaction_result",
+  toolUseId: "item_0",
+  output: { dismissed: true },
+};
+const approval = (threadId = chatId, at = "2026-11-10T11:00:00Z") => ({
+  id: "approval-1",
+  status: "pending",
+  createdAt: at,
+  description: "Send the draft",
+  payload: {
+    channelContext: { threadId },
+    actionName: "mail:send",
+    preview: { kind: "generic", title: "Send the draft", summary: "Email the final draft." },
+  },
+});
+
+let client: QueryClient;
+let messages: ChatMessage[];
+let approvals: ReturnType<typeof approval>[];
+let waiting: boolean;
+let running: boolean;
+let postStatus: number;
+let postAction: () => void;
+let fetchMock: ReturnType<typeof rs.fn<typeof fetch>>;
+
+beforeEach(async () => {
+  await i18n.changeLanguage("en");
+  client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  messages = [message("ask", [question])];
+  approvals = [];
+  waiting = true;
+  running = false;
+  postStatus = 202;
+  postAction = () => {};
+  fetchMock = rs.fn<typeof fetch>(async (input, init) => {
+    const url = String(input);
+    if (url.endsWith("/turns") && init?.method === "POST") {
+      postAction();
+      return Response.json(
+        postStatus === 400
+          ? { error: "No open suspension" }
+          : { turnId: "task-turn", streamId: "task-stream" },
+        { status: postStatus },
+      );
+    }
+    if (url.startsWith("/api/chat/sessions?"))
+      return Response.json([
+        { id: chatId, name: "Draft email", awaitingGuardian: waiting, running },
+      ]);
+    if (url === `/api/chat/sessions/${chatId}/messages`) return Response.json(messages);
+    if (url === "/api/approvals?status=pending") return Response.json(approvals);
+    if (url === "/api/approvals/approval-1")
+      return Response.json({ id: "approval-1", status: "pending" });
+    if (url === "/api/approvals/approval-1/approve" && init?.method === "POST")
+      return Response.json({ ok: true });
+    throw new Error(`Unexpected request: ${url}`);
+  });
+  rs.stubGlobal("fetch", fetchMock);
+});
+
+afterEach(() => {
+  cleanup();
+  client.clear();
+  rs.unstubAllGlobals();
+  rs.restoreAllMocks();
+});
+
+function show() {
+  return render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/chat/main-chat"]}>
+        <TaskChatCard chatId={chatId} title="Task" />
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+}
+
+function posts() {
+  return fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
+}
+
+describe("TaskChatCard", () => {
+  it("shows the task's question and posts its answer to the task, not the main chat", async () => {
+    show();
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Warm" }));
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    const [url, init] = posts()[0];
+    expect(url).toBe(`/api/chat/sessions/${chatId}/turns`);
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      parts: [
+        {
+          type: "interaction_result",
+          toolUseId: "item_0",
+          output: { answers: [{ questionId: "tone", value: "Warm" }] },
+        },
+      ],
+    });
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+    expect(screen.getByText("Answered")).toBeTruthy();
+    expect(screen.getByRole("link").getAttribute("href")).toBe(`/chat/${chatId}`);
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/chat/sessions?"))
+          .length,
+      ).toBeGreaterThan(1),
+    );
+  });
+
+  it("collapses after the session refresh says the task no longer needs input", async () => {
+    postAction = () => {
+      waiting = false;
+    };
+    show();
+    await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(screen.queryByText("Which tone?")).toBeNull());
+    expect(screen.getByRole("link")).toBeTruthy();
+  });
+
+  it("dismisses the task's question directly", async () => {
+    show();
+    await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(JSON.parse(String(posts()[0][1]?.body)).parts[0].output).toEqual({ dismissed: true });
+    expect(screen.getByText("Dismissed")).toBeTruthy();
+  });
+
+  it("shows an approval belonging to this task with the existing approval controls", async () => {
+    messages = [];
+    approvals = [approval("other-chat"), approval()];
+    show();
+    expect(await screen.findByText("Send the draft")).toBeTruthy();
+    await userEvent.click(await screen.findByRole("button", { name: "Approve" }));
+    await waitFor(() => expect(posts()).toHaveLength(1));
+    expect(posts()[0][0]).toBe("/api/approvals/approval-1/approve");
+  });
+
+  it("ignores approvals from another task", async () => {
+    approvals = [approval("other-chat")];
+    show();
+    expect(await screen.findByText("Which tone?")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Approve" })).toBeNull();
+  });
+
+  for (const state of ["idle", "running"] as const) {
+    it(`does not load or show inline cards when ${state}`, async () => {
+      waiting = state === "running";
+      running = state === "running";
+      show();
+      await screen.findByText("Draft email");
+      expect(screen.queryByText("Which tone?")).toBeNull();
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) => String(url).endsWith("/messages") || String(url).includes("/approvals"),
+        ),
+      ).toBe(false);
+    });
+  }
+
+  it("collapses when the task starts running live", async () => {
+    show();
+    await screen.findByText("Which tone?");
+    const handlers = rs.mocked(useLiveEvents).mock.calls.at(-1)?.[1];
+    act(() => {
+      handlers?.session_running.fn({ sessionId: chatId, running: true });
+    });
+    expect(screen.queryByText("Which tone?")).toBeNull();
+  });
+
+  it("closes only earlier cards and shows the latest reopened tool id", async () => {
+    messages = [
+      message("first", [question]),
+      message("answer", [result], "user"),
+      message("second", [
+        {
+          ...question,
+          render: {
+            ...question.render,
+            props: { questions: [{ id: "again", question: "Ask again?", type: "text" }] },
+          },
+        },
+      ]),
+    ];
+    show();
+    expect(await screen.findByText("Ask again?")).toBeTruthy();
+    expect(screen.queryByText("Which tone?")).toBeNull();
+  });
+
+  it("does not render a question with a later result", async () => {
+    messages.push(message("answer", [result], "user"));
+    show();
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/messages"))).toBe(true),
+    );
+    expect(screen.queryByText("Which tone?")).toBeNull();
+  });
+
+  it("keeps only the link when the latest open card belongs to an app", async () => {
+    messages.push(
+      message("app", [
+        { ...question, toolUseId: "custom", render: { kind: "inline", componentId: "custom" } },
+      ]),
+    );
+    show();
+    await screen.findByText("Draft email");
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/messages"))).toBe(true),
+    );
+    expect(screen.queryByText("Which tone?")).toBeNull();
+    expect(screen.getByRole("link")).toBeTruthy();
+  });
+
+  it("shows only the latest open card across questions and approvals", async () => {
+    approvals = [approval()];
+    show();
+    expect(await screen.findByText("Email the final draft.")).toBeTruthy();
+    expect(screen.queryByText("Which tone?")).toBeNull();
+  });
+
+  it("refetches a card answered elsewhere after a 400, without repeating the post", async () => {
+    postStatus = 400;
+    postAction = () => {
+      messages.push(message("answer", [result], "user"));
+    };
+    show();
+    await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    expect(await screen.findByRole("status")).toBeTruthy();
+    await waitFor(() => expect(screen.queryByText("Which tone?")).toBeNull());
+    expect(posts()).toHaveLength(1);
+  });
+
+  it("allows retry after a network failure", async () => {
+    show();
+    await screen.findByText("Which tone?");
+    fetchMock.mockImplementationOnce(async () => {
+      throw new Error("offline");
+    });
+    await userEvent.click(screen.getByRole("button", { name: "Dismiss" }));
+    await screen.findByRole("status");
+    await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await waitFor(() => expect(posts()).toHaveLength(2));
+  });
+});

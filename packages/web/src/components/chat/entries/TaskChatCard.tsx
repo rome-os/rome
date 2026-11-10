@@ -1,11 +1,17 @@
 import { ChatBubbleIcon } from "@radix-ui/react-icons";
+import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
+import { useApprovals } from "@/hooks/use-approvals";
+import { listSessionMessages, postSessionTurnJson } from "@/lib/chat-api";
+import type { ChatMessage } from "@/lib/chat-types";
+import { ApprovalCard } from "../approval/ApprovalCard";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
+import { QuestionCard } from "./QuestionCard";
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
 
@@ -40,17 +46,190 @@ export function TaskChatCard({ chatId, title }: { chatId: string; title: string 
         ? "failed"
         : "idle";
   return (
-    <div className="flex w-full max-w-md items-center gap-3 rounded-16 border border-border bg-surface px-3 py-2">
-      <ChatBubbleIcon className="size-4 shrink-0 text-subtle-foreground" aria-hidden />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <span className="truncate text-ui text-foreground">{session?.name ?? title}</span>
-        <span className="text-aux text-muted-foreground">
-          {t("concierge.taskChat")} · {t(`concierge.taskStatus.${status}`)}
-        </span>
+    <div className="w-full min-w-0 max-w-md space-y-3 rounded-16 border border-border bg-surface px-3 py-2">
+      <div className="flex min-w-0 items-center gap-3">
+        <ChatBubbleIcon className="size-4 shrink-0 text-subtle-foreground" aria-hidden />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-ui text-foreground">{session?.name ?? title}</span>
+          <span className="text-aux text-muted-foreground">
+            {t("concierge.taskChat")} · {t(`concierge.taskStatus.${status}`)}
+          </span>
+        </div>
+        <Button asChild variant="ghost" size="sm" className="shrink-0">
+          <Link to={`/chat/${chatId}`}>{t("concierge.openTaskChat")}</Link>
+        </Button>
       </div>
-      <Button asChild variant="ghost" size="sm" className="shrink-0">
-        <Link to={`/chat/${chatId}`}>{t("concierge.openTaskChat")}</Link>
-      </Button>
+      {status === "waiting" && (
+        <WaitingTaskCard key={chatId} chatId={chatId} onRefresh={invalidate} />
+      )}
+    </div>
+  );
+}
+
+const interactionSchema = z.object({
+  type: z.enum(["pending_interaction", "interaction_result"]),
+  toolUseId: z.string(),
+  render: z
+    .object({
+      builtin: z.boolean().optional(),
+      componentId: z.string(),
+      props: z.record(z.string(), z.unknown()).optional(),
+    })
+    .optional(),
+});
+
+const approvalPayloadSchema = z.object({
+  channelContext: z.object({ threadId: z.string() }),
+  actionName: z.string().optional(),
+  preview: z
+    .discriminatedUnion("kind", [
+      z.object({
+        kind: z.literal("generic"),
+        title: z.string(),
+        summary: z.string(),
+        fields: z.array(z.object({ label: z.string(), value: z.string() })).optional(),
+      }),
+      z.object({
+        kind: z.literal("sensitive_message"),
+        channel: z.string(),
+        threadId: z.string(),
+        text: z.string(),
+        reason: z.string().optional(),
+      }),
+    ])
+    .optional(),
+});
+
+function latestOpenInteraction(messages: ChatMessage[]) {
+  const open = new Map<
+    string,
+    { part: z.infer<typeof interactionSchema>; key: string; at: string }
+  >();
+  // Results close only earlier cards: a later turn can reuse the same toolUseId.
+  for (const message of messages) {
+    if (message.role !== "assistant" && message.role !== "user") continue;
+    let parts: unknown;
+    try {
+      parts = JSON.parse(message.content);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(parts)) continue;
+    for (const [index, raw] of parts.entries()) {
+      const parsed = interactionSchema.safeParse(raw);
+      if (!parsed.success) continue;
+      const part = parsed.data;
+      open.delete(part.toolUseId);
+      if (part.type === "pending_interaction") {
+        open.set(part.toolUseId, { part, key: `${message.id}:${index}`, at: message.createdAt });
+      }
+    }
+  }
+  return [...open.values()].at(-1);
+}
+
+function WaitingTaskCard({
+  chatId,
+  onRefresh,
+}: {
+  chatId: string;
+  onRefresh: () => Promise<void>;
+}) {
+  const { t } = useTranslation("chat");
+  const messages = useQuery({
+    queryKey: ["task-chat-cards", chatId],
+    queryFn: () => listSessionMessages(chatId),
+    refetchInterval: 5_000,
+  });
+  const approvals = useApprovals({ status: "pending" });
+  const [submitted, setSubmitted] = useState<{
+    key: string;
+    output: Record<string, unknown>;
+  } | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  const interaction = latestOpenInteraction(messages.data ?? []);
+  const approval = (approvals.data ?? [])
+    .flatMap((row) => {
+      const payload = approvalPayloadSchema.safeParse(row.payload);
+      return row.status === "pending" &&
+        payload.success &&
+        payload.data.channelContext.threadId === chatId
+        ? [{ row, payload: payload.data }]
+        : [];
+    })
+    .sort((a, b) => Date.parse(b.row.createdAt) - Date.parse(a.row.createdAt))[0];
+
+  async function refresh() {
+    await Promise.all([messages.refetch(), approvals.refetch(), onRefresh()]);
+  }
+
+  async function submit(toolUseId: string, output: Record<string, unknown>) {
+    if (!interaction || submitted) return;
+    setSubmitted({ key: interaction.key, output });
+    setError(null);
+    try {
+      // This turn belongs to the task, never to the main Chat's stream state.
+      const result = await postSessionTurnJson(chatId, {
+        parts: [{ type: "interaction_result", toolUseId, output }],
+      });
+      if (!result.ok) {
+        setError(
+          result.status === 400
+            ? t("concierge.taskCardAlreadyAnswered")
+            : result.message || t("stream.errors.sendFallback"),
+        );
+        setSubmitted(null);
+        setAttempt((value) => value + 1);
+      }
+    } catch {
+      setError(t("stream.errors.sendFallback"));
+      setSubmitted(null);
+      setAttempt((value) => value + 1);
+    }
+    await refresh();
+  }
+
+  return (
+    <div className="min-w-0 wrap-anywhere">
+      {error && (
+        <p role="status" className="mb-2 text-aux text-muted-foreground">
+          {error}
+        </p>
+      )}
+      {approval &&
+      (!interaction || Date.parse(approval.row.createdAt) > Date.parse(interaction.at)) ? (
+        <ApprovalCard
+          key={approval.row.id}
+          approvalId={approval.row.id}
+          actionName={approval.payload.actionName}
+          preview={
+            approval.payload.preview ?? {
+              kind: "generic",
+              title: approval.row.description,
+              summary: "",
+            }
+          }
+          status="pending"
+          onResolved={() => {
+            void refresh();
+          }}
+        />
+      ) : interaction?.part.render?.builtin &&
+        interaction.part.render.componentId === "question-card" ? (
+        <QuestionCard
+          key={`${interaction.key}:${attempt}`}
+          toolUseId={interaction.part.toolUseId}
+          props={interaction.part.render.props}
+          result={submitted?.key === interaction.key ? submitted.output : undefined}
+          onSubmit={(toolUseId, output) => {
+            void submit(toolUseId, output);
+          }}
+          onDismiss={(toolUseId) => {
+            void submit(toolUseId, { dismissed: true });
+          }}
+        />
+      ) : null}
     </div>
   );
 }

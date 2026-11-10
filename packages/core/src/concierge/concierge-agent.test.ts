@@ -34,6 +34,27 @@ describe("the Concierge agent", () => {
       expect(prompt).toContain("Do not edit the `Agent Name` line");
     }
   });
+
+  it("shows task questions and approvals as live cards without relaying card answers", () => {
+    const rule = concierge.systemPromptPrefix
+      .split("\n")
+      .find((line) => line.startsWith("- `task_needs_input`"));
+    for (const text of [
+      "turn_end:completed question",
+      "`approval`",
+      "`chat_card`",
+      "Do not restate the question, options or approval",
+      "`messageId` returned by `chat_card` as the `needs_user` row anchor",
+      "do not relay that answer",
+      "instead type an answer in this chat",
+      "pass it on with `chat_send`",
+      "turn_end ... by=guardian",
+      "update the row out of `needs_user`",
+      "even when you stay silent",
+    ])
+      expect(rule).toContain(text);
+  });
+
   it("can find and delete the routine that watches a task row", () => {
     expect(concierge.actions).toContain("system:search_routine");
     expect(concierge.actions).toContain("system:delete_routine");
