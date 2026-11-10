@@ -525,7 +525,7 @@ export async function buildConciergeTools(
                 messageId: {
                   type: "string",
                   description:
-                    "The message the row points to, as say, chat_card, or chat_forward returned it. Required for needs_user: show a task question or approval with chat_card, otherwise ask with say or chat_forward. Use the returned messageId as the row anchor. A new row of another state takes your latest message this turn if you leave it out. On an update it replaces the old one; leave it out to keep it. chat_forward updates this anchor automatically.",
+                    "The message the row points to, as say, chat_card, or chat_forward returned it. Required for needs_user: show a task question or approval with chat_card, otherwise ask with say or chat_forward. Use the returned messageId as the row anchor. A new row of another state takes your latest message this turn if you leave it out. On an update it replaces the old one; leave it out to keep it. chat_card and chat_forward update this anchor automatically.",
                 },
               },
             },
@@ -907,7 +907,8 @@ export async function buildConciergeTools(
       name: "chat_card",
       description:
         "Show the guardian a card that opens a task chat and shows its live status. " +
-        "Use it for a task question or approval and use the returned messageId as the needs_user row anchor. Also use it to open or find a task chat instead of sending its id.",
+        "Use it for a task question or approval and use the returned messageId as the needs_user row anchor. Also use it to open or find a task chat instead of sending its id. " +
+        "An existing task row automatically points to this card in this Concierge chat.",
       inputSchema: {
         type: "object",
         required: ["chatId"],
@@ -917,7 +918,10 @@ export async function buildConciergeTools(
         runTool("chat_card", input, async (args) => {
           const chatId = requireString(args, "chatId");
           const chat = await requireTaskChat(chatId);
+          const { chatId: conciergeChatId } = currentTurn();
           const messageId = await showCard(chatId, chat.name);
+          const task = await tasks.repo.findBySession(chatId);
+          if (task) await tasks.repo.setSourceMessage(task.id, conciergeChatId, messageId);
           return { sent: "Shown; the guardian sees the card.", messageId };
         }),
     },

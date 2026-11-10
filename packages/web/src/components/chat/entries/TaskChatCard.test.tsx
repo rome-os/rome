@@ -1,8 +1,10 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { useState } from "react";
+import { ChatPendingCardJump } from "../ChatPendingCardJump";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
 import { useTabStatus } from "@/hooks/use-tab-status";
@@ -128,6 +130,33 @@ function show(isLatestForChat = true) {
   );
 }
 
+function TaskJumpHarness() {
+  const [scroller, setScroller] = useState<HTMLDivElement | null>(null);
+  const [content, setContent] = useState<HTMLDivElement | null>(null);
+  const [floor, setFloor] = useState<HTMLDivElement | null>(null);
+  const older = { type: "task_chat", chatId, title: "Started" } as const;
+  const latest = { ...older, title: "Question" };
+  return (
+    <QueryClientProvider client={client}>
+      <MemoryRouter>
+        <LatestTaskChatsContext.Provider value={new Map([[chatId, latest]])}>
+          <div ref={setScroller} data-testid="task-scroller">
+            <div ref={setContent}>{renderFlatEntries([older, latest])}</div>
+            <div ref={setFloor} data-testid="task-floor">
+              <ChatPendingCardJump
+                scroller={scroller}
+                content={content}
+                floor={floor}
+                currentReplyMessageIds={new Set(["unrelated-main-reply"])}
+              />
+            </div>
+          </div>
+        </LatestTaskChatsContext.Provider>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+}
+
 function posts() {
   return fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
 }
@@ -180,6 +209,50 @@ describe("TaskChatCard", () => {
       ).toHaveLength(1);
     });
   }
+
+  it("jumps to an offscreen task question independently of the main Chat reply", async () => {
+    let cardTop = -200;
+    rs.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function () {
+      const top =
+        this.dataset.testid === "task-scroller"
+          ? 0
+          : this.dataset.testid === "task-floor"
+            ? 500
+            : cardTop;
+      return new DOMRect(0, top, 400, this.dataset.testid === "task-scroller" ? 600 : 100);
+    });
+    render(<TaskJumpHarness />);
+    const scroller = screen.getByTestId("task-scroller");
+    const scrollTo = rs.fn(() => {
+      cardTop = 0;
+      fireEvent.scroll(scroller);
+    });
+    scroller.scrollTo = scrollTo;
+    await screen.findByText("Which tone?");
+    const pending = document.querySelector<HTMLElement>("[data-chat-pending-card]")!;
+    expect(pending.closest("[data-chat-card-message]")).toBeNull();
+    expect(document.querySelectorAll("[data-chat-pending-card]")).toHaveLength(1);
+    expect(screen.getAllByRole("link")).toHaveLength(2);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Needs you: jump to waiting card" }),
+    );
+    expect(scrollTo).toHaveBeenCalledWith({ top: -200, behavior: "instant" });
+    expect(document.activeElement).toBe(pending);
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull(),
+    );
+    cardTop = -200;
+    fireEvent.scroll(scroller);
+    await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
+    const handlers = rs.mocked(useLiveEvents).mock.calls.at(-1)?.[1];
+    act(() => {
+      handlers?.session_running.fn({ sessionId: chatId, running: true });
+    });
+    await waitFor(() =>
+      expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull(),
+    );
+    expect(document.querySelector("[data-chat-pending-card]")).toBeNull();
+  });
 
   it("fetches a bounded page of whole turns without polling the transcript", async () => {
     messages = [

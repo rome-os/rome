@@ -543,6 +543,12 @@ describe("Concierge tools", () => {
     const card = tools.find((tool) => tool.name === "chat_card")!;
     expect(card.description).toContain("for a task question or approval");
     expect(card.description).toContain("returned messageId as the needs_user row anchor");
+    expect(card.description).toContain(
+      "An existing task row automatically points to this card in this Concierge chat",
+    );
+    expect(schema.properties.tasks.items.properties.messageId.description).toContain(
+      "chat_card and chat_forward update this anchor automatically",
+    );
   });
 
   it("say posts one message under the running turn", async () => {
@@ -1405,6 +1411,43 @@ describe("Concierge task anchors", () => {
     const result = await s.tool("chat_forward", { chatId });
     expect(result.isError).toBeFalsy();
     expect(text(result)).toEqual({ forwardedChars: 9, messageId: "said-1" });
+    expect(await s.taskRepo.findBySession(chatId)).toBeNull();
+    expect(await s.taskRepo.listForAgent(true)).toEqual([]);
+  });
+
+  it("repeated chat_card re-anchors a needs_user row without another task_upsert", async () => {
+    const s = setup();
+    const { chatId, taskId } = text(
+      await s.tool("chat_start", { title: "Flights", brief: "Find flights" }),
+    );
+    const first = text(await s.tool("chat_card", { chatId })).messageId;
+    expect(
+      (
+        await s.tool("task_upsert", {
+          tasks: [{ id: taskId, state: "needs_user", messageId: first, summary: "Pick a flight" }],
+        })
+      ).isError,
+    ).toBeFalsy();
+    expect(await anchorOf(s, taskId)).toBe(first);
+    const second = text(await s.tool("chat_card", { chatId })).messageId;
+    expect(second).not.toBe(first);
+    expect(await anchorOf(s, taskId)).toBe(second);
+    expect(await s.taskRepo.get(taskId)).toMatchObject({
+      state: "needs_user",
+      summary: "Pick a flight",
+    });
+  });
+
+  it("chat_card shows a task without a row without creating one", async () => {
+    const s = setup();
+    const chatId = await s.chats.startChat({}, "guardian");
+    await s.deps.webchatRepo.setSessionTrigger(chatId, {
+      triggerKind: TASK_CHAT_TRIGGER_KIND,
+      triggerName: null,
+    });
+    const result = await s.tool("chat_card", { chatId });
+    expect(result.isError).toBeFalsy();
+    expect(text(result)).toMatchObject({ sent: expect.any(String), messageId: expect.any(String) });
     expect(await s.taskRepo.findBySession(chatId)).toBeNull();
     expect(await s.taskRepo.listForAgent(true)).toEqual([]);
   });

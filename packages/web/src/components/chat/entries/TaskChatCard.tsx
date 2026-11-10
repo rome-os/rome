@@ -202,7 +202,7 @@ function WaitingTaskCard({
   }
 
   return (
-    <div className="min-w-0 wrap-anywhere">
+    <div data-chat-task-waiting={chatId} className="min-w-0 wrap-anywhere">
       {error && (
         <p role="status" className="mb-2 text-aux text-muted-foreground">
           {error}
