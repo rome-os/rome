@@ -52,7 +52,7 @@ const THREAD_PARAMETER = {
 const ANSWERS_PARAMETER = {
   type: "string",
   description:
-    "The message_id of the guardian message this answers, from its <chat_thread> line. Give it when the guardian sent several messages in this turn, so the answer goes where that one is. Leave it out to answer the first.",
+    "The message_id of the guardian message this answers, from its <chat_thread> line. Give it when the guardian sent several messages in this turn, so the answer goes where that one is; without it such an answer goes in no thread.",
 };
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -343,9 +343,11 @@ export async function buildConciergeTools(
         `No guardian message ${answers} in this turn. Pass a message_id from this turn's <chat_thread> lines.`,
       );
     }
-    const answered = answers ?? prompts[0];
-    if (answered !== undefined) {
-      const thread = await threadOf(chatId, answered);
+    if (prompts.length > 0) {
+      // With several guardian messages and no `answers`, which one this
+      // answers is a guess, so it goes in no thread.
+      const answered = answers ?? (prompts.length === 1 ? prompts[0] : undefined);
+      const thread = answered ? await threadOf(chatId, answered) : null;
       return thread ? { in: thread } : undefined;
     }
     if (report.thread !== undefined) {

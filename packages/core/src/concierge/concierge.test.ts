@@ -621,6 +621,21 @@ describe("Concierge tools", () => {
       expect(threadOf(s, ignored)).toBeUndefined();
     });
 
+    it("puts an answer in no thread when the turn holds several guardian messages and names none", async () => {
+      const s = setup({ said: false });
+      // Three tasks started from one message, which is now their thread's root.
+      guardianSays(s, { id: "tasks", chatThread: "tasks", settled: true, turnId: "older" });
+      // Taken by one turn: the Nile follow-up, already relayed into the tasks' thread, and an unrelated question.
+      guardianSays(s, { id: "nile", chatThread: "tasks", settled: true });
+      guardianSays(s, { id: "squared" });
+
+      const answer = saidId(await s.tool("say", { text: "Also, 9 squared is 81." }));
+      const relayed = saidId(await s.tool("say", { text: "Asked for miles", answers: "nile" }));
+
+      expect(threadOf(s, answer)).toBeUndefined();
+      expect(threadOf(s, relayed)).toBe("tasks");
+    });
+
     it("puts a task's result and card in the thread of the guardian message that started it", async () => {
       const s = setup({ said: false });
       guardianSays(s, { id: "g0" });
