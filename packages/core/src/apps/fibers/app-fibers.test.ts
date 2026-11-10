@@ -6,7 +6,14 @@ import { createEmptyLegacyArtifactBindings } from "../artifact-id.js";
 import { SkillLoader } from "../skill-loader.js";
 import type { ArtifactMetadata } from "../types.js";
 import { AgentLoader, type LoadedAgent } from "../agent-loader.js";
-import { AppFibers, addActions, addEntries, addSkills } from "./app-fibers.js";
+import {
+  AppFibers,
+  Collection,
+  addActions,
+  addEntries,
+  addSkills,
+  type AppEventSource,
+} from "./app-fibers.js";
 
 function action(name: string, version = "1"): Action {
   return {
@@ -182,6 +189,29 @@ describe("AppFibers", () => {
     );
     expect(agents.find("briefing:writer")?.definition.allowedSubagents).toEqual(["coding:coding"]);
     expect(agents.getRegistryLoadFailures()).toEqual([]);
+  });
+
+  it("lists an app's event sources until the app stops", async () => {
+    const eventSources = new Collection<AppEventSource>();
+    fibers = new AppFibers({ eventSources });
+    const source = (appId: string): AppEventSource => ({
+      appId,
+      events: `provider:event:${appId}.*`,
+      keys: [],
+      types: ["changed"],
+      ensureAction: `${appId}:ensure`,
+    });
+    for (const appId of ["mail", "notes"]) {
+      await fibers.contribute(
+        appId,
+        "eventSources",
+        addEntries("eventSources", [source(appId)], (entry) => entry.events),
+      );
+    }
+
+    await fibers.stop("mail");
+
+    expect(eventSources.list().map((entry) => entry.appId)).toEqual(["notes"]);
   });
 });
 

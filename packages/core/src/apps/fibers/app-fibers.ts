@@ -5,7 +5,7 @@
 import { Context, type Fiber } from "@deepseek-ai/cordis";
 import type { Skill } from "../../agent/index.js";
 import type { Action } from "../actions/types.js";
-import type { ArtifactMetadata } from "../types.js";
+import type { ArtifactMetadata, RomeAppEventSource } from "../types.js";
 import type { LoadedAgent } from "../agent-loader.js";
 import type { LoadedLifecycleHook } from "../app-turn-hooks.js";
 import type { LoadedMiddleware } from "../app-turn-middleware.js";
@@ -13,6 +13,33 @@ import type { LoadedMiddleware } from "../app-turn-middleware.js";
 /** A registry Rome keeps for one kind of thing apps bring. `add` returns the entry's undo. */
 export interface Registry<T> {
   add(entry: T): () => void;
+}
+
+/** A registry that keeps its entries in a list, in the order they were added. */
+export class Collection<T> implements Registry<T> {
+  private entries: readonly T[] = [];
+
+  add(entry: T): () => void {
+    this.entries = [...this.entries, entry];
+    return () => {
+      this.entries = this.entries.filter((existing) => existing !== entry);
+    };
+  }
+
+  list(): readonly T[] {
+    return this.entries;
+  }
+}
+
+/** An `eventSources` entry from an app's manifest, tagged with the app. */
+export interface AppEventSource extends RomeAppEventSource {
+  appId: string;
+}
+
+/** An app's watch provider, its action names qualified by the app's id. */
+export interface AppWatchProvider {
+  appId: string;
+  actions: { sources: string; ensure: string; normalize: string; release: string };
 }
 
 /** The registry of every app's actions. `add` returns the entry's undo. */
@@ -27,6 +54,8 @@ export interface AppRegistries {
   agents: Registry<LoadedAgent>;
   turnHooks: Registry<LoadedLifecycleHook>;
   turnMiddleware: Registry<LoadedMiddleware>;
+  eventSources: Registry<AppEventSource>;
+  watchProviders: Registry<AppWatchProvider>;
 }
 
 declare module "@deepseek-ai/cordis" {

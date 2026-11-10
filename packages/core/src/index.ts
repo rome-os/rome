@@ -195,7 +195,15 @@ import {
   createSystemPrompts,
 } from "./agent/index.js";
 import { SkillLoader } from "./apps/skill-loader.js";
-import { AppFibers, addActions, addEntries, addSkills } from "./apps/fibers/app-fibers.js";
+import {
+  AppFibers,
+  Collection,
+  addActions,
+  addEntries,
+  addSkills,
+  type AppEventSource,
+  type AppWatchProvider,
+} from "./apps/fibers/app-fibers.js";
 import type { Action } from "./apps/actions/types.js";
 import type { ArtifactMetadata } from "./apps/types.js";
 import { createPromptSources } from "./apps/prompt-sources.js";
@@ -720,6 +728,9 @@ async function main() {
     agents: agentLoader,
   });
   await agentLoader.loadCore();
+  const appEventSources = new Collection<AppEventSource>();
+  const appWatchProviders = new Collection<AppWatchProvider>();
+  appFibers.provide({ eventSources: appEventSources, watchProviders: appWatchProviders });
   const favorService = new RomeCloudFavorService();
 
   // Each subscriber re-pulls from the catalog after every event. The event
@@ -1025,12 +1036,7 @@ async function main() {
   // through them; catalog search lists their types before the first emission
   // and, given `match`, probes them as the system.
   const eventSources = new EventSources({
-    listSources: () =>
-      appCatalog
-        .listResolved()
-        .flatMap((app) =>
-          (app.manifest.eventSources ?? []).map((source) => ({ ...source, appId: app.appId })),
-        ),
+    listSources: () => [...appEventSources.list()],
     isKnownEventType: (eventName) => eventCatalog.get(eventName) !== undefined,
   });
   const eventService = new EventService(eventBus, eventCatalog, {
@@ -1300,8 +1306,7 @@ async function main() {
     actions: actionRegistry,
     // Every enabled app that declares `watchProvider`, read live so an install
     // or disable takes effect without a restart. Core names no provider.
-    providers: () =>
-      watchProvidersOf(appCatalog.listResolved(), (name) => actionRegistry.getMetadata(name)),
+    providers: () => [...appWatchProviders.list()],
     runAction: (name, args, options) =>
       actionEngine.run(name, args, { initiator: "agent:core:concierge", ...options }),
     settings: settingsRepo,
@@ -1439,6 +1444,26 @@ async function main() {
   for (const [appId, entries] of bootActions) {
     await appFibers.contribute(appId, "actions", addActions(entries));
   }
+  // What an app's manifest declares for others to find. A watch provider is
+  // checked against the actions just registered, so it follows them.
+  const contributeDeclarations = async (app: ResolvedApp): Promise<void> => {
+    const sources = (app.manifest.eventSources ?? []).map((source) => ({
+      ...source,
+      appId: app.appId,
+    }));
+    await appFibers.contribute(
+      app.appId,
+      "eventSources",
+      addEntries("eventSources", sources, (source) => source.events),
+    );
+    const providers = watchProvidersOf([app], (name) => actionRegistry.getMetadata(name));
+    await appFibers.contribute(
+      app.appId,
+      "watchProviders",
+      addEntries("watchProviders", providers, (provider) => provider.appId),
+    );
+  };
+  for (const app of appCatalog.listResolved()) await contributeDeclarations(app);
 
   appCatalog.subscribe(
     createAppActionsSubscriber(
@@ -1462,6 +1487,12 @@ async function main() {
       appActionSchemaCache,
     ),
   );
+  // After the actions subscriber, which stops a removed app's fiber and
+  // registers the actions a watch provider is checked against.
+  appCatalog.subscribe(async function appDeclarationsSubscriber(event) {
+    if (event.change === "removed" || !isResolvedApp(event.current)) return;
+    await contributeDeclarations(event.current);
+  });
   const favorRequirementSync = new FavorRequirementSync({
     favorService,
     appCatalog,
