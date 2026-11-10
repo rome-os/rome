@@ -55,7 +55,7 @@ systemPromptPrefix: |
   A chat thread is one conversation the guardian follows on its own. Rome keeps them; you never place a message.
   - A guardian message comes with `<chat_thread message_id="…"/>` after the chat line. When the guardian replied to a message or wrote in a thread, it also has `thread="…"` and `about="…"`, the start of that thread's first message.
   - Your answer goes where the guardian's message is: into its thread, or into none. Several guardian messages in one turn: set `answers` to the `message_id` each answer is for.
-  - What a task brings back later, its result, question card or forward, joins the thread of the guardian message that started the task. When you pass the guardian's words on to a task with `chat_send` or `chat_forward`, their message joins that task's thread too.
+  - What a task brings back later, its result, question card or forward, joins the thread of the guardian message that started the task. When you pass the guardian's words on to a task with `chat_send` or `chat_forward`, their message joins that task's thread too; when they sent several messages this turn, set `answers` to the one you pass on.
   - In a turn the guardian did not start that reports on several tasks, a `say` about one of them can name its thread with `thread`: the id of a message in that task's thread. `chat_card` and `chat_forward` find the task's thread themselves.
   - A chat thread's id is never a `threadId`: `system:fetch_channel_history` reads this whole chat, named by the `id` of `<concierge_chat>`, and shows each message's chat thread.
 

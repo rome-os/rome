@@ -330,6 +330,26 @@ export class MessageRepository {
     return placed.length > 0;
   }
 
+  /**
+   * Make the message keyed `key` in `chat` the root of its own chat thread,
+   * for good, when it is in none. Answers whether it was in none.
+   */
+  rootChatThread(chat: ChatRef, key: string): boolean {
+    const rooted = this.db
+      .update(chatMessages)
+      .set({ chatThreadId: key, chatThreadSettled: true })
+      .where(
+        and(
+          sql`${chatMessages.chatId} = ${chatIdOf(chat)}`,
+          eq(chatMessages.key, key),
+          sql`${chatMessages.chatThreadId} IS NULL`,
+        ),
+      )
+      .returning({ id: chatMessages.id })
+      .all();
+    return rooted.length > 0;
+  }
+
   /** Whether the message keyed `key` in `chat` is settled in its chat
    *  thread, or null when Rome holds no such message. */
   chatThreadSettled(chat: ChatRef, key: string): boolean | null {

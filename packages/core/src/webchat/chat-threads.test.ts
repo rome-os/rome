@@ -62,6 +62,22 @@ describe("chat threads", () => {
     expect(placed).toEqual([{ sessionId: CHAT, messageId: "m2", chatThreadId: "m2" }]);
   });
 
+  it("makes a message in no thread the root of the thread a reply to it starts", async () => {
+    await guardian("m1");
+    const answer = (await repo.addBackendMessage(CHAT, "t1", [{ type: "text", content: "168" }]))
+      .id;
+    await guardian("reply", { in: answer, settle: true });
+
+    const byId = new Map((await repo.getMessages(CHAT)).map((m) => [m.id, m.chatThreadId ?? null]));
+    expect(byId.get(answer)).toBe(answer);
+    expect(byId.get("reply")).toBe(answer);
+    expect(byId.get("m1")).toBeNull();
+    expect(placed).toEqual([
+      { sessionId: CHAT, messageId: answer, chatThreadId: answer },
+      { sessionId: CHAT, messageId: "reply", chatThreadId: answer },
+    ]);
+  });
+
   it("never moves a message the guardian placed in a thread or sent as a reply", async () => {
     await guardian("m1", { starts: true });
     await guardian("m2", { starts: true });
