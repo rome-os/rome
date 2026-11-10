@@ -65,6 +65,7 @@
   /* The 14px strut leaves the line box at 20px, which cannot hold a 14px
      monospace tint clear of the line above. One step down keeps it clear. */
   --markdown-inline-code-font-size: var(--rome-font-size-13);
+  --markdown-table-font-size: var(--rome-font-size-13);
 
   --markdown-heading-1-font-size: var(--rome-font-size-22);
   --markdown-heading-1-line-height: var(--rome-line-height-127);
@@ -280,10 +281,17 @@
    it; compact's stops at 20px, where inline code on consecutive lines reads as
    one slab rather than two spans. The token carries that difference, so this
    rule only has to spend it. The face carries the rest of the breathing room
-   itself: its ascent clears the caps by a third of an em. */
+   itself: its ascent clears the caps by a third of an em.
+
+   The tint is the ink at low strength rather than a surface, so it shows the
+   same on a page, on a tinted bubble, and on the sent bubble's primary fill,
+   where the ink is remapped. The padding is a hair, so a word in code keeps
+   the spacing of the sentence around it. */
 [data-streamdown="inline-code"] {
   font-size: var(--markdown-inline-code-font-size);
-  @apply px-2;
+  line-height: inherit;
+  background-color: color-mix(in oklab, var(--foreground) 7%, transparent);
+  @apply rounded-4 px-1;
 }
 
 [data-streamdown="code-block-actions"],
@@ -304,11 +312,18 @@
 /* ── Table ────────────────────────────────────────────────────────────────
    Streamdown frames a table as a card: a tinted, bordered, padded wrapper
    around a bordered scroller, with 14px cells and a permanent row of buttons
-   above. Rome sets the table as text in the column: cells at the body size,
-   a rule under the header, hairlines between rows, and the first column's ink
-   on the paragraph edge. The buttons float over the header's inline end and
-   join the same reveal as a fence's chrome. */
+   above. Rome draws one light frame instead: the scroller takes a hairline
+   border and the ink's faintest tint, as wide as the table and no wider, and
+   scrolls sideways when the table is wider than the column. Cells set one step
+   under the body, with hairlines between rows and a slightly stronger tint on
+   the header. Columns take their width from their content.
+
+   The lines and tints are the ink at low strength, not `--border` or a
+   surface: `--border` is nearly the color of a received bubble's fill in light
+   themes, and the ink also follows the sent bubble's remap. The buttons float
+   over the header's inline end and join the same reveal as a fence's chrome. */
 .rome-markdown [data-streamdown="table-wrapper"] {
+  --markdown-table-rule: color-mix(in oklab, var(--foreground) 12%, transparent);
   position: relative;
   gap: 0;
   padding: 0;
@@ -318,24 +333,33 @@
 }
 
 .rome-markdown [data-streamdown="table-wrapper"] > :has(> table) {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+  width: fit-content;
+  max-width: 100%;
+  border: 1px solid var(--markdown-table-rule);
+  border-radius: var(--rome-radius-8);
+  background: color-mix(in oklab, var(--foreground) 2%, transparent);
 }
 
 .rome-markdown [data-streamdown="table"] {
-  width: 100%;
+  width: auto;
   border-collapse: collapse;
+  font-size: var(--markdown-table-font-size);
+  line-height: var(--markdown-table-line-height);
 }
 
-.rome-markdown [data-streamdown="table-wrapper"] :is(thead, tbody, [data-streamdown="table-row"]) {
+.rome-markdown [data-streamdown="table-wrapper"] :is(tbody, [data-streamdown="table-row"]) {
   border: 0;
   background: transparent;
+}
+
+.rome-markdown [data-streamdown="table-wrapper"] thead {
+  border: 0;
+  background: color-mix(in oklab, var(--foreground) 4%, transparent);
 }
 
 .rome-markdown [data-streamdown="table-header-cell"] {
   padding: var(--rome-space-2) var(--rome-space-3);
-  border-bottom: 1px solid var(--foreground);
+  border-bottom: 1px solid var(--markdown-table-rule);
   font-size: inherit;
   font-weight: 600;
   line-height: inherit;
@@ -345,10 +369,14 @@
 
 .rome-markdown [data-streamdown="table-cell"] {
   padding: var(--rome-space-2) var(--rome-space-3);
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--markdown-table-rule);
   font-size: inherit;
   line-height: inherit;
   vertical-align: top;
+}
+
+.rome-markdown [data-streamdown="table-row"]:last-child > [data-streamdown="table-cell"] {
+  border-bottom: 0;
 }
 
 /* CJK text breaks between any two characters, so a cell's min-content width
@@ -359,14 +387,15 @@
   min-width: 6em;
 }
 
+/* With three columns or more, the first is usually a label for its row, such
+   as a date or a name, and wrapping it splits the label the row is found by.
+   It keeps one line, and the other columns wrap instead. A two-column table
+   is often a question and its answer, where the first column can be a
+   sentence, so it wraps as the rest do. */
 .rome-markdown
+  [data-streamdown="table"]:has([data-streamdown="table-header-cell"]:nth-child(3))
   :is([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]):first-child {
-  padding-inline-start: 0;
-}
-
-.rome-markdown
-  :is([data-streamdown="table-header-cell"], [data-streamdown="table-cell"]):last-child {
-  padding-inline-end: 0;
+  white-space: nowrap;
 }
 
 /* The button row is the wrapper's first child and the only one without the

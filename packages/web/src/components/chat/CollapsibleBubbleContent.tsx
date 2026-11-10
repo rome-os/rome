@@ -11,6 +11,7 @@ import { flushSync } from "react-dom";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { findScrollableYAncestor } from "@/lib/scroll-container";
 import { scrollTopAfterToggle } from "./scroll-anchor";
@@ -28,7 +29,7 @@ const COLLAPSED_MAX_HEIGHT_REM = 20;
  */
 const MIN_HIDDEN_REM = 3;
 
-// The end bar can sit behind the composer that floats over the bottom of the
+// The end button can sit behind the composer that floats over the bottom of the
 // transcript; this much of the scroller's bottom is not counted as visible.
 const COMPOSER_ALLOWANCE = "0px 0px -96px 0px";
 
@@ -94,14 +95,16 @@ function sharedObserver(): ResizeObserver {
  * reaches a match, opens the content. The open state is local: a message starts
  * cut and keeps its choice until it unmounts.
  *
- * The toggle is one full-width bar under the content, in the same slot whether
- * the message is cut or open: only its label and the revealed text differ, so
- * opening or closing moves nothing above the cut. While the message is open and
- * that bar is off screen and the top of the message has scrolled out of view, a
+ * The toggle is a small text button under the content, at its start edge, in
+ * the same slot whether the message is cut or open: only its label and the
+ * revealed text differ, so opening or closing moves nothing above the cut. The
+ * fade over the cut ends in `fill`, the color behind the content: the bubble's,
+ * or the transcript's canvas for a document. While the message is open and
+ * that button is off screen and the top of the message has scrolled out of view, a
  * small "Show less" pill floats at the top right of the visible part of the
  * message. With the top in view it would sit over the first line, so it waits. It sits in a zero-height sticky wrapper, so
  * it takes no room and its coming and going moves nothing. It is hidden from
- * assistive technology and the tab order, which keep the bar as the one toggle.
+ * assistive technology and the tab order, which keep the button as the one toggle.
  * Top, not bottom, because the composer floats over the bottom of the
  * transcript at a height that varies.
  *
@@ -115,7 +118,20 @@ function sharedObserver(): ResizeObserver {
  * view to the end. The browser's own scroll anchoring is off inside the message:
  * it would add its correction to ours.
  */
-export function CollapsibleBubbleContent({ children }: { children: ReactNode }) {
+// The fade ends in the color behind the content, so the cut text fades out
+// rather than into a band of another color.
+const FADE: Record<"bubble" | "canvas", string> = {
+  bubble: "from-surface-muted",
+  canvas: "from-chat-canvas",
+};
+
+export function CollapsibleBubbleContent({
+  fill = "bubble",
+  children,
+}: {
+  fill?: "bubble" | "canvas";
+  children: ReactNode;
+}) {
   const { t } = useTranslation("chat");
   const regionId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -184,7 +200,7 @@ export function CollapsibleBubbleContent({ children }: { children: ReactNode }) 
     };
   }, [expanded]);
 
-  // Whether the bar is on screen, and whether the message's top has scrolled
+  // Whether the end button is on screen, and whether the message's top has scrolled
   // above the transcript: together they decide whether the pill floats.
   useEffect(() => {
     const bar = barRef.current;
@@ -266,18 +282,21 @@ export function CollapsibleBubbleContent({ children }: { children: ReactNode }) 
         {collapsed ? (
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-surface-muted to-transparent"
+            className={cn(
+              "pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t to-transparent",
+              FADE[fill],
+            )}
           />
         ) : null}
       </div>
       {collapsible ? (
-        <div className="mt-2">
+        <div className="mt-1">
           <Button
             ref={barRef}
             type="button"
-            variant="secondary"
-            size="sm"
-            className="w-full"
+            variant="ghost"
+            size="xs"
+            className="-ms-[var(--control-px-center-xs)] text-muted-foreground hover:text-foreground"
             aria-expanded={expanded}
             aria-controls={regionId}
             onClick={press}

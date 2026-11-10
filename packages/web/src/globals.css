@@ -348,6 +348,27 @@
   }
 }
 
+/* Document (chat ChatBubble): a long agent message read as a page. The body
+   keeps its size and leading, and the space between blocks tightens a step, so
+   a long answer reads as one piece rather than a stack of separate blocks. */
+.rome-chat-document {
+  --markdown-block-space-between: var(--rome-space-3);
+  --markdown-heading-1-space-before: var(--rome-space-6);
+  --markdown-heading-2-space-before: var(--rome-space-6);
+  --markdown-heading-2-space-after: var(--rome-space-1);
+  --markdown-heading-3-space-before: var(--rome-space-5);
+  --markdown-heading-3-space-after: var(--rome-space-1);
+  --markdown-heading-4-space-before: var(--rome-space-4);
+  --markdown-heading-4-space-after: var(--rome-space-1);
+  --markdown-heading-floor-space-before: var(--rome-space-4);
+  --markdown-list-space-block: var(--rome-space-2);
+  --markdown-code-block-space-block: var(--rome-space-4);
+  --markdown-blockquote-space-block: var(--rome-space-4);
+  --markdown-table-space-block: var(--rome-space-4);
+  --markdown-rule-space-block: var(--rome-space-4);
+  --markdown-media-space-block: var(--rome-space-4);
+}
+
 /* Sent bubble (chat ChatBubble): the content sits on the primary fill, so the
    color tokens markdown reads are re-mapped onto the primary foreground for
    the bubble's children. The bubble itself keeps the real `--primary` for its
@@ -359,6 +380,12 @@
   --muted: color-mix(in oklab, var(--primary-foreground) 18%, transparent);
   --border: color-mix(in oklab, var(--primary-foreground) 30%, transparent);
   --border-strong: color-mix(in oklab, var(--primary-foreground) 45%, transparent);
+}
+
+/* The remap gives a link the text's own color on the primary fill, so there
+   the underline is what marks it, at rest too. */
+.rome-bubble-on-primary a {
+  text-decoration-line: underline;
 }
 
 /* A fenced block inside the sent bubble keeps the page's light `--surface` for

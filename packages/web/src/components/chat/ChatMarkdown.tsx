@@ -14,11 +14,7 @@ function ChatInlineCode({ children, className, node: _node, ...props }: ChatInli
   const color = typeof children === "string" && HEX_COLOR_LITERAL.test(children) ? children : null;
 
   return (
-    <code
-      {...props}
-      className={cn("rounded-4 bg-muted font-mono", className)}
-      data-streamdown="inline-code"
-    >
+    <code {...props} className={cn("font-mono", className)} data-streamdown="inline-code">
       {children}
       {color ? (
         <span

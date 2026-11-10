@@ -201,7 +201,7 @@ describe("Concierge layout", () => {
       const toolbar = toolbarOf("Found three.");
       expect(toolbar.className).toContain("absolute");
       expect(toolbar.className).toContain("bottom-full");
-      expect(toolbar.className).toContain("translate-y-3");
+      expect(toolbar.className).toContain("translate-y-2");
       expect(toolbar.className).toContain("w-max");
       expect(toolbar.contains(bubbleOf("Found three."))).toBe(false);
     });
@@ -326,7 +326,7 @@ describe("Concierge layout", () => {
       return cap;
     };
 
-    it("draws a long message as a normal bubble", () => {
+    it("draws a long message as a document: no fill, at the reading width", () => {
       renderTranscript([
         agentRow(
           agent("a1", 0, [text("Short.")]),
@@ -334,17 +334,17 @@ describe("Concierge layout", () => {
         ),
       ]);
 
-      const short = bubbleOf("Short.");
-      const long = bubbleOf("The long one.");
-      expect(long.className).toBe(short.className);
-      for (const bubble of [short, long]) {
-        const classes = bubble.className.split(/\s+/);
-        expect(classes).toContain("w-fit");
-        expect(classes).not.toContain("w-full");
-      }
+      const short = bubbleOf("Short.").className.split(/\s+/);
+      expect(short).toContain("w-fit");
+      expect(short).toContain("bg-surface-muted");
+      const long = bubbleOf("The long one.").className.split(/\s+/);
+      expect(long).toContain("w-full");
+      expect(long).toContain("rome-chat-document");
+      expect(long).not.toContain("bg-surface-muted");
+      expect(capOf(bubbleOf("The long one.")).className.split(/\s+/)).toContain("max-w-2xl");
     });
 
-    it("caps every kind of bubble at 90% of the column, from the group itself", () => {
+    it("caps a bubble at 90% of the column and a document at the reading width, from the group itself", () => {
       render(
         <MemoryRouter>
           <ThemeProvider>
@@ -374,21 +374,21 @@ describe("Concierge layout", () => {
         </MemoryRouter>,
       );
 
-      const bubbles = [
-        bubbleOf("Mine"),
-        bubbleOf("Short."),
-        bubbleOf("The long one."),
-        bubbleOf("The report."),
-        screen.getByTestId("task-card"),
+      const caps: Array<[HTMLElement, string]> = [
+        [bubbleOf("Mine"), "max-w-[90%]"],
+        [bubbleOf("Short."), "max-w-[90%]"],
+        [bubbleOf("The long one."), "max-w-2xl"],
+        [bubbleOf("The report."), "max-w-2xl"],
+        [screen.getByTestId("task-card"), "max-w-[90%]"],
       ];
-      for (const bubble of bubbles) {
+      for (const [bubble, width] of caps) {
         const cap = capOf(bubble);
         const classes = cap.className.split(/\s+/);
-        expect(classes).toContain("max-w-[90%]");
+        expect(classes).toContain(width);
         expect(classes).not.toContain("max-w-full");
         // A percentage of a box that shrinks to the bubble would wrap short
         // text, so the cap sits right in the group, which spans the column.
-        expect(cap.parentElement?.className).toContain("gap-1");
+        expect(cap.parentElement?.className).toContain("gap-2");
       }
     });
 
@@ -447,7 +447,7 @@ describe("Concierge layout", () => {
       expect(within(mine as HTMLElement).getByText("Two")).toBeTruthy();
       expect(within(theirs as HTMLElement).getByText("Reply A")).toBeTruthy();
       expect(within(theirs as HTMLElement).getByText("Reply B")).toBeTruthy();
-      expect((mine as HTMLElement).className).toContain("gap-1");
+      expect((mine as HTMLElement).className).toContain("gap-2");
       expect((mine as HTMLElement).parentElement?.className).toContain("gap-4");
     });
 

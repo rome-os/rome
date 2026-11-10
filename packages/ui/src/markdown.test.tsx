@@ -157,13 +157,35 @@ describe("Markdown", () => {
     expect(external.rel).toContain("noopener");
   });
 
-  it("lets prose links lead by color and underline without added weight", () => {
+  it("lets prose links lead by color alone, underlined on hover and focus, without added weight", () => {
     renderMd("Read the [guide](./guide.md).");
 
     const classes = screen.getByRole("link", { name: "guide" }).className.split(/\s+/);
     expect(classes).toContain("text-primary");
-    expect(classes).toContain("underline");
+    expect(classes).toContain("no-underline");
+    expect(classes).toContain("hover:underline");
+    expect(classes).toContain("focus-visible:underline");
     expect(classes).not.toContain("font-medium");
+  });
+
+  it("shortens a link whose text is a long hash, and keeps the whole hash in its tooltip", () => {
+    const sha = "d37eb0f1c4a9e2b7f3d1a6c8e0b5f9a2d4c7e1b3";
+    renderMd(`Merged as [${sha}](https://example.com/commit/${sha}).`);
+
+    const link = screen.getByRole("link", { name: "d37eb0f" });
+    expect(link.getAttribute("title")).toBe(sha);
+    expect(link.getAttribute("href")).toBe(`https://example.com/commit/${sha}`);
+  });
+
+  it("leaves link text that is not a hash as it is", () => {
+    renderMd(
+      "[deadbeefcafe0](https://a.example) [1234567890123](https://b.example) [abc123](https://c.example)",
+    );
+
+    // Hex with a digit and 12 characters or more is a hash; all digits, or short, is not.
+    expect(screen.getByRole("link", { name: "deadbee" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "1234567890123" }).getAttribute("title")).toBeNull();
+    expect(screen.getByRole("link", { name: "abc123" }).getAttribute("title")).toBeNull();
   });
 
   it("routes ```mermaid fences to the mermaid plugin, not the shiki code highlighter", () => {

@@ -441,6 +441,11 @@
      room to spare; compact's 20px line does not, and rebinds one step down. */
   --markdown-inline-code-font-size: var(--rome-font-size-14);
 
+  /* A table sets one step under the body: its cells are reference read in
+     short pieces, and the smaller face lets more columns fit before it scrolls. */
+  --markdown-table-font-size: var(--rome-font-size-14);
+  --markdown-table-line-height: var(--rome-line-height-143);
+
   --markdown-heading-1-font-size: var(--rome-font-size-24);
   --markdown-heading-1-line-height: var(--rome-line-height-133);
   --markdown-heading-2-font-size: var(--rome-font-size-20);

@@ -8,6 +8,7 @@ import {
   useState,
   useSyncExternalStore,
   type ComponentPropsWithoutRef,
+  type ReactNode,
 } from "react";
 import {
   defaultRehypePlugins,
@@ -30,7 +31,29 @@ export type MermaidConfig = NonNullable<MermaidOptions["config"]>;
 export type { Components, MermaidOptions, StreamdownProps };
 export { defaultUrlTransform } from "streamdown";
 
-export const MARKDOWN_LINK_CLASS = "wrap-anywhere text-primary underline";
+/**
+ * A prose link leads by color alone, and takes its underline on hover and on
+ * keyboard focus, which also keeps the browser's focus outline.
+ */
+export const MARKDOWN_LINK_CLASS =
+  "wrap-anywhere text-primary no-underline hover:underline focus-visible:underline";
+
+// A commit SHA or a similar digest: hex, with both a letter and a digit.
+const HASH_LABEL = /^(?=.*[a-f])(?=.*\d)[0-9a-f]{12,64}$/i;
+
+/** How many characters of a hash a link shows, as `git log --oneline` does. */
+const SHORT_HASH_LENGTH = 7;
+
+/**
+ * The text a link shows for `children`: a link whose whole text is a long hash
+ * shows its first {@link SHORT_HASH_LENGTH} characters, and `full` is the whole
+ * hash for the link's tooltip. Any other text shows as it is.
+ */
+export function markdownLinkLabel(children: ReactNode): { label: ReactNode; full?: string } {
+  const text = typeof children === "string" ? children : null;
+  if (text === null || !HASH_LABEL.test(text)) return { label: children };
+  return { label: text.slice(0, SHORT_HASH_LENGTH), full: text };
+}
 
 export type MarkdownLinkProps = ComponentPropsWithoutRef<"a"> & {
   node?: unknown;
@@ -48,15 +71,17 @@ export function MarkdownLink({
   ...rest
 }: MarkdownLinkProps) {
   const external = shouldOpenInNewTab(href);
+  const { label, full } = markdownLinkLabel(children);
   return (
     <a
       href={href}
       target={external ? "_blank" : undefined}
       rel={external ? "noopener noreferrer" : undefined}
       className={MARKDOWN_LINK_CLASS}
+      title={full}
       {...rest}
     >
-      {children}
+      {label}
     </a>
   );
 }
