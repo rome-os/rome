@@ -53,6 +53,17 @@ enum SnapshotRunner {
             model.openDemo()
             try? await Task.sleep(for: .seconds(2))
             await capture("04-chat", style: styleName, in: directory) {}
+            // The header's status line in each state, then back to the name alone.
+            let states: [(String, ConciergeActivity)] = [
+                ("working", .working), ("tool", .tool(.searchingWeb)), ("tasks", .tasks(title: "整理本周会议纪要", more: 1)),
+                ("needs-you", .needsYou), ("idle", .idle),
+            ]
+            for (name, state) in states {
+                await capture("60-status-\(name)", style: styleName, in: directory, wait: 0.8) {
+                    model.workspace?.topics.setActivity(state, for: conciergeChatID)
+                }
+            }
+            model.workspace?.topics.setActivity(nil, for: conciergeChatID)
             await capture("30-composer-photos", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .composerPhotos(2) }
             model.debugCommand = .composerPhotos(0)
             try? await Task.sleep(for: .seconds(0.4))
@@ -113,6 +124,19 @@ enum SnapshotRunner {
             await capture("43-connect-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail")) }
             TranscriptStore.previewPhases = [:]
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
+            // Chat threads: the replies lines, then one thread open over its chat.
+            await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
+            // A long chat thread: its last answer carries the replies line.
+            await capture("53-topic-long-thread", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-books")) }
+            // A long topic name: cut at the end inside the header's pill.
+            await capture("52-topic-long-name", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
+            model.debugCommand = .section(.topic("topic-trip"))
+            try? await Task.sleep(for: .seconds(1.5))
+            await capture("51-thread-open", style: styleName, in: directory, wait: 1.5) {
+                model.workspace?.topicStore("topic-trip").openThread(at: "k1")
+            }
+            model.workspace?.topicStore("topic-trip").closeThread()
+            try? await Task.sleep(for: .seconds(0.4))
             // Routine cards with their state, and the rows for cards only the web draws.
             await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }
             // The drawer over a topic chat: its row selected.

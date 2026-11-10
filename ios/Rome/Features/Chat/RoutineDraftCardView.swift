@@ -16,26 +16,26 @@ struct RoutineDraftCardView: View {
     @Environment(\.openInstancePage) private var openInstancePage
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 10) {
                 Image(systemName: RoutineCardText.symbol(part.trigger))
-                    .romeFont(17, .medium)
+                    .romeFont(CardScale.iconGlyph, .medium)
                     .foregroundStyle(Palette.primaryText)
-                    .frame(width: 36, height: 36)
-                    .background(Palette.primarySoft, in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                    .frame(width: CardScale.iconBox, height: CardScale.iconBox)
+                    .background(Palette.primarySoft, in: RoundedRectangle(cornerRadius: CardScale.iconCorner, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(verbatim: RoutineCardText.kind(part.trigger))
-                        .romeFont(12, .semibold)
+                        .romeFont(CardScale.label, .semibold)
                         .foregroundStyle(Palette.sub)
                     Text(verbatim: part.name)
-                        .romeFont(17, .semibold)
-                        .tracking(-0.4)
+                        .romeFont(CardScale.title, .semibold)
+                        .tracking(-0.3)
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer(minLength: 0)
                 if let status {
                     Text(verbatim: RoutineCardText.status(status))
-                        .romeFont(13, .medium)
+                        .romeFont(CardScale.caption, .medium)
                         .foregroundStyle(Palette.sub)
                 }
             }
@@ -43,15 +43,15 @@ struct RoutineDraftCardView: View {
                 ForEach(Array(RoutineCardText.rows(part).enumerated()), id: \.offset) { index, row in
                     HStack(alignment: .firstTextBaseline, spacing: 12) {
                         Text(verbatim: row.label)
-                            .romeFont(13)
+                            .romeFont(CardScale.caption)
                             .foregroundStyle(Palette.sub)
                             .frame(width: 64, alignment: .leading)
                         Text(verbatim: row.value)
-                            .romeFont(15, .medium)
+                            .romeFont(CardScale.body, .medium)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }
-                    .padding(.vertical, 10)
+                    .padding(.vertical, CardScale.fieldRowPadding)
                     .overlay(alignment: .top) {
                         if index > 0 { Rectangle().fill(Palette.hair).frame(height: 0.5) }
                     }
@@ -59,7 +59,7 @@ struct RoutineDraftCardView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 2)
-            .background(Palette.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .background(Palette.fill, in: RoundedRectangle(cornerRadius: CardScale.fieldCorner, style: .continuous))
             if canTurnOn, let origin = model.webURL {
                 Button {
                     openInstancePage(RoutineCardText.destination(status, origin: origin, sessionId: sessionId, mainChatServerID: model.workspace?.mainChatServerID))
@@ -68,13 +68,13 @@ struct RoutineDraftCardView: View {
                         Text(verbatim: RoutineCardText.link(status))
                         Image(systemName: "chevron.right").romeFont(12, .semibold)
                     }
-                    .romeFont(15, .medium)
+                    .romeFont(CardScale.body, .medium)
                     .foregroundStyle(Palette.primaryText)
                 }
                 .buttonStyle(PressScaleStyle())
             }
         }
-        .padding(16)
+        .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
         .hairline(radius: Metrics.bigCardRadius)
         .accessibilityElement(children: .contain)

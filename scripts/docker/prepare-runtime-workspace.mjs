@@ -39,12 +39,7 @@ const runtimePackages = [
 
 const optionalRuntimePackages = ["packages/app-template"];
 
-const forbiddenPackages = [
-  "packages/desktop",
-  "packages/pantheon",
-  "packages/cdp-client",
-  "packages/mobile",
-];
+const forbiddenPackages = ["packages/desktop", "packages/pantheon", "packages/cdp-client"];
 
 const rootScripts = [
   "scripts/bundle-docker-core.mjs",

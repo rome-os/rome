@@ -4,7 +4,7 @@ import { approvals } from "../../db/schema.js";
 import type { DrizzleDb } from "../../db/index.js";
 import { APPROVAL_TYPES, type ApprovalStatus, type ApprovalType } from "@rome/api-types/approvals";
 
-type ApprovalRow = typeof approvals.$inferSelect;
+export type ApprovalRow = typeof approvals.$inferSelect;
 type ResolveAction = "approve" | "reject";
 
 export type ResolvePendingResult =
@@ -53,9 +53,11 @@ export interface CreatedApproval {
 }
 
 export type ApprovalCreatedListener = (approval: CreatedApproval) => void;
+export type ApprovalResolvedListener = (approval: ApprovalRow) => void;
 
 export class ApprovalsRepository {
   private createdListeners = new Set<ApprovalCreatedListener>();
+  private resolvedListeners = new Set<ApprovalResolvedListener>();
 
   constructor(private db: DrizzleDb) {}
 
@@ -117,6 +119,17 @@ export class ApprovalsRepository {
     this.createdListeners.add(listener);
     return () => {
       this.createdListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Tells `listener` about every pending approval approved or rejected from
+   * now on, with the row as it was resolved. Returns the unsubscribe.
+   */
+  onResolved(listener: ApprovalResolvedListener): () => void {
+    this.resolvedListeners.add(listener);
+    return () => {
+      this.resolvedListeners.delete(listener);
     };
   }
 
@@ -195,6 +208,7 @@ export class ApprovalsRepository {
       };
     }
 
+    for (const listener of this.resolvedListeners) listener(updated[0]);
     return { outcome: "resolved", approval: updated[0] };
   }
 

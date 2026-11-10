@@ -64,11 +64,29 @@ describe("file browser asset byte ranges", () => {
   });
 
   it("serves a full 64 KiB chunk within the audio file", async () => {
-    const response = await app.request(await assetUrl(), { headers: { Range: "bytes=0-65535" } });
+    const url = await assetUrl();
+    const response = await app.request(url, { headers: { Range: "bytes=0-65535" } });
     expect(response.status).toBe(206);
+    expect(response.headers.get("ETag")).toBe(
+      `W/"${new URL(url, "http://localhost").searchParams.get("v")}"`,
+    );
+    expect(response.headers.get("Cache-Control")).toBe("private, no-cache");
     expect(response.headers.get("Content-Range")).toBe(`bytes 0-65535/${audio.length}`);
     expect(response.headers.get("Content-Length")).toBe("65536");
     expect(Buffer.from(await response.arrayBuffer())).toEqual(audio.subarray(0, 65536));
+  });
+
+  it("revalidates before handling an unsatisfiable Range", async () => {
+    const url = await assetUrl();
+    const etag = `W/"${new URL(url, "http://localhost").searchParams.get("v")}"`;
+    const response = await app.request(url, {
+      headers: { "If-None-Match": etag, Range: `bytes=${audio.length}-` },
+    });
+    expect(response.status).toBe(304);
+    expect(response.headers.get("ETag")).toBe(etag);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-cache");
+    expect(response.body).toBeNull();
+    expect(await response.text()).toBe("");
   });
 
   it("serves the shorter final chunk when its requested end exceeds EOF", async () => {

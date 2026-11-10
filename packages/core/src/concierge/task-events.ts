@@ -16,6 +16,7 @@
 // did not run to its end, such as when the Concierge is out of quota, spends
 // none of that: it is tried again RETRY_MS later.
 
+import { withoutSessionActor } from "../access/session-actor.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("concierge-task-events");
@@ -91,8 +92,45 @@ export class TaskEventCoalescer {
   private timer: ReturnType<typeof setTimeout> | null = null;
   private flushing = false;
   private lastFlushStartedAt = Number.NEGATIVE_INFINITY;
+  /** Rows the running flush took, until it ends. */
+  private inFlight = new Set<string>();
+  private listeners = new Set<() => void>();
 
   constructor(private deps: TaskEventDeps) {}
+
+  /**
+   * Calls `listener` whenever {@link awaitingReport} may have changed.
+   * Returns the unsubscribe.
+   */
+  onChange(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /**
+   * The rows with an urgent change the Concierge is about to report: no
+   * flush has taken it yet, or the flush that took it is still setting up
+   * or running its turn. A row waiting out a turn that did not run, or kept
+   * for a retry after a turn that did, is not about to be reported.
+   */
+  get awaitingReport(): string[] {
+    const now = this.deps.now();
+    return [...this.dirty.entries()]
+      .filter(([taskId, entry]) => {
+        if (!entry.urgent) return false;
+        if (this.inFlight.has(taskId)) return true;
+        if (entry.retry) return false;
+        if (entry.notBefore !== undefined && entry.notBefore > now) return false;
+        return entry.builtAt === undefined || entry.since > entry.builtAt;
+      })
+      .map(([taskId]) => taskId);
+  }
+
+  private changed(): void {
+    for (const listener of this.listeners) listener();
+  }
 
   /** Marks a row dirty with one more change. */
   mark(change: TaskChange): void {
@@ -126,6 +164,7 @@ export class TaskEventCoalescer {
       }
     }
     this.arm();
+    this.changed();
   }
 
   /** The Concierge wrote the row. Clears its mark unless a change came after the build. */
@@ -133,12 +172,13 @@ export class TaskEventCoalescer {
     const entry = this.dirty.get(taskId);
     if (entry && entry.builtAt !== undefined && entry.since <= entry.builtAt) {
       this.dirty.delete(taskId);
+      this.changed();
     }
   }
 
   /** Drops a row's mark, such as when its row is gone. */
   forget(taskId: string): void {
-    this.dirty.delete(taskId);
+    if (this.dirty.delete(taskId)) this.changed();
   }
 
   /** The rows waiting for a flush. */
@@ -150,6 +190,9 @@ export class TaskEventCoalescer {
     if (this.timer) clearTimeout(this.timer);
     this.timer = null;
     this.dirty.clear();
+    this.inFlight.clear();
+    this.changed();
+    this.listeners.clear();
   }
 
   private dueAt(entry: Dirty): number {
@@ -166,7 +209,11 @@ export class TaskEventCoalescer {
     if (this.flushing || this.dirty.size === 0) return;
     const due = Math.min(...[...this.dirty.values()].map((entry) => this.dueAt(entry)));
     const at = Math.max(due, this.lastFlushStartedAt + MIN_FLUSH_SPACING_MS);
-    this.timer = setTimeout(() => void this.flush(), Math.max(0, at - this.deps.now()));
+    // A mark arrives in whoever's request changed the row; the flush runs
+    // every owner's turns, so its timer must carry no one's session actor.
+    this.timer = withoutSessionActor(() =>
+      setTimeout(() => void this.flush(), Math.max(0, at - this.deps.now())),
+    );
   }
 
   private async flush(): Promise<void> {
@@ -190,10 +237,11 @@ export class TaskEventCoalescer {
         { entry, changes: entry.changes, urgent: entry.urgent },
       ]),
     );
-    for (const [, entry] of taken) {
+    for (const [taskId, entry] of taken) {
       entry.builtAt = builtAt;
       entry.undelivered = false;
       entry.flushes += 1;
+      this.inFlight.add(taskId);
     }
     try {
       const tasks = taken.map(([taskId, entry]) => ({
@@ -227,6 +275,7 @@ export class TaskEventCoalescer {
       });
     } finally {
       this.flushing = false;
+      this.inFlight.clear();
       this.afterFlush(
         taken.map(([taskId]) => taskId),
         notRun,
@@ -234,6 +283,7 @@ export class TaskEventCoalescer {
         carried,
       );
       this.arm();
+      this.changed();
     }
   }
 

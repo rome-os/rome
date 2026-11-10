@@ -35,6 +35,11 @@ protocol RomeBackend: AnyObject, Sendable {
     func archiveChat(_ id: String) async throws
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn
+    /// A send from a chat thread: it lands in that thread.
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn
+    /// Every message of the chat thread `messageId` is in, oldest first.
+    /// Only an instance with chat threads answers it.
+    func thread(sessionId: String, messageId: String) async throws -> [ChatMessage]
     /// A file in the chats' project folder, by its `/projects/…` path without the slash.
     func asset(path: String) async throws -> Data
     /// An instance URL a reply points at: the path after `/api`, and its query
@@ -49,6 +54,8 @@ protocol RomeBackend: AnyObject, Sendable {
     func interrupt(turnId: String) async throws
     func tasks() async throws -> [ConciergeTask]
     func approval(id: String) async throws -> ApprovalRecord
+    /// Every pending approval; the guardian's only (a visitor gets an error).
+    func pendingApprovals() async throws -> [PendingApproval]
     func resolveApproval(id: String, approve: Bool) async throws
     func toolCalls(traceMessageId: String) async throws -> [ToolCall]
     func aiTools() async throws -> AIToolsStatus
@@ -56,6 +63,9 @@ protocol RomeBackend: AnyObject, Sendable {
     func search(_ query: String) async throws -> [SearchHit]
     /// The guardian's display name on this instance.
     func me() async throws -> AccountIdentity?
+    /// The Concierge's own name, as the dashboard shows it (`agentName` in
+    /// `GET /settings`); nil when none is set or it cannot be read.
+    func agentName() async -> String?
     /// Whether this session is the instance's guardian, not a visitor.
     func isGuardian() async -> Bool
     /// The instance's apps, every origin; `AppLinks.mine` picks the guardian's.
@@ -115,6 +125,11 @@ final class LiveBackend: RomeBackend {
         try await client.patch("/chat/sessions/\(escape(id))/archive", json: .object(["archived": .bool(true)]))
     }
 
+    func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
+        let page: MessagePage = try await client.get("/chat/sessions/\(escape(sessionId))/messages", query: [URLQueryItem(name: "thread", value: messageId)])
+        return page.messages
+    }
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         var query = [URLQueryItem(name: "limit", value: String(limit))]
         if let before { query.append(URLQueryItem(name: "before", value: before)) }
@@ -122,7 +137,12 @@ final class LiveBackend: RomeBackend {
     }
 
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
+        try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority, thread: nil)
+    }
+
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn {
         var body: [String: JSONValue] = ["text": .string(text), "inputId": .string(inputId), "priority": .string(priority.rawValue)]
+        if let thread { body.merge(thread.body) { _, new in new } }
         if !files.isEmpty {
             body["files"] = .array(files.map { .object(["name": .string($0.name), "mimeType": .string($0.mimeType), "dataBase64": .string($0.dataBase64)]) })
         }
@@ -174,6 +194,11 @@ final class LiveBackend: RomeBackend {
         return response.tasks
     }
 
+    func pendingApprovals() async throws -> [PendingApproval] {
+        let rows: JSONValue = try await client.get("/approvals", query: [URLQueryItem(name: "status", value: "pending")], reportsUnauthorized: false)
+        return (rows.array ?? []).compactMap(PendingApproval.init(json:))
+    }
+
     func approval(id: String) async throws -> ApprovalRecord {
         try await client.get("/approvals/\(escape(id))")
     }
@@ -197,6 +222,11 @@ final class LiveBackend: RomeBackend {
 
     func search(_ query: String) async throws -> [SearchHit] {
         try await client.get("/chat/sessions/search", query: [URLQueryItem(name: "q", value: query)])
+    }
+
+    func agentName() async -> String? {
+        guard let settings: JSONValue = try? await client.get("/settings", reportsUnauthorized: false) else { return nil }
+        return AgentName.display(settings["agentName"]?.string)
     }
 
     func me() async throws -> AccountIdentity? {
@@ -314,6 +344,12 @@ extension RomeBackend {
 
     func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply { throw APIError.notFound }
     func connectors() async throws -> [ConnectorState] { [] }
+    func agentName() async -> String? { nil }
+    func pendingApprovals() async throws -> [PendingApproval] { [] }
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn {
+        try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority)
+    }
+    func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] { throw APIError.notFound }
     func routines() async throws -> [RoutineRef] { throw APIError.notFound }
     func notifyServiceConnected(chatId: String, service: String) async {}
     /// Stand-ins (demo, tests) are no guardian of a real instance.
@@ -321,4 +357,13 @@ extension RomeBackend {
     func setGuardianLanguage(_ code: String) async throws {}
     func apps() async throws -> [InstalledApp] { [] }
     func webSessionCookie() -> HTTPCookie? { nil }
+}
+
+/// The Concierge's name as the dashboard shows it: trimmed, and nil when
+/// blank, so the caller's fallback shows.
+enum AgentName {
+    static func display(_ configured: String?) -> String? {
+        let name = configured?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? nil : name
+    }
 }

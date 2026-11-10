@@ -1942,14 +1942,31 @@ export function createAssetHandler(scope: FileBrowserScope): Handler {
 
     try {
       const file = describeFile(logicalPath);
-      const { size } = statSync(resolvedPath);
+      const { mtimeMs, size } = statSync(resolvedPath);
+      const etag = `W/"${Math.trunc(mtimeMs)}-${size}"`;
+      if (
+        c.req
+          .header("If-None-Match")
+          ?.split(",")
+          .some((entry) => {
+            const tag = entry.trim();
+            return tag === "*" || tag.replace(/^W\//, "") === etag.replace(/^W\//, "");
+          })
+      ) {
+        return new Response(null, {
+          headers: { "Cache-Control": "private, no-cache", ETag: etag },
+          status: 304,
+        });
+      }
+
       const fileName = basename(resolvedPath);
       const baseHeaders: Record<string, string> = {
         "Accept-Ranges": "bytes",
-        "Cache-Control": "no-store",
+        "Cache-Control": "private, no-cache",
         "Content-Disposition": encodeContentDispositionFileName(fileName, "inline"),
         "Content-Length": String(size),
         "Content-Type": file.mimeType,
+        ETag: etag,
       };
 
       if (

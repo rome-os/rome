@@ -30,6 +30,7 @@
       "blocked": "Pop-up blocked",
       "checkFailed": "Could not check the connection"
     },
+    "taskCardAlreadyAnswered": "This card was already answered. The task has been refreshed.",
     "openTaskChat": "Open",
     "tasks": {
       "title": "Tasks",
@@ -68,13 +69,6 @@
       "replyText": {
         "done": "I've done this"
       },
-      "pill": {
-        "needsYou_one": "Tasks, {{count}} needs you",
-        "needsYou_other": "Tasks, {{count}} need you",
-        "doing_one": "Tasks, {{count}} in progress",
-        "doing_other": "Tasks, {{count}} in progress",
-        "idle": "Tasks"
-      },
       "emptyTitle": "No tasks yet",
       "emptyDescription": "Tasks {{name}} is working on, planning, or watching appear here."
     },
@@ -102,6 +96,24 @@
       },
       "justAsk": "Just asking a question?",
       "backToMain": "Ask in the main chat →"
+    },
+    "activity": {
+      "idle": "Idle",
+      "needsYou": "Waiting for your answer",
+      "working": "Working on it",
+      "tasks": "{{title}}",
+      "tasksMore": "{{title}} +{{count}}",
+      "tool": {
+        "startingTask": "Starting a task",
+        "messagingTask": "Writing to a task chat",
+        "readingChat": "Reading a chat",
+        "stoppingTask": "Stopping a task",
+        "updatingTasks": "Updating tasks",
+        "startingTopic": "Starting a topic chat",
+        "checkingFollows": "Checking what you follow",
+        "searchingWeb": "Searching the web",
+        "readingPage": "Reading a page"
+      }
     }
   },
   "reply": {
@@ -568,7 +580,10 @@
   "thread": {
     "title": "Chat thread",
     "close": "Close chat thread",
-    "loadFailed": "Couldn't load this chat thread."
+    "loadFailed": "Couldn't load this chat thread.",
+    "replies_one": "{{count}} reply",
+    "replies_other": "{{count}} replies",
+    "replyPlaceholder": "Reply"
   },
   "sessionRenewal": {
     "notice": "New session · {{reason}}",

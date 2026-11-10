@@ -8,7 +8,7 @@ import Observation
 enum UpdateGate {
     /// The oldest instance release with every API the app calls. Raise it
     /// only when the app starts calling an API a newer release brought.
-    static let minimumInstanceVersion = "1.1.185"
+    static let minimumInstanceVersion = "1.1.189"
 
     /// Whether the app works with an instance on `version`. An unknown or
     /// unreadable version is never held against it.
@@ -100,7 +100,7 @@ enum UpdateGate {
             return String(localized: "Asking Rome Cloud to start the update…")
         case .updating(let target, _):
             switch progress {
-            case .downloading: return String(localized: "Downloading \(target)…")
+            case .downloading: return String(localized: "Upgrading to \(target)…")
             case .restarting: return String(localized: "Restarting your Rome…")
             case .almostDone: return String(localized: "Almost done…")
             }

@@ -30,10 +30,19 @@ enum SettingsRoute: Hashable {
 }
 
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
-/// and the Tasks and Settings sheets.
+/// and the Tasks and Settings sheets. On a regular width (an iPad, unless the
+/// window is narrow) the drawer is pinned beside the page instead.
+///
+/// Both widths draw the same tree: the drawer and the page's stack sit in one
+/// `ZStack` and only their frames and offsets change. A window resized across
+/// compact and regular (Split View, Stage Manager) keeps the stack, its pushed
+/// pages and their state.
 struct MainShell: View {
     let workspace: Workspace
     @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// The pinned drawer on a regular width: shown, or slid away by the header's button.
+    @State private var sidebarShown = true
     @State private var section: MainSection = .chat
     @State private var path: [Route] = []
     @State private var drawerOpen = false
@@ -61,10 +70,22 @@ struct MainShell: View {
     @State private var photoViewerPreview = false
     #endif
 
+    /// The drawer pinned beside the page rather than pushed aside.
+    static func usesSidebar(_ sizeClass: UserInterfaceSizeClass?) -> Bool {
+        sizeClass == .regular
+    }
+
+    /// Mac Catalyst, which only runs the tests and the phone-sized snapshot
+    /// pass, keeps the phone's layout.
+    private var usesSidebar: Bool { Self.usesSidebar(sizeClass) && !ProcessInfo.processInfo.isMacCatalystApp }
+
     var body: some View {
         GeometryReader { geometry in
             let width = min(318, geometry.size.width * 0.81)
-            let progress = drawerProgress(width: width)
+            // Pinned, the drawer takes this much of the width beside the page;
+            // pushed aside (compact), none, and `progress` moves the page instead.
+            let column: CGFloat = usesSidebar && sidebarShown ? width : 0
+            let progress = usesSidebar ? 0 : drawerProgress(width: width)
 
             ZStack(alignment: .topLeading) {
                 Palette.drawer.ignoresSafeArea()
@@ -92,11 +113,12 @@ struct MainShell: View {
                     }
                 )
                 .frame(width: width, height: geometry.size.height)
-                .offset(x: (progress - 1) * 36)
+                // Pinned, it slides in from the left edge as the page makes room.
+                .offset(x: usesSidebar ? column - width : (progress - 1) * 36)
                 // Closed, it is not drawn: under a page still fading in (the
                 // opening screen's hand-off) its rows showed through.
-                .opacity(progress > 0 ? 0.4 + 0.6 * progress : 0)
-                .allowsHitTesting(drawerOpen)
+                .opacity(usesSidebar ? (sidebarShown ? 1 : 0) : (progress > 0 ? 0.4 + 0.6 * progress : 0))
+                .allowsHitTesting(usesSidebar ? sidebarShown : drawerOpen)
 
                 NavigationStack(path: $path) {
                     root
@@ -109,7 +131,10 @@ struct MainShell: View {
                 .environment(\.isVisitor, workspace.isVisitor)
                 // Pushed aside, the page becomes a card of its own color, following the drag.
                 .environment(\.pageBackground, Palette.blend(Palette.bg, Palette.drawerPage, progress))
-                .frame(width: geometry.size.width, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
+                // Over the page, so beside a pinned drawer they sit above the chat.
+                // The page reaches under the status bar; they start below it.
+                .overlay(alignment: .top) { banners.padding(.top, geometry.safeAreaInsets.top) }
+                .frame(width: geometry.size.width - column, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
                 .clipShape(RoundedRectangle(cornerRadius: 44 * progress, style: .continuous))
                 .overlay {
                     if progress > 0 {
@@ -120,10 +145,10 @@ struct MainShell: View {
                     }
                 }
                 .shadow(color: .black.opacity(0.12 * progress), radius: 15, x: -8, y: 0)
-                .offset(x: width * progress)
+                .offset(x: column + width * progress)
                 .ignoresSafeArea()
                 .overlay(alignment: .leading) {
-                    if !drawerOpen && path.isEmpty {
+                    if !usesSidebar && !drawerOpen && path.isEmpty {
                         Color.clear
                             .frame(width: 22)
                             .contentShape(Rectangle())
@@ -207,26 +232,16 @@ struct MainShell: View {
             closeDrawer()
             show(request.topicId.map(MainSection.topic) ?? .chat)
         }
-        .overlay(alignment: .top) {
-            if model.sessionExpired {
-                TopBanner(kind: .error, text: String(localized: "Session expired"), actionTitle: String(localized: "Sign in again")) {
-                    Task { await model.reauthenticate() }
-                }
-                .padding(.top, 58)
-                .transition(.move(edge: .top).combined(with: .opacity))
-            } else if model.update.showsBanner, !drawerOpen {
-                // The drawer has its own line for it.
-                UpdateBanner(instanceName: workspace.instanceName, onUpdate: { model.update.openPage() }, onClose: { model.update.dismissBanner() })
-                    .padding(.top, 58)
-                    .transition(.move(edge: .top).combined(with: .opacity))
-            }
-        }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.sessionExpired)
-        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: model.update.showsBanner && !drawerOpen)
+        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: model.update.showsBanner && !drawerOpen && !(usesSidebar && sidebarShown))
+        // A window that turns wide pins the drawer; the one it pushed aside is closed.
+        .onChange(of: usesSidebar) { drawerOpen = false }
         #if DEBUG
         .onChange(of: model.debugCommand) { _, command in
             switch command {
-            case .drawer(let open): open ? openDrawer() : closeDrawer()
+            case .drawer(let open):
+                // Pinned, the drawer stays on screen in every capture.
+                if !usesSidebar { open ? openDrawer() : closeDrawer() }
             case .tasks(let show):
                 if SnapshotRunner.directory != nil { sheetPreview = show } else { showTasks = show }
             case .route(let routes):
@@ -242,6 +257,25 @@ struct MainShell: View {
             }
         }
         #endif
+    }
+
+    /// Session expired, or an update offered, at the top of the page's column.
+    @ViewBuilder
+    private var banners: some View {
+        if model.sessionExpired {
+            TopBanner(kind: .error, text: String(localized: "Session expired"), actionTitle: String(localized: "Sign in again")) {
+                Task { await model.reauthenticate() }
+            }
+            .readableColumn()
+            .padding(.top, 58)
+            .transition(.move(edge: .top).combined(with: .opacity))
+        } else if model.update.showsBanner, !drawerOpen, !(usesSidebar && sidebarShown) {
+            // The drawer has its own line for it.
+            UpdateBanner(instanceName: workspace.instanceName, onUpdate: { model.update.openPage() }, onClose: { model.update.dismissBanner() })
+                .readableColumn()
+                .padding(.top, 58)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
     }
 
     @ViewBuilder
@@ -295,7 +329,7 @@ struct MainShell: View {
         ZStack {
             ChatScreen(
                 workspace: workspace,
-                onMenu: { openDrawer() },
+                onMenu: { toggleNavigation() },
                 onTasks: {
                     tasksChatId = conciergeChatID
                     showTasks = true
@@ -316,7 +350,7 @@ struct MainShell: View {
                 topicScreen(chatId: nil, key: key, draftKey: DraftStore.blankChat(key))
                     .id(key.uuidString)
             case .apps:
-                AppsScreen(workspace: workspace, onMenu: { openDrawer() }, onOpen: { app in
+                AppsScreen(workspace: workspace, onMenu: { toggleNavigation() }, onOpen: { app in
                     path.append(.app(app))
                 }, onStart: { prompt in
                     // The main Chat, with the prompt in its composer to edit.
@@ -324,7 +358,7 @@ struct MainShell: View {
                     workspace.composerPrefill = prompt
                 })
             case .search:
-                SearchScreen(workspace: workspace, onMenu: { openDrawer() }) { hit in
+                SearchScreen(workspace: workspace, onMenu: { toggleNavigation() }) { hit in
                     if workspace.isMainChat(hit.session.id) {
                         show(.chat)
                     } else if workspace.topics.chat(hit.session.id) != nil {
@@ -342,7 +376,7 @@ struct MainShell: View {
             workspace: workspace,
             chatId: chatId,
             draftKey: draftKey,
-            onMenu: { openDrawer() },
+            onMenu: { toggleNavigation() },
             onTasks: { id in
                 // A blank chat has no tasks yet; its sheet shows the empty state.
                 tasksChatId = id ?? ""
@@ -362,6 +396,10 @@ struct MainShell: View {
     /// Swaps the stack's root with no motion of its own; the drawer's slide is
     /// the only movement the guardian sees.
     private func show(_ picked: MainSection) {
+        // The page left behind stays in the tree (Chat only fades out), so its
+        // composer would keep the keyboard; with the drawer pinned no drawer
+        // opening has taken it first.
+        Keyboard.dismiss()
         var instant = Transaction()
         instant.disablesAnimations = true
         withTransaction(instant) {
@@ -455,6 +493,15 @@ struct MainShell: View {
 
     private func openDrawer() {
         withAnimation(Self.drawerSpring) { drawerOpen = true }
+    }
+
+    /// The header's drawer button: opens the drawer, or slides the pinned one
+    /// away and back, the page following its edge.
+    private func toggleNavigation() {
+        guard usesSidebar else { return openDrawer() }
+        Keyboard.dismiss()
+        withAnimation(Self.drawerSpring) { sidebarShown.toggle() }
+        if sidebarShown { workspace.topics.refresh() }
     }
 
     private func closeDrawer() {

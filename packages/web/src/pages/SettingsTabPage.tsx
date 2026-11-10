@@ -24,7 +24,6 @@ import type {
   FavorRechargePackList,
   FavorRechargePackView,
 } from "@rome/api-types/favors";
-import { isElectronShell } from "@/lib/electron-shell";
 import { artifactLocalName } from "@/lib/artifact-name";
 import { apiErrorMessageFrom, getApiErrorMessage } from "@/lib/api-error";
 import { fetchJson } from "@/lib/fetch-json";
@@ -928,18 +927,7 @@ function AdvancedSection({
           <SectionHeader>
             <SectionTitle>{t("system.title")}</SectionTitle>
           </SectionHeader>
-          {/* Not rendered in the Mac app. Its check and upgrade actions relay to
-            Rome Cloud, which resolves them against the account's *hosted*
-            instance — a machine other than the one showing the page. The version
-            card above them is read from the local build and is correct on
-            desktop, but it is not worth splitting the section to keep: the Mac
-            app has its own version surface, and a panel whose only button acts
-            on somewhere else is worse than an absent one.
-
-            This is a mitigation. It keys on which window is rendering, not on
-            what kind of backend is behind the page, so the same dashboard opened
-            in a browser at the loopback port still shows it. */}
-          {!isElectronShell() && <SystemUpgradeSection />}
+          <SystemUpgradeSection />
           <SystemDiagnosisSection details={<RelayHealthSection />} />
         </Section>
         <AppKeysSection />

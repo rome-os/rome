@@ -509,6 +509,39 @@ describe("AgentRunner", () => {
     expect(messages).toEqual([{ type: "result", content: "Fork summary", agent: "test-main" }]);
   });
 
+  it("hands the forked turn the person who asked for the fork", async () => {
+    const inputs: Array<{ actor?: object }> = [];
+    const source = {
+      key: { agentName: "test-main", channelThreadKey: "webchat:sess-1" },
+      sessionId: "source-session",
+      status: "idle" as const,
+      submit: rs.fn(),
+      async *fork(input: { actor?: object }) {
+        inputs.push(input);
+        yield { type: "result", content: "ok", agent: "test-main" } as const;
+      },
+      onStatusChange: rs.fn(() => () => undefined),
+      stop: rs.fn(async () => undefined),
+      close: rs.fn(async () => undefined),
+    };
+    const manager = {
+      open: rs.fn(),
+      find: rs.fn(() => source),
+      shutdown: rs.fn(async () => undefined),
+    } as unknown as Sessions;
+    const visitor = { kind: "visitor", accountId: "acct-v", email: "v@example.com" } as const;
+    await collectMessages(
+      new AgentRunner(manager, agentLoader).runForked({
+        agentName: "test-main",
+        sourceSessionId: "source-session",
+        channelThreadKey: "webchat:sess-1",
+        prompt: "summarize",
+        actor: visitor,
+      }),
+    );
+    expect(inputs[0]?.actor).toBe(visitor);
+  });
+
   it("records a forked run as a fork rome session with parent lineage", async () => {
     const testDb = createTestDb();
     try {

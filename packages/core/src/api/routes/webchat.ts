@@ -699,6 +699,20 @@ interface StreamSubscriber {
   queue: Promise<void>;
 }
 
+/**
+ * The tool a session's turn is in: the latest open call of its unfinished
+ * stream that has one. The queue also holds streams still waiting their
+ * turn, which have no calls, so the newest stream is not the running one.
+ */
+export function openToolOf(
+  streams: readonly Pick<ActiveWebchatStream, "finished" | "openTools">[],
+): string | null {
+  const running = [...streams]
+    .reverse()
+    .find((stream) => !stream.finished && stream.openTools.size > 0);
+  return [...(running?.openTools.values() ?? [])].at(-1) ?? null;
+}
+
 interface ActiveWebchatStream {
   streamId: string;
   sessionId: string;
@@ -717,6 +731,8 @@ interface ActiveWebchatStream {
   agentTurnId?: string;
   /** A backend turn that is housekeeping for its agent; see `BackendTurnOptions`. */
   quiet?: boolean;
+  /** A quiet turn has said something in its chat, so it shows as running from then on. */
+  spoke?: boolean;
   /** A Stop request reached the stream's turn. */
   stopRequested?: boolean;
   startedAt: string;
@@ -740,6 +756,12 @@ interface ActiveWebchatStream {
   persistedTraceEventCount: number;
   tracePersistPromise: Promise<void> | null;
   segmentBuilder: SegmentBuilder;
+  /**
+   * The turn's tool calls whose results have not come back, by call id, in
+   * the order they started. A call without an id is keyed by its position
+   * and closes at the next result without one.
+   */
+  openTools: Map<string, string>;
   subscribers: Map<string, StreamSubscriber>;
   cleanupTimer: ReturnType<typeof setTimeout> | null;
   onFinish: Promise<void>;
@@ -805,6 +827,22 @@ export interface WebchatRuntime {
   sendAsGuardian(chatId: string, text: string): Promise<void>;
   /** Whether the chat is running a turn now. */
   isRunning(sessionId: string): boolean;
+  /**
+   * Whether the chat is running a turn its owner sees: any but a quiet one
+   * that has not said anything yet, as the transcript shows it.
+   */
+  isBusy(sessionId: string): boolean;
+  /**
+   * The tool the chat's running turn is in now: its latest call whose result
+   * has not come back, as the trace names it. Null when it is in none.
+   */
+  openTool(sessionId: string): string | null;
+  /**
+   * Calls `listener` with the chat's id whenever it starts or stops running a
+   * turn, or its running turn enters or leaves a tool; the latter alone comes
+   * with `toolOnly`. Returns the unsubscribe.
+   */
+  onTurnChange(listener: (sessionId: string, change: { toolOnly?: boolean }) => void): () => void;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
   activeTurns(sessionId: string): string[];
   /** Stop a turn. A turn that already ended is not an error. */
@@ -858,12 +896,36 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     deps.agentTurnStreamRegistry.listBySession(sessionId).length > 0;
   // Sessions running right now, so a status stream can open with a snapshot.
   const runningSessions = new Set<string>();
+  /** Listeners told when a session's running turn changes in any way, tools included. */
+  const turnListeners = new Set<(sessionId: string, change: { toolOnly?: boolean }) => void>();
+  const notifyTurn = (sessionId: string, change: { toolOnly?: boolean } = {}): void => {
+    for (const listener of turnListeners) listener(sessionId, change);
+  };
   const notifyRunning = (sessionId: string): void => {
     const event = { sessionId, running: isSessionRunning(sessionId) };
     if (event.running) runningSessions.add(sessionId);
     else runningSessions.delete(sessionId);
     for (const listener of runningListeners) listener(event);
+    notifyTurn(sessionId);
   };
+  const isSessionBusy = (sessionId: string): boolean =>
+    (activeStreams.get(sessionId) ?? []).some(
+      (stream) => !stream.finished && (!stream.quiet || stream.spoke),
+    ) || deps.agentTurnStreamRegistry.listBySession(sessionId).length > 0;
+  // A quiet turn shows once it says something.
+  deps.webchatRepo.onMessageInserted((message) => {
+    if (message.role !== "assistant") return;
+    let changed = false;
+    for (const stream of activeStreams.get(message.sessionId) ?? []) {
+      if (!stream.finished && stream.quiet && !stream.spoke) {
+        stream.spoke = true;
+        changed = true;
+      }
+    }
+    if (changed) notifyTurn(message.sessionId);
+  });
+  const openTool = (sessionId: string): string | null =>
+    openToolOf(activeStreams.get(sessionId) ?? []);
   deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
   const subscribeStatusEvents = (emit: LiveEventEmit): (() => void) => {
     const listener = (event: { sessionId: string; running: boolean }) =>
@@ -1595,6 +1657,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return null;
     }
 
+    const forkActor = turnActor(await currentSessionActor(), undefined);
     const iterator = deps.agentRunner
       .runForked({
         agentName,
@@ -1606,6 +1669,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         label: input.label,
         mode: "exact",
         sourceCheckpoint,
+        // The fork acts for the person who asked for it.
+        ...(forkActor ? { actor: forkActor } : {}),
         // Keyed by the fork's own id, exactly what `handleChatSend` will
         // derive for it later.
         ...(input.continuable ? { persistThreadKey: webchatSessionKey } : {}),
@@ -1952,6 +2017,22 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
   };
 
+  // Keeps `stream.openTools` in step with a trace block, and answers whether
+  // it changed.
+  const trackOpenTool = (
+    stream: ActiveWebchatStream,
+    block: ReturnType<typeof toTraceEvent>,
+  ): boolean => {
+    if (block.type === "tool_use") {
+      stream.openTools.set(block.id ?? `anon:${stream.openTools.size}`, block.tool);
+      return true;
+    }
+    if (block.type !== "tool_result") return false;
+    if (block.toolUseId) return stream.openTools.delete(block.toolUseId);
+    const anon = [...stream.openTools.keys()].reverse().find((key) => key.startsWith("anon:"));
+    return anon ? stream.openTools.delete(anon) : false;
+  };
+
   // Push an AgentEvent through the segment builder and emit segment_upsert
   // events for any segments whose payload changed, plus a refreshed summary.
   const emitLiveTraceEvent = (
@@ -1959,6 +2040,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     msg: TraceableEvent & { agent?: string },
   ): void => {
     const block = toTraceEvent(msg);
+    if (trackOpenTool(stream, block)) notifyTurn(stream.sessionId, { toolOnly: true });
     const changed = stream.segmentBuilder.push(block);
     for (const seg of changed) {
       emitToStream(stream, "segment_upsert", seg, `seg:${seg.id}`);
@@ -2048,6 +2130,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       persistedTraceEventCount: 0,
       tracePersistPromise: null,
       segmentBuilder,
+      openTools: new Map(),
       subscribers: new Map(),
       cleanupTimer: null,
       onFinish,
@@ -4317,6 +4400,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const options = {
       ...(replyPushes(actor, saidBy) ? { pushLevel: "active" as const } : {}),
+      // Who the turn acts for, captured now: its tool calls run as this
+      // person however late the model's callback arrives.
+      ...(turnActor(actor, saidBy) ? { actor: turnActor(actor, saidBy) } : {}),
       links: turnLinks,
       priority: priority.data,
       threadContext,
@@ -4678,6 +4764,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       });
     },
     isRunning: isSessionRunning,
+    isBusy: isSessionBusy,
+    openTool,
+    onTurnChange(listener) {
+      turnListeners.add(listener);
+      return () => {
+        turnListeners.delete(listener);
+      };
+    },
     activeTurns: (sessionId) =>
       sessionTurns(sessionId).map(
         (turn) => ("agentTurnId" in turn ? turn.agentTurnId : undefined) ?? turn.turnId,
@@ -4693,11 +4787,26 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 }
 
 /**
- * Whether the Concierge's reply to a sent message may reach the guardian's
- * phone (ConciergePush): only a message the guardian wrote, signed in. A
- * message said as someone else (an agent account, an automated source) and a
- * loopback caller acting as the guardian are not the guardian writing.
+ * The person a sent message's turn acts for: the guardian or a visitor who
+ * wrote it. A message said as an agent account, or with no person behind
+ * it, gives none.
+ */
+export function turnActor(
+  actor: SessionActor | undefined,
+  saidBy: Account | undefined,
+): SessionActor | undefined {
+  if (saidBy !== undefined) return undefined;
+  return actor?.kind === "guardian" || actor?.kind === "visitor" ? actor : undefined;
+}
+
+/**
+ * Whether the Concierge's reply to a sent message may reach the sender's
+ * phone (ConciergePush): only a message the guardian or a visitor wrote,
+ * signed in. A message said as someone else (an agent account, an automated
+ * source) and a loopback caller acting as the guardian are not a person
+ * writing.
  */
 export function replyPushes(actor: SessionActor | undefined, saidBy: Account | undefined): boolean {
-  return actor?.kind === "guardian" && actor.via === "cookie" && saidBy === undefined;
+  if (saidBy !== undefined) return false;
+  return actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via === "cookie");
 }

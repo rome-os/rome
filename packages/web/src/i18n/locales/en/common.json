@@ -133,7 +133,8 @@
       "previous7Days": "Previous 7 days",
       "previous30Days": "Previous 30 days",
       "older": "Older"
-    }
+    },
+    "startedByConcierge": "Started by {{name}}"
   },
   "language": {
     "label": "Language"
@@ -146,19 +147,18 @@
     "signOutError": "Couldn't log out. Please try again."
   },
   "thisComputer": {
-    "label": "Let Rome use this computer",
-    "auditLog": "View audit log",
+    "label": "Computer use",
+    "auditLog": "Computer use log",
     "tooltip": {
       "connected": "Rome can use this computer",
       "connecting": "Connecting…",
       "offline": "Rome can't reach this computer right now",
-      "disabled": "Rome can't use this computer"
-    },
-    "state": {
-      "connected": "Connected",
-      "connecting": "Connecting…",
-      "offline": "Offline",
-      "disabled": "Turned off"
+      "disabled": "Rome can't use this computer",
+      "limited": {
+        "connected": "Connected · Computer use off",
+        "connecting": "Connecting… · Computer use off",
+        "offline": "Offline · Computer use off"
+      }
     }
   },
   "terminal": {
@@ -193,6 +193,9 @@
       "preparingUrl": "Preparing Claude sign-in URL",
       "submittingCode": "Submitting Claude login code"
     }
+  },
+  "upgradeIndicator": {
+    "tooltip": "{{name}} can be upgraded"
   },
   "upgradeBanner": {
     "countdownTitle": "Update to Rome {{version}} is ready",

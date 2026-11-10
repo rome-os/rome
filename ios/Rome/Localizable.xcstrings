@@ -155,6 +155,34 @@
         }
       }
     },
+    "%lld replies" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld reply"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld replies"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 条回复"
+          }
+        }
+      }
+    },
     "%lld unread" : {
       "localizations" : {
         "zh-Hans" : {
@@ -595,6 +623,16 @@
         }
       }
     },
+    "Checking what you follow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查看你的关注"
+          }
+        }
+      }
+    },
     "Choose from library" : {
       "localizations" : {
         "zh-Hans" : {
@@ -911,16 +949,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已完成"
-          }
-        }
-      }
-    },
-    "Downloading %@…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在下载 %@…"
           }
         }
       }
@@ -1963,6 +1991,26 @@
         }
       }
     },
+    "Reading a chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查看对话"
+          }
+        }
+      }
+    },
+    "Reading a page" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在阅读网页"
+          }
+        }
+      }
+    },
     "Reading log" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2059,6 +2107,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已被替换"
+          }
+        }
+      }
+    },
+    "Reply" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回复"
           }
         }
       }
@@ -2353,6 +2411,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "搜索 Chat 和任务里的消息"
+          }
+        }
+      }
+    },
+    "Searching the web" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在搜索网页"
           }
         }
       }
@@ -2675,6 +2743,26 @@
         }
       }
     },
+    "Starting a task" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在开始任务"
+          }
+        }
+      }
+    },
+    "Starting a topic chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在开启话题对话"
+          }
+        }
+      }
+    },
     "Status" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2711,6 +2799,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已停止"
+          }
+        }
+      }
+    },
+    "Stopping a task" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在停止任务"
           }
         }
       }
@@ -2945,12 +3043,12 @@
         }
       }
     },
-    "This can take a few minutes. You can leave the app; it picks up where it left off." : {
+    "This card was already answered. The task has been refreshed." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这可能需要几分钟。你可以先离开 App，回来后会接着等待。"
+            "value" : "这张卡片已经回答过，任务已刷新。"
           }
         }
       }
@@ -2981,6 +3079,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这台 iPhone、你的 Rome、你的 AI 模型服务商"
+          }
+        }
+      }
+    },
+    "This runs on your Rome's server, not on this phone, and can take a few minutes. You can leave the app and come back." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "升级在你的 Rome 服务器上进行，不在这台手机上，可能需要几分钟。你可以先离开 App，稍后再回来。"
           }
         }
       }
@@ -3201,6 +3309,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "立即更新"
+          }
+        }
+      }
+    },
+    "Updating tasks" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在更新任务"
+          }
+        }
+      }
+    },
+    "Upgrading to %@…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在升级到 %@…"
           }
         }
       }
@@ -3443,12 +3571,32 @@
         }
       }
     },
+    "Working on it" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在处理"
+          }
+        }
+      }
+    },
     "Workouts" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "体能训练"
+          }
+        }
+      }
+    },
+    "Writing to a task chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在给任务对话发消息"
           }
         }
       }
@@ -3629,6 +3777,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下一页"
+          }
+        }
+      }
+    },
+    "status.needsYou" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for your answer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等你回复"
           }
         }
       }

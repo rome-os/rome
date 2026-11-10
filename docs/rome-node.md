@@ -287,7 +287,7 @@ is committed with WAL and `synchronous=FULL`, and on macOS also `fullfsync`,
 before the program starts, the folder is read, or a push creates its part file.
 If that commit fails, the host replies `audit_unavailable` and runs nothing. The
 message tells the caller where to look: `rome-node audit status` for the CLI, and
-**Rome → Audit Log…** for the app. `system.info` changes nothing and answers as
+**Rome → Computer Use Log…** for the app. `system.info` changes nothing and answers as
 usual, with `audit: { state: "ok" | "unavailable", code?, message? }`, so Settings →
 Devices can show why a device refuses requests. The `end` record is written after
 the action and before the reply. A failed `end` stays in memory and is written
@@ -325,8 +325,8 @@ most every 5 seconds when a request arrives. To start over, move the file away.
 first 256 KiB of a payload. The full stored payload of the app's log can be read
 with `rome-node audit show <seq> --content stdout --db ~/.rome-desktop/audit/audit.db`
 (`stdin`, `stderr`, and `file` work the same way). The desktop app shows its
-log in **Rome → Audit Log…**, also in the tray menu, and Settings → Devices in the
-Rome it opened offers **View audit log** in this computer's menu. That window is a
+log in **Rome → Computer Use Log…**, also in the tray menu, and Settings → Devices in the
+Rome it opened offers **Computer use log** in this computer's menu. That window is a
 local page of the app with the device pages' layout. The Rome's page can only ask
 the app to open it (`device.openAuditLog`). The log is read through channels that
 answer the app's own `file:` pages, so remote pages never receive any of it.
@@ -479,21 +479,56 @@ the app quits. Programs run as the user who runs the app. Before it connects,
 the app adopts the PATH of the user's login shell, because an app opened from
 Finder or the Dock gets only the system directories.
 
-The user can turn the computer off as a device and on again. The choice persists
-across restarts: while it is off, the app stays signed in and opens the Rome, but
-does not connect the computer. Settings → Devices in the Rome the app opened shows
-a "This device" card whose menu has Connect or Disconnect, only inside the app.
+While the app runs signed in it is always connected to the Gateway. It disconnects
+only when the user signs out, the app quits, the network is lost, or Rome Cloud
+revokes the device, so the device's connected or offline state is real. Two
+independent choices apply on top of the connection, and both persist across restarts.
+
+- **Computer use** (on by default) decides whether Rome may
+  run programs and read files on this computer. Turning it off keeps the connection but
+  switches it to a limited one. That connection is built without the executor, so no
+  program or file code is reachable from it. It answers `system.info` with
+  `computerUse: false` and an empty `actions` list. Every other request gets the error
+  `computer_use_off` as a normal reply, so a caller does not wait for a timeout.
+  Binary requests get an error frame, and `system.info` leaves out `transferVersion`, so
+  `rome-node cp` stops early. These refusals are not written to the audit log, because
+  nothing ran. Turning Computer use on or off reconnects in the other mode.
+- **Notifications** (on by default) decides whether the app shows Rome Cloud's
+  notifications. Off, the app still receives them and drops them. The switch lives in the
+  app's own Settings window (**Rome → Settings…**), and the Rome's dashboard cannot read or
+  change it.
+
+Settings → Devices in the Rome the app opened shows
+a "This device" card whose menu has Connect or Disconnect, which turn Computer use on and off, only inside the app.
 The menu cannot remove this computer. It links to Rome Cloud, which can. The app answers the
 card's requests only from the top frame of that Rome's origin. Other pages in its
 window, and the Rome in a browser, cannot read or change the device.
 
-While the computer is on as a device, the app keeps its display from sleeping,
+While Computer use is on and the computer is connected, the app keeps its display from sleeping,
 and macOS does not idle-sleep while the display stays on. A lost connection keeps
 the hold for 30 minutes, because a computer that sleeps during an outage does not
 reconnect on its own. After that the app releases the hold and takes it again
-once the device reconnects. Turning the device off, signing out, Rome Cloud
+once the device reconnects. Turning Computer use off, signing out, Rome Cloud
 revoking the device, or quitting the app releases it at once. Closing the lid or
 choosing Sleep still sleeps the computer.
+
+Rome Cloud can also send the app a notification over the same connection, as one
+text message, only from the Gateway to the app:
+
+```json
+{"type":"notification","title":"Rome","body":"…","level":"active","instanceId":"…","chatId":"…"}
+```
+
+`title`, `body` and `instanceId` are required strings (title up to 200 characters, body
+up to 2000, instance id up to 128). `level` is `active` or `passive`, and `chatId` is a
+string up to 128 characters. Both are optional. It has no `id` or `from`, which every
+relayed peer message has, so it can only come from the Gateway. A client ignores it
+without an `onNotification` handler, as `rome-node` does, and ignores any message that
+does not match. The app shows it as a system notification, silent unless `level` is
+`active`, and skips it while its Rome window is visible and in front or while the
+Notifications choice is off. Clicking it shows the window, and opens the chat if the
+notification is for the Rome the app has open. The connection is up with Computer use
+on or off, so both get notifications. macOS only shows them from a signed app.
 
 The app keeps its credential in its own encrypted store and never reads the CLI's
 configuration directory. `rome-node connect` on the same computer is a separate

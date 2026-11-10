@@ -299,7 +299,7 @@ export async function buildConciergeTools(
     // touches a needs_user row keeps its message.
     if (write.state === "needs_user" && !messageId) {
       throw new Error(
-        `${where}: needs_user requires messageId: say or chat_forward the ask first, then pass the messageId it returned`,
+        `${where}: needs_user requires messageId: show a task question or approval with chat_card, otherwise ask with say or chat_forward; pass the returned messageId`,
       );
     }
     // A row belongs to the Concierge chat it was made in, and moves to the
@@ -319,11 +319,17 @@ export async function buildConciergeTools(
   const findListEntry = async (chatId: string) =>
     (await webchatRepo.listSessions("all")).find((chat) => chat.id === chatId);
 
-  // A message the guardian did not ask for may also reach their phone. Its
+  // Every message of a turn with a push level may also reach the phone. Its
   // lock-screen line is only ever words the Concierge wrote in this message,
-  // and null when it wrote none, which pushes a fixed line.
-  const said = (chatId: string, turnId: string, ownWords: string | null) =>
-    service.said({ turnId, chatId, ownWords, level: context.getTurnPushLevel() });
+  // and null when it wrote none or marked them private, which pushes a fixed line.
+  const said = (chatId: string, turnId: string, ownWords: string | null, isPrivate = false) =>
+    service.said({
+      turnId,
+      chatId,
+      ownWords,
+      ...(isPrivate ? { private: true } : {}),
+      level: context.getTurnPushLevel(),
+    });
 
   // The chat thread a message the Concierge says goes into
   // (docs/domains/chats.md#chat-thread), and the placing of the guardian's
@@ -386,6 +392,7 @@ export async function buildConciergeTools(
   const say = async (
     text: string,
     format: "bubble" | "long",
+    isPrivate: boolean,
     thread?: string,
     answers?: string,
   ) => {
@@ -396,7 +403,7 @@ export async function buildConciergeTools(
       [{ type: "text", content: text, ...(format === "long" ? { format } : {}) }],
       { chatThread: await chatThreadFor(thread, answers) },
     );
-    said(chatId, turnId, text);
+    said(chatId, turnId, text, isPrivate);
     return id;
   };
 
@@ -444,7 +451,8 @@ export async function buildConciergeTools(
       name: "say",
       description:
         "Send the guardian one message. This is the only way the guardian hears you: text you write outside this tool is private. " +
-        "One call is one message. Use format bubble (default) for a short chat line, and long for one long message with content the guardian asked for.",
+        "One call is one message. Use format bubble (default) for a short chat line, and long for one long message with content the guardian asked for. " +
+        "Every message can show on the guardian's phone lock screen: set private for one that holds a code, password, token or other secret, and the phone shows a fixed line instead.",
       inputSchema: {
         type: "object",
         required: ["text"],
@@ -455,6 +463,11 @@ export async function buildConciergeTools(
             enum: ["bubble", "long"],
             description: "bubble: a short chat line. long: one long message.",
           },
+          private: {
+            type: "boolean",
+            description:
+              "true: the message holds a secret, so its words never show on the phone's lock screen.",
+          },
           thread: THREAD_PARAMETER,
           answers: ANSWERS_PARAMETER,
         },
@@ -464,6 +477,7 @@ export async function buildConciergeTools(
           const messageId = await say(
             requireString(args, "text"),
             args.format === "long" ? "long" : "bubble",
+            args.private === true,
             optionalString(args, "thread"),
             optionalString(args, "answers"),
           );
@@ -478,7 +492,7 @@ export async function buildConciergeTools(
       description:
         "Write your task list, the guardian's panel of what you are busy with. Batch only: one call writes every row that changed. " +
         "An entry without id creates a row (title required, and a message to point to); an entry with id updates it, and fields you leave out stay. " +
-        "Setting a row to needs_user needs the messageId of the message that asks the guardian, so say or chat_forward before you write it. " +
+        "For needs_user, show a task question or approval with chat_card, otherwise ask with say or chat_forward. Use the returned messageId as the row anchor. " +
         "Returns each row's id and the message it points to.",
       inputSchema: {
         type: "object",
@@ -525,7 +539,7 @@ export async function buildConciergeTools(
                 messageId: {
                   type: "string",
                   description:
-                    "The message the row points to, as say, chat_card, or chat_forward returned it. Required whenever the entry sets state needs_user: it must be the message that asks the guardian, so say or chat_forward first. A new row of another state takes your latest message this turn if you leave it out. On an update it replaces the old one; leave it out to keep it. chat_forward updates this anchor automatically.",
+                    "The message the row points to, as say, chat_card, or chat_forward returned it. Required for needs_user: show a task question or approval with chat_card, otherwise ask with say or chat_forward. Use the returned messageId as the row anchor. A new row of another state takes your latest message this turn if you leave it out. On an update it replaces the old one; leave it out to keep it. chat_card and chat_forward update this anchor automatically.",
                 },
               },
             },
@@ -907,7 +921,8 @@ export async function buildConciergeTools(
       name: "chat_card",
       description:
         "Show the guardian a card that opens a task chat and shows its live status. " +
-        "Use it when they want to open or find a task chat, instead of sending its id.",
+        "Use it for a task question or approval and use the returned messageId as the needs_user row anchor. Also use it to open or find a task chat instead of sending its id. " +
+        "An existing task row automatically points to this card in this Concierge chat.",
       inputSchema: {
         type: "object",
         required: ["chatId"],
@@ -917,7 +932,10 @@ export async function buildConciergeTools(
         runTool("chat_card", input, async (args) => {
           const chatId = requireString(args, "chatId");
           const chat = await requireTaskChat(chatId);
+          const { chatId: conciergeChatId } = currentTurn();
           const messageId = await showCard(chatId, chat.name);
+          const task = await tasks.repo.findBySession(chatId);
+          if (task) await tasks.repo.setSourceMessage(task.id, conciergeChatId, messageId);
           return { sent: "Shown; the guardian sees the card.", messageId };
         }),
     },

@@ -7,6 +7,7 @@ import {
   TaskEventCoalescer,
   URGENT_DELAY_MS,
 } from "./task-events.js";
+import { currentSessionActor, runWithSessionActor } from "../access/session-actor.js";
 
 const urgent = (taskId: string, kind = "turn_end:completed by=concierge") => ({
   taskId,
@@ -79,6 +80,48 @@ describe("TaskEventCoalescer", () => {
   });
   afterEach(() => {
     rs.useRealTimers();
+  });
+
+  describe("awaitingReport", () => {
+    it("holds an urgent row from its mark until the turn that reports it ends", async () => {
+      const s = setup();
+      const changes: string[][] = [];
+      s.coalescer.onChange(() => changes.push(s.coalescer.awaitingReport));
+      s.holdTurns();
+      s.coalescer.mark(quiet("q"));
+      s.coalescer.mark(urgent("a"));
+      expect(s.coalescer.awaitingReport).toEqual(["a"]);
+
+      // The flush builds and runs the turn: the row is still about to be reported.
+      await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+      expect(s.flushes).toHaveLength(1);
+      expect(s.coalescer.awaitingReport).toEqual(["a"]);
+
+      // The Concierge writes the row during its turn, and the turn ends.
+      s.coalescer.settle("a");
+      await s.endTurn();
+      expect(s.coalescer.awaitingReport).toEqual([]);
+      expect(changes.at(-1)).toEqual([]);
+    });
+
+    it("lets go of a row the turn carried but did not settle, until its retry", async () => {
+      const s = setup();
+      s.coalescer.mark(urgent("a"));
+      await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+      expect(s.flushes).toHaveLength(1);
+      expect(s.coalescer.pending).toEqual(["a"]);
+      expect(s.coalescer.awaitingReport).toEqual([]);
+    });
+
+    it("lets go of a row waiting out a turn that did not run", async () => {
+      const s = setup();
+      s.turnsRun(false);
+      s.coalescer.mark(urgent("a"));
+      await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+      expect(s.coalescer.awaitingReport).toEqual([]);
+      await rs.advanceTimersByTimeAsync(RETRY_MS);
+      expect(s.flushes).toHaveLength(2);
+    });
   });
 
   it("flushes an urgent change after 2 s, as one non-quiet batch", async () => {
@@ -438,6 +481,40 @@ describe("TaskEventCoalescer", () => {
     expect(delivered).toEqual([
       { chatId: "topic-1", owner: "guardian", taskIds: ["a", "b"], prompt: "a,b", quiet: false },
       { chatId: null, owner: "guardian", taskIds: ["c"], prompt: "c", quiet: true },
+    ]);
+  });
+});
+
+describe("TaskEventCoalescer and session actors", () => {
+  it("runs every owner's turns as no one, whichever person's request marked the last row", async () => {
+    const seen: Array<{ owner: string; actor: unknown }> = [];
+    const coalescer = new TaskEventCoalescer({
+      now: () => Date.now(),
+      render: async (tasks) =>
+        tasks.map((task) => ({
+          chatId: task.taskId === "v" ? "visitor-topic" : null,
+          owner: task.taskId === "v" ? "visitor:acct-v" : "guardian",
+          taskIds: [task.taskId],
+          prompt: task.taskId,
+          quiet: false,
+        })),
+      deliver: async ({ owner }) => {
+        seen.push({ owner, actor: await currentSessionActor() });
+        return "completed";
+      },
+      giveUp: () => {},
+    });
+    coalescer.mark(urgent("g"));
+    // The visitor's request marks the last row, which arms the timer.
+    await runWithSessionActor(
+      { kind: "visitor", accountId: "acct-v", email: "v@example.com" },
+      () => coalescer.mark(urgent("v")),
+    );
+    await new Promise((resolve) => setTimeout(resolve, URGENT_DELAY_MS + 200));
+    coalescer.stop();
+    expect(seen).toEqual([
+      { owner: "guardian", actor: undefined },
+      { owner: "visitor:acct-v", actor: undefined },
     ]);
   });
 });

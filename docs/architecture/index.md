@@ -16,5 +16,6 @@ Browse by surface:
 - [`named-desktops.md`](named-desktops.md) — The fixed table of X displays kept for one owner each, the script that starts them so they outlive Rome, and the loopback and guardian-only rules for viewing them.
 - [`host-execution.md`](host-execution.md) — How system actions delegate privileged jobs to a Linux host service and preserve its authorization boundary.
 - [`concierge.md`](concierge.md) — How one Concierge talks in its main and topic chats, hands work to task chats, and sends each result, alert and digest to the chat that should hear it.
+- [`concierge-activity.md`](concierge-activity.md) — How Rome works out what each Concierge chat is doing from facts it holds, and tells only that chat's owner.
 - [`concierge-following.md`](concierge-following.md) — How an event from a followed service reaches the Concierge through its connection, triage and digest, and the rules that keep service differences in the connection.
 - [`observability.md`](observability.md) — The OTEL → Collector → ClickHouse pipeline, required telemetry attributes, and the dev-vs-prod topology split.

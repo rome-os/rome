@@ -11,8 +11,17 @@ import {
   Plus,
   Trash2,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
+import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -34,12 +43,11 @@ import { deviceFolderName, pathSegments } from "@/lib/device-folder";
 import {
   activeSessionFromPath,
   chatKind,
-  isProjectChat,
   MAIN_CHAT_PATH,
   sessionActivityTime,
 } from "@/lib/chat-session";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
-import { useConciergeChatId, useRefreshTopicChats } from "@/hooks/use-concierge";
+import { useConciergeChatId, useConciergeName, useRefreshTopicChats } from "@/hooks/use-concierge";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { ConciergeChats } from "./ConciergeEntry";
 import { emitSessionsChanged, useArchiveSession } from "@/lib/session-events";
@@ -214,7 +222,18 @@ const SESSION_NAME_MAX_LENGTH = 50;
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole.
  */
-function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
+function ChatRowLink({
+  id,
+  name,
+  nested,
+  marker,
+}: {
+  id: string;
+  name: string;
+  nested: boolean;
+  /** Names who started the chat, shown as a small mark after the name. */
+  marker?: string;
+}) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
   // Measured lazily right before the tooltip could open (pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
@@ -247,6 +266,13 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
           <span ref={nameRef} className="truncate">
             {name}
           </span>
+          {marker ? (
+            <ChatBubbleIcon
+              role="img"
+              aria-label={marker}
+              className="ml-2 h-3 w-3 shrink-0 text-subtle-foreground"
+            />
+          ) : null}
         </Link>
       </TooltipTrigger>
       {/* Right of the row, so the bubble reaches into the page rather than
@@ -305,11 +331,14 @@ export function RecentChats({
   const sessions = useMemo(
     () =>
       (cachedSessions ?? [])
-        .filter((s) => isProjectChat(chatKind(s)))
+        // Concierge chats have their own rows above; every other chat,
+        // task chats included, sits under its project.
+        .filter((s) => chatKind(s) !== "topic")
         .map((s) => withLiveRunning(s, liveRunning.current)),
     [cachedSessions],
   );
   const conciergeChatId = useConciergeChatId();
+  const conciergeName = useConciergeName();
   // Refetches the chat list and the Concierge's list together.
   const refreshTopicChats = useRefreshTopicChats();
   // The Concierge section draws its topic chats from these: an archived one
@@ -318,7 +347,30 @@ export function RecentChats({
     () => (cachedSessions ?? []).filter((s) => chatKind(s, conciergeChatId) === "topic"),
     [cachedSessions, conciergeChatId],
   );
-  const activeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
+  const routeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
+  // The router renders a navigation as a transition, so the location stays
+  // on the old chat until the new one has rendered, which takes a moment
+  // when the old one is long. The row a click opens is marked at once, as an
+  // urgent update, and gives way when the location arrives.
+  const [openingSessionId, setOpeningSessionId] = useState<string | null>(null);
+  useEffect(() => setOpeningSessionId(null), [routeSessionId]);
+  const activeSessionId = openingSessionId ?? routeSessionId;
+  const markOpening = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      const link = (event.target as Element).closest("a[href]");
+      if (!link || link.getAttribute("target")) return;
+      const opened = activeSessionFromPath(
+        new URL(link.getAttribute("href") ?? "", window.location.origin).pathname,
+        conciergeChatId,
+      );
+      // A click back on the chat already open cancels a mark still waiting.
+      if (opened) setOpeningSessionId(opened === routeSessionId ? null : opened);
+    },
+    [conciergeChatId, routeSessionId],
+  );
 
   // A chat that starts running before the list has it, such as a task chat
   // Concierge just started, would show only when its first turn ends. The
@@ -629,7 +681,16 @@ export function RecentChats({
             }`}
           />
         ) : (
-          <ChatRowLink id={session.id} name={session.name} nested={nested} />
+          <ChatRowLink
+            id={session.id}
+            name={session.name}
+            nested={nested}
+            marker={
+              chatKind(session) === "task"
+                ? t("recentChats.startedByConcierge", { name: conciergeName })
+                : undefined
+            }
+          />
         )}
         <span
           className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${
@@ -921,7 +982,10 @@ export function RecentChats({
             {headerControls}
           </div>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 scrollbar-idle-hidden">
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 scrollbar-idle-hidden"
+          onClickCapture={markOpening}
+        >
           {conciergeChatId ? (
             <ConciergeChats
               mainChatId={conciergeChatId}

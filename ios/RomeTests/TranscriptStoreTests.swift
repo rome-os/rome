@@ -23,7 +23,12 @@ final class FakeBackend: RomeBackend {
     /// Runs while the newest page is in flight.
     var duringNewestFetch: (() async -> Void)?
 
+    /// Set, every message read fails with it.
+    var messagesError: APIError?
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
+        pageLimits.append(limit)
+        if let messagesError { throw messagesError }
         let end = before.flatMap { cursor in stored.firstIndex { $0.id == cursor } } ?? stored.count
         let start = max(0, end - limit)
         let page = MessagePage(messages: Array(stored[start..<end]), nextCursor: start > 0 ? stored[start].id : nil)
@@ -60,8 +65,13 @@ final class FakeBackend: RomeBackend {
     var calls: [String] = []
     var startFails = false
 
+    /// Runs inside the chat-list fetch, before it answers.
+    var duringChatsFetch: (() async -> Void)?
+
     func conciergeChats() async throws -> [ConciergeChat] {
-        [ConciergeChat(id: conciergeChatID, name: "", main: true, unread: 0)] + topicChats
+        let answer = [ConciergeChat(id: conciergeChatID, name: "", main: true, unread: 0)] + topicChats
+        await duringChatsFetch?()
+        return answer
     }
 
     func startTopicChat() async throws -> ConciergeChat {
@@ -92,6 +102,30 @@ final class FakeBackend: RomeBackend {
     /// Off, every send fails, as it always did here.
     var sendSucceeds = false
 
+    /// What each send asked for its chat thread, in order.
+    var sentThreads: [ThreadTarget?] = []
+    /// A thread read's answer, by the message asked for; missing ones fail.
+    var threads: [String: [ChatMessage]] = [:]
+    var threadReads: [String] = []
+
+    /// Set, every thread read fails with it (a network error, say).
+    var threadError: APIError?
+    /// Runs inside a thread read, before it answers.
+    var duringThreadRead: (() async -> Void)?
+
+    func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
+        threadReads.append(messageId)
+        await duringThreadRead?()
+        if let threadError { throw threadError }
+        guard let thread = threads[messageId] else { throw APIError.notFound }
+        return thread
+    }
+
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn {
+        sentThreads.append(thread)
+        return try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority)
+    }
+
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
         sentFiles = files
         calls.append(files.isEmpty ? "send \(sessionId) \(text)" : "send \(sessionId) \(text) [\(files.count) files]")
@@ -99,9 +133,17 @@ final class FakeBackend: RomeBackend {
         throw APIError.network
     }
     var answeredSessions: [String] = []
+    /// What an answer fails with; nil lets it through.
+    var answerError: APIError? = .network
+    var pending: [PendingApproval] = []
+    /// The page size of each fetch, in order.
+    var pageLimits: [Int] = []
+
+    func pendingApprovals() async throws -> [PendingApproval] { pending }
+
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
         answeredSessions.append(sessionId)
-        throw APIError.network
+        if let answerError { throw answerError }
     }
     /// The chats marked read, in order.
     var reads: [String] = []

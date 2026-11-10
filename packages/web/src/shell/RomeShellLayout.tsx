@@ -19,7 +19,12 @@ import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { UpgradeCountdownBanner } from "../components/upgrade-countdown-banner";
 import { IconButton } from "../components/ui/icon-button";
 import { MobileBackdrop } from "../components/ui/mobile-backdrop";
-import { SlotOutlet } from "../components/slot";
+import { SlotContent, SlotOutlet, useSlotOutlet } from "../components/slot";
+import { cn } from "@/lib/utils";
+import {
+  CONCIERGE_LEADING_SLOT,
+  FLOATING_SURFACE,
+} from "@/components/concierge/ConciergeHeaderStatus";
 import { SLIDE_MS, useSwipeSidebar } from "./use-swipe-sidebar";
 import { AppGrid } from "./AppGrid";
 import { APP_NAV } from "./builtin-nav";
@@ -29,11 +34,14 @@ import { ProfileMenu } from "./ProfileMenu";
 import { RecentChats } from "./RecentChats";
 import { RailLabelsContext } from "./sidebar-shared";
 import { ThisComputerButton } from "./ThisComputerButton";
+import { UpgradeIndicator } from "./UpgradeIndicator";
 import { useChatPeek } from "./use-chat-peek";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { saveSetting } from "@/lib/chat-api";
 import { openChatSearch } from "@/lib/chat-search-events";
 import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
+import { useDashboardActivity } from "@/hooks/use-dashboard-activity";
+import { hasSession, useAuthStateSnapshot } from "@/lib/auth-state";
 import { useDesktop } from "@/hooks/use-desktop";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useSettings, useInvalidateSettings } from "@/hooks/use-settings";
@@ -116,6 +124,13 @@ export function RomeShellLayout() {
   const [railNames, setRailNames] = useState(readRailNames);
   const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const isDesktop = useDesktop();
+  // The sidebar's upgrade arrow stays out of the way while the nightly upgrade
+  // banner is up; the banner owns the poll and reports only that it is shown.
+  const [upgradeBannerUp, setUpgradeBannerUp] = useState(false);
+  // Every shell page reports whether the person signed in is here, sidebar
+  // shown or not, so their phone pushes wait while they are.
+  const { bootstrap } = useAuthStateSnapshot();
+  useDashboardActivity(hasSession(bootstrap));
   // The fallback title for whatever the shell is showing. A routed page that
   // can name its own subject claims the page slot, which outranks this.
   // Sourced from the sidebar's own destinations: the nav already has to know
@@ -127,6 +142,29 @@ export function RomeShellLayout() {
   // hides the chat list. That is a desktop arrangement: below `md` the sidebar
   // is a slide-over, so a collapse saved on desktop must not empty the drawer.
   const onChat = isChatPath(location.pathname);
+  // Whether the open page is a Concierge chat, whose header floats over it.
+  const conciergeHeader = useSlotOutlet(CONCIERGE_LEADING_SLOT);
+  const leadingButtons = (className?: string) => (
+    <>
+      {onChat ? (
+        // A chat is the detail of the chat list: this goes up to it.
+        <IconButton
+          size="md"
+          label={t("nav.chatList")}
+          icon={<ChevronLeft aria-hidden />}
+          onClick={() => setChatListOpen(true)}
+          className={className}
+        />
+      ) : null}
+      <IconButton
+        size="md"
+        label={t("nav.openSidebar")}
+        icon={<HamburgerMenuIcon aria-hidden />}
+        onClick={() => setSidebarOpen(true)}
+        className={className}
+      />
+    </>
+  );
   const showChats = isDesktop && onChat && !collapsed;
   const phoneChatList = !isDesktop && onChat && chatListOpen && !hideSidebar;
   const sidebarShortcut = sidebarShortcutForPlatform();
@@ -303,8 +341,10 @@ export function RomeShellLayout() {
       style={{ width: `${railRem}rem` }}
       data-rail-labelled={railNames ? "" : undefined}
     >
+      {/* The upgrade arrow ends the logo row with names shown, and sits under
+          the logo without them. */}
       <div
-        className={`flex shrink-0 items-center gap-1 pb-4 ${railNames ? "justify-start px-3" : "justify-center"} ${titlebar ? "pt-2" : "pt-5"}`}
+        className={`flex shrink-0 items-center gap-1 pb-4 ${railNames ? "justify-start px-3" : "flex-col"} ${titlebar ? "pt-2" : "pt-5"}`}
       >
         {/* A fixed slot, so swapping the logo link for the 32px expand
             button does not move every tile below it. */}
@@ -346,10 +386,14 @@ export function RomeShellLayout() {
           )}
         </div>
         {railNames ? (
-          <span className="min-w-0 truncate text-ui font-medium text-foreground">
+          <span className="min-w-0 flex-1 truncate text-ui font-medium text-foreground">
             {t("appName")}
           </span>
         ) : null}
+        <UpgradeIndicator
+          suppressed={upgradeBannerUp}
+          tooltipSide={railNames ? "bottom" : "right"}
+        />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-idle-hidden">
         <RailLabelsContext.Provider value={railNames}>
@@ -447,7 +491,7 @@ export function RomeShellLayout() {
     const contentLeft = hideSidebar ? "0px" : `calc(${sidebarWidth} + 1px)`;
     return (
       <div className="flex h-dvh flex-col overflow-hidden bg-background">
-        <UpgradeCountdownBanner />
+        <UpgradeCountdownBanner onVisibleChange={setUpgradeBannerUp} />
         <DesktopTitlebar
           leadingWidth={contentLeft}
           sidebarToggle={
@@ -509,7 +553,7 @@ export function RomeShellLayout() {
 
   return (
     <div className="flex min-h-[var(--rome-viewport-height)] flex-col bg-background">
-      <UpgradeCountdownBanner />
+      <UpgradeCountdownBanner onVisibleChange={setUpgradeBannerUp} />
       <div
         ref={frameRef}
         className={`relative flex flex-1 ${clipped ? "max-md:overflow-x-clip" : ""}`}
@@ -574,31 +618,28 @@ export function RomeShellLayout() {
           style={
             {
               "--rome-chat-left": sidebarWidth,
+              // With no bar above it, the page runs to the top of the screen.
+              ...(conciergeHeader && !hideSidebar
+                ? {
+                    "--rome-mobile-header-height": "0px",
+                    "--rome-mobile-content-height": "var(--rome-viewport-height)",
+                  }
+                : {}),
             } as CSSProperties
           }
         >
-          {!hideSidebar ? (
+          {!hideSidebar && conciergeHeader ? (
+            // A Concierge chat floats its own header over its messages, so
+            // the bar steps aside and its buttons move into that header.
+            <SlotContent name={CONCIERGE_LEADING_SLOT}>
+              {leadingButtons(cn("rounded-full", FLOATING_SURFACE))}
+            </SlotContent>
+          ) : !hideSidebar ? (
             <header
               data-mobile-header
               className="sticky top-0 z-10 flex h-[var(--rome-mobile-header-height)] shrink-0 items-center gap-2 border-b border-border bg-background px-2 pt-safe md:hidden"
             >
-              <div className="flex shrink-0 items-center">
-                {onChat ? (
-                  // A chat is the detail of the chat list: this goes up to it.
-                  <IconButton
-                    size="md"
-                    label={t("nav.chatList")}
-                    icon={<ChevronLeft aria-hidden />}
-                    onClick={() => setChatListOpen(true)}
-                  />
-                ) : null}
-                <IconButton
-                  size="md"
-                  label={t("nav.openSidebar")}
-                  icon={<HamburgerMenuIcon aria-hidden />}
-                  onClick={() => setSidebarOpen(true)}
-                />
-              </div>
+              <div className="flex shrink-0 items-center">{leadingButtons()}</div>
               {/* The chat page fills this with the session's identity + app
                   tabs + actions, mirroring the desktop chat navbar. Other routes
                   leave it empty, so the Rome wordmark fallback shows. */}

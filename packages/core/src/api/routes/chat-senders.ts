@@ -4,6 +4,7 @@ import {
   type ChatMessageSender,
 } from "@rome/api-types/chat";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
+import { isConciergeAgent } from "../../concierge/privacy.js";
 import { guardianAuth } from "../../db/schema.js";
 import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
 import type { SessionActor } from "../../access/session-actor.js";
@@ -89,11 +90,14 @@ export async function resolveAutomatedSender(
   let appId: string | undefined;
   if (source.type === "agent" && source.id) {
     const agent = deps.agentLoader.list().find((candidate) => candidate.name === source.id);
-    name = isCoreMainAgentId(source.id)
-      ? mainAgentDisplayName(await deps.settingsRepo.get("agentName"))
-      : agent
-        ? prettyAgentName(source.id)
-        : source.id;
+    // The main agent and the Concierge go by the name the guardian gave the agent.
+    if (isCoreMainAgentId(source.id)) {
+      name = mainAgentDisplayName(await deps.settingsRepo.get("agentName"));
+    } else if (isConciergeAgent(source.id)) {
+      name = mainAgentDisplayName(await deps.settingsRepo.get("agentName"), "Concierge");
+    } else {
+      name = agent ? prettyAgentName(source.id) : source.id;
+    }
     appId = agent?.ownerId;
   } else if (source.type === "app" && source.id) {
     appId = source.id;

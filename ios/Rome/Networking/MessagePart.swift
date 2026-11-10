@@ -286,7 +286,9 @@ enum MessagePart: Hashable, Sendable {
         )
     }
 
-    private static func approval(_ value: JSONValue, id: String) -> ApprovalPart {
+    /// An approval as a card shows it, from a stored `approval_card` part or
+    /// an approval row's payload (`actionName`, `preview`, `status`).
+    static func approval(_ value: JSONValue, id: String) -> ApprovalPart {
         let preview = value["preview"]
         var fields: [ApprovalPart.Field] = []
         var title: String?

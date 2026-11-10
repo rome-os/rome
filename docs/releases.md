@@ -1,6 +1,6 @@
 # Releases
 
-Rome ships two kinds of release artifacts: the **runtime Docker image** (the product) and **npm SDK packages** (for app authors). They have independent versioning and independent pipelines.
+Rome ships three kinds of release artifacts: the **runtime Docker image** (the product), the **Mac app**, and **npm SDK packages** (for app authors). They have independent versioning and independent pipelines.
 
 ## Rome runtime image (Docker Hub)
 
@@ -49,6 +49,18 @@ The workflow freezes `ROME_VERSION` (tag with `v` stripped — always equal to t
 ### Rehearsing the pipeline
 
 `.github/workflows/docker-publish-test.yml` publishes to `zoolsher/rome` with separate `TEST_DOCKERHUB_*` secrets on manual dispatch and twice-daily schedules. It exercises the multi-arch build and manifest publish without creating production release tags. It does not use the production weekday schedule, CI gate, or version allocation. It is a copy, not a shared workflow — when changing the release pipeline, update both or note the drift.
+
+## Mac app
+
+The Mac app ships in three steps:
+
+1. Push a `desktop-vMAJOR.MINOR.PATCH` tag. [`.github/workflows/desktop-build.yml`](../.github/workflows/desktop-build.yml) builds, signs, and notarizes the app at that version, and keeps the DMG, ZIP, and `latest-mac.yml` as a run artifact. The tag must be plain semver and newer than every other `desktop-v*` tag. A tagged build that cannot be signed fails.
+2. Test the build.
+3. Run [`.github/workflows/desktop-publish-updates.yml`](../.github/workflows/desktop-publish-updates.yml) with the build's run ID and `qa_approved` checked. Its first job copies the artifact to the update feed the installed apps read, and never rolls the feed back. When the channel is `stable`, a second job then creates the GitHub release for the tag.
+
+The GitHub release is titled `Rome for Mac X.Y.Z` and carries the DMG and a `SHA256SUMS` file for it. Its notes list the commits since the previous Mac app release that touch the packages the app is built from: `packages/desktop`, `packages/desktop-base-web`, `packages/rome-node-core`, and `packages/lib`. Keep that list in the workflow in step with the app's workspace dependencies. The release never takes the **Latest** badge from the package releases.
+
+Only the release job writes to the repository, and it does not see the update feed's deploy secrets. It fails when a release for the tag already exists. If it fails after the feed went out, rerun that job alone.
 
 ## npm packages (via release-please)
 
@@ -183,6 +195,7 @@ reusable workflow calls are authorized against the caller workflow, so
 - `.release-please-manifest.json` — Current version per package path. release-please updates this in the release PR. Never edit by hand.
 - `.github/workflows/release.yml` — Single publish entrypoint: push events run `release-please` and automatic npm publish. Manual dispatches retry/publish selected packages under the same npm Trusted Publisher identity.
 - `.github/workflows/sdk-publish.yml` — Reusable implementation called by `release.yml`. Do not run it directly.
+- `.github/workflows/desktop-build.yml` and `.github/workflows/desktop-publish-updates.yml` — Mac app build, update feed, and GitHub release. See [Mac app](#mac-app).
 - `scripts/check-publish-targets.test.mjs` (`pnpm test:release:targets`, part of `test:unit:rest`) — Holds the three package lists together: the `all` dispatch target, the dispatch menu, and `release-please-config.json`. It also asserts every released package declares `repository`.
 - The `lint` job in `.github/workflows/ci.yml` + `scripts/check-pr-title.sh` — PR-time gate on the Conventional Commit title that becomes the squash commit. It is the job's first step, ahead of the toolchain install, so a bad title reports in seconds. Read the note below before making it a required check.
 

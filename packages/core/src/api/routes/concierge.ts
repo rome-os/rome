@@ -17,6 +17,36 @@ export const CONCIERGE_UNREAD_CAP = 100;
 /** The most days of finished rows a caller can ask the task list for. */
 const MAX_DONE_DAYS = 3650;
 
+/** An SSE stream of what `subscribe` emits, with a heartbeat, until the client goes. */
+function streamEvents(
+  c: Context,
+  subscribe: (emit: (event: string, data: unknown) => void) => () => void,
+): Response {
+  return streamSSE(c, async (sse) => {
+    let close!: () => void;
+    let finished = false;
+    const closed = new Promise<void>((resolve) => {
+      close = resolve;
+    });
+    let unsubscribe = () => {};
+    const heartbeat = setInterval(() => {
+      sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);
+    }, 20_000);
+    function finish() {
+      if (finished) return;
+      finished = true;
+      clearInterval(heartbeat);
+      unsubscribe();
+      close();
+    }
+    unsubscribe = subscribe((event, data) => {
+      sse.writeSSE({ event, data: JSON.stringify(data) }).catch(finish);
+    });
+    sse.onAbort(finish);
+    await closed;
+  });
+}
+
 export function conciergeRoutes(
   deps: Pick<ApiDeps, "concierge" | "dashboardAccessState" | "webchatRepo">,
 ): Hono {
@@ -59,10 +89,14 @@ export function conciergeRoutes(
       return c.json({ error: "Concierge is not available" }, 404);
     }
     const chats = await Promise.all(
-      (await concierge.listChats(owner)).map(async (chat) => ({
-        ...chat,
-        unread: await deps.webchatRepo.countUnreadAgentMessages(chat.id, CONCIERGE_UNREAD_CAP),
-      })),
+      (await concierge.listChats(owner)).map(async (chat) => {
+        const activity = await concierge.activity?.current(chat.id);
+        return {
+          ...chat,
+          unread: await deps.webchatRepo.countUnreadAgentMessages(chat.id, CONCIERGE_UNREAD_CAP),
+          ...(activity ? { activity } : {}),
+        };
+      }),
     );
     return c.json({ chats } satisfies ConciergeChatsResponse);
   });
@@ -112,29 +146,20 @@ export function conciergeRoutes(
     if (!concierge) {
       return c.json({ error: "Concierge is not available" }, 404);
     }
-    return streamSSE(c, async (sse) => {
-      let close!: () => void;
-      let finished = false;
-      const closed = new Promise<void>((resolve) => {
-        close = resolve;
-      });
-      let unsubscribe = () => {};
-      const heartbeat = setInterval(() => {
-        sse.writeSSE({ event: "keepalive", data: "" }).catch(finish);
-      }, 20_000);
-      function finish() {
-        if (finished) return;
-        finished = true;
-        clearInterval(heartbeat);
-        unsubscribe();
-        close();
-      }
-      unsubscribe = concierge.deps.tasks.subscribe((event, data) => {
-        sse.writeSSE({ event, data: JSON.stringify(data) }).catch(finish);
-      }, owner);
-      sse.onAbort(finish);
-      await closed;
-    });
+    return streamEvents(c, (emit) => concierge.deps.tasks.subscribe(emit, owner));
+  });
+
+  // The same `concierge_activity` events as the `concierge.activity` topic
+  // of the live events socket, for a tab that cannot open the socket: the
+  // caller's chats only, and the gate runs before the stream opens.
+  app.get("/concierge/activity/events", async (c) => {
+    const owner = await callerOwner();
+    if (!owner) return c.json({ error: "Not authenticated" }, 401);
+    const activity = deps.concierge?.activity;
+    if (!activity) {
+      return c.json({ error: "Concierge is not available" }, 404);
+    }
+    return streamEvents(c, (emit) => activity.subscribe(owner, emit));
   });
 
   // The Concierge's connectors: every tool it can act through or watch, with

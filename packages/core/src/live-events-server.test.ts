@@ -18,6 +18,7 @@ import { guardianAuth } from "./db/schema.js";
 import { createSession, createVisitorSession } from "./access/auth.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
 import { PhoneWatching } from "./lib/phone-watching.js";
+import { DashboardActivity } from "./lib/dashboard-activity.js";
 import {
   attachLiveEventsServer,
   type LiveEventSources,
@@ -86,6 +87,14 @@ function upgradeStatus(port: number, headers: Record<string, string>): Promise<n
   });
 }
 
+const visitorHeaders = () => ({
+  "x-forwarded-for": "203.0.113.1",
+  "x-forwarded-host": "rome.example",
+  "x-forwarded-proto": "http",
+  cookie: `rome_visitor=${createVisitorSession("account-1", "visitor@example.com")}`,
+  origin: "http://rome.example",
+});
+
 describe("live events WebSocket", () => {
   let testDb: TestDb;
   let projectsRoot: string;
@@ -98,6 +107,7 @@ describe("live events WebSocket", () => {
   let conciergeTasks: ConciergeTasks;
   let dashboardAccess: DashboardAccessState;
   let phoneWatching: PhoneWatching;
+  let dashboardActivity: DashboardActivity;
   const catalogHandlers = new Set<SubscriberHandler>();
   const nameListeners = new Set<LiveEventEmit>();
   const clients: TestClient[] = [];
@@ -177,12 +187,29 @@ describe("live events WebSocket", () => {
         track(runtime.subscribeSessionEvents(sessionId, emit)),
       subscribeAppCatalog: (emit) => track(subscribeCatalogChanges(catalog, emit)),
       subscribeConciergeTasks: (owner, emit) => track(conciergeTasks.subscribe(emit, owner)),
+      // Each owner's one chat, told on subscribe, as the activity tracker does.
+      subscribeConciergeActivity: (owner, emit) => {
+        emit("concierge_activity", {
+          chatId: owner === "guardian" ? "concierge" : "visitor-main",
+          activity: { kind: "idle" },
+          at: 1,
+        });
+        return track(() => {});
+      },
     };
     server = createServer();
     dashboardAccess = new DashboardAccessState();
     dashboardAccess.setCloudEmailAccess(["visitor@example.com"]);
     phoneWatching = new PhoneWatching();
-    live = attachLiveEventsServer(server, testDb.db, dashboardAccess, sources, phoneWatching);
+    dashboardActivity = new DashboardActivity();
+    live = attachLiveEventsServer(
+      server,
+      testDb.db,
+      dashboardAccess,
+      sources,
+      phoneWatching,
+      dashboardActivity,
+    );
     port = await new Promise<number>((resolve) => {
       server.listen(0, "127.0.0.1", () => resolve((server.address() as AddressInfo).port));
     });
@@ -314,6 +341,12 @@ describe("live events WebSocket", () => {
     expect(
       await client.next((m) => m.type === "event" && m.topic === "concierge.tasks"),
     ).toMatchObject({ data: { task: { id: mine.id, title: "Mine" } } });
+
+    // concierge.activity tells the visitor about their own chats only.
+    await client.subscribe("concierge.activity");
+    expect(
+      await client.next((m) => m.type === "event" && m.topic === "concierge.activity"),
+    ).toMatchObject({ event: "concierge_activity", data: { chatId: "visitor-main" } });
   });
 
   it("pushes each write to the Concierge's todo list on concierge.tasks", async () => {
@@ -396,36 +429,92 @@ describe("live events WebSocket", () => {
     // The phone follows B's data (its name, its rows) but shows A.
     await phone.subscribe("chat.session:sess-b");
     await phone.subscribe("chat.watch:sess-a");
-    expect(phoneWatching.isWatching("sess-a")).toBe(true);
-    expect(phoneWatching.isWatching("sess-b")).toBe(false);
+    expect(phoneWatching.isWatching("guardian", "sess-a")).toBe(true);
+    expect(phoneWatching.isWatching("guardian", "sess-b")).toBe(false);
 
     // The chat on screen moves to B: the watch moves with it.
     phone.send({ type: "unsubscribe", topic: "chat.watch:sess-a" });
     await phone.subscribe("chat.watch:sess-b");
-    await rs.waitFor(() => expect(phoneWatching.isWatching("sess-a")).toBe(false));
-    expect(phoneWatching.isWatching("sess-b")).toBe(true);
+    await rs.waitFor(() => expect(phoneWatching.isWatching("guardian", "sess-a")).toBe(false));
+    expect(phoneWatching.isWatching("guardian", "sess-b")).toBe(true);
 
     // The phone's goodbye: closing stops the count at once.
     await phone.close();
-    await rs.waitFor(() => expect(phoneWatching.isWatching("sess-b")).toBe(false));
+    await rs.waitFor(() => expect(phoneWatching.isWatching("guardian", "sess-b")).toBe(false));
   });
 
-  it("never counts a watch from the dashboard or a visitor", async () => {
+  it("never counts a watch from the dashboard", async () => {
     await deps.webchatRepo.createSession("sess-a", "A");
     const web = await connect();
     await web.subscribe("chat.watch:sess-a");
-    expect(phoneWatching.isWatching("sess-a")).toBe(false);
-    const visitor = await connect({
-      "x-forwarded-for": "203.0.113.1",
-      "x-forwarded-host": "rome.example",
-      "x-forwarded-proto": "http",
-      cookie: `rome_visitor=${createVisitorSession("account-1", "visitor@example.com")}`,
-      origin: "http://rome.example",
-      "x-rome-client": "phone",
-    });
-    visitor.send({ type: "subscribe", topic: "chat.watch:sess-a" });
-    await visitor.next((m) => m.topic === "chat.watch:sess-a");
-    expect(phoneWatching.isWatching("sess-a")).toBe(false);
+    expect(phoneWatching.isWatching("guardian", "sess-a")).toBe(false);
+  });
+
+  it("counts a visitor's phone watch for that visitor alone", async () => {
+    await deps.webchatRepo.createSession("sess-a", "A");
+    await deps.webchatRepo.createSession(
+      "visitor-chat",
+      "Mine",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      CONCIERGE_AGENT_ID,
+      "webchat",
+      null,
+      { ownerKey: "visitor:account-1" },
+    );
+    const phone = await connect({ ...visitorHeaders(), "x-rome-client": "phone" });
+    await phone.subscribe("chat.watch:visitor-chat");
+    expect(phoneWatching.isWatching("visitor:account-1", "visitor-chat")).toBe(true);
+    expect(phoneWatching.isWatching("guardian", "visitor-chat")).toBe(false);
+    // A chat the visitor may open but the guardian owns: the watch is the
+    // visitor's, so it never holds back the guardian's push there.
+    await phone.subscribe("chat.watch:sess-a");
+    expect(phoneWatching.isWatching("guardian", "sess-a")).toBe(false);
+  });
+
+  it("counts the guardian's dashboard as active from its signal until it says away", async () => {
+    const web = await connect();
+    web.send({ type: "activity", state: "active" });
+    // Frames run in order, so this ack means the signal before it is counted.
+    await web.subscribe("chat.status");
+    expect(dashboardActivity.isActive("guardian")).toBe(true);
+    web.send({ type: "activity", state: "away" });
+    await web.subscribe("apps.catalog");
+    expect(dashboardActivity.isActive("guardian")).toBe(false);
+    expect(web.messages.some((m) => m.type === "error")).toBe(false);
+  });
+
+  it("stops counting the guardian's dashboard once its socket closes", async () => {
+    const web = await connect();
+    web.send({ type: "activity", state: "active" });
+    await web.subscribe("chat.status");
+    expect(dashboardActivity.isActive("guardian")).toBe(true);
+    await web.close();
+    await rs.waitFor(() => expect(dashboardActivity.isActive("guardian")).toBe(false));
+  });
+
+  it("counts a visitor's dashboard for that visitor alone, and never the phone's activity", async () => {
+    const visitor = await connect(visitorHeaders());
+    visitor.send({ type: "activity", state: "active" });
+    await visitor.subscribe("chat.status");
+    expect(dashboardActivity.isActive("visitor:account-1")).toBe(true);
+    expect(dashboardActivity.isActive("guardian")).toBe(false);
+    const phone = await connect({ "x-rome-client": "phone" });
+    phone.send({ type: "activity", state: "active" });
+    await phone.subscribe("chat.status");
+    expect(dashboardActivity.isActive("guardian")).toBe(false);
+  });
+
+  it("ignores an active signal from a visitor dropped from the allow-list", async () => {
+    const visitor = await connect(visitorHeaders());
+    dashboardAccess.setCloudEmailAccess([]);
+    visitor.send({ type: "activity", state: "active" });
+    // An error answers the refused subscribe, after the signal before it ran.
+    visitor.send({ type: "subscribe", topic: "chat.status" });
+    await visitor.next((m) => m.type === "error");
+    expect(dashboardActivity.isActive("visitor:account-1")).toBe(false);
   });
 
   it("forwards session events for the subscribed session only, until unsubscribed", async () => {
@@ -508,12 +597,12 @@ describe("live events WebSocket", () => {
     }
     await phone.next((m) => m.type === "subscribed" && m.topic === "chat.session:sess-31");
     await phone.subscribe("chat.watch:sess-0");
-    expect(phoneWatching.isWatching("sess-0")).toBe(true);
+    expect(phoneWatching.isWatching("guardian", "sess-0")).toBe(true);
 
     // A second watch replaces the first rather than adding to it.
     await phone.subscribe("chat.watch:sess-1");
-    expect(phoneWatching.isWatching("sess-0")).toBe(false);
-    expect(phoneWatching.isWatching("sess-1")).toBe(true);
+    expect(phoneWatching.isWatching("guardian", "sess-0")).toBe(false);
+    expect(phoneWatching.isWatching("guardian", "sess-1")).toBe(true);
     expect(phone.messages.some((m) => m.type === "error")).toBe(false);
   });
 
@@ -524,7 +613,7 @@ describe("live events WebSocket", () => {
     phone.send({ type: "unsubscribe", topic: "chat.watch:sess-a" });
     // Frames run in order, so this one resolving means the watch's check has too.
     await phone.subscribe("chat.session:sess-a");
-    expect(phoneWatching.isWatching("sess-a")).toBe(false);
+    expect(phoneWatching.isWatching("guardian", "sess-a")).toBe(false);
     expect(phone.messages.some((m) => m.topic === "chat.watch:sess-a")).toBe(false);
   });
 

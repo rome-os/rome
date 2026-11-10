@@ -13,7 +13,6 @@ import { automatedSource, speaksForGuardian } from "./automated-source.js";
 
 import { randomUUID } from "node:crypto";
 import type { TranscriptPart } from "@rome/api-types/chat";
-import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import type {
   Account,
   AgentInputState,
@@ -22,7 +21,6 @@ import type {
   InputStatusEvent,
 } from "@rome-os/app-runtime";
 import { and, asc, eq, inArray, type SQL, sql } from "drizzle-orm";
-import { CONCIERGE_AGENT_ID } from "../concierge/privacy.js";
 import { ChatRepository } from "../chats/storage/chat-repository.js";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import { partsText, type SaidBy } from "../chats/storage/message.js";
@@ -50,7 +48,12 @@ import {
 import { isWebchatChat, storedSessionType } from "../db/session-kind.js";
 import type { SessionActor } from "../access/session-actor.js";
 import { TurnLinks } from "../sessions/turn-links.js";
-import { ChatReadModel, chatsSessionAwaitingGuardian } from "./chat-read-model.js";
+import {
+  ChatReadModel,
+  chatsSessionAwaitingGuardian,
+  chatsSessionAwaitingGuardianSince,
+  chatsSessionOwnerSpokeAt,
+} from "./chat-read-model.js";
 import {
   isSessionTraceArchived,
   sessionTraceCutoff,
@@ -103,6 +106,8 @@ export class ChatsWebChatRepository extends WebChatRepository {
   // A listed session counts and waits on the lines its transcript draws.
   protected override readonly messageCountColumn = chatsSessionMessageCount;
   protected override readonly awaitingGuardianColumn = chatsSessionAwaitingGuardian;
+  protected override readonly awaitingGuardianSinceColumn = chatsSessionAwaitingGuardianSince;
+  protected override readonly ownerSpokeAtColumn = chatsSessionOwnerSpokeAt;
 
   /** Searches the dashboard chats' messages in Chats, at most one match per
    *  chat, the most recent, most recent first. A dashboard notice is not in
@@ -524,12 +529,33 @@ export class ChatsWebChatRepository extends WebChatRepository {
   }
 
   /**
+   * Who wrote the messages that started `turn`, by the account each records
+   * ("guardian", "visitor:<account>"), each once. More than one means the
+   * turn held more than one person's input. An agent's message names no one.
+   */
+  getTurnPromptSenders(turn: Pick<InterruptedTurn, "sessionId" | "turnId">): string[] {
+    return this.db
+      .all<{ sender: string }>(sql`
+      SELECT DISTINCT m.sender_account_id AS sender
+      FROM agent_turn_messages l
+      JOIN ${romeSessions} s ON s.id = l.session_id
+      JOIN ${CHAT_MESSAGES} m ON m.id = l.message_id
+        AND m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+      WHERE l.session_id = ${turn.sessionId} AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
+        AND m.sender_agent IS NULL AND m.sender_account_id IS NOT NULL
+    `)
+      .map((row) => row.sender);
+  }
+
+  /**
    * The newest turn of each dashboard chat that ended in an error, when its
    * trace began at or after `sinceMs` or its runtime session was active then.
    * A turn that began earlier and was active since is listed, and the caller
    * decides by its last activity. A turn still running, or ended any other
-   * way, is not listed. Concierge chats are left out: they recover on their
-   * own. Oldest first. Eligibility is for `canContinueAfterRestart` to decide.
+   * way, is not listed. A Concierge chat is listed like any other: when it moved
+   * to another provider on its own, its recovery turn is its newest turn, and
+   * when it could not move, its stopped turn still is. Oldest first.
+   * Eligibility is for `canContinueAfterRestart` to decide.
    */
   getLatestErroredTurns(sinceMs: number): ErroredTurn[] {
     const since = Math.floor(sinceMs / 1000);
@@ -549,8 +575,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
         ORDER BY n.created_at DESC, n.rowid DESC LIMIT 1
       )
       WHERE s.type = 'channel' AND s.chat_platform = 'webchat'
-        AND s.id <> ${CONCIERGE_CHAT_ID}
-        AND coalesce(s.agent_name, '') NOT IN (${CONCIERGE_AGENT_ID}, 'concierge')
         AND (
           t.created_at >= ${since}
           OR EXISTS (SELECT 1 FROM ${sessions} r WHERE r.chat_id = s.id AND r.last_active_at >= ${since})

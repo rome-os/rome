@@ -17,6 +17,9 @@ export interface DevicesStatus {
   devices: DeviceStatus[];
 }
 
+/** A snapshot at least this old starts a new check when it is read. */
+const REFRESH_AFTER_MS = 10_000;
+
 /** Shares read-only probes across clients. A timeout does not establish that a device is offline. */
 export class DeviceStatusReader {
   private cached?: DevicesStatus;
@@ -25,24 +28,39 @@ export class DeviceStatusReader {
 
   constructor(private connector: Pick<DeviceConnector, "list" | "run" | "getStatus">) {}
 
+  /** Drops the snapshot, so the next read waits for a check that starts after this call. */
   invalidate() {
     this.generation++;
     this.cached = undefined;
+    this.pending = undefined;
   }
 
+  /**
+   * The last snapshot, at once. A stale one starts a check in the background, and a later read
+   * gets its result. Only a read without a snapshot waits: the first one, or one after
+   * invalidate. A failed background check keeps the last snapshot.
+   */
   async read(): Promise<DevicesStatus> {
-    if (this.cached && Date.now() - Date.parse(this.cached.checkedAt) < 10_000) return this.cached;
+    if (!this.cached) return this.refresh();
+    if (Date.now() - Date.parse(this.cached.checkedAt) >= REFRESH_AFTER_MS)
+      this.refresh().catch(() => undefined);
+    return this.cached;
+  }
+
+  /** Runs one check at a time. Callers that arrive during a check share it. */
+  private refresh(): Promise<DevicesStatus> {
     if (this.pending) return this.pending;
     const generation = this.generation;
-    this.pending = this.check()
+    const pending = this.check()
       .then((snapshot) => {
         if (generation === this.generation) this.cached = snapshot;
         return snapshot;
       })
       .finally(() => {
-        this.pending = undefined;
+        if (this.pending === pending) this.pending = undefined;
       });
-    return this.pending;
+    this.pending = pending;
+    return pending;
   }
 
   private async check(): Promise<DevicesStatus> {

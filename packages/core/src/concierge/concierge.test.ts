@@ -225,6 +225,9 @@ function setup(
     openSession: rs.fn(async (chatId: string) => `opened-${chatId}`),
     sendAsGuardian: rs.fn(async () => {}),
     isRunning: rs.fn(() => false),
+    isBusy: rs.fn(() => false),
+    openTool: rs.fn(() => null),
+    onTurnChange: rs.fn(() => () => {}),
     activeTurns: rs.fn(() => []),
     interruptTurn: rs.fn(async () => {}),
   };
@@ -313,6 +316,10 @@ function setup(
       ),
       createSession: rs.fn(async () => {}),
       listProjects: async () => [{ path: "default" }, { path: "rome-oss" }],
+      // The activity's own sources (activity.test.ts covers it).
+      onMessageInserted: () => () => {},
+      awaitingGuardianSince: async () => new Map<string, number>(),
+      ownerSpokeAt: async () => null,
     },
     tasks,
     approvals: {
@@ -320,6 +327,7 @@ function setup(
         approvalListeners.add(listener);
         return () => approvalListeners.delete(listener);
       },
+      onResolved: () => () => {},
     },
     messages: {
       recent: async (place: Place, limit: number) => {
@@ -523,6 +531,32 @@ describe("Concierge tools", () => {
       "connect_card",
     ]);
     expect(await buildConciergeTools(on.service, on.context("core:main"))).toEqual([]);
+  });
+
+  it("uses task cards as the needs_user anchor for task questions and approvals", async () => {
+    const s = setup();
+    const tools = await buildConciergeTools(s.service, s.context());
+    const upsert = tools.find((tool) => tool.name === "task_upsert")!;
+    const schema = upsert.inputSchema as {
+      properties: { tasks: { items: { properties: { messageId: { description: string } } } } };
+    };
+    for (const description of [
+      upsert.description,
+      schema.properties.tasks.items.properties.messageId.description,
+    ]) {
+      expect(description).toContain("show a task question or approval with chat_card");
+      expect(description).toContain("otherwise ask with say or chat_forward");
+      expect(description).toContain("Use the returned messageId as the row anchor");
+    }
+    const card = tools.find((tool) => tool.name === "chat_card")!;
+    expect(card.description).toContain("for a task question or approval");
+    expect(card.description).toContain("returned messageId as the needs_user row anchor");
+    expect(card.description).toContain(
+      "An existing task row automatically points to this card in this Concierge chat",
+    );
+    expect(schema.properties.tasks.items.properties.messageId.description).toContain(
+      "chat_card and chat_forward update this anchor automatically",
+    );
   });
 
   it("say posts one message under the running turn", async () => {
@@ -1389,6 +1423,57 @@ describe("Concierge task anchors", () => {
     expect(await s.taskRepo.listForAgent(true)).toEqual([]);
   });
 
+  it("repeated chat_card re-anchors a needs_user row without another task_upsert", async () => {
+    const s = setup();
+    const { chatId, taskId } = text(
+      await s.tool("chat_start", { title: "Flights", brief: "Find flights" }),
+    );
+    const first = text(await s.tool("chat_card", { chatId })).messageId;
+    expect(
+      (
+        await s.tool("task_upsert", {
+          tasks: [{ id: taskId, state: "needs_user", messageId: first, summary: "Pick a flight" }],
+        })
+      ).isError,
+    ).toBeFalsy();
+    expect(await anchorOf(s, taskId)).toBe(first);
+    const second = text(await s.tool("chat_card", { chatId })).messageId;
+    expect(second).not.toBe(first);
+    expect(await anchorOf(s, taskId)).toBe(second);
+    expect(await s.taskRepo.get(taskId)).toMatchObject({
+      state: "needs_user",
+      summary: "Pick a flight",
+    });
+  });
+
+  it("chat_card shows a task without a row without creating one", async () => {
+    const s = setup();
+    const chatId = await s.chats.startChat({}, "guardian");
+    await s.deps.webchatRepo.setSessionTrigger(chatId, {
+      triggerKind: TASK_CHAT_TRIGGER_KIND,
+      triggerName: null,
+    });
+    const result = await s.tool("chat_card", { chatId });
+    expect(result.isError).toBeFalsy();
+    expect(text(result)).toMatchObject({ sent: expect.any(String), messageId: expect.any(String) });
+    expect(await s.taskRepo.findBySession(chatId)).toBeNull();
+    expect(await s.taskRepo.listForAgent(true)).toEqual([]);
+  });
+
+  it("anchors needs_user to chat_card rather than an introductory say", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    await s.tool("say", { text: "The task needs your input." });
+    const { messageId } = text(await s.tool("chat_card", { chatId: "task-1" }));
+    const task = (await s.taskRepo.findBySession("task-1"))!;
+    const result = await s.tool("task_upsert", {
+      tasks: [{ id: task.id, state: "needs_user", messageId }],
+    });
+    expect(result.isError).toBeFalsy();
+    expect(await anchorOf(s, task.id)).toBe(messageId);
+    expect((await s.taskRepo.get(task.id))?.state).toBe("needs_user");
+  });
+
   it("points a new row at the latest thing the Concierge said this turn", async () => {
     const s = setup({ said: false });
     await s.tool("say", { text: "First" });
@@ -1461,7 +1546,7 @@ describe("Concierge task anchors", () => {
     });
     expect(create.isError).toBe(true);
     expect(create.content[0].text).toContain(
-      "tasks[1]: needs_user requires messageId: say or chat_forward the ask first",
+      "tasks[1]: needs_user requires messageId: show a task question or approval with chat_card",
     );
     const update = await s.tool("task_upsert", { tasks: [{ id, state: "needs_user" }] });
     expect(update.isError).toBe(true);
@@ -2122,13 +2207,15 @@ describe("Concierge pushes", () => {
     const date = new Date(at);
     return `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}`;
   };
-  /** Quiet hours from an hour ago to an hour from now. */
-  const quietNow = (s: ReturnType<typeof setup>) =>
+  /** Quiet hours from an hour ago to an hour from now, for `owner` only. */
+  const quietNow = (s: ReturnType<typeof setup>, owner = "guardian") =>
     s.service.attachFollowing({
       rules: async () => ({
         digestTimes: ["09:00"],
         quietHours: { start: hhmm(Date.now() - 3_600_000), end: hhmm(Date.now() + 3_600_000) },
       }),
+      quietUntil: async (_at: number, asked: string) =>
+        asked === owner ? Date.now() + 3_600_000 : null,
     } as unknown as ConciergeFollowing);
 
   it("hands a system turn's push level to the turn it runs", async () => {
@@ -2161,12 +2248,25 @@ describe("Concierge pushes", () => {
     expect(s.pushes.map((push) => push.chatId)).toEqual([TOPIC_CHAT]);
   });
 
-  it("pushes once for a turn that says two messages", async () => {
+  it("pushes a turn's first message at once and holds a second said right after for the merge window", async () => {
     const s = setup();
     s.pushLevel("active");
     await sayIn(s, "The build failed.");
     await sayIn(s, "I restarted it.");
     expect(s.pushes.map((push) => push.body)).toEqual(["The build failed."]);
+  });
+
+  it("pushes the fixed line for a message the Concierge marks private", async () => {
+    const s = setup();
+    s.pushLevel("active");
+    await s.tool("say", { text: "Your code is 7291.", private: true });
+    await s.settle();
+    expect(s.pushes).toEqual([
+      { body: "A task has an update", level: "active", chatId: CONCIERGE_CHAT },
+    ]);
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => textOf(row.content))).toEqual([
+      "Your code is 7291.",
+    ]);
   });
 
   /** A finished task chat whose latest answer is `answer`, with the row the Concierge titled. */
@@ -2246,7 +2346,22 @@ describe("Concierge pushes", () => {
     expect(JSON.stringify(s.pushes)).not.toContain("7291");
   });
 
-  it("pushes nothing from a visitor's Concierge, whose turns the guardian's phone must not show", async () => {
+  it("keeps a private message off the lock screen when it starts a chat thread", async () => {
+    const s = setup();
+    s.pushLevel("active");
+    const result = await s.tool("say", {
+      text: "Your code is 7291.",
+      private: true,
+      thread: "new",
+    });
+    await s.settle();
+    expect(result.isError).toBeFalsy();
+    expect(s.pushes).toEqual([
+      { body: "A task has an update", level: "active", chatId: CONCIERGE_CHAT },
+    ]);
+  });
+
+  it("pushes a visitor's Concierge to that visitor, never to the guardian", async () => {
     const s = setup();
     s.sessions.set("visitor-topic", {
       id: "visitor-topic",
@@ -2258,8 +2373,28 @@ describe("Concierge pushes", () => {
     s.turnIn("visitor-topic");
     s.pushLevel("active");
     await sayIn(s, "Your 3pm moved.");
-    expect(s.pushes).toEqual([]);
+    expect(s.pushes).toEqual([
+      { body: "Your 3pm moved.", level: "active", chatId: "visitor-topic", recipient: "acct-ann" },
+    ]);
     expect(s.messages.get("visitor-topic")).toHaveLength(1);
+  });
+
+  it("holds back a visitor's push in the visitor's quiet hours, not the guardian's", async () => {
+    const s = setup();
+    s.sessions.set("visitor-topic", {
+      id: "visitor-topic",
+      name: "Ann's calendar",
+      triggerKind: null,
+      agentName: CONCIERGE_AGENT_ID,
+      ownerKey: "visitor:acct-ann",
+    });
+    quietNow(s, "visitor:acct-ann");
+    s.turnIn("visitor-topic");
+    s.pushLevel("active");
+    await sayIn(s, "Your 3pm moved.");
+    s.turnIn(CONCIERGE_CHAT);
+    await sayIn(s, "A PR needs your review.");
+    expect(s.pushes.map((push) => push.chatId)).toEqual([CONCIERGE_CHAT]);
   });
 
   it("pushes nothing for a turn the guardian started", async () => {

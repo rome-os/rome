@@ -69,6 +69,21 @@ describe("executor credential lifecycle", () => {
     expect(mocks.remove).not.toHaveBeenCalled();
     expect(mocks.connect.mock.calls[0][0].getToken()).toBe(saved.token);
   });
+  it("passes the notification handler to the Gateway connection", async () => {
+    const onNotification = rs.fn();
+    await expect(
+      connectHost({
+        cloudUrl: saved.cloudUrl,
+        name: "Test",
+        signal: new AbortController().signal,
+        credentials: { load: mocks.read, save: mocks.write, clear: mocks.remove },
+        authorize: mocks.login,
+        audit: noAudit,
+        onNotification,
+      }),
+    ).rejects.toThrow("replaced");
+    expect(mocks.connect.mock.calls[0][0].onNotification).toBe(onNotification);
+  });
   it("reuses a stored Rome desktop session as the device identity", async () => {
     const desktop = { ...saved, token: `romemob_${"b".repeat(43)}` };
     mocks.read.mockResolvedValue(desktop);

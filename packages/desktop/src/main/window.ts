@@ -185,7 +185,7 @@ export function createSettingsWindow(): BrowserWindow {
 
 /** The local audit log viewer. A `file:` page, so only it gets the preload's `audit` channels. */
 export function createAuditWindow(): BrowserWindow {
-  const existing = BrowserWindow.getAllWindows().find((w) => w.getTitle() === "Rome Audit Log");
+  const existing = BrowserWindow.getAllWindows().find((w) => w.getTitle() === "Computer Use Log");
   if (existing) {
     if (existing.isMinimized()) existing.restore();
     existing.show();
@@ -197,7 +197,7 @@ export function createAuditWindow(): BrowserWindow {
     height: 760,
     minWidth: 700,
     minHeight: 480,
-    title: "Rome Audit Log",
+    title: "Computer Use Log",
     webPreferences: {
       preload: PRELOAD_PATH,
       contextIsolation: true,

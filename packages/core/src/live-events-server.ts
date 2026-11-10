@@ -5,19 +5,24 @@
 // Upgrades skip the edge probe like `/ws/terminal`:
 // docs/architecture/access-control.md. Reach mirrors the SSE routes: the
 // guardian gets every topic, and a visitor on the dashboard allow-list gets
-// every topic but `apps.catalog`. `concierge.tasks` carries the caller's own
-// Concierge rows, and another owner's Concierge or task chat is not found.
+// every topic but `apps.catalog`. `concierge.tasks` and `concierge.activity`
+// carry the caller's own Concierge rows and chats, and another owner's
+// Concierge or task chat is not found.
 //
 // The wire contract lives in @rome/api-types/live-events. `subscribed` precedes
-// the snapshot `chat.status` replays too. The guardian's phone app marks its
-// socket with a header and holds `chat.watch:<id>` for the chat on its screen;
-// that chat counts as watched (`PhoneWatching`), which holds back the
-// Concierge's push there. Its data subscriptions never count.
+// the snapshot `chat.status` replays too. The phone app marks its socket with
+// a header and holds `chat.watch:<id>` for the chat on its screen; that chat
+// counts as watched for the person signed in on it (`PhoneWatching`), which
+// holds back the Concierge's push there. Its data subscriptions never count.
+// A dashboard's `activity` frames count its person as active or away
+// (`DashboardActivity`): while one is active, none of that person's
+// Concierge pushes goes out.
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
 import {
   APP_CATALOG_TOPIC,
+  CONCIERGE_ACTIVITY_TOPIC,
   CHAT_SESSION_TOPIC_PREFIX,
   CHAT_STATUS_TOPIC,
   CHAT_WATCH_TOPIC_PREFIX,
@@ -31,6 +36,7 @@ import type { DrizzleDb } from "./db/index.js";
 import type { DashboardAccessState } from "./access/dashboard-access-state.js";
 import type { LiveEventEmit } from "./lib/live-event.js";
 import type { PhoneWatching } from "./lib/phone-watching.js";
+import type { DashboardActivity } from "./lib/dashboard-activity.js";
 import { gateUpgrade, type UpgradeCaller } from "./access/ws-guardian-gate.js";
 import { rejectUpgrade } from "./lib/ws-upgrade.js";
 import { createLogger } from "./logger.js";
@@ -50,6 +56,8 @@ export interface LiveEventSources {
   subscribeAppCatalog(emit: LiveEventEmit): Unsubscribe;
   /** Emits `task_upsert` for every write to one owner's Concierge todo list. */
   subscribeConciergeTasks(owner: string, emit: LiveEventEmit): Unsubscribe;
+  /** Emits `concierge_activity` for each of one owner's Concierge chats, then for every change. */
+  subscribeConciergeActivity(owner: string, emit: LiveEventEmit): Unsubscribe;
 }
 
 export const MAX_SUBSCRIPTIONS_PER_SOCKET = 32;
@@ -67,6 +75,7 @@ type Topic =
   | { kind: "chat.status" }
   | { kind: "apps.catalog" }
   | { kind: "concierge.tasks" }
+  | { kind: "concierge.activity" }
   | { kind: "chat.session"; sessionId: string }
   | { kind: "chat.watch"; sessionId: string };
 
@@ -74,6 +83,7 @@ function parseTopic(topic: string): Topic | null {
   if (topic === CHAT_STATUS_TOPIC) return { kind: "chat.status" };
   if (topic === APP_CATALOG_TOPIC) return { kind: "apps.catalog" };
   if (topic === CONCIERGE_TASKS_TOPIC) return { kind: "concierge.tasks" };
+  if (topic === CONCIERGE_ACTIVITY_TOPIC) return { kind: "concierge.activity" };
   if (topic.startsWith(CHAT_SESSION_TOPIC_PREFIX)) {
     const sessionId = topic.slice(CHAT_SESSION_TOPIC_PREFIX.length);
     if (SESSION_ID_PATTERN.test(sessionId)) return { kind: "chat.session", sessionId };
@@ -100,6 +110,7 @@ export function attachLiveEventsServer(
   dashboardAccess: Pick<DashboardAccessState, "isCloudEmailAllowed">,
   sources: LiveEventSources,
   phoneWatching?: PhoneWatching,
+  dashboardActivity?: DashboardActivity,
 ): { close(): void } {
   const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_PAYLOAD_BYTES });
 
@@ -148,6 +159,9 @@ export function attachLiveEventsServer(
       caller.kind === "guardian" || (topic.kind !== "apps.catalog" && visitorAllowed());
     // Whose Concierge todo list and private chats this socket may read.
     const owner = caller.kind === "guardian" ? "guardian" : `visitor:${caller.accountId}`;
+    // A dashboard holds back only its own person's pushes; a phone's
+    // activity frames count for nothing.
+    const activity = phone ? undefined : dashboardActivity?.open(owner);
     const exists = async (topic: Topic): Promise<boolean> =>
       topic.kind === "chat.session" || topic.kind === "chat.watch"
         ? sources.hasChatSession(topic.sessionId, owner)
@@ -161,14 +175,16 @@ export function attachLiveEventsServer(
           return sources.subscribeAppCatalog(emit);
         case "concierge.tasks":
           return sources.subscribeConciergeTasks(owner, emit);
+        case "concierge.activity":
+          return sources.subscribeConciergeActivity(owner, emit);
         case "chat.session":
           return sources.subscribeChatSession(topic.sessionId, emit);
         case "chat.watch":
-          // The chat on the guardian's phone: what the Concierge says there is
-          // read on the phone, so it is not pushed to it. Anyone else's watch
+          // The chat on its person's phone: what the Concierge says there is
+          // read on the phone, so it is not pushed to it. A dashboard's watch
           // is held and counts for nothing.
-          if (!phone || caller.kind !== "guardian" || !phoneWatching) return () => {};
-          return phoneWatching.watch(topic.sessionId);
+          if (!phone || !phoneWatching) return () => {};
+          return phoneWatching.watch(owner, topic.sessionId);
       }
     };
 
@@ -231,6 +247,7 @@ export function attachLiveEventsServer(
       if (closed) return;
       closed = true;
       clearInterval(ping);
+      activity?.close();
       for (const entry of subscriptions.values()) entry.unsubscribe?.();
       subscriptions.clear();
     };
@@ -263,8 +280,11 @@ export function attachLiveEventsServer(
         sendError("Invalid message");
         return;
       }
-      if (result.data.type === "subscribe") subscribe(result.data.topic);
-      else unsubscribe(result.data.topic);
+      const message = result.data;
+      if (message.type === "subscribe") subscribe(message.topic);
+      else if (message.type === "unsubscribe") unsubscribe(message.topic);
+      else if (message.state === "away") activity?.away();
+      else if (visitorAllowed()) activity?.active();
     });
     ws.on("close", teardown);
     ws.on("error", (err) => {

@@ -7,6 +7,14 @@ enum LiveEvent: Sendable {
     case sessionRunning(sessionId: String, running: Bool)
     /// A message was stored in a chat (`chat.session:<id>`).
     case messageInsert(ChatMessage)
+    /// A message was placed in a chat thread (`message_chat_thread`).
+    case messageThread(sessionId: String, messageId: String, chatThreadId: String?)
+    /// A Concierge chat's activity changed (`concierge_activity`). Nil: a
+    /// state this build does not know, shown as no status line.
+    /// `at`: when it took effect on the server, epoch milliseconds.
+    case conciergeActivity(chatId: String, activity: ConciergeActivity?, at: Double? = nil)
+    /// The Concierge was renamed (`agent_name_changed`, newer instances).
+    case agentName(String?)
     /// A chat was renamed.
     case sessionName(sessionId: String, name: String)
     /// The Concierge wrote a task row (`concierge.tasks`).
@@ -36,6 +44,8 @@ extension LiveEventSource {
 
 enum LiveTopic {
     static let chatStatus = "chat.status"
+    /// What the Concierge is doing in each of the guardian's Concierge chats.
+    static let conciergeActivity = "concierge.activity"
     static let conciergeTasks = "concierge.tasks"
     static func chat(_ sessionId: String) -> String { "chat.session:\(sessionId)" }
     /// Held for the one chat on screen; it carries no events.
@@ -297,6 +307,14 @@ final class LiveEventsSocket: LiveEventSource {
         case "message_insert":
             guard let message = data.decoded(ChatMessage.self) else { return nil }
             return .messageInsert(message)
+        case "concierge_activity":
+            guard let chatId = data["chatId"]?.string, let activity = data["activity"] else { return nil }
+            return .conciergeActivity(chatId: chatId, activity: ConciergeActivity(json: activity), at: data["at"]?.number)
+        case "agent_name_changed":
+            return .agentName(AgentName.display(data["agentName"]?.string))
+        case "message_chat_thread":
+            guard let id = data["sessionId"]?.string, let message = data["messageId"]?.string else { return nil }
+            return .messageThread(sessionId: id, messageId: message, chatThreadId: data["chatThreadId"]?.string)
         case "task_upsert":
             guard let event = data.decoded(TaskUpsertEvent.self) else { return nil }
             return .taskUpsert(event.task)

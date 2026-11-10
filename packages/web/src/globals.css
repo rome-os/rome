@@ -109,6 +109,114 @@
   display: none;
 }
 
+/* The Concierge header's mascot (RomeMascot): a blink now and then at rest,
+   a soft bob and a glance while something is being done. */
+.rome-mascot-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: rome-mascot-blink 4.5s ease-in-out infinite;
+}
+
+.rome-mascot[data-alive] .rome-mascot-figure {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: rome-mascot-bob 1.4s ease-in-out infinite;
+}
+
+.rome-mascot[data-alive] .rome-mascot-eyes {
+  animation:
+    rome-mascot-blink 2.2s ease-in-out infinite,
+    rome-mascot-glance 3.6s ease-in-out infinite;
+}
+
+/* A press: a squash and one blink, over whatever it was doing. */
+.rome-mascot[data-poked] {
+  transform-origin: 50% 100%;
+  animation: rome-mascot-squash 420ms ease-out;
+}
+
+.rome-mascot[data-poked] .rome-mascot-eyes {
+  animation: rome-mascot-poke-blink 420ms ease-out;
+}
+
+@keyframes rome-mascot-squash {
+  0%,
+  100% {
+    transform: scale(1, 1);
+  }
+
+  30% {
+    transform: scale(1.12, 0.82);
+  }
+
+  60% {
+    transform: scale(0.95, 1.06);
+  }
+}
+
+@keyframes rome-mascot-poke-blink {
+  0%,
+  100% {
+    transform: scaleY(1);
+  }
+
+  25%,
+  55% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes rome-mascot-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+
+  96% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes rome-mascot-bob {
+  0%,
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+
+  50% {
+    transform: translateY(-4%) scaleY(1.02);
+  }
+}
+
+@keyframes rome-mascot-glance {
+  0%,
+  35%,
+  100% {
+    translate: 0 0;
+  }
+
+  45%,
+  60% {
+    translate: -8% 0;
+  }
+
+  70%,
+  85% {
+    translate: 6% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rome-mascot-eyes,
+  .rome-mascot[data-alive] .rome-mascot-figure,
+  .rome-mascot[data-alive] .rome-mascot-eyes,
+  .rome-mascot[data-poked],
+  .rome-mascot[data-poked] .rome-mascot-eyes {
+    animation: none;
+  }
+}
+
 @keyframes rome-activity-pulse {
 
   0%,
@@ -531,7 +639,7 @@
 @layer base {
   :root {
     /* Mobile shell geometry when the page is rendered edge-to-edge (for
-       example inside the Expo WKWebView). Indirect the system env() values so
+       example inside the iOS app's WKWebView). Indirect the system env() values so
        layout tests can exercise real, non-zero safe-area geometry. */
     --rome-safe-area-top: env(safe-area-inset-top);
     --rome-safe-area-inset-bottom: env(safe-area-inset-bottom);
@@ -544,6 +652,14 @@
       var(--rome-safe-area-inset-bottom) - var(--rome-keyboard-height)
     );
     --rome-mobile-header-height: calc(3rem + var(--rome-safe-area-top));
+    /* A Concierge chat's floating header: the mascot's badge, the name pill
+       under it with the status line, and the gaps around them. The messages
+       start below it. */
+    --rome-concierge-header-height: 6.25rem;
+    /* How far a Concierge chat's messages start below the top of their
+       column: the header, plus the phone's safe area, where the header
+       reaches the top of the screen. */
+    --rome-concierge-header-offset: var(--rome-concierge-header-height);
     /* The screen height not covered by an on-screen keyboard. lib/visual-viewport.ts
        overrides this inline on <html>; the fallback serves browsers without
        `visualViewport`. A page sized to the screen reads this rather than
@@ -557,15 +673,12 @@
   html,
   body {
     /* Stop the document from rubber-banding past its own ends. Inner scrollers
-       already set `overscroll-contain`, and the native shell passes
-       `bounces={false}`, but the page's own viewport scroller still bounced on
-       iOS because nothing constrained it. Both elements carry the rule: which
+       already set `overscroll-contain`, but the page's own viewport scroller
+       still bounced on iOS because nothing constrained it. Both elements carry the rule: which
        one defines the viewport scroller depends on the route's overflow.
 
-       Deliberately ungated. The Expo shell sets no marker on the document the
-       way Electron sets `.is-electron`, so there is nothing to scope this to —
-       and scoping it there would leave mobile Safari, which has the same bug,
-       still bouncing. The cost is that ordinary mobile browsers lose native
+       Deliberately ungated: scoping it to an app shell would leave mobile
+       Safari, which has the same bug, still bouncing. The cost is that ordinary mobile browsers lose native
        pull-to-refresh and desktop loses its rubber-band. Both are the app-like
        tradeoff we want: the dashboard refetches on its own, so a gesture whose
        only effect is reloading the bundle is not worth preserving. */
@@ -602,6 +715,21 @@
 
 @utility pt-safe {
   padding-top: var(--rome-safe-area-top);
+}
+
+/* A scroller under a Concierge chat's floating header: its content starts
+   below the header, and a scroll to an element stops below it too. */
+@utility concierge-header-clear {
+  padding-top: var(--rome-concierge-header-offset);
+  scroll-padding-top: var(--rome-concierge-header-offset);
+}
+
+@media (width < 48rem) {
+  :root {
+    --rome-concierge-header-offset: calc(
+      var(--rome-concierge-header-height) + var(--rome-safe-area-top)
+    );
+  }
 }
 
 /* Overlay-style scrollbar for inner panes. The track keeps its width at all
@@ -772,6 +900,17 @@ html.is-electron
 }
 html.is-electron [data-app-titlebar] {
   -webkit-app-region: drag;
+}
+/* A Concierge chat's mascot hangs from the title bar and drags the window like
+   it, below the bar too. Its messages start under the pill, which reaches
+   less far below the bar than the floating header does. */
+html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
+  -webkit-app-region: drag;
+}
+@media (width >= 48rem) {
+  html.is-electron {
+    --rome-concierge-header-offset: 4.5rem;
+  }
 }
 
 /* Set for ~900ms on the question a timeline dot jumped to. Every user bubble

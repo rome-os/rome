@@ -4,8 +4,10 @@ import { isJwt } from "./signer.js";
 import {
   CLOSE,
   gatewayMessage,
+  gatewayNotification,
   outboundEnvelope,
   type GatewayMessage,
+  type GatewayNotification,
   type OutboundEnvelope,
 } from "./protocol.js";
 
@@ -45,6 +47,11 @@ export interface GatewayClientOptions {
   /** Receives parsed binary frames. Unparseable binary messages are dropped. */
   onFrame?(frame: Frame): void;
   onStatus?(status: ConnectionStatus): void;
+  /**
+   * A notification the Gateway sent for this device to show. Without a handler it is dropped,
+   * like any other message the client does not know.
+   */
+  onNotification?(notification: GatewayNotification): void;
   random?(): number;
   beforeConnect?(): Promise<string | null>;
 }
@@ -159,12 +166,20 @@ export function connectGateway(options: GatewayClientOptions) {
         if (frame) options.onFrame?.(frame);
         return;
       }
-      let message;
+      let json: unknown;
       try {
-        message = gatewayMessage(JSON.parse(data));
+        json = JSON.parse(data);
       } catch {
         return;
       }
+      const notification = gatewayNotification(json);
+      if (notification) {
+        try {
+          options.onNotification?.(notification);
+        } catch {}
+        return;
+      }
+      const message = gatewayMessage(json);
       if (message) options.onMessage(message);
     });
     current.addEventListener("close", ({ code }) => finish(code));

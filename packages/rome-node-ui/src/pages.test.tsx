@@ -401,7 +401,7 @@ describe("this device", () => {
     await userEvent.click(
       within(screen.getAllByRole("listitem")[0]!).getByRole("button", { name: "Device actions" }),
     );
-    await userEvent.click(await screen.findByRole("menuitem", { name: "View audit log" }));
+    await userEvent.click(await screen.findByRole("menuitem", { name: "Computer use log" }));
     expect(openAuditLog).toHaveBeenCalledTimes(1);
     unmount();
     render(
@@ -417,7 +417,7 @@ describe("this device", () => {
       within(screen.getAllByRole("listitem")[0]!).getByRole("button", { name: "Device actions" }),
     );
     await screen.findByRole("menuitem", { name: "Disconnect" });
-    expect(screen.queryByRole("menuitem", { name: "View audit log" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "Computer use log" })).toBeNull();
   });
 
   it("puts it first even when other devices are busier", async () => {

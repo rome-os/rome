@@ -84,6 +84,9 @@ export const ConciergeBubble = memo(function ConciergeBubble({
 
   return (
     <div
+      // Every bubble, a message's later ones included: the thread view
+      // counts a press on one as on its content.
+      data-concierge-bubble-part
       data-timeline-anchor={anchorId}
       data-arrival={arrival}
       className={cn(

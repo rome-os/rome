@@ -4,6 +4,7 @@ import { app, BrowserWindow, Menu, Tray, nativeImage } from "electron";
 import type { FloatingPill } from "./floating-pill";
 import { createLogger } from "./logger";
 import { isQuitting, requestStopAndQuit } from "./lifecycle";
+import type { DeviceStatus } from "./cloud/device-host";
 import type { RuntimeStatus } from "./runtime/provider";
 import type { Runtime } from "./runtime/runtime";
 
@@ -71,6 +72,18 @@ export function statusLabel(status: RuntimeStatus | null): string {
   }
 }
 
+/**
+ * The line for this computer: its connection, and Computer use when that is off. Null while the
+ * app is signed out, which the status line above already says.
+ */
+export function deviceLabel(device: DeviceStatus): string | null {
+  if (device.state === "off") return null;
+  const connection = { connected: "Connected", connecting: "Connecting…", offline: "Offline" }[
+    device.connection
+  ];
+  return `This Mac: ${connection}${device.computerUse ? "" : " · Computer use off"}`;
+}
+
 export interface SetupTrayOptions {
   getMainWindow: () => BrowserWindow | null;
   ensureMainWindow: () => Promise<BrowserWindow> | BrowserWindow;
@@ -80,11 +93,20 @@ export interface SetupTrayOptions {
   runtime: Runtime;
   /** Null where the pill does not exist (every platform but macOS). */
   floatingPill: FloatingPill | null;
+  /** This computer as a device. Without it the menu has no line for it. */
+  device?: { status(): DeviceStatus; onChange(listener: () => void): void };
 }
 
 export function setupTray(options: SetupTrayOptions): Tray {
-  const { getMainWindow, ensureMainWindow, openSettings, openAuditLog, runtime, floatingPill } =
-    options;
+  const {
+    getMainWindow,
+    ensureMainWindow,
+    openSettings,
+    openAuditLog,
+    runtime,
+    floatingPill,
+    device,
+  } = options;
 
   tray = new Tray(resolveTrayIcon());
   tray.setToolTip("Rome");
@@ -104,6 +126,7 @@ export function setupTray(options: SetupTrayOptions): Tray {
     if (!tray) return;
 
     const quitting = isQuitting();
+    const deviceLine = device ? deviceLabel(device.status()) : null;
     const template: Electron.MenuItemConstructorOptions[] = [
       {
         label: "Show Rome",
@@ -116,12 +139,13 @@ export function setupTray(options: SetupTrayOptions): Tray {
         label: quitting ? "Status: Quitting…" : statusLabel(status),
         enabled: false,
       },
+      ...(deviceLine ? [{ label: deviceLine, enabled: false }] : []),
       { type: "separator" },
       {
         label: "Settings…",
         click: openSettings,
       },
-      ...(openAuditLog ? [{ label: "Audit Log…", click: openAuditLog }] : []),
+      ...(openAuditLog ? [{ label: "Computer Use Log…", click: openAuditLog }] : []),
       // The floating icon is off until it is ticked here, and this is the way
       // back after its own menu has hidden it.
       ...(floatingPill
@@ -152,6 +176,7 @@ export function setupTray(options: SetupTrayOptions): Tray {
   };
 
   rebuildMenu(runtime.getStatus());
+  device?.onChange(() => rebuildMenu(runtime.getStatus()));
   runtime.on("status", (status: RuntimeStatus) => rebuildMenu(status));
   // Hiding the pill from its own menu has to untick the box here.
   floatingPill?.onEnabledChange(() => rebuildMenu(runtime.getStatus()));

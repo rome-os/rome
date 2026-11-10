@@ -102,7 +102,9 @@ function TaskRow({
           <button
             type="button"
             onClick={jump}
-            className="block min-w-0 text-left outline-none after:absolute after:inset-0 focus-visible:after:outline-1 focus-visible:after:-outline-offset-1 focus-visible:after:outline-solid focus-visible:after:outline-ring/50"
+            // A button sizes to its content even as a block, so without the
+            // full width a long title pushes the row past the panel's edge.
+            className="block w-full min-w-0 text-left outline-none after:absolute after:inset-0 focus-visible:after:outline-1 focus-visible:after:-outline-offset-1 focus-visible:after:outline-solid focus-visible:after:outline-ring/50"
           >
             <TitleText task={task} finished={finished} />
           </button>

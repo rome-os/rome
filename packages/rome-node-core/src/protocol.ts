@@ -57,6 +57,57 @@ export function gatewayMessage(value: unknown): GatewayMessage | null {
   return null;
 }
 
+/**
+ * A notification Rome Cloud asks this device to show. The Gateway sends it as one text frame,
+ * `{"type":"notification", title, body, instanceId, level?, chatId?}`, server to client only.
+ */
+export interface GatewayNotification {
+  title: string;
+  body: string;
+  /** The Rome instance the notification is about. */
+  instanceId: string;
+  /** `active` rings. Without a level the notification is silent. */
+  level?: "active" | "passive";
+  chatId?: string;
+}
+
+export const NOTIFICATION_LIMITS = { title: 200, body: 2000, id: 128 } as const;
+
+const text = (value: unknown, max: number): value is string =>
+  typeof value === "string" && value.length > 0 && value.length <= max;
+
+/**
+ * Parses a notification frame, or returns null for anything else. A relayed peer message always
+ * carries `id` and `from`, so a frame with either is never a notification: only the Gateway
+ * itself can send one.
+ */
+export function gatewayNotification(value: unknown): GatewayNotification | null {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const item = value as Record<string, unknown>;
+  if (item.type !== "notification" || Object.hasOwn(item, "id") || Object.hasOwn(item, "from"))
+    return null;
+  if (
+    !text(item.title, NOTIFICATION_LIMITS.title) ||
+    !text(item.body, NOTIFICATION_LIMITS.body) ||
+    !text(item.instanceId, NOTIFICATION_LIMITS.id)
+  )
+    return null;
+  const notification: GatewayNotification = {
+    title: item.title,
+    body: item.body,
+    instanceId: item.instanceId,
+  };
+  if (item.level !== undefined) {
+    if (item.level !== "active" && item.level !== "passive") return null;
+    notification.level = item.level;
+  }
+  if (item.chatId !== undefined) {
+    if (!text(item.chatId, NOTIFICATION_LIMITS.id)) return null;
+    notification.chatId = item.chatId;
+  }
+  return notification;
+}
+
 export function byteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }

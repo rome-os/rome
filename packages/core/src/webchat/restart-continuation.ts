@@ -1,3 +1,4 @@
+import type { SessionActor } from "../access/session-actor.js";
 import type { MainBackendTurnRunner } from "../apps/actions/backend-turn.js";
 import type { InterruptedTurn } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
@@ -35,6 +36,8 @@ export async function continueInterruptedTurns(
   >,
   runner: Pick<MainBackendTurnRunner, "runAndReport">,
   now = Date.now(),
+  /** Who the continuation acts for: the person whose turn it continues. Absent, no one. */
+  actorOf: (turn: InterruptedTurn) => Promise<SessionActor | undefined> = async () => undefined,
 ): Promise<void> {
   for (const turn of turns) {
     // The marker lives in turn_start's prompt, not a later best-effort trace
@@ -44,6 +47,7 @@ export async function continueInterruptedTurns(
       if (!repo.canContinueAfterRestart(turn)) continue;
       if (!isRecentActivity(repo.getRestartLastActivityAt(turn), now)) continue;
       const excerpt = repo.getRestartGuardianPrompt(turn);
+      const actor = await actorOf(turn);
       await runner.runAndReport(
         {
           agentName: turn.agentName,
@@ -59,6 +63,7 @@ export async function continueInterruptedTurns(
         {
           inputLabel: "Restart recovery",
           shouldRun: () => repo.canContinueAfterRestart(turn),
+          ...(actor ? { actor } : {}),
         },
       );
     } catch (error) {

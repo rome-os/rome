@@ -133,7 +133,8 @@
       "previous7Days": "过去 7 天",
       "previous30Days": "过去 30 天",
       "older": "更早"
-    }
+    },
+    "startedByConcierge": "由 {{name}} 发起"
   },
   "language": {
     "label": "语言"
@@ -146,19 +147,18 @@
     "signOutError": "退出登录失败，请重试。"
   },
   "thisComputer": {
-    "label": "允许 Rome 操作这台电脑",
-    "auditLog": "查看操作记录",
+    "label": "电脑操作",
+    "auditLog": "电脑操作记录",
     "tooltip": {
       "connected": "Rome 可以操作这台电脑",
       "connecting": "正在连接…",
       "offline": "Rome 暂时无法连接这台电脑",
-      "disabled": "Rome 不能操作这台电脑"
-    },
-    "state": {
-      "connected": "已连接",
-      "connecting": "正在连接…",
-      "offline": "离线",
-      "disabled": "已关闭"
+      "disabled": "Rome 不能操作这台电脑",
+      "limited": {
+        "connected": "已连接 · 电脑操作已关闭",
+        "connecting": "正在连接… · 电脑操作已关闭",
+        "offline": "离线 · 电脑操作已关闭"
+      }
     }
   },
   "terminal": {
@@ -193,6 +193,9 @@
       "preparingUrl": "正在准备 Claude 登录链接",
       "submittingCode": "正在提交 Claude 登录代码"
     }
+  },
+  "upgradeIndicator": {
+    "tooltip": "{{name}} 可以升级"
   },
   "upgradeBanner": {
     "countdownTitle": "Rome {{version}} 更新已就绪",

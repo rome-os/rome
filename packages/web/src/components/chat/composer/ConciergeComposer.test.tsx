@@ -263,7 +263,8 @@ describe("ConciergeComposer reply", () => {
   it("sends into the open chat thread, then closes it and clears the reply", async () => {
     const { onSend } = renderComposer({}, reply, true, undefined, true);
 
-    await userEvent.type(await screen.findByPlaceholderText("Message"), "why there?{Enter}");
+    // While the thread view is open the composer reads as a reply into it.
+    await userEvent.type(await screen.findByPlaceholderText("Reply"), "why there?{Enter}");
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
     await userEvent.type(screen.getByPlaceholderText("Message"), "and the hotel?{Enter}");
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
@@ -278,9 +279,9 @@ describe("ConciergeComposer reply", () => {
     const { onSend } = renderComposer({}, reply, true, undefined, true);
     onSend.mockRejectedValueOnce(new Error("offline"));
 
-    await userEvent.type(await screen.findByPlaceholderText("Message"), "why there?{Enter}");
+    await userEvent.type(await screen.findByPlaceholderText("Reply"), "why there?{Enter}");
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(1));
-    await userEvent.type(screen.getByPlaceholderText("Message"), "{Enter}");
+    await userEvent.type(await screen.findByPlaceholderText("Reply"), "{Enter}");
     await waitFor(() => expect(onSend).toHaveBeenCalledTimes(2));
 
     expect(onSend.mock.calls[1][0]).toMatchObject({ replyTo: reply, chatThread: "a1" });

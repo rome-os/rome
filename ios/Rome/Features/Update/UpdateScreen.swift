@@ -35,6 +35,8 @@ struct UpdateScreen: View {
                 }
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     bottom
+                        .frame(maxWidth: Metrics.buttonWidth)
+                        .frame(maxWidth: .infinity)
                         .padding(.horizontal, 20)
                         .padding(.top, 12)
                         .padding(.bottom, 18)
@@ -62,6 +64,8 @@ struct UpdateScreen: View {
                 }
                 .overlay(alignment: .bottom) {
                     bottom
+                        .frame(maxWidth: Metrics.buttonWidth)
+                        .frame(maxWidth: .infinity)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 18)
                 }
@@ -139,7 +143,7 @@ struct UpdateScreen: View {
                         .id(line)
                         .transition(.opacity)
                 }
-                Text("This can take a few minutes. You can leave the app; it picks up where it left off.")
+                Text("This runs on your Rome's server, not on this phone, and can take a few minutes. You can leave the app and come back.")
                     .romeFont(15)
                     .lineSpacing(3)
                     .foregroundStyle(Palette.sub)
