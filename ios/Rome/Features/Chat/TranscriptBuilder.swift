@@ -33,7 +33,8 @@ enum TranscriptRow: Identifiable, Hashable {
     case taskCard(id: String, chatId: String, title: String)
     case approval(id: String, part: MessagePart.ApprovalPart, sessionId: String)
     case question(id: String, part: MessagePart.QuestionPart, sessionId: String, answered: JSONValue?)
-    case webOnly(id: String, kind: MessagePart.WebOnlyKind)
+    /// `done`: an interactive card the guardian already answered.
+    case webOnly(id: String, kind: MessagePart.WebOnlyKind, done: Bool = false)
     case routineDraft(id: String, part: MessagePart.RoutineDraftPart)
     case connect(id: String, part: MessagePart.ConnectCardPart, sessionId: String)
     case error(id: String, text: String)
@@ -44,7 +45,7 @@ enum TranscriptRow: Identifiable, Hashable {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _), .approval(let id, _, _), .question(let id, _, _, _),
-             .webOnly(let id, _), .routineDraft(let id, _), .connect(let id, _, _), .error(let id, _), .tools(let id, _, _):
+             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .error(let id, _), .tools(let id, _, _):
             return id
         case .typing:
             return "typing"
@@ -121,8 +122,8 @@ enum TranscriptBuilder {
                     rows.append(.approval(id: id, part: approval, sessionId: message.sessionId))
                 case .question(let question):
                     rows.append(.question(id: id, part: question, sessionId: message.sessionId, answered: answers[question.toolUseId]))
-                case .webOnly(let kind):
-                    rows.append(.webOnly(id: id, kind: kind))
+                case .webOnly(let kind, let toolUseId):
+                    rows.append(.webOnly(id: id, kind: kind, done: toolUseId.map { answers[$0] != nil } ?? false))
                 case .routineDraft(let draft):
                     rows.append(.routineDraft(id: id, part: draft))
                 case .connectCard(let card):

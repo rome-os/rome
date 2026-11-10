@@ -33,14 +33,27 @@ private func rows(_ items: [[String: Any]]) -> [TranscriptRow] {
             ["type": "quota_switch", "from": "claude", "to": "codex", "model": "GPT-5"],
         ])
         #expect(parsed == [
-            .webOnly(.aiTools), .webOnly(.connectService), .webOnly(.connectorSignIn),
-            .webOnly(.app("habits")), .webOnly(.turnSummary), .webOnly(.modelSwitch(model: "GPT-5")),
+            .webOnly(.aiTools, toolUseId: "a"), .webOnly(.connectService, toolUseId: "b"), .webOnly(.connectorSignIn, toolUseId: "c"),
+            .webOnly(.app("habits"), toolUseId: "d"), .webOnly(.turnSummary), .webOnly(.modelSwitch(model: "GPT-5")),
         ])
         #expect(MessagePart.WebOnlyKind.aiTools.title() == "Connect Claude or ChatGPT")
         #expect(MessagePart.WebOnlyKind.connectService.title() == "A card to connect a service")
         #expect(MessagePart.WebOnlyKind.app("habits").title(appName: "Habits") == "A card from Habits")
         #expect(MessagePart.WebOnlyKind.app("habits").title() == "An app card")
         #expect(MessagePart.WebOnlyKind.modelSwitch(model: "GPT-5").title() == "Switched to GPT-5")
+    }
+
+    /// An answered interactive card says it is done; an open one still asks to be opened.
+    @Test func anAnsweredCardSaysDone() {
+        let card: [String: Any] = ["type": "pending_interaction", "toolUseId": "tu-1", "appId": "connector", "render": ["componentId": "connect-card"]]
+        let content = String(data: try! JSONSerialization.data(withJSONObject: [card]), encoding: .utf8)!
+        let message = ChatMessage(id: "m", sessionId: "s", role: "assistant", content: content, createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000)))
+        func row(_ answers: [String: JSONValue]) -> TranscriptRow? {
+            TranscriptBuilder.rows(messages: [message], pending: [], answers: answers, options: .init()).last
+        }
+        #expect(row([:]) == .webOnly(id: "m:0", kind: .connectService, done: false))
+        #expect(row(["tu-1": .object(["connected": .bool(true)])]) == .webOnly(id: "m:0", kind: .connectService, done: true))
+        #expect(row(["other": .object([:])]) == .webOnly(id: "m:0", kind: .connectService, done: false))
     }
 
     /// A newer server's part this build does not know is a row, not a gap.
@@ -106,9 +119,18 @@ private func rows(_ items: [[String: Any]]) -> [TranscriptRow] {
         #expect(RoutineCardText.status(.notOn) == "Not on")
         #expect(RoutineCardText.status(.on(routineId: "r")) == "On")
         #expect(RoutineCardText.status(.paused(routineId: "r")) == "Paused")
-        #expect(RoutineCardText.link(nil) == "Turn it on in Routines")
-        #expect(RoutineCardText.link(.notOn) == "Turn it on in Routines")
+        #expect(RoutineCardText.link(nil) == "Turn it on on the web")
+        #expect(RoutineCardText.link(.notOn) == "Turn it on on the web")
         #expect(RoutineCardText.link(.on(routineId: "r")) == "Open in Routines")
+    }
+
+    /// An unsaved proposal is turned on from its own card, so the link opens
+    /// that card's chat; Routines cannot turn it on. A saved routine opens its page.
+    @Test func theLinkGoesWhereTheRoutineCanBeTurnedOn() {
+        let origin = URL(string: "https://me.romeos.cc")!
+        #expect(RoutineCardText.destination(.notOn, origin: origin, sessionId: "topic-1", mainChatServerID: nil).absoluteString == "https://me.romeos.cc/chat/topic-1")
+        #expect(RoutineCardText.destination(nil, origin: origin, sessionId: conciergeChatID, mainChatServerID: "c-42").absoluteString == "https://me.romeos.cc/chat/c-42")
+        #expect(RoutineCardText.destination(.paused(routineId: "r2"), origin: origin, sessionId: "topic-1", mainChatServerID: nil).absoluteString == "https://me.romeos.cc/routines/r2")
     }
 
     @MainActor

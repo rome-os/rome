@@ -18,8 +18,9 @@ enum MessagePart: Hashable, Sendable {
     /// A routine Chat proposed (`propose_routine`), shown read-only.
     case routineDraft(RoutineDraftPart)
     /// A part the web dashboard draws and this app does not: a row that opens
-    /// the chat there.
-    case webOnly(WebOnlyKind)
+    /// the chat there. `toolUseId` names an interactive card, whose answer
+    /// marks it done.
+    case webOnly(WebOnlyKind, toolUseId: String? = nil)
     /// The guardian's answer to an interactive card.
     case interactionResult(toolUseId: String, output: JSONValue)
     /// A turn that failed before it ran.
@@ -226,7 +227,7 @@ enum MessagePart: Hashable, Sendable {
                let toolUseId = value["toolUseId"]?.string {
                 return .question(question(render?["props"], toolUseId: toolUseId))
             }
-            return .webOnly(webOnlyKind(componentId: render?["componentId"]?.string, appId: value["appId"]?.string))
+            return .webOnly(webOnlyKind(componentId: render?["componentId"]?.string, appId: value["appId"]?.string), toolUseId: value["toolUseId"]?.string)
         case "interaction_result":
             guard let toolUseId = value["toolUseId"]?.string else { return nil }
             return .interactionResult(toolUseId: toolUseId, output: value["output"] ?? .null)

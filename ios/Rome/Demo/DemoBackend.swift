@@ -597,6 +597,8 @@ final class DemoBackend: RomeBackend {
                 .object(["type": .string("quota_switch"), "from": .string("claude"), "to": .string("codex"), "model": .string("GPT-5")]),
                 .object(["type": .string("poll_card"), "question": .string("?")]),
             ], at: at(11, 2), session: routine),
+            // The AI tools card was answered on the web: its row says Done.
+            parts([.object(["type": .string("interaction_result"), "toolUseId": .string("ai-1"), "output": .object(["connected": .bool(true)])])], at: at(11, 3), session: routine, role: "user"),
         ]
         messages["topic-mail-setup"] = [
             user("ms1", "摘要按什么来整理？", at: at(10, 1), session: "topic-mail-setup"),

@@ -57,10 +57,10 @@ struct InteractionRow: View {
                 store.connect(part, rowId: id, chatId: sessionId)
             }
             .task(id: id) { await store.checkConnected(part, rowId: id) }
-        case .webOnly(_, let kind):
-            WebOnlyCard(kind: kind, sessionId: store.sessionId)
+        case .webOnly(_, let kind, let done):
+            WebOnlyCard(kind: kind, done: done, sessionId: store.sessionId)
         case .routineDraft(_, let part):
-            RoutineDraftCardView(part: part, status: store.routineStatus(part), canTurnOn: !isVisitor)
+            RoutineDraftCardView(part: part, status: store.routineStatus(part), canTurnOn: !isVisitor, sessionId: store.sessionId)
                 .task { if !isVisitor { await store.loadRoutines() } }
         default:
             EmptyView()

@@ -610,6 +610,8 @@ struct QuestionCardView: View {
 /// chat on the dashboard, in the app.
 struct WebOnlyCard: View {
     let kind: MessagePart.WebOnlyKind
+    /// Answered already: it says so, instead of asking to be opened.
+    var done = false
     /// The chat it is in, opened on the dashboard.
     var sessionId: String? = nil
     @Environment(AppModel.self) private var model
@@ -631,7 +633,7 @@ struct WebOnlyCard: View {
                 Text(verbatim: title)
                     .romeFont(15)
                     .fixedSize(horizontal: false, vertical: true)
-                Text("Shown only on the web")
+                Text(done ? "Done" : "Shown only on the web")
                     .romeFont(13)
                     .foregroundStyle(Palette.sub)
             }

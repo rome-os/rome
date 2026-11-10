@@ -55,7 +55,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(approval.fields == [.init(label: "收件人", value: "x@y.z")])
         guard case .question(let question) = parts[2] else { Issue.record("no question"); return }
         #expect(question.questions.first?.options == ["A", "B"])
-        #expect(parts[3] == .webOnly(.unknown))
+        #expect(parts[3] == .webOnly(.unknown, toolUseId: "app"))
         #expect(parts[4] == .other(type: "tool_use"))
         #expect(parts[5] == .error("boom"))
     }

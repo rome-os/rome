@@ -2457,12 +2457,12 @@
         }
       }
     },
-    "Turn it on in Routines" : {
+    "Turn it on on the web" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "在「例程」中开启"
+            "value" : "在 Web 上开启"
           }
         }
       }

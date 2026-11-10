@@ -9,6 +9,8 @@ struct RoutineDraftCardView: View {
     let status: RoutineStatus?
     /// A visitor cannot turn a routine on, so gets no link to.
     var canTurnOn = true
+    /// The chat the card is in: an unsaved proposal is turned on from its card there.
+    var sessionId: String? = nil
 
     @Environment(AppModel.self) private var model
     @Environment(\.openInstancePage) private var openInstancePage
@@ -60,7 +62,7 @@ struct RoutineDraftCardView: View {
             .background(Palette.fill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
             if canTurnOn, let origin = model.webURL {
                 Button {
-                    openInstancePage(InstancePages.routines(origin: origin, routineId: status?.routineId))
+                    openInstancePage(RoutineCardText.destination(status, origin: origin, sessionId: sessionId, mainChatServerID: model.workspace?.mainChatServerID))
                 } label: {
                     HStack(spacing: 4) {
                         Text(verbatim: RoutineCardText.link(status))
@@ -126,9 +128,17 @@ enum RoutineCardText {
         }
     }
 
-    /// Where the link goes: turning it on while it is not on (or its state is
-    /// unknown), else the routine on the dashboard.
+    /// The link's words: turning it on while no routine was made from the
+    /// card (or its state is unknown), else the routine on the dashboard.
     static func link(_ status: RoutineStatus?) -> String {
-        status?.routineId == nil ? String(localized: "Turn it on in Routines") : String(localized: "Open in Routines")
+        status?.routineId == nil ? String(localized: "Turn it on on the web") : String(localized: "Open in Routines")
+    }
+
+    /// Where the link goes. Only the card itself turns an unsaved proposal
+    /// on, so that opens the card's chat on the dashboard; a routine made
+    /// from it opens its own page.
+    static func destination(_ status: RoutineStatus?, origin: URL, sessionId: String?, mainChatServerID: String?) -> URL {
+        if let routineId = status?.routineId { return InstancePages.routines(origin: origin, routineId: routineId) }
+        return InstancePages.chat(origin: origin, sessionId: sessionId, mainChatServerID: mainChatServerID)
     }
 }
