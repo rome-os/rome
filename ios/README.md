@@ -36,7 +36,7 @@ A phone keeps an installed app's team. A build signed by another team is refused
 
 ### On an iPad
 
-The app runs on iPhone and iPad. A phone stays in portrait; an iPad turns to every orientation and works in Split View, Slide Over and Stage Manager windows. Layout goes by width, never by device: on a regular width the drawer is a sidebar beside the page (`NavigationSplitView`), and the header's drawer button hides or shows it; on a compact width, such as a narrow iPad window, the drawer slides out as on a phone. Conversations keep one centered column of `Metrics.readableWidth` (720 pt) at most. Check a screen change on an iPad simulator too, for example `name=iPad Pro 13-inch (M5)`.
+The app runs on iPhone and iPad. A phone stays in portrait; an iPad turns to every orientation and works in Split View, Slide Over and Stage Manager windows. Layout goes by width, never by device: on a regular width the drawer is pinned beside the page, and the header's drawer button slides it away and back; on a compact width, such as a narrow iPad window, the drawer slides out as on a phone. Both are one view tree in `MainShell` that only changes frames and offsets, so a window resized across the two keeps the open page and its state. Conversations keep one centered column of `Metrics.readableWidth` (720 pt) at most. Check a screen change on an iPad simulator too, for example `name=iPad Pro 13-inch (M5)`.
 
 ## Release to TestFlight
 

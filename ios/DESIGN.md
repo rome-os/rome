@@ -64,4 +64,4 @@ Example: the opening screen shows the mascot and "Rome" with no caption, and a p
 
 A screen adapts to the width it gets, not to the device, so an iPad window of any size and a phone follow the same rules. A conversation never runs wider than one readable column.
 
-Example: on a wide iPad window the drawer is a sidebar beside the page; narrowed in Split View, it slides out as on a phone. Messages, cards and the composer stay in a centered column of 720 pt at most.
+Example: on a wide iPad window the drawer is pinned beside the page; narrowed in Split View, it slides out as on a phone, and the open chat stays as it was. Messages, cards and the composer stay in a centered column of 720 pt at most.

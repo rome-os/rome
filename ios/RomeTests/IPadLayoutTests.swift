@@ -29,3 +29,40 @@ import Testing
         #expect(AppGrid.columns(width: 1024, accessibility: true) == 7)
     }
 }
+
+/// An iPad window resized across compact and regular (Split View, Stage
+/// Manager) keeps the page's stack, and with it the open page and its state:
+/// the shell changes frames, never the view tree.
+@MainActor
+@Suite struct ShellResizeTests {
+    @Test func thePageStackSurvivesASizeClassChange() async throws {
+        let workspace = Workspace(backend: DemoBackend(variant: .full), instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-resize-\(UUID().uuidString)/Drafts"), instance: "t"))
+        defer { workspace.stop() }
+        let host = UIHostingController(rootView: MainShell(workspace: workspace).environment(AppModel()))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 1194, height: 834)
+        window.rootViewController = host
+        window.isHidden = false
+        defer { window.isHidden = true }
+
+        var stacks: [UINavigationController] = []
+        for sizeClass in [UIUserInterfaceSizeClass.regular, .compact, .regular] {
+            host.traitOverrides.horizontalSizeClass = sizeClass
+            host.view.setNeedsLayout()
+            host.view.layoutIfNeeded()
+            try await Task.sleep(for: .milliseconds(400))
+            stacks.append(try #require(Self.navigation(in: host)))
+        }
+        #expect(stacks[0] === stacks[1])
+        #expect(stacks[1] === stacks[2])
+    }
+
+    private static func navigation(in controller: UIViewController) -> UINavigationController? {
+        if let navigation = controller as? UINavigationController { return navigation }
+        for child in controller.children {
+            if let navigation = navigation(in: child) { return navigation }
+        }
+        return nil
+    }
+}
