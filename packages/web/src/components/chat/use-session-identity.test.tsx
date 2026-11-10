@@ -44,6 +44,21 @@ afterEach(() => {
   rs.clearAllMocks();
 });
 
+describe("useSessionIdentity forkable", () => {
+  it.each([
+    ["a common chat", {}, true],
+    ["a fork chat", { parentSessionId: "s0" }, true],
+    ["a task chat", { triggerKind: "concierge" }, false],
+    ["a fork of a Concierge chat", { agentName: "core:concierge", parentSessionId: "t1" }, false],
+  ])("reports whether %s can be forked", async (_label, fields, forkable) => {
+    rs.mocked(getSession).mockResolvedValue({ ...session, ...fields });
+    rs.mocked(listChatAgents).mockResolvedValue(groups);
+    const { result } = renderHook(() => useSessionIdentity("s1"));
+    await waitFor(() => expect(result.current.loading).toBe(false));
+    expect(result.current.forkable).toBe(forkable);
+  });
+});
+
 describe("useSessionIdentity presentation mode", () => {
   it("masks the pinned-agent mention while presentation mode is on, and restores it when off", async () => {
     rs.mocked(getSession).mockResolvedValue(session);

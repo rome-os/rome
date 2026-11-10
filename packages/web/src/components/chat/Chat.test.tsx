@@ -2115,6 +2115,34 @@ describe("Chat Concierge empty state", () => {
     expect(screen.queryByTestId("tasks-pill")).toBeNull();
   });
 
+  it("offers no Archive or Delete for the main chat, and both for a topic chat", async () => {
+    const user = userEvent.setup();
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const main = renderChat(
+      <Chat sessionId="concierge" variant="concierge" conciergeMainChatId="concierge" />,
+    );
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "share.title",
+    ]);
+    await user.keyboard("{Escape}");
+    main.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    expect(screen.getByRole("menuitem", { name: "navbar.archive" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "navbar.delete" })).toBeTruthy();
+  });
+
   it("titles the main Concierge chat with the agent's chosen name, and a topic chat with its own", async () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",

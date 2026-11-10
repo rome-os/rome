@@ -17,7 +17,7 @@ import { useSettings } from "@/hooks/use-settings";
 import {
   CONCIERGE_CHAT_ID,
   ensureConciergeChat,
-  CONCIERGE_CHATS_QUERY_KEY,
+  refreshTopicChats,
   startConciergeTopicChat,
   useConciergeChat,
   useConciergeChats,
@@ -272,7 +272,7 @@ export function ChatComponent({
   const isConcierge = isListedConcierge || topicDraft;
   const startTopicChat = useCallback(async () => {
     const chat = await startConciergeTopicChat();
-    void queryClient.invalidateQueries({ queryKey: CONCIERGE_CHATS_QUERY_KEY });
+    void refreshTopicChats(queryClient);
     return chat.id;
   }, [queryClient]);
   const recoverMissingSession = useCallback(

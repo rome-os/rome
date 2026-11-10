@@ -544,7 +544,7 @@ describe("AgentRunner", () => {
         parentTurnId: "parent-turn-1",
         triggerKind: "fork",
         triggerName: "recap",
-        // Follow-up turns of the side chat rebuild their context from this row.
+        // Follow-up turns of the fork chat rebuild their context from this row.
         deviceFolder: { deviceId: "mac", deviceName: "macbook", platform: "macos", path: "/w" },
       });
 
@@ -963,17 +963,17 @@ describe("AgentRunner", () => {
       }
     });
 
-    it("leaves a saved side chat to the webchat route on a backend turn", async () => {
+    it("leaves a saved fork chat to the webchat route on a backend turn", async () => {
       const testDb = createTestDb();
       try {
         const repo = new ChatsWebChatRepository(testDb.db);
         await repo.ensureRomeSession({
-          id: "side-chat",
+          id: "fork-chat",
           type: "fork",
-          name: "Side chat",
+          name: "Fork chat",
           agentName: "main",
         });
-        const { manager, turns, see } = await resumedSession(testDb.db, "side-chat");
+        const { manager, turns, see } = await resumedSession(testDb.db, "fork-chat");
         const runner = new AgentRunner(manager, agentLoader, repo);
 
         see(
@@ -984,10 +984,10 @@ describe("AgentRunner", () => {
               prompt: "continue",
               threadContext: {
                 channel: "webchat",
-                threadId: "side-chat",
-                threadName: "Side chat",
+                threadId: "fork-chat",
+                threadName: "Fork chat",
                 threadType: "private",
-                romeSessionId: "side-chat",
+                romeSessionId: "fork-chat",
               },
               persistTrace: true,
               persistTranscript: false,
@@ -995,8 +995,8 @@ describe("AgentRunner", () => {
           ),
         );
 
-        expect(turns).toEqual([{ romeSessionId: "side-chat", romeSessionType: "webchat" }]);
-        const roles = (await repo.getMessages("side-chat")).map((m) => m.role);
+        expect(turns).toEqual([{ romeSessionId: "fork-chat", romeSessionType: "webchat" }]);
+        const roles = (await repo.getMessages("fork-chat")).map((m) => m.role);
         expect(roles).not.toContain("user");
         expect(roles).not.toContain("assistant");
       } finally {
@@ -1454,7 +1454,7 @@ describe("AgentRunner", () => {
           .runForked({
             ...key,
             sourceSessionId,
-            prompt: "First side chat",
+            prompt: "First fork chat",
             mode: "exact",
           })
           [Symbol.asyncIterator]();
@@ -1465,7 +1465,7 @@ describe("AgentRunner", () => {
 
         // Production evicts otherwise-idle source sessions after 15 seconds.
         // Cross several sweeper intervals while the first fork is leased: the
-        // source must remain available for another side chat.
+        // source must remain available for another fork chat.
         await rs.advanceTimersByTimeAsync(500);
         expect(manager.find(key)?.sessionId).toBe(sourceSessionId);
 
@@ -1473,7 +1473,7 @@ describe("AgentRunner", () => {
           .runForked({
             ...key,
             sourceSessionId,
-            prompt: "Second side chat",
+            prompt: "Second fork chat",
             mode: "exact",
           })
           [Symbol.asyncIterator]();
@@ -1488,7 +1488,7 @@ describe("AgentRunner", () => {
         expect(manager.find(key)).toBeUndefined();
 
         // The webchat route reacquires before every fork. Webchat's persisted
-        // provider-session reuse does not expire, so a later side chat resumes
+        // provider-session reuse does not expire, so a later fork chat resumes
         // the same source identity after the short in-memory lease is evicted.
         const resumedSource = await manager.open(key);
         expect(resumedSource.sessionId).toBe(sourceSessionId);
@@ -1496,7 +1496,7 @@ describe("AgentRunner", () => {
           .runForked({
             ...key,
             sourceSessionId,
-            prompt: "Side chat after eviction",
+            prompt: "Fork chat after eviction",
             mode: "exact",
           })
           [Symbol.asyncIterator]();

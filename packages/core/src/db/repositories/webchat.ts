@@ -256,7 +256,7 @@ export interface EnsureRomeSessionInput {
   agentName: string | null;
   projectName?: string;
   projectPath?: string | null;
-  /** A side chat keeps the folder of the chat it branched from. */
+  /** A fork chat keeps the folder of the chat it branched from. */
   deviceFolder?: DeviceFolder | null;
   sourceChannel?: string | null;
   sourceThreadId?: string | null;

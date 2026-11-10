@@ -2,7 +2,8 @@
 import { useEffect } from "react";
 import { MemoryRouter, Route, Routes, useLocation, useNavigate } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
 import { SlotOutlet, SlotProvider } from "@/components/slot";
@@ -311,6 +312,26 @@ describe("FreeGrid mobile header", () => {
       expect(header(container).querySelector("[data-concierge-tasks-pill]")).not.toBeNull(),
     );
     await waitFor(() => expect(header(container).textContent).toContain("Milo"));
+  });
+
+  it("offers no Delete for the main chat in the phone header's menu", async () => {
+    concierge.chatId = "concierge";
+    identity.current = { sessionName: "Concierge" };
+    const user = userEvent.setup();
+    const main = renderAt("/message", {}, <FreeGrid sessionId="concierge" />);
+    await user.click(
+      await within(header(main.container)).findByRole("button", { name: "More actions" }),
+    );
+    expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
+    await user.keyboard("{Escape}");
+    main.unmount();
+
+    identity.current = { sessionName: "Plan the launch" };
+    const other = renderAt("/chat/some-other-chat");
+    await user.click(
+      await within(header(other.container)).findByRole("button", { name: "More actions" }),
+    );
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
   });
 
   it("leaves every other chat's header without it", async () => {

@@ -5,8 +5,6 @@ import {
   LayoutGrid,
   MessageSquare,
   MoreHorizontal,
-  Pin,
-  PinOff,
   PanelRightOpen,
   PanelRightClose,
   Share2,
@@ -20,7 +18,7 @@ import { artifactOwnerId } from "@/lib/artifact-name";
 import { prettyAgentName } from "@/lib/agent-name";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { deleteSession } from "@/lib/chat-api";
-import { chatPath } from "@/lib/chat-session";
+import { chatPath, MAIN_CHAT_PATH } from "@/lib/chat-session";
 import { useApps } from "@/hooks/use-apps";
 import { appDisplayName } from "@/lib/app-display-name";
 import { SessionAvatar } from "@/components/chat/SessionAvatar";
@@ -35,7 +33,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { IconButton } from "@/components/ui/icon-button";
-import { emitSessionsChanged, usePinSession } from "@/lib/session-events";
+import { emitSessionsChanged } from "@/lib/session-events";
 import { AppWidget } from "./AppWidget";
 import { ChatWidget } from "./ChatWidget";
 import { DesktopWidget } from "./DesktopWidget";
@@ -385,7 +383,6 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
     model,
     reasoningEffort,
     pinnedAgentMention,
-    pinnedAt,
   } = useSessionIdentity(chatSessionId);
   const conciergeChats = useConciergeChats();
   const conciergeName = useConciergeName();
@@ -402,11 +399,10 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
   // outranks the route's own title. Claimed here rather than in FreePage so it
   // reads the same identity the header does, and follows a rename with it.
   useDocumentTitle(chatName);
-  const setPinned = usePinSession();
 
   // Delete the active chat from the mobile header's "⋯" menu, mirroring the
-  // desktop navbar: drop the session, refresh the sidebar list, land on a fresh
-  // chat.
+  // desktop navbar: drop the session, refresh the sidebar list, land on the
+  // main chat.
   const handleDeleteSession = useCallback(async () => {
     if (!chatSessionId) return;
     try {
@@ -415,17 +411,8 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
       // best-effort — the list refresh below reconciles either way
     }
     emitSessionsChanged();
-    navigate("/chat");
+    navigate(MAIN_CHAT_PATH);
   }, [chatSessionId, navigate]);
-
-  const handlePinSession = useCallback(async () => {
-    if (!chatSessionId) return;
-    try {
-      await setPinned(chatSessionId, !pinnedAt);
-    } catch {
-      // Server truth is unchanged; the next successful session read reconciles.
-    }
-  }, [chatSessionId, pinnedAt, setPinned]);
 
   return (
     <WorkspaceEventBusContext.Provider value={eventBus}>
@@ -497,26 +484,21 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end">
                   {chatSessionId && (
-                    <DropdownMenuItem onSelect={() => void handlePinSession()}>
-                      {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
-                      {pinnedAt
-                        ? t("navbar.unpin", { ns: "chat" })
-                        : t("navbar.pin", { ns: "chat" })}
-                    </DropdownMenuItem>
-                  )}
-                  {chatSessionId && (
                     <DropdownMenuItem onSelect={() => eventBus.emit("share:start", {})}>
                       <Share2 className="size-4" />
                       {t("share.title", { ns: "chat", defaultValue: "Share chat" })}
                     </DropdownMenuItem>
                   )}
-                  <DropdownMenuItem
-                    variant="destructive"
-                    onSelect={() => void handleDeleteSession()}
-                  >
-                    <Trash2 className="size-4" />
-                    {t("recentChats.delete")}
-                  </DropdownMenuItem>
+                  {/* The main chat is never deleted. */}
+                  {isMainConcierge ? null : (
+                    <DropdownMenuItem
+                      variant="destructive"
+                      onSelect={() => void handleDeleteSession()}
+                    >
+                      <Trash2 className="size-4" />
+                      {t("recentChats.delete")}
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
               <ToolsToggle unread={toolView.unreadIds.length > 0} />
