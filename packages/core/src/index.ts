@@ -1,4 +1,5 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
+import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { WebChatDashboardSessions } from "./webchat/webchat-dashboard-sessions.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
@@ -245,7 +246,8 @@ import { SystemUpgradeService } from "./instance/system-upgrade/service.js";
 import { HostExecutionService } from "./apps/host-execution/service.js";
 import { createHostWorkerRecovery } from "./apps/host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./instance/auto-upgrade-gate.js";
-import { PublicAccessState } from "./access/public-access-state.js";
+import { Permissions } from "./access/permissions.js";
+import { loadAppPermissions } from "./apps/app-permissions.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
 import { DashboardAccessStore } from "./access/dashboard-access-store.js";
 import {
@@ -1981,9 +1983,9 @@ async function main() {
       }
     }
   };
-  const publicAccessState = new PublicAccessState();
+  const permissions = new Permissions();
   try {
-    await publicAccessState.load(db);
+    await loadAppPermissions(db, permissions);
   } catch (err) {
     log.warn("Failed to load publicAccess settings; starting with empty allow-list", {
       error: err instanceof Error ? err.message : String(err),
@@ -2124,7 +2126,7 @@ async function main() {
       codexAccountService,
       claudeAccount,
       romeCreditsProxy: romeCreditsProxyRoutes(config.internalApi.host),
-      publicAccessState,
+      permissions,
       dashboardAccessState,
       dashboardAccessStore,
       visitorAllowListSync,
@@ -2302,6 +2304,13 @@ async function main() {
   void continueInterruptedTurns(endedTurns, webchatRepo, backendTurnRunner).catch((error) => {
     log.warn("restart continuations failed", { error: String(error) });
   });
+  // Subscribes after the first account read may have settled, so it also reads the
+  // remembered state: a limit that ended while Rome was down is swept now.
+  const stopUsageLimitContinuation = startUsageLimitContinuation({
+    accounts: modelAccounts,
+    repo: webchatRepo,
+    runner: backendTurnRunner,
+  });
 
   // Best-effort instance-identity check. Fire-and-forget: announces
   // which account this instance is bound to, reports the running version, and
@@ -2411,6 +2420,7 @@ async function main() {
     capabilityDiscovery.stop();
     shutdownLog.info("capability discovery stopped");
 
+    stopUsageLimitContinuation();
     stopCodexLoginChoice();
     unsubscribeInstanceLinked();
     visitorAllowListSync.stop();

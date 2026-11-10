@@ -4,7 +4,6 @@ import type {
   AppInstallResponse,
   AppArtifactDetails,
   AppArtifactSummary,
-  AppAccessMode,
   AppDetailResponse,
   AppListResponse,
   AppOrigin,
@@ -13,7 +12,6 @@ import type {
   InstalledAppCard,
   SpecSource,
 } from "@rome/api-types/apps";
-import { eq } from "drizzle-orm";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import type { ContentfulStatusCode } from "hono/utils/http-status";
@@ -31,13 +29,12 @@ import { isPublishableSource, publishAppBundle, publishArtifactRoot } from "../.
 import { findUpgradeCandidates } from "../../apps/upgrade-detector.js";
 import { parseSkillFrontmatterResult } from "../../apps/packaging/skill-frontmatter.js";
 import { getProfileAppsDir, getProjectsRoot } from "../../paths.js";
-import { settings } from "../../db/schema.js";
 import {
-  DEFAULT_PUBLIC_ACCESS_CONFIG,
-  PUBLIC_ACCESS_SETTING_KEY,
-  normalizePublicAccessConfig,
-  type PublicAccessConfig,
-} from "../../access/public-access-config.js";
+  appAccessMode,
+  appPermissions,
+  loadAppPermissionsSetting,
+} from "../../apps/app-permissions.js";
+import { GUARDIAN_ONLY, type Permission } from "../../access/permissions.js";
 import { resolveGuardianSession } from "../../access/guardian-session.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import { resolveVisitorSession } from "../../access/visitor-session.js";
@@ -92,20 +89,16 @@ export function deriveAppProjectPath(
 
 function toInstalledAppCard(
   view: ReturnType<AppCatalog["list"]>[number],
-  publicAccess: PublicAccessConfig,
+  permission: Permission,
   capabilityDetails: AppArtifactDetails,
 ): InstalledAppCard {
   const resolved = isResolvedApp(view) ? view : null;
   const hasFrontend = !!resolved?.web;
   const status = deriveRuntimeStatusFromView(view);
   const isActive = status === "active";
-  const isPublic = publicAccess.allowedApps.includes(view.appId);
-  const cloudAllowedEmails = publicAccess.cloudEmailAccess[view.appId] ?? [];
-  const accessMode: AppAccessMode = isPublic
-    ? "public"
-    : cloudAllowedEmails.length > 0
-      ? "cloud-email"
-      : "private";
+  const accessMode = appAccessMode(permission);
+  const isPublic = permission.anyoneWithLink;
+  const cloudAllowedEmails = [...permission.listedEmails];
 
   return {
     id: view.appId,
@@ -308,14 +301,10 @@ async function loadArtifactDetailsByApp(
   return byApp;
 }
 
-async function loadPublicAccessConfig(deps: ApiDeps): Promise<PublicAccessConfig> {
-  const rows = await deps.db
-    .select()
-    .from(settings)
-    .where(eq(settings.key, PUBLIC_ACCESS_SETTING_KEY));
-  return rows.length > 0 && rows[0].value
-    ? normalizePublicAccessConfig(rows[0].value)
-    : DEFAULT_PUBLIC_ACCESS_CONFIG;
+// Read from the stored setting, not `deps.permissions`, so the app page shows
+// what is saved even when loading it at startup failed.
+async function loadAppPermissions(deps: ApiDeps): Promise<Map<string, Permission>> {
+  return appPermissions(await loadAppPermissionsSetting(deps.db));
 }
 
 const ICON_MIME_TYPES: Record<string, string> = {
@@ -469,7 +458,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
   app.get("/apps", async (c) => {
     const catalog = deps.appCatalog;
     const views = catalog.list();
-    const publicAccess = await loadPublicAccessConfig(deps);
+    const permissions = await loadAppPermissions(deps);
     const artifactDetailsByApp = await loadArtifactDetailsByApp(catalog, [
       ...deps.agentLoader.getRegistryLoadFailures(),
       ...deps.actionLoader.getRegistryLoadFailures(),
@@ -478,7 +467,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
     const cards = views.map((view) =>
       toInstalledAppCard(
         view,
-        publicAccess,
+        permissions.get(view.appId) ?? GUARDIAN_ONLY,
         artifactDetailsByApp.get(view.appId) ?? emptyArtifactDetails(),
       ),
     );
@@ -500,16 +489,12 @@ export function appsRoutes(deps: ApiDeps): Hono {
     const appIdSegment = appIdToPathSegment(appId);
     const routeBase = mode === "full" ? getFullAppHref(appId) : getEmbeddedAppHref(appId);
     const assetBase = `/app-assets/${appIdSegment}/${view.web.assetVersion}`;
-    const [publicAccess, guardianSession] = await Promise.all([
-      loadPublicAccessConfig(deps),
+    const [permissions, guardianSession] = await Promise.all([
+      loadAppPermissions(deps),
       resolveGuardianSession(c, deps.db),
     ]);
-    const cloudAllowedEmails = publicAccess.cloudEmailAccess[appId] ?? [];
-    const accessMode: AppAccessMode = publicAccess.allowedApps.includes(appId)
-      ? "public"
-      : cloudAllowedEmails.length > 0
-        ? "cloud-email"
-        : "private";
+    const permission = permissions.get(appId) ?? GUARDIAN_ONLY;
+    const accessMode = appAccessMode(permission);
     const viewer = resolveVisitorSession(c);
     const guardianAccessAllowed = guardianSession !== null;
     const dashboardAccessAllowed =
@@ -518,7 +503,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
       accessMode !== "cloud-email" ||
       guardianAccessAllowed ||
       dashboardAccessAllowed ||
-      (viewer !== null && cloudAllowedEmails.includes(viewer.email.toLowerCase()));
+      (viewer !== null && permission.listedEmails.has(viewer.email.toLowerCase()));
     // Client-side mirror of the server-side `request.caller` (apps/api.ts):
     // resolved here, per manifest fetch, and delivered on the bootstrap so the
     // app UI can gate owner-only affordances without probing a route. Advisory

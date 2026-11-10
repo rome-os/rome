@@ -50,7 +50,7 @@ import type { Sessions } from "../agent/index.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import type { Hono } from "hono";
 import type { ClaudeLogins, CodexLogins, ModelAccount, ModelAccounts } from "../agent/index.js";
-import type { PublicAccessState } from "../access/public-access-state.js";
+import type { Permissions } from "../access/permissions.js";
 import type { DashboardAccessState } from "../access/dashboard-access-state.js";
 import type { DashboardAccessStore } from "../access/dashboard-access-store.js";
 import type { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
@@ -218,7 +218,7 @@ export interface ApiDeps {
    * In-memory snapshot of app access policy, read by `/api/auth/verify` on
    * every proxied request. Kept in sync by the `/api/public-access` PUT handler.
    */
-  publicAccessState: PublicAccessState;
+  permissions: Permissions;
   /**
    * In-memory snapshot of shared dashboard access policy, read by
    * `/api/auth/verify` on every proxied request. Kept in sync by
