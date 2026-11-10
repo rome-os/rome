@@ -206,6 +206,11 @@ const PAIRINGS: Pairing[] = [
   { fg: "ring", bg: "primary", min: AA_NON_TEXT, why: "inner edge on a Button" },
   { fg: "ring", bg: "secondary", min: AA_NON_TEXT, why: "inner edge on a secondary Button" },
   { fg: "ring", bg: "input", min: AA_NON_TEXT, why: "inner edge on a Switch track" },
+
+  // The sidebar's upgrade arrow: a `success` disc with the glyph knocked out
+  // in `surface`. The glyph is the whole control (its label is `aria-label`),
+  // so the bar is the non-text one.
+  { fg: "surface", bg: "success", min: AA_NON_TEXT, why: "upgrade arrow on its disc" },
 ];
 
 /** Every pairing's id, pinned so shrinking the roster is an explicit edit.
@@ -262,6 +267,7 @@ const PAIRING_IDS = [
   "ring/primary",
   "ring/secondary",
   "ring/input",
+  "surface/success",
 ];
 
 // ─── Known failures ───────────────────────────────────────────────────────────

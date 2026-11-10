@@ -1,10 +1,16 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { useMutation, useQuery } from "@tanstack/react-query";
+import { useQuery } from "@tanstack/react-query";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
+import {
+  RESTART_TIMEOUT_MS,
+  UPGRADE_CHECK_PATH,
+  type UpgradeCheck,
+  useSystemUpgrade,
+} from "@/hooks/use-system-upgrade";
 import { fetchJson } from "@/lib/fetch-json";
 
 /** Mirrors GET /api/build-info from @rome/core (build identity + boot version report). */
@@ -16,31 +22,12 @@ interface BuildInfoResponse {
   previousVersion: string | null;
 }
 
-/** Mirrors the Rome Cloud upgrade-check contract relayed by GET /api/system/upgrade/check. */
-interface UpgradeCheck {
-  current: { version: string | null; sha: string | null };
-  latest: { version: string };
-  upgradeAvailable: boolean;
-}
-
-const RESTART_POLL_INTERVAL_MS = 3_000;
-const RESTART_PROBE_TIMEOUT_MS = 5_000;
-// Give up waiting for the new backend after this long and point the guardian
-// at Rome Cloud instead — the upgrade may have failed server-side, and polling
-// forever reads as "still working" when nobody is.
-const RESTART_TIMEOUT_MS = 10 * 60_000;
-const MAX_RESTART_POLLS = RESTART_TIMEOUT_MS / RESTART_POLL_INTERVAL_MS;
-
 export function SystemUpgradeSection() {
   const { t } = useTranslation("settings");
+  // The shared upgrade copy names what restarts; this page speaks of the product.
+  const name = t("appName", { ns: "common" });
   const [checkRequested, setCheckRequested] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
-  const [targetConflict, setTargetConflict] = useState(false);
-  const [upgradeError, setUpgradeError] = useState<string | null>(null);
-  // The version we're restarting into; non-null switches the section into the
-  // "Rome is restarting" state and starts polling for the new backend.
-  const [restartingTo, setRestartingTo] = useState<string | null>(null);
-  const [restartTimedOut, setRestartTimedOut] = useState(false);
 
   const buildQuery = useQuery({
     queryKey: ["build-info"] as const,
@@ -56,85 +43,14 @@ export function SystemUpgradeSection() {
     enabled: checkRequested,
     retry: false,
     queryFn: ({ signal }) =>
-      fetchJson<UpgradeCheck>("/api/system/upgrade/check", {
+      fetchJson<UpgradeCheck>(UPGRADE_CHECK_PATH, {
         signal,
         fallback: t("system.checkFailedFallback"),
       }),
   });
 
-  const upgradeMutation = useMutation({
-    mutationFn: (target: string) =>
-      fetchJson<{ status: string; target: string }>("/api/system/upgrade", {
-        method: "POST",
-        json: { target },
-        fallback: t("system.upgradeFailedFallback"),
-      }),
-    onSuccess: (data) => {
-      setConfirmOpen(false);
-      setRestartingTo(data.target);
-    },
-    onError: (err) => {
-      if (err.message === "target_not_latest") {
-        // A newer version was published between check and confirm. Re-fetch so
-        // the dialog shows the new latest, and ask the guardian to re-confirm.
-        setTargetConflict(true);
-        void checkQuery.refetch();
-        return;
-      }
-      setConfirmOpen(false);
-      setUpgradeError(err.message);
-    },
-  });
-
-  useEffect(() => {
-    if (restartingTo === null) return;
-    setRestartTimedOut(false);
-    let cancelled = false;
-    let timer: number | undefined;
-    let polls = 0;
-    const controller = new AbortController();
-    // Reload only when the backend reports the version we're upgrading into.
-    // Health reachability alone can't distinguish "upgrade finished" from the
-    // old backend still serving (or a transient blip), but the old backend can
-    // never report the target version, so this signal is race-free. The
-    // self-rearming timeout keeps at most one probe in flight.
-    const poll = async () => {
-      let upgraded = false;
-      try {
-        const res = await fetch("/api/build-info", {
-          cache: "no-store",
-          credentials: "include",
-          signal: AbortSignal.any([
-            controller.signal,
-            AbortSignal.timeout(RESTART_PROBE_TIMEOUT_MS),
-          ]),
-        });
-        if (res.ok) {
-          const body = (await res.json()) as { version?: string | null };
-          upgraded = body.version === restartingTo;
-        }
-      } catch {
-        // Backend unreachable mid-restart; keep polling.
-      }
-      if (cancelled) return;
-      if (upgraded) {
-        window.location.reload();
-        return;
-      }
-      polls += 1;
-      if (polls >= MAX_RESTART_POLLS) {
-        setRestartTimedOut(true);
-        return;
-      }
-      timer = window.setTimeout(poll, RESTART_POLL_INTERVAL_MS);
-    };
-    timer = window.setTimeout(poll, RESTART_POLL_INTERVAL_MS);
-    return () => {
-      cancelled = true;
-      controller.abort();
-      window.clearTimeout(timer);
-    };
-  }, [restartingTo]);
+  const upgrade = useSystemUpgrade(() => checkQuery.refetch());
+  const { restartingTo, restartTimedOut, targetConflict } = upgrade;
 
   const build = buildQuery.data ?? null;
   // A failed re-check must not leave the previous result on screen: React
@@ -151,6 +67,7 @@ export function SystemUpgradeSection() {
             <AlertTitle>{t("system.restartTimeoutTitle")}</AlertTitle>
             <AlertDescription>
               {t("system.restartTimeoutBody", {
+                name,
                 version: restartingTo,
                 minutes: RESTART_TIMEOUT_MS / 60_000,
               })}{" "}
@@ -166,9 +83,9 @@ export function SystemUpgradeSection() {
           </Alert>
         ) : (
           <Alert variant="info">
-            <AlertTitle>{t("system.restartingTitle")}</AlertTitle>
+            <AlertTitle>{t("system.restartingTitle", { name })}</AlertTitle>
             <AlertDescription>
-              {t("system.restartingBody", { version: restartingTo })}
+              {t("system.restartingBody", { name, version: restartingTo })}
             </AlertDescription>
           </Alert>
         )}
@@ -177,8 +94,7 @@ export function SystemUpgradeSection() {
   }
 
   function startCheck() {
-    setUpgradeError(null);
-    setTargetConflict(false);
+    upgrade.reset();
     setConfirmOpen(false);
     if (checkRequested) void checkQuery.refetch();
     else setCheckRequested(true);
@@ -254,7 +170,12 @@ export function SystemUpgradeSection() {
             <AlertDescription className="flex-1">
               {t("system.upgradeAvailable", { version: latest })}
             </AlertDescription>
-            <Button onClick={() => setConfirmOpen(true)}>
+            <Button
+              onClick={() => {
+                upgrade.reset();
+                setConfirmOpen(true);
+              }}
+            >
               {t("system.upgradeButton", { version: latest })}
             </Button>
           </Alert>
@@ -266,32 +187,29 @@ export function SystemUpgradeSection() {
           </Alert>
         )}
 
-        {upgradeError && (
+        {upgrade.error && (
           <p className="text-ui text-destructive-fg">
-            {t("system.upgradeFailed", { message: upgradeError })}
+            {t("system.upgradeFailed", { message: upgrade.error })}
           </p>
         )}
       </div>
 
       {latest && (
         <RomeConfirmDialog
-          open={confirmOpen}
-          title={t("system.confirmTitle", { version: latest })}
-          description={t("system.confirmDescription")}
+          // A failed request closes the confirmation and reports inline below.
+          open={confirmOpen && upgrade.error === null}
+          title={t("system.confirmTitle", { name, version: latest })}
+          description={t("system.confirmDescription", { name })}
           confirmLabel={t("system.confirmButton")}
           // Disabled while the POST is in flight (a second activation would
           // resubmit) and during the 409 recovery re-check, when `latest` is
           // still the stale target Rome Cloud just rejected.
-          confirmDisabled={upgradeMutation.isPending || checkQuery.isFetching}
+          confirmDisabled={upgrade.pending || checkQuery.isFetching}
           onCancel={() => {
             setConfirmOpen(false);
-            setTargetConflict(false);
+            upgrade.reset();
           }}
-          onConfirm={() => {
-            setUpgradeError(null);
-            setTargetConflict(false);
-            upgradeMutation.mutate(latest);
-          }}
+          onConfirm={() => upgrade.upgrade(latest)}
         />
       )}
     </div>

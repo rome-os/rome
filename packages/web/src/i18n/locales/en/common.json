@@ -194,6 +194,9 @@
       "submittingCode": "Submitting Claude login code"
     }
   },
+  "upgradeIndicator": {
+    "tooltip": "{{name}} can be upgraded"
+  },
   "upgradeBanner": {
     "countdownTitle": "Update to Rome {{version}} is ready",
     "countdownBody": "Updating in {{remaining}} unless you defer.",

@@ -29,6 +29,7 @@ import { ProfileMenu } from "./ProfileMenu";
 import { RecentChats } from "./RecentChats";
 import { RailLabelsContext } from "./sidebar-shared";
 import { ThisComputerButton } from "./ThisComputerButton";
+import { UpgradeIndicator } from "./UpgradeIndicator";
 import { useChatPeek } from "./use-chat-peek";
 import { SUPPORTED_LANGUAGES } from "@/i18n";
 import { saveSetting } from "@/lib/chat-api";
@@ -38,6 +39,7 @@ import { useDashboardActivity } from "@/hooks/use-dashboard-activity";
 import { hasSession, useAuthStateSnapshot } from "@/lib/auth-state";
 import { useDesktop } from "@/hooks/use-desktop";
 import { useDocumentTitle } from "@/hooks/use-document-title";
+import { useUpgradeStatus } from "@/hooks/use-upgrade-status";
 import { useSettings, useInvalidateSettings } from "@/hooks/use-settings";
 import { agentNameChangedSchema } from "@rome/api-types/live-events";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
@@ -118,6 +120,9 @@ export function RomeShellLayout() {
   const [railNames, setRailNames] = useState(readRailNames);
   const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const isDesktop = useDesktop();
+  // One poll loop feeds both the nightly upgrade banner and the sidebar's
+  // upgrade arrow, which stays out of the way while the banner is up.
+  const upgradeStatus = useUpgradeStatus();
   // Every shell page reports whether the person signed in is here, sidebar
   // shown or not, so their phone pushes wait while they are.
   const { bootstrap } = useAuthStateSnapshot();
@@ -309,8 +314,10 @@ export function RomeShellLayout() {
       style={{ width: `${railRem}rem` }}
       data-rail-labelled={railNames ? "" : undefined}
     >
+      {/* The upgrade arrow ends the logo row with names shown, and sits under
+          the logo without them. */}
       <div
-        className={`flex shrink-0 items-center gap-1 pb-4 ${railNames ? "justify-start px-3" : "justify-center"} ${titlebar ? "pt-2" : "pt-5"}`}
+        className={`flex shrink-0 items-center gap-1 pb-4 ${railNames ? "justify-start px-3" : "flex-col"} ${titlebar ? "pt-2" : "pt-5"}`}
       >
         {/* A fixed slot, so swapping the logo link for the 32px expand
             button does not move every tile below it. */}
@@ -352,10 +359,14 @@ export function RomeShellLayout() {
           )}
         </div>
         {railNames ? (
-          <span className="min-w-0 truncate text-ui font-medium text-foreground">
+          <span className="min-w-0 flex-1 truncate text-ui font-medium text-foreground">
             {t("appName")}
           </span>
         ) : null}
+        <UpgradeIndicator
+          suppressed={upgradeStatus.state !== null}
+          tooltipSide={railNames ? "bottom" : "right"}
+        />
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto scrollbar-idle-hidden">
         <RailLabelsContext.Provider value={railNames}>
@@ -453,7 +464,7 @@ export function RomeShellLayout() {
     const contentLeft = hideSidebar ? "0px" : `calc(${sidebarWidth} + 1px)`;
     return (
       <div className="flex h-dvh flex-col overflow-hidden bg-background">
-        <UpgradeCountdownBanner />
+        <UpgradeCountdownBanner status={upgradeStatus} />
         <DesktopTitlebar
           leadingWidth={contentLeft}
           sidebarToggle={
@@ -515,7 +526,7 @@ export function RomeShellLayout() {
 
   return (
     <div className="flex min-h-[var(--rome-viewport-height)] flex-col bg-background">
-      <UpgradeCountdownBanner />
+      <UpgradeCountdownBanner status={upgradeStatus} />
       <div
         ref={frameRef}
         className={`relative flex flex-1 ${clipped ? "max-md:overflow-x-clip" : ""}`}

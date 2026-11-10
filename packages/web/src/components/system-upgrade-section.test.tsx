@@ -295,7 +295,7 @@ describe("SystemUpgradeSection", () => {
       expect(await screen.findByText("Rome is restarting")).toBeTruthy();
 
       // The backend never comes back on the target version.
-      await rs.advanceTimersByTimeAsync(10 * 60_000 + 3_000);
+      await rs.advanceTimersByTimeAsync(40 * 60_000 + 3_000);
 
       await waitFor(() =>
         expect(screen.getByText("The upgrade is taking longer than expected")).toBeTruthy(),
