@@ -437,10 +437,12 @@ private struct StatusLine: View {
 /// A menu title cut to one line at the end. A system menu wraps a long
 /// title onto as many lines as it needs and ignores a line limit.
 enum MenuTitle {
-    /// The width a menu's section title gets on a phone, with room to spare.
-    static let width: CGFloat = 200
+    /// The width a menu's section title gets: a system menu is about 250 pt
+    /// wide on every phone and iPad and leaves about 190 pt for its title,
+    /// so this keeps a margin for heavier text settings.
+    static let width: CGFloat = 168
 
-    static func oneLine(_ title: String, width: CGFloat = width, font: UIFont = .preferredFont(forTextStyle: .footnote)) -> String {
+    static func oneLine(_ title: String, width: CGFloat = width, font: UIFont = .preferredFont(forTextStyle: .footnote, compatibleWith: UITraitCollection(legibilityWeight: .bold))) -> String {
         func fits(_ text: String) -> Bool {
             (text as NSString).size(withAttributes: [.font: font]).width <= width
         }
