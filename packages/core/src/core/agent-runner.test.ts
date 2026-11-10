@@ -3352,7 +3352,6 @@ describe("AgentRunner", () => {
           memory: () => ({ index: `Memory read at ${Math.random()}`, projects: [] }),
           onChanged: () => {},
         };
-        // As in production, a session stays open between turns.
         const manager = createSessions(
           {
             ...managerDeps(resolver),
@@ -3361,10 +3360,12 @@ describe("AgentRunner", () => {
             heldMidTurn: async (sessionId: string) => held.has(sessionId),
             ...extraDeps,
           },
+          // As in production, a session stays open between turns until it
+          // is evicted (`evict`).
           { keepAliveAcrossTurns: true },
         );
         managers.push(manager);
-        return new AgentRunner(
+        const runner = new AgentRunner(
           manager,
           agentLoader,
           new ChatsWebChatRepository(testDb.db),
@@ -3374,6 +3375,8 @@ describe("AgentRunner", () => {
           undefined,
           sessionOpeningFor({ channelSurface: testChannelSurface }),
         );
+        managerOf.set(runner, manager);
+        return runner;
       }
 
       const tool = (description: string): RomeTool => ({
@@ -3383,10 +3386,22 @@ describe("AgentRunner", () => {
         handler: async () => ({ content: [{ type: "text", text: "ok" }] }),
       });
 
+      const managerOf = new WeakMap<AgentRunner, Sessions>();
+      /** Closes the chat's live session, as its idle eviction does, so the
+       *  next turn opens it cold. */
+      async function evict(runner: AgentRunner) {
+        await managerOf
+          .get(runner)
+          ?.find({ agentName: "test-renewing", channelThreadKey: key })
+          ?.close("idle");
+      }
+
+      /** One turn of the chat, opened cold unless `live`. */
       async function turn(
         runner: AgentRunner,
-        params: { sessionId?: string; contextSuffix?: string } = {},
+        params: { sessionId?: string; contextSuffix?: string; live?: boolean } = {},
       ) {
+        if (!params.live) await evict(runner);
         const messages = await collectMessages(
           runner.run({
             agentName: "test-renewing",
@@ -3521,7 +3536,7 @@ describe("AgentRunner", () => {
         }
       });
 
-      it("swaps nothing when the renewal's backend fails to open, and retries on a fresh thread", async () => {
+      it("records nothing when a cold renewal's fresh open fails, and retries fresh on the next cold open", async () => {
         const provider = new MockModelProvider(replies(3));
         const open = provider.openSession.bind(provider);
         let failNext = false;
@@ -3539,16 +3554,19 @@ describe("AgentRunner", () => {
         identity.text = "**Agent Name:** YoYo";
         failNext = true;
 
-        const failed = await collectMessages(
-          runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
-        );
-        expect(failed.some((message) => message.type === "error")).toBe(true);
+        await evict(runner);
+        await expect(
+          collectMessages(
+            runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
+          ),
+        ).rejects.toThrow("provider down");
         expect((await sessionRepository.session(first!))?.supersededBy).toBeFalsy();
         expect((await sessionRepository.current(key, "core:test-renewing"))?.id).toBe(first);
 
         const retried = await turn(runner);
         expect(retried).not.toBe(first);
         expect((await sessionRepository.session(first!))?.supersededBy).toBe(retried);
+        expect(provider.calls.at(-1)?.prompt).toContain("<continuation>");
         // Every open after the first starts a fresh thread: none resumes the retired one.
         expect(provider.sessions.slice(1).map((params) => params.thread)).toEqual([
           { kind: "new" },
@@ -3620,10 +3638,26 @@ describe("AgentRunner", () => {
         expect(provider.calls[0]?.prompt).not.toContain("<continuation>");
       });
 
-      it("announces the renewal, with its reason, on the fresh session's first turn only", async () => {
-        const runner = renewingRunner(new MockModelProvider(replies(3)));
+      /** A provider whose every open names a thread of its own, as real ones do. */
+      function threadedProvider(count: number) {
+        const provider = new MockModelProvider(replies(count));
+        const open = provider.openSession.bind(provider);
+        provider.openSession = async (params) =>
+          Object.assign(await open(params), {
+            modelThreadId:
+              params.thread.kind === "resume"
+                ? params.thread.modelThreadId
+                : `thread-${provider.sessions.length}`,
+          });
+        return provider;
+      }
+
+      it("opens fresh on a cold open after a setup change, with the continuation and the renewal line on its first turn only", async () => {
+        const provider = threadedProvider(3);
+        const runner = renewingRunner(provider);
         const starts: unknown[] = [];
         const run = async () => {
+          await evict(runner);
           const messages = await collectMessages(
             runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
           );
@@ -3631,12 +3665,21 @@ describe("AgentRunner", () => {
           starts.push(start && "sessionRenewal" in start ? start.sessionRenewal : undefined);
           return start?.type === "turn_start" ? start.sessionId : undefined;
         };
-        await run();
+        const first = await run();
         identity.text = "**Agent Name:** YoYo";
         const renewed = await run();
-        await run();
+        const after = await run();
 
+        expect(renewed).not.toBe(first);
+        expect(after).toBe(renewed);
         expect(starts).toEqual([undefined, { reason: "setup", sessionId: renewed }, undefined]);
+        expect(provider.sessions.map((params) => params.thread)).toEqual([
+          { kind: "new" },
+          { kind: "new" },
+          { kind: "resume", modelThreadId: "thread-2" },
+        ]);
+        expect(provider.calls[1]?.prompt).toContain("<continuation>");
+        expect(provider.calls[2]?.prompt).not.toContain("<continuation>");
       });
 
       it("starts a fresh session after an instruction change", async () => {
@@ -3654,16 +3697,17 @@ describe("AgentRunner", () => {
         );
       });
 
-      it("renews at a wake's turn start too, and the wake runs on the fresh session", async () => {
-        const provider = new MockModelProvider(replies(2));
+      it("resumes the session a wake names as it is, and the next cold open by the chat renews it", async () => {
+        const provider = new MockModelProvider(replies(3));
         const runner = renewingRunner(provider);
         const first = await turn(runner);
         identity.text = "**Agent Name:** YoYo";
-        const resumed = await turn(runner, { sessionId: first });
+        const woken = await turn(runner, { sessionId: first });
+        const next = await turn(runner);
 
-        expect(resumed).not.toBe(first);
-        expect((await sessionRepository.session(first!))?.supersededBy).toBe(resumed);
-        expect(provider.calls[1]?.prompt).toContain("<continuation>");
+        expect(woken).toBe(first);
+        expect(next).not.toBe(first);
+        expect((await sessionRepository.session(first!))?.supersededBy).toBe(next);
       });
 
       it("routes a wake-up for a session a renewal replaced to the chat's current session", async () => {
@@ -3720,37 +3764,25 @@ describe("AgentRunner", () => {
         expect(provider.calls[2]?.prompt).toContain("Read CI run 42 for PR #7");
       });
 
-      it("never blocks a send during a running turn: the renewal waits for the next turn's start", async () => {
+      it("never renews a live session: it keeps its setup until its next cold open", async () => {
         const provider = new MockModelProvider(replies(3));
-        let release!: () => void;
-        const gate = new Promise<void>((resolve) => {
-          release = resolve;
-        });
-        const run = provider.run.bind(provider);
-        provider.run = async function* (params) {
-          // The second turn runs until the test lets it end.
-          if (provider.calls.length === 1) await gate;
-          yield* run(params);
-        };
         const runner = renewingRunner(provider);
         const first = await turn(runner);
-        const running = turn(runner);
-        await new Promise((resolve) => setTimeout(resolve, 20));
         identity.text = "**Agent Name:** YoYo";
 
-        // Sent while the turn runs: admitted at once, run after it, and its
-        // own start is the boundary where the session renews.
-        const sentMeanwhile = turn(runner);
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        release();
+        // Live, between turns: the session keeps running as it opened.
+        const live = await turn(runner, { live: true });
+        expect(live).toBe(first);
+        expect(provider.sessions).toHaveLength(1);
+        expect((await sessionRepository.session(first!))?.supersededBy).toBeFalsy();
 
-        expect(await running).toBe(first);
-        const sent = await sentMeanwhile;
-        expect(sent).not.toBe(first);
-        expect(sent).toBe((await sessionRepository.current(key, "core:test-renewing"))?.id);
+        // Evicted, the next open is cold and renews.
+        const cold = await turn(runner);
+        expect(cold).not.toBe(first);
+        expect(provider.sessions.at(-1)?.config.systemPrompt).toContain("YoYo");
       });
 
-      it("serializes a resume with a renewal: both run on the chat's current session", async () => {
+      it("a resume racing a cold renewal runs on the chat's current session", async () => {
         const provider = new MockModelProvider(replies(3));
         const open = provider.openSession.bind(provider);
         provider.openSession = async (params) => {
@@ -3795,7 +3827,7 @@ describe("AgentRunner", () => {
           };
         };
 
-        it("resume first, then a renewal: the wake runs, then the chat renews", async () => {
+        it("a wake and a send at once both run, without errors, on the chat's current session", async () => {
           const runner = renewingRunner(new MockModelProvider(replies(3)));
           const first = (await run(runner)).sessionId;
           const wake = run(runner, { sessionId: first });
@@ -3806,28 +3838,6 @@ describe("AgentRunner", () => {
           expect([woken.errors, sent.errors]).toEqual([[], []]);
           const current = (await sessionRepository.current(key, "core:test-renewing"))?.id;
           expect(sent.sessionId).toBe(current);
-        });
-
-        it("a caller that acquired but has not submitted keeps a usable session through a renewal", async () => {
-          const runner = renewingRunner(new MockModelProvider(replies(4)));
-          const first = (await run(runner)).sessionId;
-          const manager = managers.at(-1)!;
-          // Acquired with no opening, so this acquire itself checks no setup.
-          const held = await manager.open({ agentName: "test-renewing", channelThreadKey: key });
-          identity.text = "**Agent Name:** YoYo";
-
-          const meanwhile = await run(runner);
-          // The renewal swapped the session in place, so the held caller's
-          // turn runs on it, on the chat's current session.
-          const heldTurn = await held.submit({ prompt: "Late" }, { priority: "after" }).turn;
-          const heldEvents = await collectMessages(heldTurn.events());
-          const heldStart = heldEvents.find((message) => message.type === "turn_start");
-
-          expect(meanwhile.sessionId).not.toBe(first);
-          expect(errorsOf(heldEvents)).toEqual([]);
-          expect(heldStart?.type === "turn_start" ? heldStart.sessionId : undefined).toBe(
-            meanwhile.sessionId,
-          );
         });
 
         it("an acquire abandoned before its submit lets the session go", async () => {
@@ -3842,99 +3852,22 @@ describe("AgentRunner", () => {
               shouldRun: () => false,
             }),
           );
+          // Nothing holds it: its idle eviction may close it, and the next
+          // cold open renews it.
+          const live = managerOf
+            .get(runner)
+            ?.find({ agentName: "test-renewing", channelThreadKey: key }) as
+            | { isQuiescentForRotation: boolean }
+            | undefined;
+          await rs.waitFor(() => expect(live?.isQuiescentForRotation).toBe(true));
           identity.text = "**Agent Name:** YoYo";
+          await evict(runner);
 
           expect((await run(runner)).sessionId).not.toBe(first);
         });
-
-        it("an approval set while an after turn prepares keeps the session, until the hold clears", async () => {
-          const provider = new MockModelProvider(replies(4));
-          let release!: () => void;
-          const gate = new Promise<void>((resolve) => {
-            release = resolve;
-          });
-          const runModel = provider.run.bind(provider);
-          provider.run = async function* (params) {
-            if (provider.calls.length === 1) await gate;
-            yield* runModel(params);
-          };
-          const runner = renewingRunner(provider);
-          const first = (await run(runner)).sessionId;
-          const running = run(runner);
-          await new Promise((resolve) => setTimeout(resolve, 20));
-          identity.text = "**Agent Name:** YoYo";
-          held.add(first!);
-          release();
-          await running;
-
-          const after = await run(runner);
-          expect(after.sessionId).toBe(first);
-          expect(after.errors).toEqual([]);
-
-          // The hold clears: the next turn's start renews the session.
-          held.clear();
-          const renewed = await run(runner);
-          expect(renewed.sessionId).not.toBe(first);
-          expect(renewed.errors).toEqual([]);
-        });
       });
 
-      it("an after-priority backend turn that sets an approval while it prepares its model is never renewed under it", async () => {
-        let gated = false;
-        let release!: () => void;
-        const gate = new Promise<void>((resolve) => {
-          release = resolve;
-        });
-        let preparing!: () => void;
-        const prepared = new Promise<void>((resolve) => {
-          preparing = resolve;
-        });
-        const runner = renewingRunner(new MockModelProvider(replies(4)), async () => {
-          if (!gated) return;
-          gated = false;
-          preparing();
-          await gate;
-        });
-        const first = (await turn(runner))!;
-        const session = await managers
-          .at(-1)!
-          .open({ agentName: "test-renewing", channelThreadKey: key });
-        gated = true;
-        const backend = session.submit({ prompt: "backend" }, { priority: "after" });
-        const backendEvents = collectMessages((await backend.turn).events());
-        await prepared;
-        // While the turn prepares its model, the setup changes and the turn
-        // creates an approval that holds the session.
-        identity.text = "**Agent Name:** YoYo";
-        held.add(first);
-
-        // A send meanwhile returns at once; its turn waits behind the backend turn.
-        let sentStarted = false;
-        const sent = (async () => {
-          const messages = await collectMessages(
-            runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
-          );
-          const start = messages.find((message) => message.type === "turn_start");
-          sentStarted = true;
-          return start?.type === "turn_start" ? start.sessionId : undefined;
-        })();
-        await new Promise((resolve) => setTimeout(resolve, 20));
-        expect(sentStarted).toBe(false);
-        release();
-        const backendStart = (await backendEvents).find((message) => message.type === "turn_start");
-
-        expect(backendStart?.type === "turn_start" ? backendStart.sessionId : undefined).toBe(
-          first,
-        );
-        // The send's own turn start is the next boundary, and the hold keeps it.
-        expect(await sent).toBe(first);
-        expect((await sessionRepository.session(first))?.supersededBy).toBeFalsy();
-
-        held.clear();
-        expect(await turn(runner)).not.toBe(first);
-      });
-
-      it("keeps a session an approval holds mid-turn, and renews it once the hold ends", async () => {
+      it("an approval hold blocks a cold renewal, and the next cold open once it clears renews", async () => {
         const runner = renewingRunner(new MockModelProvider(replies(3)));
         const first = await turn(runner);
         identity.text = "**Agent Name:** YoYo";
@@ -3948,26 +3881,135 @@ describe("AgentRunner", () => {
         expect(after).not.toBe(first);
       });
 
-      it("keeps the continuation notice for a renewed session whose first open failed", async () => {
-        const provider = new MockModelProvider(replies(2));
-        const runner = renewingRunner(provider);
-        await turn(runner);
+      it("opens a renewed session on the model the tier maps to now, not the retired session's pin", async () => {
+        const provider = new MockModelProvider(replies(3));
+        const tier = { model: "tier-model-1" };
+        // Exact requests (a pin) get their model; a tier request gets the
+        // model the tier maps to at that moment.
+        const modelResolver = {
+          resolve: async (request: { kind: string; model?: string }) => ({
+            modelProvider: provider,
+            model: request.kind === "exact" ? request.model! : tier.model,
+          }),
+        } as unknown as ModelResolver;
+        const runner = renewingRunner(provider, undefined, { modelResolver });
+        const first = await turn(runner);
+        tier.model = "tier-model-2";
+
+        // Unchanged, a cold open resumes on the model its history was made with.
+        expect(await turn(runner)).toBe(first);
+        expect(provider.sessions.at(-1)?.config.model).toBe("tier-model-1");
+
         identity.text = "**Agent Name:** YoYo";
+        const renewed = await turn(runner);
+        expect(renewed).not.toBe(first);
+        expect(provider.sessions.at(-1)?.config.model).toBe("tier-model-2");
+      });
+
+      describe("a resume judges each session on the row it read", () => {
+        /** What a renewal elsewhere does to `id`'s row: supersede it with a successor. */
+        async function renewElsewhere(id: string): Promise<string> {
+          const row = (await sessionRepository.session(id))!;
+          const successor = row.replace({
+            setup: row.setup ?? undefined,
+            reason: "setup",
+            workingDir: row.workingDir ?? undefined,
+          });
+          await sessionRepository.replace(row, successor);
+          return successor.id;
+        }
+
+        /** The repository, with a hook that runs right after a read returns. */
+        function racing(after: {
+          session?: (id: string, read: number) => Promise<void>;
+          current?: (read: number) => Promise<void>;
+        }) {
+          let sessionReads = 0;
+          let currentReads = 0;
+          return new Proxy(sessionRepository, {
+            get(target, property) {
+              if (property === "session") {
+                return async (id: string) => {
+                  const row = await target.session(id);
+                  await after.session?.(id, ++sessionReads);
+                  return row;
+                };
+              }
+              if (property === "current") {
+                return async (...args: Parameters<SessionRepository["current"]>) => {
+                  const row = await target.current(...args);
+                  await after.current?.(++currentReads);
+                  return row;
+                };
+              }
+              const value = Reflect.get(target, property);
+              return typeof value === "function" ? value.bind(target) : value;
+            },
+          });
+        }
+
+        it("resumes an active session it read, though a renewal superseded it right after", async () => {
+          const provider = new MockModelProvider(replies(2));
+          const first = (await turn(renewingRunner(provider)))!;
+          let successor: string | undefined;
+          const runner = renewingRunner(provider, undefined, {
+            // Each read of the named session after the first races a renewal once.
+            sessionRepository: racing({
+              session: async (id, read) => {
+                if (id === first && read === 2 && !successor)
+                  successor = await renewElsewhere(first);
+              },
+            }),
+          });
+
+          const woken = await turn(runner, { sessionId: first });
+
+          expect(successor).toBeDefined();
+          expect(woken).toBe(successor);
+        });
+
+        it("resumes the chat's current session it read, though a renewal superseded it right after", async () => {
+          const provider = new MockModelProvider(replies(2));
+          const first = (await turn(renewingRunner(provider)))!;
+          const second = await renewElsewhere(first);
+          let third: string | undefined;
+          const runner = renewingRunner(provider, undefined, {
+            sessionRepository: racing({
+              current: async (read) => {
+                if (read === 1) third = await renewElsewhere(second);
+              },
+            }),
+          });
+
+          const woken = await turn(runner, { sessionId: first });
+
+          expect(third).toBeDefined();
+          expect(woken).toBe(third);
+        });
+      });
+
+      it("hands no turn a session whose cold open finished after a shutdown", async () => {
+        const provider = new MockModelProvider(replies(1));
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
         const open = provider.openSession.bind(provider);
-        let failNext = true;
         provider.openSession = async (params) => {
-          if (failNext) {
-            failNext = false;
-            throw new Error("provider unavailable");
-          }
+          await gate;
           return open(params);
         };
+        const runner = renewingRunner(provider);
+        const running = collectMessages(
+          runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
+        );
+        // The cold open is waiting on the provider when the shutdown runs.
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        await managers.at(-1)!.shutdown();
+        release();
 
-        await turn(runner).catch(() => undefined);
-        const retried = await turn(runner);
-
-        expect(retried).toBeDefined();
-        expect(provider.calls.at(-1)?.prompt).toContain("<continuation>");
+        await expect(running).rejects.toThrow("shut down");
+        expect(provider.calls).toEqual([]);
       });
 
       it("renews a session that opened before setups were recorded", async () => {

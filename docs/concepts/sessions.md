@@ -26,12 +26,11 @@ A continuity key is the value that whatever opens a session, and comes back to i
 **Contracts:**
 
 - At most one session per continuity key and agent is active. A reset completes that session and starts the next one under the same continuity key, so the next message continues where the chat left off.
-- A chat's reset policy decides when its session is due for a reset. In code, the rule is `evaluateProviderSessionReset` in [`packages/core/src/agent/domain/session-reset.ts`](../../packages/core/src/agent/domain/session-reset.ts), and the opener reads the policy from Chat settings and hands it over when it opens a session by continuity key. A resume by id brings no policy of its own: the session keeps the one it already has, if any.
+- A chat's reset policy decides when its session is due for a reset. In code, the rule is `evaluateProviderSessionReset` in [`packages/core/src/agent/domain/session-reset.ts`](../../packages/core/src/agent/domain/session-reset.ts), and the opener reads the policy from Chat settings and hands it over when it opens a session by continuity key. The policy is checked only when that open is [cold](#renewal).
 - A session that a reset replaced is superseded, not ended: whatever still names it by id, such as a scheduled wake-up, reaches the chat's current session, whatever reset replaced it. A session completed any other way cannot be resumed.
-- A resume by id that names a session a reset has just replaced reaches its successor, so a resume never fails because a reset ran meanwhile.
+- A resume by id that names a session a reset has just replaced reaches its successor, so a resume never fails because a reset ran meanwhile. A resume judges each session on the row it read, and follows a row it read as superseded to the chat's current session.
 - A wake-up an agent schedules for itself carries the agent's own note: why it waits, what to do on waking, and what it concerns, with when and from which turn it was set. The woken turn reads the note whichever session wakes. When the wake-up reaches a newer session than the one that set it, its turn also carries the [continuation](#continuation) notice. A wake-up set before notes existed carries none, and reaches the current session with the notice.
-- A reset happens only at a turn boundary, inside the session's own turn queue: at the start of a turn, before that turn prepares its model, and only when no other turn is admitted, queued or running ahead of it and no approval holds the session. That turn then runs on the new session. Opening, resuming or sending to a session never decides or waits for a reset, so a message sent during a turn steers or queues as it always does.
-- While an approval holds a session, no reset replaces it. The reset happens on the first turn that starts after the hold ends.
+- A reset happens only when a session is opened cold. See [Renewal](#renewal).
 - An approval holds its session for a day: a pending one from when it was asked for, an executing one from when it was approved. A request never answered, or an execution a crash left running, would otherwise keep the chat on one session for good. The cost is that an approval answered after a day resumes in a newer session, which reads the chat's earlier messages through the [continuation](#continuation) notice rather than holding them in context.
 - A chat shows a faint line where its session was replaced, with the reason: the setup changed, an idle or daily reset, or a working folder that is gone. The line is part of the new session's first turn, so it stays after a reload, counts as nothing unread and sends no push.
 - Sessions never reads what a continuity key means. Only the code that minted it may parse it.
@@ -56,10 +55,21 @@ Memory, follows and tasks are not part of it, since a session reads them while i
 **Contracts:**
 
 - A change to an agent's setup reaches a session only when a fresh session opens.
-- An agent whose policy asks for it gets a fresh session in the same chat when its setup changed since its session opened. The check runs at the start of each turn, whatever opened the session, including a wake-up that resumes it by id. The Concierge's chats work this way, since one of them can run on one session for days.
-- A session that recorded no setup opened before setups were recorded, and is replaced on its next turn under such a policy.
+- An agent whose policy asks for it gets a fresh session in the same chat when its setup changed since its stored session opened, the next time the chat opens it cold ([Renewal](#renewal)). The Concierge's chats work this way, since one of them could otherwise run on one session for days.
+- A session that recorded no setup opened before setups were recorded, and is replaced on its next cold open under such a policy.
 - A replacement for a changed setup sends no message or push: the chat shows only the line where the session was renewed. It carries the [continuation](#continuation) notice until a turn of its own succeeds.
-- A renewal opens the new session exactly as a fresh open would, from the agent's setup as it is then: its prompt, tools, MCP servers, answer shape and working folder. The chat moves to the new session only once its model has opened. If that open fails, the chat stays on its session, and the next turn tries the renewal again on a fresh thread, never the retired one.
+
+## Renewal
+
+A renewal replaces a chat's session with a fresh one, on a new provider thread, for a changed [setup](#setup) or a reset its chat's policy says is due. It happens only when a session is opened cold: opened by continuity key while it is not live in memory.
+
+**Contracts:**
+
+- A live session is never renewed. Until its idle eviction it keeps the prompt, tools, MCP servers, answer shape and model it opened with, and every turn sent to it meanwhile runs on it. The next cold open after the eviction compares the stored setup with the agent's current one and renews when they differ.
+- A resume by id, such as a wake-up, resumes the session it names as it is, or the chat's current session when a reset superseded it. It never renews.
+- While an approval holds a session, a cold open resumes it instead of renewing it. The first cold open after the hold ends renews it.
+- A renewal opens the new session exactly as a fresh open would, from the agent's setup as it is then. Its model comes from the agent's tier or model as they map now, never the retired session's [model pin](#model-pin). A model the guardian picked for the chat still applies.
+- The successor is written, with its setup, its reason and the working folder, and the retired session marked superseded, only once the fresh thread has opened. If that open fails, nothing is written, and the next cold open tries again on a fresh thread, never the retired one.
 
 ## Session in use
 
@@ -67,9 +77,10 @@ A session is in use from the moment a caller acquires it, by opening or resuming
 
 **Contracts:**
 
-- A session is replaced only by a reset inside its own turn queue, at a turn boundary (see [Continuity key](#continuity-key)). Nothing outside the queue replaces it.
+- A session is replaced only by a [renewal](#renewal) when it is opened cold, so a session in use is never replaced.
 - Only the idle sweeper closes a session from outside, and only one with no caller holding it, no turn admitted or running, and its last turn's cleanup finished. Shutdown closes every session, since the process ends.
-- A caller that acquired a session and has not submitted yet keeps it from being closed. A reset that runs meanwhile swaps the session in place, so that caller's turn runs on the chat's current session.
+- A caller that acquired a session and has not submitted yet keeps it from being closed.
+- A session whose close has begun is never handed to a caller: the next open waits for that close to finish and opens cold. An open that finishes after a shutdown reaches no turn.
 - Deleting a chat, or the project it belongs to, is the exception: it closes the chat's session even while a turn runs, since that turn's chat is gone.
 
 ## Model pin
