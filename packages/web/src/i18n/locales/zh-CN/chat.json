@@ -102,6 +102,24 @@
       },
       "justAsk": "只是问个问题？",
       "backToMain": "回主对话问 →"
+    },
+    "activity": {
+      "idle": "空闲",
+      "needsYou": "等你回复",
+      "working": "正在处理",
+      "tasksMore": "{{title}} · 另 {{count}} 个",
+      "tool": {
+        "startingTask": "正在开始任务",
+        "messagingTask": "正在给任务发消息",
+        "readingTask": "正在查看任务",
+        "stoppingTask": "正在停止任务",
+        "updatingTasks": "正在更新任务",
+        "startingTopic": "正在开启话题",
+        "checkingFollows": "正在查看你的关注",
+        "searchingWeb": "正在搜索网页",
+        "readingPage": "正在阅读网页"
+      },
+      "tasksLabel": "任务"
     }
   },
   "reply": {

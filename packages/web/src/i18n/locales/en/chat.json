@@ -102,6 +102,24 @@
       },
       "justAsk": "Just asking a question?",
       "backToMain": "Ask in the main chat →"
+    },
+    "activity": {
+      "idle": "Idle",
+      "needsYou": "Waiting for your answer",
+      "working": "Working on it",
+      "tasksMore": "{{title}} · +{{count}}",
+      "tool": {
+        "startingTask": "Starting a task",
+        "messagingTask": "Messaging a task",
+        "readingTask": "Checking on a task",
+        "stoppingTask": "Stopping a task",
+        "updatingTasks": "Updating tasks",
+        "startingTopic": "Starting a topic",
+        "checkingFollows": "Checking what you follow",
+        "searchingWeb": "Searching the web",
+        "readingPage": "Reading a page"
+      },
+      "tasksLabel": "Tasks"
     }
   },
   "reply": {

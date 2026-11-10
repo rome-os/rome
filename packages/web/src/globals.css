@@ -109,6 +109,75 @@
   display: none;
 }
 
+/* The Concierge header's mascot (RomeMascot): a blink now and then at rest,
+   a soft bob and a glance while something is being done. */
+.rome-mascot-eyes {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: rome-mascot-blink 4.5s ease-in-out infinite;
+}
+
+.rome-mascot[data-alive] .rome-mascot-figure {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: rome-mascot-bob 1.4s ease-in-out infinite;
+}
+
+.rome-mascot[data-alive] .rome-mascot-eyes {
+  animation:
+    rome-mascot-blink 2.2s ease-in-out infinite,
+    rome-mascot-glance 3.6s ease-in-out infinite;
+}
+
+@keyframes rome-mascot-blink {
+  0%,
+  92%,
+  100% {
+    transform: scaleY(1);
+  }
+
+  96% {
+    transform: scaleY(0.1);
+  }
+}
+
+@keyframes rome-mascot-bob {
+  0%,
+  100% {
+    transform: translateY(0) scaleY(1);
+  }
+
+  50% {
+    transform: translateY(-4%) scaleY(1.02);
+  }
+}
+
+@keyframes rome-mascot-glance {
+  0%,
+  35%,
+  100% {
+    translate: 0 0;
+  }
+
+  45%,
+  60% {
+    translate: -8% 0;
+  }
+
+  70%,
+  85% {
+    translate: 6% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rome-mascot-eyes,
+  .rome-mascot[data-alive] .rome-mascot-figure,
+  .rome-mascot[data-alive] .rome-mascot-eyes {
+    animation: none;
+  }
+}
+
 @keyframes rome-activity-pulse {
 
   0%,

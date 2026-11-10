@@ -16,11 +16,14 @@ import { useConciergeTasks } from "./use-concierge-tasks";
  * quiet icon. It opens the task list in the side pane's Tasks tab, or in a
  * full-height sheet where the pane would take the whole width.
  */
-export function ConciergeTasksPill({ chatId }: { chatId: string | null }) {
+/**
+ * Opens a Concierge chat's task list: in the side pane's Tasks tab, or in a
+ * full-height sheet where the pane would take the whole width. Render `sheet`
+ * once, outside any menu, so it outlives the menu that opened it.
+ */
+export function useConciergeTaskList(chatId: string | null) {
   const { t } = useTranslation("chat");
   const pane = useToolTasks();
-  const tasks = tasksOfChat(useConciergeTasks().tasks, chatId);
-  const state = pillState(tasks);
   const [sheetOpen, setSheetOpen] = useState(false);
 
   // The tab belongs to this chat: it goes when the chat does.
@@ -32,6 +35,38 @@ export function ConciergeTasksPill({ chatId }: { chatId: string | null }) {
     else if (pane.active) pane.hide();
     else pane.show();
   };
+  const expanded = pane && !pane.compact ? pane.active : undefined;
+  const sheet = (
+    <Sheet
+      open={sheetOpen}
+      onClose={() => setSheetOpen(false)}
+      ariaLabel={t("concierge.tasks.title")}
+      widthClassName="w-full max-w-none"
+    >
+      <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 pt-safe">
+        <SheetTitle className="flex-1 truncate text-title text-foreground">
+          {t("concierge.tasks.title")}
+        </SheetTitle>
+        <IconButton
+          size="sm"
+          label={t("concierge.tasks.close")}
+          icon={<X />}
+          onClick={() => setSheetOpen(false)}
+        />
+      </div>
+      <div className="min-h-0 flex-1">
+        <ConciergeTaskPanel chatId={chatId} onNavigate={() => setSheetOpen(false)} />
+      </div>
+    </Sheet>
+  );
+  return { open, expanded, sheet };
+}
+
+export function ConciergeTasksPill({ chatId }: { chatId: string | null }) {
+  const { t } = useTranslation("chat");
+  const tasks = tasksOfChat(useConciergeTasks().tasks, chatId);
+  const state = pillState(tasks);
+  const { open, expanded, sheet } = useConciergeTaskList(chatId);
   const label =
     state.kind === "needsYou"
       ? t("concierge.tasks.pill.needsYou", { count: state.count })
@@ -45,7 +80,7 @@ export function ConciergeTasksPill({ chatId }: { chatId: string | null }) {
         onClick={open}
         aria-label={label}
         title={label}
-        aria-expanded={pane && !pane.compact ? pane.active : undefined}
+        aria-expanded={expanded}
         data-concierge-tasks-pill
         data-state={state.kind}
         // A small inline count on every screen. The 44px touch floor is the
@@ -62,27 +97,7 @@ export function ConciergeTasksPill({ chatId }: { chatId: string | null }) {
         <ListChecks className="size-3" aria-hidden />
         {state.kind === "idle" ? null : state.count}
       </button>
-      <Sheet
-        open={sheetOpen}
-        onClose={() => setSheetOpen(false)}
-        ariaLabel={t("concierge.tasks.title")}
-        widthClassName="w-full max-w-none"
-      >
-        <div className="flex h-12 shrink-0 items-center gap-2 border-b border-border px-3 pt-safe">
-          <SheetTitle className="flex-1 truncate text-title text-foreground">
-            {t("concierge.tasks.title")}
-          </SheetTitle>
-          <IconButton
-            size="sm"
-            label={t("concierge.tasks.close")}
-            icon={<X />}
-            onClick={() => setSheetOpen(false)}
-          />
-        </div>
-        <div className="min-h-0 flex-1">
-          <ConciergeTaskPanel chatId={chatId} onNavigate={() => setSheetOpen(false)} />
-        </div>
-      </Sheet>
+      {sheet}
     </>
   );
 }
