@@ -40,6 +40,7 @@ struct ThreadOverlay: View {
                         }
                     }
                     .padding(.horizontal, Metrics.pagePadding)
+                    .readableColumn()
                     .padding(.vertical, 12)
                     // At least as tall as the scroll, with the messages at its
                     // foot: the space around them is the blurred chat, and a

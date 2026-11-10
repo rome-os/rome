@@ -103,6 +103,7 @@ struct TopicChatScreen: View {
             .animation(.easeOut(duration: 0.2), value: showsStarters)
             .disabled(starting != nil)
             .padding(.horizontal, Metrics.pagePadding)
+            .readableColumn()
             .padding(.top, 6)
             .padding(.bottom, 8)
         }
@@ -137,6 +138,7 @@ struct TopicChatScreen: View {
                 }
                 .padding(.horizontal, Metrics.pagePadding)
                 .frame(maxWidth: .infinity, alignment: .trailing)
+                .readableColumn()
             }
             .defaultScrollAnchor(.bottom)
         } else if store != nil {

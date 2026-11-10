@@ -59,3 +59,9 @@ Example: a visitor sees no owner settings. A card the phone cannot draw yet open
 No text explains what the screen already shows. A label names a thing once, and a screen adds a line of text only when the guardian needs a fact they cannot see.
 
 Example: the opening screen shows the mascot and "Rome" with no caption, and a page header is its title alone.
+
+## 11. Width decides the layout
+
+A screen adapts to the width it gets, not to the device, so an iPad window of any size and a phone follow the same rules. A conversation never runs wider than one readable column.
+
+Example: on a wide iPad window the drawer is a sidebar beside the page; narrowed in Split View, it slides out as on a phone. Messages, cards and the composer stay in a centered column of 720 pt at most.

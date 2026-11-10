@@ -79,6 +79,7 @@ struct ChatScreen: View {
                 }
                 .animation(.easeOut(duration: 0.2), value: store.rows.isEmpty)
                 .padding(.horizontal, Metrics.pagePadding)
+                .readableColumn()
                 .padding(.top, 6)
                 .padding(.bottom, 8)
             }
@@ -124,6 +125,7 @@ struct ChatScreen: View {
             }
         }
         .padding(.top, model.autoOpenHint != nil || store.loadError == .offline || offersPush ? 10 : 0)
+        .readableColumn()
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.autoOpenHint)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: offersPush)
     }
@@ -684,6 +686,7 @@ struct TranscriptList<Row: View>: View {
                         .id("bottom")
                 }
                 .padding(.horizontal, Metrics.pagePadding)
+                .readableColumn()
                 // Never shorter than the space between the bars. Content shorter
                 // than that is held at the bottom by a top inset the scroll view
                 // adds, and takes back a frame late once the rows outgrow the

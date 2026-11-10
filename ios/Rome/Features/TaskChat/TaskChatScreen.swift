@@ -56,6 +56,7 @@ struct TaskChatScreen: View {
                 onStop: { store.stopTurn() }
             )
             .padding(.horizontal, Metrics.pagePadding)
+            .readableColumn()
             .padding(.top, 6)
             .padding(.bottom, 8)
         }

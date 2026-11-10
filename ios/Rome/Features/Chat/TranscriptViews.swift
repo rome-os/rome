@@ -413,7 +413,7 @@ struct TaskCard: View {
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
-        .containerRelativeFrame(.horizontal) { width, _ in (width - 32) * 0.82 }
+        .containerRelativeFrame(.horizontal) { width, _ in (Metrics.column(width) - 32) * 0.82 }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityLabel("Task, \(title)")
     }

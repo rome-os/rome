@@ -98,6 +98,26 @@ enum Metrics {
     static let groupRadius: CGFloat = 16
     static let bigCardRadius: CGFloat = 18
     static let bubbleMaxWidthRatio: CGFloat = 0.78
+    /// The widest a conversation runs, its page padding included. On a phone
+    /// the screen is narrower; on an iPad the column stays this wide and
+    /// centered, so a line never runs across the whole screen.
+    static let readableWidth: CGFloat = 720
+    /// The widest a full-width button grows, as on the largest phone; an
+    /// iPad's page keeps its buttons this wide and centered.
+    static let buttonWidth: CGFloat = 400
+
+    /// The width a conversation's column takes in a container this wide.
+    static func column(_ container: CGFloat) -> CGFloat {
+        min(container, readableWidth)
+    }
+}
+
+extension View {
+    /// Keeps a conversation's rows, composer and banners in one centered
+    /// column of `Metrics.readableWidth` at most (DESIGN.md 4).
+    func readableColumn() -> some View {
+        frame(maxWidth: Metrics.readableWidth).frame(maxWidth: .infinity)
+    }
 }
 
 /// One scale for every card a chat draws, kept at the size of the chat's

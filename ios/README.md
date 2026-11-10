@@ -34,6 +34,10 @@ Installing works on a locked phone, but launching does not: it fails with "Locke
 
 A phone keeps an installed app's team. A build signed by another team is refused with "MismatchedApplicationIdentifierEntitlement", so delete the app from the phone first; that also deletes its sign-in. The first launch right after installing from a new team can fail with "Application failed preflight checks"; launch again.
 
+### On an iPad
+
+The app runs on iPhone and iPad. A phone stays in portrait; an iPad turns to every orientation and works in Split View, Slide Over and Stage Manager windows. Layout goes by width, never by device: on a regular width the drawer is a sidebar beside the page (`NavigationSplitView`), and the header's drawer button hides or shows it; on a compact width, such as a narrow iPad window, the drawer slides out as on a phone. Conversations keep one centered column of `Metrics.readableWidth` (720 pt) at most. Check a screen change on an iPad simulator too, for example `name=iPad Pro 13-inch (M5)`.
+
 ## Release to TestFlight
 
 Release builds are the TestFlight app: bundle id `cc.romeos.mobile`, name "Rome", HTTPS to `https://romeos.cc` only, and no demo data, snapshot runner, debug environment variables or Mac Catalyst. Debug builds are `cc.romeos.mobile.dev`, named "Rome Dev", so both can sit on one phone. `MARKETING_VERSION` is in `Config/Base.xcconfig`.

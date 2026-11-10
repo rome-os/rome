@@ -28,10 +28,17 @@ enum SettingsRoute: Hashable {
 }
 
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
-/// and the Tasks and Settings sheets.
+/// and the Tasks and Settings sheets. On a regular width (an iPad, unless the
+/// window is narrow) the drawer is a sidebar beside the page instead.
 struct MainShell: View {
     let workspace: Workspace
     @Environment(AppModel.self) private var model
+    @Environment(\.horizontalSizeClass) private var sizeClass
+    /// The sidebar on a regular width: shown, or hidden by the header's button.
+    @State private var sidebar: NavigationSplitViewVisibility = .automatic
+    /// The window has room for the sidebar beside the page. Narrower, as an
+    /// iPad in portrait, it starts hidden and lies over the page when shown.
+    @State private var sidebarFits = true
     @State private var section: MainSection = .chat
     @State private var path: [Route] = []
     @State private var drawerOpen = false
@@ -59,86 +66,25 @@ struct MainShell: View {
     @State private var photoViewerPreview = false
     #endif
 
+    /// The drawer beside the page rather than over it.
+    static func usesSidebar(_ sizeClass: UserInterfaceSizeClass?) -> Bool {
+        sizeClass == .regular
+    }
+
+    /// Mac Catalyst, which only runs the tests and the phone-sized snapshot
+    /// pass, keeps the phone's layout.
+    private var usesSidebar: Bool { Self.usesSidebar(sizeClass) && !ProcessInfo.processInfo.isMacCatalystApp }
+
+    /// The narrowest window that keeps the sidebar beside a page of a useful
+    /// width; the system lays it over the page below that.
+    static let sidebarBesideWidth: CGFloat = 1000
+
+    /// The sidebar is shown over the page, covering it.
+    private var sidebarCovers: Bool { usesSidebar && !sidebarFits && sidebar != .detailOnly }
+
     var body: some View {
-        GeometryReader { geometry in
-            let width = min(318, geometry.size.width * 0.81)
-            let progress = drawerProgress(width: width)
-
-            ZStack(alignment: .topLeading) {
-                Palette.drawer.ignoresSafeArea()
-
-                DrawerView(
-                    workspace: workspace,
-                    section: section,
-                    onSection: { picked in
-                        show(picked)
-                        closeDrawer()
-                    },
-                    onNewTopic: {
-                        show(.newTopic(UUID()))
-                        closeDrawer()
-                    },
-                    // The sheet rises over the open drawer, and the drawer is still
-                    // there when it closes: one motion each way, never two at once.
-                    onSettings: {
-                        settingsPath = []
-                        showSettings = true
-                    },
-                    onUpdate: {
-                        closeDrawer()
-                        model.update.openPage()
-                    }
-                )
-                .frame(width: width, height: geometry.size.height)
-                .offset(x: (progress - 1) * 36)
-                // Closed, it is not drawn: under a page still fading in (the
-                // opening screen's hand-off) its rows showed through.
-                .opacity(progress > 0 ? 0.4 + 0.6 * progress : 0)
-                .allowsHitTesting(drawerOpen)
-
-                NavigationStack(path: $path) {
-                    root
-                    .navigationDestination(for: Route.self) { route in
-                        destination(route)
-                    }
-                }
-                .environment(\.chatLinkOpener, openChatLink)
-                .environment(\.openInstancePage, OpenInstancePageAction { url in path.append(.page(url)) })
-                .environment(\.isVisitor, workspace.isVisitor)
-                // Pushed aside, the page becomes a card of its own color, following the drag.
-                .environment(\.pageBackground, Palette.blend(Palette.bg, Palette.drawerPage, progress))
-                .frame(width: geometry.size.width, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
-                .clipShape(RoundedRectangle(cornerRadius: 44 * progress, style: .continuous))
-                .overlay {
-                    if progress > 0 {
-                        RoundedRectangle(cornerRadius: 44 * progress, style: .continuous)
-                            .fill(Color.clear)
-                            .contentShape(Rectangle())
-                            .onTapGesture { closeDrawer() }
-                    }
-                }
-                .shadow(color: .black.opacity(0.12 * progress), radius: 15, x: -8, y: 0)
-                .offset(x: width * progress)
-                .ignoresSafeArea()
-                .overlay(alignment: .leading) {
-                    if !drawerOpen && path.isEmpty {
-                        Color.clear
-                            .frame(width: 22)
-                            .contentShape(Rectangle())
-                            .gesture(drawerDrag(width: width))
-                            // The edge sits above the list, which never feels this
-                            // touch: stop its glide on touch-down, as the list would.
-                            .simultaneousGesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { _ in if !edgeTouched { edgeTouched = true; Scrolling.stopGlides() } }
-                                    .onEnded { _ in edgeTouched = false }
-                            )
-                    }
-                }
-            }
-            // While the drawer is open, a sideways drag anywhere, on the drawer or
-            // the uncovered chat, pulls it closed.
-            .gesture(drawerDrag(width: width), including: drawerOpen ? .all : .subviews)
+        Group {
+            if usesSidebar { sidebarLayout } else { drawerLayout }
         }
         .sheet(isPresented: $showTasks) {
             TasksSheet(store: workspace.tasks, chatId: tasksChatId) { task in
@@ -152,6 +98,8 @@ struct MainShell: View {
         .sheet(isPresented: $showSettings) {
             settingsSheet
         }
+        // A window that turns wide shows the sidebar; the drawer it leaves is closed.
+        .onChange(of: usesSidebar) { drawerOpen = false }
         #if DEBUG
         .overlay {
             if sheetPreview {
@@ -210,11 +158,13 @@ struct MainShell: View {
                 TopBanner(kind: .error, text: String(localized: "Session expired"), actionTitle: String(localized: "Sign in again")) {
                     Task { await model.reauthenticate() }
                 }
+                .readableColumn()
                 .padding(.top, 58)
                 .transition(.move(edge: .top).combined(with: .opacity))
             } else if model.update.showsBanner, !drawerOpen {
                 // The drawer has its own line for it.
                 UpdateBanner(instanceName: workspace.instanceName, onUpdate: { model.update.openPage() }, onClose: { model.update.dismissBanner() })
+                    .readableColumn()
                     .padding(.top, 58)
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
@@ -224,7 +174,13 @@ struct MainShell: View {
         #if DEBUG
         .onChange(of: model.debugCommand) { _, command in
             switch command {
-            case .drawer(let open): open ? openDrawer() : closeDrawer()
+            case .drawer(let open):
+                if usesSidebar {
+                    // Where the sidebar fits, it stays on screen in every capture.
+                    sidebar = open || sidebarFits ? .all : .detailOnly
+                } else {
+                    open ? openDrawer() : closeDrawer()
+                }
             case .tasks(let show):
                 if SnapshotRunner.directory != nil { sheetPreview = show } else { showTasks = show }
             case .route(let routes):
@@ -241,6 +197,122 @@ struct MainShell: View {
         }
         #endif
     }
+
+    /// A regular width: the drawer's pages in a sidebar, the page beside it.
+    /// The header's drawer button hides and shows the sidebar.
+    private var sidebarLayout: some View {
+        NavigationSplitView(columnVisibility: $sidebar) {
+            drawer
+                .background(Palette.drawer.ignoresSafeArea())
+                .toolbar(.hidden, for: .navigationBar)
+                .toolbar(removing: .sidebarToggle)
+                .navigationSplitViewColumnWidth(318)
+                .onAppear { workspace.topics.refresh() }
+        } detail: {
+            stack(pageBackground: Palette.bg)
+        }
+        .navigationSplitViewStyle(.balanced)
+        // Shown where it fits beside the page, hidden where it would cover it,
+        // also after a rotation or a window resize.
+        .onGeometryChange(for: Bool.self) { $0.size.width >= Self.sidebarBesideWidth } action: { fits in
+            sidebarFits = fits
+            sidebar = fits ? .all : .detailOnly
+        }
+    }
+
+    private var drawer: some View {
+        DrawerView(
+            workspace: workspace,
+            section: section,
+            onSection: { picked in
+                show(picked)
+                closeDrawer()
+            },
+            onNewTopic: {
+                show(.newTopic(UUID()))
+                closeDrawer()
+            },
+            // The sheet rises over the open drawer, and the drawer is still
+            // there when it closes: one motion each way, never two at once.
+            onSettings: {
+                settingsPath = []
+                showSettings = true
+            },
+            onUpdate: {
+                closeDrawer()
+                model.update.openPage()
+            }
+        )
+    }
+
+    private func stack(pageBackground: Color) -> some View {
+        NavigationStack(path: $path) {
+            root
+            .navigationDestination(for: Route.self) { route in
+                destination(route)
+            }
+        }
+        .environment(\.chatLinkOpener, openChatLink)
+        .environment(\.openInstancePage, OpenInstancePageAction { url in path.append(.page(url)) })
+        .environment(\.isVisitor, workspace.isVisitor)
+        .environment(\.pageBackground, pageBackground)
+    }
+
+    /// A compact width (a phone, or a narrow iPad window): the drawer under
+    /// the page, which slides aside to show it.
+    private var drawerLayout: some View {
+        GeometryReader { geometry in
+            let width = min(318, geometry.size.width * 0.81)
+            let progress = drawerProgress(width: width)
+
+            ZStack(alignment: .topLeading) {
+                Palette.drawer.ignoresSafeArea()
+
+                drawer
+                .frame(width: width, height: geometry.size.height)
+                .offset(x: (progress - 1) * 36)
+                // Closed, it is not drawn: under a page still fading in (the
+                // opening screen's hand-off) its rows showed through.
+                .opacity(progress > 0 ? 0.4 + 0.6 * progress : 0)
+                .allowsHitTesting(drawerOpen)
+
+                // Pushed aside, the page becomes a card of its own color, following the drag.
+                stack(pageBackground: Palette.blend(Palette.bg, Palette.drawerPage, progress))
+                .frame(width: geometry.size.width, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
+                .clipShape(RoundedRectangle(cornerRadius: 44 * progress, style: .continuous))
+                .overlay {
+                    if progress > 0 {
+                        RoundedRectangle(cornerRadius: 44 * progress, style: .continuous)
+                            .fill(Color.clear)
+                            .contentShape(Rectangle())
+                            .onTapGesture { closeDrawer() }
+                    }
+                }
+                .shadow(color: .black.opacity(0.12 * progress), radius: 15, x: -8, y: 0)
+                .offset(x: width * progress)
+                .ignoresSafeArea()
+                .overlay(alignment: .leading) {
+                    if !drawerOpen && path.isEmpty {
+                        Color.clear
+                            .frame(width: 22)
+                            .contentShape(Rectangle())
+                            .gesture(drawerDrag(width: width))
+                            // The edge sits above the list, which never feels this
+                            // touch: stop its glide on touch-down, as the list would.
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { _ in if !edgeTouched { edgeTouched = true; Scrolling.stopGlides() } }
+                                    .onEnded { _ in edgeTouched = false }
+                            )
+                    }
+                }
+            }
+            // While the drawer is open, a sideways drag anywhere, on the drawer or
+            // the uncovered chat, pulls it closed.
+            .gesture(drawerDrag(width: width), including: drawerOpen ? .all : .subviews)
+        }
+    }
+
 
     @ViewBuilder
     private func destination(_ route: Route) -> some View {
@@ -293,7 +365,7 @@ struct MainShell: View {
         ZStack {
             ChatScreen(
                 workspace: workspace,
-                onMenu: { openDrawer() },
+                onMenu: { toggleNavigation() },
                 onTasks: {
                     tasksChatId = conciergeChatID
                     showTasks = true
@@ -314,7 +386,7 @@ struct MainShell: View {
                 topicScreen(chatId: nil, key: key, draftKey: DraftStore.blankChat(key))
                     .id(key.uuidString)
             case .apps:
-                AppsScreen(workspace: workspace, onMenu: { openDrawer() }, onOpen: { app in
+                AppsScreen(workspace: workspace, onMenu: { toggleNavigation() }, onOpen: { app in
                     path.append(.app(app))
                 }, onStart: { prompt in
                     // The main Chat, with the prompt in its composer to edit.
@@ -322,7 +394,7 @@ struct MainShell: View {
                     workspace.composerPrefill = prompt
                 })
             case .search:
-                SearchScreen(workspace: workspace, onMenu: { openDrawer() }) { hit in
+                SearchScreen(workspace: workspace, onMenu: { toggleNavigation() }) { hit in
                     if workspace.isMainChat(hit.session.id) {
                         show(.chat)
                     } else if workspace.topics.chat(hit.session.id) != nil {
@@ -340,7 +412,7 @@ struct MainShell: View {
             workspace: workspace,
             chatId: chatId,
             draftKey: draftKey,
-            onMenu: { openDrawer() },
+            onMenu: { toggleNavigation() },
             onTasks: { id in
                 // A blank chat has no tasks yet; its sheet shows the empty state.
                 tasksChatId = id ?? ""
@@ -428,7 +500,7 @@ struct MainShell: View {
 
     /// The chat on screen, by its store's id.
     private var visibleChat: String? {
-        if drawerOpen || showTasks || showSettings { return nil }
+        if drawerOpen || sidebarCovers || showTasks || showSettings { return nil }
         if let top = path.last {
             if case .taskChat(let chatId, _) = top { return chatId }
             return nil
@@ -449,8 +521,18 @@ struct MainShell: View {
         withAnimation(Self.drawerSpring) { drawerOpen = true }
     }
 
+    /// The header's drawer button: opens the drawer, or with a sidebar,
+    /// hides or shows it.
+    private func toggleNavigation() {
+        guard usesSidebar else { return openDrawer() }
+        Keyboard.dismiss()
+        withAnimation { sidebar = sidebar == .detailOnly ? .all : .detailOnly }
+    }
+
     private func closeDrawer() {
         withAnimation(Self.drawerSpring) { drawerOpen = false }
+        // A sidebar that covers the page goes with it.
+        if sidebarCovers { withAnimation { sidebar = .detailOnly } }
     }
 
     /// Opens from the left edge or closes from anywhere, following the finger.
