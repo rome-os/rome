@@ -75,14 +75,20 @@ final class TranscriptStore {
         self.backend = backend
     }
 
-    var rows: [TranscriptRow] {
+    /// Answers given to cards: stored ones, then those sent this session.
+    var answers: [String: JSONValue] {
         var answers = TranscriptBuilder.answers(in: messages)
         answers.merge(localAnswers) { stored, _ in stored }
+        return answers
+    }
+
+    var rows: [TranscriptRow] {
+        let answers = answers
         return TranscriptBuilder.rows(
             messages: messages,
             pending: pending,
             answers: answers,
-            options: .init(showTools: kind == .task, typing: kind == .concierge && running && visibleTurn)
+            options: .init(showTools: kind == .task, showThreads: kind == .concierge, typing: kind == .concierge && running && visibleTurn)
         )
     }
 
@@ -161,6 +167,7 @@ final class TranscriptStore {
             }
             loaded = true
             loadError = nil
+            if reopening != nil { await resolveReopening() }
             await refreshRunning()
         } catch let error as APIError {
             loadError = error
@@ -239,7 +246,14 @@ final class TranscriptStore {
     /// arrived in; the order never changes when the same rows arrive again.
     private func merge(_ incoming: [ChatMessage], persist: Bool = true) {
         var byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
-        for message in incoming {
+        for var message in incoming {
+            if message.knowsThreads {
+                instanceKnowsThreads = true
+            } else if let held = byID[message.id], held.knowsThreads {
+                // A live insert leaves the thread out: keep the one already known.
+                message.chatThreadId = held.chatThreadId
+                message.knowsThreads = true
+            }
             byID[message.id] = message
             if seen[message.id] == nil {
                 seen[message.id] = seen.count
@@ -283,11 +297,96 @@ final class TranscriptStore {
                 // The turn's trace summary and reply are final now.
                 Task { await reload() }
             }
+        case .messageThread(let id, let messageId, let root) where id == sessionId:
+            if let index = messages.firstIndex(where: { $0.id == messageId }) {
+                messages[index].chatThreadId = root
+                messages[index].knowsThreads = true
+            }
         case .reconnected:
             resync()
         default:
             break
         }
+    }
+
+    // MARK: Chat threads
+
+    /// The chat thread shown over the chat, if one is open.
+    private(set) var thread: ThreadStore?
+    /// The instance has chat threads: a read showed `chatThreadId`, on any
+    /// message. Live inserts leave the field out, so one message cannot tell.
+    private(set) var instanceKnowsThreads = false
+    /// A thread a restored draft was written in, being looked up because its
+    /// message is not in the pages held.
+    private(set) var reopening: ThreadTarget?
+
+    /// Where the composer sends, and what its draft keeps: the open thread,
+    /// or one still being looked up.
+    var composerThread: ThreadTarget? { thread?.target ?? reopening }
+
+    /// Opens the chat thread a stored message is in, over the chat.
+    /// `toReply`: Reply was chosen, so the composer takes the keyboard; the
+    /// replies line opens it for reading, keyboard down.
+    func openThread(at messageId: String, toReply: Bool = true) {
+        guard kind == .concierge, let anchor = messages.first(where: { $0.id == messageId }) else { return }
+        open(anchor: anchor, older: [], toReply: toReply)
+    }
+
+    private func open(anchor: ChatMessage, older: [ChatMessage], toReply: Bool) {
+        thread?.stop()
+        reopening = nil
+        let opened = ThreadStore(anchor: anchor, chat: self, backend: backend, toReply: toReply, older: older)
+        thread = opened
+        opened.start()
+    }
+
+    func closeThread() {
+        thread?.stop()
+        thread = nil
+        reopening = nil
+    }
+
+    /// A restored draft was written in a chat thread: it opens again. Its
+    /// message may be older than the pages held, so an instance with chat
+    /// threads is asked for it, and only a thread the server no longer has
+    /// leaves the text to the chat. An older instance cannot be asked: there
+    /// the text goes to the chat when the message is not held.
+    func reopenThread(_ target: ThreadTarget) {
+        guard kind == .concierge, thread == nil else { return }
+        if message(target.messageId) != nil {
+            openThread(at: target.messageId)
+            return
+        }
+        guard target.instanceKnowsThreads || instanceKnowsThreads else { return }
+        reopening = target
+        Task { await resolveReopening() }
+    }
+
+    /// Looks up the thread a draft waits on. Unreachable now, it keeps
+    /// waiting, and the next reload asks again.
+    func resolveReopening() async {
+        guard let target = reopening, thread == nil else { return }
+        do {
+            let found = try await backend.thread(sessionId: sessionId, messageId: target.messageId)
+            guard reopening == target, thread == nil else { return }
+            guard let anchor = found.first(where: { $0.id == target.messageId }) ?? found.last else {
+                reopening = nil
+                return
+            }
+            open(anchor: anchor, older: found, toReply: true)
+        } catch APIError.notFound {
+            if reopening == target { reopening = nil }
+        } catch {}
+    }
+
+    /// The messages held for this chat that are in `root`'s thread.
+    func messages(inThread root: String) -> [ChatMessage] {
+        messages.filter { !$0.isTrace && ($0.chatThreadId == root || $0.id == root) }
+    }
+
+    /// A stored message, by id.
+    func message(_ id: String) -> ChatMessage? {
+        messages.first { $0.id == id }
     }
 
     /// Reloads after events may have been missed. A burst of requests (one per
@@ -344,28 +443,29 @@ final class TranscriptStore {
     @discardableResult
     /// Sends the guardian's text with any photos (JPEG). Photos alone are a
     /// message too. `fromComposer`: the composer's content, cleared as it goes.
-    func send(_ text: String, images: [ComposerImage] = [], fromComposer: Bool = false) -> Bool {
+    func send(_ text: String, images: [ComposerImage] = [], fromComposer: Bool = false, thread: ThreadTarget? = nil) -> Bool {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty || !images.isEmpty else { return false }
         let inputId = UUID().uuidString.lowercased()
-        pending.append(PendingSend(id: inputId, text: trimmed, images: images, createdAt: .now, state: .sending))
+        pending.append(PendingSend(id: inputId, text: trimmed, images: images, createdAt: .now, state: .sending, thread: thread))
         if kind == .concierge {
             markRunning()
             visibleTurn = true
         }
-        deliver(inputId: inputId, text: trimmed, images: images, fromComposer: fromComposer)
+        deliver(inputId: inputId, text: trimmed, images: images, fromComposer: fromComposer, thread: thread)
         return true
     }
 
     func retry(_ id: String) {
         guard let index = pending.firstIndex(where: { $0.id == id }) else { return }
         pending[index].state = .sending
-        deliver(inputId: id, text: pending[index].text, images: pending[index].images)
+        deliver(inputId: id, text: pending[index].text, images: pending[index].images, thread: pending[index].thread)
     }
 
-    private func deliver(inputId: String, text: String, images: [ComposerImage], fromComposer: Bool = false) {
+    private func deliver(inputId: String, text: String, images: [ComposerImage], fromComposer: Bool = false, thread: ThreadTarget? = nil) {
         // Kept as the chat's draft until the server takes it.
-        if let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer) }
+        // Kept with the thread it was for, so a lost send comes back there.
+        if let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer, thread: thread) }
         Task {
             do {
                 let turn = try await backend.send(
@@ -373,7 +473,8 @@ final class TranscriptStore {
                     text: text,
                     files: OutgoingFile.photos(images),
                     inputId: inputId,
-                    priority: kind == .concierge ? .now : .next
+                    priority: kind == .concierge ? .now : .next,
+                    thread: thread
                 )
                 if let index = pending.firstIndex(where: { $0.id == inputId }) {
                     pending[index].state = .sent

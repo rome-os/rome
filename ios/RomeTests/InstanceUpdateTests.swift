@@ -276,7 +276,7 @@ final class Counter: @unchecked Sendable {
 
     @Test func behindButSupportedIsOnlyOffered() async {
         let backend = FakeBackend()
-        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.186"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.189"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
         let updater = updater(defaults())
         await updater.attach(backend: backend, instanceID: "i1")
         #expect(!updater.blocking)
@@ -309,7 +309,7 @@ final class Counter: @unchecked Sendable {
     @Test func aClosedBannerStaysClosedForThatRelease() async {
         let store = defaults()
         let backend = FakeBackend()
-        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.186"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.189"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
         let first = updater(store)
         await first.attach(backend: backend, instanceID: "i1")
         first.dismissBanner()
@@ -326,7 +326,7 @@ final class Counter: @unchecked Sendable {
         #expect(other.showsBanner)
 
         // A newer release shows it once more.
-        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.186"), latest: .init(version: "1.1.191"), upgradeAvailable: true))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.189"), latest: .init(version: "1.1.191"), upgradeAvailable: true))
         let newer = updater(store)
         await newer.attach(backend: backend, instanceID: "i1")
         #expect(newer.showsBanner)
@@ -334,7 +334,7 @@ final class Counter: @unchecked Sendable {
 
     @Test func aFailedOfferedUpdateCanBeClosed() async {
         let backend = FakeBackend()
-        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.186"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.189"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
         backend.startResults = [.failure(APIError.server(status: 503, message: "pantheon_unreachable"))]
         let updater = updater(defaults())
         await updater.attach(backend: backend, instanceID: "i1")
@@ -374,7 +374,7 @@ final class Counter: @unchecked Sendable {
     /// A relaunch resumes an update that then times out: the failure stays on
     /// the page, which closes back to the offer for a supported instance.
     @Test func aTimedOutUpdateAfterARelaunchIsSeen() async throws {
-        for (from, closes) in [("1.1.186", true), ("1.1.100", false)] {
+        for (from, closes) in [("1.1.189", true), ("1.1.100", false)] {
             let defaults = UserDefaults(suiteName: "UpdateFailureTests-\(UUID().uuidString)")!
             let store = PendingUpgradeStore(defaults: defaults)
             store.save(PendingUpgrade(target: "1.1.190", since: .now.addingTimeInterval(-UpdateGate.upgradeTimeout + 0.2), from: from), for: "i1")
@@ -406,7 +406,8 @@ final class Counter: @unchecked Sendable {
         #expect(live.count == TopicChatsStore.liveNameLimit)
         #expect(live.contains("t29") && !live.contains("t0"))
         #expect(TopicChatsStore.liveIDs(Array(chats.prefix(3))) == ["t0", "t1", "t2"])
-        // Status, tasks, the main chat and the chat on screen still fit.
-        #expect(TopicChatsStore.liveNameLimit + 4 <= 32)
+        // Status, tasks, the Concierge's activity, the main chat and the chat
+        // on screen still fit.
+        #expect(TopicChatsStore.liveNameLimit + 5 <= 32)
     }
 }

@@ -25,6 +25,11 @@ enum Palette {
     static let drawerPage = dynamic(0xE4DED4, 0x151210)
     static let cardShadow = dynamic(rgba: (0x3C2814, 0.16), (0x000000, 0.5))
     static let softShadow = dynamic(rgba: (0x1A130F, 0.06), (0x000000, 0.3))
+    /// Behind the chat header's name, over its glass: the dark pill keeps
+    /// its name readable when bright messages pass under it.
+    static let headerPillTint = dynamic(rgba: (0xFFFFFF, 0), (0x000000, 0.28))
+    /// Under the chat header's avatar, so it sits on the pill.
+    static let avatarShadow = dynamic(rgba: (0x3C2814, 0.18), (0x000000, 0.35))
 
     static let primary = dynamic(0xD86F4C, 0xD86F4C)
     static let primaryIcon = dynamic(0xD86F4C, 0xE07C5A)
@@ -91,8 +96,51 @@ enum Metrics {
     static let bubbleTight: CGFloat = 6
     static let cardRadius: CGFloat = 18
     static let groupRadius: CGFloat = 16
-    static let bigCardRadius: CGFloat = 22
+    static let bigCardRadius: CGFloat = 18
     static let bubbleMaxWidthRatio: CGFloat = 0.78
+}
+
+/// One scale for every card a chat draws, kept at the size of the chat's
+/// own text: a card's title is the bubble's size and only bolder, its body
+/// a step smaller, so a card never speaks louder than the conversation
+/// (DESIGN.md 3 and 4).
+enum CardScale {
+    /// The card's title, semibold: the bubble's body size.
+    static let title: CGFloat = 16
+    /// Body text, option labels, field values.
+    static let body: CGFloat = 15
+    /// The small label above a title ("Needs approval", "Task"), semibold.
+    static let label: CGFloat = 12
+    /// Secondary lines and field labels.
+    static let caption: CGFloat = 13
+    /// Inside a card's edge.
+    static let paddingH: CGFloat = 14
+    static let paddingV: CGFloat = 12
+    /// A box inside a card: a card's fields, a question's options.
+    static let fieldCorner: CGFloat = 12
+    /// Above and below each row of fields.
+    static let fieldRowPadding: CGFloat = 8
+    /// The square behind a card's glyph, and the glyph.
+    static let iconBox: CGFloat = 30
+    static let iconGlyph: CGFloat = 15
+    static let iconCorner: CGFloat = 9
+    /// A service's mark on a connect card.
+    static let connectMark: CGFloat = 32
+    /// A card's main buttons (Approve, Reject).
+    static let buttonHeight: CGFloat = 40
+    static let buttonFont: CGFloat = 16
+    /// A question's option row.
+    static let optionMinHeight: CGFloat = 40
+    /// A small action beside a row (Connect, Open).
+    static let actionHeight: CGFloat = 32
+    static let actionFont: CGFloat = 14
+}
+
+extension View {
+    /// A card's padding on the shared scale.
+    func cardPadding() -> some View {
+        padding(.horizontal, CardScale.paddingH).padding(.vertical, CardScale.paddingV)
+    }
 }
 
 extension EnvironmentValues {

@@ -160,19 +160,27 @@ struct TaskChatScreen: View {
             if let briefID, id.hasPrefix(briefID + ":") {
                 BriefCard(text: text)
             } else {
-                UserBubble(text: text, images: images, pending: pending) { store.retry(id) }
+                UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, menu: menu(row))
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position)
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, menu: menu(row))
         case .tools, .approval, .question, .webOnly, .routineDraft, .connect:
             InteractionRow(row: row, store: store)
         case .error(_, let text):
             ErrorLine(text: text)
-        case .taskCard(_, let id, let title):
+        case .taskCard(_, let id, let title, _):
             TaskCard(title: title) {}
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
+        case .threadReplies:
+            // Task chats have no chat threads.
+            EmptyView()
         }
+    }
+
+    /// A task chat's bubbles: the time, Copy and Share; no threads to reply in.
+    private func menu(_ row: TranscriptRow) -> BubbleMenu {
+        BubbleMenu(date: row.messageId.flatMap(store.message)?.date)
     }
 
     /// Task chats space every block by 12 pt, as on the board; bubbles in a run keep 3 pt.

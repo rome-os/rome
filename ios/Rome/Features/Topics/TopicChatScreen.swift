@@ -15,6 +15,7 @@ struct TopicChatScreen: View {
     let onArchived: () -> Void
     let onCreated: (String) -> Void
 
+    @Environment(AppModel.self) private var model
     @State private var draft = ""
     @State private var starting: String?
     @State private var startFailed = false
@@ -41,9 +42,16 @@ struct TopicChatScreen: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Under an open thread, VoiceOver reads the thread, not what it covers.
+        .accessibilityHidden(store?.thread != nil)
         .floatingTopBar {
             ChatHeader(
-                title: Text(verbatim: title),
+                // The Concierge's name, as in the main chat; the topic's own
+                // title stays in the "…" menu.
+                name: workspace.mainChatTitle,
+                menuTitle: title,
+                activity: workspace.topics.activity(for: chatId),
+                announces: chatId != nil && model.visibleChat == chatId,
                 onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
@@ -55,10 +63,18 @@ struct TopicChatScreen: View {
                     newName = title
                     renaming = true
                 },
-                onArchive: chatId.map { id in { archive(id) } },
-                plainTitle: true
+                onArchive: chatId.map { id in { archive(id) } }
             )
+            .accessibilityHidden(store?.thread != nil)
         }
+        // Over the header and the transcript; the composer below stays in place.
+        .overlay {
+            if let store, let thread = store.thread {
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.mainChatTitle, activity: workspace.topics.activity(for: chatId), onOpenChat: onOpenChat) { store.closeThread() }
+            }
+        }
+        // Reply brings the keyboard up; the replies line opens it for reading.
+        .onChange(of: store?.thread != nil) { _, open in if open, store?.thread?.toReply == true { composerFocused = true } }
         .alert("Rename chat", isPresented: $renaming) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) {}
@@ -69,7 +85,7 @@ struct TopicChatScreen: View {
             }
         }
         .pageBackground()
-        .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store)
+        .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onThread: { store?.reopenThread($0) })
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 10) {
@@ -82,7 +98,7 @@ struct TopicChatScreen: View {
                 if showsStarters {
                     ConciergeStarters { send(text: $0.text) }
                 }
-                Composer(text: $draft, placeholder: String(localized: "Message"), focused: $composerFocused, attachments: attachments) { send() }
+                Composer(text: $draft, placeholder: store?.composerThread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) { send() }
             }
             .animation(.easeOut(duration: 0.2), value: showsStarters)
             .disabled(starting != nil)
@@ -94,6 +110,7 @@ struct TopicChatScreen: View {
         // A blank chat that just started its chat keeps this view.
         .onChange(of: chatId) { store?.start() }
         .onDisappear {
+            store?.closeThread()
             store?.stop()
             // Left blank, the chat is never made, and its draft goes with it.
             if chatId == nil && starting == nil { workspace.drafts.discard(chat: draftKey) }
@@ -145,9 +162,11 @@ struct TopicChatScreen: View {
         guard !attachments.isPreparing else { return }
         let images = attachments.images
         if let store {
-            if store.send(draft, images: images, fromComposer: true) {
+            // While a chat thread is open, the composer sends into it.
+            if store.send(draft, images: images, fromComposer: true, thread: store.composerThread) {
                 draft = ""
                 _ = attachments.take()
+                store.closeThread()
             }
             return
         }

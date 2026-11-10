@@ -32,6 +32,12 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     var content: String
     var createdAt: String
     var traceSummary: TraceSummary?
+    /// The first message of the chat thread this one is in; nil when it is
+    /// alone, or on an instance without chat threads.
+    var chatThreadId: String? = nil
+    /// The instance sent `chatThreadId`, null included: it has chat threads.
+    /// An older instance leaves the field out.
+    var knowsThreads = false
 
     var date: Date { RomeDate.parse(createdAt) ?? .distantPast }
 
@@ -39,6 +45,55 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
 
     var isUser: Bool { role == "user" }
     var isTrace: Bool { role == "trace" }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId
+    }
+}
+
+extension ChatMessage {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        sessionId = try container.decode(String.self, forKey: .sessionId)
+        turnId = try container.decodeIfPresent(String.self, forKey: .turnId)
+        role = try container.decode(String.self, forKey: .role)
+        content = try container.decode(String.self, forKey: .content)
+        createdAt = try container.decode(String.self, forKey: .createdAt)
+        traceSummary = try container.decodeIfPresent(TraceSummary.self, forKey: .traceSummary)
+        chatThreadId = try container.decodeIfPresent(String.self, forKey: .chatThreadId)
+        knowsThreads = container.contains(.chatThreadId)
+    }
+
+    /// Writes `chatThreadId` as null when the instance sent it as null, so a
+    /// kept copy reads back the same.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(sessionId, forKey: .sessionId)
+        try container.encodeIfPresent(turnId, forKey: .turnId)
+        try container.encode(role, forKey: .role)
+        try container.encode(content, forKey: .content)
+        try container.encode(createdAt, forKey: .createdAt)
+        try container.encodeIfPresent(traceSummary, forKey: .traceSummary)
+        if knowsThreads { try container.encode(chatThreadId, forKey: .chatThreadId) }
+    }
+
+    /// The chat thread it is in, by its first message: its own id when alone.
+    var threadRoot: String { chatThreadId ?? id }
+}
+
+/// Where a message sent from a chat thread goes. An instance with chat
+/// threads takes `chatThread`; an older one places a reply by
+/// `replyToMessageId` (every supported release has it).
+struct ThreadTarget: Codable, Hashable, Sendable {
+    /// A message of the open thread.
+    let messageId: String
+    let instanceKnowsThreads: Bool
+
+    var body: [String: JSONValue] {
+        instanceKnowsThreads ? ["chatThread": .string(messageId)] : ["replyToMessageId": .string(messageId)]
+    }
 }
 
 struct TraceSummary: Codable, Hashable, Sendable {
@@ -117,6 +172,114 @@ struct ConciergeChat: Codable, Identifiable, Hashable, Sendable {
     var main: Bool
     /// Agent messages since the guardian last read it.
     var unread: Int?
+    /// What the Concierge is doing in this chat now. Absent on older
+    /// instances, and for a state this build does not know: no status line.
+    var activity: ConciergeActivity? = nil
+
+    private enum CodingKeys: String, CodingKey { case id, name, main, unread, activity }
+
+    init(id: String, name: String, main: Bool, unread: Int? = nil, activity: ConciergeActivity? = nil) {
+        self.id = id
+        self.name = name
+        self.main = main
+        self.unread = unread
+        self.activity = activity
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        main = try container.decode(Bool.self, forKey: .main)
+        unread = try container.decodeIfPresent(Int.self, forKey: .unread)
+        activity = (try? container.decodeIfPresent(JSONValue.self, forKey: .activity)).flatMap { $0 }.flatMap(ConciergeActivity.init(json:))
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(id, forKey: .id)
+        try container.encode(name, forKey: .name)
+        try container.encode(main, forKey: .main)
+        try container.encodeIfPresent(unread, forKey: .unread)
+        try container.encodeIfPresent(activity?.json, forKey: .activity)
+    }
+}
+
+/// What the Concierge is doing in one of its chats, as the server works it
+/// out (`ConciergeActivity`). The app only draws it.
+enum ConciergeActivity: Hashable, Sendable {
+    case idle
+    /// A card or approval waits on the guardian.
+    case needsYou
+    /// The chat's turn is running, in no named tool.
+    case working
+    /// The chat's turn is in a named tool.
+    case tool(Tool)
+    /// Task chats it started are running: the newest's title, and how many more.
+    case tasks(title: String, more: Int)
+
+    enum Tool: String, Sendable, CaseIterable {
+        case startingTask, messagingTask, readingChat, stoppingTask, updatingTasks
+        case startingTopic, checkingFollows, searchingWeb, readingPage
+    }
+
+    /// Lenient, as the contract asks: an unknown kind is nil (no line), an
+    /// unknown tool reads as working.
+    init?(json: JSONValue) {
+        switch json["kind"]?.string {
+        case "idle": self = .idle
+        case "needsYou": self = .needsYou
+        case "working": self = .working
+        case "tool": self = json["tool"]?.string.flatMap(Tool.init(rawValue:)).map(Self.tool) ?? .working
+        case "tasks":
+            let title = json["title"]?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            let more = json["more"]?.number.map(Int.init) ?? 0
+            self = title.isEmpty ? .working : .tasks(title: title, more: max(0, more))
+        default: return nil
+        }
+    }
+
+    var json: JSONValue {
+        switch self {
+        case .idle: return .object(["kind": .string("idle")])
+        case .needsYou: return .object(["kind": .string("needsYou")])
+        case .working: return .object(["kind": .string("working")])
+        case .tool(let tool): return .object(["kind": .string("tool"), "tool": .string(tool.rawValue)])
+        case .tasks(let title, let more): return .object(["kind": .string("tasks"), "title": .string(title), "more": .number(Double(more))])
+        }
+    }
+
+    /// The header's second line; nil leaves the name alone.
+    var statusLine: String? {
+        switch self {
+        case .idle: return nil
+        // Its own key: the question card's "Waiting for your answer" reads
+        // differently in Chinese.
+        case .needsYou: return String(localized: "status.needsYou", defaultValue: "Waiting for your answer")
+        case .working: return String(localized: "Working on it")
+        case .tasks(let title, let more): return more > 0 ? "\(title) +\(more)" : title
+        case .tool(let tool):
+            switch tool {
+            case .startingTask: return String(localized: "Starting a task")
+            case .messagingTask: return String(localized: "Writing to a task chat")
+            case .readingChat: return String(localized: "Reading a chat")
+            case .stoppingTask: return String(localized: "Stopping a task")
+            case .updatingTasks: return String(localized: "Updating tasks")
+            case .startingTopic: return String(localized: "Starting a topic chat")
+            case .checkingFollows: return String(localized: "Checking what you follow")
+            case .searchingWeb: return String(localized: "Searching the web")
+            case .readingPage: return String(localized: "Reading a page")
+            }
+        }
+    }
+
+    /// Working, in a tool, or running tasks: the line shimmers and the mascot is alive.
+    var isBusy: Bool {
+        switch self {
+        case .working, .tool, .tasks: return true
+        case .idle, .needsYou: return false
+        }
+    }
 }
 
 /// `GET /concierge/chats`: the main chat first, then the topic chats, oldest first.
@@ -209,6 +372,40 @@ enum RoutineStatus: Hashable, Sendable {
         case .notOn: return nil
         case .on(let id), .paused(let id): return id
         }
+    }
+}
+
+/// A pending approval and the chat that asked for it, from `GET /approvals?status=pending`.
+struct PendingApproval: Hashable, Sendable {
+    let id: String
+    /// The chat the action ran in (`payload.channelContext.threadId`).
+    let chatId: String?
+    let part: MessagePart.ApprovalPart
+    let createdAt: Date
+
+    /// Reads one row; a row with no id is skipped. A preview the app cannot
+    /// read keeps the approval's controls, titled by the row's description.
+    init?(json row: JSONValue) {
+        guard let id = row["id"]?.string, row["status"]?.string ?? "pending" == "pending" else { return nil }
+        self.id = id
+        let payload = row["payload"]
+        chatId = payload?["channelContext"]?["threadId"]?.string
+        var fields: [String: JSONValue] = ["status": .string("pending")]
+        if let action = payload?["actionName"]?.string { fields["actionName"] = .string(action) }
+        if let preview = payload?["preview"] { fields["preview"] = preview }
+        var part = MessagePart.approval(.object(fields), id: id)
+        if part.title == nil, let description = row["description"]?.string, !description.isEmpty {
+            part = .init(approvalId: id, actionName: part.actionName, title: description, summary: part.summary, fields: part.fields, storedStatus: part.storedStatus)
+        }
+        self.part = part
+        createdAt = row["createdAt"]?.string.flatMap(RomeDate.parse) ?? .distantPast
+    }
+
+    init(id: String, chatId: String?, part: MessagePart.ApprovalPart, createdAt: Date) {
+        self.id = id
+        self.chatId = chatId
+        self.part = part
+        self.createdAt = createdAt
     }
 }
 

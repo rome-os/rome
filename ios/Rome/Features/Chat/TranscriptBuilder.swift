@@ -11,6 +11,8 @@ struct PendingSend: Identifiable, Hashable, Sendable {
     var images: [ComposerImage] = []
     let createdAt: Date
     var state: State
+    /// Sent from a chat thread: a retry goes to the same thread.
+    var thread: ThreadTarget? = nil
 }
 
 /// A photo in the guardian's bubble: the one being sent, or a stored upload.
@@ -30,7 +32,9 @@ enum TranscriptRow: Identifiable, Hashable {
     case separator(id: String, date: Date)
     case userText(id: String, text: String, images: [UserImage] = [], pending: PendingSend.State?)
     case agentText(id: String, text: String, long: Bool, forwardedFrom: MessagePart.ForwardedFrom?, position: BubblePosition)
-    case taskCard(id: String, chatId: String, title: String)
+    /// `latest`: the newest card for that task chat, the only one that may
+    /// show what the task waits on.
+    case taskCard(id: String, chatId: String, title: String, latest: Bool = false)
     case approval(id: String, part: MessagePart.ApprovalPart, sessionId: String)
     case question(id: String, part: MessagePart.QuestionPart, sessionId: String, answered: JSONValue?)
     /// `done`: an interactive card the guardian already answered.
@@ -39,13 +43,18 @@ enum TranscriptRow: Identifiable, Hashable {
     case connect(id: String, part: MessagePart.ConnectCardPart, sessionId: String)
     case error(id: String, text: String)
     case tools(id: String, traceMessageId: String, count: Int)
+    /// Under an Agent message that ends a stretch of a chat thread, where the
+    /// thread goes on beyond that stretch: how many replies it has.
+    /// `guardian`: the message is the guardian's, so the line sits right.
+    case threadReplies(id: String, messageId: String, count: Int, guardian: Bool)
     case typing
 
     var id: String {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
-             .taskCard(let id, _, _), .approval(let id, _, _), .question(let id, _, _, _),
-             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .error(let id, _), .tools(let id, _, _):
+             .taskCard(let id, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
+             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .error(let id, _), .tools(let id, _, _),
+             .threadReplies(let id, _, _, _):
             return id
         case .typing:
             return "typing"
@@ -54,7 +63,29 @@ enum TranscriptRow: Identifiable, Hashable {
 
     var isGuardian: Bool {
         if case .userText = self { return true }
+        if case .threadReplies(_, _, _, let guardian) = self { return guardian }
         return false
+    }
+
+    /// The stored message a row was drawn from; nil for a pending send and
+    /// rows of no one message.
+    var messageId: String? {
+        switch self {
+        case .userText(let id, _, _, let pending):
+            return pending == nil ? Self.message(ofPart: id) : nil
+        case .agentText(let id, _, _, _, _):
+            return Self.message(ofPart: id)
+        case .threadReplies(_, let messageId, _, _):
+            return messageId
+        default:
+            return nil
+        }
+    }
+
+    /// A part row's id is `<message id>:<part index>`.
+    static func message(ofPart id: String) -> String? {
+        guard let colon = id.lastIndex(of: ":") else { return nil }
+        return String(id[..<colon])
     }
 }
 
@@ -68,6 +99,8 @@ enum TranscriptBuilder {
     struct Options {
         /// Task chats show their tool summaries; Concierge has none.
         var showTools = false
+        /// Concierge chats mark a chat thread's first message with its replies.
+        var showThreads = false
         var typing = false
     }
 
@@ -90,6 +123,7 @@ enum TranscriptBuilder {
         var entries: [Entry] = []
         // A stored message replaces the pending bubble it came from.
         let storedIDs = Set(messages.map(\.id))
+        let replies = options.showThreads ? threadLines(messages) : [:]
 
         // Messages come in the store's order, which follows the server's turns.
         for message in messages {
@@ -133,6 +167,9 @@ enum TranscriptBuilder {
                 case .interactionResult, .other:
                     continue
                 }
+            }
+            if !rows.isEmpty, let count = replies[message.id] {
+                rows.append(.threadReplies(id: "replies-\(message.id)", messageId: message.id, count: count, guardian: message.isUser))
             }
             if !rows.isEmpty {
                 entries.append(Entry(id: message.id, date: message.date, guardian: message.isUser, rows: rows, bubbleIndexes: bubbles))
@@ -191,8 +228,63 @@ enum TranscriptBuilder {
             previous = entry
         }
         closeRun()
+        // Only the newest card for each task chat expands.
+        var marked = Set<String>()
+        for index in output.indices.reversed() {
+            if case .taskCard(let id, let chatId, let title, _) = output[index], marked.insert(chatId).inserted {
+                output[index] = .taskCard(id: id, chatId: chatId, title: title, latest: true)
+            }
+        }
         if options.typing { output.append(.typing) }
         return output
+    }
+
+    /// Where the "N replies" line goes, by message id, and its count.
+    ///
+    /// The timeline is cut into runs: messages next to each other in one
+    /// chat thread (a message in none is a run of its own). A run's line sits
+    /// under its last Agent message, and only where it helps: the thread has
+    /// messages outside the run (later ones elsewhere, or its first message
+    /// is not in the run, perhaps not loaded), or it has four or more. Two
+    /// runs next to each other never both get one: the later keeps it. The
+    /// count is the thread's loaded messages, less its first when that is
+    /// loaded and counted: what is left are replies.
+    static func threadLines(_ messages: [ChatMessage]) -> [String: Int] {
+        let shown = messages.filter { !$0.isTrace && $0.parts.contains(where: \.isVisible) }
+        var sizes: [String: Int] = [:]
+        for message in shown { if let root = message.chatThreadId { sizes[root, default: 0] += 1 } }
+        // A first message counts only where it is placed in its own thread;
+        // one from before threads (no chatThreadId) is not in `sizes`.
+        let counted = Set(shown.filter { $0.chatThreadId == $0.id }.map(\.id))
+        func replies(_ thread: String) -> Int { (sizes[thread] ?? 0) - (counted.contains(thread) ? 1 : 0) }
+
+        struct Run { let thread: String?; var messages: [ChatMessage] }
+        var runs: [Run] = []
+        for message in shown {
+            if let thread = message.chatThreadId, runs.last?.thread == thread {
+                runs[runs.count - 1].messages.append(message)
+            } else {
+                runs.append(Run(thread: message.chatThreadId, messages: [message]))
+            }
+        }
+        func qualifies(_ run: Run) -> String? {
+            guard let thread = run.thread, let size = sizes[thread],
+                  let last = run.messages.last(where: { !$0.isUser }) else { return nil }
+            let rootHere = run.messages.contains { $0.id == thread }
+            let elsewhere = size > run.messages.count || !rootHere
+            return elsewhere || size >= 4 ? last.id : nil
+        }
+        var lines: [String: Int] = [:]
+        var laterKept = false
+        for run in runs.reversed() {
+            if !laterKept, let id = qualifies(run), let thread = run.thread, replies(thread) > 0 {
+                lines[id] = replies(thread)
+                laterKept = true
+            } else {
+                laterKept = false
+            }
+        }
+        return lines
     }
 
     /// Answers the guardian already gave, read from their `interaction_result` parts.

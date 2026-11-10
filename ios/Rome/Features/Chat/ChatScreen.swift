@@ -25,21 +25,32 @@ struct ChatScreen: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Under an open thread, VoiceOver reads the thread, not what it covers.
+        .accessibilityHidden(store.thread != nil)
         // The bar is clear: the transcript scrolls under its glass items.
         .floatingTopBar {
             VStack(spacing: 0) {
-                ChatHeader(title: Text("Chat"), onMenu: {
+                ChatHeader(name: workspace.mainChatTitle, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), announces: model.visibleChat == conciergeChatID, onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     onMenu()
-                }, onTasks: onTasks, mascotTitle: true)
+                }, onTasks: onTasks)
                 banners
             }
+            .accessibilityHidden(store.thread != nil)
         }
+        // Over the header and the transcript; the composer below stays in place.
+        .overlay {
+            if let thread = store.thread {
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.mainChatTitle, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), onOpenChat: onOpenChat) { store.closeThread() }
+            }
+        }
+        // Reply brings the keyboard up; the replies line opens it for reading.
+        .onChange(of: store.thread != nil) { _, open in if open, store.thread?.toReply == true { composerFocused = true } }
         .pageBackground()
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
-        .composerDraft(workspace.drafts, chat: workspace.concierge.sessionId, text: $draft, attachments: attachments, transcript: workspace.concierge, prefill: Binding(
+        .composerDraft(workspace.drafts, chat: workspace.concierge.sessionId, text: $draft, attachments: attachments, transcript: workspace.concierge, onThread: { store.reopenThread($0) }, prefill: Binding(
             get: { workspace.composerPrefill },
             set: { workspace.composerPrefill = $0 }
         )) { composerFocused = true }
@@ -55,12 +66,14 @@ struct ChatScreen: View {
                     if ConciergeStarters.visible(loaded: store.loaded, rows: store.rows) {
                         ConciergeStarters { store.send($0.text) }
                     }
-                    Composer(text: $draft, placeholder: String(localized: "Message"), focused: $composerFocused, attachments: attachments) {
+                    // While a chat thread is open, the composer sends into it.
+                    Composer(text: $draft, placeholder: store.composerThread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) {
                         // A photo still being made small would land in the next message.
                         guard !attachments.isPreparing else { return }
-                        if store.send(draft, images: attachments.images, fromComposer: true) {
+                        if store.send(draft, images: attachments.images, fromComposer: true, thread: store.composerThread) {
                             draft = ""
                             _ = attachments.take()
+                            store.closeThread()
                         }
                     }
                 }
@@ -184,123 +197,287 @@ struct ConciergeRow: View {
     let store: TranscriptStore
     let tasks: TasksStore
     let onOpenChat: (String, String) -> Void
+    /// Drawn in an open chat thread: no menus or thread links, text selectable.
+    var inThread = false
+    @Environment(AppModel.self) private var model
+
+    /// The message's time, and Reply on the Agent's messages outside a thread.
+    private func menu(reply: Bool) -> BubbleMenu {
+        let message = row.messageId.flatMap(store.message)
+        let onReply: (() -> Void)? = reply && !inThread
+            ? row.messageId.map { id in { store.openThread(at: id) } }
+            : nil
+        return BubbleMenu(date: message?.date, onReply: onReply, inThread: inThread)
+    }
 
     var body: some View {
         switch row {
         case .separator(_, let date):
             TimeSeparator(date: date)
         case .userText(let id, let text, let images, let pending):
-            UserBubble(text: text, images: images, pending: pending) { store.retry(id) }
+            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, menu: menu(reply: false))
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat)
-        case .taskCard(_, let chatId, let title):
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat, menu: menu(reply: true))
+        case .threadReplies(_, let messageId, let count, let guardian):
+            if !inThread {
+                ThreadRepliesLine(count: count, guardian: guardian) { store.openThread(at: messageId, toReply: false) }
+            }
+        case .taskCard(_, let chatId, let title, let latest):
             let name = tasks.title(forChat: chatId, fallback: title)
-            TaskCard(title: name) {
-                onOpenChat(chatId, name)
+            VStack(alignment: .leading, spacing: 8) {
+                TaskCard(title: name) {
+                    onOpenChat(chatId, name)
+                }
+                // The newest card of a task that waits on the guardian shows
+                // what it asks, answered right here (rome-os/rome#1949).
+                if latest, !inThread, TaskWaitView.waits(tasks.chats[chatId]), let workspace = model.workspace {
+                    TaskWaitView(store: workspace.taskWait(chatId), session: tasks.chats[chatId])
+                }
             }
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
         case .approval, .question, .webOnly, .routineDraft, .tools, .connect:
+            // In a thread a tap on a card stays on it, never closing the thread.
             InteractionRow(row: row, store: store)
+                .keepsTaps(inThread)
         case .error(_, let text):
             ErrorLine(text: text)
         }
     }
 }
 
+private extension View {
+    /// Takes the taps on its own content, so they never reach a view behind.
+    @ViewBuilder
+    func keepsTaps(_ on: Bool) -> some View {
+        if on { self.onTapGesture {} } else { self }
+    }
+}
+
 /// The floating header: menu, title, tasks.
 struct ChatHeader: View {
-    let title: Text
+    /// The Concierge's name, in the main chat and in topic chats alike.
+    let name: String
+    /// The chat's own title, for the "…" menu: the topic's name, or the name.
+    var menuTitle: String? = nil
+    /// What the Concierge is doing here; nil shows the name alone.
+    var activity: ConciergeActivity? = nil
+    /// The chat is the one on screen: its status changes are read out.
+    var announces = false
     let onMenu: () -> Void
     let onTasks: () -> Void
-    /// A topic chat's "…" menu. Without both, only the Tasks button shows.
+    /// A topic chat's options in the "…" menu, below Tasks.
     var onRename: (() -> Void)? = nil
     var onArchive: (() -> Void)? = nil
-    /// A topic chat's title: one line of small text, no pill.
-    var plainTitle = false
-    /// The main Chat: the mascot in the pill, read out as the title.
-    var mascotTitle = false
-    @State private var pokes = 0
-    @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
 
     var body: some View {
-        HStack {
+        // The row is as tall as the identity with its name alone, so the
+        // buttons never move. A status line grows the pill down, past the
+        // row, over the transcript, never pushing it.
+        HStack(alignment: .center) {
             GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
                 MenuGlyph()
             }
-            if plainTitle {
-                PlainHeaderTitle(title: title)
-            } else if mascotTitle {
-                Spacer()
-                Mascot(blinks: true, pokes: pokes)
-                    .frame(height: 22)
-                    .padding(.horizontal, 22)
-                    .frame(height: 44)
-                    .glassSurface(Capsule())
-                    // The whole pill: a soft tap and a reaction, nothing else.
-                    .contentShape(Capsule())
-                    .onTapGesture {
-                        haptic.impactOccurred()
-                        haptic.prepare()
-                        pokes += 1
-                    }
-                    .onAppear { haptic.prepare() }
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(title)
-                    .accessibilityAddTraits(.isHeader)
-                    .accessibilityRemoveTraits(.isButton)
-                Spacer()
-            } else {
-                Spacer()
-                title
-                    .lineLimit(1)
-                    .romeFont(17, .semibold)
-                    .tracking(-0.4)
-                    .padding(.horizontal, 18)
-                    .frame(height: 44)
-                    .glassSurface(Capsule())
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
-            }
-            // No count: task progress is not reported accurately enough to badge.
-            if let onRename, let onArchive {
-                // Each keeps a 44 pt target; the targets overlap so the icons
-                // sit as close as iOS's own paired toolbar buttons.
-                HStack(spacing: -10) {
-                    Button(action: onTasks) {
-                        ChecklistGlyph()
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressScaleStyle(scale: 0.9))
-                    .accessibilityLabel("Tasks")
-                    Menu {
-                        Button(action: onRename) {
-                            Label("Rename", systemImage: "pencil")
-                        }
-                        Button(role: .destructive, action: onArchive) {
-                            Label("Archive", systemImage: "archivebox")
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .romeFont(17, .semibold)
-                            .foregroundStyle(Palette.fg)
-                            .frame(width: 44, height: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .accessibilityLabel("More")
-                }
-                .glassSurface(Capsule(), interactive: true)
-            } else {
-                GlassCircleButton(accessibilityLabel: "Tasks", action: onTasks) {
-                    ChecklistGlyph()
-                }
-            }
+            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces) }
+            ChatMoreMenu(title: menuTitle ?? name, onTasks: onTasks, onRename: onRename, onArchive: onArchive)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
-        .frame(height: 52)
-        .modifier(PlainTitleFade(active: plainTitle))
+        .padding(.bottom, 4)
+    }
+}
+
+/// A Concierge chat's identity at the top: a round avatar with the mascot,
+/// overlapping a glass pill with the Concierge's name and, while it does
+/// something, a status line under it.
+struct ChatIdentity: View {
+    let name: String
+    /// Nil or idle: the name alone, and the pill shrinks back.
+    var activity: ConciergeActivity? = nil
+    /// A copy laid over the header (a chat thread): no reactions to a tap.
+    var still = false
+    /// Read status changes out: only for the chat on screen, and only once
+    /// (the header below a thread does it, not the copy over it).
+    var announces = false
+
+    @State private var pokes = 0
+    @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// What VoiceOver reads when the status changes: nothing for a chat
+    /// that is not the one on screen.
+    static func announcement(_ line: String?, announces: Bool) -> String? {
+        announces ? line : nil
+    }
+
+    static let avatarSize: CGFloat = 50
+    /// How far the avatar reaches down over the pill.
+    static let overlap: CGFloat = 8
+
+    /// The identity's height with the name alone, at the current text size:
+    /// what the header row is laid out for.
+    static func restingHeight(for size: DynamicTypeSize) -> CGFloat {
+        let name = UIFont.systemFont(ofSize: ScaledFont.scaled(14, for: size), weight: .semibold).lineHeight
+        return avatarSize - overlap + (overlap + 1) + name + 5
+    }
+
+    /// Holds the identity at the top of a fixed-height slot: the slot is the
+    /// resting height, and what grows below it overflows downward.
+    struct Slot<Content: View>: View {
+        @ViewBuilder var content: () -> Content
+        @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+        var body: some View {
+            Color.clear
+                .frame(maxWidth: .infinity)
+                .frame(height: ChatIdentity.restingHeight(for: dynamicTypeSize))
+                .overlay(alignment: .top) { content() }
+        }
+    }
+
+    private var status: String? { activity?.statusLine }
+    private var busy: Bool { activity?.isBusy ?? false }
+
+    var body: some View {
+        VStack(spacing: -Self.overlap) {
+            // A solid disc on the glass pill: two overlapping layers never
+            // share a color (DESIGN.md 1). Busy, the mascot bobs and glances;
+            // at rest it blinks; under Reduce Motion it stays still.
+            Mascot(alive: busy && !reduceMotion, blinks: !reduceMotion, pokes: pokes)
+                .frame(height: 28)
+                .frame(width: Self.avatarSize, height: Self.avatarSize)
+                .background(Palette.elevated, in: Circle())
+                .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
+                .shadow(color: Palette.avatarShadow, radius: 4, x: 0, y: 1)
+                // The avatar: a soft tap and a reaction, nothing else.
+                .contentShape(Circle())
+                .onTapGesture {
+                    guard !still else { return }
+                    haptic.impactOccurred()
+                    haptic.prepare()
+                    pokes += 1
+                }
+                .onAppear { if !still { haptic.prepare() } }
+                .zIndex(1)
+            VStack(spacing: 1) {
+                Text(verbatim: name)
+                    .romeFont(14, .semibold)
+                    .foregroundStyle(Palette.fg)
+                if let status {
+                    StatusLine(text: status, warning: activity == .needsYou, shimmers: busy && !reduceMotion)
+                }
+            }
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 12)
+            // Clear of the avatar's edge, which reaches `overlap` into the pill.
+            .padding(.top, Self.overlap + 1)
+            .padding(.bottom, 5)
+            .frame(minWidth: 72)
+            // Frosted like the composer, so what scrolls under blurs out.
+            .background(Palette.headerPillTint, in: Capsule())
+            .glassSurface(Capsule(), frost: Frost.composer)
+            // A new state switches at once: no resize or fade.
+            .transaction { $0.animation = nil }
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: status.map { "\(name), \($0)" } ?? name))
+        .accessibilityAddTraits(.isHeader)
+        .onChange(of: status) { _, line in
+            // Read out politely, as the web's live region is.
+            guard let line = Self.announcement(line, announces: announces) else { return }
+            var announcement = AttributedString(line)
+            announcement.accessibilitySpeechAnnouncementPriority = .low
+            AccessibilityNotification.Announcement(announcement).post()
+        }
+    }
+}
+
+/// The header's status line: small and muted, the warning colour while the
+/// Concierge waits on the guardian, and a faint left-to-right shimmer
+/// while it works.
+private struct StatusLine: View {
+    let text: String
+    let warning: Bool
+    let shimmers: Bool
+
+    var body: some View {
+        let line = Text(verbatim: text)
+            .romeFont(12, .medium)
+            .foregroundStyle(warning ? Palette.warningText : Palette.sub)
+        if shimmers {
+            line.overlay {
+                TimelineView(.animation) { context in
+                    // One pass every two seconds, left to right.
+                    let phase = context.date.timeIntervalSinceReferenceDate.truncatingRemainder(dividingBy: 2) / 2
+                    GeometryReader { geometry in
+                        let band = geometry.size.width * 0.45
+                        LinearGradient(colors: [.clear, Palette.fg.opacity(0.55), .clear], startPoint: .leading, endPoint: .trailing)
+                            .frame(width: band)
+                            .offset(x: -band + (geometry.size.width + band) * phase)
+                    }
+                    .mask(line)
+                }
+                .allowsHitTesting(false)
+            }
+        } else {
+            line
+        }
+    }
+}
+
+/// A menu title cut to one line at the end. A system menu wraps a long
+/// title onto as many lines as it needs and ignores a line limit.
+enum MenuTitle {
+    /// The width a menu's section title gets on a phone, with room to spare.
+    static let width: CGFloat = 200
+
+    static func oneLine(_ title: String, width: CGFloat = width, font: UIFont = .preferredFont(forTextStyle: .footnote)) -> String {
+        func fits(_ text: String) -> Bool {
+            (text as NSString).size(withAttributes: [.font: font]).width <= width
+        }
+        guard !fits(title) else { return title }
+        var characters = Array(title)
+        while !characters.isEmpty {
+            characters.removeLast()
+            let cut = String(characters).trimmingCharacters(in: .whitespaces) + "…"
+            if fits(cut) { return cut }
+        }
+        return "…"
+    }
+}
+
+/// A Concierge chat's "…" button: the chat's title in small grey text on
+/// top, then Tasks, then the chat's own options.
+struct ChatMoreMenu: View {
+    let title: String
+    let onTasks: () -> Void
+    var onRename: (() -> Void)? = nil
+    var onArchive: (() -> Void)? = nil
+
+    var body: some View {
+        Menu {
+            Section {
+                // No count: task progress is not reported accurately enough to badge.
+                Button(action: onTasks) { Label("Tasks", systemImage: "checklist") }
+                if let onRename {
+                    Button(action: onRename) { Label("Rename", systemImage: "pencil") }
+                }
+                if let onArchive {
+                    Button(role: .destructive, action: onArchive) { Label("Archive", systemImage: "archivebox") }
+                }
+            } header: {
+                // A system menu wraps its title whatever the line limit: it is cut here.
+                if !title.isEmpty { Text(verbatim: MenuTitle.oneLine(title)) }
+            }
+        } label: {
+            Image(systemName: "ellipsis")
+                .romeFont(17, .semibold)
+                .foregroundStyle(Palette.fg)
+                .frame(width: 44, height: 44)
+                .glassSurface(Circle(), interactive: true)
+        }
+        .accessibilityLabel("More")
     }
 }
 
@@ -327,14 +504,6 @@ struct DrawerPageHeader: View {
 }
 
 /// The fade a plain title needs; the main Chat's pill reads on its own.
-private struct PlainTitleFade: ViewModifier {
-    let active: Bool
-
-    func body(content: Content) -> some View {
-        if active { content.headerFade() } else { content }
-    }
-}
-
 /// A header title without a pill: one line of small semibold text, cut at
 /// the end, centered between the side buttons.
 struct PlainHeaderTitle: View {
@@ -458,12 +627,30 @@ struct TranscriptList<Row: View>: View {
     /// A finger is on the list: an older page waits, so the rows under it
     /// never move. A glide does not hold it back.
     @State private var fingerDown = false
+    /// Once the stack has gone lazy it stays lazy, so it changes kind at
+    /// most once.
+    @State private var lazyLocked = false
+
+    /// Up to this many rows a transcript is laid out all at once. A lazy
+    /// stack guesses the height of rows it has not laid out, and a chat that
+    /// mixes cards with short bubbles makes it guess wrong: the content then
+    /// shrinks under the scroll as rows leave the screen, and the rows jump.
+    /// Past this many rows the lazy stack's memory saving wins.
+    static var eagerRowLimit: Int { 120 }
+
+    /// Lazy once older pages exist or the rows pass the limit. An eager
+    /// stack runs every row's onAppear at once, so with older pages to
+    /// fetch it would page through the whole history; eager, there is none.
+    static func isLazy(rows: Int, hasOlder: Bool, locked: Bool) -> Bool {
+        locked || hasOlder || rows > eagerRowLimit
+    }
 
     var body: some View {
         let rows = store.rows
+        let lazy = Self.isLazy(rows: rows.count, hasOlder: store.hasOlder, locked: lazyLocked)
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
+                TranscriptStack(lazy: lazy) {
                     if store.hasOlder {
                         Spinner(size: 16, color: Palette.sub)
                             .padding(.vertical, 12)
@@ -528,6 +715,9 @@ struct TranscriptList<Row: View>: View {
             }
             .onChange(of: bottomVisible) { _, now in
                 transcriptScrollLog.notice("bottom visible \(now, privacy: .public), height \(visibleHeight, privacy: .public)")
+            }
+            .onChange(of: lazy, initial: true) { _, now in
+                if now { lazyLocked = true }
             }
             .onChange(of: rows.last?.id) {
                 // Before iOS 18 a list that follows also scrolls to a new last
@@ -638,6 +828,21 @@ struct TranscriptList<Row: View>: View {
         unseen = 0
         // Eases out onto the bottom: a spring would run past it and back.
         withAnimation(.easeOut(duration: 0.35)) { proxy.scrollTo("bottom", anchor: .bottom) }
+    }
+}
+
+/// The transcript's stack: lazy for a long transcript, all at once for a
+/// short one (`TranscriptList.eagerRowLimit`).
+private struct TranscriptStack<Content: View>: View {
+    let lazy: Bool
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        if lazy {
+            LazyVStack(spacing: 0, content: content)
+        } else {
+            VStack(spacing: 0, content: content)
+        }
     }
 }
 
