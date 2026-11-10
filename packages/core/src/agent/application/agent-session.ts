@@ -31,7 +31,7 @@ import { type AgentLog } from "../domain/agent-log.js";
 import { type DeferTool } from "./ask-user-tools.js";
 import { type SessionTools, forkSessionTools } from "../domain/session-tools.js";
 import { type ForkOpening, type ForkRequest, keepsFork, openFork } from "../domain/fork.js";
-import { type TurnFacts, type PushLevel } from "../domain/turn-facts.js";
+import { type TurnFacts, type PushLevel, type TurnActor } from "../domain/turn-facts.js";
 import {
   NO_ROME_TOOLS,
   type RomeTool,
@@ -242,6 +242,12 @@ export interface SendTurnOptions {
   initiatedBy?: "user" | "system";
   /** Pushes the messages said in the turn at this level (RunParams.pushLevel). */
   pushLevel?: PushLevel;
+  /**
+   * Who the turn acts for, captured when its input was admitted. Every action
+   * the turn calls runs as this person, however late its tool callback
+   * arrives. Absent, the turn acts for no one.
+   */
+  actor?: TurnActor;
 }
 
 export interface AgentSessionStatusEvent {
@@ -920,6 +926,7 @@ async function openSession(
   const turnFacts = (
     refs: TurnExecRefs,
     pushLevel: () => PushLevel | undefined = () => undefined,
+    actor: () => TurnActor | undefined = () => undefined,
   ): TurnFacts => ({
     agentName: key.agentName,
     continuityKey: key.channelThreadKey,
@@ -931,9 +938,14 @@ async function openSession(
     threadContext: refs.getThreadContext,
     sharedContext: refs.getSharedContext,
     pushLevel,
+    actor,
     inTurn: refs.bindTurnCtx,
   });
-  const liveTurn = turnFacts(sessionExecRefs, () => impl.currentTurnPushLevelRef);
+  const liveTurn = turnFacts(
+    sessionExecRefs,
+    () => impl.currentTurnPushLevelRef,
+    () => impl.currentTurnActorRef,
+  );
 
   // `defer`: schedule a one-off wakeup back into this same thread, through
   // the turn's facts (`deps.defer`). Only
@@ -1453,6 +1465,7 @@ interface TurnSink {
   quoted?: PromptMessage | null;
   initiatedBy?: "user" | "system";
   pushLevel?: PushLevel;
+  actor?: TurnActor;
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
   subagentCallsByToolUse: Map<string, { key: SubagentCallKey; call: SubagentCall }>;
@@ -1720,6 +1733,10 @@ class AgentSessionImpl implements AgentSession {
 
   get currentTurnPushLevelRef(): PushLevel | undefined {
     return this.currentSink?.pushLevel;
+  }
+
+  get currentTurnActorRef(): TurnActor | undefined {
+    return this.currentSink?.actor;
   }
 
   get currentTurnSharedContextRef(): Record<string, unknown> | undefined {
@@ -2796,6 +2813,7 @@ class AgentSessionImpl implements AgentSession {
       quoted: options?.quoted ?? null,
       initiatedBy: options?.initiatedBy ?? "user",
       pushLevel: options?.pushLevel,
+      actor: options?.actor,
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
       subagentCallsByToolUse: new Map(),

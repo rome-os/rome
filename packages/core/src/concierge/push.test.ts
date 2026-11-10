@@ -7,6 +7,7 @@ rs.mock("../logger.js", () => ({
 }));
 
 const { ConciergePush, FIXED_LINE, MERGE_MS, RING_MS, pushBody } = await import("./push.js");
+const { currentSessionActor, runWithSessionActor } = await import("../access/session-actor.js");
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 10));
 
@@ -261,11 +262,11 @@ describe("ConciergePush", () => {
   });
 
   it("keeps the newest message when its owner lookup straddles the window's end", async () => {
-    let release: () => void = () => {};
+    const waiting: Array<() => void> = [];
     let slow = false;
     const { push, sent, advance, advanceClock } = pushWith({
       ownerOf: async () => {
-        if (slow) await new Promise<void>((resolve) => (release = resolve));
+        if (slow) await new Promise<void>((resolve) => waiting.push(resolve));
         return GUARDIAN;
       },
     });
@@ -275,12 +276,17 @@ describe("ConciergePush", () => {
     await advanceClock(8_000);
     slow = true;
     push.said({ turnId: "t1", chatId: "c", ownWords: "newer", level: "active" });
-    // The window ends and its flush fires while the newer lookup is still out.
+    push.said({ turnId: "t1", chatId: "c", ownWords: "C", level: "active" });
+    // The window ends and its flush fires while both lookups are still out.
     await advance(MERGE_MS);
-    release();
+    slow = false;
+    for (const resolve of waiting.splice(0)) resolve();
     await settle();
-    await advance(MERGE_MS);
+    // "newer" opened a new window, and C waits in it: the first window's
+    // late flush neither sends "older" nor takes C early.
     expect(sent.map((content) => content.body)).toEqual(["first", "newer"]);
+    await advance(MERGE_MS);
+    expect(sent.map((content) => content.body)).toEqual(["first", "newer", "C"]);
   });
 
   it("drops a merged push that a hold covers when its window ends", async () => {
@@ -313,6 +319,34 @@ describe("ConciergePush", () => {
     push.said({ turnId: "t2", chatId: "c", ownWords: "second", level: "active" });
     await settle();
     expect(sent.map((content) => content.body)).toEqual(["first", "second"]);
+  });
+
+  it("sends and arms its merge timer as no one, whichever person's turn said the message", async () => {
+    const sendActors: unknown[] = [];
+    const timerActors: Array<Promise<unknown>> = [];
+    const push = new ConciergePush({
+      notify: {
+        send: async () => {
+          sendActors.push(await currentSessionActor());
+          return { kind: "ok", attempted: 1, sent: 1, failed: 0 };
+        },
+      },
+      ownerOf: async () => GUARDIAN,
+      quietUntil: async () => null,
+      language: async () => null,
+      now: () => 1_000_000,
+      setTimer: () => {
+        timerActors.push(currentSessionActor());
+      },
+    });
+    const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
+    runWithSessionActor(visitor, () => {
+      push.said({ turnId: "t1", chatId: "c", ownWords: "first", level: "active" });
+      push.said({ turnId: "t1", chatId: "c", ownWords: "merged", level: "active" });
+    });
+    await settle();
+    expect(sendActors).toEqual([undefined]);
+    expect(await Promise.all(timerActors)).toEqual([undefined]);
   });
 
   it("never logs the message, whatever the outcome", async () => {

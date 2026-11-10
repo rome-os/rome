@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { NotifyClient } from "./notify-client.js";
+import { NOT_HOSTED_REMEMBERED_MS, NotifyClient } from "./notify-client.js";
 
 function client(opts: { token?: string | null; origin?: string | null; fetchImpl: typeof fetch }) {
   return new NotifyClient({
@@ -127,6 +127,32 @@ describe("NotifyClient.send", () => {
     const c = client({ fetchImpl: rs.fn(async () => jsonRes(200, notHosted)) });
     expect(await c.send({ body: "hi" })).toEqual({ kind: "not_hosted" });
     expect(await c.send({ body: "hi", recipient: "acct-v" })).toEqual({ kind: "not_hosted" });
+  });
+
+  it("remembers not_hosted for an hour, or until the instance token changes", async () => {
+    let now = 0;
+    let token = "romeinst_a";
+    const fetchImpl = rs.fn(async () =>
+      jsonRes(200, { attempted: 0, sent: 0, failed: 0, reason: "not_hosted" }),
+    );
+    const c = new NotifyClient({
+      getToken: () => token,
+      getOrigin: () => "https://romeos.cc",
+      fetchImpl,
+      timeoutMs: 50,
+      now: () => now,
+    });
+    expect(await c.send({ body: "1" })).toEqual({ kind: "not_hosted" });
+    now += NOT_HOSTED_REMEMBERED_MS - 1;
+    expect(await c.send({ body: "2" })).toEqual({ kind: "not_hosted" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    now += 1;
+    await c.send({ body: "3" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    // Re-enrollment mints a new token, which asks again at once.
+    token = "romeinst_b";
+    await c.send({ body: "4" });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
   });
 
   it("keeps an older Rome Cloud's zero counts, which carry no reason, as ok", async () => {

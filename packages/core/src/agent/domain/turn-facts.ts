@@ -8,6 +8,13 @@ import type { WidgetDrawing } from "./widget-drawing.js";
 export type PushLevel = "active" | "passive";
 
 /**
+ * Who a turn acts for: the person whose message started it, as the request
+ * that admitted the message proved. The agent context carries it unread, as
+ * it does the thread context, and hands it to every action the turn calls.
+ */
+export type TurnActor = object;
+
+/**
  * Value. The facts about a turn that the ports behind the Rome tools need. A
  * session's own turns share one; a fork's turns have their own. The thread and
  * shared contexts pass through unread.
@@ -30,6 +37,8 @@ export interface TurnFacts {
   sharedContext(): Record<string, unknown> | undefined;
   /** The level the running turn pushes its messages at, or undefined when it pushes none. */
   pushLevel(): PushLevel | undefined;
+  /** Who the running turn acts for, or undefined for a turn no person started. */
+  actor(): TurnActor | undefined;
   /** Runs `fn` in the turn's trace context, so the work it starts nests under the turn. */
   inTurn<T>(fn: () => T): T;
 }

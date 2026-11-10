@@ -10,6 +10,7 @@
 // each batch, in the Concierge chat each follow reports to, and digest ones at
 // the guardian's digest times, in the main chat (alerts.ts).
 
+import { withoutSessionActor } from "../access/session-actor.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import {
   CONCIERGE_FOLLOW_DEFAULT_RULES,
@@ -1379,8 +1380,10 @@ export function startConciergeFollowing(
     void following
       .reconcile()
       .catch((error: unknown) => log.warn("follow reconcile failed", { error: messageOf(error) }));
-  const firstReconcile = setTimeout(runReconcile, RECONCILE_DELAY_MS);
-  const reconcileTimer = setInterval(runReconcile, RECONCILE_INTERVAL_MS);
+  const firstReconcile = withoutSessionActor(() => setTimeout(runReconcile, RECONCILE_DELAY_MS));
+  const reconcileTimer = withoutSessionActor(() =>
+    setInterval(runReconcile, RECONCILE_INTERVAL_MS),
+  );
   firstReconcile.unref?.();
   reconcileTimer.unref?.();
   // Important items owed from before a restart.

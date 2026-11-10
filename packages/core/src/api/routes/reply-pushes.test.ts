@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { replyPushes } from "./webchat.js";
+import { replyPushes, turnActor } from "./webchat.js";
 
 describe("replyPushes", () => {
   it("pushes the reply to a message the guardian or a visitor wrote, signed in", () => {
@@ -21,5 +21,17 @@ describe("replyPushes", () => {
     ).toBe(false);
     expect(replyPushes({ kind: "anonymous" }, undefined)).toBe(false);
     expect(replyPushes(undefined, undefined)).toBe(false);
+  });
+});
+
+describe("turnActor", () => {
+  it("is the guardian or visitor who wrote the message, and no one for an agent account", () => {
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "loopback" as const };
+    const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
+    expect(turnActor(guardian, undefined)).toBe(guardian);
+    expect(turnActor(visitor, undefined)).toBe(visitor);
+    expect(turnActor(visitor, { platform: "webchat", id: "core:concierge" })).toBeUndefined();
+    expect(turnActor({ kind: "anonymous" }, undefined)).toBeUndefined();
+    expect(turnActor(undefined, undefined)).toBeUndefined();
   });
 });

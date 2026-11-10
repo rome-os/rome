@@ -15,6 +15,7 @@ const TURN: TurnFacts = {
   threadContext: () => undefined,
   sharedContext: () => undefined,
   pushLevel: () => undefined,
+  actor: () => undefined,
   inTurn: (fn) => fn(),
 };
 

@@ -57,12 +57,15 @@ export interface SystemNotifyContent extends NotifyContent {
 }
 
 const HTTP_TIMEOUT_MS = 120_000;
+/** How long a `not_hosted` answer stands before Rome Cloud is asked again. */
+export const NOT_HOSTED_REMEMBERED_MS = 60 * 60_000;
 
 export interface NotifyClientDeps {
   getToken?: () => string | null | Promise<string | null>;
   getOrigin?: () => string | null;
   fetchImpl?: typeof fetch;
   timeoutMs?: number;
+  now?: () => number;
 }
 
 /**
@@ -78,17 +81,28 @@ export class NotifyClient implements NotifyService {
   private readonly getOrigin: () => string | null;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
+  private readonly now: () => number;
+  /**
+   * The last `not_hosted` answer, for the instance token it came with. A new
+   * token, as re-enrollment mints, asks again at once.
+   */
+  private notHosted: { token: string; until: number } | null = null;
 
   constructor(deps: NotifyClientDeps = {}) {
     this.getToken = deps.getToken ?? cloudBearer;
     this.getOrigin = deps.getOrigin ?? getRomeCloudOrigin;
     this.fetchImpl = deps.fetchImpl ?? fetch;
     this.timeoutMs = deps.timeoutMs ?? HTTP_TIMEOUT_MS;
+    this.now = deps.now ?? Date.now;
   }
 
   async send(content?: SystemNotifyContent): Promise<SendOutcome> {
     const token = await this.getToken();
     if (!token) return { kind: "no_token" };
+    // A non-hosted instance would hear `not_hosted` for every message.
+    if (this.notHosted?.token === token && this.now() < this.notHosted.until) {
+      return { kind: "not_hosted" };
+    }
     const origin = this.getOrigin();
     if (!origin) return { kind: "unconfigured" };
     // URL construction is a pre-dispatch configuration seam. Let an invalid
@@ -144,6 +158,7 @@ export class NotifyClient implements NotifyService {
       if (!isCounts(body)) return { kind: "outcome_unknown" };
       // An older Rome Cloud sends no `reason`, and its counts stand as they are.
       if ((body as { reason?: unknown }).reason === "not_hosted" && body.attempted === 0) {
+        this.notHosted = { token, until: this.now() + NOT_HOSTED_REMEMBERED_MS };
         return { kind: "not_hosted" };
       }
       // A Rome Cloud that served the recipient echoes it. One that answers

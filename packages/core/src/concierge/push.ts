@@ -5,6 +5,7 @@
 // only after RING_MS without one
 // (docs/adrs/proactive-concierge-push-without-per-message-consent.md).
 
+import { withoutSessionActor } from "../access/session-actor.js";
 import { marked, type Token } from "marked";
 import type { NotifyLevel, SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
 import { createLogger } from "../logger.js";
@@ -121,10 +122,15 @@ interface Pending {
   owner: ConciergeOwner;
 }
 
+interface Waiting extends Pending {
+  /** When the merge window this message waits in ends: only that window's flush sends it. */
+  due: number;
+}
+
 interface ChatPushes {
   lastPushAt: number | null;
   /** The latest message said within MERGE_MS of the last push, sent when that window ends. */
-  pending: Pending | null;
+  pending: Waiting | null;
 }
 
 export class ConciergePush {
@@ -139,6 +145,11 @@ export class ConciergePush {
     this.setTimer = deps.setTimer ?? ((fn, ms) => setTimeout(fn, ms).unref());
   }
 
+  /** Registers a merge timer that carries no one's session actor, whoever's turn said the message. */
+  private schedule(fn: () => void, ms: number): void {
+    withoutSessionActor(() => this.setTimer(fn, ms));
+  }
+
   /**
    * Pushes a message of a turn that has a push level to its chat's owner.
    * A message held back is dropped, never pushed later. Answers at once: the
@@ -148,7 +159,9 @@ export class ConciergePush {
   said(said: SaidInTurn): void {
     const { level } = said;
     if (!level) return;
-    this.enqueue(said.chatId, () => this.handle({ ...said, level }));
+    // A message is said in whoever's scope ran the tool; the push serves the
+    // chat's owner, so its queue carries no one's session actor.
+    withoutSessionActor(() => this.enqueue(said.chatId, () => this.handle({ ...said, level })));
   }
 
   /** Runs `step` after every earlier step of the chat; a failure is logged, never thrown. */
@@ -174,10 +187,11 @@ export class ConciergePush {
     const chat = this.chatOf(said.chatId);
     const sinceLast = chat.lastPushAt === null ? Infinity : this.now() - chat.lastPushAt;
     if (sinceLast < MERGE_MS) {
-      if (!chat.pending) {
-        this.setTimer(() => this.flush(said.chatId), MERGE_MS - sinceLast);
+      const due = (chat.lastPushAt ?? 0) + MERGE_MS;
+      if (chat.pending?.due !== due) {
+        this.schedule(() => this.flush(said.chatId, due), MERGE_MS - sinceLast);
       }
-      chat.pending = { said, owner };
+      chat.pending = { said, owner, due };
       return;
     }
     // The window has ended but its flush has not run yet: this newer message
@@ -186,11 +200,12 @@ export class ConciergePush {
     await this.deliver(chat, { said, owner });
   }
 
-  private flush(chatId: string): void {
+  /** Sends the message waiting in the window that ends at `due`; a later window's message waits for its own flush. */
+  private flush(chatId: string, due: number): void {
     this.enqueue(chatId, async () => {
       const chat = this.chats.get(chatId);
       const pending = chat?.pending;
-      if (!chat || !pending) return;
+      if (!chat || !pending || pending.due !== due) return;
       chat.pending = null;
       await this.deliver(chat, pending);
     });

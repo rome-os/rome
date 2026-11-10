@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { watchDashboardActivity } from "./use-dashboard-activity";
+import { inPhoneAppWebView, watchDashboardActivity } from "./use-dashboard-activity";
 
 describe("watchDashboardActivity", () => {
   const stops: Array<() => void> = [];
@@ -85,11 +85,72 @@ describe("watchDashboardActivity", () => {
     expect(report).toHaveBeenCalledWith("active");
   });
 
+  it("counts continued input inside a same-origin app iframe, added before or after it starts", async () => {
+    const before = document.createElement("iframe");
+    document.body.append(before);
+    const report = watch({ visible: true, focused: true });
+    const after = document.createElement("iframe");
+    document.body.append(after);
+    // The observer sees the new frame once the mutation is delivered.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    before.contentWindow?.dispatchEvent(new KeyboardEvent("keydown"));
+    after.contentWindow?.dispatchEvent(new Event("pointerdown"));
+    // Input keeps arriving from the frame, as it would past the active window.
+    before.contentWindow?.dispatchEvent(new Event("pointermove"));
+    expect(report.mock.calls).toEqual([["active"], ["active"], ["active"]]);
+    before.remove();
+    after.remove();
+  });
+
+  it("listens to a frame's new window after it loads again", () => {
+    const frame = document.createElement("iframe");
+    document.body.append(frame);
+    const report = watch({ visible: true, focused: true });
+    frame.dispatchEvent(new Event("load"));
+    frame.contentWindow?.dispatchEvent(new KeyboardEvent("keydown"));
+    // Listening again after a load never doubles the count.
+    expect(report.mock.calls).toEqual([["active"]]);
+    frame.remove();
+  });
+
   it("stops reporting once stopped", () => {
     const report = watch({ visible: true, focused: true });
     stops.splice(0).forEach((stop) => stop());
     window.dispatchEvent(new KeyboardEvent("keydown"));
     window.dispatchEvent(new Event("blur"));
     expect(report).not.toHaveBeenCalled();
+  });
+});
+
+describe("inPhoneAppWebView", () => {
+  it("knows the phone app's web view by its marker, and an older build's by a missing Safari token", () => {
+    // A build with the marker.
+    expect(
+      inPhoneAppWebView(
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148 RomeiOS/1.4.0",
+      ),
+    ).toBe(true);
+    // An installed build from before it: a bare WKWebView on iPhone and iPad.
+    expect(
+      inPhoneAppWebView(
+        "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+      ),
+    ).toBe(true);
+    expect(
+      inPhoneAppWebView(
+        "Mozilla/5.0 (iPad; CPU OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Mobile/15E148",
+      ),
+    ).toBe(true);
+  });
+
+  it("leaves Safari, other iOS browsers and desktop browsers counting", () => {
+    for (const userAgent of [
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Mobile/15E148 Safari/604.1",
+      "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) CriOS/130.0.0.0 Mobile/15E148 Safari/604.1",
+      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15",
+      "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    ]) {
+      expect(inPhoneAppWebView(userAgent)).toBe(false);
+    }
   });
 });

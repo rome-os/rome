@@ -24,6 +24,7 @@ import {
   type RoutineActivationGate,
 } from "../routines/propose-routine-tool.js";
 import type { SessionToolsProvider } from "./session-tools.js";
+import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
 
 export interface RomeToolPortsDeps {
   actionRegistry: ActionRegistry;
@@ -47,6 +48,14 @@ export interface RomeToolPorts {
 export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   const { actionRegistry, actionEngine, eventSources } = deps;
 
+  // A tool callback arrives in whatever async scope the model's process
+  // delivers it in, never the request that admitted the turn, so the ambient
+  // actor there belongs to someone else or to no one. The turn's own actor,
+  // captured at admission, stands instead; a turn no person started acts for
+  // no one. The webchat route puts a SessionActor there.
+  const asTurnActor = <T>(turn: TurnFacts, fn: (actor: SessionActor | undefined) => T): T =>
+    withoutSessionActor(() => fn(turn.actor() as SessionActor | undefined));
+
   // The registry's `getForAgent` is the single resolution point for what an
   // agent may call: its allow-list, or everything for "*". Both the
   // model-facing catalog and the execution gate derive from it, so they can't
@@ -69,26 +78,30 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
         .some((action) => action.config.name === canonical);
     },
     run: (turn, name, input) =>
-      turn.inTurn(async () => {
-        // Allow-list check is load-bearing for security: an agent yaml that
-        // scopes `actions: [foo]` must not reach anything else in the registry.
-        const action = findPermittedAction(turn, name);
-        if (!action) throw new Error(`Unknown action: ${name}`);
-        return actionEngine.run(action.config.name, input as Record<string, unknown>, {
-          initiator: `agent:${turn.agentName}`,
-          channelContext: turn.threadContext(),
-          sharedContext: turn.sharedContext(),
-          sessionId: turn.sessionId,
-          agentName: turn.agentName,
-          channelThreadKey: turn.continuityKey,
-          turnId: turn.turnId(),
-        });
-      }),
+      turn.inTurn(() =>
+        asTurnActor(turn, async (actor) => {
+          // Allow-list check is load-bearing for security: an agent yaml that
+          // scopes `actions: [foo]` must not reach anything else in the registry.
+          const action = findPermittedAction(turn, name);
+          if (!action) throw new Error(`Unknown action: ${name}`);
+          return actionEngine.run(action.config.name, input as Record<string, unknown>, {
+            initiator: `agent:${turn.agentName}`,
+            ...(actor ? { actor } : {}),
+            channelContext: turn.threadContext(),
+            sharedContext: turn.sharedContext(),
+            sessionId: turn.sessionId,
+            agentName: turn.agentName,
+            channelThreadKey: turn.continuityKey,
+            turnId: turn.turnId(),
+          });
+        }),
+      ),
   };
 
   // Actions `defer` runs on the agent's behalf are attributed to its turn.
   const agentRunContext = (turn: TurnFacts) => ({
     initiator: `agent:${turn.agentName}`,
+    ...(turn.actor() ? { actor: turn.actor() as SessionActor } : {}),
     sessionId: turn.sessionId,
     agentName: turn.agentName,
     channelThreadKey: turn.continuityKey,
@@ -99,33 +112,35 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
   // the agent's action allow-list: `defer` is a built-in.
   const defer: Pick<DeferTool, "schedule"> = {
     schedule: (turn, wakeUp) =>
-      turn.inTurn(async () =>
-        runDefer(wakeUp, {
-          context: {
-            agentName: turn.agentName,
-            sessionId: turn.sessionId,
-            channelContext: turn.threadContext(),
-            ownerKey: await dashboardChatOwner(deps.webchatRepo, turn.threadContext()),
-          },
-          createRoutine: async (createArgs) => {
-            const result = await actionEngine.run(
-              "create_routine",
-              createArgs,
-              agentRunContext(turn),
-            );
-            if (result.status === "error") throw new Error(result.error);
-            if (result.status !== "ok") {
-              throw new Error(`create_routine returned ${result.status}`);
-            }
-            return result.data;
-          },
-          prepareEventWait: eventSources
-            ? (eventName, filter) =>
-                eventSources.prepareWait(eventName, filter, (name, args) =>
-                  actionEngine.run(name, args, agentRunContext(turn)),
-                )
-            : undefined,
-        }),
+      turn.inTurn(() =>
+        asTurnActor(turn, async () =>
+          runDefer(wakeUp, {
+            context: {
+              agentName: turn.agentName,
+              sessionId: turn.sessionId,
+              channelContext: turn.threadContext(),
+              ownerKey: await dashboardChatOwner(deps.webchatRepo, turn.threadContext()),
+            },
+            createRoutine: async (createArgs) => {
+              const result = await actionEngine.run(
+                "create_routine",
+                createArgs,
+                agentRunContext(turn),
+              );
+              if (result.status === "error") throw new Error(result.error);
+              if (result.status !== "ok") {
+                throw new Error(`create_routine returned ${result.status}`);
+              }
+              return result.data;
+            },
+            prepareEventWait: eventSources
+              ? (eventName, filter) =>
+                  eventSources.prepareWait(eventName, filter, (name, args) =>
+                    actionEngine.run(name, args, agentRunContext(turn)),
+                  )
+              : undefined,
+          }),
+        ),
       ),
   };
 

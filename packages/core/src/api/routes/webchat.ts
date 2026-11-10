@@ -4207,6 +4207,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const options = {
       ...(replyPushes(actor, saidBy) ? { pushLevel: "active" as const } : {}),
+      // Who the turn acts for, captured now: its tool calls run as this
+      // person however late the model's callback arrives.
+      ...(turnActor(actor, saidBy) ? { actor: turnActor(actor, saidBy) } : {}),
       links: turnLinks,
       priority: priority.data,
       threadContext,
@@ -4584,6 +4587,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
  * source) and a loopback caller acting as the guardian are not a person
  * writing.
  */
+/**
+ * The person a sent message's turn acts for: the guardian or a visitor who
+ * wrote it. A message said as an agent account, or with no person behind
+ * it, gives none.
+ */
+export function turnActor(
+  actor: SessionActor | undefined,
+  saidBy: Account | undefined,
+): SessionActor | undefined {
+  if (saidBy !== undefined) return undefined;
+  return actor?.kind === "guardian" || actor?.kind === "visitor" ? actor : undefined;
+}
+
 export function replyPushes(actor: SessionActor | undefined, saidBy: Account | undefined): boolean {
   if (saidBy !== undefined) return false;
   return actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via === "cookie");
