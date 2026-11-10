@@ -324,6 +324,27 @@ struct ChatIdentity: View {
     }
 }
 
+/// A menu title cut to one line at the end. A system menu wraps a long
+/// title onto as many lines as it needs and ignores a line limit.
+enum MenuTitle {
+    /// The width a menu's section title gets on a phone, with room to spare.
+    static let width: CGFloat = 200
+
+    static func oneLine(_ title: String, width: CGFloat = width, font: UIFont = .preferredFont(forTextStyle: .footnote)) -> String {
+        func fits(_ text: String) -> Bool {
+            (text as NSString).size(withAttributes: [.font: font]).width <= width
+        }
+        guard !fits(title) else { return title }
+        var characters = Array(title)
+        while !characters.isEmpty {
+            characters.removeLast()
+            let cut = String(characters).trimmingCharacters(in: .whitespaces) + "…"
+            if fits(cut) { return cut }
+        }
+        return "…"
+    }
+}
+
 /// A Concierge chat's "…" button: the chat's title in small grey text on
 /// top, then Tasks, then the chat's own options.
 struct ChatMoreMenu: View {
@@ -344,7 +365,8 @@ struct ChatMoreMenu: View {
                     Button(role: .destructive, action: onArchive) { Label("Archive", systemImage: "archivebox") }
                 }
             } header: {
-                if !title.isEmpty { Text(verbatim: title) }
+                // A system menu wraps its title whatever the line limit: it is cut here.
+                if !title.isEmpty { Text(verbatim: MenuTitle.oneLine(title)) }
             }
         } label: {
             Image(systemName: "ellipsis")

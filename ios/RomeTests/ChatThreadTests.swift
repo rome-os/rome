@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UIKit
 @testable import Rome
 
 private func message(_ id: String, role: String = "assistant", _ text: String = "hi", at seconds: TimeInterval, thread: String? = nil, knows: Bool = true, session: String = "concierge") -> ChatMessage {
@@ -220,5 +221,19 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         let workspace = Workspace(backend: FakeBackend(), instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-agent-name-\(UUID().uuidString)/Drafts"), instance: "t"))
         #expect(workspace.mainChatTitle == "Chat")
         workspace.stop()
+    }
+}
+
+/// The "…" menu names the chat on one line.
+@MainActor
+@Suite struct MenuTitleTests {
+    @Test func aLongNameIsCutAtTheEnd() {
+        let font = UIFont.systemFont(ofSize: 13)
+        let long = "家里装修：厨房翻新、浴室防水和客厅灯具的预算与师傅安排"
+        let cut = MenuTitle.oneLine(long, width: 200, font: font)
+        #expect(cut.hasSuffix("…"))
+        #expect(long.hasPrefix(String(cut.dropLast())))
+        #expect((cut as NSString).size(withAttributes: [.font: font]).width <= 200)
+        #expect(MenuTitle.oneLine("Milo", width: 200, font: font) == "Milo")
     }
 }
