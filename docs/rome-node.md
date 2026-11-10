@@ -504,7 +504,7 @@ text message, only from the Gateway to the app:
 
 `title`, `body` and `instanceId` are required strings (title up to 200 characters, body
 up to 2000, instance id up to 128). `level` is `active` or `passive`, and `chatId` is a
-string up to 128 characters; both are optional. It has no `id` or `from`, which every
+string up to 128 characters. Both are optional. It has no `id` or `from`, which every
 relayed peer message has, so it can only come from the Gateway. A client ignores it
 without an `onNotification` handler, as `rome-node` does, and ignores any message that
 does not match. The app shows it as a system notification, silent unless `level` is
