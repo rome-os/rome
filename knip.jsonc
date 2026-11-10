@@ -26,11 +26,8 @@
   ],
 
   // Host tools the runtime shells out to, installed in the container image or
-  // on the operator's machine rather than as npm packages. `expo` is the
-  // exception: packages/mobile depends on it, but .github/workflows/mobile-ci.yml
-  // invokes it at root scope, where that dependency is out of view. Removing it
-  // here on the strength of the mobile dependency reintroduces the finding.
-  "ignoreBinaries": ["composio", "rg", "lipo", "vale", "expo", "gofmt", "flock", "mkfifo"],
+  // on the operator's machine rather than as npm packages.
+  "ignoreBinaries": ["composio", "rg", "lipo", "vale", "gofmt", "flock", "mkfifo"],
 
   // Severity decides the exit code: `error` fails the command, while `warn`
   // prints and passes. The export rules are `warn` because a barrel that
@@ -129,15 +126,6 @@
       // Built by a `pnpm --filter` step in this package's own build script,
       // never imported.
       "ignoreDependencies": ["rome-desktop-base-web"]
-    },
-    "packages/mobile": {
-      // The expo plugin evaluates app.config.js, which reads a native build
-      // variable that is absent outside an EAS build.
-      "expo": false,
-      "entry": ["app.config.js", "plugins/*.js", "src/**/*.test.{ts,tsx}"],
-      // app.json registers expo-notifications as an Expo native config plugin;
-      // no JavaScript import reaches that build-time registration.
-      "ignoreDependencies": ["expo-notifications"]
     },
     "packages/lib": { "entry": ["src/**/*.test.ts"] },
     "packages/rome-node-core": {

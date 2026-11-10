@@ -55,67 +55,7 @@ overrides:
   react-dom: "19.2.6"
   "@types/react": "19.2.15"
   "@types/react-dom": "19.2.3"
-  # packages/mobile must NOT get the react pins above: react-native 0.86.2's
-  # embedded renderer throws at startup unless React.version is EXACTLY the
-  # version it was built against (19.2.3) — the peer range (^19.2.3) is looser
-  # than the runtime check. Scoped overrides win over the globals for the
-  # rome-mobile subtree; keep these in lockstep with the Expo SDK's pins.
-  "rome-mobile>react": "19.2.3"
-  "rome-mobile>@types/react": "~19.2.14"
   'shell-quote': '1.9.0'
-
-# The global react pins above rewrite the PEER ranges of mobile's deps
-# (expo/react-native declare `react: ^19.1.0`, the override turns that into
-# `19.2.6`), so mobile's intentionally-scoped react 19.1.0 would warn on every
-# install. Each exemption is parent-scoped to the Expo/RN packages that
-# actually carry the peer, so react peer warnings stay ALIVE for the rest of
-# the workspace (a dep genuinely wanting react 18 still warns). When an Expo
-# SDK upgrade adds a new react-peer dependency, a fresh warning will name the
-# parent to add here — that prompt is intentional. These entries are inert in
-# the Docker runtime workspace (none of these packages ship in the image).
-peerDependencyRules:
-  allowedVersions:
-    "expo>react": "^19.2.3"
-    "@expo/devtools>react": "^19.2.3"
-    "@expo/vector-icons>react": "^19.2.3"
-    "expo-asset>react": "^19.2.3"
-    "expo-font>react": "^19.2.3"
-    "expo-keep-awake>react": "^19.2.3"
-    "expo-modules-core>react": "^19.2.3"
-    "expo-notifications>react": "^19.2.3"
-    "expo-widgets>react": "^19.2.3"
-    "@expo/ui>react": "^19.2.3"
-    "vaul>react": "^19.2.3"
-    "@radix-ui/react-dialog>react": "^19.2.3"
-    "@radix-ui/react-compose-refs>react": "^19.2.3"
-    "@radix-ui/react-context>react": "^19.2.3"
-    "@radix-ui/react-dismissable-layer>react": "^19.2.3"
-    "@radix-ui/react-use-callback-ref>react": "^19.2.3"
-    "@radix-ui/react-use-escape-keydown>react": "^19.2.3"
-    "@radix-ui/react-focus-guards>react": "^19.2.3"
-    "@radix-ui/react-focus-scope>react": "^19.2.3"
-    "@radix-ui/react-id>react": "^19.2.3"
-    "@radix-ui/react-use-layout-effect>react": "^19.2.3"
-    "@radix-ui/react-portal>react": "^19.2.3"
-    "@radix-ui/react-presence>react": "^19.2.3"
-    "@radix-ui/react-primitive>react": "^19.2.3"
-    "@radix-ui/react-slot>react": "^19.2.3"
-    "@radix-ui/react-use-controllable-state>react": "^19.2.3"
-    "@radix-ui/react-use-effect-event>react": "^19.2.3"
-    "react-remove-scroll>react": "^19.2.3"
-    "react-remove-scroll-bar>react": "^19.2.3"
-    "react-style-singleton>react": "^19.2.3"
-    "use-callback-ref>react": "^19.2.3"
-    "use-sidecar>react": "^19.2.3"
-    "react-dom>react": "^19.2.3"
-    "@expo/router-server>react": "^19.2.3"
-    "@expo/log-box>react": "^19.2.3"
-    "@expo/dom-webview>react": "^19.2.3"
-    "react-native>react": "^19.2.3"
-    "@react-native/virtualized-lists>react": "^19.2.3"
-    "react-native-webview>react": "^19.2.3"
-    "react-native>@types/react": "^19.2.14"
-    "@react-native/virtualized-lists>@types/react": "^19.2.14"
 
 # Disable pnpm 11's 24h quarantine of newly published packages: Rome publishes
 # its own SDK packages and installs apps that may depend on them release-day.
