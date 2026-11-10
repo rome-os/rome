@@ -1,9 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  mkdtempSync,
+  rmSync,
+  statSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
 import {
+  createAssetHandler,
   createFileGetHandler,
   createFileWatchEventsHandler,
   createResolveHandler,
@@ -210,6 +219,71 @@ describe("file browser event streams", () => {
 
     await rs.advanceTimersByTimeAsync(120_000);
     await expect(reader.read()).resolves.toMatchObject({ done: true });
+  });
+});
+
+describe("file browser asset revalidation", () => {
+  let rootDir: string;
+  let app: Hono;
+  const image = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+  const url = "/api/projects/asset/photo.png?path=projects/photo.png";
+
+  beforeEach(() => {
+    rootDir = mkdtempSync(join(tmpdir(), "rome-asset-cache-"));
+    writeFileSync(join(rootDir, "photo.png"), image);
+    app = new Hono();
+    app.get(
+      "/api/projects/asset/:fileName",
+      createAssetHandler({
+        assetBasePath: "/api/projects/asset",
+        logicalRoot: "projects",
+        rootDir,
+      }),
+    );
+  });
+
+  afterEach(() => {
+    rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it("returns an empty 304 for a matching If-None-Match", async () => {
+    const initial = await app.request(url);
+    const etag = initial.headers.get("ETag")!;
+    expect(Buffer.from(await initial.arrayBuffer())).toEqual(image);
+
+    const response = await app.request(url, { headers: { "If-None-Match": etag } });
+    expect(response.status).toBe(304);
+    expect(response.headers.get("ETag")).toBe(etag);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-cache");
+    expect(response.body).toBeNull();
+    expect(await response.text()).toBe("");
+  });
+
+  it("returns the full image with validators for a mismatched If-None-Match", async () => {
+    const response = await app.request(url, { headers: { "If-None-Match": 'W/"stale"' } });
+    const { mtimeMs, size } = statSync(join(rootDir, "photo.png"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("ETag")).toBe(`W/"${Math.trunc(mtimeMs)}-${size}"`);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-cache");
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(image);
+  });
+
+  it("changes the ETag when an overwrite changes mtime but keeps the same size", async () => {
+    const initial = await app.request(url);
+    const etag = initial.headers.get("ETag")!;
+    await initial.arrayBuffer();
+    const filePath = join(rootDir, "photo.png");
+    const { mtimeMs } = statSync(filePath);
+    const replacement = Buffer.from([0x89, 0x50, 0x4e, 0x48]);
+    writeFileSync(filePath, replacement);
+    const modified = new Date(mtimeMs + 2000);
+    utimesSync(filePath, modified, modified);
+
+    const response = await app.request(url, { headers: { "If-None-Match": etag } });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("ETag")).not.toBe(etag);
+    expect(response.headers.get("Cache-Control")).toBe("private, no-cache");
+    expect(Buffer.from(await response.arrayBuffer())).toEqual(replacement);
   });
 });
 
