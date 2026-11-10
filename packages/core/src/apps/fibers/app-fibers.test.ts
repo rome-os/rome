@@ -5,7 +5,7 @@ import type { Action } from "../actions/types.js";
 import { createEmptyLegacyArtifactBindings } from "../artifact-id.js";
 import { SkillLoader } from "../skill-loader.js";
 import type { ArtifactMetadata } from "../types.js";
-import { AppScopes, type AppContribution } from "./app-scopes.js";
+import { AppFibers, type AppContribution } from "./app-fibers.js";
 
 function action(name: string, version = "1"): Action {
   return {
@@ -56,27 +56,27 @@ function app(appId: string, actions: string[], skills: string[], version = "1"):
   };
 }
 
-describe("AppScopes", () => {
+describe("AppFibers", () => {
   const identity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-  let scopes: AppScopes;
+  let fibers: AppFibers;
   afterEach(async () => {
-    await scopes?.close();
+    await fibers?.close();
   });
 
   function setup() {
     const actions = new ActionRegistryImpl(identity);
     const skills = new SkillLoader(identity);
-    scopes = new AppScopes({ actions, skills });
+    fibers = new AppFibers({ actions, skills });
     return { actions, skills };
   }
 
   it("registers an app's actions and skills when it starts", async () => {
     const { actions, skills } = setup();
-    await scopes.start(app("dream", ["dream", "skill_review"], ["memory"]));
+    await fibers.start(app("dream", ["dream", "skill_review"], ["memory"]));
 
     expect(actions.list().sort()).toEqual(["dream:dream", "dream:skill_review"]);
     expect(skills.list().map((s) => s.name)).toEqual(["dream:memory"]);
-    expect(scopes.heldBy("dream")).toEqual([
+    expect(fibers.heldBy("dream")).toEqual([
       "action:dream",
       "action:skill_review",
       "skill:dream:memory",
@@ -85,21 +85,21 @@ describe("AppScopes", () => {
 
   it("uninstall removes that app's entries and leaves other apps alone", async () => {
     const { actions, skills } = setup();
-    await scopes.start(app("dream", ["dream"], ["memory"]));
-    await scopes.start(app("inbox", ["message_handler"], ["triage"]));
+    await fibers.start(app("dream", ["dream"], ["memory"]));
+    await fibers.start(app("inbox", ["message_handler"], ["triage"]));
 
-    await scopes.stop("dream");
+    await fibers.stop("dream");
 
     expect(actions.list()).toEqual(["inbox:message_handler"]);
     expect(skills.list().map((s) => s.name)).toEqual(["inbox:triage"]);
-    expect(scopes.heldBy("dream")).toEqual([]);
+    expect(fibers.heldBy("dream")).toEqual([]);
   });
 
   it("upgrade replaces the old version's entries with the new version's", async () => {
     const { actions, skills } = setup();
-    await scopes.start(app("dream", ["dream", "old_action"], ["memory"], "1"));
+    await fibers.start(app("dream", ["dream", "old_action"], ["memory"], "1"));
 
-    await scopes.start(app("dream", ["dream", "new_action"], ["memory"], "2"));
+    await fibers.start(app("dream", ["dream", "new_action"], ["memory"], "2"));
 
     expect(actions.list().sort()).toEqual(["dream:dream", "dream:new_action"]);
     expect(actions.get("dream:dream")?.config.description).toBe("dream v2");
@@ -114,10 +114,10 @@ describe("AppScopes", () => {
         return () => order.push(`${kind}:${name}`);
       },
     });
-    scopes = new AppScopes({ actions: tracking("action"), skills: tracking("skill") });
-    await scopes.start(app("dream", ["a", "b"], ["c"]));
+    fibers = new AppFibers({ actions: tracking("action"), skills: tracking("skill") });
+    await fibers.start(app("dream", ["a", "b"], ["c"]));
 
-    await scopes.stop("dream");
+    await fibers.stop("dream");
 
     expect(order).toEqual(["skill:dream:c", "action:b", "action:a"]);
   });

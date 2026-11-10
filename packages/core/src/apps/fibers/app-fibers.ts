@@ -1,6 +1,6 @@
-// Prototype: an app's lifecycle as one Cordis scope. Everything Rome registers
-// for an app is an effect in that scope, and stopping the app disposes the
-// scope, which runs every undo once, newest first. Not wired into the
+// Prototype: an app's lifecycle as one Cordis fiber. Everything Rome registers
+// for an app is an effect in that fiber, and stopping the app disposes the
+// fiber, which runs every undo once, newest first. Not wired into the
 // composition root yet.
 
 import { Context, type Fiber } from "@deepseek-ai/cordis";
@@ -32,7 +32,7 @@ export interface AppContribution {
   skills: Skill[];
 }
 
-export class AppScopes {
+export class AppFibers {
   private readonly root = new Context();
   private readonly running = new Map<string, Fiber>();
 
@@ -41,7 +41,7 @@ export class AppScopes {
     this.root.provide("skills", services.skills);
   }
 
-  /** Starts an app in its own scope. A running app is stopped first, which is an upgrade. */
+  /** Starts an app in its own fiber. A running app is stopped first, which is an upgrade. */
   async start(app: AppContribution): Promise<void> {
     await this.stop(app.appId);
     // A fresh object per start: Cordis keys a plugin by its identity.
@@ -62,7 +62,7 @@ export class AppScopes {
     await fiber;
   }
 
-  /** Disposes the app's scope. Does nothing when the app is not running. */
+  /** Disposes the app's fiber. Does nothing when the app is not running. */
   async stop(appId: string): Promise<void> {
     const fiber = this.running.get(appId);
     if (!fiber) return;
@@ -70,7 +70,7 @@ export class AppScopes {
     await fiber.dispose();
   }
 
-  /** Labels of what the app's scope still holds, for "what is this app holding?". */
+  /** Labels of what the app's fiber still holds, for "what is this app holding?". */
   heldBy(appId: string): string[] {
     return (
       this.running
