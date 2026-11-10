@@ -50,7 +50,12 @@ const agent = (id: string, turnId: string): ChatMessage => ({
   createdAt: "2026-10-27T00:00:00.000Z",
 });
 
-function transcript(messages: ChatMessage[], streaming = false, quiet = false) {
+function transcript(
+  messages: ChatMessage[],
+  streaming = false,
+  quiet = false,
+  snapshot: LivePreview["snapshot"] = null,
+) {
   const rows = buildRows(messages, new Map(), IDENTITY, {
     runningTurnId: streaming ? "t9" : null,
     isStreaming: streaming,
@@ -59,7 +64,13 @@ function transcript(messages: ChatMessage[], streaming = false, quiet = false) {
     <ThemeProvider>
       <ConciergeTranscript
         rows={rows}
-        live={{ ...live, isStreaming: streaming, runningTurnId: streaming ? "t9" : null, quiet }}
+        live={{
+          ...live,
+          isStreaming: streaming,
+          runningTurnId: streaming ? "t9" : null,
+          quiet,
+          snapshot,
+        }}
         actions={actions}
         contentRef={() => {}}
       />
@@ -222,9 +233,25 @@ describe("ConciergeTranscript typing indicator", () => {
     expect(getByRole("log").hasAttribute("aria-busy")).toBe(false);
   });
 
-  it("shows the dots once the quiet turn says something", () => {
-    const { container, rerender } = render(transcript(history, true, true));
-    rerender(transcript([...history, agent("a9", "t9")], true, true));
+  it("hides the dots once the turn has said something, and shows them while it works on", () => {
+    const { container, rerender } = render(transcript(history, true));
+    expect(dots(container)).not.toBeNull();
+    // The turn's message lands; it only closes off after it.
+    rerender(transcript([...history, agent("a9", "t9")], true));
+    expect(dots(container)).toBeNull();
+    // It starts another call.
+    const working = {
+      segments: [
+        {
+          kind: "block" as const,
+          id: "b0",
+          ordinal: 0,
+          block: { type: "tool_use" as const, id: "w1", tool: "WebSearch", input: {} },
+        },
+      ],
+      summary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },
+    };
+    rerender(transcript([...history, agent("a9", "t9")], true, false, working));
     expect(dots(container)).not.toBeNull();
   });
 

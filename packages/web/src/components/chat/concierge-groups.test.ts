@@ -1,7 +1,8 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatMessage } from "@/lib/chat-types";
 import type { ChatRow } from "./chat-view";
-import { buildConciergeItems, type ConciergeItem } from "./concierge-groups";
+import type { TraceSnapshot } from "@rome/api-types/trace-segments";
+import { buildConciergeItems, type ConciergeItem, showsTyping } from "./concierge-groups";
 
 const MIN = 60_000;
 // Local noon, so a few hours either way stays on the same local day.
@@ -326,5 +327,71 @@ it("groups an on-behalf Concierge message with adjacent guardian messages", () =
   expect(groups[0]).toMatchObject({
     sender: "guardian",
     entries: [{ message: { id: "typed" } }, { message: { id: "on-behalf" } }],
+  });
+});
+
+describe("showsTyping", () => {
+  const block = (ordinal: number, b: Record<string, unknown>) => ({
+    kind: "block" as const,
+    id: `b${ordinal}`,
+    block: b,
+    ordinal,
+  });
+  const trace = (...blocks: Record<string, unknown>[]) =>
+    ({
+      segments: blocks.map((b, i) => block(i, b)),
+      summary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },
+    }) as unknown as TraceSnapshot;
+  const use = (id: string, tool: string) => ({ type: "tool_use", id, tool, input: {} });
+  const result = (id: string, tool: string) => ({
+    type: "tool_result",
+    toolUseId: id,
+    tool,
+    output: "",
+  });
+  const asked = [userRow(guardian("g1", 0))];
+  const live = (snapshot: TraceSnapshot | null, extra: { quiet?: boolean } = {}) => ({
+    isStreaming: true,
+    runningTurnId: "t1",
+    snapshot,
+    ...extra,
+  });
+
+  it("types from the turn's start until its first message", () => {
+    expect(showsTyping(asked, live(null))).toBe(true);
+    expect(showsTyping(asked, live(trace(use("s1", "core:say"))))).toBe(true);
+  });
+
+  it("stops once the turn has said something, while it only closes off", () => {
+    const said = [...asked, agentRow(say("a1", MIN))];
+    const afterSay = trace(use("s1", "core:say"), result("s1", "core:say"));
+    expect(showsTyping(said, live(afterSay))).toBe(false);
+    // A forward is a message too.
+    expect(showsTyping(said, live(trace(use("f1", "mcp__rome__chat_forward"))))).toBe(false);
+  });
+
+  it("types again while the turn works on in another call, and stops at its next message", () => {
+    const said = [...asked, agentRow(say("a1", MIN))];
+    const working = trace(use("s1", "core:say"), result("s1", "core:say"), use("w1", "WebSearch"));
+    expect(showsTyping(said, live(working))).toBe(true);
+    const done = trace(
+      use("s1", "core:say"),
+      result("s1", "core:say"),
+      use("w1", "WebSearch"),
+      result("w1", "WebSearch"),
+      use("s2", "core:say"),
+      result("s2", "core:say"),
+    );
+    expect(showsTyping([...said, agentRow(say("a2", 2 * MIN))], live(done))).toBe(false);
+  });
+
+  it("keeps a quiet turn silent until it says something", () => {
+    expect(showsTyping(asked, live(null, { quiet: true }))).toBe(false);
+    const said = [...asked, agentRow(say("a1", MIN))];
+    expect(showsTyping(said, live(trace(use("w1", "WebSearch")), { quiet: true }))).toBe(true);
+  });
+
+  it("never types once the turn has ended", () => {
+    expect(showsTyping(asked, { ...live(null), isStreaming: false })).toBe(false);
   });
 });
