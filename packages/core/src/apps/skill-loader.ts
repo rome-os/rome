@@ -57,6 +57,19 @@ export class SkillLoader implements SkillCatalog {
     this.failures = failures;
   }
 
+  /**
+   * Adds one skill and returns its undo, which removes that skill only. A
+   * later `loadFromCatalog` replaces the whole list, added skills included.
+   */
+  add(skill: Skill): () => void {
+    this.skills = [...this.skills, skill].sort((left, right) =>
+      left.name.localeCompare(right.name),
+    );
+    return () => {
+      this.skills = this.skills.filter((entry) => entry !== skill);
+    };
+  }
+
   list(): readonly Skill[] {
     return [...this.skills];
   }
