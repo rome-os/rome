@@ -138,7 +138,7 @@ struct HealthAccessScreen: View {
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(model.node.device.dataFlowLabel)
             Promise(text: "Read only when your Rome asks. Never changed.")
-            Promise(text: "Never sold, used for ads, or used to train AI models.")
+            Promise(text: "Rome never sells it, uses it for ads, or uses it to train AI models. Your AI provider's terms apply to what it receives.")
             Promise(text: "Results can stay in your Rome's chats and memory.", last: true)
         }
         .id("where")

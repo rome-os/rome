@@ -604,8 +604,9 @@ off by default. Health values go to the user's Rome and to the AI model behind i
 so the page shows what the Rome can do with Health as three short chats, each with
 a request and the Rome's answer in the app's own chat bubbles, and where the data
 goes: from the iPhone to the Rome and on to its AI model provider. Three short
-promises follow. Health is read only when the Rome asks and is never changed. It is
-never sold, used for ads, or used to train AI models. Results can stay in the
+promises follow. Health is read only when the Rome asks and is never changed. Rome
+never sells it, uses it for ads, or uses it to train AI models, and the user's AI
+provider's terms apply to what it receives. Results can stay in the
 Rome's chats and memory. A link opens the privacy policy. The choice is kept across launches, and the row and the
 switch are dimmed while the phone is off limits (the page still opens). While the
 switch is off, `health.stats` and `health.samples`

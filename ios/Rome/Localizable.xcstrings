@@ -1491,16 +1491,6 @@
         }
       }
     },
-    "Never sold, used for ads, or used to train AI models." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "绝不出售、不用于广告、不用于训练 AI 模型。"
-          }
-        }
-      }
-    },
     "New app" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2331,6 +2321,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rome Cloud 登录已过期"
+          }
+        }
+      }
+    },
+    "Rome never sells it, uses it for ads, or uses it to train AI models. Your AI provider's terms apply to what it receives." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 绝不出售这些数据，也不会将其用于广告或训练 AI 模型。你的 AI 服务商收到的数据适用其自身条款。"
           }
         }
       }
