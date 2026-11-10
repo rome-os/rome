@@ -390,6 +390,25 @@ final class NodeHost {
 
 // MARK: - WebSocket
 
+/// A continuation URLSession's callback may answer more than once: the first
+/// answer resumes it and the rest are ignored. A second `resume` of a
+/// checked continuation traps.
+final class ResumeOnce: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<Void, Error>?
+
+    init(_ continuation: CheckedContinuation<Void, Error>) { self.continuation = continuation }
+
+    /// Resumes with the error, or normally when there is none. A no-op after the first call.
+    func resume(_ error: Error?) {
+        let held = lock.withLock { () -> CheckedContinuation<Void, Error>? in
+            defer { continuation = nil }
+            return continuation
+        }
+        if let error { held?.resume(throwing: error) } else { held?.resume() }
+    }
+}
+
 /// A `URLSessionWebSocketTask` to the Gateway. The token goes in the
 /// `Authorization` header, never in the URL.
 final class WebSocketTransport: NSObject, NodeSocket, URLSessionWebSocketDelegate, @unchecked Sendable {
@@ -475,13 +494,19 @@ final class WebSocketTransport: NSObject, NodeSocket, URLSessionWebSocketDelegat
         guard let task = lock.withLock({ self.task }) else { throw NodeSocketClosed(code: nil) }
         // A cancelled ping closes the socket, which answers the pong handler with an error.
         try await withTaskCancellationHandler {
-            try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
-                task.sendPing { error in
-                    if let error { continuation.resume(throwing: error) } else { continuation.resume() }
-                }
-            }
+            try await Self.awaitPong { pong in task.sendPing(pongReceiveHandler: pong) }
         } onCancel: {
             close()
+        }
+    }
+
+    /// Waits for the one answer to a ping. `start` hands the pong handler to
+    /// URLSession, which may call it twice when the task is cancelled with the
+    /// ping still waiting (POSIX 53). Only the first call resumes.
+    static func awaitPong(_ start: @Sendable (@escaping @Sendable (Error?) -> Void) -> Void) async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let once = ResumeOnce(continuation)
+            start { error in once.resume(error) }
         }
     }
 

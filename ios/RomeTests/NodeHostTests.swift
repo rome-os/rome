@@ -305,6 +305,51 @@ final class HostRig {
         #expect(socket.pings <= before + 1)
     }
 
+    /// A stand-in for `sendPing`: it keeps the pong handler, so a test can call it as often as URLSession might.
+    final class PongHandler: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: (@Sendable (Error?) -> Void)?
+        var handler: (@Sendable (Error?) -> Void)? { lock.withLock { stored } }
+        func keep(_ handler: @escaping @Sendable (Error?) -> Void) { lock.withLock { stored = handler } }
+    }
+
+    @Test func aPongHandlerCalledTwiceResumesOnlyOnce() async throws {
+        let pong = PongHandler()
+        let waiting = Task { try await WebSocketTransport.awaitPong { pong.keep($0) } }
+        #expect(await eventually { pong.handler != nil })
+        let handler = try #require(pong.handler)
+        handler(nil)
+        handler(nil)
+        handler(NSError(domain: NSPOSIXErrorDomain, code: 53))
+        try await waiting.value
+    }
+
+    @Test func aCancelledPingsLateSecondCallbackDoesNotCrash() async {
+        let pong = PongHandler()
+        let waiting = Task { try await WebSocketTransport.awaitPong { pong.keep($0) } }
+        #expect(await eventually { pong.handler != nil })
+        let handler = pong.handler!
+        // The cancelled task's socket answers with POSIX 53, then answers again.
+        handler(NSError(domain: NSPOSIXErrorDomain, code: 53))
+        handler(NSError(domain: NSPOSIXErrorDomain, code: 53))
+        handler(nil)
+        do {
+            try await waiting.value
+            Issue.record("the first answer was an error")
+        } catch {
+            #expect((error as NSError).code == 53, "the first answer wins")
+        }
+    }
+
+    @Test func resumeOnceIgnoresEveryCallAfterTheFirst() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let once = ResumeOnce(continuation)
+            once.resume(nil)
+            once.resume(nil)
+            once.resume(URLError(.cancelled))
+        }
+    }
+
     @Test func theUpgradeRequestRefusesRedirects() {
         let transport = WebSocketTransport()
         let task = URLSession.shared.dataTask(with: URL(string: "https://gateway.test/ws")!)
