@@ -31,7 +31,6 @@ rs.mock("./use-chat-peek", () => ({
 }));
 rs.mock("../components/upgrade-countdown-banner", () => ({ UpgradeCountdownBanner: () => null }));
 rs.mock("./UpgradeIndicator", () => ({ UpgradeIndicator: () => null }));
-rs.mock("@/hooks/use-upgrade-status", () => ({ useUpgradeStatus: () => ({ state: null }) }));
 rs.mock("@/hooks/use-settings", () => ({
   useSettings: () => ({ data: {} }),
   useInvalidateSettings: () => () => Promise.resolve(),

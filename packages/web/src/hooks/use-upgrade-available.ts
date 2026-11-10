@@ -26,6 +26,17 @@ export function isNewerVersion(latest: string, current: string): boolean {
   return false;
 }
 
+/**
+ * The release a check offers, or null: Rome Cloud must flag an upgrade *and*
+ * its latest must be strictly newer. The one rule every web surface uses.
+ */
+export function offeredVersion(check: UpgradeCheck): string | null {
+  const current = check.current.version;
+  return check.upgradeAvailable && current !== null && isNewerVersion(check.latest.version, current)
+    ? check.latest.version
+    : null;
+}
+
 /** True once the browser is idle after mount and the tab is visible. */
 function useIdleAndVisible(): boolean {
   const [ready, setReady] = useState(false);
@@ -83,10 +94,6 @@ export function useUpgradeAvailable(enabled: boolean): UpgradeAvailability {
   // React Query keeps the last good data when a refetch fails; a failed check
   // must not leave a stale offer up.
   const check = query.error ? null : query.data;
-  const current = check?.current.version ?? null;
-  const latest =
-    check && current !== null && isNewerVersion(check.latest.version, current)
-      ? check.latest.version
-      : null;
+  const latest = check ? offeredVersion(check) : null;
   return { latest, recheck: () => query.refetch(), rechecking: query.isFetching };
 }

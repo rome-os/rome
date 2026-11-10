@@ -11,6 +11,7 @@ import {
   type UpgradeCheck,
   useSystemUpgrade,
 } from "@/hooks/use-system-upgrade";
+import { offeredVersion } from "@/hooks/use-upgrade-available";
 import { fetchJson } from "@/lib/fetch-json";
 
 /** Mirrors GET /api/build-info from @rome/core (build identity + boot version report). */
@@ -58,6 +59,8 @@ export function SystemUpgradeSection() {
   // absence of an error rather than on data alone.
   const check = checkQuery.error ? null : (checkQuery.data ?? null);
   const latest = check?.latest.version ?? null;
+  // Same rule as the sidebar arrow, so the two never disagree on one screen.
+  const offered = check ? offeredVersion(check) : null;
 
   if (restartingTo !== null) {
     return (
@@ -159,16 +162,16 @@ export function SystemUpgradeSection() {
       <div className="space-y-3 empty:hidden">
         {checkQuery.error && <CheckErrorNotice message={checkQuery.error.message} />}
 
-        {check && !check.upgradeAvailable && (
+        {check && offered === null && (
           <p className="text-ui text-muted-foreground">
             {t("system.upToDate", { version: check.latest.version })}
           </p>
         )}
 
-        {check && check.upgradeAvailable && latest && (
+        {offered && (
           <Alert variant="info" className="flex flex-wrap items-center justify-between gap-3 p-4">
             <AlertDescription className="flex-1">
-              {t("system.upgradeAvailable", { version: latest })}
+              {t("system.upgradeAvailable", { version: offered })}
             </AlertDescription>
             <Button
               onClick={() => {
@@ -176,7 +179,7 @@ export function SystemUpgradeSection() {
                 setConfirmOpen(true);
               }}
             >
-              {t("system.upgradeButton", { version: latest })}
+              {t("system.upgradeButton", { version: offered })}
             </Button>
           </Alert>
         )}

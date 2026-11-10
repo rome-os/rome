@@ -179,6 +179,32 @@ describe("SystemUpgradeSection", () => {
     ).toBeTruthy();
   });
 
+  it("offers no downgrade when this build is ahead of the latest release", async () => {
+    // Rome Cloud flags any mismatch as available; the dashboard only offers a newer release.
+    mockBackend({
+      build: buildInfo({ version: "1.3.0" }),
+      check: [
+        {
+          status: 200,
+          body: {
+            current: { version: "1.3.0", sha: "abc1234" },
+            latest: { version: "1.2.0" },
+            upgradeAvailable: true,
+          },
+        },
+      ],
+    });
+    renderSection();
+    const user = userEvent.setup();
+
+    await user.click(await findEnabledButton("Check for updates"));
+
+    expect(
+      await screen.findByText("You're up to date — 1.2.0 is the latest version."),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Upgrade to 1.2.0" })).toBeNull();
+  });
+
   it("renders a not-managed message when Rome Cloud is unconfigured, not an error", async () => {
     mockBackend({
       build: buildInfo(),

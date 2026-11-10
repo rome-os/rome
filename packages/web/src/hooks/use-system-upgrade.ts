@@ -20,6 +20,10 @@ const RESTART_PROBE_TIMEOUT_MS = 5_000;
 // Rome Cloud: a cold image pull plus a slow migration can take this long.
 export const RESTART_TIMEOUT_MS = 40 * 60_000;
 const MAX_RESTART_POLLS = RESTART_TIMEOUT_MS / RESTART_POLL_INTERVAL_MS;
+// Above the server's 15 s Rome Cloud relay budget, so an honest answer still
+// lands; past it the request is treated as lost and the guardian can retry
+// (a duplicate is rejected as `upgrade_in_progress`).
+const UPGRADE_REQUEST_TIMEOUT_MS = 20_000;
 
 export interface SystemUpgrade {
   /** Starts the upgrade to `target`, the latest version the guardian confirmed. */
@@ -59,6 +63,7 @@ export function useSystemUpgrade(recheck: () => unknown): SystemUpgrade {
       fetchJson<{ status: string; target: string }>("/api/system/upgrade", {
         method: "POST",
         json: { target },
+        signal: AbortSignal.timeout(UPGRADE_REQUEST_TIMEOUT_MS),
         fallback: t("system.upgradeFailedFallback"),
       }),
     onSuccess: (data) => setRestartingTo(data.target),
@@ -68,7 +73,7 @@ export function useSystemUpgrade(recheck: () => unknown): SystemUpgrade {
         void recheck();
         return;
       }
-      setError(err.message);
+      setError(err.name === "TimeoutError" ? "request_timeout" : err.message);
     },
   });
 

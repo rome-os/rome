@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import {
   isNewerVersion,
+  offeredVersion,
   UPGRADE_CHECK_INTERVAL_MS,
   useUpgradeAvailable,
 } from "./use-upgrade-available";
@@ -21,8 +22,13 @@ function setVisibility(state: DocumentVisibilityState) {
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => state });
 }
 
+// Rome Cloud's flag is true for any mismatch, a rollback included.
 function check(current: string | null, latest: string) {
-  return { current: { version: current, sha: "abc1234" }, latest: { version: latest } };
+  return {
+    current: { version: current, sha: "abc1234" },
+    latest: { version: latest },
+    upgradeAvailable: current !== latest,
+  };
 }
 
 /** Serves the upgrade check from `next()`, counting requests. */
@@ -69,6 +75,15 @@ describe("isNewerVersion", () => {
     expect(isNewerVersion("latest", "1.1.0")).toBe(false);
     expect(isNewerVersion("1.2.0", "dev")).toBe(false);
     expect(isNewerVersion("1.2", "1.1.0")).toBe(false);
+  });
+});
+
+describe("offeredVersion", () => {
+  it("needs both Rome Cloud's flag and a strictly newer latest", () => {
+    expect(offeredVersion(check("1.1.0", "1.2.0"))).toBe("1.2.0");
+    expect(offeredVersion(check("1.3.0", "1.2.0"))).toBeNull();
+    expect(offeredVersion({ ...check("1.1.0", "1.2.0"), upgradeAvailable: false })).toBeNull();
+    expect(offeredVersion(check(null, "1.2.0"))).toBeNull();
   });
 });
 

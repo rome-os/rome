@@ -39,7 +39,6 @@ import { useDashboardActivity } from "@/hooks/use-dashboard-activity";
 import { hasSession, useAuthStateSnapshot } from "@/lib/auth-state";
 import { useDesktop } from "@/hooks/use-desktop";
 import { useDocumentTitle } from "@/hooks/use-document-title";
-import { useUpgradeStatus } from "@/hooks/use-upgrade-status";
 import { useSettings, useInvalidateSettings } from "@/hooks/use-settings";
 import { agentNameChangedSchema } from "@rome/api-types/live-events";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
@@ -120,9 +119,9 @@ export function RomeShellLayout() {
   const [railNames, setRailNames] = useState(readRailNames);
   const hideSidebar = new URLSearchParams(location.search).get("hideSidebar") === "1";
   const isDesktop = useDesktop();
-  // One poll loop feeds both the nightly upgrade banner and the sidebar's
-  // upgrade arrow, which stays out of the way while the banner is up.
-  const upgradeStatus = useUpgradeStatus();
+  // The sidebar's upgrade arrow stays out of the way while the nightly upgrade
+  // banner is up; the banner owns the poll and reports only that it is shown.
+  const [upgradeBannerUp, setUpgradeBannerUp] = useState(false);
   // Every shell page reports whether the person signed in is here, sidebar
   // shown or not, so their phone pushes wait while they are.
   const { bootstrap } = useAuthStateSnapshot();
@@ -364,7 +363,7 @@ export function RomeShellLayout() {
           </span>
         ) : null}
         <UpgradeIndicator
-          suppressed={upgradeStatus.state !== null}
+          suppressed={upgradeBannerUp}
           tooltipSide={railNames ? "bottom" : "right"}
         />
       </div>
@@ -464,7 +463,7 @@ export function RomeShellLayout() {
     const contentLeft = hideSidebar ? "0px" : `calc(${sidebarWidth} + 1px)`;
     return (
       <div className="flex h-dvh flex-col overflow-hidden bg-background">
-        <UpgradeCountdownBanner status={upgradeStatus} />
+        <UpgradeCountdownBanner onVisibleChange={setUpgradeBannerUp} />
         <DesktopTitlebar
           leadingWidth={contentLeft}
           sidebarToggle={
@@ -526,7 +525,7 @@ export function RomeShellLayout() {
 
   return (
     <div className="flex min-h-[var(--rome-viewport-height)] flex-col bg-background">
-      <UpgradeCountdownBanner status={upgradeStatus} />
+      <UpgradeCountdownBanner onVisibleChange={setUpgradeBannerUp} />
       <div
         ref={frameRef}
         className={`relative flex flex-1 ${clipped ? "max-md:overflow-x-clip" : ""}`}

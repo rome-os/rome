@@ -4,20 +4,29 @@ import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
 import { Button } from "./ui/button";
 import { IconButton } from "./ui/icon-button";
-import { estimatedServerNow, type UseUpgradeStatusResult } from "../hooks/use-upgrade-status";
+import { estimatedServerNow, useUpgradeStatus } from "../hooks/use-upgrade-status";
 
 /**
  * Global top banner fronting the upgrade consent countdown. Persistent and
  * non-blocking, so the prompt itself doesn't disrupt a guardian mid-task.
- * Four states, driven by useUpgradeStatus's poll loop (owned by the shell, which
- * also hides the sidebar's upgrade arrow while this is up): countdown (the human
+ * Four states, driven by useUpgradeStatus's poll loop: countdown (the human
  * gate), updating (the restart, tracked client-side so it survives the server
  * going away), stalled (restart overdue — dismissable), hidden. The desktop
  * app renders the same SPA, so this covers both.
  */
-export function UpgradeCountdownBanner({ status }: { status: UseUpgradeStatusResult }) {
+export function UpgradeCountdownBanner({
+  onVisibleChange,
+}: {
+  /** Told whether the banner is up, so the shell can hide the sidebar's
+   * upgrade arrow without re-rendering on every poll. */
+  onVisibleChange?: (visible: boolean) => void;
+}) {
   const { t } = useTranslation("common");
-  const { state, updateNow, defer, dismissStalled } = status;
+  const { state, updateNow, defer, dismissStalled } = useUpgradeStatus();
+  const visible = state !== null;
+  useEffect(() => {
+    onVisibleChange?.(visible);
+  }, [visible, onVisibleChange]);
   const [busy, setBusy] = useState(false);
   const [verbFailed, setVerbFailed] = useState(false);
 

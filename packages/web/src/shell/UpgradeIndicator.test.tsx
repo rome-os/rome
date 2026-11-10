@@ -46,7 +46,12 @@ function available(current: string, latest: string): Scripted {
 const GUARDIAN = { kind: "guardian", userId: "g", displayName: "Ray", avatarUrl: null };
 
 /** A fake backend at the fetch seam; `check` and `upgrade` are consumed in order (last repeats). */
-function mockBackend(opts: { identity?: unknown; check: Scripted[]; upgrade?: Scripted[] }) {
+function mockBackend(opts: {
+  identity?: unknown;
+  check: Scripted[];
+  // "timeout" plays the request's own deadline firing (fetch rejects).
+  upgrade?: (Scripted | "timeout")[];
+}) {
   const checks = [...opts.check];
   const upgrades = [...(opts.upgrade ?? [])];
   const upgradeRequests: unknown[] = [];
@@ -66,6 +71,7 @@ function mockBackend(opts: { identity?: unknown; check: Scripted[]; upgrade?: Sc
       upgradeRequests.push(JSON.parse(String(init.body)));
       const next = upgrades.shift();
       if (!next) throw new Error("unexpected upgrade request");
+      if (next === "timeout") throw new DOMException("signal timed out", "TimeoutError");
       return json(next);
     }
     if (url === "/api/build-info") return json({ status: 200, body: { version: "1.1.0" } });
@@ -199,5 +205,24 @@ describe("UpgradeIndicator", () => {
 
     expect(await screen.findByText("Upgrade request failed: upgrade_in_progress")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Cancel" })).toBeTruthy();
+  });
+
+  it("gives the dialog back when the upgrade request times out", async () => {
+    mockBackend({ check: [available("1.1.0", "1.2.0")], upgrade: ["timeout"] });
+    renderIndicator();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: ARROW }));
+    await user.click(await screen.findByRole("button", { name: "Upgrade and restart" }));
+
+    // A lost request must not leave the dialog locked: the error shows and both
+    // buttons work again.
+    expect(await screen.findByText("Upgrade request failed: request_timeout")).toBeTruthy();
+    const cancel = screen.getByRole("button", { name: "Cancel" }) as HTMLButtonElement;
+    const confirm = screen.getByRole("button", {
+      name: "Upgrade and restart",
+    }) as HTMLButtonElement;
+    expect(cancel.disabled).toBe(false);
+    expect(confirm.disabled).toBe(false);
   });
 });
