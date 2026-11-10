@@ -7,7 +7,7 @@ import {
   normalizeDashboardAccessConfig,
   type DashboardAccessConfig,
 } from "./dashboard-access-config.js";
-import { normalizePublicAccessEmail } from "./public-access-config.js";
+import { normalizeVisitorEmail } from "./visitor-email.js";
 
 /**
  * In-memory cache of dashboard visitor policy for the auth-edge probe.
@@ -28,12 +28,12 @@ export class DashboardAccessState {
   }
 
   isCloudEmailAllowed(email: string): boolean {
-    const normalized = normalizePublicAccessEmail(email);
+    const normalized = normalizeVisitorEmail(email);
     return normalized !== null && this.cloudEmailAccess.has(normalized);
   }
 
   setCloudEmailAccess(emails: Iterable<string>): void {
-    const normalized = Array.from(emails, normalizePublicAccessEmail).filter(
+    const normalized = Array.from(emails, normalizeVisitorEmail).filter(
       (email): email is string => email !== null,
     );
     this.cloudEmailAccess = new Set(normalized);
