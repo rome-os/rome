@@ -33,6 +33,7 @@ import type { AgentNamesService } from "../../chats/accounts/agent-names.js";
 import { withRemovedMembers } from "../../lib/removed-members.js";
 import type { AppConnectionsContextFactory } from "../../connections/app-connections.js";
 import { AppActionSchemaCache } from "./app-action-schema-cache.js";
+import { type AppFibers, addActions } from "../fibers/app-fibers.js";
 
 export interface AppActionLoadFailure {
   name: string;
@@ -206,9 +207,13 @@ function createLazyAppAction(
  * of the same bundle registers without an import. Its module loads on first
  * use, so a load failure surfaces from that call instead of in `failed`.
  */
+/** Receives each app action as it is instantiated. */
+export type AppActionSink = (action: Action, metadata: ArtifactMetadata) => void;
+
+/** Instantiates app actions and hands each to `target`, a registry or a sink. */
 export async function registerAppActions(
   actionLoader: ActionLoader,
-  actionRegistry: ActionRegistryImpl,
+  target: ActionRegistryImpl | AppActionSink,
   catalog: AppCatalog,
   deps: Record<string, unknown>,
   services: AppActionServices,
@@ -217,6 +222,8 @@ export async function registerAppActions(
   const loaded: string[] = [];
   const failed: AppActionLoadFailure[] = [];
   const schemaCache = options.schemaCache ?? null;
+  const register: AppActionSink =
+    typeof target === "function" ? target : (action, metadata) => target.register(action, metadata);
 
   for (const [name, record] of actionLoader.getAllRecords()) {
     if (record.metadata.ownerType !== "app") {
@@ -235,7 +242,7 @@ export async function registerAppActions(
       : null;
     const cached = cacheKey ? schemaCache?.get(cacheKey) : undefined;
     if (cached) {
-      actionRegistry.register(
+      register(
         createLazyAppAction(record, catalog, deps, services, cached.inputSchema ?? undefined),
         record.metadata,
       );
@@ -249,7 +256,7 @@ export async function registerAppActions(
         record.directory,
         createAppActionRuntimeDeps(record, catalog, deps, services),
       );
-      actionRegistry.register(action, record.metadata);
+      register(action, record.metadata);
       if (cacheKey) schemaCache?.set(cacheKey, action.inputSchema);
       loaded.push(name);
     } catch (err) {
@@ -295,7 +302,7 @@ const appActionsLog = createLogger("app-actions");
  */
 export function createAppActionsSubscriber(
   actionLoader: ActionLoader,
-  actionRegistry: ActionRegistryImpl,
+  fibers: AppFibers,
   catalog: AppCatalog,
   deps: Record<string, unknown>,
   services: AppActionServices,
@@ -303,17 +310,20 @@ export function createAppActionsSubscriber(
   schemaCache: AppActionSchemaCache | null = null,
 ): SubscriberHandler {
   return async function appActionsSubscriber(event: CatalogEvent) {
-    actionRegistry.unregisterOwnedBy("app", event.appId);
-    if (event.change === "removed") return;
-    if (!isResolvedApp(event.current)) return;
+    if (event.change === "removed" || !isResolvedApp(event.current)) {
+      await fibers.stop(event.appId);
+      return;
+    }
+    const entries: { action: Action; metadata: ArtifactMetadata }[] = [];
     const { failed } = await registerAppActions(
       actionLoader,
-      actionRegistry,
+      (action, metadata) => entries.push({ action, metadata }),
       catalog,
       deps,
       services,
       { onlyAppId: event.appId, schemaCache },
     );
+    await fibers.contribute(event.appId, "actions", addActions(entries));
     if (failed.length > 0) {
       log.warn("some app actions failed to initialize", { appId: event.appId, failed });
     }

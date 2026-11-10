@@ -194,6 +194,9 @@ import {
   createSystemPrompts,
 } from "./agent/index.js";
 import { SkillLoader } from "./apps/skill-loader.js";
+import { AppFibers, addActions, addSkills } from "./apps/fibers/app-fibers.js";
+import type { Action } from "./apps/actions/types.js";
+import type { ArtifactMetadata } from "./apps/types.js";
 import { createPromptSources } from "./apps/prompt-sources.js";
 import { startCodexLoginChoice } from "./rome-cloud/codex-login.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
@@ -330,7 +333,7 @@ import { removeUnconnectedAccounts } from "./connections/unconnected-accounts.js
 import { createAppDbMigrationSubscriber } from "./apps/db-migration-subscriber.js";
 import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
 import { createOgImageStore } from "./apps/og/store.js";
-import type { ResolvedApp } from "./apps/state.js";
+import { isResolvedApp, type ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
 import { AppApiDispatcher } from "./apps/api.js";
 import { RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
@@ -710,6 +713,7 @@ async function main() {
   const actionLoader = new ActionLoader(artifactIdentity);
   const skillCatalog = new SkillLoader(artifactIdentity);
   const actionRegistry = new ActionRegistryImpl(artifactIdentity);
+  const appFibers = new AppFibers({ actions: actionRegistry, skills: skillCatalog });
   const favorService = new RomeCloudFavorService();
 
   // Each subscriber re-pulls from the catalog after every event. The event
@@ -732,9 +736,14 @@ async function main() {
       });
     }
   });
-  appCatalog.subscribe(async function skillCatalogSubscriber() {
+  appCatalog.subscribe(async function skillCatalogSubscriber(event) {
     try {
-      await skillCatalog.loadFromCatalog(appCatalog);
+      if (event.change === "removed" || !isResolvedApp(event.current)) {
+        await appFibers.stop(event.appId);
+        return;
+      }
+      const skills = await skillCatalog.loadApp(appCatalog, event.appId);
+      await appFibers.contribute(event.appId, "skills", addSkills(skills));
     } catch (err) {
       appsLog.warn("skill catalog reload failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -1387,9 +1396,14 @@ async function main() {
     getProfileAppActionSchemaCachePath(),
     appActionSchemaCacheBuild(getBuildInfo()),
   );
+  const bootActions = new Map<string, { action: Action; metadata: ArtifactMetadata }[]>();
   const appActionReload = await registerAppActions(
     actionLoader,
-    actionRegistry,
+    (action, metadata) => {
+      const entries = bootActions.get(metadata.ownerId) ?? [];
+      entries.push({ action, metadata });
+      bootActions.set(metadata.ownerId, entries);
+    },
     appCatalog,
     appActionDeps,
     {
@@ -1406,11 +1420,14 @@ async function main() {
     },
     { schemaCache: appActionSchemaCache },
   );
+  for (const [appId, entries] of bootActions) {
+    await appFibers.contribute(appId, "actions", addActions(entries));
+  }
 
   appCatalog.subscribe(
     createAppActionsSubscriber(
       actionLoader,
-      actionRegistry,
+      appFibers,
       appCatalog,
       appActionDeps,
       {

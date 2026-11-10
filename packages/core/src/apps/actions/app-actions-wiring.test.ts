@@ -1,3 +1,5 @@
+import { AppFibers } from "../fibers/app-fibers.js";
+import { SkillLoader } from "../skill-loader.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -84,9 +86,10 @@ describe("createAppActionsSubscriber", () => {
       await actionLoader.loadFromCatalog(catalog);
       const actionRegistry = new ActionRegistryImpl(identity);
       const log = { warn: rs.fn() };
+      const fibers = new AppFibers({ actions: actionRegistry, skills: new SkillLoader(identity) });
       const subscriber = createAppActionsSubscriber(
         actionLoader,
-        actionRegistry,
+        fibers,
         catalog,
         {},
         {
@@ -100,6 +103,7 @@ describe("createAppActionsSubscriber", () => {
       await subscriber({ appId: "feeds", change: "changed", current: app });
 
       expect(actionRegistry.has("feeds:sync")).toBe(false);
+      await fibers.close();
       expect(log.warn).toHaveBeenCalledWith("some app actions failed to initialize", {
         appId: "feeds",
         failed: [

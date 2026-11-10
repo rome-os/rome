@@ -1,6 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, sep } from "node:path";
 import type { AppCatalog } from "./catalog.js";
+import type { ArtifactRef } from "./state.js";
 import { toArtifactMetadata } from "./artifact-ref-adapter.js";
 import { resolveArtifactId, type ArtifactIdentityContext } from "./artifact-id.js";
 import { loadArtifactRecords } from "./artifact-records.js";
@@ -19,14 +20,36 @@ function stripSkillStructuredSection(content: string): string {
  */
 export class SkillLoader implements SkillCatalog {
   private skills: Skill[] = [];
-  private failures: AppOwnedArtifactLoadFailure[] = [];
+  private failures = new Map<string, AppOwnedArtifactLoadFailure[]>();
 
   constructor(private readonly identity: ArtifactIdentityContext) {}
 
   async loadFromCatalog(catalog: AppCatalog): Promise<void> {
+    const { skills, failures } = await this.read(catalog.listArtifacts("skill"));
+    this.skills = skills.sort((left, right) => left.name.localeCompare(right.name));
+    this.failures = new Map();
+    for (const failure of failures) {
+      this.failures.set(failure.ownerId, [...(this.failures.get(failure.ownerId) ?? []), failure]);
+    }
+  }
+
+  /**
+   * Reads one app's skills without adding them, and records that app's load
+   * failures. The caller adds the skills, so their removal follows the app.
+   */
+  async loadApp(catalog: AppCatalog, appId: string): Promise<Skill[]> {
+    const sources = catalog.listArtifacts("skill").filter((ref) => ref.ownerId === appId);
+    const { skills, failures } = await this.read(sources);
+    this.failures.set(appId, failures);
+    return skills;
+  }
+
+  private async read(
+    refs: readonly ArtifactRef[],
+  ): Promise<{ skills: Skill[]; failures: AppOwnedArtifactLoadFailure[] }> {
     const { records, failures } = await loadArtifactRecords({
       kind: "skill",
-      sources: catalog.listArtifacts("skill").map(toArtifactMetadata),
+      sources: refs.map(toArtifactMetadata),
       identity: this.identity,
       read: async (metadata) => {
         const skillFile = join(metadata.sourcePath, "SKILL.md");
@@ -44,7 +67,7 @@ export class SkillLoader implements SkillCatalog {
       },
     });
 
-    this.skills = Array.from(records, ([artifactId, { config, metadata }]) => ({
+    const skills = Array.from(records, ([artifactId, { config, metadata }]) => ({
       name: artifactId,
       localName: config.name,
       description: config.description,
@@ -53,8 +76,8 @@ export class SkillLoader implements SkillCatalog {
       ...(config.directory ? { directory: config.directory, files: config.files } : {}),
       ownerType: metadata.ownerType,
       ownerId: metadata.ownerId,
-    })).sort((left, right) => left.name.localeCompare(right.name));
-    this.failures = failures;
+    }));
+    return { skills, failures };
   }
 
   /**
@@ -81,7 +104,7 @@ export class SkillLoader implements SkillCatalog {
 
   /** For the apps side, which shows an author why a skill is missing. */
   getRegistryLoadFailures(): AppOwnedArtifactLoadFailure[] {
-    return [...this.failures];
+    return [...this.failures.values()].flat();
   }
 
   private resolveName(name: string): string {

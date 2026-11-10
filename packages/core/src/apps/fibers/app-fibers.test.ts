@@ -5,7 +5,7 @@ import type { Action } from "../actions/types.js";
 import { createEmptyLegacyArtifactBindings } from "../artifact-id.js";
 import { SkillLoader } from "../skill-loader.js";
 import type { ArtifactMetadata } from "../types.js";
-import { AppFibers, type AppContribution } from "./app-fibers.js";
+import { AppFibers, addActions, addSkills } from "./app-fibers.js";
 
 function action(name: string, version = "1"): Action {
   return {
@@ -45,15 +45,21 @@ function skill(appId: string, name: string): Skill {
   };
 }
 
-function app(appId: string, actions: string[], skills: string[], version = "1"): AppContribution {
-  return {
+async function start(
+  fibers: AppFibers,
+  appId: string,
+  actions: string[],
+  skills: string[],
+  version = "1",
+): Promise<void> {
+  await fibers.contribute(
     appId,
-    actions: actions.map((name) => ({
-      action: action(name, version),
-      metadata: metadata(appId, name),
-    })),
-    skills: skills.map((name) => skill(appId, name)),
-  };
+    "actions",
+    addActions(
+      actions.map((name) => ({ action: action(name, version), metadata: metadata(appId, name) })),
+    ),
+  );
+  await fibers.contribute(appId, "skills", addSkills(skills.map((name) => skill(appId, name))));
 }
 
 describe("AppFibers", () => {
@@ -72,7 +78,7 @@ describe("AppFibers", () => {
 
   it("registers an app's actions and skills when it starts", async () => {
     const { actions, skills } = setup();
-    await fibers.start(app("dream", ["dream", "skill_review"], ["memory"]));
+    await start(fibers, "dream", ["dream", "skill_review"], ["memory"]);
 
     expect(actions.list().sort()).toEqual(["dream:dream", "dream:skill_review"]);
     expect(skills.list().map((s) => s.name)).toEqual(["dream:memory"]);
@@ -85,8 +91,8 @@ describe("AppFibers", () => {
 
   it("uninstall removes that app's entries and leaves other apps alone", async () => {
     const { actions, skills } = setup();
-    await fibers.start(app("dream", ["dream"], ["memory"]));
-    await fibers.start(app("inbox", ["message_handler"], ["triage"]));
+    await start(fibers, "dream", ["dream"], ["memory"]);
+    await start(fibers, "inbox", ["message_handler"], ["triage"]);
 
     await fibers.stop("dream");
 
@@ -97,9 +103,9 @@ describe("AppFibers", () => {
 
   it("upgrade replaces the old version's entries with the new version's", async () => {
     const { actions, skills } = setup();
-    await fibers.start(app("dream", ["dream", "old_action"], ["memory"], "1"));
+    await start(fibers, "dream", ["dream", "old_action"], ["memory"], "1");
 
-    await fibers.start(app("dream", ["dream", "new_action"], ["memory"], "2"));
+    await start(fibers, "dream", ["dream", "new_action"], ["memory"], "2");
 
     expect(actions.list().sort()).toEqual(["dream:dream", "dream:new_action"]);
     expect(actions.get("dream:dream")?.config.description).toBe("dream v2");
@@ -115,7 +121,7 @@ describe("AppFibers", () => {
       },
     });
     fibers = new AppFibers({ actions: tracking("action"), skills: tracking("skill") });
-    await fibers.start(app("dream", ["a", "b"], ["c"]));
+    await start(fibers, "dream", ["a", "b"], ["c"]);
 
     await fibers.stop("dream");
 
