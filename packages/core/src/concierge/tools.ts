@@ -299,7 +299,7 @@ export async function buildConciergeTools(
     // touches a needs_user row keeps its message.
     if (write.state === "needs_user" && !messageId) {
       throw new Error(
-        `${where}: needs_user requires messageId: say or chat_forward the ask first, then pass the messageId it returned`,
+        `${where}: needs_user requires messageId: show a task question or approval with chat_card, otherwise ask with say or chat_forward; pass the returned messageId`,
       );
     }
     // A row belongs to the Concierge chat it was made in, and moves to the
@@ -478,7 +478,7 @@ export async function buildConciergeTools(
       description:
         "Write your task list, the guardian's panel of what you are busy with. Batch only: one call writes every row that changed. " +
         "An entry without id creates a row (title required, and a message to point to); an entry with id updates it, and fields you leave out stay. " +
-        "Setting a row to needs_user needs the messageId of the message that asks the guardian, so say or chat_forward before you write it. " +
+        "For needs_user, show a task question or approval with chat_card, otherwise ask with say or chat_forward. Use the returned messageId as the row anchor. " +
         "Returns each row's id and the message it points to.",
       inputSchema: {
         type: "object",
@@ -525,7 +525,7 @@ export async function buildConciergeTools(
                 messageId: {
                   type: "string",
                   description:
-                    "The message the row points to, as say, chat_card, or chat_forward returned it. Required whenever the entry sets state needs_user: it must be the message that asks the guardian, so say or chat_forward first. A new row of another state takes your latest message this turn if you leave it out. On an update it replaces the old one; leave it out to keep it. chat_forward updates this anchor automatically.",
+                    "The message the row points to, as say, chat_card, or chat_forward returned it. Required for needs_user: show a task question or approval with chat_card, otherwise ask with say or chat_forward. Use the returned messageId as the row anchor. A new row of another state takes your latest message this turn if you leave it out. On an update it replaces the old one; leave it out to keep it. chat_forward updates this anchor automatically.",
                 },
               },
             },
@@ -907,7 +907,7 @@ export async function buildConciergeTools(
       name: "chat_card",
       description:
         "Show the guardian a card that opens a task chat and shows its live status. " +
-        "Use it when they want to open or find a task chat, instead of sending its id.",
+        "Use it for a task question or approval and use the returned messageId as the needs_user row anchor. Also use it to open or find a task chat instead of sending its id.",
       inputSchema: {
         type: "object",
         required: ["chatId"],

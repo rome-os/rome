@@ -5,6 +5,8 @@ import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
+import { useTabStatus } from "@/hooks/use-tab-status";
+import { LatestTaskChatsContext, renderFlatEntries } from "./render";
 import { useLiveEvents } from "@/hooks/use-live-events";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { TaskChatCard } from "./TaskChatCard";
@@ -13,6 +15,8 @@ rs.mock("@/hooks/use-live-events", () => ({
   chatStatusTopic: "chat-status",
   useLiveEvents: rs.fn(),
 }));
+
+rs.mock("@/hooks/use-tab-status", () => ({ useTabStatus: rs.fn() }));
 
 const chatId = "task-chat";
 const question: TranscriptPart = {
@@ -94,7 +98,8 @@ beforeEach(async () => {
       return Response.json([
         { id: chatId, name: "Draft email", awaitingGuardian: waiting, running },
       ]);
-    if (url === `/api/chat/sessions/${chatId}/messages`) return Response.json(messages);
+    if (url === `/api/chat/sessions/${chatId}/messages?limit=2`)
+      return Response.json({ messages, nextCursor: "older-turn" });
     if (url === "/api/approvals?status=pending") return Response.json(approvals);
     if (url === "/api/approvals/approval-1")
       return Response.json({ id: "approval-1", status: "pending" });
@@ -108,15 +113,16 @@ beforeEach(async () => {
 afterEach(() => {
   cleanup();
   client.clear();
+  rs.useRealTimers();
   rs.unstubAllGlobals();
   rs.restoreAllMocks();
 });
 
-function show() {
+function show(isLatestForChat = true) {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/chat/main-chat"]}>
-        <TaskChatCard chatId={chatId} title="Task" />
+        <TaskChatCard chatId={chatId} title="Task" isLatestForChat={isLatestForChat} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
@@ -127,6 +133,132 @@ function posts() {
 }
 
 describe("TaskChatCard", () => {
+  it("keeps older blocks compact without pending targets, tab claims or card requests", async () => {
+    show(false);
+    await screen.findByText("Draft email");
+    expect(screen.getByText("Task chat · Needs you")).toBeTruthy();
+    expect(screen.getByRole("link").textContent).toBe("Open");
+    expect(document.querySelector("[data-chat-pending-card]")).toBeNull();
+    expect(rs.mocked(useTabStatus).mock.calls).toHaveLength(0);
+    expect(fetchMock.mock.calls.some(([url]) => /messages|approvals/.test(String(url)))).toBe(
+      false,
+    );
+  });
+
+  for (const kind of ["question", "approval"] as const) {
+    it(`mounts ${kind} controls and a pending target only in the newest block`, async () => {
+      if (kind === "approval") {
+        messages = [];
+        approvals = [approval()];
+      }
+      const older = { type: "task_chat", chatId, title: "Started" } as const;
+      const latest = { ...older, title: "Question" };
+      render(
+        <QueryClientProvider client={client}>
+          <MemoryRouter>
+            <LatestTaskChatsContext.Provider value={new Map([[chatId, latest]])}>
+              {renderFlatEntries([older, latest])}
+            </LatestTaskChatsContext.Provider>
+          </MemoryRouter>
+        </QueryClientProvider>,
+      );
+      await screen.findByRole("button", { name: kind === "question" ? "Send" : "Approve" });
+      expect(screen.getAllByRole("link")).toHaveLength(2);
+      expect(
+        screen.getAllByRole("button", { name: kind === "question" ? "Send" : "Approve" }),
+      ).toHaveLength(1);
+      expect(document.querySelectorAll("[data-chat-pending-card]")).toHaveLength(1);
+      if (kind === "approval") {
+        await waitFor(() =>
+          expect(
+            rs.mocked(useTabStatus).mock.calls.some(([status]) => status === "needs-you"),
+          ).toBe(true),
+        );
+      }
+      expect(
+        fetchMock.mock.calls.filter(([url]) => String(url).includes("/messages")),
+      ).toHaveLength(1);
+    });
+  }
+
+  it("fetches a bounded page of whole turns without polling the transcript", async () => {
+    messages = [
+      ...Array.from({ length: 40 }, (_, i) =>
+        message(`row-${i}`, [{ type: "text", content: "Working" }]),
+      ),
+      message("ask", [question]),
+    ];
+    rs.useFakeTimers();
+    show();
+    for (let i = 0; i < 10 && !screen.queryByText("Which tone?"); i += 1) {
+      await act(async () => {
+        await rs.advanceTimersByTimeAsync(100);
+      });
+    }
+    expect(screen.getByText("Which tone?")).toBeTruthy();
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(15_000);
+    });
+    const requests = fetchMock.mock.calls.filter(([url]) => String(url).includes("/messages"));
+    expect(requests.map(([url]) => url)).toEqual([`/api/chat/sessions/${chatId}/messages?limit=2`]);
+  });
+
+  it("loads a fresh page when live running events remount the waiting card", async () => {
+    show();
+    await screen.findByText("Which tone?");
+    const notify = (running: boolean) => {
+      const handlers = rs.mocked(useLiveEvents).mock.calls.at(-1)?.[1];
+      act(() => {
+        handlers?.session_running.fn({ sessionId: chatId, running });
+      });
+    };
+    notify(true);
+    messages = [
+      message("next", [
+        {
+          ...question,
+          toolUseId: "item_1",
+          render: {
+            ...question.render,
+            props: { questions: [{ id: "next", question: "Next question?", type: "text" }] },
+          },
+        },
+      ]),
+    ];
+    notify(false);
+    await screen.findByText("Next question?");
+    expect(fetchMock.mock.calls.filter(([url]) => String(url).includes("/messages"))).toHaveLength(
+      2,
+    );
+  });
+
+  it("allows a later question in the same mounted card to be answered", async () => {
+    show();
+    await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
+    await screen.findByText("Dismissed");
+    const nextQuestion = {
+      ...question,
+      toolUseId: "item_1",
+      render: {
+        ...question.render,
+        props: {
+          questions: [{ id: "next", question: "Next question?", type: "single", options: ["Yes"] }],
+        },
+      },
+    };
+    messages = [message("next", [nextQuestion])];
+    await act(async () => {
+      await client.invalidateQueries({ queryKey: ["task-chat-cards", chatId] });
+    });
+    await userEvent.click(await screen.findByRole("button", { name: "Yes" }));
+    await userEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(posts()).toHaveLength(2));
+    expect(JSON.parse(String(posts()[1][1]?.body)).parts[0]).toMatchObject({
+      toolUseId: "item_1",
+      output: { answers: [{ questionId: "next", value: "Yes" }] },
+    });
+  });
+
   it("shows the task's question and posts its answer to the task, not the main chat", async () => {
     show();
     const user = userEvent.setup();
@@ -183,6 +315,24 @@ describe("TaskChatCard", () => {
     expect(posts()[0][0]).toBe("/api/approvals/approval-1/approve");
   });
 
+  for (const preview of [
+    undefined,
+    { kind: "generic", title: "No summary" },
+    { kind: "unknown" },
+  ]) {
+    it(`keeps an approval with ${JSON.stringify(preview)} preview actionable`, async () => {
+      messages = [];
+      const row = approval();
+      approvals = [{ ...row, payload: { ...row.payload, preview } } as ReturnType<typeof approval>];
+      show();
+      expect(await screen.findByText("Send the draft")).toBeTruthy();
+      expect(screen.queryByText("No summary")).toBeNull();
+      await userEvent.click(await screen.findByRole("button", { name: "Approve" }));
+      await waitFor(() => expect(posts()).toHaveLength(1));
+      expect(posts()[0][0]).toBe("/api/approvals/approval-1/approve");
+    });
+  }
+
   it("ignores approvals from another task", async () => {
     approvals = [approval("other-chat")];
     show();
@@ -199,7 +349,7 @@ describe("TaskChatCard", () => {
       expect(screen.queryByText("Which tone?")).toBeNull();
       expect(
         fetchMock.mock.calls.some(
-          ([url]) => String(url).endsWith("/messages") || String(url).includes("/approvals"),
+          ([url]) => String(url).includes("/messages") || String(url).includes("/approvals"),
         ),
       ).toBe(false);
     });
@@ -238,7 +388,7 @@ describe("TaskChatCard", () => {
     messages.push(message("answer", [result], "user"));
     show();
     await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/messages"))).toBe(true),
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/messages"))).toBe(true),
     );
     expect(screen.queryByText("Which tone?")).toBeNull();
   });
@@ -252,7 +402,7 @@ describe("TaskChatCard", () => {
     show();
     await screen.findByText("Draft email");
     await waitFor(() =>
-      expect(fetchMock.mock.calls.some(([url]) => String(url).endsWith("/messages"))).toBe(true),
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/messages"))).toBe(true),
     );
     expect(screen.queryByText("Which tone?")).toBeNull();
     expect(screen.getByRole("link")).toBeTruthy();

@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { useApprovals } from "@/hooks/use-approvals";
-import { listSessionMessages, postSessionTurnJson } from "@/lib/chat-api";
+import { listSessionMessagePage, postSessionTurnJson } from "@/lib/chat-api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { ApprovalCard } from "../approval/ApprovalCard";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
@@ -21,7 +21,15 @@ type TaskStatus = "running" | "waiting" | "failed" | "idle";
  * A task chat another agent started on the guardian's behalf: its title, its
  * live status, and a link that opens it.
  */
-export function TaskChatCard({ chatId, title }: { chatId: string; title: string }) {
+export function TaskChatCard({
+  chatId,
+  title,
+  isLatestForChat,
+}: {
+  chatId: string;
+  title: string;
+  isLatestForChat: boolean;
+}) {
   const { t } = useTranslation("chat");
   const { sessions, invalidate } = useChatSessions("all", "all");
   const [liveRunning, setLiveRunning] = useState<boolean | null>(null);
@@ -59,7 +67,7 @@ export function TaskChatCard({ chatId, title }: { chatId: string; title: string 
           <Link to={`/chat/${chatId}`}>{t("concierge.openTaskChat")}</Link>
         </Button>
       </div>
-      {status === "waiting" && (
+      {isLatestForChat && status === "waiting" && (
         <WaitingTaskCard key={chatId} chatId={chatId} onRefresh={invalidate} />
       )}
     </div>
@@ -80,7 +88,7 @@ const interactionSchema = z.object({
 
 const approvalPayloadSchema = z.object({
   channelContext: z.object({ threadId: z.string() }),
-  actionName: z.string().optional(),
+  actionName: z.string().optional().catch(undefined),
   preview: z
     .discriminatedUnion("kind", [
       z.object({
@@ -97,7 +105,8 @@ const approvalPayloadSchema = z.object({
         reason: z.string().optional(),
       }),
     ])
-    .optional(),
+    .optional()
+    .catch(undefined),
 });
 
 function latestOpenInteraction(messages: ChatMessage[]) {
@@ -138,8 +147,9 @@ function WaitingTaskCard({
   const { t } = useTranslation("chat");
   const messages = useQuery({
     queryKey: ["task-chat-cards", chatId],
-    queryFn: () => listSessionMessages(chatId),
-    refetchInterval: 5_000,
+    // Waiting questions follow the last user prompt. Pages contain whole turns,
+    // so two turns cover that question even when a turn has many message rows.
+    queryFn: () => listSessionMessagePage(chatId, { limit: 2 }),
   });
   const approvals = useApprovals({ status: "pending" });
   const [submitted, setSubmitted] = useState<{
@@ -148,7 +158,7 @@ function WaitingTaskCard({
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const interaction = latestOpenInteraction(messages.data ?? []);
+  const interaction = latestOpenInteraction(messages.data?.messages ?? []);
   const approval = (approvals.data ?? [])
     .flatMap((row) => {
       const payload = approvalPayloadSchema.safeParse(row.payload);
@@ -165,7 +175,7 @@ function WaitingTaskCard({
   }
 
   async function submit(toolUseId: string, output: Record<string, unknown>) {
-    if (!interaction || submitted) return;
+    if (!interaction || submitted?.key === interaction.key) return;
     setSubmitted({ key: interaction.key, output });
     setError(null);
     try {

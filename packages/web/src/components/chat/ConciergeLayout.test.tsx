@@ -18,7 +18,11 @@ rs.mock("@/hooks/use-dashboard-identity", () => ({
 }));
 // The card reads the chat list; the transcript only decides what surrounds it.
 rs.mock("@/components/chat/entries/TaskChatCard", () => ({
-  TaskChatCard: ({ title }: { title: string }) => <div data-testid="task-card">{title}</div>,
+  TaskChatCard: ({ title, isLatestForChat }: { title: string; isLatestForChat: boolean }) => (
+    <div data-testid="task-card" data-latest={isLatestForChat}>
+      {title}
+    </div>
+  ),
 }));
 // The real buttons fetch and observe the viewport; the transcript only decides
 // where they appear and for which turn.
@@ -128,6 +132,36 @@ function bubbleOf(content: string): HTMLElement {
 }
 
 describe("Concierge layout", () => {
+  it("expands only the newest block for each task across messages and within one message", () => {
+    const card = (chatId: string, title: string) => ({ type: "task_chat", chatId, title });
+    const rows = [
+      agentRow(agent("start", 0, [card("task-a", "Started A"), card("task-b", "Started B")])),
+      agentRow(
+        agent("ask", 1000, [card("task-a", "First ask"), card("task-a", "Latest ask")], "turn-2"),
+      ),
+    ];
+    const view = renderTranscript(rows);
+    const expanded = () =>
+      screen
+        .getAllByTestId("task-card")
+        .filter((card) => card.dataset.latest === "true")
+        .map((card) => card.textContent);
+    expect(expanded()).toEqual(["Started B", "Latest ask"]);
+    view.rerender(
+      <ThemeProvider>
+        <ConciergeTranscript
+          rows={[...rows, agentRow(agent("new", 2000, [card("task-b", "New ask B")], "turn-3"))]}
+          live={idle}
+          actions={actions}
+          contentRef={() => {}}
+          feedback
+        />
+      </ThemeProvider>,
+    );
+    expect(expanded()).toEqual(["Latest ask", "New ask B"]);
+    expect(screen.getAllByTestId("task-card")).toHaveLength(5);
+  });
+
   describe("with a pointer that can hover", () => {
     beforeEach(() => stubHover(true));
 
