@@ -133,7 +133,8 @@
       "previous7Days": "过去 7 天",
       "previous30Days": "过去 30 天",
       "older": "更早"
-    }
+    },
+    "startedByConcierge": "由 {{name}} 发起"
   },
   "language": {
     "label": "语言"

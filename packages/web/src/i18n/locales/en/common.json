@@ -133,7 +133,8 @@
       "previous7Days": "Previous 7 days",
       "previous30Days": "Previous 30 days",
       "older": "Older"
-    }
+    },
+    "startedByConcierge": "Started by {{name}}"
   },
   "language": {
     "label": "Language"

@@ -13,21 +13,19 @@ import {
   FakeWebSocket,
   fakeSocketLiveEventsClient,
 } from "@/test/fake-websocket";
-import userEvent from "@testing-library/user-event";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu";
-import { ChatThreadView, KEEPS_CHAT_THREAD_OPEN } from "./ChatThreadView";
+import { MemoryRouter } from "react-router-dom";
+import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
+import { ChatThreadView } from "./ChatThreadView";
+import { ConciergeTranscript } from "./ConciergeTranscript";
+import { buildRows } from "./chat-view";
+import type { BlockActions } from "./MessageList";
 import { QuotedReply } from "./reply/QuotedReply";
 import { ReplyBar } from "./reply/ReplyBar";
 import { ReplyDraftProvider, useReplyDraftState, type ReplyDraft } from "./reply/reply-draft";
 
 // The thread view of a Concierge chat (docs/domains/chats.md#chat-thread):
 // Reply and a reply's quote open it, it reads one thread and follows it live,
-// and it closes on Esc or a click outside it and the composer.
+// and it closes on Esc or a press on its blurred area.
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -168,15 +166,17 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     expect([draft.target?.messageId, draft.thread]).toEqual(["a1", "a1"]);
   });
 
-  it("closes the thread view with the reply bar's ✕", () => {
+  it("keeps the reply bar at every width while the thread is open, and closes the thread with its ✕", () => {
     let draft!: ReplyDraft;
-    render(
+    const { container } = render(
       <ThreadsDraft onDraft={(next) => (draft = next)}>
         <ReplyBar />
       </ThreadsDraft>,
     );
     act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
     expect(draft.thread).toBe("a1");
+    // The phone width is the same dashboard: no class hides the bar there.
+    expect(container.querySelector("[data-reply-bar]")!.className).not.toMatch(/hidden/);
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
 
@@ -185,9 +185,26 @@ describe("the reply draft of a chat that keeps chat threads", () => {
   });
 });
 
+/** Draws each message as one paragraph of its first text, as a stand-in for the transcript. */
+const paragraphs = (messages: { id: string; content: string }[]) =>
+  messages.map((m) => (
+    <p key={m.id} data-timeline-anchor={m.id}>
+      {(JSON.parse(m.content) as { content: string }[])[0].content}
+    </p>
+  ));
+
 describe("ChatThreadView", () => {
   it("shows the thread's messages and new ones as they are said", async () => {
-    render(host(<ChatThreadView sessionId="concierge" messageId="a1" onClose={() => {}} />));
+    render(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={() => {}}
+          renderMessages={paragraphs}
+        />,
+      ),
+    );
 
     expect(await screen.findByText("Which day?")).toBeTruthy();
     expect(requested[0]).toBe("/api/chat/sessions/concierge/messages?thread=a1");
@@ -206,72 +223,122 @@ describe("ChatThreadView", () => {
     expect(await screen.findByText("Make it tomorrow instead")).toBeTruthy();
   });
 
-  it("stays open through a menu the composer opens, which renders outside the app's tree", async () => {
-    const onClose = rs.fn();
-    const picked = rs.fn();
+  it("floats the header it is given over its messages", async () => {
     render(
       host(
-        <div>
-          <div {...{ [KEEPS_CHAT_THREAD_OPEN]: "" }}>
-            <DropdownMenu>
-              <DropdownMenuTrigger>Attach</DropdownMenuTrigger>
-              <DropdownMenuContent>
-                <DropdownMenuItem onSelect={picked}>From a project</DropdownMenuItem>
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-          <ChatThreadView sessionId="concierge" messageId="a1" onClose={onClose} />
-        </div>,
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={() => {}}
+          header={<header>Milo</header>}
+          renderMessages={paragraphs}
+        />,
       ),
     );
-    await screen.findByText("Which day?");
-
-    await userEvent.click(screen.getByRole("button", { name: "Attach" }));
-    await userEvent.click(await screen.findByRole("menuitem", { name: "From a project" }));
-
-    expect(picked).toHaveBeenCalledTimes(1);
-    expect(onClose).not.toHaveBeenCalled();
+    const view = await screen.findByRole("dialog", { name: "Chat thread" });
+    expect(view.className).toContain("absolute");
+    expect(view.className).toContain("inset-0");
+    expect(screen.getByText("Milo")).toBeTruthy();
+    // No title of its own.
+    expect(screen.queryByText(/repl(y|ies)/)).toBeNull();
   });
 
-  it("reads malformed parts and legacy plain content as the timeline does", async () => {
+  it("keeps open on a press on any bubble of a message, a forwarded report included", async () => {
+    rs.stubGlobal("IntersectionObserver", undefined);
+    rs.stubGlobal(
+      "matchMedia",
+      rs.fn((query: string) => ({
+        matches: false,
+        media: query,
+        addEventListener: rs.fn(),
+        removeEventListener: rs.fn(),
+      })),
+    );
     thread = [
-      { ...message("m1", "user", "x"), content: "Plain text from before parts" },
       {
         ...message("a1", "assistant", "x"),
+        turnId: "t1",
         content: JSON.stringify([
-          { type: "text" },
-          { type: "mystery", content: "never shown" },
-          { type: "text", content: "Thursday works" },
+          { type: "text", content: "Here it is" },
+          {
+            type: "text",
+            content: "# Report\n\nThree hotels near the river.",
+            format: "long",
+            forwardedFrom: { chatId: "task-1", title: "Hotels" },
+          },
         ]),
       },
     ];
-    render(host(<ChatThreadView sessionId="concierge" messageId="m1" onClose={() => {}} />));
-
-    expect(await screen.findByText("Plain text from before parts")).toBeTruthy();
-    expect(screen.getByText("Thursday works")).toBeTruthy();
-    expect(screen.queryByText("never shown")).toBeNull();
+    const onClose = rs.fn();
+    const identity = { name: "Rome", iconUrl: null };
+    render(
+      host(
+        <MemoryRouter>
+          <ChatThreadView
+            sessionId="concierge"
+            messageId="a1"
+            onClose={onClose}
+            renderMessages={(messages) => (
+              <ConciergeTranscript
+                rows={buildRows(messages, new Map(), identity, {
+                  runningTurnId: null,
+                  isStreaming: false,
+                })}
+                live={{
+                  isStreaming: false,
+                  runningTurnId: null,
+                  snapshot: null,
+                  textStore: EMPTY_LIVE_TEXT,
+                  identity,
+                }}
+                actions={
+                  {
+                    onApprovalResolved: () => {},
+                    onSubmitAppComponent: () => {},
+                    onDismissAppComponent: () => {},
+                    interactionResults: new Map(),
+                  } as BlockActions
+                }
+                contentRef={() => {}}
+              />
+            )}
+          />
+        </MemoryRouter>,
+      ),
+    );
+    const report = await screen.findByText("Three hotels near the river.");
+    // Nothing stops the press, so a drag from it still selects text.
+    expect(fireEvent.pointerDown(report)).toBe(true);
+    fireEvent.pointerDown(screen.getByText("Here it is"));
+    expect(onClose).not.toHaveBeenCalled();
+    fireEvent.pointerDown(screen.getByRole("dialog", { name: "Chat thread" }));
+    expect(onClose).toHaveBeenCalledTimes(1);
   });
 
-  it("closes on Esc and on a click outside, but not on a click in the composer", async () => {
+  it("closes on Esc and on a press on its blurred area, not on a message or outside it", async () => {
     const onClose = rs.fn();
     render(
       host(
         <div>
-          <p>transcript</p>
-          <div {...{ [KEEPS_CHAT_THREAD_OPEN]: "" }}>
-            <textarea aria-label="composer" />
-          </div>
-          <ChatThreadView sessionId="concierge" messageId="a1" onClose={onClose} />
+          <nav>sidebar</nav>
+          <textarea aria-label="composer" />
+          <ChatThreadView
+            sessionId="concierge"
+            messageId="a1"
+            onClose={onClose}
+            renderMessages={paragraphs}
+          />
         </div>,
       ),
     );
     await screen.findByText("Which day?");
 
-    fireEvent.pointerDown(screen.getByLabelText("composer"));
     fireEvent.pointerDown(screen.getByText("Which day?"));
+    fireEvent.pointerDown(screen.getByText("sidebar"));
+    fireEvent.pointerDown(screen.getByLabelText("composer"));
     expect(onClose).not.toHaveBeenCalled();
 
-    fireEvent.pointerDown(screen.getByText("transcript"));
+    fireEvent.pointerDown(screen.getByRole("dialog", { name: "Chat thread" }));
     expect(onClose).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));

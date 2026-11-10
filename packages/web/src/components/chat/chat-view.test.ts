@@ -8,6 +8,7 @@ import {
   isAwaitingGuardian,
   isLockedByCard,
   isLastTurnFailed,
+  threadInteractionResults,
   type AgentIdentity,
 } from "./chat-view";
 
@@ -68,6 +69,57 @@ describe("buildChatView", () => {
     const v = buildChatView(messages, MAIN, MAIN_IDENTITY);
     expect(v.interactionResults.get(interactionResultKey(MAIN, "h1"))).toEqual({ ok: 1 });
     expect(v.interactionResults.get("h1")).toBeUndefined();
+  });
+
+  it("reads a thread's card results from its own history, outside the main timeline's page", () => {
+    // The question and its answer are older than the main timeline's page.
+    const oldCard = mk(MAIN, "assistant", "t1", [
+      { type: "pending_interaction", toolUseId: "old", appId: "x", render: {} },
+    ]);
+    const newCard = mk(MAIN, "assistant", "t3", [
+      { type: "pending_interaction", toolUseId: "new", appId: "x", render: {} },
+    ]);
+    const thread = [
+      oldCard,
+      mk(MAIN, "user", "t2", [
+        { type: "interaction_result", toolUseId: "old", output: { answer: "Friday" } },
+      ]),
+      newCard,
+    ];
+    const main = {
+      messages: [newCard],
+      results: new Map([[interactionResultKey(MAIN, "new"), { answer: "Yes" }]]),
+    };
+    const results = threadInteractionResults(thread, MAIN, MAIN_IDENTITY, main);
+    expect(results.get(interactionResultKey(MAIN, "old"))).toEqual({ answer: "Friday" });
+    // A newer answer the main timeline holds for the same card still applies.
+    expect(results.get(interactionResultKey(MAIN, "new"))).toEqual({ answer: "Yes" });
+  });
+
+  it("keeps a thread card's own answer when a later card reuses its tool id", () => {
+    const card = (turnId: string) =>
+      mk(MAIN, "assistant", turnId, [
+        { type: "pending_interaction", toolUseId: "item_0", appId: "x", render: {} },
+      ]);
+    const answer = (turnId: string, value: string) =>
+      mk(MAIN, "user", turnId, [
+        { type: "interaction_result", toolUseId: "item_0", output: { answer: value } },
+      ]);
+    // The thread holds the first `item_0` and its answer.
+    const thread = [card("t1"), answer("t2", "Friday")];
+    // The main timeline holds a later card with the same id, answered differently.
+    const mainMessages = [card("t5"), answer("t6", "Monday")];
+    const main = {
+      messages: mainMessages,
+      results: buildChatView(new Map([[MAIN, mainMessages]]), MAIN, MAIN_IDENTITY)
+        .interactionResults,
+    };
+    const results = threadInteractionResults(thread, MAIN, MAIN_IDENTITY, main);
+    expect(results.get(interactionResultKey(MAIN, "item_0"))).toEqual({ answer: "Friday" });
+
+    // Unanswered in the thread: the later card's answer still is not its own.
+    const open = threadInteractionResults([card("t1")], MAIN, MAIN_IDENTITY, main);
+    expect(open.get(interactionResultKey(MAIN, "item_0"))).toBeUndefined();
   });
 
   const questionCard = (toolUseId: string) => ({

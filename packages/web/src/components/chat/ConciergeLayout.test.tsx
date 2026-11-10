@@ -464,8 +464,20 @@ describe("Concierge layout", () => {
     });
 
     it("puts the typing bubble in the agent's group", () => {
+      // The turn has spoken, so it types only while it works on in a call.
+      const working = {
+        segments: [
+          {
+            kind: "block" as const,
+            id: "b0",
+            ordinal: 0,
+            block: { type: "tool_use" as const, id: "w1", tool: "WebSearch", input: {} },
+          },
+        ],
+        summary: { distinctApps: [], totalSteps: 0, invocationCounts: {} },
+      };
       const { container } = renderTranscript([agentRow(agent("a1", 0, [text("One sec.")]))], {
-        live: { ...idle, isStreaming: true, runningTurnId: "turn-1" },
+        live: { ...idle, isStreaming: true, runningTurnId: "turn-1", snapshot: working },
       });
 
       const groups = topLevel(container).filter((el) => el.tagName === "DIV");

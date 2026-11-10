@@ -33,6 +33,7 @@ import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
 import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
+import type { ConciergeActivityTracker } from "./activity.js";
 import type { ConciergeTasks } from "./tasks.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
@@ -118,6 +119,16 @@ export interface TaskChats {
    */
   openSession(chatId: string): Promise<string>;
   isRunning(chatId: string): boolean;
+  /** Whether the chat runs a turn its owner sees: any but a quiet one that has said nothing yet. */
+  isBusy(chatId: string): boolean;
+  /** The tool the chat's running turn is in now, as the trace names it, or null. */
+  openTool(chatId: string): string | null;
+  /**
+   * Calls `listener` with the chat's id whenever it starts or stops running
+   * a turn, or its running turn enters or leaves a tool; the latter alone
+   * comes with `toolOnly`. Returns the unsubscribe.
+   */
+  onTurnChange(listener: (chatId: string, change: { toolOnly?: boolean }) => void): () => void;
   /** Sends `text` into the chat as the guardian's own message, the way their composer does. */
   sendAsGuardian(chatId: string, text: string): Promise<void>;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
@@ -152,10 +163,12 @@ export interface ConciergeDeps {
     | "chatThreadSettled"
     | "setSessionTrigger"
     | "listProjects"
+    | "onMessageInserted"
+    | "awaitingGuardianOf"
   >;
   /** The todo list. */
   tasks: ConciergeTasks;
-  approvals: Pick<ApprovalsRepository, "onCreated">;
+  approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved">;
   messages: Pick<MessageRepository, "recent" | "before">;
   sessionRepository: Pick<SessionRepository, "current">;
   accounts: Pick<ModelAccounts, "read">;
@@ -225,6 +238,42 @@ export class ConciergeService {
 
   attachDashboard(dashboard: ConciergeDashboard): void {
     this.attached = dashboard;
+    for (const watcher of this.turnWatchers) {
+      watcher.stop = dashboard.chats.onTurnChange(watcher.listener);
+    }
+  }
+
+  private turnWatchers = new Set<{
+    listener: (chatId: string, change: { toolOnly?: boolean }) => void;
+    stop: (() => void) | null;
+  }>();
+
+  /**
+   * Calls `listener` whenever a chat's turn changes, as
+   * `TaskChats.onTurnChange` says, from when the dashboard is attached, which
+   * may be after this call. Returns the unsubscribe.
+   */
+  watchTurns(listener: (chatId: string, change: { toolOnly?: boolean }) => void): () => void {
+    const watcher = {
+      listener,
+      stop: this.attached ? this.attached.chats.onTurnChange(listener) : null,
+    };
+    this.turnWatchers.add(watcher);
+    return () => {
+      watcher.stop?.();
+      this.turnWatchers.delete(watcher);
+    };
+  }
+
+  private attachedActivity: ConciergeActivityTracker | null = null;
+
+  /** What each Concierge chat is doing, for its header; null until the events are started. */
+  get activity(): ConciergeActivityTracker | null {
+    return this.attachedActivity;
+  }
+
+  attachActivity(activity: ConciergeActivityTracker | null): void {
+    this.attachedActivity = activity;
   }
 
   /** The dashboard. Throws before the API layer has attached it, which no

@@ -1,6 +1,7 @@
 import { REPLY_TO_TEXT_MAX_LENGTH } from "@rome/api-types/chat";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatMessage } from "@/lib/chat-types";
+import type { ReplyTarget } from "./reply-draft";
 
 /** What a Reply button quotes: one message, or the answer of one agent turn. */
 export interface ReplySource {
@@ -102,4 +103,24 @@ export function lastTextMessage(messages: ChatMessage[]): ChatMessage | undefine
   return messages.findLast((message) =>
     parseMessageEntries(message).some((part) => part.type === "text" && part.content.trim()),
   );
+}
+
+/**
+ * The reply a Reply on `source` picks. A selection inside the message's own
+ * element (`source.scope`, else its `data-timeline-anchor`) becomes the
+ * quote; a message of several bubbles quotes the one bubble.
+ */
+export function replyTargetOf(source: ReplySource): ReplyTarget {
+  const selected = selectedQuote(
+    source.scope?.() ?? findMessageAnchor(document, source.messageId),
+    source.text,
+  );
+  const quote = selected ?? (source.ownBubble ? source.text : undefined);
+  return {
+    messageId: source.messageId,
+    author: source.author,
+    ...(source.name ? { name: source.name } : {}),
+    ...(quote ? { quote } : {}),
+    preview: replyPreview(quote ?? source.text),
+  };
 }

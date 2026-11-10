@@ -225,6 +225,9 @@ function setup(
     openSession: rs.fn(async (chatId: string) => `opened-${chatId}`),
     sendAsGuardian: rs.fn(async () => {}),
     isRunning: rs.fn(() => false),
+    isBusy: rs.fn(() => false),
+    openTool: rs.fn(() => null),
+    onTurnChange: rs.fn(() => () => {}),
     activeTurns: rs.fn(() => []),
     interruptTurn: rs.fn(async () => {}),
   };
@@ -313,6 +316,9 @@ function setup(
       ),
       createSession: rs.fn(async () => {}),
       listProjects: async () => [{ path: "default" }, { path: "rome-oss" }],
+      // The activity's own sources (activity.test.ts covers it).
+      onMessageInserted: () => () => {},
+      awaitingGuardianOf: async () => new Set<string>(),
     },
     tasks,
     approvals: {
@@ -320,6 +326,7 @@ function setup(
         approvalListeners.add(listener);
         return () => approvalListeners.delete(listener);
       },
+      onResolved: () => () => {},
     },
     messages: {
       recent: async (place: Place, limit: number) => {

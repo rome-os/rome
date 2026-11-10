@@ -1521,6 +1521,20 @@ export class WebChatRepository {
     });
   }
 
+  /**
+   * Which of `sessionIds` wait on the guardian, by the same rule as the
+   * `awaitingGuardian` of a listed chat: a card after the last prompt, or a
+   * pending approval in the chat. Ids that name no chat are left out.
+   */
+  async awaitingGuardianOf(sessionIds: readonly string[]): Promise<Set<string>> {
+    if (sessionIds.length === 0) return new Set();
+    const rows = await this.db
+      .select({ id: romeSessions.id, awaiting: this.awaitingGuardianColumn })
+      .from(romeSessions)
+      .where(inArray(romeSessions.id, [...sessionIds]));
+    return new Set(rows.filter((row) => row.awaiting).map((row) => row.id));
+  }
+
   /** Omit ownerKey to list all owners. NULL matches none, and the guardian includes NULL-owned sessions. */
   /** `visibleTo` keeps only the chats that owner may open. */
   async listSessions(

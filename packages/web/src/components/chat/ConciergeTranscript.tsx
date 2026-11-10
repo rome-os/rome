@@ -10,7 +10,7 @@ import type { ChatEntry } from "@/lib/chat-types";
 import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
 import { SessionRenewalNotice } from "./SessionRenewalNotice";
 import type { ChatRow } from "@/components/chat/chat-view";
-import { buildConciergeItems, turnHasSpoken } from "@/components/chat/concierge-groups";
+import { buildConciergeItems, showsTyping } from "@/components/chat/concierge-groups";
 import { useBubbleArrivals } from "@/components/chat/use-bubble-arrivals";
 
 function TypingBubble() {
@@ -54,9 +54,7 @@ export function ConciergeTranscript({
   feedback?: boolean;
 }) {
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
-  // A quiet turn (the agent updating its own list) shows no typing dots until
-  // it says something.
-  const typing = live.isStreaming && (!live.quiet || turnHasSpoken(rows, live.runningTurnId));
+  const typing = showsTyping(rows, live);
   const items = useMemo(() => buildConciergeItems(rows, { typing }), [rows, typing]);
   const messageIds = useMemo(
     () =>

@@ -4,7 +4,8 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rst
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter, useLocation } from "react-router-dom";
+import { Suspense } from "react";
+import { MemoryRouter, Route, Routes, useLocation, useParams } from "react-router-dom";
 import i18n from "@/i18n";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import type { LiveEventsClient } from "@/lib/live-events";
@@ -154,7 +155,7 @@ function textIndex(container: HTMLElement, text: string): number {
 }
 
 describe("RecentChats", () => {
-  it("lists the main chat as Main chat, and keeps Concierge and task chats out of Projects", async () => {
+  it("lists the main chat as Main chat, keeps Concierge chats out of Projects, and puts task chats under their project", async () => {
     concierge.chatId = "concierge";
     const row = (id: string, name: string) => ({
       id,
@@ -178,12 +179,155 @@ describe("RecentChats", () => {
     const entry = await screen.findByRole("link", { name: "Main chat" });
     expect(entry.getAttribute("href")).toBe("/message");
     await screen.findByRole("link", { name: "My own chat" });
-    // A task chat opens from the Tasks list and its task card, not from here.
-    expect(screen.queryByRole("link", { name: /Find flights/ })).toBeNull();
-    expect(screen.queryByRole("link", { name: /Milo|Concierge/ })).toBeNull();
+    const task = await screen.findByRole("link", { name: /Find flights/ });
+    expect(task.getAttribute("href")).toBe("/chat/task-1");
+    expect(screen.queryByRole("link", { name: /^(Milo|Concierge)$/ })).toBeNull();
   });
 
-  it("keeps task chats out of every status filter", async () => {
+  it("gives a task chat's row the same status and menu as a common chat's", async () => {
+    const user = userEvent.setup();
+    const row = (id: string, name: string, extra: Partial<MockSession> = {}) =>
+      ({
+        id,
+        name,
+        createdAt: new Date().toISOString(),
+        activityAt: new Date().toISOString(),
+        lastSeenActivityAt: null,
+        unread: true,
+        running: false,
+        projectName: "default",
+        projectPath: "default",
+        ...extra,
+      }) as MockSession;
+    mockSessions([
+      row("task-1", "Find flights", { triggerKind: "concierge" }),
+      row("mine", "My own chat"),
+    ]);
+    renderRecentChats();
+    const rowOf = async (name: string) =>
+      (await screen.findByRole("link", { name: new RegExp(`^${name}`) })).closest<HTMLElement>(
+        "[data-chat-row]",
+      )!;
+    const shape = async (name: string) => {
+      const chatRow = await rowOf(name);
+      const status =
+        within(chatRow)
+          .queryAllByRole("img")
+          .map((img) => img.getAttribute("aria-label"))
+          .find((label) => !label?.startsWith("Started by")) ?? null;
+      await user.click(within(chatRow).getByRole("button", { name: "Chat actions" }));
+      const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
+      await user.keyboard("{Escape}");
+      return { status, items, className: chatRow.className };
+    };
+    const task = await shape("Find flights");
+    expect(task.status).toBe("Done · new replies");
+    expect(task).toEqual(await shape("My own chat"));
+  });
+
+  it("marks a task chat's row as started by the Concierge, and a common chat's not", async () => {
+    concierge.chatId = "concierge";
+    const row = (id: string, name: string, extra: Partial<MockSession> = {}) =>
+      ({
+        id,
+        name,
+        createdAt: new Date().toISOString(),
+        activityAt: new Date().toISOString(),
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+        ...extra,
+      }) as MockSession;
+    mockSessions(
+      [row("task-1", "Find flights", { triggerKind: "concierge" }), row("mine", "My own chat")],
+      { agentName: "Milo" },
+    );
+    renderRecentChats();
+    const rowOf = async (name: string) =>
+      (await screen.findByRole("link", { name: new RegExp(name) })).closest<HTMLElement>(
+        "[data-chat-row]",
+      )!;
+    const task = await rowOf("Find flights");
+    await waitFor(() =>
+      expect(within(task).getByRole("img", { name: "Started by Milo" })).toBeTruthy(),
+    );
+    const mine = await rowOf("My own chat");
+    expect(within(mine).queryByRole("img", { name: /Started by/ })).toBeNull();
+    expect(mine.querySelectorAll("svg").length).toBe(task.querySelectorAll("svg").length - 1);
+  });
+
+  it("marks the row it opens at once, while the router still holds the old chat", async () => {
+    mockSessions(
+      ["task-1", "mine"].map(
+        (id) =>
+          ({
+            id,
+            name: id === "mine" ? "My own chat" : "Find flights",
+            createdAt: new Date().toISOString(),
+            activityAt: new Date().toISOString(),
+            lastSeenActivityAt: null,
+            unread: false,
+            projectName: "default",
+            projectPath: "default",
+            ...(id === "task-1" ? { triggerKind: "concierge" } : {}),
+          }) as MockSession,
+      ),
+    );
+    // The task chat's page holds its render until released, so the router's
+    // transition stays open, as on a long chat that takes a moment.
+    let release = () => {};
+    let released = false;
+    const held = new Promise<void>((resolve) => {
+      release = () => {
+        released = true;
+        resolve();
+      };
+    });
+    function Page() {
+      const { id } = useParams();
+      if (id === "task-1" && !released) throw held;
+      return null;
+    }
+    render(
+      <QueryClientProvider client={testQueryClient()}>
+        <MemoryRouter initialEntries={["/chat/mine"]}>
+          <RecentChats />
+          <LocationProbe />
+          <Suspense fallback={null}>
+            <Routes>
+              <Route path="/chat/:id" element={<Page />} />
+            </Routes>
+          </Suspense>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const rowOf = async (name: string) =>
+      (await screen.findByRole("link", { name: new RegExp(`^${name}`) })).closest<HTMLElement>(
+        "[data-chat-row]",
+      )!;
+    expect((await rowOf("My own chat")).className).toContain("bg-surface shadow-1");
+    await userEvent.setup().click(await screen.findByRole("link", { name: /^Find flights/ }));
+    expect((await rowOf("Find flights")).className).toContain("bg-surface shadow-1");
+    expect((await rowOf("My own chat")).className).not.toContain("bg-surface shadow-1");
+    expect(screen.getByTestId("location-path").textContent).toBe("/chat/mine");
+
+    // A click back on the open chat before the other one renders: the mark
+    // returns to it.
+    await userEvent.setup().click(await screen.findByRole("link", { name: /^My own chat/ }));
+    expect((await rowOf("My own chat")).className).toContain("bg-surface shadow-1");
+    expect((await rowOf("Find flights")).className).not.toContain("bg-surface shadow-1");
+
+    // Opening the other chat again, and letting it render.
+    await userEvent.setup().click(await screen.findByRole("link", { name: /^Find flights/ }));
+    await act(async () => release());
+    await waitFor(() =>
+      expect(screen.getByTestId("location-path").textContent).toBe("/chat/task-1"),
+    );
+    expect((await rowOf("Find flights")).className).toContain("bg-surface shadow-1");
+  });
+
+  it("applies the status filter to task chats like any other chat", async () => {
     localStorage.setItem("rome-recent-chats-status-filter", "all");
     mockSessions([
       {
@@ -212,7 +356,7 @@ describe("RecentChats", () => {
     ]);
     renderRecentChats();
     await screen.findByRole("link", { name: "Old chat" });
-    expect(screen.queryByRole("link", { name: /Find flights/ })).toBeNull();
+    expect(await screen.findByRole("link", { name: /Find flights/ })).toBeTruthy();
   });
 
   describe("Concierge topic chats", () => {
@@ -480,9 +624,14 @@ describe("RecentChats", () => {
     const user = userEvent.setup();
     const view = renderRecentChats();
     const requestedScope = () =>
-      new URL(String(fetchSpy.mock.calls.at(-1)?.[0]), "http://localhost").searchParams.get(
-        "scope",
-      );
+      new URL(
+        String(
+          fetchSpy.mock.calls
+            .filter(([input]) => String(input).startsWith("/api/chat/sessions"))
+            .at(-1)?.[0],
+        ),
+        "http://localhost",
+      ).searchParams.get("scope");
     await waitFor(() => expect(requestedScope()).toBe("mine"));
     await user.click(screen.getByRole("button", { name: "List settings" }));
     const mine = screen.getByRole("menuitem", { name: "My chats" });
@@ -844,7 +993,8 @@ describe("RecentChats", () => {
 
     it("keeps a start that arrives while the list is loading", async () => {
       let respond!: () => void;
-      rs.spyOn(globalThis, "fetch").mockImplementation((async () => {
+      rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+        if (!String(input).startsWith("/api/chat/sessions")) return Response.json({});
         await new Promise<void>((resolve) => {
           respond = resolve;
         });

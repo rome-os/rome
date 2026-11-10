@@ -12,7 +12,7 @@ import {
 } from "@opentelemetry/sdk-logs";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { createWebchatRuntime } from "./webchat.js";
+import { createWebchatRuntime, openToolOf } from "./webchat.js";
 import { Session } from "../../agent/index.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
@@ -6330,6 +6330,63 @@ describe("Webchat API", () => {
       ordinary.release();
       await ordinary.task;
       await runtime.flushAll();
+    });
+
+    it("names the running turn's open tool, and tells each tool change as tool-only", async () => {
+      const sessionId = "sess-open-tool";
+      await deps.webchatRepo.createSession(sessionId, "Open tool");
+      const { runtime } = createWebchatRuntime(deps);
+      const changes: Array<{ toolOnly?: boolean }> = [];
+      runtime.onTurnChange((_id, change) => changes.push(change));
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const running = runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        await emit({ type: "tool_use", id: "search-1", tool: "WebSearch", input: {} });
+        await gate;
+      });
+      await rs.waitFor(() => expect(runtime.openTool(sessionId)).toBe("WebSearch"));
+      expect(changes.some((change) => change.toolOnly)).toBe(true);
+
+      release();
+      await running;
+      await runtime.flushAll();
+      expect(runtime.openTool(sessionId)).toBeNull();
+    });
+
+    it("reads the open tool off the running stream, not a send queued behind it", () => {
+      const running = { finished: false, openTools: new Map([["search-1", "WebSearch"]]) };
+      const queued = { finished: false, openTools: new Map<string, string>() };
+      expect(openToolOf([running, queued])).toBe("WebSearch");
+      expect(openToolOf([{ ...running, finished: true }, queued])).toBeNull();
+    });
+
+    it("counts a quiet backend turn as busy only once it says something", async () => {
+      const sessionId = "sess-quiet-busy";
+      await deps.webchatRepo.createSession(sessionId, "Quiet busy");
+      const { runtime } = createWebchatRuntime(deps);
+      const changes: string[] = [];
+      runtime.onTurnChange((id) => changes.push(id));
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      const task = runtime.enqueueSessionTask(sessionId, () => gate, { quiet: true });
+      await rs.waitFor(() => expect(runtime.isRunning(sessionId)).toBe(true));
+      expect(runtime.isBusy(sessionId)).toBe(false);
+
+      const told = changes.length;
+      await deps.webchatRepo.addBackendMessage(sessionId, "quiet-turn", [
+        { type: "text", content: "Done." },
+      ]);
+      expect(runtime.isBusy(sessionId)).toBe(true);
+      expect(changes.length).toBeGreaterThan(told);
+
+      release();
+      await task;
+      await runtime.flushAll();
+      expect(runtime.isBusy(sessionId)).toBe(false);
     });
 
     it("emits message_insert when a turn recap row is inserted", async () => {

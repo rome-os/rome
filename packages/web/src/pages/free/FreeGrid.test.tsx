@@ -269,7 +269,9 @@ describe("FreeGrid mobile header", () => {
   const header = (container: HTMLElement) =>
     container.querySelector<HTMLElement>(".header, header[data-mobile-header]")!;
 
-  it("refreshes the main chat header and document title with the chat list closed, including after reconnect", async () => {
+  // The main chat's name is in the chat's own floating header, which reads the
+  // same name as the tab title; the phone bar carries none.
+  it("refreshes the main chat's document title with the chat list closed, including after reconnect", async () => {
     concierge.chatId = "concierge";
     const settings = { agentName: "Flint", guardianLanguage: "en" };
     const client = fakeSocketLiveEventsClient();
@@ -290,8 +292,7 @@ describe("FreeGrid mobile header", () => {
       client,
     );
     try {
-      await waitFor(() => expect(header(container).textContent).toContain("Flint"));
-      expect(document.title).toContain("Flint");
+      await waitFor(() => expect(document.title).toContain("Flint"));
       expect(container.querySelector("[data-phone-chat-list]")).toBeNull();
       expect(container.querySelector("[data-projects-section]")).toBeNull();
       const socket = acceptLatestSocket();
@@ -304,9 +305,8 @@ describe("FreeGrid mobile header", () => {
           data: { agentName: "Pebble" },
         }),
       );
-      await waitFor(() => expect(header(container).textContent).toContain("Pebble"));
-      expect(header(container).textContent).not.toContain("Flint");
-      expect(document.title).toContain("Pebble");
+      await waitFor(() => expect(document.title).toContain("Pebble"));
+      expect(document.title).not.toContain("Flint");
       expect(rs.mocked(fetch).mock.calls.filter(([url]) => url === "/api/settings")).toHaveLength(
         2,
       );
@@ -317,30 +317,30 @@ describe("FreeGrid mobile header", () => {
       act(() => {
         acceptLatestSocket();
       });
-      await waitFor(() => expect(header(container).textContent).toContain("Boulder"));
-      expect(document.title).toContain("Boulder");
+      await waitFor(() => expect(document.title).toContain("Boulder"));
     } finally {
       unmount();
     }
   });
 
-  it("puts the tasks pill beside the Concierge's name", async () => {
+  const moreButton = (container: HTMLElement) =>
+    within(header(container)).findByRole("button", { name: "More actions" });
+
+  it("leaves a Concierge chat's bar without a title, since the chat floats its own header", async () => {
     concierge.chatId = "concierge";
-    const { container } = renderAt("/chat/concierge");
-    await waitFor(() =>
-      expect(header(container).querySelector("[data-concierge-tasks-pill]")).not.toBeNull(),
-    );
-    const pill = header(container).querySelector<HTMLElement>("[data-concierge-tasks-pill]")!;
-    await waitFor(() => expect(pill.getAttribute("data-state")).toBe("needsYou"));
-    expect(pill.getAttribute("aria-label")).toBe("Tasks, 1 needs you");
+    identity.current = { sessionName: "Concierge" };
+    const { container } = renderAt("/chat/concierge", { agentName: "Milo" });
+    await moreButton(container);
+    expect(header(container).textContent).not.toContain("Milo");
+    expect(header(container).textContent).not.toContain("Concierge");
+    expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();
   });
 
-  it("titles the main Concierge chat with the agent's chosen name, and any other chat with its own", async () => {
+  it("names the tab after the main Concierge chat's chosen name, and any other chat after its own", async () => {
     concierge.chatId = "concierge";
     identity.current = { sessionName: "Concierge" };
     const first = renderAt("/chat/concierge", { agentName: "Milo" });
-    await waitFor(() => expect(header(first.container).textContent).toContain("Milo"));
-    expect(header(first.container).textContent).not.toContain("Concierge");
+    await waitFor(() => expect(document.title).toContain("Milo"));
     first.unmount();
 
     identity.current = { sessionName: "Plan the launch" };
@@ -349,45 +349,19 @@ describe("FreeGrid mobile header", () => {
     expect(header(second.container).textContent).not.toContain("Milo");
   });
 
-  it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {
+  it("names the agent's app beside a titled chat", async () => {
     concierge.chatId = "concierge";
-    const pinned = (appLabel: string, agentName: string) => ({
-      appId: appLabel.toLowerCase(),
-      appLabel,
-      agentName,
-      iconUrl: null,
-    });
-    identity.current = {
-      sessionName: "Concierge",
-      pinnedAgentMention: pinned("Rome", "core:concierge"),
-    };
-    const first = renderAt("/chat/concierge");
-    await waitFor(() =>
-      expect(header(first.container).querySelector("[data-concierge-tasks-pill]")).not.toBeNull(),
-    );
-    expect(header(first.container).textContent).not.toContain("Rome");
-    first.unmount();
-
     identity.current = {
       sessionName: "Plan the launch",
-      pinnedAgentMention: pinned("Workflow Studio", "workflow-planner"),
+      pinnedAgentMention: {
+        appId: "workflow-studio",
+        appLabel: "Workflow Studio",
+        agentName: "workflow-planner",
+        iconUrl: null,
+      },
     };
-    const second = renderAt("/chat/some-other-chat");
-    await waitFor(() => expect(header(second.container).textContent).toContain("Workflow Studio"));
-  });
-
-  it("opens the main chat at /message, under the agent's chosen name", async () => {
-    concierge.chatId = "concierge";
-    identity.current = { sessionName: "Concierge" };
-    const { container } = renderAt(
-      "/message",
-      { agentName: "Milo" },
-      <FreeGrid sessionId="concierge" />,
-    );
-    await waitFor(() =>
-      expect(header(container).querySelector("[data-concierge-tasks-pill]")).not.toBeNull(),
-    );
-    await waitFor(() => expect(header(container).textContent).toContain("Milo"));
+    const { container } = renderAt("/chat/some-other-chat");
+    await waitFor(() => expect(header(container).textContent).toContain("Workflow Studio"));
   });
 
   it("offers no Delete for the main chat in the phone header's menu", async () => {
@@ -395,32 +369,15 @@ describe("FreeGrid mobile header", () => {
     identity.current = { sessionName: "Concierge" };
     const user = userEvent.setup();
     const main = renderAt("/message", {}, <FreeGrid sessionId="concierge" />);
-    await user.click(
-      await within(header(main.container)).findByRole("button", { name: "More actions" }),
-    );
+    await user.click(await moreButton(main.container));
     expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
     await user.keyboard("{Escape}");
     main.unmount();
 
     identity.current = { sessionName: "Plan the launch" };
     const other = renderAt("/chat/some-other-chat");
-    await user.click(
-      await within(header(other.container)).findByRole("button", { name: "More actions" }),
-    );
+    await user.click(await moreButton(other.container));
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
-  });
-
-  it("leaves every other chat's header without it", async () => {
-    concierge.chatId = "concierge";
-    const { container } = renderAt("/chat/some-other-chat");
-    await waitFor(() => expect(header(container).querySelector("button")).not.toBeNull());
-    expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();
-  });
-
-  it("leaves the header without it until the main chat is loaded", async () => {
-    const { container } = renderAt("/chat/concierge");
-    await waitFor(() => expect(header(container).querySelector("button")).not.toBeNull());
-    expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();
   });
 });
 

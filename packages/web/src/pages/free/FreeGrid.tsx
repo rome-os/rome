@@ -39,8 +39,6 @@ import { ChatWidget } from "./ChatWidget";
 import { DesktopWidget } from "./DesktopWidget";
 import { ProjectsWidget } from "./ProjectsWidget";
 import { PinnedChatWidget } from "./PinnedChatWidget";
-import { cn } from "@/lib/utils";
-import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
 import { useConciergeChatId, useConciergeChats, useConciergeName } from "@/hooks/use-concierge";
 import { COMPACT_WIDTH, ToolWorkspace } from "./ToolWorkspace";
 import { useToolTrace } from "./tool-trace";
@@ -162,6 +160,47 @@ function ToolsToggle({ unread }: { unread: boolean }) {
       }
       onClick={() => setPaneCollapsed(paneOpen)}
     />
+  );
+}
+
+/** The phone header's "⋯" menu. */
+function MobileChatMenu({
+  chatSessionId,
+  deletable,
+  onShare,
+  onDelete,
+}: {
+  chatSessionId: string | undefined;
+  deletable: boolean;
+  onShare: () => void;
+  onDelete: () => void;
+}) {
+  const { t } = useTranslation("common");
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <IconButton
+          size="md"
+          label={t("nav.more")}
+          icon={<MoreHorizontal />}
+          className="text-muted-foreground hover:text-foreground"
+        />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        {chatSessionId && (
+          <DropdownMenuItem onSelect={onShare}>
+            <Share2 className="size-4" />
+            {t("share.title", { ns: "chat", defaultValue: "Share chat" })}
+          </DropdownMenuItem>
+        )}
+        {deletable ? (
+          <DropdownMenuItem variant="destructive" onSelect={onDelete}>
+            <Trash2 className="size-4" />
+            {t("recentChats.delete")}
+          </DropdownMenuItem>
+        ) : null}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -449,58 +488,41 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
             {/* A portal: it renders in the mobile header, and sits here so it
                 reads the pane's open state. */}
             <SlotContent name="mobileHeader">
-              <div className="flex min-w-0 flex-1 items-center gap-2">
-                <SessionAvatar
-                  iconUrl={pinnedAgentMention?.iconUrl}
-                  label={pinnedAgentMention?.appLabel}
-                  model={model}
-                  reasoningEffort={reasoningEffort}
-                />
-                {sessionLoading ? (
-                  <SessionLoadingTitle />
-                ) : (
-                  <span
-                    className={cn("truncate text-ui text-foreground", isConcierge && "shrink-0")}
-                  >
-                    {chatName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
-                  </span>
-                )}
-                {isConcierge ? <ConciergeTasksPill chatId={chatSessionId ?? null} /> : null}
-                {/* Same label as the desktop navbar, also none for the Concierge. */}
-                {!isConcierge && sessionName?.trim() && pinnedAgentMention && (
-                  <span className="shrink-0 truncate text-aux text-muted-foreground">
-                    {pinnedAgentMention.appLabel}
-                  </span>
-                )}
-              </div>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <IconButton
-                    size="md"
-                    label={t("nav.more")}
-                    icon={<MoreHorizontal />}
-                    className="text-muted-foreground hover:text-foreground"
+              {isConcierge ? (
+                // The chat floats its own header once it shows, and the
+                // shell's bar steps aside for it; until then the bar stays
+                // empty rather than naming the chat twice.
+                <div className="min-w-0 flex-1" />
+              ) : (
+                <div className="flex min-w-0 flex-1 items-center gap-2">
+                  <SessionAvatar
+                    iconUrl={pinnedAgentMention?.iconUrl}
+                    label={pinnedAgentMention?.appLabel}
+                    model={model}
+                    reasoningEffort={reasoningEffort}
                   />
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end">
-                  {chatSessionId && (
-                    <DropdownMenuItem onSelect={() => eventBus.emit("share:start", {})}>
-                      <Share2 className="size-4" />
-                      {t("share.title", { ns: "chat", defaultValue: "Share chat" })}
-                    </DropdownMenuItem>
+                  {sessionLoading ? (
+                    <SessionLoadingTitle />
+                  ) : (
+                    <span className="truncate text-ui text-foreground">
+                      {chatName?.trim() || pinnedAgentMention?.appLabel || t("recentChats.newChat")}
+                    </span>
                   )}
-                  {/* The main chat is never deleted. */}
-                  {isMainConcierge ? null : (
-                    <DropdownMenuItem
-                      variant="destructive"
-                      onSelect={() => void handleDeleteSession()}
-                    >
-                      <Trash2 className="size-4" />
-                      {t("recentChats.delete")}
-                    </DropdownMenuItem>
+                  {/* Same label as the desktop navbar. */}
+                  {sessionName?.trim() && pinnedAgentMention && (
+                    <span className="shrink-0 truncate text-aux text-muted-foreground">
+                      {pinnedAgentMention.appLabel}
+                    </span>
                   )}
-                </DropdownMenuContent>
-              </DropdownMenu>
+                </div>
+              )}
+              <MobileChatMenu
+                chatSessionId={chatSessionId}
+                // The main chat is never deleted.
+                deletable={!isMainConcierge}
+                onShare={() => eventBus.emit("share:start", {})}
+                onDelete={() => void handleDeleteSession()}
+              />
               <ToolsToggle unread={toolView.unreadIds.length > 0} />
             </SlotContent>
           </ToolWorkspace>

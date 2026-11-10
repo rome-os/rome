@@ -11,6 +11,10 @@ import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
 import { requestConciergeJump } from "@/components/concierge/concierge-jump";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
+import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
+import { SlotProvider, useSlotOutlet } from "@/components/slot";
+import { CONCIERGE_LEADING_SLOT } from "@/components/concierge/ConciergeHeaderStatus";
+import { ToolTasksContext, type ToolTasksHost } from "@/pages/free/tool-tasks";
 import { Chat } from "./Chat";
 import enChat from "@/i18n/locales/en/chat.json";
 import zhChat from "@/i18n/locales/zh-CN/chat.json";
@@ -62,8 +66,11 @@ rs.mock("@/hooks/use-tab-status", () => ({
   useChatTabStatus: mockUseChatTabStatus,
 }));
 
+// `initReactI18next` too: any module that loads the app's i18n setup passes
+// it to `i18next.use()`, which throws on an undefined plugin.
 rs.mock("react-i18next", () => ({
   useTranslation: () => ({ t }),
+  initReactI18next: { type: "3rdParty", init: () => {} },
 }));
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({
@@ -81,9 +88,15 @@ rs.mock("@/components/chat/use-session-identity", () => ({
   useSessionIdentity: mockUseSessionIdentity,
 }));
 
-// The pill is tested on its own; here only whether the navbar offers it.
-rs.mock("@/components/concierge/ConciergeTasksPill", () => ({
-  ConciergeTasksPill: () => <span data-testid="tasks-pill" />,
+// The activity and the task list are tested on their own; here only what the
+// header shows of them.
+const mockConciergeActivity = rs.hoisted(() => rs.fn((): ConciergeActivity => ({ kind: "idle" })));
+rs.mock("@/components/concierge/use-concierge-activity", () => ({
+  useConciergeActivity: mockConciergeActivity,
+}));
+const mockOpenTaskList = rs.hoisted(() => rs.fn());
+rs.mock("@/components/concierge/ConciergeTaskList", () => ({
+  useConciergeTaskList: () => ({ open: mockOpenTaskList, sheet: null }),
 }));
 
 rs.mock("@/pages/free/workspace-context", () => ({
@@ -470,6 +483,7 @@ class MockEventSource {
 }
 
 beforeEach(() => {
+  mockConciergeActivity.mockReturnValue({ kind: "idle" });
   appsPanel.collapsed = true;
   stickToBottom.isAtBottom = true;
   mockUseSessionIdentity.mockReturnValue({
@@ -2095,24 +2109,139 @@ describe("Chat Concierge empty state", () => {
     expect(guidance()).toBeNull();
   });
 
-  it("puts the tasks pill in the navbar beside the Concierge's name, and in no other chat's", async () => {
+  it("gives the phone shell its bar back while the tool pane covers a Concierge chat", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const seen: { outlet: boolean } = { outlet: false };
+    function ShellProbe() {
+      seen.outlet = useSlotOutlet(CONCIERGE_LEADING_SLOT);
+      return null;
+    }
+    const tasksHost = (compact: boolean): ToolTasksHost => ({
+      active: false,
+      compact,
+      show: rs.fn(),
+      hide: rs.fn(),
+    });
+    const at = (compact: boolean, paneOpen: boolean) => (
+      <SlotProvider>
+        <ShellProbe />
+        <ToolTasksContext.Provider value={tasksHost(compact)}>
+          <ToolTraceContext.Provider
+            value={{
+              outlet: null,
+              paneOpen,
+              setPaneCollapsed: rs.fn(),
+              reveal: rs.fn(),
+              set: rs.fn(),
+            }}
+          >
+            <Chat sessionId="concierge" variant="concierge" />
+          </ToolTraceContext.Provider>
+        </ToolTasksContext.Provider>
+      </SlotProvider>
+    );
+    const view = render(<MemoryRouter>{at(true, false)}</MemoryRouter>);
+    // Chat on screen: its floating header takes the shell's buttons.
+    await waitFor(() => expect(seen.outlet).toBe(true));
+
+    // The pane fills a narrow screen in place of the chat: the shell's bar is the way back.
+    view.rerender(<MemoryRouter>{at(true, true)}</MemoryRouter>);
+    await waitFor(() => expect(seen.outlet).toBe(false));
+
+    // Beside the chat on a wide screen, the pane hides nothing.
+    view.rerender(<MemoryRouter>{at(false, true)}</MemoryRouter>);
+    await waitFor(() => expect(seen.outlet).toBe(true));
+  });
+
+  it("floats the Concierge's header over its messages: the mascot's badge, a name pill and round buttons", async () => {
+    mockConciergeActivity.mockReturnValue({ kind: "tasks", title: "Book the flight", more: 0 });
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
       pinnedAgentMention: null,
       archivedAt: null,
     });
     const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
-    const pill = await screen.findByTestId("tasks-pill");
-    const name = screen.getByText("Concierge");
-    expect(name.compareDocumentPosition(pill) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    expect(name.parentElement).toBe(pill.parentElement);
-    // The name keeps its width beside the pill; the label after it gives way.
-    expect(name.className).toContain("shrink-0");
+    const header = await waitFor(() => {
+      const found = document.querySelector<HTMLElement>("[data-concierge-header]");
+      if (!found) throw new Error("no header");
+      return found;
+    });
+    // No bar: it sits over the messages, which start below it.
+    expect(header.className).toContain("absolute");
+    expect(header.className).not.toMatch(/\bbg-|\bborder-b\b/);
+    const scroller = header.parentElement!.querySelector<HTMLElement>(".overflow-y-auto")!;
+    expect(scroller.className).toContain("concierge-header-clear");
+    const badge = header.querySelector<HTMLElement>("[data-concierge-header-badge]")!;
+    const pill = header.querySelector<HTMLElement>("[data-concierge-header-pill]")!;
+    expect(badge.querySelector(".rome-mascot")).not.toBeNull();
+    expect(badge.className).toContain("rounded-full");
+    expect(within(pill).getByText("Concierge")).toBeTruthy();
+    expect(within(pill).getByText("concierge.activity.tasks")).toBeTruthy();
+    expect(
+      header.querySelector("[data-concierge-header-status]")!.getAttribute("data-activity"),
+    ).toBe("tasks");
+    const more = within(header).getByRole("button", { name: "navbar.more" });
+    expect(more.className).toContain("rounded-full");
+    // The buttons share the badge's row, so they centre on the mascot.
+    expect(badge.className).toContain("row-start-1");
+    expect(more.closest<HTMLElement>(".col-start-3")!.className).toContain("row-start-1");
+    expect(document.querySelector("[data-concierge-tasks-pill]")).toBeNull();
     view.unmount();
 
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Plan the launch",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
     renderChat(<Chat sessionId="session-1" />);
-    await waitFor(() => expect(listSessionMessages).toHaveBeenCalled());
-    expect(screen.queryByTestId("tasks-pill")).toBeNull();
+    expect(await screen.findByText("Plan the launch")).toBeTruthy();
+    expect(document.querySelector("[data-concierge-header]")).toBeNull();
+    expect(screen.getByRole("button", { name: "navbar.more" }).className).not.toContain(
+      "rounded-full",
+    );
+  });
+
+  it("says what the Concierge is doing under its name", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    mockConciergeActivity.mockReturnValue({ kind: "tool", tool: "startingTask" });
+    const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    expect(await screen.findByText("concierge.activity.tool.startingTask")).toBeTruthy();
+    view.unmount();
+
+    mockConciergeActivity.mockReturnValue({ kind: "needsYou" });
+    const waiting = renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    expect((await screen.findByText("concierge.activity.needsYou")).className).toContain(
+      "text-warning-fg",
+    );
+    waiting.unmount();
+
+    // Idle, the line is there for a screen reader only.
+    mockConciergeActivity.mockReturnValue({ kind: "idle" });
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    expect((await screen.findByText("concierge.activity.idle")).className).toContain("sr-only");
+  });
+
+  it("opens the task list from a plain Tasks item in a Concierge chat's menu", async () => {
+    const user = userEvent.setup();
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Calendar",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    renderChat(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    const item = screen.getByRole("menuitem", { name: "concierge.tasks.title" });
+    expect(item.textContent).toBe("concierge.tasks.title");
+    await user.click(item);
+    expect(mockOpenTaskList).toHaveBeenCalledTimes(1);
   });
 
   it("offers no Archive or Delete for the main chat, and both for a topic chat", async () => {
@@ -2127,6 +2256,7 @@ describe("Chat Concierge empty state", () => {
     );
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
+      "concierge.tasks.title",
       "share.title",
     ]);
     await user.keyboard("{Escape}");
@@ -2143,7 +2273,7 @@ describe("Chat Concierge empty state", () => {
     expect(screen.getByRole("menuitem", { name: "navbar.delete" })).toBeTruthy();
   });
 
-  it("titles the main Concierge chat with the agent's chosen name, and a topic chat with its own", async () => {
+  it("heads the main chat and a topic chat alike, with the agent's chosen name", async () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
       pinnedAgentMention: null,
@@ -2152,8 +2282,7 @@ describe("Chat Concierge empty state", () => {
     const main = renderChat(
       <Chat sessionId="concierge" variant="concierge" conciergeName="Milo" />,
     );
-    await screen.findByTestId("tasks-pill");
-    expect(screen.getByText("Milo")).toBeTruthy();
+    expect(await screen.findByText("Milo")).toBeTruthy();
     expect(screen.queryByText("Concierge")).toBeNull();
     main.unmount();
 
@@ -2170,9 +2299,8 @@ describe("Chat Concierge empty state", () => {
         conciergeName="Milo"
       />,
     );
-    await screen.findByTestId("tasks-pill");
-    expect(screen.getByText("Calendar")).toBeTruthy();
-    expect(screen.queryByText("Milo")).toBeNull();
+    expect(await screen.findByText("Milo")).toBeTruthy();
+    expect(screen.queryByText("Calendar")).toBeNull();
   });
 
   it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {
@@ -2188,7 +2316,7 @@ describe("Chat Concierge empty state", () => {
       archivedAt: null,
     });
     const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
-    await screen.findByTestId("tasks-pill");
+    await screen.findByText("Concierge");
     expect(screen.queryByText("Rome")).toBeNull();
     view.unmount();
 
@@ -2254,6 +2382,25 @@ describe("Chat Concierge jump to a message", () => {
     expect(anchor("m-2")?.hasAttribute("data-timeline-landed")).toBe(true);
     expect(toast.loading).not.toHaveBeenCalled();
     expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
+  });
+
+  it("lands a jumped-to message below the floating header, not under it", async () => {
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: [message(1), message(2)],
+      nextCursor: null,
+    });
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(rows()).toBe(2));
+    const scroller = document.querySelector<HTMLElement>(".concierge-header-clear")!;
+    // jsdom applies no stylesheet: stand in for the header's scroll padding.
+    scroller.style.scrollPaddingTop = "112px";
+    scroller.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+    Object.defineProperty(scroller, "scrollTop", { value: 1000, configurable: true });
+    anchor("m-2")!.getBoundingClientRect = () => ({ top: 500 }) as DOMRect;
+
+    act(() => requestConciergeJump("m-2"));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1000 + 500 - 112 - 24, behavior: "auto" });
   });
 
   it("pages older history in until the message renders, says so meanwhile, then jumps", async () => {
