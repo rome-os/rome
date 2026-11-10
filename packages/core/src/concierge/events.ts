@@ -510,6 +510,11 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
       movedBy.set(sessionId, moved);
       return moved;
     },
+    forgetChatsMovedTo: (chatId) => {
+      for (const [sessionId, moved] of movedBy) {
+        if (moved.includes(chatId)) movedBy.delete(sessionId);
+      }
+    },
   });
   service.attachActivity(tracker);
 

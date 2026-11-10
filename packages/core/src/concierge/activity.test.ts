@@ -163,6 +163,7 @@ function world() {
     ["main", "guardian"],
     ["topic", "guardian"],
   ]);
+  const movedBy = new Map<string, string[]>();
   const sources: ConciergeActivitySources = {
     now: () => now,
     isRunning: (id) => running.has(id),
@@ -179,10 +180,19 @@ function world() {
     ownerOf: async (chatId) => chats.get(chatId) ?? null,
     chatsOf: async (owner) =>
       [...chats.entries()].filter(([, who]) => who === owner).map(([id]) => id),
+    // Cached as events.ts caches it: a row write forgets its session's answer.
     chatsMovedBy: async (sessionId) => {
-      if (chats.has(sessionId)) return [sessionId];
+      const known = movedBy.get(sessionId);
+      if (known) return known;
       const row = rows.find((candidate) => candidate.chatId === sessionId);
-      return row ? [row.conciergeChat] : [];
+      const moved = chats.has(sessionId) ? [sessionId] : row ? [row.conciergeChat] : [];
+      movedBy.set(sessionId, moved);
+      return moved;
+    },
+    forgetChatsMovedTo: (chatId) => {
+      for (const [sessionId, moved] of movedBy) {
+        if (moved.includes(chatId)) movedBy.delete(sessionId);
+      }
     },
   };
   const tracker = new ConciergeActivityTracker(sources);
@@ -204,6 +214,7 @@ function world() {
     pending,
     rows,
     chats,
+    movedBy,
     advance: (ms: number) => {
       now += ms;
       rs.advanceTimersByTime(ms);
@@ -387,6 +398,7 @@ describe("ConciergeActivityTracker", () => {
 
     // The task is pointed at a message of the main chat.
     row.conciergeChat = "main";
+    w.movedBy.delete("task-1");
     await w.tracker.taskChanged("t1", "main");
     expect(w.last("main")).toEqual({ kind: "needsYou" });
     w.advance(IDLE_GRACE_MS);
@@ -400,6 +412,36 @@ describe("ConciergeActivityTracker", () => {
     await flush();
     expect(w.last("main")).toEqual({ kind: "idle" });
     expect(w.last("topic")).toEqual({ kind: "idle" });
+  });
+
+  it("moves a finished task's resumed chat to the main chat when its topic chat is retired", async () => {
+    const w = world();
+    await flush();
+    const row = {
+      id: "t1",
+      title: "Old trip",
+      chatId: "task-1",
+      updatedAt: 5,
+      conciergeChat: "topic",
+    };
+    w.rows.push(row);
+    w.running.add("task-1");
+    await w.tracker.sessionChanged("task-1");
+    expect(w.last("topic")).toEqual({ kind: "tasks", title: "Old trip", more: 0 });
+
+    // The topic is archived. The finished row is not written, but it is now
+    // the main chat's, as the panel reads it.
+    w.chats.delete("topic");
+    row.conciergeChat = "main";
+    await w.tracker.retired("topic", "main");
+    expect(w.last("topic")).toEqual({ kind: "idle" });
+    expect(w.last("main")).toEqual({ kind: "tasks", title: "Old trip", more: 0 });
+
+    // Its task chat's next change reaches the main chat, not the retired one.
+    w.running.delete("task-1");
+    w.awaiting.add("task-1");
+    await w.tracker.sessionChanged("task-1");
+    expect(w.last("main")).toEqual({ kind: "needsYou" });
   });
 
   it("says its own turn's work over a fresh wait, and the wait once the turn ends", async () => {

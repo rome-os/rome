@@ -481,6 +481,13 @@ export class ConciergeService {
     const follows = (await this.attachedFollowing?.moveToMainChat(chatId, storedChatId(main))) ?? 0;
     const tasks = await this.deps.tasks.repo.moveToMainChat(chatId, storedChatId(main));
     log.info("concierge chat retired", { chatId, how, follows, tasks });
+    // Finished rows stay on the topic chat, so no row write tells the
+    // activity that their task chats now move the main chat.
+    await this.activity?.retired(chatId, main).catch((error: unknown) =>
+      log.warn("concierge activity retire failed", {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
     if (follows === 0 && tasks === 0) return;
     void this.runSystemTurn(
       main,
