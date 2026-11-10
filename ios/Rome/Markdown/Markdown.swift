@@ -340,6 +340,23 @@ enum CJKEmphasis {
                     }
                 }
                 index = found ?? index + ticks
+            } else if character == "]", index + 1 < chars.count, chars[index + 1] == "(" {
+                // A link's destination keeps its asterisks.
+                var depth = 0
+                var end = index + 1
+                while end < chars.count {
+                    if chars[end] == "(" { depth += 1 }
+                    if chars[end] == ")" { depth -= 1; if depth == 0 { break } }
+                    end += 1
+                }
+                index = end + 1
+            } else if character == "<", let close = chars[index...].firstIndex(where: { $0 == ">" || $0.isWhitespace }),
+                      chars[close] == ">", chars[index..<close].contains(where: { $0 == ":" || $0 == "@" }) {
+                // An autolink, `<https://…>`, keeps them too.
+                index = close + 1
+            } else if Self.startsURL(chars, at: index) {
+                // So does a bare URL, up to the next space.
+                while index < chars.count, !chars[index].isWhitespace { index += 1 }
             } else if character == "*" {
                 var length = 0
                 while index + length < chars.count, chars[index + length] == "*" { length += 1 }
@@ -367,6 +384,10 @@ enum CJKEmphasis {
                 open.append(run)
             }
         }
+        // Only pairs beside CJK need the relaxed rule; the parser takes the rest.
+        pairs = pairs.filter { opener, closer in
+            isCJK(opener.before) || isCJK(opener.after) || isCJK(closer.before) || isCJK(closer.after)
+        }
         guard !pairs.isEmpty else { return text }
         // Right to left, so earlier offsets stay valid.
         var edits: [(Run, [Character])] = []
@@ -384,6 +405,16 @@ enum CJKEmphasis {
             chars.replaceSubrange(run.start..<run.start + run.length, with: replacement)
         }
         return String(chars)
+    }
+
+    /// Whether a bare URL starts at `index`.
+    private static func startsURL(_ chars: [Character], at index: Int) -> Bool {
+        guard index == 0 || chars[index - 1].isWhitespace || chars[index - 1] == "(" else { return false }
+        for scheme in ["https://", "http://", "www."] {
+            let prefix = Array(scheme)
+            if index + prefix.count <= chars.count, Array(chars[index..<index + prefix.count]) == prefix { return true }
+        }
+        return false
     }
 
     /// Turns the marks `mark` left into emphasis, and removes them.

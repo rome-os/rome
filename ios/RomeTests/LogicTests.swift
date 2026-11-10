@@ -208,6 +208,21 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
         #expect(result.runs.contains { $0.link != nil })
     }
 
+    /// Asterisks in a link's destination, an autolink or a bare URL are the
+    /// URL's, never emphasis.
+    @Test func cjkBoldLeavesURLsAlone() {
+        let link = MarkdownParser.inline("**中文。** [link](https://example.com/a*b*c)")
+        #expect(String(link.characters) == "中文。 link")
+        #expect(link.runs.contains { $0.link?.absoluteString == "https://example.com/a*b*c" })
+        #expect(spans("**中文。** [link](https://example.com/a*b*c)", .stronglyEmphasized) == ["中文。"])
+        let bare = MarkdownParser.inline("**看这里。**https://example.com/x*y*z 好")
+        #expect(String(bare.characters).contains("https://example.com/x*y*z"))
+        let auto = MarkdownParser.inline("**看这里。**<https://example.com/x*y*z>")
+        #expect(String(auto.characters).contains("x*y*z"))
+        // A Latin pair beside a CJK one is left to the parser as it is.
+        #expect(spans("**粗体。**和 *italic* 字", .emphasized) == ["italic"])
+    }
+
     @Test func latinEmphasisUnchanged() {
         #expect(spans("Some **bold** and *italic* text", .stronglyEmphasized) == ["bold"])
         #expect(spans("Some **bold** and *italic* text", .emphasized) == ["italic"])

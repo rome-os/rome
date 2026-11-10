@@ -244,6 +244,7 @@ struct MainShell: View {
             showTasks = false
             showSettings = false
             page = nil
+            settingsPage = nil
             closeDrawer()
             show(request.topicId.map(MainSection.topic) ?? .chat)
         }

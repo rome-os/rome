@@ -261,7 +261,11 @@ enum TranscriptBuilder {
                 continue
             }
             lines[root] = count
-            let interrupted = shown[(rootIndex + 1)..<newest].contains { $0.chatThreadId != root }
+            // Between the two, whichever comes first: a reply can sort
+            // before its root when they were written in the same second.
+            let first = min(rootIndex, newest), last = max(rootIndex, newest)
+            guard last > first + 1 else { continue }
+            let interrupted = shown[(first + 1)..<last].contains { $0.chatThreadId != root && $0.id != root }
             if interrupted { lines[shown[newest].id] = count }
         }
         return lines

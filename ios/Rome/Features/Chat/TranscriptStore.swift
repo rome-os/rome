@@ -337,7 +337,7 @@ final class TranscriptStore {
     /// threads cannot tell, so there Reply opens the thread as before.
     func reply(to messageId: String) {
         guard kind == .concierge, let message = message(messageId) else { return }
-        if Self.quotes(message, among: messages) {
+        if Self.quotes(message, among: messages, instanceKnowsThreads: instanceKnowsThreads) {
             closeThread()
             quote = ThreadTarget(messageId: messageId, instanceKnowsThreads: true, quote: true)
         } else {
@@ -346,8 +346,10 @@ final class TranscriptStore {
     }
 
     /// Whether Reply on `message` quotes it rather than opening a thread.
-    nonisolated static func quotes(_ message: ChatMessage, among messages: [ChatMessage]) -> Bool {
-        message.knowsThreads && message.chatThreadId == nil && !messages.contains { $0.chatThreadId == message.id }
+    /// A live insert leaves `chatThreadId` out, so whether the instance has
+    /// chat threads is the chat's to say, not the one message's.
+    nonisolated static func quotes(_ message: ChatMessage, among messages: [ChatMessage], instanceKnowsThreads: Bool = false) -> Bool {
+        (instanceKnowsThreads || message.knowsThreads) && message.chatThreadId == nil && !messages.contains { $0.chatThreadId == message.id }
     }
 
     func cancelQuote() {

@@ -109,6 +109,13 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(lines([message("legacy", at: 0), message("u", role: "user", at: 10, thread: "legacy")]) == ["legacy": 1])
     }
 
+    /// A reply written in the same second as its root can sort before it:
+    /// no trap, and the root's line still shows.
+    @Test func aReplySortedBeforeItsRootIsCounted() {
+        #expect(lines([message("a", at: 0, thread: "r"), message("r", role: "user", at: 0, thread: "r")]) == ["r": 1])
+        #expect(lines([message("a", at: 0, thread: "r"), message("x", role: "user", at: 0), message("r", role: "user", at: 0, thread: "r")]) == ["r": 1, "a": 1])
+    }
+
     /// Two threads each carry their own.
     @Test func eachThreadHasItsOwn() {
         let messages = [
@@ -310,6 +317,8 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(!TranscriptStore.quotes(inside, among: all))
         // An instance before chat threads cannot tell: Reply opens the thread, as before.
         #expect(!TranscriptStore.quotes(message("old", at: 0, knows: false), among: []))
+        // A live insert leaves the field out; the chat knows the instance has threads.
+        #expect(TranscriptStore.quotes(message("live", at: 0, knows: false), among: [], instanceKnowsThreads: true))
     }
 
     @Test func aQuoteStaysInTheChatAndSendsToTheMessagesThread() async {
