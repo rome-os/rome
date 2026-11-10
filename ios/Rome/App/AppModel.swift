@@ -802,22 +802,19 @@ final class AppModel {
         await openInstance(preferring: currentInstanceID)
     }
 
-    /// Only the guardian can update the instance, so only the guardian's
-    /// workspace is checked: a visitor gets no page, banner or drawer line.
-    static func offersUpdates(to workspace: Workspace) -> Bool { !workspace.isVisitor }
-
     private func open(_ workspace: Workspace) async {
         self.workspace = workspace
         syncLanguage()
         // Its own task: the poll that reports the finish is cancelled when the
         // reopened workspace attaches, and would cancel the reopen with it.
         update.onFinished = { [weak self] in Task { await self?.reopenAfterUpgrade() } }
-        // Updating the instance is the guardian's call: a visitor never sees
-        // the page, the banner or the drawer's line.
+        // The role first, so the screens know a visitor from the start. Both
+        // get the same update flow: the instance lets a visitor on its
+        // allow-list check and start an upgrade, as the dashboard does.
         await workspace.readRole()
         // Signed out, or another workspace opened, while it read.
         guard self.workspace === workspace else { return }
-        if let id = currentInstanceID, Self.offersUpdates(to: workspace) {
+        if let id = currentInstanceID {
             Task { await update.attach(backend: workspace.backend, instanceID: id) }
             // Hold the loading state briefly for the check, so a Rome below the
             // app's minimum goes straight to the update page instead of showing

@@ -365,24 +365,28 @@ final class Counter: @unchecked Sendable {
         #expect(updater.offered == "1.1.190")
     }
 
-    /// A visitor cannot update: their workspace is never checked, so no page,
-    /// banner or drawer line.
-    @Test func visitorsAreNotOffered() async {
+    /// A visitor gets the guardian's update flow: the offer, and a start
+    /// the instance accepts from them.
+    @Test func visitorsAreOfferedAndCanStart() async {
         let backend = FakeBackend()
+        backend.identity = .success(AccountIdentity(name: "Visitor", isGuardian: false))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.189"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
         let drafts = DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-soft-\(UUID().uuidString)/Drafts"), instance: "t")
-        let guardianSpace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
-        backend.identity = .success(AccountIdentity(name: "Owner", isGuardian: true))
-        await guardianSpace.readRole()
-        #expect(AppModel.offersUpdates(to: guardianSpace))
-
-        let visitorBackend = FakeBackend()
-        visitorBackend.identity = .success(AccountIdentity(name: "Visitor", isGuardian: false))
-        let visitorSpace = Workspace(backend: visitorBackend, instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
+        let visitorSpace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
         await visitorSpace.readRole()
-        #expect(!AppModel.offersUpdates(to: visitorSpace))
-        // What a visitor's never-attached updater shows.
-        let idle = updater(defaults())
-        #expect(!idle.blocking && idle.offered == nil && !idle.showsBanner)
+        #expect(visitorSpace.isVisitor)
+        let updater = updater(defaults())
+        await updater.attach(backend: visitorSpace.backend, instanceID: "i1")
+        #expect(updater.offered == "1.1.190" && updater.showsBanner)
+        updater.openPage()
+        #expect(updater.blocking && updater.canClose)
+        await updater.updateNow()
+        if case .updating(let target, _) = updater.state {
+            #expect(target == "1.1.190")
+        } else {
+            Issue.record("the visitor's start did not go through: \(updater.state)")
+        }
+        updater.reset()
     }
 }
 
