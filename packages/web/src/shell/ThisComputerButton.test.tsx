@@ -340,9 +340,9 @@ describe("ThisComputerButton", () => {
       const notifications = await screen.findByRole("switch", { name: "Notifications" });
       await userEvent.click(notifications);
       await waitFor(() => expect(notifications.hasAttribute("disabled")).toBe(true));
-      expect(
-        screen.getByRole("switch", { name: "Computer use" }).hasAttribute("disabled"),
-      ).toBe(true);
+      expect(screen.getByRole("switch", { name: "Computer use" }).hasAttribute("disabled")).toBe(
+        true,
+      );
       act(() => finish(split("connected", true, false)));
       await waitFor(() => expect(notifications.hasAttribute("disabled")).toBe(false));
     });
