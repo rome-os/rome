@@ -171,8 +171,8 @@ struct UpdateScreen: View {
             .transition(.opacity)
         default:
             VStack(spacing: 8) {
-                // The Rome by name, never read as an update to this app.
-                Text(verbatim: UpdateCopy.action(instanceName))
+                // Names Rome, so no one reads it as an update to this app.
+                Text("Update Rome")
                     .romeFont(28, .bold)
                     .lineLimit(1)
                     .tracking(-0.7)

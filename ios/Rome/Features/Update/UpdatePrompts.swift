@@ -13,7 +13,6 @@ enum UpdateCopy {
     }
 
     static func banner(_ name: String) -> String { String(localized: "\(shortName(name)) has an update") }
-    static func action(_ name: String) -> String { String(localized: "Update \(shortName(name))") }
     static func updated(_ name: String, version: String) -> String { String(localized: "\(shortName(name)) updated to \(version)") }
 
     /// The Agent's name as the chat header shows it, or Rome before it is known.
@@ -111,7 +110,8 @@ struct UpdatePill: View {
 /// the accent on a light tint, shaped like the drawer's rows, never raised
 /// like the selected one. It opens the update page.
 struct DrawerUpdateRow: View {
-    let instanceName: String
+    /// The Agent's display name, as the Chat pill names it.
+    let agentName: String?
     let action: () -> Void
 
     var body: some View {
@@ -120,7 +120,7 @@ struct DrawerUpdateRow: View {
                 Image(systemName: "arrow.down.circle")
                     .romeFont(16, .medium)
                     .frame(width: 22)
-                Text(verbatim: UpdateCopy.action(instanceName))
+                Text(verbatim: UpdateCopy.banner(UpdateCopy.agent(agentName)))
                     .romeFont(15, .medium)
                     .lineLimit(1)
                 Spacer(minLength: 4)

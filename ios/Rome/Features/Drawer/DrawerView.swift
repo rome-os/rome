@@ -79,7 +79,7 @@ struct DrawerView: View {
 
             // The open Rome behind its latest release, for a guardian and a visitor alike.
             if model.update.offered != nil {
-                DrawerUpdateRow(instanceName: workspace.instanceName, action: onUpdate)
+                DrawerUpdateRow(agentName: workspace.agentName, action: onUpdate)
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
             }

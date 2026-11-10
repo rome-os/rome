@@ -289,7 +289,11 @@ struct SettingsScreen: View {
                     }
                     HStack(spacing: 6) {
                         Circle().fill(Palette.success).frame(width: 7, height: 7)
-                        Text(verbatim: InstanceLine.text(host: workspace.host, version: model.update.runningVersion)).lineLimit(1)
+                        // The version first: a long domain is cut, never the version.
+                        if let version = InstanceLine.version(model.update.runningVersion) {
+                            Text(verbatim: "\(version) ·").fixedSize()
+                        }
+                        Text(verbatim: workspace.host).lineLimit(1).truncationMode(.middle)
                     }
                     .romeFont(14)
                     .foregroundStyle(Palette.sub)
@@ -480,11 +484,17 @@ struct FeedbackSheet: View {
     }
 }
 
-/// The second line of the Settings header: the instance's domain and the
-/// release it runs, once the update check has said. No placeholder before.
+/// The second line of the Settings header: the release the instance runs,
+/// once the update check has said, then its domain. No placeholder before.
 enum InstanceLine {
+    /// "v1.1.190", or nil before the check says.
+    static func version(_ version: String?) -> String? {
+        guard let version = version?.trimmingCharacters(in: .whitespaces), !version.isEmpty else { return nil }
+        return version.hasPrefix("v") ? version : "v" + version
+    }
+
     static func text(host: String, version: String?) -> String {
-        guard let version = version?.trimmingCharacters(in: .whitespaces), !version.isEmpty else { return host }
-        return "\(host) · \(version.hasPrefix("v") ? version : "v" + version)"
+        guard let version = self.version(version) else { return host }
+        return "\(version) · \(host)"
     }
 }

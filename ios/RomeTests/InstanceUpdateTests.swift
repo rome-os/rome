@@ -268,7 +268,7 @@ final class Counter: @unchecked Sendable {
     /// The prompts name the Rome, never this app, on one line.
     @Test func thePromptsNameTheRome() {
         #expect(UpdateCopy.banner("My Rome") == "My Rome has an update")
-        #expect(UpdateCopy.action("Team Rome") == "Update Team Rome")
+        #expect(UpdateCopy.agent(nil) == "Rome" && UpdateCopy.agent(" ") == "Rome" && UpdateCopy.agent("Milo") == "Milo")
         #expect(UpdateCopy.shortName("  Short  ") == "Short")
         let long = UpdateCopy.shortName("The Kyoto planning and family Rome")
         #expect(long.count == UpdateCopy.nameLimit)
@@ -297,8 +297,8 @@ final class Counter: @unchecked Sendable {
     /// the check says; the domain alone before, with no placeholder.
     @Test func settingsNamesTheRunningRelease() async {
         #expect(InstanceLine.text(host: "yo.romeos.cc", version: nil) == "yo.romeos.cc")
-        #expect(InstanceLine.text(host: "yo.romeos.cc", version: "1.1.190") == "yo.romeos.cc · v1.1.190")
-        #expect(InstanceLine.text(host: "yo.romeos.cc", version: "v1.1.190") == "yo.romeos.cc · v1.1.190")
+        #expect(InstanceLine.text(host: "yo.romeos.cc", version: "1.1.190") == "v1.1.190 · yo.romeos.cc")
+        #expect(InstanceLine.text(host: "yo.romeos.cc", version: "v1.1.190") == "v1.1.190 · yo.romeos.cc")
         let backend = FakeBackend()
         backend.check = .success(UpgradeCheck(current: .init(version: "1.1.189"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
         let updater = updater(defaults())

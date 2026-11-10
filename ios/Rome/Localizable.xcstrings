@@ -3343,12 +3343,12 @@
         }
       }
     },
-    "Update %@" : {
+    "Update Rome" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "更新 %@"
+            "value" : "更新 Rome"
           }
         }
       }
