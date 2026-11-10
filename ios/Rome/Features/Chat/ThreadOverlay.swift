@@ -171,10 +171,13 @@ struct ThreadRepliesLine: View {
                 .romeFont(13, .medium)
                 .foregroundStyle(Palette.sub)
                 .padding(.horizontal, 6)
-                .frame(minHeight: 28)
+                .padding(.vertical, 8)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Tight under its bubble: the tap area keeps its height, the line
+        // takes only its text's.
+        .padding(.vertical, -8)
         .frame(maxWidth: .infinity, alignment: guardian ? .trailing : .leading)
         .padding(.leading, guardian ? 0 : 8)
     }
