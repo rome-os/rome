@@ -198,3 +198,27 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(store.thread == nil)
     }
 }
+
+/// The main chat's header names the Concierge as the dashboard does.
+@MainActor
+@Suite struct AgentNameTests {
+    @Test func theNameIsTrimmedAndBlankFallsBack() {
+        #expect(AgentName.display("  Milo ") == "Milo")
+        #expect(AgentName.display("   ") == nil)
+        #expect(AgentName.display(nil) == nil)
+    }
+
+    @Test func aRenameIsHeardLive() {
+        guard case .agentName(let name) = LiveEventsSocket.decode(name: "agent_name_changed", data: .object(["agentName": .string("Pebble")])) else {
+            Issue.record("not read"); return
+        }
+        #expect(name == "Pebble")
+    }
+
+    /// An instance with no name set, or none readable, shows "Chat".
+    @Test func withoutANameTheMainChatIsChat() async {
+        let workspace = Workspace(backend: FakeBackend(), instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-agent-name-\(UUID().uuidString)/Drafts"), instance: "t"))
+        #expect(workspace.mainChatTitle == "Chat")
+        workspace.stop()
+    }
+}

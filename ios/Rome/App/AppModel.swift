@@ -84,6 +84,9 @@ final class Workspace {
     /// visitor's its own id. The app names the main chat `conciergeChatID` in
     /// its screens; everything sent to the server uses this id.
     private(set) var mainChatServerID: String?
+    /// The Concierge's own name; nil until read, or when none is set.
+    private(set) var agentName: String?
+    @ObservationIgnored private var nameWatch: UUID?
     /// Whose session this is. Apps, the update page, AI tool usage, approvals
     /// and the instance's own settings are the guardian's; a visitor never sees
     /// them. Unknown (not read yet, or unreadable) is treated as the guardian,
@@ -230,11 +233,34 @@ final class Workspace {
 
     func start() async {
         drafts.discardBlankChats()
+        watchAgentName()
         tasks.start()
         topics.start()
         if role == .unknown { Task { await readRole() } }
         await openConcierge()
     }
+
+    /// Reads the Concierge's name now and after each reconnect; a newer
+    /// instance also announces a rename.
+    private func watchAgentName() {
+        guard nameWatch == nil else { return }
+        nameWatch = backend.events.subscribe(LiveTopic.chatStatus) { [weak self] event in
+            guard let self else { return }
+            switch event {
+            case .agentName(let name): self.agentName = name
+            case .reconnected: Task { await self.readAgentName() }
+            default: break
+            }
+        }
+        Task { await readAgentName() }
+    }
+
+    private func readAgentName() async {
+        agentName = await backend.agentName()
+    }
+
+    /// The main chat's name in its header: the Concierge's own, else "Chat".
+    var mainChatTitle: String { agentName ?? String(localized: "Chat") }
 
     /// Kept rows from last time stay on screen while this runs, and when the
     /// instance cannot be reached: the store fetches again when it is back.
@@ -304,6 +330,8 @@ final class Workspace {
     }
 
     func stop() {
+        if let nameWatch { backend.events.unsubscribe(nameWatch) }
+        nameWatch = nil
         tasks.stop()
         concierge.stop()
         topics.stop()

@@ -9,6 +9,8 @@ struct ThreadOverlay: View {
     let thread: ThreadStore
     let chat: TranscriptStore
     let tasks: TasksStore
+    /// The chat's name, as its header shows it.
+    let name: String
     let onOpenChat: (String, String) -> Void
     let onClose: () -> Void
 
@@ -57,14 +59,13 @@ struct ThreadOverlay: View {
         }
     }
 
-    /// The chat's own header, laid over it unchanged: the mascot pill in the
-    /// middle, still, and the close button where the "…" sits.
+    /// The chat's own header, laid over it unchanged: the same identity in
+    /// the middle, still, and the close button where the "…" sits.
     private var header: some View {
-        HStack {
-            // Where the drawer button sits below, so the pill keeps its place.
+        HStack(alignment: .top) {
+            // Where the drawer button sits below, so the identity keeps its place.
             Color.clear.frame(width: 44, height: 44)
-            MascotPill(still: true)
-                .accessibilityLabel(Text("Reply"))
+            ChatIdentity(name: name, still: true)
                 .frame(maxWidth: .infinity)
             GlassCircleButton(accessibilityLabel: "Close", action: close) {
                 Image(systemName: "xmark").romeFont(15, .semibold)
@@ -72,7 +73,7 @@ struct ThreadOverlay: View {
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
-        .frame(height: 52)
+        .padding(.bottom, 6)
     }
 
     /// The composer keeps its text and focus: closed unsent, the text stays

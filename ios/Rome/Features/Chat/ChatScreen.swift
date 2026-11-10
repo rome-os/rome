@@ -28,18 +28,18 @@ struct ChatScreen: View {
         // The bar is clear: the transcript scrolls under its glass items.
         .floatingTopBar {
             VStack(spacing: 0) {
-                ChatHeader(title: Text("Chat"), onMenu: {
+                ChatHeader(name: workspace.mainChatTitle, onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     onMenu()
-                }, onTasks: onTasks, menuTitle: String(localized: "Chat"))
+                }, onTasks: onTasks)
                 banners
             }
         }
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.mainChatTitle, onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
         // Reply or a tap on a message: the composer is ready for the reply.
@@ -245,81 +245,82 @@ private extension View {
 
 /// The floating header: menu, title, tasks.
 struct ChatHeader: View {
-    let title: Text
+    /// The chat's name: the Concierge's for the main chat, the topic's for a topic chat.
+    let name: String
     let onMenu: () -> Void
     let onTasks: () -> Void
     /// A topic chat's options in the "…" menu, below Tasks.
     var onRename: (() -> Void)? = nil
     var onArchive: (() -> Void)? = nil
-    /// The chat's title as the "…" menu names it.
-    var menuTitle: String = ""
-    /// A topic chat: its title first, then the mascot in its place.
-    var revealsMascot = false
-    /// Which chat the header shows: another one starts from its title again.
-    var chatKey: String = ""
-    @State private var pokes = 0
-    @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
-    @State private var mascotShown = false
-
-    /// How long a topic chat shows its title before the mascot takes its place.
-    static let titleHold: Duration = .seconds(3)
-
-    private var showsMascot: Bool { !revealsMascot || mascotShown }
 
     var body: some View {
-        HStack {
+        HStack(alignment: .top) {
             GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
                 MenuGlyph()
             }
-            ZStack {
-                if showsMascot {
-                    MascotPill(pokes: pokes)
-                        // The whole pill: a soft tap and a reaction, nothing else.
-                        .contentShape(Capsule())
-                        .onTapGesture {
-                            haptic.impactOccurred()
-                            haptic.prepare()
-                            pokes += 1
-                        }
-                        .onAppear { haptic.prepare() }
-                        .accessibilityLabel(title)
-                        .transition(.opacity)
-                } else {
-                    PlainHeaderTitle(title: title)
-                        .transition(.opacity)
-                }
-            }
-            .frame(maxWidth: .infinity)
-            ChatMoreMenu(title: menuTitle, onTasks: onTasks, onRename: onRename, onArchive: onArchive)
+            ChatIdentity(name: name)
+                .frame(maxWidth: .infinity)
+            ChatMoreMenu(title: name, onTasks: onTasks, onRename: onRename, onArchive: onArchive)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
-        .frame(height: 52)
-        .task(id: revealsMascot ? chatKey : nil) {
-            guard revealsMascot else { return }
-            mascotShown = false
-            try? await Task.sleep(for: Self.titleHold)
-            guard !Task.isCancelled else { return }
-            withAnimation(.easeInOut(duration: 0.45)) { mascotShown = true }
-        }
+        .padding(.bottom, 6)
     }
 }
 
-/// The mascot in its glass pill: the Concierge chats' title, read out as `title`.
-struct MascotPill: View {
-    var pokes = 0
-    /// Still: no blinking, for a copy laid over the header (a chat thread).
+/// A Concierge chat's identity at the top: a round avatar with the mascot,
+/// overlapping a glass pill with the chat's name and, when there is one, a
+/// status line under it.
+struct ChatIdentity: View {
+    let name: String
+    /// A second, lighter line under the name; none leaves the pill one line.
+    var status: String? = nil
+    /// Still: no blinking or reactions, for the copy over the header (a chat thread).
     var still = false
 
+    @State private var pokes = 0
+    @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
+
+    static let avatarSize: CGFloat = 44
+    /// How far the avatar reaches down over the pill.
+    static let overlap: CGFloat = 10
+
     var body: some View {
-        Mascot(blinks: !still, pokes: pokes)
-            .frame(height: 22)
-            .padding(.horizontal, 22)
-            .frame(height: 44)
+        VStack(spacing: -Self.overlap) {
+            Mascot(blinks: !still, pokes: pokes)
+                .frame(height: 20)
+                .frame(width: Self.avatarSize, height: Self.avatarSize)
+                .glassSurface(Circle())
+                // The avatar: a soft tap and a reaction, nothing else.
+                .contentShape(Circle())
+                .onTapGesture {
+                    guard !still else { return }
+                    haptic.impactOccurred()
+                    haptic.prepare()
+                    pokes += 1
+                }
+                .onAppear { if !still { haptic.prepare() } }
+                .zIndex(1)
+            VStack(spacing: 1) {
+                Text(verbatim: name)
+                    .romeFont(14, .semibold)
+                    .foregroundStyle(Palette.fg)
+                if let status {
+                    Text(verbatim: status)
+                        .romeFont(12)
+                        .foregroundStyle(Palette.sub)
+                }
+            }
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 14)
+            .padding(.top, Self.overlap + 4)
+            .padding(.bottom, 6)
             .glassSurface(Capsule())
-            .accessibilityElement(children: .ignore)
-            .accessibilityAddTraits(.isHeader)
-            .accessibilityRemoveTraits(.isButton)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(Text(verbatim: status.map { "\(name), \($0)" } ?? name))
+        .accessibilityAddTraits(.isHeader)
     }
 }
 

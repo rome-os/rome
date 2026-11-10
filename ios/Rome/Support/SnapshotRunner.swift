@@ -104,8 +104,10 @@ enum SnapshotRunner {
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
             // Chat threads: the replies lines, then one thread open over its chat.
             await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
-            // Three seconds on, the topic chat's title has given way to the mascot.
-            await capture("52-topic-mascot", style: styleName, in: directory, wait: 2) {}
+            // A long topic name: cut at the end inside the header's pill.
+            await capture("52-topic-long-name", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
+            model.debugCommand = .section(.topic("topic-trip"))
+            try? await Task.sleep(for: .seconds(1.5))
             await capture("51-thread-open", style: styleName, in: directory, wait: 1.5) {
                 model.workspace?.topicStore("topic-trip").openThread(at: "k1")
             }

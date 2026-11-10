@@ -9,6 +9,8 @@ enum LiveEvent: Sendable {
     case messageInsert(ChatMessage)
     /// A message was placed in a chat thread (`message_chat_thread`).
     case messageThread(sessionId: String, messageId: String, chatThreadId: String?)
+    /// The Concierge was renamed (`agent_name_changed`, newer instances).
+    case agentName(String?)
     /// A chat was renamed.
     case sessionName(sessionId: String, name: String)
     /// The Concierge wrote a task row (`concierge.tasks`).
@@ -299,6 +301,8 @@ final class LiveEventsSocket: LiveEventSource {
         case "message_insert":
             guard let message = data.decoded(ChatMessage.self) else { return nil }
             return .messageInsert(message)
+        case "agent_name_changed":
+            return .agentName(AgentName.display(data["agentName"]?.string))
         case "message_chat_thread":
             guard let id = data["sessionId"]?.string, let message = data["messageId"]?.string else { return nil }
             return .messageThread(sessionId: id, messageId: message, chatThreadId: data["chatThreadId"]?.string)

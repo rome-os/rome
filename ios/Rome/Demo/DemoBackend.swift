@@ -294,6 +294,9 @@ final class DemoBackend: RomeBackend {
         return hits.sorted { $0.message.createdAt > $1.message.createdAt }
     }
 
+    /// The demo's Concierge goes by a name of its own.
+    func agentName() async -> String? { "Milo" }
+
     func me() async throws -> AccountIdentity? { AccountIdentity(name: "Lin", isGuardian: variant != .visitor) }
 
     func isGuardian() async -> Bool { variant != .visitor }

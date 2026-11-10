@@ -61,6 +61,9 @@ protocol RomeBackend: AnyObject, Sendable {
     func search(_ query: String) async throws -> [SearchHit]
     /// The guardian's display name on this instance.
     func me() async throws -> AccountIdentity?
+    /// The Concierge's own name, as the dashboard shows it (`agentName` in
+    /// `GET /settings`); nil when none is set or it cannot be read.
+    func agentName() async -> String?
     /// Whether this session is the instance's guardian, not a visitor.
     func isGuardian() async -> Bool
     /// The instance's apps, every origin; `AppLinks.mine` picks the guardian's.
@@ -214,6 +217,11 @@ final class LiveBackend: RomeBackend {
         try await client.get("/chat/sessions/search", query: [URLQueryItem(name: "q", value: query)])
     }
 
+    func agentName() async -> String? {
+        guard let settings: JSONValue = try? await client.get("/settings", reportsUnauthorized: false) else { return nil }
+        return AgentName.display(settings["agentName"]?.string)
+    }
+
     func me() async throws -> AccountIdentity? {
         let body: JSONValue = try await client.get("/auth/me")
         return AccountIdentity(json: body)
@@ -329,6 +337,7 @@ extension RomeBackend {
 
     func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply { throw APIError.notFound }
     func connectors() async throws -> [ConnectorState] { [] }
+    func agentName() async -> String? { nil }
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread: ThreadTarget?) async throws -> CreatedTurn {
         try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority)
     }
@@ -340,4 +349,13 @@ extension RomeBackend {
     func setGuardianLanguage(_ code: String) async throws {}
     func apps() async throws -> [InstalledApp] { [] }
     func webSessionCookie() -> HTTPCookie? { nil }
+}
+
+/// The Concierge's name as the dashboard shows it: trimmed, and nil when
+/// blank, so the caller's fallback shows.
+enum AgentName {
+    static func display(_ configured: String?) -> String? {
+        let name = configured?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return name.isEmpty ? nil : name
+    }
 }

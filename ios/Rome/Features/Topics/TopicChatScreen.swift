@@ -43,7 +43,7 @@ struct TopicChatScreen: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .floatingTopBar {
             ChatHeader(
-                title: Text(verbatim: title),
+                name: title,
                 onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
@@ -55,16 +55,13 @@ struct TopicChatScreen: View {
                     newName = title
                     renaming = true
                 },
-                onArchive: chatId.map { id in { archive(id) } },
-                menuTitle: title,
-                revealsMascot: true,
-                chatKey: chatId ?? draftKey
+                onArchive: chatId.map { id in { archive(id) } }
             )
         }
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let store, let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: title, onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
         // Reply or a tap on a message: the composer is ready for the reply.
