@@ -589,7 +589,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                     placeholder={
                       pendingUploads.length > 0
                         ? t("composer.placeholderWithUploads")
-                        : t("concierge.placeholder")
+                        : replyDraft?.thread
+                          ? t("thread.replyPlaceholder")
+                          : t("concierge.placeholder")
                     }
                     rows={1}
                     className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none"

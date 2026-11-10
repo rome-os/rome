@@ -1,4 +1,5 @@
-import { memo, useMemo, type ReactNode } from "react";
+import { ThreadRepliesLine } from "@/components/chat/reply/chat-threads";
+import { Fragment, memo, useMemo, type ReactNode } from "react";
 import type { ForwardedFrom } from "@rome/api-types/chat";
 import { UserMessage } from "./UserMessage";
 import { ChatBubble } from "@/components/chat/ChatBubble";
@@ -208,31 +209,34 @@ export const ConciergeGroup = memo(function ConciergeGroup({
         group.sender === "guardian" ? "items-end" : "items-start",
       )}
     >
-      {group.entries.map((entry) =>
-        entry.message.sender?.kind === "automated" ? (
-          <div
-            key={entry.message.id}
-            data-timeline-anchor={entry.message.id}
-            className="w-full self-start"
-          >
-            <UserMessage msg={entry.message} />
-          </div>
-        ) : group.sender === "guardian" ? (
-          <GuardianBubble
-            key={entry.message.id}
-            msg={entry.message}
-            arrival={arrival(entry.message.id)["data-arrival"]}
-          />
-        ) : (
-          <AgentEntry
-            key={entry.message.id}
-            entry={entry}
-            actions={actions}
-            rateable={feedback && (!runningTurnId || entry.message.turnId !== runningTurnId)}
-            arrival={arrival}
-          />
-        ),
-      )}
+      {group.entries.map((entry) => (
+        <Fragment key={entry.message.id}>
+          {entry.message.sender?.kind === "automated" ? (
+            <div
+              key={entry.message.id}
+              data-timeline-anchor={entry.message.id}
+              className="w-full self-start"
+            >
+              <UserMessage msg={entry.message} />
+            </div>
+          ) : group.sender === "guardian" ? (
+            <GuardianBubble
+              key={entry.message.id}
+              msg={entry.message}
+              arrival={arrival(entry.message.id)["data-arrival"]}
+            />
+          ) : (
+            <AgentEntry
+              key={entry.message.id}
+              entry={entry}
+              actions={actions}
+              rateable={feedback && (!runningTurnId || entry.message.turnId !== runningTurnId)}
+              arrival={arrival}
+            />
+          )}
+          <ThreadRepliesLine message={entry.message} />
+        </Fragment>
+      ))}
       {group.typing ? typing : null}
     </div>
   );

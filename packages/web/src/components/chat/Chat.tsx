@@ -23,6 +23,7 @@ import {
   PanelRightOpen,
   Share2,
   Trash2,
+  X,
 } from "lucide-react";
 import { z } from "zod";
 import {
@@ -98,7 +99,9 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
-import { ChatThreadView, KEEPS_CHAT_THREAD_OPEN } from "@/components/chat/ChatThreadView";
+import { ChatThreadView } from "@/components/chat/ChatThreadView";
+import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
+import { ChatThreadsProvider, useChatThreadsValue } from "@/components/chat/reply/chat-threads";
 import {
   ConciergeEmptyState,
   ConciergeTopicEmptyState,
@@ -2160,8 +2163,9 @@ export function Chat({
   // mascot's badge with the name pill under it in the middle, and round
   // buttons either side, centred on the badge. The equal side columns keep the
   // middle centred over the chat. Only its pieces take the pointer, so the
-  // messages under the gaps stay reachable.
-  const conciergeHeader = concierge ? (
+  // messages under the gaps stay reachable. The thread view floats the same
+  // header with its close button on the right.
+  const floatingHeader = (trailing: ReactNode) => (
     <div
       data-concierge-header
       className="pointer-events-none absolute inset-x-0 top-0 z-20 grid grid-cols-[1fr_minmax(0,max-content)_1fr] items-center gap-x-2 px-2 pt-2 max-md:pt-[calc(var(--rome-safe-area-top)+0.5rem)] md:px-3"
@@ -2173,10 +2177,19 @@ export function Chat({
       />
       {conciergeStatus}
       <div className="pointer-events-auto col-start-3 row-start-1 flex items-center gap-1 justify-self-end">
-        {navbarActions}
+        {trailing}
       </div>
-      {conciergeTaskList.sheet}
     </div>
+  );
+  const threadOpen = concierge && Boolean(mainSessionId) && replyDraft.thread !== null;
+  // The thread view's transcript feeds none of the chat's scroll measures.
+  const ignoreThreadContent = useCallback(() => {}, []);
+  const chatThreads = useChatThreadsValue(displayMessages);
+  const conciergeHeader = concierge ? (
+    <>
+      {threadOpen ? null : floatingHeader(navbarActions)}
+      {conciergeTaskList.sheet}
+    </>
   ) : null;
 
   const navbar = (
@@ -2272,38 +2285,40 @@ export function Chat({
                   {hasOlder(mainSessionId) ? (
                     <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
                   ) : null}
-                  <MessageList
-                    rows={rows}
-                    live={{
-                      isStreaming: displayedStreaming,
-                      runningTurnId,
-                      quiet: activeSessionStream?.quiet,
-                      snapshot: currentSnapshot,
-                      textStore: liveTextStore,
-                      blockIx: activeSessionStream?.assistantBlockIx,
-                      textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
-                      identity: mainIdentity,
-                    }}
-                    selection={
-                      shareMode
-                        ? {
-                            selectedTurns: selectedShareTurns,
-                            selectableSessionId: mainSessionId,
-                            onToggleTurn: toggleShareTurn,
-                          }
-                        : undefined
-                    }
-                    contentRef={attachContent}
-                    onOpenLiveTrace={openLiveTraceDrawer}
-                    onOpenStoredTrace={openStoredTraceDrawer}
-                    onOpenSubagentTrace={openSubagentTraceDrawer}
-                    activeTraceTarget={traceDrawerTarget}
-                    subagentIconByName={subagentIconByName}
-                    actions={blockActions}
-                    feedback
-                    fork={forkable}
-                    variant={variant}
-                  />
+                  <ChatThreadsProvider value={chatThreads}>
+                    <MessageList
+                      rows={rows}
+                      live={{
+                        isStreaming: displayedStreaming,
+                        runningTurnId,
+                        quiet: activeSessionStream?.quiet,
+                        snapshot: currentSnapshot,
+                        textStore: liveTextStore,
+                        blockIx: activeSessionStream?.assistantBlockIx,
+                        textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
+                        identity: mainIdentity,
+                      }}
+                      selection={
+                        shareMode
+                          ? {
+                              selectedTurns: selectedShareTurns,
+                              selectableSessionId: mainSessionId,
+                              onToggleTurn: toggleShareTurn,
+                            }
+                          : undefined
+                      }
+                      contentRef={attachContent}
+                      onOpenLiveTrace={openLiveTraceDrawer}
+                      onOpenStoredTrace={openStoredTraceDrawer}
+                      onOpenSubagentTrace={openSubagentTraceDrawer}
+                      activeTraceTarget={traceDrawerTarget}
+                      subagentIconByName={subagentIconByName}
+                      actions={blockActions}
+                      feedback
+                      fork={forkable}
+                      variant={variant}
+                    />
+                  </ChatThreadsProvider>
                 </>
               ) : (
                 emptyState
@@ -2326,7 +2341,9 @@ export function Chat({
                 ref={setFloorEl}
                 data-chat-floor
                 className={cn(
-                  "pointer-events-none sticky bottom-0 z-10 px-3 max-md:pointer-events-auto max-md:bg-chat-canvas md:px-6",
+                  "pointer-events-none sticky bottom-0 px-3 max-md:pointer-events-auto md:px-6",
+                  // Over the thread view, whose blur runs down behind it.
+                  threadOpen ? "z-30" : "z-10 max-md:bg-chat-canvas",
                   // Presentation mode gives the draft's bottom gap 5x its normal
                   // size so a recording framed on the empty state keeps the
                   // composer clear of the capture's lower edge.
@@ -2367,25 +2384,15 @@ export function Chat({
                     // rail, has no width gate: it is reachable on a phone, where
                     // the 36px step is under the 44px floor.
                     "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
-                    !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
+                    !mainSessionId || isAtBottom || threadOpen
+                      ? "invisible opacity-0"
+                      : "visible opacity-100",
                   )}
                 />
-                <div
-                  className="pointer-events-auto relative mx-auto max-w-5xl"
-                  {...{ [KEEPS_CHAT_THREAD_OPEN]: "" }}
-                >
-                  {concierge && mainSessionId && replyDraft.thread ? (
-                    <ChatThreadView
-                      key={replyDraft.thread}
-                      sessionId={mainSessionId}
-                      messageId={replyDraft.thread}
-                      onClose={replyDraft.closeThread}
-                      className="absolute inset-x-0 bottom-full z-10 mb-2"
-                    />
-                  ) : null}
+                <div className="pointer-events-auto relative mx-auto max-w-5xl">
                   {/* Sits on the composer's top-right corner, clear of the
                       centered jump to latest. */}
-                  {mainSessionId && (
+                  {mainSessionId && !threadOpen && (
                     <div className="pointer-events-none absolute right-0 bottom-full mb-2">
                       <ChatPendingCardJump
                         scroller={scrollerEl}
@@ -2476,6 +2483,41 @@ export function Chat({
                 onJump={jumpToMessage}
               />
             )}
+            {threadOpen && mainSessionId && replyDraft.thread ? (
+              <ChatThreadView
+                key={replyDraft.thread}
+                sessionId={mainSessionId}
+                messageId={replyDraft.thread}
+                onClose={replyDraft.closeThread}
+                floor={floorEl}
+                header={floatingHeader(
+                  <IconButton
+                    size="md"
+                    label={t("thread.close")}
+                    icon={<X />}
+                    onClick={replyDraft.closeThread}
+                    className={actionBadge}
+                  />,
+                )}
+                renderMessages={(threadMessages) => (
+                  <ConciergeTranscript
+                    rows={buildRows(threadMessages, identityBySession, mainIdentity, {
+                      runningTurnId: null,
+                      isStreaming: false,
+                    })}
+                    live={{
+                      isStreaming: false,
+                      runningTurnId: null,
+                      snapshot: null,
+                      textStore: liveTextStore,
+                      identity: mainIdentity,
+                    }}
+                    actions={blockActions}
+                    contentRef={ignoreThreadContent}
+                  />
+                )}
+              />
+            ) : null}
           </div>
         </div>
         <TraceDrawer
