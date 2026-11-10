@@ -11,9 +11,12 @@ import {
   type MainBackendTurnRunner,
 } from "../apps/actions/backend-turn.js";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
-import { romeSessions, sessions } from "../db/schema.js";
+import { guardianAuth, romeSessions, sessions } from "../db/schema.js";
 import { createMockAgentRunner, createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
+import { continuationActor } from "./continuation-actor.js";
+import { sendForCaller } from "../apps/actions/caller-notify.js";
+import type { SessionActor } from "../access/session-actor.js";
 import { continueInterruptedTurns } from "./restart-continuation.js";
 import {
   startUsageLimitContinuation,
@@ -194,8 +197,9 @@ describe("usage-limit continuation", () => {
   function start(
     runner: Pick<MainBackendTurnRunner, "runAndReport">,
     from: Pick<ModelAccounts, "read" | "refresh" | "onChanged"> = accounts,
+    actorOf?: (turn: { sessionId: string; turnId: string }) => Promise<SessionActor | undefined>,
   ) {
-    stop = startUsageLimitContinuation({ accounts: from, repo, runner });
+    stop = startUsageLimitContinuation({ accounts: from, repo, runner, actorOf });
     return stop;
   }
 
@@ -208,6 +212,31 @@ describe("usage-limit continuation", () => {
   }
 
   describe("a stopped turn", () => {
+    it("continues as the person whose turn it was, so send_notification rings them in a shared chat", async () => {
+      await db.db
+        .insert(guardianAuth)
+        .values({ id: "auth-1", userId: "seat-1", passwordHash: "x", createdAt: new Date() });
+      await stopped();
+      claude.set(available);
+      const { agent, runner } = backend();
+      start(runner, accounts, (turn) => continuationActor(db.db, repo, turn));
+      await clearAndSweep();
+      const actor = agent.calls[0]?.actor as SessionActor | undefined;
+      expect(actor).toEqual({ kind: "guardian", userId: "seat-1", via: "loopback" });
+      const pushes: unknown[] = [];
+      await sendForCaller(
+        {
+          send: async (content) => (
+            pushes.push(content), { kind: "ok", attempted: 1, sent: 1, failed: 0 }
+          ),
+        },
+        async () => null,
+        { actor, chatId: "chat" },
+        { body: "Done" },
+      );
+      expect(pushes).toEqual([{ body: "Done" }]);
+    });
+
     it("continues after the provider clears, in the same chat, runtime and agent", async () => {
       await stopped();
       claude.set(limitedUntil(NOW + HOUR));

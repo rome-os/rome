@@ -213,6 +213,7 @@ import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
 import { privateOwnerOf } from "./concierge/privacy.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
+import { continuationActor } from "./webchat/continuation-actor.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
@@ -2318,7 +2319,16 @@ async function main() {
 
   // The API, actions and agents are ready. One continuation runs at a time,
   // outside boot, and each rechecks its chat after waiting in the webchat queue.
-  void continueInterruptedTurns(endedTurns, webchatRepo, backendTurnRunner).catch((error) => {
+  // Each continuation acts for the person whose turn it continues.
+  const continuationActorOf = (turn: { sessionId: string; turnId: string }) =>
+    continuationActor(db, webchatRepo, turn);
+  void continueInterruptedTurns(
+    endedTurns,
+    webchatRepo,
+    backendTurnRunner,
+    Date.now(),
+    continuationActorOf,
+  ).catch((error) => {
     log.warn("restart continuations failed", { error: String(error) });
   });
   // Subscribes after the first account read may have settled, so it also reads the
@@ -2327,6 +2337,7 @@ async function main() {
     accounts: modelAccounts,
     repo: webchatRepo,
     runner: backendTurnRunner,
+    actorOf: continuationActorOf,
   });
 
   // Best-effort instance-identity check. Fire-and-forget: announces

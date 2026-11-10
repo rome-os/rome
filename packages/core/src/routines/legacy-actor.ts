@@ -2,9 +2,9 @@
 // chat's owner, as its fires did then. Every newer routine records its own
 // person (`Routine.createdBy`).
 
-import { guardianActor, type SessionActor } from "../access/session-actor.js";
-import { VisitorProfilesRepository } from "../access/visitor-profiles.js";
-import { ownerOf, recipientOf } from "../concierge/owner.js";
+import { actorOfOwner } from "../access/owner-actor.js";
+import type { SessionActor } from "../access/session-actor.js";
+import { ownerOf } from "../concierge/owner.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { Routine } from "./types.js";
@@ -24,9 +24,5 @@ export async function legacyRoutineActor(
     const chat = await deps.webchatRepo.getSession(args.threadId);
     owner = chat ? ownerOf(chat) : null;
   }
-  if (!owner) return undefined;
-  const accountId = recipientOf(owner);
-  if (accountId === undefined) return guardianActor(deps.db);
-  const profiles = await new VisitorProfilesRepository(deps.db).getMany([accountId]);
-  return { kind: "visitor", accountId, email: profiles.get(accountId)?.email ?? "" };
+  return owner ? actorOfOwner(deps.db, owner) : undefined;
 }
