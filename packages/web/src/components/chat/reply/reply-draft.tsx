@@ -132,7 +132,9 @@ export function useReplyDraftState({
   const pick = useCallback(
     (next: ReplyTarget, openView?: boolean) => {
       changes.current += 1;
-      setDraft(opened(next, openView));
+      // A reply picked inside an open thread view keeps it open: the view
+      // shows its whole thread, older than the loaded timeline too.
+      setDraft((current) => opened(next, openView ?? (current.thread !== null || undefined)));
       requestAnimationFrame(() => focusRef.current());
     },
     [opened],

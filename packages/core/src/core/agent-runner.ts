@@ -316,7 +316,7 @@ export class AgentRunner {
         initiatedBy: params.initiatedBy ?? "user",
         ...(params.pushLevel ? { pushLevel: params.pushLevel } : {}),
         ...(params.actor ? { actor: params.actor } : {}),
-        ...(params.threadAnchor ? { threadAnchor: params.threadAnchor } : {}),
+        ...(params.reportedTask ? { reportedTask: params.reportedTask } : {}),
       },
     );
     held.submitted = true;

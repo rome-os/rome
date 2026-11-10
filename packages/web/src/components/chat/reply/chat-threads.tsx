@@ -29,29 +29,41 @@ export function useChatThreads(): ChatThreads | null {
 export type ThreadTimelineMessage = Pick<ChatMessage, "id" | "role" | "chatThreadId">;
 
 /**
- * Where the "N replies" lines go in a loaded timeline: by the id of a chat
- * thread's root, its first message, the number of replies it has loaded. A
- * root with no replies, and a thread whose root is not loaded, get none.
+ * Where the "N replies" lines go in a loaded timeline, oldest message first:
+ * by the id of the message each sits under, the count it shows. A thread's
+ * count is its loaded messages less its root, the message that names it.
+ * A thread with replies shows a line under its root, and one under its
+ * newest message when a message of another thread, or of none, lies between
+ * the two. A thread whose root is not loaded shows one under its newest
+ * message only. A line moves to the newest message as one arrives.
  */
 export function threadRepliesLines(
   messages: readonly ThreadTimelineMessage[],
 ): Map<string, number> {
-  const loaded = new Set<string>();
-  const totals = new Map<string, number>();
-  for (const message of messages) {
-    if (message.role !== "user" && message.role !== "assistant") continue;
-    loaded.add(message.id);
-    if (message.chatThreadId) {
-      totals.set(message.chatThreadId, (totals.get(message.chatThreadId) ?? 0) + 1);
-    }
-  }
+  const timeline = messages.filter(
+    (message) => message.role === "user" || message.role === "assistant",
+  );
+  const at = new Map(timeline.map((message, index) => [message.id, index]));
+  const replies = new Map<string, number[]>();
+  timeline.forEach((message, index) => {
+    const thread = message.chatThreadId;
+    if (!thread || message.id === thread) return;
+    replies.set(thread, [...(replies.get(thread) ?? []), index]);
+  });
   const lines = new Map<string, number>();
-  for (const [root, total] of totals) {
-    // A root sent before it started a thread is in none itself.
-    const replies = messages.some((m) => m.id === root && m.chatThreadId === root)
-      ? total - 1
-      : total;
-    if (loaded.has(root) && replies > 0) lines.set(root, replies);
+  for (const [thread, indexes] of replies) {
+    const newest = indexes[indexes.length - 1] as number;
+    const newestId = timeline[newest]?.id as string;
+    const root = at.get(thread);
+    if (root === undefined) {
+      lines.set(newestId, indexes.length);
+      continue;
+    }
+    lines.set(thread, indexes.length);
+    const apart = timeline
+      .slice(root + 1, newest)
+      .some((message) => message.chatThreadId !== thread);
+    if (apart) lines.set(newestId, indexes.length);
   }
   return lines;
 }
@@ -120,8 +132,8 @@ function wordsOf(message: ChatMessage): string {
 }
 
 /**
- * The subdued "N replies" line under a chat thread's root, which opens the
- * thread. Renders nothing where {@link threadRepliesLines}
+ * The subdued "N replies" line under a chat thread's root or newest message,
+ * which opens the thread. Renders nothing where {@link threadRepliesLines}
  * puts no line, and inside the thread view.
  */
 export function ThreadRepliesLine({ message }: { message: ChatMessage }) {

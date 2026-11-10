@@ -132,6 +132,21 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     expect(draft.target).toBeNull();
   });
 
+  it("keeps the thread view open on Reply to a message older than the loaded timeline", () => {
+    let draft!: ReplyDraft;
+    render(
+      <ThreadsDraft onDraft={(next) => (draft = next)} threaded={["a1"]}>
+        {null}
+      </ThreadsDraft>,
+    );
+    act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
+    // "old" is in the open thread, but not in the timeline's loaded pages.
+    act(() => draft.set({ messageId: "old", author: "guardian", preview: "Move my 3pm" }));
+
+    expect(draft.thread).toBe("old");
+    expect(draft.target?.messageId).toBe("old");
+  });
+
   it("opens the thread view from a reply's quote", () => {
     let draft!: ReplyDraft;
     const part: ReplyToPart = {

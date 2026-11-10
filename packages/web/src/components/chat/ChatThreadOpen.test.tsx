@@ -71,36 +71,62 @@ describe("threadRepliesLines", () => {
     expect(threadRepliesLines([free("q1"), free("a1", "assistant")])).toEqual(new Map());
   });
 
-  it("shows one under the root, counting its replies", () => {
+  it("6. shows a thread said in one stretch under its root only", () => {
     expect(threadRepliesLines([g("q1"), a("a1", "q1"), g("q2", "q1"), a("a2", "q1")])).toEqual(
       new Map([["q1", 3]]),
     );
   });
 
+  it("6. shows it under its newest message too when another message lies between", () => {
+    expect(
+      threadRepliesLines([
+        g("q1"),
+        a("a1", "q1"),
+        free("w1"),
+        free("w2", "assistant"),
+        a("a2", "q1"),
+      ]),
+    ).toEqual(
+      new Map([
+        ["q1", 2],
+        ["a2", 2],
+      ]),
+    );
+  });
+
+  it("7. shows it under its newest message only when its root is not loaded", () => {
+    expect(threadRepliesLines([g("q2", "q1"), free("w1"), a("a2", "q1")])).toEqual(
+      new Map([["a2", 2]]),
+    );
+  });
+
+  it("8. counts the same on both lines, and moves the newest line as a message arrives", () => {
+    const before = [g("q1"), a("a1", "q1"), free("w1"), a("a2", "q1")];
+    expect(threadRepliesLines(before)).toEqual(
+      new Map([
+        ["q1", 2],
+        ["a2", 2],
+      ]),
+    );
+    expect(threadRepliesLines([...before, free("w2"), g("q3", "q1")])).toEqual(
+      new Map([
+        ["q1", 3],
+        ["q3", 3],
+      ]),
+    );
+  });
+
   it("counts a root that was in no thread when the thread started at it", () => {
-    // A task's result came back to the message that started it.
     expect(threadRepliesLines([free("q1"), free("ack", "assistant"), a("result", "q1")])).toEqual(
-      new Map([["q1", 1]]),
+      new Map([
+        ["q1", 1],
+        ["result", 1],
+      ]),
     );
   });
 
-  it("shows one reply under a message in no thread once the guardian replies to it", () => {
-    // The reply to "168" is placed in the thread its root starts; the root stays as it was.
-    expect(threadRepliesLines([free("q"), free("168", "assistant"), g("r", "168")])).toEqual(
-      new Map([["168", 1]]),
-    );
-  });
-
-  it("shows none for a root with no replies, or one not loaded", () => {
+  it("shows none for a root with no replies", () => {
     expect(threadRepliesLines([g("q1")])).toEqual(new Map());
-    expect(threadRepliesLines([g("q2", "q1"), a("a2", "q1")])).toEqual(new Map());
-  });
-
-  it("follows a message placed in a thread later", () => {
-    const loaded = [g("q1"), a("a1", "q1"), free("q2"), free("a2", "assistant")];
-    expect(threadRepliesLines(loaded)).toEqual(new Map([["q1", 1]]));
-    const moved = loaded.map((m) => (m.chatThreadId === null ? { ...m, chatThreadId: "q1" } : m));
-    expect(threadRepliesLines(moved)).toEqual(new Map([["q1", 3]]));
   });
 });
 

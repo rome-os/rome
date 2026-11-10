@@ -32,12 +32,13 @@ One line of conversation inside a [Concierge chat](#concierge-chat) that its own
 
 - A chat thread is known by its chat and the id of its first message, its root.
 - An owner's message sent as a reply, or from the thread view, is in that thread at once, and nothing moves it.
-- When a task brings something back later, its result, its question card or a forward, it joins the thread of the owner's message that started the task. That message becomes the thread's root when it was in none.
-- A task keeps one root: once it has a chat thread, everything it brings back joins that thread. A task no owner's message started has no thread.
-- When the owner's words are sent on to a task, their message joins that task's thread, so a follow-up stays in the task's story.
+- A task has one root, kept for good. A task started for an owner's message has that message's thread, or that message as its root. The Concierge's messages in that turn that answer the message join the thread with it. A task no one owner's message started takes the first owner's message sent on to it, or the first thing it brings back.
+- Whatever a task brings back later, its result, its question card or a forward, joins the task's thread. So does an owner's message sent on to it, which keeps a follow-up in the task's story.
+- A task moved to another Concierge chat leaves its thread behind, and starts a new one there the same way.
 - Any other message is in no chat thread: an owner's message typed in the chat, and the Concierge's answer to one. The Concierge's answer to a message in a thread is in that thread.
 - A message in no chat thread opens a thread view that shows it alone.
 - The chat's timeline shows every message in the order it was said, whatever its thread. The thread view shows one thread's messages on their own.
+- A thread with replies shows its count under its root, and under its newest message when other messages lie between the two. A thread whose root is not loaded shows it under its newest message only.
 
 ## Place
 
