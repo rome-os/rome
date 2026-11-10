@@ -34,7 +34,6 @@ import { deviceFolderName, pathSegments } from "@/lib/device-folder";
 import {
   activeSessionFromPath,
   chatKind,
-  isProjectChat,
   MAIN_CHAT_PATH,
   sessionActivityTime,
 } from "@/lib/chat-session";
@@ -305,7 +304,9 @@ export function RecentChats({
   const sessions = useMemo(
     () =>
       (cachedSessions ?? [])
-        .filter((s) => isProjectChat(chatKind(s)))
+        // Concierge chats have their own rows above; every other chat,
+        // task chats included, sits under its project.
+        .filter((s) => chatKind(s) !== "topic")
         .map((s) => withLiveRunning(s, liveRunning.current)),
     [cachedSessions],
   );

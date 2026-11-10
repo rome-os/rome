@@ -132,14 +132,14 @@ A chat the Concierge starts to hand one piece of work to another agent. It belon
 
 - A task chat has a row in its owner's task list. It is private to the owner of the Concierge chat that started it, who alone can open it and write in it.
 - A task chat carries one piece of work. It gets no alerts and no digest.
-- A task chat is not in the [chat list](#chat-list). It opens from its row in the task list and from its task card, and search finds it.
+- A task chat is in the [chat list](#chat-list), under its project with the common chats. It also opens from its row in the task list and from its task card, and search finds it.
 
 ## Chat list
 
 The dashboard's list of a person's chats, beside the rail. Every dashboard person gets the same list, with their own main chat in it.
 
 - It opens with the main chat, labelled "Main chat", and the topic chats under it, latest first: five, then a More row for the rest. The plus beside the main chat starts a topic chat.
-- Below a divider, the Projects section holds the common chats and fork chats, grouped by project or by device folder, with the default project first. The default project's row is always there, under every filter, even when it holds no chat. A plus on a project row starts a chat in that project, and the composer can still move it to another project before its first message. The plus shows on hover, and always on a touch screen.
+- Below a divider, the Projects section holds the common chats, fork chats and task chats, grouped by project or by device folder, with the default project first. The default project's row is always there, under every filter, even when it holds no chat. A plus on a project row starts a chat in that project, and the composer can still move it to another project before its first message. The plus shows on hover, and always on a touch screen.
 - Nothing in it is pinned, and it is not grouped by date.
 - Its status filter, active, archived or all, applies to every chat in it. Under archived the main chat is hidden, since it is never archived, and an archived topic chat stays under the main chat, not in Projects.
 
@@ -244,7 +244,7 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 ## Decided against
 
 - **A New chat button, pinned chats and pinned projects at the top of the chat list.** They showed the same ideas twice beside the main chat, and a person had to choose between the Concierge and a new chat for every request. The main chat is where a person talks to Rome, and a common chat starts from Projects.
-- **Task chats in the chat list.** Under the default project they read as the guardian's own work, and each task pushed the guardian's own chats down. The task list and task cards already open them.
+- **Task chats out of the chat list.** The guardian lost sight of work running on their behalf, and the task list and cards were the only way back to it.
 - **Channel as a thing the guardian meets, with its own identity and lifetime.** A channel is one to one with a connected account, so the two words name one thing and the guardian only ever sees the account. Its jobs went to account, connection, connected account and chat. The code's channel layer ([Channels](../architecture/channels.md)) is retired as those words replace it.
 - **The agent as part of the connection.** Which agent speaks through an account is the guardian's decision about a chat identity, so it belongs to Chats. Kept on the connection, Connections would hold a fact only Chats uses.
 - **The connected account as the connection, with the agent dying on disconnect.** This was the rule until 2026-11-04. Its forces were that a reconnect would inherit an agent the guardian never set, and that a connection with no account reported yet had no record to hold one. Neither holds: the guardian set the agent on that account, and a connection is active only once the platform has reported its account. The account is what the guardian means by "the sales agent", so the link hangs on it.

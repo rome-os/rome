@@ -154,7 +154,7 @@ function textIndex(container: HTMLElement, text: string): number {
 }
 
 describe("RecentChats", () => {
-  it("lists the main chat as Main chat, and keeps Concierge and task chats out of Projects", async () => {
+  it("lists the main chat as Main chat, keeps Concierge chats out of Projects, and puts task chats under their project", async () => {
     concierge.chatId = "concierge";
     const row = (id: string, name: string) => ({
       id,
@@ -178,12 +178,12 @@ describe("RecentChats", () => {
     const entry = await screen.findByRole("link", { name: "Main chat" });
     expect(entry.getAttribute("href")).toBe("/message");
     await screen.findByRole("link", { name: "My own chat" });
-    // A task chat opens from the Tasks list and its task card, not from here.
-    expect(screen.queryByRole("link", { name: /Find flights/ })).toBeNull();
+    const task = await screen.findByRole("link", { name: /Find flights/ });
+    expect(task.getAttribute("href")).toBe("/chat/task-1");
     expect(screen.queryByRole("link", { name: /Milo|Concierge/ })).toBeNull();
   });
 
-  it("keeps task chats out of every status filter", async () => {
+  it("applies the status filter to task chats like any other chat", async () => {
     localStorage.setItem("rome-recent-chats-status-filter", "all");
     mockSessions([
       {
@@ -212,7 +212,7 @@ describe("RecentChats", () => {
     ]);
     renderRecentChats();
     await screen.findByRole("link", { name: "Old chat" });
-    expect(screen.queryByRole("link", { name: /Find flights/ })).toBeNull();
+    expect(await screen.findByRole("link", { name: /Find flights/ })).toBeTruthy();
   });
 
   describe("Concierge topic chats", () => {
