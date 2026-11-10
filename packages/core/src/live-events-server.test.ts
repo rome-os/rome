@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { WebSocket } from "ws";
+import type { LiveEventEmit } from "./lib/live-event.js";
 import type { LiveEventsServerMessage } from "@rome/api-types/live-events";
 import type { AppCatalog } from "./apps/catalog.js";
 import type { CatalogEvent, SubscriberHandler } from "./apps/state.js";
@@ -98,6 +99,7 @@ describe("live events WebSocket", () => {
   let dashboardAccess: DashboardAccessState;
   let phoneWatching: PhoneWatching;
   const catalogHandlers = new Set<SubscriberHandler>();
+  const nameListeners = new Set<LiveEventEmit>();
   const clients: TestClient[] = [];
   const originalProjectsRoot = process.env.ROME_PROJECTS_ROOT;
 
@@ -116,6 +118,19 @@ describe("live events WebSocket", () => {
     return client;
   }
 
+  it("carries agent renames on chat.status without a new topic", async () => {
+    const client = await connect();
+    client.send({ type: "subscribe", topic: "chat.status" });
+    await client.next((message) => message.type === "subscribed");
+    for (const listener of nameListeners) listener("agent_name_changed", { agentName: "Pebble" });
+    expect(await client.next((message) => message.type === "event")).toEqual({
+      type: "event",
+      topic: "chat.status",
+      event: "agent_name_changed",
+      data: { agentName: "Pebble" },
+    });
+  });
+
   beforeEach(async () => {
     projectsRoot = mkdtempSync(join(tmpdir(), "rome-live-events-"));
     process.env.ROME_PROJECTS_ROOT = projectsRoot;
@@ -128,6 +143,15 @@ describe("live events WebSocket", () => {
     });
     deps = await buildTestDeps(testDb.db);
     conciergeTasks = new ConciergeTasks(new ConciergeTasksRepository(testDb.db));
+    nameListeners.clear();
+    deps.agentNameEvents = {
+      subscribe(emit) {
+        nameListeners.add(emit);
+        return () => {
+          nameListeners.delete(emit);
+        };
+      },
+    };
     runtime = createWebchatRuntime(deps).runtime;
     catalogHandlers.clear();
     const catalog = {

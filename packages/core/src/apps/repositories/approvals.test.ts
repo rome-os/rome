@@ -16,6 +16,55 @@ describe("ApprovalsRepository", () => {
     testDb.close();
   });
 
+  it("holdsSession() is true while an approval of the session waits or runs, and false once it ends", async () => {
+    const id = await repo.create({
+      type: "action_execution",
+      requestedBy: "agent",
+      description: "Send the mail",
+      payload: { sessionId: "runtime-1" },
+    });
+    expect(await repo.holdsSession("runtime-1")).toBe(true);
+    expect(await repo.holdsSession("runtime-2")).toBe(false);
+
+    await repo.resolvePending(id, "approve", "guardian");
+    await repo.claimExecution(id);
+    expect(await repo.holdsSession("runtime-1")).toBe(true);
+
+    await repo.markExecuted(id);
+    expect(await repo.holdsSession("runtime-1")).toBe(false);
+  });
+
+  it("holdsSession() holds for a pending approval younger than a day, and not for an older one", async () => {
+    const asked = new Date("2026-11-09T12:00:00Z");
+    await repo.create({
+      type: "action_execution",
+      requestedBy: "agent",
+      description: "Send the mail",
+      payload: { sessionId: "runtime-1" },
+    });
+    await testDb.db.update(approvals).set({ createdAt: asked });
+    const hoursLater = (hours: number) => new Date(asked.getTime() + hours * 60 * 60 * 1000);
+
+    expect(await repo.holdsSession("runtime-1", hoursLater(23))).toBe(true);
+    expect(await repo.holdsSession("runtime-1", hoursLater(25))).toBe(false);
+  });
+
+  it("holdsSession() stops holding for an execution a crash left running, a day after approval", async () => {
+    const id = await repo.create({
+      type: "action_execution",
+      requestedBy: "agent",
+      description: "Send the mail",
+      payload: { sessionId: "runtime-1" },
+    });
+    await repo.resolvePending(id, "approve", "guardian");
+    await repo.claimExecution(id);
+    const approved = (await repo.findById(id))!.resolvedAt!;
+    const hoursLater = (hours: number) => new Date(approved.getTime() + hours * 60 * 60 * 1000);
+
+    expect(await repo.holdsSession("runtime-1", hoursLater(1))).toBe(true);
+    expect(await repo.holdsSession("runtime-1", hoursLater(25))).toBe(false);
+  });
+
   it("create() inserts approval with pending status", async () => {
     const id = await repo.create({
       type: "person_mapping",

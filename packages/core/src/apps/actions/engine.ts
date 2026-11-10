@@ -139,6 +139,7 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "system:send_user_message",
   "system:create_routine",
   "system:send_feedback",
+  "core:set_agent_name",
   "core:app_connection_read",
   "core:app_connection_write",
   "core:app_connection_write_without_approval",

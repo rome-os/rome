@@ -5,6 +5,7 @@ import { ConciergeGroup } from "@/components/chat/ConciergeGroup";
 import { ConciergeTimeSeparator } from "@/components/chat/ConciergeTimeSeparator";
 import type { BlockActions, LivePreview } from "@/components/chat/MessageList";
 import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
+import { SessionRenewalNotice } from "./SessionRenewalNotice";
 import type { ChatRow } from "@/components/chat/chat-view";
 import { buildConciergeItems, turnHasSpoken } from "@/components/chat/concierge-groups";
 import { useBubbleArrivals } from "@/components/chat/use-bubble-arrivals";
@@ -76,6 +77,8 @@ export function ConciergeTranscript({
         {items.map((item) => {
           if (item.kind === "separator")
             return <ConciergeTimeSeparator key={item.key} at={item.at} />;
+          if (item.kind === "renewal")
+            return <SessionRenewalNotice key={item.key} reason={item.reason} className="mb-0" />;
           if (item.kind === "notice")
             return (
               <ModelSwitchNotice

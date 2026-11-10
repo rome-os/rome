@@ -217,6 +217,7 @@ import {
 } from "./core/session-opening.js";
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
+import { registerAgentNameAction } from "./people/agent-name.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
@@ -1210,6 +1211,8 @@ async function main() {
         eventSources,
         sessionTools: (context) => buildConciergeTools(concierge, context),
       }),
+      // A session an approval waits to resume mid-turn stays until it ends.
+      heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),
     },
     { keepAliveAcrossTurns: true, idleTtlMs: 15_000 },
   );
@@ -1299,6 +1302,10 @@ async function main() {
     },
   });
 
+  const agentNameEvents = registerAgentNameAction(actionRegistry, {
+    settingsRepo,
+    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
+  });
   startConciergeEvents(concierge, turnListeners);
   // The Concierge reaches the connector's watch actions as itself.
   startConciergeFollowing(concierge, {
@@ -2146,6 +2153,7 @@ async function main() {
   let internalApi: ApiHandle | undefined;
   try {
     const apiDeps: ApiDeps = {
+      agentNameEvents,
       appConnectionAccessRepo,
       concierge,
       feedback: feedbackClient,
