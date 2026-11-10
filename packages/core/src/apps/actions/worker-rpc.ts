@@ -35,6 +35,7 @@ import type { CloudProfileService } from "../../instance/cloud-profile.js";
 import type { SendOutcome, SystemNotifyContent } from "../../lib/notify-client.js";
 import type { ConciergeOwner } from "../../concierge/owner.js";
 import { actionCaller, sendForCaller } from "./caller-notify.js";
+import type { MainBackendTurnRunner } from "./backend-turn.js";
 import { SpecSourceSchema } from "../lockfile.js";
 import { parseRemixSource } from "../remix-source.js";
 import type {
@@ -292,14 +293,14 @@ export interface WorkerRpcServices {
    * in a worker (a routine-fired root action → subprocess), but running the turn
    * + delivering its reply needs main-only state (AgentSession registry, channel
    * adapters, webchat runtime) — so `session.continue` runs it here. */
-  backendTurnRunner: BackendTurnRunner;
+  backendTurnRunner: Pick<MainBackendTurnRunner, "runAndDeliver">;
   /** Main-process push sender. The `send_notification` action runs in
    * a worker, but the durable instance token must never leave main — so
    * `notify.send` reads the token and calls Rome Cloud's `/api/notify` here and
    * returns only the classified `SendOutcome`. */
   notify: { send(content?: SystemNotifyContent): Promise<SendOutcome> };
-  /** Whose a dashboard chat is, or null when it no longer exists: its owner's phone gets a push it calls for. */
-  ownerOfChat: (chatId: string) => Promise<ConciergeOwner | null>;
+  /** The one person a dashboard chat is private to, or null for a shared chat: a push it calls for rings them. */
+  privateOwnerOf: (chatId: string) => Promise<ConciergeOwner | null>;
   feedback: FeedbackService;
   /** System-only: what `system:get_guardian_cloud_profile` reads from Rome Cloud. */
   cloudProfile: CloudProfileService;
@@ -377,7 +378,7 @@ export class WorkerRpcServer {
         // No params: the probe takes none. All policy (Rome Cloud check,
         // countdown open) runs in the main-process service.
         "system.upgrade.checkAndOffer": () => this.services.systemUpgrade.checkAndOffer(),
-        "session.continue": (params) => this.handleSessionContinue(params),
+        "session.continue": (params, context) => this.handleSessionContinue(params, context),
         "feedback.send": (params) =>
           this.services.feedback.send(parseParams("feedback.send", feedbackSendSchema, params)),
         "cloudProfile.get": () => this.services.cloudProfile.get(),
@@ -389,7 +390,7 @@ export class WorkerRpcServer {
           const { body } = parseParams("notify.send", NotifySendParams, params);
           return sendForCaller(
             this.services.notify,
-            this.services.ownerOfChat,
+            this.services.privateOwnerOf,
             callerOf(context),
             body !== undefined ? { body } : undefined,
           );
@@ -542,9 +543,15 @@ export class WorkerRpcServer {
     return await this.services.appStore.getListing(parsed);
   }
 
-  private async handleSessionContinue(params: unknown): Promise<{ ok: true }> {
+  private async handleSessionContinue(
+    params: unknown,
+    context?: IpcCallContext,
+  ): Promise<{ ok: true }> {
     const turn = parseParams("session.continue", SessionContinueParams, params);
-    await this.services.backendTurnRunner.runAndDeliver(turn);
+    // The woken turn acts for the person of the action that woke it, as the
+    // IPC boundary captured them, such as the person whose reminder fired.
+    const actor = context?.callerActionContext?.actor;
+    await this.services.backendTurnRunner.runAndDeliver(turn, actor ? { actor } : undefined);
     return { ok: true };
   }
 

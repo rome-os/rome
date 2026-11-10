@@ -244,7 +244,8 @@ function setup(
     routines: {
       create: async (data) => {
         const id = `r${nextId++}`;
-        routines.set(id, { ...data, id, enabled: data.enabled ?? true, createdAt: new Date() });
+        const { createdBy: _createdBy, ...stored } = data;
+        routines.set(id, { ...stored, id, enabled: data.enabled ?? true, createdAt: new Date() });
         return id;
       },
       findByKey: async (key) => [...routines.values()].find((r) => r.key === key) ?? null,

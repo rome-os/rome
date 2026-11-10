@@ -119,6 +119,11 @@ describe("send_notification action", () => {
       status: "error",
       error: "recipient_not_allowed",
     });
+    expect(await withOutcome({ kind: "recipient_unknown" }).execute({})).toEqual({
+      status: "error",
+      error:
+        "recipient_unknown: can't tell whom to notify in this shared chat, so nothing was sent.",
+    });
     expect(await withOutcome({ kind: "not_hosted" }).execute({})).toEqual({
       status: "error",
       error:

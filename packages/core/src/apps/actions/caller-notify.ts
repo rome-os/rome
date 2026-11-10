@@ -1,6 +1,6 @@
-// Whose phone `send_notification` rings: the person who acted, the guardian or
-// a visitor. Only a call no person made falls back to the calling chat's
-// owner, then the guardian. A visitor's call never reaches the guardian:
+// Whose phone `send_notification` rings: the owner of a private chat, else the
+// one person the turn acts for. In a shared chat with no such person it sends
+// nothing. A visitor's call never reaches the guardian:
 // docs/architecture/notification-delivery.md.
 import type { SessionActor } from "../../access/session-actor.js";
 import { WEBCHAT_CHANNEL } from "../../chats/dashboard/dashboard-account.js";
@@ -29,33 +29,40 @@ export function actionCaller(
   };
 }
 
+/** Whom a call's push goes to: `recipient` names a visitor, and none names the guardian. */
+export type NotifyTarget = { recipient?: string } | "unknown";
+
 /**
- * The Rome Cloud account a call's push goes to, undefined for the guardian.
- * A person who acted gets it, whoever owns the chat: a visitor in a chat
- * they share with the guardian or another visitor rings only themselves.
- * A call no person made, such as a routine's, goes to the calling chat's
- * owner, and with no chat to the guardian.
+ * Whom a call's push goes to. A chat private to one person (a Concierge chat,
+ * its task chats) rings that person. Otherwise the one person the turn acts
+ * for, whoever owns the chat: a visitor in a chat they share with the
+ * guardian or another visitor rings only themselves. A call in a shared chat
+ * with no such person (no one acted, or more than one person's input is in
+ * the turn) is `"unknown"` and sends nothing: it never falls back to the
+ * chat's owner or the guardian. A call with no chat rings the guardian.
  */
 export async function notifyRecipient(
   caller: ActionCaller,
-  ownerOfChat: (chatId: string) => Promise<ConciergeOwner | null>,
-): Promise<string | undefined> {
-  if (caller.actor?.kind === "visitor") return caller.actor.accountId;
-  if (caller.actor?.kind === "guardian") return recipientOf(GUARDIAN_OWNER);
-  const owner = caller.chatId ? await ownerOfChat(caller.chatId) : null;
-  return recipientOf(owner ?? GUARDIAN_OWNER);
+  privateOwnerOf: (chatId: string) => Promise<ConciergeOwner | null>,
+): Promise<NotifyTarget> {
+  const owner = caller.chatId ? await privateOwnerOf(caller.chatId) : null;
+  if (owner) return { recipient: recipientOf(owner) };
+  if (caller.actor?.kind === "visitor") return { recipient: caller.actor.accountId };
+  if (caller.actor?.kind === "guardian") return { recipient: recipientOf(GUARDIAN_OWNER) };
+  return caller.chatId ? "unknown" : { recipient: recipientOf(GUARDIAN_OWNER) };
 }
 
-/** Sends `content` to the person `caller` stands for. */
+/** Sends `content` to the person `caller` stands for; sends nothing when that is unknown. */
 export async function sendForCaller(
   notify: { send(content?: SystemNotifyContent): Promise<SendOutcome> },
-  ownerOfChat: (chatId: string) => Promise<ConciergeOwner | null>,
+  privateOwnerOf: (chatId: string) => Promise<ConciergeOwner | null>,
   caller: ActionCaller,
   content: NotifyContent | undefined,
 ): Promise<SendOutcome> {
-  const recipient = await notifyRecipient(caller, ownerOfChat);
-  if (recipient === undefined) return notify.send(content);
-  return notify.send({ ...content, recipient });
+  const target = await notifyRecipient(caller, privateOwnerOf);
+  if (target === "unknown") return { kind: "recipient_unknown" };
+  if (target.recipient === undefined) return notify.send(content);
+  return notify.send({ ...content, recipient: target.recipient });
 }
 
 /**
@@ -64,10 +71,15 @@ export async function sendForCaller(
  */
 export function callerNotifyService(
   notify: { send(content?: SystemNotifyContent): Promise<SendOutcome> },
-  ownerOfChat: (chatId: string) => Promise<ConciergeOwner | null>,
+  privateOwnerOf: (chatId: string) => Promise<ConciergeOwner | null>,
 ): NotifyService {
   return {
     send: (content) =>
-      sendForCaller(notify, ownerOfChat, actionCaller(actionExecutionContext.getStore()), content),
+      sendForCaller(
+        notify,
+        privateOwnerOf,
+        actionCaller(actionExecutionContext.getStore()),
+        content,
+      ),
   };
 }

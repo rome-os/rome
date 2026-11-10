@@ -13,6 +13,7 @@ import { actionExecutionContext } from "../apps/actions/context.js";
 import { replayContext } from "../apps/actions/replay.js";
 import { runWithoutSession } from "../telemetry-context.js";
 import type { Clock, ClockTimer } from "../lib/clock.js";
+import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
 
 const log = createLogger("routine-engine");
 
@@ -43,7 +44,21 @@ export class RoutineEngine {
     private retryDelayMs: number,
     /** Time source for run durations, lastFiredAt, and the retry timer. */
     private clock: Clock,
+    /**
+     * Who a routine from before `createdBy` acts for: its chat's owner.
+     * Absent, such a routine acts for no one.
+     */
+    private legacyActorOf: (routine: Routine) => Promise<SessionActor | undefined> = async () =>
+      undefined,
   ) {}
+
+  /** The person a fire acts for: who created the routine, never anyone ambient. */
+  private async actorOf(routine: Routine): Promise<SessionActor | undefined> {
+    if (routine.createdBy === null || routine.createdBy === undefined) {
+      return this.legacyActorOf(routine);
+    }
+    return routine.createdBy.kind === "anonymous" ? undefined : routine.createdBy;
+  }
 
   registerProvider(type: string, provider: TriggerProvider): void {
     this.providers.set(type, provider);
@@ -192,11 +207,14 @@ export class RoutineEngine {
     // store, its trace span and the session id of the turn that created it.
     // Leaving all four keeps a fire from reading as a nested call, from
     // parenting its span under a long-ended action and from being attributed
-    // to a session it does not belong to.
+    // to a session it does not belong to. Nor does it act for whoever's
+    // request is ambient: it acts for the routine's own person (`actorOf`).
     return otelContext.with(ROOT_CONTEXT, () =>
       replayContext.exit(() =>
         actionExecutionContext.exit(() =>
-          runWithoutSession(() => this.dispatchAsRoot(routine, payload, opts)),
+          withoutSessionActor(() =>
+            runWithoutSession(() => this.dispatchAsRoot(routine, payload, opts)),
+          ),
         ),
       ),
     );
@@ -245,9 +263,11 @@ export class RoutineEngine {
         });
 
         const mergedArgs = { ...routine.args, __triggerPayload: payload };
+        const actor = await this.actorOf(routine);
         // A routine fire holds no action worker, so it can wait out a busy pool.
         const context: ActionRunContext = {
           initiator: `routine:${routine.name}`,
+          ...(actor ? { actor } : {}),
           rootExecutionId,
           whenWorkersBusy: "queue",
           ...(keep ? {} : { omitFromRecord: ["__triggerPayload"] }),
@@ -360,6 +380,7 @@ export class RoutineEngine {
                       const retryResult = await runWithoutHookInvocationContext(() =>
                         this.actionEngine.run(routine.actionName, mergedArgs, {
                           initiator: `routine:${routine.name}`,
+                          ...(actor ? { actor } : {}),
                           whenWorkersBusy: "queue",
                           // A retry keeps the payload out of its record, as the first try did.
                           ...(keep ? {} : { omitFromRecord: ["__triggerPayload"] }),

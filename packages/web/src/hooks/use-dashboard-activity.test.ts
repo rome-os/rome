@@ -102,6 +102,19 @@ describe("watchDashboardActivity", () => {
     after.remove();
   });
 
+  it("lets go of a frame taken out of the page", async () => {
+    const frame = document.createElement("iframe");
+    document.body.append(frame);
+    const report = watch({ visible: true, focused: true });
+    const frameWindow = frame.contentWindow;
+    const removeListener = rs.spyOn(frameWindow as Window, "removeEventListener");
+    frame.remove();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(removeListener).toHaveBeenCalledWith("keydown", expect.any(Function), expect.anything());
+    frameWindow?.dispatchEvent(new KeyboardEvent("keydown"));
+    expect(report).not.toHaveBeenCalled();
+  });
+
   it("listens to a frame's new window after it loads again", () => {
     const frame = document.createElement("iframe");
     document.body.append(frame);

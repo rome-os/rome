@@ -825,6 +825,9 @@ export function startConciergeFollowing(
             trigger,
             actionName: CONCIERGE_DIGEST_ACTION,
             args,
+            // The Concierge's own machinery: it acts for no person, whoever's
+            // request set the digest times.
+            createdBy: "guardian",
           });
       if (existing) await deps.routines.update(id, { trigger, args, enabled: true });
       await reactivate(id);
@@ -903,6 +906,7 @@ export function startConciergeFollowing(
           actionName: CONCIERGE_FOLLOW_ACTION,
           args,
           keepTriggerPayload: false,
+          createdBy: "guardian",
         });
       }
       await reactivate(id);

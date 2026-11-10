@@ -1529,6 +1529,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     if (!sourceCheckpoint) return null;
 
+    const forkActor = turnActor(await currentSessionActor(), undefined);
     const iterator = deps.agentRunner
       .runForked({
         agentName,
@@ -1540,6 +1541,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         label: input.label,
         mode: "exact",
         sourceCheckpoint,
+        // The fork acts for the person who asked for it.
+        ...(forkActor ? { actor: forkActor } : {}),
         // Keyed by the fork's own id, exactly what `handleChatSend` will
         // derive for it later.
         ...(input.continuable ? { persistThreadKey: webchatSessionKey } : {}),

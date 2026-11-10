@@ -3,6 +3,7 @@ import type {
   RunParams as SdkRunParams,
 } from "@rome-os/app-runtime";
 import type { NotifyLevel } from "../lib/notify-client.js";
+import type { TurnActor } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
 
 export type { ForkRunMode, ForkSourceCheckpoint, ThreadContext } from "@rome-os/app-runtime";
@@ -15,6 +16,8 @@ export interface RunParams extends SdkRunParams {
    *  the chat serves, as a push at this level (ConciergePush). Absent, the
    *  turn pushes nothing. */
   pushLevel?: NotifyLevel;
+  /** Who the turn acts for, such as the person whose reminder woke it. Absent, no one. */
+  actor?: TurnActor;
   /** Whether the runner saves the turn's trace. Defaults to every channel but
    *  webchat, whose chat route saves the trace of the turns it runs. */
   persistTrace?: boolean;
@@ -47,6 +50,8 @@ export interface ForkRunParams extends SdkForkRunParams {
    * until the run starts.
    */
   persistThreadKey?: (forkSessionId: string) => string;
+  /** Who the forked turn acts for: the person who asked for the fork. Absent, no one. */
+  actor?: TurnActor;
 }
 
 export interface AgentRunnerInterface {

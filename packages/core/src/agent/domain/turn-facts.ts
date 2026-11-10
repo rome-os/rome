@@ -9,10 +9,22 @@ export type PushLevel = "active" | "passive";
 
 /**
  * Who a turn acts for: the person whose message started it, as the request
- * that admitted the message proved. The agent context carries it unread, as
- * it does the thread context, and hands it to every action the turn calls.
+ * that admitted the message proved. The agent context reads only who it is,
+ * to tell two people apart, and hands it to every action the turn calls.
  */
-export type TurnActor = object;
+export interface TurnActor {
+  readonly kind: string;
+  /** The person's Rome Cloud account, when they have one. */
+  readonly accountId?: string;
+  /** The guardian's seat. */
+  readonly userId?: string;
+}
+
+/** Whether two inputs speak for the same person, or both for no one. */
+export function sameActor(a: TurnActor | undefined, b: TurnActor | undefined): boolean {
+  if (!a || !b) return a === b;
+  return a.kind === b.kind && a.accountId === b.accountId && a.userId === b.userId;
+}
 
 /**
  * Value. The facts about a turn that the ports behind the Rome tools need. A

@@ -40,12 +40,17 @@ export class DashboardActivity {
   }
 
   isActive(owner: string): boolean {
+    return this.activeOwners().has(owner);
+  }
+
+  /** The people at one of their dashboards now. */
+  activeOwners(): Set<string> {
     const now = this.now();
-    let active = false;
+    const owners = new Set<string>();
     for (const [socket, last] of this.lastActive) {
       if (now - last.at >= DASHBOARD_ACTIVE_MS) this.lastActive.delete(socket);
-      else if (last.owner === owner) active = true;
+      else owners.add(last.owner);
     }
-    return active;
+    return owners;
   }
 }

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { v4 as uuid } from "uuid";
 import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
-import { toRoutine } from "../../db/repositories/routines.js";
+import { routineCreator, toRoutine } from "../../db/repositories/routines.js";
 import {
   parseDateAndLocalTime,
   resolveOneOffDate,
@@ -343,6 +343,8 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       trigger: body.trigger as unknown,
       actionName: resolvedActionName,
       args: (body.args ?? {}) as unknown,
+      // The person turning it on, from Settings or a chat's card: its fires act for them.
+      createdBy: await routineCreator(deps.db, {}),
       createdAt: now,
       lastFiredAt: null,
       nextRunAt: null,

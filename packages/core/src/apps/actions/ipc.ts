@@ -259,6 +259,7 @@ export class IpcRpc {
         method === "channels.query" ||
         method === "channels.send" ||
         method === "notify.send" ||
+        method === "session.continue" ||
         method === "agent.session.runTurn"
       ) {
         request.callerActionContext = {

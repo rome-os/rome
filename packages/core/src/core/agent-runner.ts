@@ -297,6 +297,7 @@ export class AgentRunner {
         ...(lines ? { quoted: lines.quoted } : {}),
         initiatedBy: params.initiatedBy ?? "user",
         ...(params.pushLevel ? { pushLevel: params.pushLevel } : {}),
+        ...(params.actor ? { actor: params.actor } : {}),
       },
     ).turn;
     this.runLineDeps?.replies?.runs(handle.id, agentName);
@@ -418,6 +419,7 @@ export class AgentRunner {
         checkpoint: params.sourceCheckpoint,
         threadContext: params.threadContext,
         continuityKey: params.persistThreadKey,
+        ...(params.actor ? { actor: params.actor } : {}),
       })) {
         if (!forkTurnId && message.type === "turn_start") {
           forkTurnId = message.turnId;

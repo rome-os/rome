@@ -1,3 +1,4 @@
+import type { SessionActor } from "../access/session-actor.js";
 import type { EventBusTrigger, ManualTrigger, ScheduleTrigger } from "@rome-os/app-runtime";
 
 export type {
@@ -38,6 +39,13 @@ export interface Routine {
   createdAt: Date;
   lastFiredAt?: Date;
   nextRunAt?: Date; // meaningful for schedule triggers only
+  /**
+   * The person the routine's fires act for: who created it, or the guardian
+   * for one no person made. `anonymous` when it was made in work that acts for
+   * no one, so its fires act for no one. Null on a row from before the field,
+   * whose fires act for its chat's owner.
+   */
+  createdBy?: SessionActor | null;
 }
 
 export type RoutineRunStatus = "success" | "error" | "running" | "pending_approval" | "cancelled";

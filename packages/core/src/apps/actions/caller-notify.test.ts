@@ -3,11 +3,12 @@ import type { SystemNotifyContent } from "../../lib/notify-client.js";
 import { actionCaller, callerNotifyService, sendForCaller } from "./caller-notify.js";
 import { actionExecutionContext } from "./context.js";
 
-const owners: Record<string, string> = {
-  "guardian-chat": "guardian",
-  "visitor-chat": "visitor:acct-v",
+// Only a Concierge chat is private to one person; every other chat is shared.
+const privateOwners: Record<string, string> = {
+  "guardian-concierge": "guardian",
+  "visitor-concierge": "visitor:acct-v",
 };
-const ownerOfChat = async (chatId: string) => owners[chatId] ?? null;
+const ownerOfChat = async (chatId: string) => privateOwners[chatId] ?? null;
 const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
 const other = { kind: "visitor" as const, accountId: "acct-w", email: "w@example.com" };
 const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
@@ -24,9 +25,22 @@ function recorder() {
 }
 
 describe("send_notification's recipient", () => {
-  it("rings the person who acted, whoever owns the chat", async () => {
+  it("rings the owner of a private chat", async () => {
     const { notify, sent } = recorder();
-    // A visitor in the guardian's chat, and in another visitor's chat.
+    await sendForCaller(notify, ownerOfChat, { chatId: "visitor-concierge" }, { body: "a" });
+    await sendForCaller(
+      notify,
+      ownerOfChat,
+      { actor: guardian, chatId: "guardian-concierge" },
+      {
+        body: "b",
+      },
+    );
+    expect(sent).toEqual([{ body: "a", recipient: "acct-v" }, { body: "b" }]);
+  });
+
+  it("rings the one person the turn acts for in a shared chat, whoever owns it", async () => {
+    const { notify, sent } = recorder();
     await sendForCaller(
       notify,
       ownerOfChat,
@@ -43,7 +57,6 @@ describe("send_notification's recipient", () => {
         body: "b",
       },
     );
-    // The guardian in a visitor's chat.
     await sendForCaller(
       notify,
       ownerOfChat,
@@ -59,25 +72,24 @@ describe("send_notification's recipient", () => {
     ]);
   });
 
-  it("never names the guardian for a visitor's call, with or without a chat", async () => {
+  it("refuses a shared chat's call with no one person, never falling back to its owner", async () => {
     const { notify, sent } = recorder();
-    await sendForCaller(notify, ownerOfChat, { actor: visitor, chatId: null }, { body: "x" });
-    await sendForCaller(notify, ownerOfChat, { actor: visitor, chatId: "gone" }, undefined);
-    expect(sent).toEqual([{ body: "x", recipient: "acct-v" }, { recipient: "acct-v" }]);
+    // No one acted, or more than one person's input is in the turn: both
+    // reach the action with no actor.
+    expect(
+      await sendForCaller(notify, ownerOfChat, { chatId: "visitor-chat" }, { body: "x" }),
+    ).toEqual({ kind: "recipient_unknown" });
+    expect(await sendForCaller(notify, ownerOfChat, { chatId: "gone" }, undefined)).toEqual({
+      kind: "recipient_unknown",
+    });
+    expect(sent).toEqual([]);
   });
 
-  it("sends a call no person made to the calling chat's owner, then the guardian", async () => {
+  it("rings the guardian for a call with no chat, unless a visitor made it", async () => {
     const { notify, sent } = recorder();
-    await sendForCaller(notify, ownerOfChat, { chatId: "visitor-chat" }, { body: "routine" });
-    await sendForCaller(notify, ownerOfChat, { chatId: "guardian-chat" }, { body: "routine" });
-    await sendForCaller(notify, ownerOfChat, { chatId: "gone" }, undefined);
     await sendForCaller(notify, ownerOfChat, { chatId: null }, undefined);
-    expect(sent).toEqual([
-      { body: "routine", recipient: "acct-v" },
-      { body: "routine" },
-      undefined,
-      undefined,
-    ]);
+    await sendForCaller(notify, ownerOfChat, { actor: visitor, chatId: null }, { body: "x" });
+    expect(sent).toEqual([undefined, { body: "x", recipient: "acct-v" }]);
   });
 
   it("reads only a dashboard chat as the calling chat", () => {

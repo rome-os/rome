@@ -1055,6 +1055,10 @@ export const routines = sqliteTable("routines", {
   // whose payloads are private and large, such as a whole mail: its runs then
   // keep only the payload's size.
   keepTriggerPayload: integer("keep_trigger_payload", { mode: "boolean" }).notNull().default(true),
+  // The person who created the routine, as a session actor (JSON): its fires
+  // act for them, so a reminder's push reaches the person who asked. Null on
+  // rows from before the column, whose fires act for the chat's owner.
+  createdBy: text("created_by", { mode: "json" }),
 
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
   lastFiredAt: integer("last_fired_at", { mode: "timestamp" }),

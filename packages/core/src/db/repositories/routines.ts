@@ -3,6 +3,12 @@ import { v4 as uuid } from "uuid";
 import { routineRuns, routines } from "../schema.js";
 import type { DrizzleDb } from "../index.js";
 import {
+  currentSessionActor,
+  guardianActor,
+  type SessionActor,
+} from "../../access/session-actor.js";
+import { actionExecutionContext } from "../../apps/actions/context.js";
+import {
   ACTIVE_ROUTINE_RUN_STATUSES,
   type DeleteRoutineResult,
   type Routine,
@@ -25,7 +31,26 @@ export function toRoutine(row: RoutineRow): Routine {
     createdAt: row.createdAt,
     lastFiredAt: row.lastFiredAt ?? undefined,
     nextRunAt: row.nextRunAt ?? undefined,
+    createdBy: (row.createdBy as SessionActor | null) ?? null,
   };
+}
+
+/**
+ * Who a routine created now acts for. An app's routine, or one `"guardian"`
+ * names, is the guardian's. Otherwise the person of the action or request
+ * creating it; an action that acts for no one (a turn with more than one
+ * person's input) makes it act for no one. Core work outside any action,
+ * with no person, is the guardian's.
+ */
+export async function routineCreator(
+  db: DrizzleDb,
+  given: { createdBy?: SessionActor | "guardian"; managedBy?: string },
+): Promise<SessionActor | null> {
+  if (given.createdBy !== undefined && given.createdBy !== "guardian") return given.createdBy;
+  if (given.createdBy === "guardian" || given.managedBy) return (await guardianActor(db)) ?? null;
+  const store = actionExecutionContext.getStore();
+  if (store) return store.actor ?? { kind: "anonymous" };
+  return (await currentSessionActor()) ?? (await guardianActor(db)) ?? null;
 }
 
 export class RoutinesRepository {
@@ -71,7 +96,11 @@ export class RoutinesRepository {
    * the domain type instead of leaking drizzle row shapes. */
   async listRoutines(): Promise<Routine[]> {
     const rows = await this.findAll();
-    return rows.map(toRoutine);
+    // Who made each routine stays in core: an app has no need to know a person.
+    return rows.map((row) => {
+      const { createdBy: _createdBy, ...routine } = toRoutine(row);
+      return routine;
+    });
   }
 
   /** Delete a routine only if it has no in-flight runs. The active-run count
@@ -132,9 +161,12 @@ export class RoutinesRepository {
     enabled?: boolean;
     nextRunAt?: Date;
     keepTriggerPayload?: boolean;
+    /** Who its fires act for; absent, {@link routineCreator} decides. */
+    createdBy?: SessionActor | "guardian";
   }): Promise<string> {
     const id = uuid();
     const now = new Date();
+    const createdBy = await routineCreator(this.db, data);
     await this.db.insert(routines).values({
       id,
       name: data.name,
@@ -145,6 +177,7 @@ export class RoutinesRepository {
       actionName: data.actionName,
       args: data.args as unknown,
       keepTriggerPayload: data.keepTriggerPayload ?? true,
+      createdBy,
       createdAt: now,
       lastFiredAt: null,
       nextRunAt: data.nextRunAt ?? null,

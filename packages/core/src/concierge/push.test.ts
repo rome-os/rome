@@ -40,8 +40,10 @@ function pushWith(
       (async (chatId) => (chatId === "gone" ? null : chatId.startsWith("v-") ? VISITOR : GUARDIAN)),
     quietUntil: async (_at, owner) => options.quietUntil?.(owner) ?? null,
     language: async () => options.language ?? null,
-    watching: options.watching,
-    dashboardActive: options.dashboardActive,
+    watchersOf: (chatId) =>
+      new Set([GUARDIAN, VISITOR].filter((owner) => options.watching?.(owner, chatId))),
+    activeOwners: () =>
+      new Set([GUARDIAN, VISITOR].filter((owner) => options.dashboardActive?.(owner))),
     now: () => now,
     setTimer: (fn, ms) => timers.push({ at: now + ms, fn }),
   });
@@ -232,6 +234,24 @@ describe("ConciergePush", () => {
     await advance(MERGE_MS);
     await advance(MERGE_MS);
     expect(sent.map((content) => content.body)).toEqual(["first"]);
+  });
+
+  it("drops a message held when said even when the hold ends before its owner is known", async () => {
+    let active = true;
+    let release: () => void = () => {};
+    const { push, sent, advance } = pushWith({
+      dashboardActive: () => active,
+      ownerOf: async () => {
+        await new Promise<void>((resolve) => (release = resolve));
+        return GUARDIAN;
+      },
+    });
+    push.said({ turnId: "t1", chatId: "c", ownWords: "read at the dashboard", level: "active" });
+    // The dashboard goes idle while the owner lookup is still out.
+    active = false;
+    release();
+    await advance(MERGE_MS);
+    expect(sent).toEqual([]);
   });
 
   it("drops a message said while the phone shows the chat, even after the phone leaves", async () => {

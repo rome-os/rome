@@ -84,10 +84,10 @@ export interface ConciergePushDeps {
   ownerOf: (chatId: string) => Promise<ConciergeOwner | null>;
   /** When `owner`'s quiet window `at` falls in ends, or null outside their quiet hours. */
   quietUntil: (at: number, owner: ConciergeOwner) => Promise<number | null>;
-  /** Whether `owner`'s phone app shows this chat now: then it is read there, not pushed. */
-  watching?: (owner: ConciergeOwner, chatId: string) => boolean;
-  /** Whether `owner` is at one of their web dashboards now: then none of their pushes goes out. */
-  dashboardActive?: (owner: ConciergeOwner) => boolean;
+  /** The people whose phone app shows this chat now: it is read there, not pushed to them. */
+  watchersOf?: (chatId: string) => ReadonlySet<ConciergeOwner>;
+  /** The people at one of their web dashboards now: none of their pushes goes out. */
+  activeOwners?: () => ReadonlySet<ConciergeOwner>;
   /** `owner`'s dashboard language, or null. */
   language: (owner: ConciergeOwner) => Promise<string | null>;
   now?: () => number;
@@ -116,6 +116,12 @@ export const FIXED_LINE: Record<string, string> = {
   en: "A task has an update",
   "zh-CN": "有个任务有了新进展",
 };
+
+/** Who the phone and dashboard holds cover, at one moment. */
+interface Holds {
+  watchers: ReadonlySet<ConciergeOwner>;
+  active: ReadonlySet<ConciergeOwner>;
+}
 
 interface Pending {
   said: SaidInTurn & { level: NotifyLevel };
@@ -159,9 +165,14 @@ export class ConciergePush {
   said(said: SaidInTurn): void {
     const { level } = said;
     if (!level) return;
+    // Taken as the message is said: a hold that ends while the owner lookup
+    // or an earlier message is still in the queue still drops it.
+    const holds = this.holdsNow(said.chatId);
     // A message is said in whoever's scope ran the tool; the push serves the
     // chat's owner, so its queue carries no one's session actor.
-    withoutSessionActor(() => this.enqueue(said.chatId, () => this.handle({ ...said, level })));
+    withoutSessionActor(() =>
+      this.enqueue(said.chatId, () => this.handle({ ...said, level }, holds)),
+    );
   }
 
   /** Runs `step` after every earlier step of the chat; a failure is logged, never thrown. */
@@ -178,12 +189,19 @@ export class ConciergePush {
     });
   }
 
-  private async handle(said: SaidInTurn & { level: NotifyLevel }): Promise<void> {
+  private holdsNow(chatId: string): Holds {
+    return {
+      watchers: this.deps.watchersOf?.(chatId) ?? new Set(),
+      active: this.deps.activeOwners?.() ?? new Set(),
+    };
+  }
+
+  private async handle(said: SaidInTurn & { level: NotifyLevel }, holds: Holds): Promise<void> {
     const owner = await this.deps.ownerOf(said.chatId);
     if (!owner) return;
     // A message read or held when said is dropped: it never enters the merge
     // window, so it cannot go out once the hold clears.
-    if (await this.held(said, owner)) return;
+    if (await this.held(said, owner, holds)) return;
     const chat = this.chatOf(said.chatId);
     const sinceLast = chat.lastPushAt === null ? Infinity : this.now() - chat.lastPushAt;
     if (sinceLast < MERGE_MS) {
@@ -214,7 +232,7 @@ export class ConciergePush {
   private async deliver(chat: ChatPushes, { said, owner }: Pending): Promise<void> {
     const { turnId, chatId } = said;
     // Checked again at dispatch: a hold may have started while a merged push waited.
-    if (await this.held(said, owner)) return;
+    if (await this.held(said, owner, this.holdsNow(chatId))) return;
     const at = this.now();
     const rings = chat.lastPushAt === null || at - chat.lastPushAt > RING_MS;
     const level: NotifyLevel = said.level === "active" && rings ? "active" : "passive";
@@ -252,12 +270,16 @@ export class ConciergePush {
   }
 
   /** Whether a hold covers `owner` now, logging which; the phone's watch, their dashboard, then quiet hours. */
-  private async held({ turnId, chatId }: SaidInTurn, owner: ConciergeOwner): Promise<boolean> {
-    if (this.deps.watching?.(owner, chatId)) {
+  private async held(
+    { turnId, chatId }: SaidInTurn,
+    owner: ConciergeOwner,
+    holds: Holds,
+  ): Promise<boolean> {
+    if (holds.watchers.has(owner)) {
       log.info("concierge push skipped: the phone shows the chat", { turnId, chatId });
       return true;
     }
-    if (this.deps.dashboardActive?.(owner)) {
+    if (holds.active.has(owner)) {
       log.info("concierge push held back: a dashboard is active", { turnId, chatId });
       return true;
     }

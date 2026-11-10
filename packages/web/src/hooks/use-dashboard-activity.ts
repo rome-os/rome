@@ -90,11 +90,22 @@ export function watchDashboardActivity(
       listenToFrame(frame);
     }
   };
+  const forgetFrame = (frame: HTMLIFrameElement) => {
+    frame.removeEventListener("load", onFrameLoad);
+    frames.get(frame)?.();
+    frames.delete(frame);
+  };
   const frameObserver = new MutationObserver((records) => {
+    let removed = false;
     for (const record of records) {
+      removed ||= record.removedNodes.length > 0;
       for (const node of record.addedNodes) {
         if (node instanceof Element) watchFrames(node);
       }
+    }
+    // A frame taken out of the page lets go of its window and its entry.
+    if (removed) {
+      for (const frame of [...frames.keys()]) if (!frame.isConnected) forgetFrame(frame);
     }
   });
   frameObserver.observe(doc.documentElement, { childList: true, subtree: true });
@@ -106,11 +117,7 @@ export function watchDashboardActivity(
   return () => {
     stopWindow();
     frameObserver.disconnect();
-    for (const [frame, stop] of frames) {
-      frame.removeEventListener("load", onFrameLoad);
-      stop();
-    }
-    frames.clear();
+    for (const frame of [...frames.keys()]) forgetFrame(frame);
     doc.removeEventListener("visibilitychange", onVisibility);
     win.removeEventListener("blur", onBlur);
     win.removeEventListener("pagehide", onAway);

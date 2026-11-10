@@ -18,6 +18,8 @@ export type SendOutcome =
   | { kind: "recipient_not_allowed" }
   /** Rome Cloud pushes only for a hosted instance, and this one is not (desktop, self-hosted, test). Nothing was sent. */
   | { kind: "not_hosted" }
+  /** The call came from a shared chat with no one person to notify. Nothing was sent. */
+  | { kind: "recipient_unknown" }
   | { kind: "outcome_unknown" };
 
 /**

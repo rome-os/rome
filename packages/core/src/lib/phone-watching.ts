@@ -23,6 +23,16 @@ export class PhoneWatching {
     };
   }
 
+  /** The people whose phone shows `chatId` now. */
+  watchersOf(chatId: string): Set<string> {
+    const watchers = new Set<string>();
+    for (const key of this.counts.keys()) {
+      const split = key.indexOf("\n");
+      if (key.slice(split + 1) === chatId) watchers.add(key.slice(0, split));
+    }
+    return watchers;
+  }
+
   isWatching(owner: string, chatId: string): boolean {
     return (this.counts.get(keyOf(owner, chatId)) ?? 0) > 0;
   }

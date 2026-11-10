@@ -210,6 +210,8 @@ import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
 import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
+import { privateOwnerOf } from "./concierge/privacy.js";
+import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
@@ -973,6 +975,9 @@ async function main() {
     actionEngine,
     30_000,
     systemClock,
+    // A routine from before routines recorded their creator acts for its
+    // chat's owner, as its fires did then.
+    (routine) => legacyRoutineActor(routine, { db, webchatRepo }),
   );
   deactivateRoutine = (id) => routineEngine.deactivate(id);
   const scheduleTriggerProvider = new ScheduleTriggerProvider(routinesRepo, () =>
@@ -1111,6 +1116,9 @@ async function main() {
   // the worker injects NotifyServiceProxy and the WorkerRpcServer below routes
   // `notify.send` back to this same instance. The Concierge pushes through it too.
   const notifyClient = new NotifyClient();
+  // A chat private to one person rings them when an action in it notifies.
+  const privateOwnerOfChat = async (chatId: string) =>
+    privateOwnerOf(await webchatRepo.getSession(chatId));
   // Concierge (rome-os/rome#1344). Its backend turns run through the runner
   // created below, by the time any turn finishes. The API layer attaches the
   // dashboard it runs task chats on.
@@ -1370,7 +1378,7 @@ async function main() {
     backendTurnRunner,
     // Real push sender in main, to the person the calling chat serves; the
     // worker gets a NotifyServiceProxy.
-    notify: callerNotifyService(notifyClient, (chatId) => concierge.ownerOfChat(chatId)),
+    notify: callerNotifyService(notifyClient, privateOwnerOfChat),
     // Image generation capability: provider-neutral registry the generate_image
     // action consumes. Codex is the only provider today; its report reads
     // the same model accounts the model resolver gates on.
@@ -1942,7 +1950,7 @@ async function main() {
     hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
     backendTurnRunner,
     notify: notifyClient,
-    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
+    privateOwnerOf: privateOwnerOfChat,
     feedback: feedbackClient,
     cloudProfile: cloudProfileClient,
     agentNames: agentNameResolver,

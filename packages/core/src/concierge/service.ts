@@ -168,9 +168,9 @@ export interface ConciergeDeps {
   /** Asks Rome Cloud to push to a person's phone. Absent, nothing is pushed. */
   notify?: ConciergePushDeps["notify"];
   /** The chats each person's phone app holds open; nothing said there is pushed to them. */
-  phoneWatching?: Pick<PhoneWatching, "isWatching">;
+  phoneWatching?: Pick<PhoneWatching, "watchersOf">;
   /** Whether each person is at a web dashboard; while they are, nothing is pushed to them. */
-  dashboardActivity?: Pick<DashboardActivity, "isActive">;
+  dashboardActivity?: Pick<DashboardActivity, "activeOwners">;
 }
 
 export interface SystemTurnOptions {
@@ -198,8 +198,8 @@ export class ConciergeService {
           ownerOf: (chatId) => this.ownerOfChat(chatId),
           quietUntil: async (at, owner) =>
             (await this.attachedFollowing?.quietUntil(at, owner)) ?? null,
-          watching: (owner, chatId) => deps.phoneWatching?.isWatching(owner, chatId) ?? false,
-          dashboardActive: (owner) => deps.dashboardActivity?.isActive(owner) ?? false,
+          watchersOf: (chatId) => deps.phoneWatching?.watchersOf(chatId) ?? new Set(),
+          activeOwners: () => deps.dashboardActivity?.activeOwners() ?? new Set(),
           // A visitor has no language setting of their own; the dashboard's is the guardian's.
           language: async () => {
             const stored = await this.deps.settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);

@@ -20,6 +20,8 @@ export type SendOutcome =
   | { kind: "recipient_not_allowed" }
   /** Rome Cloud pushes only for a hosted instance, and this one is not (desktop, self-hosted, test). Nothing was sent. */
   | { kind: "not_hosted" }
+  /** The call came from a shared chat with no one person to notify. Nothing was sent. */
+  | { kind: "recipient_unknown" }
   | { kind: "outcome_unknown" };
 
 /** Structural copy of core's `NotifyContent`. An optional
@@ -88,6 +90,12 @@ export function createSendNotificationAction(
             status: "error",
             error:
               "not_hosted: the notification was not delivered. This Rome is not hosted by Rome Cloud, so it cannot push to a phone.",
+          };
+        case "recipient_unknown":
+          return {
+            status: "error",
+            error:
+              "recipient_unknown: can't tell whom to notify in this shared chat, so nothing was sent.",
           };
         case "outcome_unknown":
           return { status: "error", error: "notification_outcome_unknown" };
