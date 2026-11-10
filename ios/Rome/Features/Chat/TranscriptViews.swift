@@ -267,14 +267,20 @@ final class StoredImageCache {
 /// The agent's bubble. In a run of bubbles the first keeps a small bottom-left
 /// corner and the last a small top-left corner, as on the design's Chat board.
 /// Every reply sits in a bubble, a long one too: past about fifteen lines it
-/// folds, with "Show more".
+/// folds under a soft fade, with a small chevron below to unfold it.
 struct AgentBubble: View {
     let text: String
     let forwardedFrom: MessagePart.ForwardedFrom?
     let position: BubblePosition
     var onOpenChat: (String, String) -> Void = { _, _ in }
     var menu = BubbleMenu()
-    @State private var expanded = false
+    #if DEBUG
+    /// Snapshot runs only: long bubbles open unfolded.
+    static var startsExpanded = false
+    #else
+    static let startsExpanded = false
+    #endif
+    @State private var expanded = AgentBubble.startsExpanded
     /// The reply's laid-out height, measured: Chinese fits far fewer
     /// characters on a line than English, so characters cannot tell.
     @State private var fullHeight: CGFloat = 0
@@ -340,9 +346,12 @@ struct AgentBubble: View {
                 .clipped()
                 .overlay(alignment: .bottom) {
                     if folds && !expanded {
+                        // The fade is part of the chevron's tap target.
                         LinearGradient(colors: [Palette.bubble.opacity(0), Palette.bubble], startPoint: .top, endPoint: .bottom)
                             .frame(height: 48)
-                            .allowsHitTesting(false)
+                            .contentShape(Rectangle())
+                            .onTapGesture(perform: toggle)
+                            .accessibilityHidden(true)
                     }
                 }
             if folds { expandButton }
@@ -361,12 +370,25 @@ struct AgentBubble: View {
         .padding(.trailing, forwardedFrom == nil ? 64 : 32)
     }
 
+    /// A small grey chevron, centred: the row is 44 pt tall to tap, but
+    /// reaches into the spacing above and the padding below, so it adds
+    /// little height.
     private var expandButton: some View {
-        Button(expanded ? "Show less" : "Show more") {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { expanded.toggle() }
+        Button(action: toggle) {
+            Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                .romeFont(13, .semibold)
+                .foregroundStyle(Palette.sub)
+                .frame(maxWidth: .infinity, minHeight: 44)
+                .contentShape(Rectangle())
         }
-        .romeFont(14, .semibold)
-        .foregroundStyle(Palette.primaryText)
+        .buttonStyle(.plain)
+        .accessibilityLabel(expanded ? Text("Show less") : Text("Show more"))
+        .padding(.top, -14)
+        .padding(.bottom, -12)
+    }
+
+    private func toggle() {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { expanded.toggle() }
     }
 }
 

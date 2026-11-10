@@ -156,6 +156,16 @@ enum SnapshotRunner {
             try? await Task.sleep(for: .seconds(0.8))
             await capture("25-topic-blank", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.newTopic(UUID())) }
             await capture("29-topic-photo-long-reply", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
+            // The same reply unfolded, its chevron pointing up.
+            AgentBubble.startsExpanded = true
+            model.debugCommand = .section(.chat)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("29b-topic-long-reply-unfolded", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
+            AgentBubble.startsExpanded = false
+            model.debugCommand = .section(.chat)
+            try? await Task.sleep(for: .seconds(0.6))
+            model.debugCommand = .section(.topic("topic-home"))
+            try? await Task.sleep(for: .seconds(0.6))
             await capture("34-photo-viewer", style: styleName, in: directory, wait: 2) { model.debugCommand = .photoViewer(true) }
             model.debugCommand = .photoViewer(false)
             try? await Task.sleep(for: .seconds(0.4))

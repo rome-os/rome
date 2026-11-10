@@ -104,8 +104,8 @@ struct TasksSheet: View {
                 Button(showAllDone ? "Show less" : "Show \(group.hidden) older") {
                     withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) { showAllDone.toggle() }
                 }
-                .romeFont(14, .semibold)
-                .foregroundStyle(Palette.primaryText)
+                .romeFont(14)
+                .foregroundStyle(Palette.sub)
                 .padding(.horizontal, 6)
                 .padding(.top, 2)
             }
