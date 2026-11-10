@@ -105,6 +105,43 @@ final class InstanceListProtocol: URLProtocol, @unchecked Sendable {
         }
     }
 
+    /// The wait on B's upgrade times out: nothing reopens B now, so a tap
+    /// for B opens it. Fails before the change: the tap waited on a wait
+    /// that had ended, and did nothing.
+    @Test func aTapAfterTheWaitTimedOutOpensTheInstance() async throws {
+        await withCleanDefaults {
+            UserDefaults.standard.set(try? JSONEncoder().encode(PendingUpgrade(target: "1.2.0", since: .now.addingTimeInterval(-UpdateGate.upgradeTimeout + 0.3), from: "1.1.0")), forKey: "pendingUpgrade.b")
+            defer {
+                UserDefaults.standard.removeObject(forKey: "pendingUpgrade.b")
+                InstanceListProtocol.other = [:]
+            }
+            InstanceListProtocol.other = [
+                "/api/auth/cloud/native/start": (200, #"{"authorization_request":{"client_id":"rome-instance","state":"s-1"},"origin":"https://b.example"}"#),
+                "/v1/instances/b/authorizations": (409, #"{"error":"instance_not_ready"}"#),
+            ]
+            list(b: "running")
+            let app = model(sessionForB: false)
+            await app.openInstance(preferring: "b", showHint: false)
+            #expect(app.update.waitingInstanceID == "b")
+            // Rome Cloud reports B stopped until the wait gives up.
+            list(b: "stopped")
+            for _ in 0..<80 {
+                if case .failed = app.update.state { break }
+                try? await Task.sleep(for: .milliseconds(100))
+            }
+            guard case .failed(.timedOut) = app.update.state else { Issue.record("\(app.update.state)"); return }
+            #expect(app.update.waitingInstanceID == nil)
+            // B comes back; its push is tapped: B opens.
+            let future = ISO8601DateFormatter().string(from: Date().addingTimeInterval(3600))
+            InstanceListProtocol.other["/v1/instances/b/authorizations"] = (200, #"{"code":"code-1","state":"s-1","iss":"https://romeos.cc"}"#)
+            InstanceListProtocol.other["/api/auth/cloud/native/complete"] = (200, #"{"cookie_name":"rome_session","session_token":"t","expires_at":"\#(future)","origin":"https://b.example"}"#)
+            list(b: "running")
+            await app.openFromPush(PushTarget(instanceId: "b"))
+            #expect(app.currentInstanceID == "b")
+            app.workspace?.stop()
+        }
+    }
+
     /// A retry that finds the pushed instance still stopped keeps its page,
     /// so the next retry still opens it, not the instance opened last.
     /// Fails before the change: the second retry opened C.
