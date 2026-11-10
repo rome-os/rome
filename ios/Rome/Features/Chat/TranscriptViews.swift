@@ -393,11 +393,11 @@ struct TaskCard: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Task")
-                    .romeFont(12, .semibold)
+                    .romeFont(CardScale.label, .semibold)
                     .foregroundStyle(Palette.sub)
                 HStack(spacing: 8) {
                     Text(title)
-                        .romeFont(16, .semibold)
+                        .romeFont(CardScale.title, .semibold)
                         .tracking(-0.3)
                         .foregroundStyle(Palette.fg)
                         .multilineTextAlignment(.leading)
@@ -407,9 +407,7 @@ struct TaskCard: View {
                         .foregroundStyle(Palette.sub)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 13)
+            .cardPadding()
             .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
             .softElevation(radius: Metrics.cardRadius)
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
