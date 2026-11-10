@@ -279,3 +279,132 @@ jobs:
           rm -rf "$REMOTE_STAGE_DIR"
           EOF
           } | sshpass -e "${ssh_cmd[@]}" "$ssh_target" "bash -se"
+
+  # The Releases page mirrors the stable feed: a version appears there only
+  # once users can update to it. This is the one job that writes to the
+  # repository, and it binds no environment, so the deploy secrets above never
+  # reach it. When it fails after the feed went out, rerun just this job.
+  github-release:
+    name: Create GitHub release
+    needs: publish-update-feed
+    if: ${{ inputs.update_channel == 'stable' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: write
+    env:
+      BUILD_RUN_ID: ${{ inputs.build_run_id }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The notes walk history back to the previous desktop release's tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Resolve release tag
+        id: tag
+        run: |
+          set -euo pipefail
+
+          tag="$(gh run view "$BUILD_RUN_ID" --json headBranch --jq '.headBranch')"
+          head_sha="$(gh run view "$BUILD_RUN_ID" --json headSha --jq '.headSha')"
+          if ! [[ "$tag" =~ ^desktop-v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo "::error::Run ${BUILD_RUN_ID} was built from ${tag}, not a desktop-vX.Y.Z tag"
+            exit 1
+          fi
+          # The release attaches to the tag, so the tag must still name the
+          # commit the artifacts were built from.
+          tag_sha="$(git rev-parse --verify "refs/tags/${tag}^{commit}")"
+          if [ "$tag_sha" != "$head_sha" ]; then
+            echo "::error::${tag} points at ${tag_sha}, but run ${BUILD_RUN_ID} built ${head_sha}"
+            exit 1
+          fi
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::A release for ${tag} already exists"
+            exit 1
+          fi
+
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          echo "version=${tag#desktop-v}" >> "$GITHUB_OUTPUT"
+
+      - name: Download approved DMG
+        id: dmg
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+
+          gh run download "$BUILD_RUN_ID" \
+            --name rome-desktop-mac-arm64-signed \
+            --dir artifacts
+
+          dmgs=(artifacts/*.dmg)
+          if [ "${#dmgs[@]}" -ne 1 ]; then
+            echo "::error::Expected exactly one DMG in run ${BUILD_RUN_ID}, found ${#dmgs[@]}"
+            exit 1
+          fi
+          (cd artifacts && sha256sum -- "$(basename "${dmgs[0]}")" > SHA256SUMS)
+          cat artifacts/SHA256SUMS
+          echo "path=${dmgs[0]}" >> "$GITHUB_OUTPUT"
+
+      - name: Write release notes
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+        run: |
+          set -euo pipefail
+
+          # The highest published desktop release below this one. Releases, not
+          # tags: a tag whose build never shipped must not swallow its changes.
+          prev="$(
+            gh api --paginate "repos/${GH_REPO}/releases?per_page=100" --jq '.[] | select(.draft | not) | .tag_name' \
+              | sed -nE 's/^desktop-v((0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*))$/\1/p' \
+              | { cat; printf '%s\n' "$VERSION"; } \
+              | sort -u -t. -k1,1n -k2,2n -k3,3n \
+              | awk -v v="$VERSION" '$0 == v { print p } { p = $0 }'
+          )"
+
+          {
+            echo "Signed and notarized Rome for Apple silicon Macs. Installed apps update on their own; download the DMG for a new install and check it with \`shasum -a 256 -c SHA256SUMS\`."
+            echo
+            if [ -z "$prev" ]; then
+              echo "First Rome for Mac release on GitHub."
+            else
+              echo "## Changes since ${prev}"
+              echo
+              # The paths the app is built from: the desktop package and its
+              # workspace dependencies (see packages/desktop/package.json).
+              log="$(
+                git log --no-merges --format='- %s' "desktop-v${prev}..${TAG}" -- \
+                  packages/desktop packages/desktop-base-web packages/rome-node-core packages/lib
+              )"
+              changes="$(printf '%s\n' "$log" | grep -vE '^- chore(\([^)]*\))?: release' || true)"
+              if [ -n "$changes" ]; then
+                printf '%s\n' "$changes"
+              else
+                echo "No changes in the app's packages."
+              fi
+            fi
+          } > release-notes.md
+          cat release-notes.md
+
+      - name: Create release
+        env:
+          TAG: ${{ steps.tag.outputs.tag }}
+          VERSION: ${{ steps.tag.outputs.version }}
+          DMG: ${{ steps.dmg.outputs.path }}
+        run: |
+          set -euo pipefail
+
+          # Not Latest: that badge stays with the package releases. With assets,
+          # gh uploads to a draft and publishes it last, deleting the draft if an
+          # upload fails, so a failed run leaves nothing for a rerun to trip on.
+          gh release create "$TAG" \
+            --verify-tag \
+            --latest=false \
+            --title "Rome for Mac ${VERSION}" \
+            --notes-file release-notes.md \
+            "$DMG" \
+            artifacts/SHA256SUMS
