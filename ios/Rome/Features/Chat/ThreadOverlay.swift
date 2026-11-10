@@ -29,32 +29,44 @@ struct ThreadOverlay: View {
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
                 .opacity(shown ? 1 : 0)
                 .onTapGesture { close() }
-            VStack(spacing: 0) {
-                // In place from the first frame: it stands for the header below.
-                header
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                            ConciergeRow(row: row, store: chat, tasks: tasks, onOpenChat: onOpenChat, inThread: true)
-                                .padding(.top, TranscriptSpacing.top(row, after: index > 0 ? rows[index - 1] : nil))
-                        }
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        ConciergeRow(row: row, store: chat, tasks: tasks, onOpenChat: onOpenChat, inThread: true)
+                            .padding(.top, TranscriptSpacing.top(row, after: index > 0 ? rows[index - 1] : nil))
                     }
-                    .padding(.horizontal, Metrics.pagePadding)
-                    .readableColumn()
-                    .padding(.vertical, 12)
-                    // At least as tall as the scroll, with the messages at its
-                    // foot: the space around them is the blurred chat, and a
-                    // tap there closes. A message keeps its own taps.
-                    .frame(maxWidth: .infinity, minHeight: visibleHeight, alignment: .bottom)
-                    .contentShape(Rectangle())
-                    .onTapGesture { close() }
                 }
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { visibleHeight = $0 }
-                .defaultScrollAnchor(.bottom)
-                .scrollDismissesKeyboard(.interactively)
-                .opacity(shown ? 1 : 0)
-                .offset(y: shown ? 0 : 36)
+                .padding(.horizontal, Metrics.pagePadding)
+                .readableColumn()
+                .padding(.vertical, 12)
+                // At least as tall as the scroll, with the messages at its
+                // foot: the space around them is the blurred chat, and a
+                // tap there closes. A message keeps its own taps.
+                .frame(maxWidth: .infinity, minHeight: visibleHeight, alignment: .bottom)
+                .contentShape(Rectangle())
+                .onTapGesture { close() }
             }
+            // The height between the header and the composer.
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { visibleHeight = $0 }
+            .modifier(StayAtBottom())
+            .scrollDismissesKeyboard(.interactively)
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown ? 0 : 36)
+            // Rows end in a short fade just above the composer, never behind
+            // its glass. Upward the mask reaches past the header, where the
+            // rows fade under it instead.
+            .mask {
+                VStack(spacing: 0) {
+                    Rectangle()
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 14)
+                }
+                .ignoresSafeArea(.container, edges: .top)
+            }
+            .softTopScrollEdge()
+            // Above the rows, as the chat's own header is: they scroll under it.
+            // In place from the first frame: it stands for the header below.
+            .floatingTopBar { header }
         }
         .onAppear {
             withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { shown = true }
@@ -84,6 +96,21 @@ struct ThreadOverlay: View {
         Task {
             try? await Task.sleep(for: .milliseconds(200))
             onClose()
+        }
+    }
+}
+
+/// Where the thread holds still: it opens on its last message, and the
+/// last message stays just above the composer as the keyboard comes up or
+/// the read brings older messages in above it.
+private struct StayAtBottom: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
+                .defaultScrollAnchor(.bottom)
+        } else {
+            content.defaultScrollAnchor(.bottom)
         }
     }
 }

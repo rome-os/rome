@@ -126,6 +126,15 @@ enum SnapshotRunner {
             }
             model.workspace?.topicStore("topic-trip").closeThread()
             try? await Task.sleep(for: .seconds(0.4))
+            // A thread taller than the screen, opened near its foot: the
+            // header above the rows, the last answer just above the composer.
+            model.debugCommand = .section(.topic("topic-books"))
+            try? await Task.sleep(for: .seconds(1.5))
+            await capture("54-long-thread-open", style: styleName, in: directory, wait: 1.5) {
+                model.workspace?.topicStore("topic-books").openThread(at: "b23")
+            }
+            model.workspace?.topicStore("topic-books").closeThread()
+            try? await Task.sleep(for: .seconds(0.4))
             // Routine cards with their state, and the rows for cards only the web draws.
             await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }
             // The drawer over a topic chat: its row selected.

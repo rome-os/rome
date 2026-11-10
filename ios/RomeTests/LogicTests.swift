@@ -127,6 +127,46 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
     @Test func plainDropsMarks() {
         #expect(MarkdownParser.plain("**bold** and `code`") == "bold and code")
     }
+
+    /// The ranges with an intent, as plain strings.
+    private func spans(_ text: String, _ intent: InlinePresentationIntent) -> [String] {
+        let result = MarkdownParser.inline(text)
+        return result.runs.compactMap { run in
+            run.inlinePresentationIntent?.contains(intent) == true ? String(result[run.range].characters) : nil
+        }
+    }
+
+    @Test func boldClosesAfterCJKPunctuation() {
+        let text = "**今晚要注意保暖、防霜冻。**渭南市…"
+        #expect(String(MarkdownParser.inline(text).characters) == "今晚要注意保暖、防霜冻。渭南市…")
+        #expect(spans(text, .stronglyEmphasized) == ["今晚要注意保暖、防霜冻。"])
+    }
+
+    @Test func boldOpensBeforeCJKPunctuation() {
+        let text = "明天：**「降温」**提醒"
+        #expect(String(MarkdownParser.inline(text).characters) == "明天：「降温」提醒")
+        #expect(spans(text, .stronglyEmphasized) == ["「降温」"])
+    }
+
+    @Test func italicAndBoldItalicBesideCJK() {
+        #expect(spans("注意*保暖。*今晚", .emphasized) == ["保暖。"])
+        let both = MarkdownParser.inline("***防霜冻。***渭南")
+        #expect(String(both.characters) == "防霜冻。渭南")
+        #expect(both.runs.first?.inlinePresentationIntent?.isSuperset(of: [.stronglyEmphasized, .emphasized]) == true)
+    }
+
+    @Test func cjkBoldKeepsCodeAndLinks() {
+        let result = MarkdownParser.inline("**提醒。**看 `a*b` 和 [链接](https://example.com)")
+        #expect(String(result.characters) == "提醒。看 a*b 和 链接")
+        #expect(result.runs.contains { $0.link != nil })
+    }
+
+    @Test func latinEmphasisUnchanged() {
+        #expect(spans("Some **bold** and *italic* text", .stronglyEmphasized) == ["bold"])
+        #expect(spans("Some **bold** and *italic* text", .emphasized) == ["italic"])
+        #expect(String(MarkdownParser.inline("2 * 3 * 4 and a**b").characters) == "2 * 3 * 4 and a**b")
+        #expect(String(MarkdownParser.inline("**bold**word").characters) == "boldword")
+    }
 }
 
 @Suite struct AuthTests {

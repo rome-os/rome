@@ -178,7 +178,9 @@ enum MarkdownParser {
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
             failurePolicy: .returnPartiallyParsedIfPossible
         )
-        var result = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        let marked = CJKEmphasis.mark(text)
+        var result = (try? AttributedString(markdown: marked, options: options)) ?? AttributedString(marked)
+        CJKEmphasis.apply(&result)
         for run in result.runs {
             if run.link != nil {
                 result[run.range].foregroundColor = Palette.primaryText
@@ -195,6 +197,143 @@ enum MarkdownParser {
         String(inline(text).characters)
             .replacingOccurrences(of: "#", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Bold and italic next to Chinese and Japanese text. CommonMark's flanking
+/// rule only closes `**` before a space or punctuation, so
+/// `**防霜冻。**渭南` keeps its asterisks: the closer follows `。` and comes
+/// before a letter. Text with a `*` run beside a CJK character has its
+/// emphasis paired here instead: a run opens before any non-space and closes
+/// after any non-space, and pairs with the nearest open run of its length.
+/// The pairs go through the parser as private-use marks and become emphasis
+/// afterwards. Text without one is left to the parser as it is.
+enum CJKEmphasis {
+    private static let strongOpen: Character = "\u{E000}"
+    private static let strongClose: Character = "\u{E001}"
+    private static let emphasisOpen: Character = "\u{E002}"
+    private static let emphasisClose: Character = "\u{E003}"
+    private static let marks: Set<Character> = [strongOpen, strongClose, emphasisOpen, emphasisClose]
+
+    static func isCJK(_ character: Character?) -> Bool {
+        guard let value = character?.unicodeScalars.first?.value else { return false }
+        return (0x2E80...0x9FFF).contains(value)  // radicals, punctuation, kana, ideographs
+            || (0xAC00...0xD7AF).contains(value)  // Hangul
+            || (0xF900...0xFAFF).contains(value)  // compatibility ideographs
+            || (0xFF00...0xFFEF).contains(value)  // fullwidth forms
+            || (0x20000...0x3FFFF).contains(value)
+    }
+
+    private struct Run {
+        let start: Int
+        let length: Int
+        let before: Character?
+        let after: Character?
+    }
+
+    /// The text with its paired `*` runs replaced by marks, when a run sits
+    /// beside a CJK character.
+    static func mark(_ text: String) -> String {
+        guard text.contains("*") else { return text }
+        var chars = Array(text)
+        var runs: [Run] = []
+        var index = 0
+        while index < chars.count {
+            let character = chars[index]
+            if character == "\\" {
+                index += 2
+            } else if character == "`" {
+                // A code span keeps its asterisks.
+                var ticks = 0
+                while index + ticks < chars.count, chars[index + ticks] == "`" { ticks += 1 }
+                var close = index + ticks
+                var found: Int?
+                while close < chars.count {
+                    if chars[close] == "`" {
+                        var count = 0
+                        while close + count < chars.count, chars[close + count] == "`" { count += 1 }
+                        if count == ticks { found = close + count; break }
+                        close += count
+                    } else {
+                        close += 1
+                    }
+                }
+                index = found ?? index + ticks
+            } else if character == "*" {
+                var length = 0
+                while index + length < chars.count, chars[index + length] == "*" { length += 1 }
+                runs.append(Run(
+                    start: index,
+                    length: length,
+                    before: index > 0 ? chars[index - 1] : nil,
+                    after: index + length < chars.count ? chars[index + length] : nil))
+                index += length
+            } else {
+                index += 1
+            }
+        }
+        guard runs.contains(where: { isCJK($0.before) || isCJK($0.after) }) else { return text }
+
+        var open: [Run] = []
+        var pairs: [(Run, Run)] = []
+        for run in runs where run.length <= 3 {
+            let canClose = run.before.map { !$0.isWhitespace } ?? false
+            let canOpen = run.after.map { !$0.isWhitespace } ?? false
+            if canClose, let match = open.lastIndex(where: { $0.length == run.length }) {
+                pairs.append((open[match], run))
+                open.removeSubrange(match...)
+            } else if canOpen {
+                open.append(run)
+            }
+        }
+        guard !pairs.isEmpty else { return text }
+        // Right to left, so earlier offsets stay valid.
+        var edits: [(Run, [Character])] = []
+        for (opener, closer) in pairs {
+            switch opener.length {
+            case 1:
+                edits += [(opener, [emphasisOpen]), (closer, [emphasisClose])]
+            case 2:
+                edits += [(opener, [strongOpen]), (closer, [strongClose])]
+            default:
+                edits += [(opener, [strongOpen, emphasisOpen]), (closer, [emphasisClose, strongClose])]
+            }
+        }
+        for (run, replacement) in edits.sorted(by: { $0.0.start > $1.0.start }) {
+            chars.replaceSubrange(run.start..<run.start + run.length, with: replacement)
+        }
+        return String(chars)
+    }
+
+    /// Turns the marks `mark` left into emphasis, and removes them.
+    static func apply(_ result: inout AttributedString) {
+        guard result.characters.contains(where: { marks.contains($0) }) else { return }
+        var spans: [(Range<AttributedString.Index>, InlinePresentationIntent)] = []
+        var strong: [AttributedString.Index] = []
+        var emphasis: [AttributedString.Index] = []
+        var index = result.startIndex
+        while index < result.endIndex {
+            let next = result.characters.index(after: index)
+            switch result.characters[index] {
+            case strongOpen: strong.append(next)
+            case emphasisOpen: emphasis.append(next)
+            case strongClose:
+                if let start = strong.popLast() { spans.append((start..<index, .stronglyEmphasized)) }
+            case emphasisClose:
+                if let start = emphasis.popLast() { spans.append((start..<index, .emphasized)) }
+            default: break
+            }
+            index = next
+        }
+        for (range, intent) in spans where !range.isEmpty {
+            let pieces = result[range].runs.map { ($0.range, $0.inlinePresentationIntent ?? []) }
+            for (piece, existing) in pieces {
+                result[piece].inlinePresentationIntent = existing.union(intent)
+            }
+        }
+        while let mark = result.characters.firstIndex(where: { marks.contains($0) }) {
+            result.removeSubrange(mark..<result.characters.index(after: mark))
+        }
     }
 }
 

@@ -366,7 +366,7 @@ struct ChatIdentity: View {
                     .romeFont(14, .semibold)
                     .foregroundStyle(Palette.fg)
                 if let status {
-                    StatusLine(text: status, warning: activity == .needsYou, shimmers: busy && !reduceMotion)
+                    StatusLine(text: status, shimmers: busy && !reduceMotion)
                 }
             }
             .lineLimit(1)
@@ -395,18 +395,16 @@ struct ChatIdentity: View {
     }
 }
 
-/// The header's status line: small and muted, the warning colour while the
-/// Concierge waits on the guardian, and a faint left-to-right shimmer
-/// while it works.
+/// The header's status line: small and muted in every state, with a faint
+/// left-to-right shimmer while the Concierge works.
 private struct StatusLine: View {
     let text: String
-    let warning: Bool
     let shimmers: Bool
 
     var body: some View {
         let line = Text(verbatim: text)
             .romeFont(12, .medium)
-            .foregroundStyle(warning ? Palette.warningText : Palette.sub)
+            .foregroundStyle(Palette.sub)
         if shimmers {
             line.overlay {
                 TimelineView(.animation) { context in

@@ -103,6 +103,7 @@ final class DemoBackend: RomeBackend {
                 let (main, seconds) = steps[step % steps.count]
                 self.bus.emit(LiveTopic.conciergeActivity, .conciergeActivity(chatId: conciergeChatID, activity: main))
                 self.bus.emit(LiveTopic.conciergeActivity, .conciergeActivity(chatId: "topic-trip", activity: steps[(step + 2) % steps.count].0))
+                self.bus.emit(LiveTopic.conciergeActivity, .conciergeActivity(chatId: "topic-books", activity: steps[(step + 3) % steps.count].0))
                 step += 1
                 try? await Task.sleep(for: .seconds(seconds))
             }
@@ -583,14 +584,17 @@ final class DemoBackend: RomeBackend {
             for row in 0..<3 { for column in 0..<5 { context.fill(CGRect(x: 200 + column * 85, y: 220 + row * 95, width: 50, height: 60)) } }
         }.jpegData(compressionQuality: 0.8)
         // A long chat, to scroll far from the bottom.
-        // The last two chapters are one long chat thread: four messages, so
-        // its answer carries the replies line.
+        // The last eight chapters are one long chat thread, taller than the
+        // screen: its last answer carries the replies line.
         messages["topic-books"] = (0..<24).flatMap { index -> [ChatMessage] in
             let time = at(8, 0, daysAgo: 1).addingTimeInterval(Double(index) * 600)
-            let root: String? = index >= 22 ? "b22" : nil
+            let root: String? = index >= 16 ? "b16" : nil
             return [
                 threaded(user("b\(index)", "第 \(index + 1) 章讲了什么？", at: time, session: "topic-books"), root),
-                threaded(agent("第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"), root),
+                // The last answer opens with bold that closes after `。`.
+                threaded(agent(index == 23
+                    ? "**第 24 章的重点：先把大问题拆小。**每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。"
+                    : "第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"), root),
             ]
         }
         // Two chat threads: the plan, interrupted by the weather, so both of
