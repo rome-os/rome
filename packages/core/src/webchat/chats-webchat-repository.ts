@@ -51,7 +51,7 @@ import { TurnLinks } from "../sessions/turn-links.js";
 import {
   ChatReadModel,
   chatsSessionAwaitingGuardian,
-  chatsSessionAwaitingGuardianSince,
+  chatsSessionAwaitingCardSince,
   chatsSessionOwnerSpokeAt,
 } from "./chat-read-model.js";
 import {
@@ -106,7 +106,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
   // A listed session counts and waits on the lines its transcript draws.
   protected override readonly messageCountColumn = chatsSessionMessageCount;
   protected override readonly awaitingGuardianColumn = chatsSessionAwaitingGuardian;
-  protected override readonly awaitingGuardianSinceColumn = chatsSessionAwaitingGuardianSince;
+  protected override readonly awaitingCardSinceColumn = chatsSessionAwaitingCardSince;
   protected override readonly ownerSpokeAtColumn = chatsSessionOwnerSpokeAt;
 
   /** Searches the dashboard chats' messages in Chats, at most one match per
@@ -347,6 +347,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     const parts = partsOf(content);
     // The input, its queued link and the session's activity commit together,
     // so an input on record is always one the session can admit.
+    let root: string | null = null;
     const recorded = this.db.transaction(() => {
       const recorded = this.lines.record({
         direction: "toRome",
@@ -371,11 +372,12 @@ export class ChatsWebChatRepository extends WebChatRepository {
         at: new Date(),
       });
       if (!recorded) return false;
-      if (chatThread) this.place(standing, id, chatThread);
+      if (chatThread) root = this.place(standing, id, chatThread).rooted;
       this.links.prompt(recorded.id, sessionId, null, "queued");
       this.advanceActivity(sessionId, recorded.at);
       return true;
     });
+    this.emitRooted(sessionId, root);
     const thread = recorded && chatThread ? this.lines.chatThreadOf(standing.place.chat, id) : null;
     if (thread) this.emitChatThreadPlaced({ sessionId, messageId: id, chatThreadId: thread });
     return recorded;
@@ -388,15 +390,13 @@ export class ChatsWebChatRepository extends WebChatRepository {
   ): Promise<string | null> {
     const standing = this.standingOf(sessionId);
     if (!standing || this.lines.idOf(standing.place.chat, messageId) === null) return null;
-    const moved = this.db.transaction(() => this.place(standing, messageId, placement));
+    const { placed, rooted } = this.db.transaction(() =>
+      this.place(standing, messageId, placement),
+    );
+    this.emitRooted(sessionId, rooted);
     const thread = this.lines.chatThreadOf(standing.place.chat, messageId);
-    if (moved && thread) this.emitChatThreadPlaced({ sessionId, messageId, chatThreadId: thread });
+    if (placed && thread) this.emitChatThreadPlaced({ sessionId, messageId, chatThreadId: thread });
     return thread;
-  }
-
-  override async chatThreadSettled(sessionId: string, messageId: string): Promise<boolean | null> {
-    const standing = this.standingOf(sessionId);
-    return standing ? this.lines.chatThreadSettled(standing.place.chat, messageId) : null;
   }
 
   override async chatThreadOf(sessionId: string, messageId: string): Promise<string | null> {
@@ -419,15 +419,28 @@ export class ChatsWebChatRepository extends WebChatRepository {
    * `placement` names. Answers whether it was placed. Runs inside the
    * caller's transaction when there is one.
    */
-  private place(standing: Standing, key: string, placement: ChatThreadPlacement): boolean {
+  private place(
+    standing: Standing,
+    key: string,
+    placement: ChatThreadPlacement,
+  ): { placed: boolean; rooted: string | null } {
     const chat = standing.place.chat;
-    const thread =
-      "in" in placement
-        ? (this.lines.chatThreadOf(chat, placement.in) ?? key)
-        : "latest" in placement
-          ? (this.lines.latestChatThread(chat) ?? key)
-          : key;
-    return this.lines.placeInChatThread(chat, key, thread, { settle: placement.settle === true });
+    const thread = "in" in placement ? (this.lines.chatThreadOf(chat, placement.in) ?? key) : key;
+    // A message in no thread that a reply joins becomes its thread's root, so
+    // whether a message is in a thread has one answer.
+    const rooted =
+      "in" in placement && thread === placement.in && thread !== key
+        ? this.lines.rootChatThread(chat, thread)
+        : false;
+    const placed = this.lines.placeInChatThread(chat, key, thread, {
+      settle: placement.settle === true,
+    });
+    return { placed, rooted: rooted ? thread : null };
+  }
+
+  /** Tells the chat's listeners that `root` now starts its own thread. */
+  private emitRooted(sessionId: string, root: string | null): void {
+    if (root) this.emitChatThreadPlaced({ sessionId, messageId: root, chatThreadId: root });
   }
 
   /** Rechecked at dispatch: only an unchanged guardian root chat can continue. */
@@ -993,6 +1006,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
     chatThread?: ChatThreadPlacement,
     at: Date = new Date(),
   ): Date {
+    let root: string | null = null;
     this.db.transaction(() => {
       const recorded = this.lines.record({
         direction: "toRome",
@@ -1005,11 +1019,12 @@ export class ChatsWebChatRepository extends WebChatRepository {
       });
       const id = recorded?.id ?? this.lines.idOf(standing.place.chat, key);
       if (id === null) throw new Error(`Dashboard line ${key} could not be recorded`);
-      if (chatThread) this.place(standing, key, chatThread);
+      if (chatThread) root = this.place(standing, key, chatThread).rooted;
       if (turnId && role === "user") this.links.prompt(id, standing.sessionId, turnId);
       if (turnId && role === "assistant") this.links.answer(id, standing.sessionId, turnId);
       this.advanceActivity(standing.sessionId, at);
     });
+    this.emitRooted(standing.sessionId, root);
     return at;
   }
 

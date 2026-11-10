@@ -112,26 +112,67 @@ function latestCardMessages(messages: ChatMessage[]): Map<string, string> {
   return map;
 }
 
+// (card message, session, toolUseId) → the result that card occurrence got,
+// read in transcript order as buildInteractionResults reads it. Kept per
+// occurrence, so a later card that reuses the tool id has its own.
+function resultsByCard(messages: ChatMessage[]): Map<string, Record<string, unknown>> {
+  const results = new Map<string, Record<string, unknown>>();
+  const cardOf = new Map<string, string>();
+  // Per session, the built-in cards still open, which a typed reply dismisses.
+  const openCards = new Map<string, Set<string>>();
+  const occurrence = (key: string) => `${cardOf.get(key)}\u0000${key}`;
+  for (const msg of messages) {
+    let userTextReply = false;
+    for (const b of parseMessageEntries(msg)) {
+      if (msg.role === "assistant" && b.type === "pending_interaction") {
+        const key = interactionResultKey(msg.sessionId, b.toolUseId);
+        cardOf.set(key, msg.id);
+        const open = openCards.get(msg.sessionId) ?? new Set<string>();
+        open.delete(key);
+        if (isAutoDismissedCard(b)) open.add(key);
+        openCards.set(msg.sessionId, open);
+      } else if (msg.role === "user" && b.type === "interaction_result") {
+        const key = interactionResultKey(msg.sessionId, b.toolUseId);
+        if (cardOf.has(key)) results.set(occurrence(key), b.output);
+        openCards.get(msg.sessionId)?.delete(key);
+      } else if (msg.role === "user" && b.type === "text" && b.content.trim()) {
+        userTextReply = true;
+      }
+    }
+    const open = userTextReply ? openCards.get(msg.sessionId) : undefined;
+    if (open) {
+      for (const key of open) results.set(occurrence(key), { dismissed: true });
+      open.clear();
+    }
+  }
+  return results;
+}
+
 /**
- * The card results a chat thread's own transcript reads: those its fetched
- * messages record, which can lie well before the main timeline's loaded
- * page, then the main timeline's, which may be newer, but only for a card the
- * thread shows as the same message. A result for a later card that reuses the
- * tool id leaves the thread's own card as it was.
+ * The card results a chat thread's own transcript reads. They are read from
+ * the thread's fetched messages and the main timeline's together, in order
+ * and each message once: the thread's can lie well before the main
+ * timeline's loaded page, and a typed reply placed in another thread, which
+ * dismisses the card, is only in the main timeline's. Each card gets the
+ * result of its own occurrence, so a later card that reuses the tool id
+ * leaves it as it was. The main timeline's results, which also hold ones not
+ * yet in any message, then apply to a card the thread shows as the same
+ * message.
  */
 export function threadInteractionResults(
   threadMessages: ChatMessage[],
-  sessionId: string,
-  mainIdentity: AgentIdentity,
   main: { messages: ChatMessage[]; results: ChatView["interactionResults"] },
 ): ChatView["interactionResults"] {
-  const results = buildChatView(
-    new Map([[sessionId, threadMessages]]),
-    sessionId,
-    mainIdentity,
-  ).interactionResults;
+  const union = new Map<string, ChatMessage>();
+  for (const msg of [...threadMessages, ...main.messages]) union.set(msg.id, msg);
+  const byCard = resultsByCard(orderChatMessages([...union.values()]));
   const threadCards = latestCardMessages(threadMessages);
   const mainCards = latestCardMessages(main.messages);
+  const results: ChatView["interactionResults"] = new Map();
+  for (const [key, card] of threadCards) {
+    const own = byCard.get(`${card}\u0000${key}`);
+    if (own !== undefined) results.set(key, own);
+  }
   for (const [key, output] of main.results) {
     const card = threadCards.get(key);
     if (card !== undefined && card === mainCards.get(key)) results.set(key, output);

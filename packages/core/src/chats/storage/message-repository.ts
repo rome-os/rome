@@ -304,18 +304,6 @@ export class MessageRepository {
     return row ? (row.thread ?? key) : null;
   }
 
-  /** The chat thread of the newest message in `chat` that is in one, or null
-   *  when none is. */
-  latestChatThread(chat: ChatRef): string | null {
-    return (
-      this.db.all<{ thread: string }>(sql`
-        SELECT chat_thread_id AS thread FROM chat_messages
-        WHERE chat_id = ${chatIdOf(chat)} AND chat_thread_id IS NOT NULL
-        ORDER BY said_at DESC, id DESC LIMIT 1
-      `)[0]?.thread ?? null
-    );
-  }
-
   /**
    * Put the message keyed `key` in `chat` in chat thread `thread`, and, with
    * `settle`, for good. A settled message is never moved again. Answers
@@ -342,14 +330,24 @@ export class MessageRepository {
     return placed.length > 0;
   }
 
-  /** Whether the message keyed `key` in `chat` is settled in its chat
-   *  thread, or null when Rome holds no such message. */
-  chatThreadSettled(chat: ChatRef, key: string): boolean | null {
-    const row = this.db.all<{ settled: number }>(sql`
-      SELECT chat_thread_settled AS settled FROM chat_messages
-      WHERE chat_id = ${chatIdOf(chat)} AND key = ${key}
-    `)[0];
-    return row ? row.settled === 1 : null;
+  /**
+   * Make the message keyed `key` in `chat` the root of its own chat thread,
+   * for good, when it is in none. Answers whether it was in none.
+   */
+  rootChatThread(chat: ChatRef, key: string): boolean {
+    const rooted = this.db
+      .update(chatMessages)
+      .set({ chatThreadId: key, chatThreadSettled: true })
+      .where(
+        and(
+          sql`${chatMessages.chatId} = ${chatIdOf(chat)}`,
+          eq(chatMessages.key, key),
+          sql`${chatMessages.chatThreadId} IS NULL`,
+        ),
+      )
+      .returning({ id: chatMessages.id })
+      .all();
+    return rooted.length > 0;
   }
 
   /** The chat on `platform` that holds a message its adapter keys `key`, the

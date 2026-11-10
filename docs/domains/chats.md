@@ -28,14 +28,17 @@ A chat inside a chat, usually started from one of its messages. A thread is not 
 
 ## Chat thread
 
-One line of conversation inside a [Concierge chat](#concierge-chat) about one thing its owner asked for. Unlike a [thread](#thread), it is not a place: its messages stay in the chat's own timeline, and the Concierge, not the platform, places messages into it.
+One line of conversation inside a [Concierge chat](#concierge-chat) that its owner follows on its own. Unlike a [thread](#thread), it is not a place: its messages stay in the chat's own timeline. A chat thread exists only on demand, and the Concierge never places a message.
 
-- A chat thread is known by its chat and the id of its first message.
-- Every message the Concierge says in the chat is in a chat thread. One it does not place joins the thread of the owner's message it answers. One that answers no message of the owner, such as a task's result, joins the thread of the message that started the task.
-- An owner's message sent from the thread view, or as a reply, is in that thread at once, and nothing moves it.
-- Any other owner's message joins the chat thread of the newest message that is in one, or starts its own when none is. The first message the Concierge says after it **places** it, once and for good: in the thread that message is in, in another, or in a new one. Nothing moves it after that.
-- A message from before chat threads is in none, and its thread view shows it alone.
+- A chat thread is known by its chat and the id of its first message, its root.
+- An owner's message sent as a reply, or from the thread view, is in that thread at once, and nothing moves it.
+- A task has one root, kept for good. A task started for an owner's message has that message's thread, or that message as its root. The Concierge's messages in that turn that answer the message join the thread with it. A task no one owner's message started takes the first owner's message sent on to it, or the first thing it brings back.
+- Whatever a task brings back later, its result, its question card or a forward, joins the task's thread. So does an owner's message sent on to it, which keeps a follow-up in the task's story.
+- A task moved to another Concierge chat leaves its thread behind, and starts a new one there the same way.
+- Any other message is in no chat thread: an owner's message typed in the chat, and the Concierge's answer to one. The Concierge's answer to a message in a thread is in that thread.
+- A message in no chat thread opens a thread view that shows it alone.
 - The chat's timeline shows every message in the order it was said, whatever its thread. The thread view shows one thread's messages on their own.
+- A thread with replies shows its count under its root, and under its newest message when other messages lie between the two. A thread whose root is not loaded shows it under its newest message only.
 
 ## Place
 
@@ -261,7 +264,8 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **"Channel" for a topic chat, as in Claude Duet.** Channel names nothing the guardian meets in Rome, and bringing it back for one kind of chat would give it a meaning no other surface shares.
 - **"Sub chat" for a topic chat.** It reads as a chat under another, which is what a task chat is. A topic chat stands beside the main chat.
 - **A platform thread for a chat thread.** A platform thread is a place of its own, so its messages leave the chat's timeline. The guardian wants every message in the timeline, grouped only when they open one thread.
-- **The guardian sorting messages into chat threads.** It asks them to file every message by hand. The Concierge knows what each message is about, and the guardian's own choice, a reply or the thread view, stays theirs.
+- **The guardian sorting messages into chat threads.** It asks them to file every message by hand. Threads start only when the guardian replies, or when a task brings something back.
+- **Every message in a chat thread, with the Concierge placing each one.** The Concierge rarely started a new thread, so one thread swallowed the whole timeline, and opening it showed the same list as the timeline.
 - **A topic chat as a thread of the main chat.** A thread's messages are messages of its chat, so the main chat would still carry every topic. Separate topics need separate chats.
 - **Several Concierges, each with its own memory, follows and tasks.** One event would be triaged and told once per Concierge, and the isolation it promises does not exist inside one Rome. The reasons are in [One Concierge with several chats](../adrs/one-concierge-with-several-chats.md).
 - **A reply rule the guardian sets per assistant.** An assistant writes to Rome to get an answer, and no case has come up yet where one should be ignored. The setting waits until one does.

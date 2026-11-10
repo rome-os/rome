@@ -132,31 +132,25 @@ export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (
 ))`.mapWith(Boolean);
 
 /**
- * When the session's newest wait on the guardian began, unix seconds, or null
- * when nothing waits: the newest card of those
- * {@link chatsSessionAwaitingGuardian} counts open, or the newest approval
- * still pending in this chat.
+ * When the session's newest open card was said, unix seconds, or null: the
+ * newest card of those {@link chatsSessionAwaitingGuardian} counts open.
+ * Pending approvals are read apart, once per call, by the repository's
+ * `awaitingGuardianSince`. The Chats version of the legacy
+ * `sessionAwaitingCardSince`.
  */
-export const chatsSessionAwaitingGuardianSince = sql<number | null>`nullif(max(
-  coalesce((
-    select max(m."said_at") from (
-      select coalesce(max(u."seq"), 0) as "cut" from ${CHAT_MESSAGES} u
-      where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
-      and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')
-    ) last
-    cross join ${CHAT_MESSAGES} m
-    cross join json_each(m."parts") part
-    where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
-    and m."seq" > last."cut"
-    and m."sender_agent" is not null and json_valid(m."parts")
-    and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
-  ), -1),
-  coalesce((
-    select max(cast(a."created_at" as integer)) from "approvals" a
-    where a."status" = 'pending'
-    and json_extract(a."payload", '$.channelContext.threadId') = "rome_sessions"."id"
-  ), -1)
-), -1)`;
+export const chatsSessionAwaitingCardSince = sql<number | null>`(
+  select max(m."said_at") from (
+    select coalesce(max(u."seq"), 0) as "cut" from ${CHAT_MESSAGES} u
+    where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
+    and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')
+  ) last
+  cross join ${CHAT_MESSAGES} m
+  cross join json_each(m."parts") part
+  where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
+  and m."seq" > last."cut"
+  and m."sender_agent" is not null and json_valid(m."parts")
+  and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
+)`;
 
 /**
  * When the session's owner last said something in it, unix seconds, or null:

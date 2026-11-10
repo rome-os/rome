@@ -90,7 +90,7 @@ describe("buildChatView", () => {
       messages: [newCard],
       results: new Map([[interactionResultKey(MAIN, "new"), { answer: "Yes" }]]),
     };
-    const results = threadInteractionResults(thread, MAIN, MAIN_IDENTITY, main);
+    const results = threadInteractionResults(thread, main);
     expect(results.get(interactionResultKey(MAIN, "old"))).toEqual({ answer: "Friday" });
     // A newer answer the main timeline holds for the same card still applies.
     expect(results.get(interactionResultKey(MAIN, "new"))).toEqual({ answer: "Yes" });
@@ -114,11 +114,11 @@ describe("buildChatView", () => {
       results: buildChatView(new Map([[MAIN, mainMessages]]), MAIN, MAIN_IDENTITY)
         .interactionResults,
     };
-    const results = threadInteractionResults(thread, MAIN, MAIN_IDENTITY, main);
+    const results = threadInteractionResults(thread, main);
     expect(results.get(interactionResultKey(MAIN, "item_0"))).toEqual({ answer: "Friday" });
 
     // Unanswered in the thread: the later card's answer still is not its own.
-    const open = threadInteractionResults([card("t1")], MAIN, MAIN_IDENTITY, main);
+    const open = threadInteractionResults([card("t1")], main);
     expect(open.get(interactionResultKey(MAIN, "item_0"))).toBeUndefined();
   });
 
@@ -132,6 +132,27 @@ describe("buildChatView", () => {
       builtin: true,
       props: { questions: [] },
     },
+  });
+
+  it("dismisses a thread's card by a typed reply placed in another thread, outside the main page", () => {
+    const at = (minute: number) => ({ createdAt: new Date(minute * 60_000).toISOString() });
+    // Thread A: the question, older than the main timeline's loaded page.
+    const thread = [
+      mk(MAIN, "user", "t1", [{ type: "text", content: "Plan the trip" }], at(1)),
+      mk(MAIN, "assistant", "t1", [questionCard("item_0")], at(2)),
+    ];
+    // The main page holds the typed reply, placed in thread B, but not the card.
+    const reply = mk(MAIN, "user", "t3", [{ type: "text", content: "Friday works" }], at(5));
+    const main = { messages: [reply], results: new Map() };
+    expect(
+      threadInteractionResults(thread, main).get(interactionResultKey(MAIN, "item_0")),
+    ).toEqual({ dismissed: true });
+
+    // A later card reusing the id, after that reply, stays open: the reply was before it.
+    const later = mk(MAIN, "assistant", "t4", [questionCard("item_0")], at(6));
+    expect(
+      threadInteractionResults([...thread, later], main).get(interactionResultKey(MAIN, "item_0")),
+    ).toBeUndefined();
   });
 
   it("auto-dismisses an open ask_question card when the guardian replies in chat", () => {

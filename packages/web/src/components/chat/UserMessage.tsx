@@ -11,6 +11,9 @@ import { ReplyButton } from "@/components/chat/reply/ReplyButton";
 import { isSettledUserMessage } from "@/components/chat/reply/reply-source";
 import { SenderAvatar, sentByViewer } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
+import { AgentAvatar } from "@/components/chat/AgentAvatar";
+import { useSaidByConcierge } from "@/components/chat/task-chat";
+import { RomeMascot } from "@/components/concierge/RomeMascot";
 
 // Isolated so that streaming-driven re-renders of ChatPage do not re-parse
 // every historical user message through ReactMarkdown on every snapshot tick.
@@ -22,11 +25,14 @@ export const UserMessage = memo(
     const { data: viewer } = useDashboardIdentity();
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
     const timestamp = useMemo(() => formatMessageTimestamp(msg.createdAt), [msg.createdAt]);
+    const concierge = useSaidByConcierge(msg.sender);
     // Some user turns carry only a structured part with no text (e.g. an
     // interaction_result, whose inline component re-renders its own read-only
     // state), so suppress the empty bubble.
     if (!text) return null;
-    const own = sentByViewer(msg.sender, viewer);
+    // The Concierge speaks for its owner in a task chat, so its messages sit
+    // on the owner's side, under its own name and mascot.
+    const own = concierge || sentByViewer(msg.sender, viewer);
     const onBehalfOf = msg.sender?.kind === "automated" ? msg.sender.onBehalfOf : undefined;
     const displaySender = onBehalfOf ?? msg.sender;
     const sourceBadge =
@@ -45,7 +51,7 @@ export const UserMessage = memo(
       <UserMessageBubble
         msg={msg}
         text={text}
-        own={own}
+        own={own && !concierge}
         // The bubble's cap follows the message row, not a wider attribution footer.
         className={cn(own && sourceBadge ? "max-w-[70cqw]" : "max-w-[70%]", !own && "self-start")}
       />
@@ -113,6 +119,21 @@ export const UserMessage = memo(
         >
           {bubble}
         </MessageRow>
+      );
+    }
+    if (concierge) {
+      const name = msg.sender?.name ?? t("senderAutomation");
+      return (
+        <div data-concierge-message className="group mb-4 flex items-start justify-end gap-2">
+          <div className="flex min-w-0 flex-1 flex-col items-end">
+            <span className="mb-1 flex h-5 max-w-full items-center truncate text-aux text-muted-foreground">
+              {name}
+            </span>
+            {bubble}
+            {actions}
+          </div>
+          <AgentAvatar label={name} mark={<RomeMascot className="h-1/2 w-auto" />} />
+        </div>
       );
     }
     return (

@@ -162,7 +162,7 @@ export interface BackendTurnRunnerDeps {
    * routed alike. Absent, the turn runs where its params say. */
   resolveTurn?: (
     params: BackendTurnParams,
-  ) => Promise<BackendTurnParams & { threadAnchor?: string }>;
+  ) => Promise<BackendTurnParams & { reportedTask?: string }>;
   /** Runs when a webchat continuation starts, after it has waited its turn in
    * the queue, so it resolves its model from the chat's current selection. */
   beforeTurn?: (params: BackendTurnParams) => Promise<unknown>;
@@ -184,7 +184,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
       | "persistAnswer"
       | "inputLabel"
       | "pushLevel"
-      | "threadAnchor"
+      | "reportedTask"
       | "actor"
     > &
       Pick<RunParams, "shouldRun"> = {},
@@ -301,7 +301,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
     asked: BackendTurnParams,
     options?: BackendTurnOptions,
   ): Promise<BackendTurnOutcome> {
-    const params: BackendTurnParams & { threadAnchor?: string } = deps.resolveTurn
+    const params: BackendTurnParams & { reportedTask?: string } = deps.resolveTurn
       ? await deps.resolveTurn(asked)
       : asked;
     let outcome: BackendTurnOutcome = "failed";
@@ -335,7 +335,7 @@ export function createBackendTurnRunner(deps: BackendTurnRunnerDeps): MainBacken
             ...(options?.inputLabel ? { inputLabel: options.inputLabel } : {}),
             ...(options?.pushLevel ? { pushLevel: options.pushLevel } : {}),
             ...(options?.actor ? { actor: options.actor } : {}),
-            ...(params.threadAnchor ? { threadAnchor: params.threadAnchor } : {}),
+            ...(params.reportedTask ? { reportedTask: params.reportedTask } : {}),
           };
           for await (const msg of runTurn(params, workingDir, trace, deviceFolder)) {
             if (msg.type === "turn_start") turnId = msg.turnId;

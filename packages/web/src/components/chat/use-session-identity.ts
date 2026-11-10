@@ -31,6 +31,8 @@ export interface SessionIdentity {
    * chat, and not in a main, topic or task chat.
    */
   forkable: boolean;
+  /** A task chat the Concierge started. */
+  isTaskChat: boolean;
 }
 
 /**
@@ -56,6 +58,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
   const [pinnedAgentMention, setPinnedAgentMention] = useState<AgentMention | null>(null);
   const [archivedAt, setArchivedAt] = useState<string | null>(null);
   const [forkable, setForkable] = useState(false);
+  const [isTaskChat, setIsTaskChat] = useState(false);
   // The session id whose first fetch has settled (success or failure). Keyed by
   // id so switching sessions is "loading" again with no reset-effect flash.
   const [settledSessionId, setSettledSessionId] = useState<string | null>(null);
@@ -96,6 +99,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
         setForkable(!!session && isProjectChat(chatKind(session)));
+        setIsTaskChat(!!session && chatKind(session) === "task");
         const agentName = session?.agentName ?? null;
         if (!agentName) {
           setPinnedAgentMention(null);
@@ -124,6 +128,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
           setPinnedAgentMention(null);
           setArchivedAt(null);
           setForkable(false);
+          setIsTaskChat(false);
         }
       }
     })();
@@ -153,6 +158,7 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
         setReasoningEffort(session?.reasoningEffort ?? null);
         setArchivedAt(session?.archivedAt ?? null);
         setForkable(!!session && isProjectChat(chatKind(session)));
+        setIsTaskChat(!!session && chatKind(session) === "task");
       } catch {
         // Best effort; the next mount / event reconciles.
       }
@@ -169,5 +175,6 @@ export function useSessionIdentity(sessionId: string | null | undefined): Sessio
     pinnedAgentMention: presentationMode ? null : pinnedAgentMention,
     archivedAt,
     forkable,
+    isTaskChat,
   };
 }

@@ -51,10 +51,9 @@ export interface TurnFacts {
   pushLevel(): PushLevel | undefined;
   /** Who the running turn acts for, or undefined for a turn no person started. */
   actor(): TurnActor | undefined;
-  /** A message of the chat the running turn answers though no message there
-   *  started it, as a task's report answers the message that started the
-   *  task, or undefined when the turn names none. */
-  threadAnchor(): string | undefined;
+  /** The id of the one Concierge task the running turn reports on, or
+   *  undefined when it reports on none or on several. */
+  reportedTask(): string | undefined;
   /** Runs `fn` in the turn's trace context, so the work it starts nests under the turn. */
   inTurn<T>(fn: () => T): T;
 }

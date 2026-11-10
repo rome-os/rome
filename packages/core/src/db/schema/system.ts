@@ -741,6 +741,13 @@ export const conciergeTasks = sqliteTable(
      * with the legacy rows.
      */
     legacySourceMessageId: text("legacy_source_message_id"),
+    /**
+     * The key of the message that names the row's chat thread in its
+     * Concierge chat (docs/domains/chats.md#chat-thread). Written once, the
+     * first time the row has a thread, and cleared only when the row moves
+     * to another Concierge chat.
+     */
+    threadRoot: text("thread_root"),
     createdAt: integer("created_at", { mode: "timestamp_ms" }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
     /** Set while the state is `done` or `dropped`. */

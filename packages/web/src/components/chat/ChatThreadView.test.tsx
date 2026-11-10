@@ -3,6 +3,7 @@ import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rst
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { ReactNode } from "react";
+import { createPortal } from "react-dom";
 import type { ReplyToPart } from "@rome/api-types/chat";
 import { chatSessionTopicName } from "@rome/api-types/live-events";
 import i18n from "@/i18n";
@@ -15,7 +16,7 @@ import {
 } from "@/test/fake-websocket";
 import { MemoryRouter } from "react-router-dom";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
-import { ChatThreadView } from "./ChatThreadView";
+import { ChatThreadView, chatThreadQueryKey } from "./ChatThreadView";
 import { ConciergeTranscript } from "./ConciergeTranscript";
 import { buildRows } from "./chat-view";
 import type { BlockActions } from "./MessageList";
@@ -79,9 +80,12 @@ function host(children: ReactNode) {
 function ThreadsDraft({
   onDraft,
   children,
+  threaded = ["a1"],
 }: {
   onDraft: (draft: ReplyDraft) => void;
   children: ReactNode;
+  /** The messages the timeline shows in a chat thread. */
+  threaded?: string[];
 }) {
   const draft = useReplyDraftState({
     chatId: "concierge",
@@ -90,6 +94,7 @@ function ThreadsDraft({
     jump: () => {},
     focusComposer: () => {},
     threads: true,
+    inThread: (messageId) => threaded.includes(messageId),
   });
   onDraft(draft);
   return <ReplyDraftProvider value={draft}>{children}</ReplyDraftProvider>;
@@ -107,6 +112,39 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     act(() => draft.closeThread());
     expect(draft.thread).toBeNull();
     expect(draft.target).toBeNull();
+  });
+
+  it("keeps the timeline on Reply to a message in no thread, with the quote bar on the main composer", () => {
+    let draft!: ReplyDraft;
+    render(
+      <ThreadsDraft onDraft={(next) => (draft = next)} threaded={[]}>
+        <ReplyBar />
+      </ThreadsDraft>,
+    );
+
+    act(() => draft.set({ messageId: "a9", author: "agent", preview: "168" }));
+
+    expect(draft.thread).toBeNull();
+    expect(draft.target?.messageId).toBe("a9");
+    expect(document.querySelector("[data-reply-bar]")?.textContent).toContain("168");
+    // Its ✕ drops the reply.
+    fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
+    expect(draft.target).toBeNull();
+  });
+
+  it("keeps the thread view open on Reply to a message older than the loaded timeline", () => {
+    let draft!: ReplyDraft;
+    render(
+      <ThreadsDraft onDraft={(next) => (draft = next)} threaded={["a1"]}>
+        {null}
+      </ThreadsDraft>,
+    );
+    act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
+    // "old" is in the open thread, but not in the timeline's loaded pages.
+    act(() => draft.set({ messageId: "old", author: "guardian", preview: "Move my 3pm" }));
+
+    expect(draft.thread).toBe("old");
+    expect(draft.target?.messageId).toBe("old");
   });
 
   it("opens the thread view from a reply's quote", () => {
@@ -132,7 +170,11 @@ describe("the reply draft of a chat that keeps chat threads", () => {
 
   it("puts a failed send's reply and thread back only when nothing changed since the send", () => {
     let draft!: ReplyDraft;
-    render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
+    render(
+      <ThreadsDraft onDraft={(next) => (draft = next)} threaded={["a1", "b1"]}>
+        {null}
+      </ThreadsDraft>,
+    );
     const a = { messageId: "a1", author: "agent" as const, preview: "Which day?" };
     const b = { messageId: "b1", author: "agent" as const, preview: "Flights?" };
 
@@ -342,5 +384,61 @@ describe("ChatThreadView", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
+  });
+
+  it("stays open on a press inside a layer its content opened in a portal", async () => {
+    const onClose = rs.fn();
+    render(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={onClose}
+          renderMessages={(messages) => (
+            <>
+              {paragraphs(messages)}
+              {createPortal(<div>popover padding</div>, document.body)}
+            </>
+          )}
+        />,
+      ),
+    );
+    await screen.findByText("Which day?");
+    fireEvent.pointerDown(screen.getByText("popover padding"));
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("puts a cached thread's newest message above the composer once its floor is measured", async () => {
+    // A list's content is 1000px tall, plus the floor it keeps clear of.
+    const tops: number[] = [];
+    rs.spyOn(HTMLElement.prototype, "scrollHeight", "get").mockImplementation(function (
+      this: HTMLElement,
+    ) {
+      return 1000 + (Number.parseFloat(this.style.paddingBottom) || 0);
+    });
+    rs.spyOn(HTMLElement.prototype, "scrollTop", "set").mockImplementation((value: number) => {
+      tops.push(value);
+    });
+    const floor = document.createElement("div");
+    floor.getBoundingClientRect = () => ({ height: 150 }) as DOMRect;
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    // Opened before: its messages are drawn at once, before the floor is measured.
+    client.setQueryData(chatThreadQueryKey("concierge", "a1"), thread);
+    render(
+      <QueryClientProvider client={client}>
+        <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
+          <ChatThreadView
+            sessionId="concierge"
+            messageId="a1"
+            onClose={() => {}}
+            floor={floor}
+            renderMessages={paragraphs}
+          />
+        </LiveEventsClientContext.Provider>
+      </QueryClientProvider>,
+    );
+    await screen.findByText("Which day?");
+    await waitFor(() => expect(tops.at(-1)).toBe(1150));
+    rs.restoreAllMocks();
   });
 });

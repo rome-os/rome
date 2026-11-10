@@ -118,26 +118,25 @@ const inputPrioritySchema = z.enum(["now", "next"]).optional();
 const CHAT_THREAD_ABOUT_LIMIT = 80;
 
 /**
- * The line that tells the Concierge which chat thread the guardian's message
- * is in, what that thread is about (its first message, shortened), and
- * whether the guardian chose it, so it is never moved. A message that starts
- * its own thread is about nothing else.
+ * The line that names the guardian's message to the Concierge, so an answer
+ * can say which one it answers, and, when the message is in a chat thread,
+ * which thread and what it is about (its first message, shortened). A
+ * message that starts its own thread is about nothing else.
  */
 function chatThreadLine(
   messageId: string,
-  thread: string,
-  chosen: boolean,
+  thread: string | null,
   firstMessage: string | null,
 ): string {
   const about =
-    thread !== messageId && firstMessage
+    thread && thread !== messageId && firstMessage
       ? ` about="${xmlAttr(
           firstMessage.length > CHAT_THREAD_ABOUT_LIMIT
             ? `${firstMessage.slice(0, CHAT_THREAD_ABOUT_LIMIT - 1)}…`
             : firstMessage,
         )}"`
       : "";
-  return `<chat_thread message_id="${messageId}" thread="${thread}"${about} chosen="${chosen}"/>`;
+  return `<chat_thread message_id="${messageId}"${thread ? ` thread="${thread}"` : ""}${about}/>`;
 }
 
 function xmlAttr(value: string): string {
@@ -2728,7 +2727,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (isMainConciergeChat(session)) {
       return c.json({ error: "The main Concierge chat cannot be deleted" }, 409);
     }
-    if (isConciergeChat(session)) await deps.concierge?.retireChat(sessionId, "deleted");
+    const retiredTo = isConciergeChat(session)
+      ? ((await deps.concierge?.retireChat(sessionId, "deleted")) ?? null)
+      : null;
     // Closing the chat session also closes the live AgentSession
     // so we don't keep an idle SDK CLI subprocess pinned to a deleted thread.
     const sess = deps.agentSessionManager.find({
@@ -2742,6 +2743,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // chat is gone; the Concierge hears of it quietly.
     const taskId = (await deps.concierge?.taskOfChat(sessionId)) ?? null;
     await deps.webchatRepo.deleteSession(sessionId);
+    // Told after the delete, as an archive is, so the activity reads the
+    // chat's finished rows as the main chat's.
+    if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo);
     if (taskId) deps.concierge?.chatDeleted(taskId);
     // Durable audit signal for guardian-initiated chat deletion. Keep the
     // payload free of chat titles and message content because the OTLP
@@ -3851,15 +3855,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return answer({ error: "chatThread must be a message id" }, 400);
     }
     // In a Concierge chat a message sent into a chat thread, or as a reply,
-    // stays in that thread. Any other joins the latest thread until the
-    // Concierge places it (docs/domains/chats.md#chat-thread).
+    // stays in that thread. Any other is in none
+    // (docs/domains/chats.md#chat-thread).
     const chatThread: ChatThreadPlacement | undefined = !isConciergeChat(session)
       ? undefined
       : body.chatThread
         ? { in: body.chatThread, settle: true }
         : reply
           ? { in: body.replyToMessageId as string, settle: true }
-          : { latest: true };
+          : undefined;
     if (
       !(await deps.webchatRepo.recordUserInput(
         inputId,
@@ -3887,14 +3891,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       messageId: inputId,
       text: displayText,
     });
-    // The Concierge reads where the message stands, so it can place it.
-    const placedIn = chatThread ? await deps.webchatRepo.chatThreadOf(sessionId, inputId) : null;
-    if (placedIn && conciergeHeader) {
-      const first = await deps.webchatRepo.getReplyTarget(sessionId, placedIn);
+    // The Concierge reads which message this is, and the thread it is in.
+    if (conciergeHeader) {
+      const placedIn = chatThread ? await deps.webchatRepo.chatThreadOf(sessionId, inputId) : null;
+      const first = placedIn ? await deps.webchatRepo.getReplyTarget(sessionId, placedIn) : null;
       const line = chatThreadLine(
         inputId,
         placedIn,
-        chatThread?.settle === true,
         first ? messageContentText(first.content) : null,
       );
       promptText = `${conciergeHeader}\n${line}\n\n${noticedPrompt}`;

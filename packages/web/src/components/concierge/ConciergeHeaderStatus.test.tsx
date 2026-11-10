@@ -36,11 +36,14 @@ describe("ConciergeHeaderStatus", () => {
     expect(screen.getByText("Starting a task").getAttribute("aria-live")).toBe("polite");
   });
 
-  it("says it waits on the guardian in warning colour, with the mascot still", () => {
+  it("says it waits on the guardian in the muted colour of every status, still and unshimmered", () => {
     const { container } = render(
       <ConciergeHeaderStatus name="Milo" activity={{ kind: "needsYou" }} />,
     );
-    expect(screen.getByText("Waiting for your answer").className).toContain("text-warning-fg");
+    const line = screen.getByText("Waiting for your answer");
+    expect(line.className).toContain("text-muted-foreground");
+    expect(line.className).not.toContain("warning");
+    expect(line.className).not.toContain("shimmer");
     expect(mascot(container).hasAttribute("data-alive")).toBe(false);
   });
 

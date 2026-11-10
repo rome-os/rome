@@ -28,23 +28,14 @@ export function useChatThreads(): ChatThreads | null {
 /** A message of the timeline, as the replies rule reads it. */
 export type ThreadTimelineMessage = Pick<ChatMessage, "id" | "role" | "chatThreadId">;
 
-interface Run {
-  thread: string | null;
-  messages: ThreadTimelineMessage[];
-}
-
 /**
  * Where the "N replies" lines go in a loaded timeline, oldest message first:
- * by the id of the agent message each sits under, the number of replies.
- *
- * A run is a stretch of guardian and agent messages in one chat thread, with
- * no message of another between them. A run gets a line under its last agent
- * message when the timeline alone does not show its thread whole: the thread
- * has messages outside the run, its first message is not in the run, or it
- * has 4 or more messages. A question and its answer alone get none. Of two
- * neighbouring runs that both qualify, only the later keeps its line. The
- * count is the thread's loaded messages less one; a thread whose count would
- * be 0 gets none.
+ * by the id of the message each sits under, the count it shows. A thread's
+ * count is its loaded messages less its root, the message that names it.
+ * A thread with replies shows a line under its root, and one under its
+ * newest message when a message of another thread, or of none, lies between
+ * the two. A thread whose root is not loaded shows one under its newest
+ * message only. A line moves to the newest message as one arrives.
  */
 export function threadRepliesLines(
   messages: readonly ThreadTimelineMessage[],
@@ -52,36 +43,27 @@ export function threadRepliesLines(
   const timeline = messages.filter(
     (message) => message.role === "user" || message.role === "assistant",
   );
-  const totals = new Map<string, number>();
-  for (const message of timeline) {
-    if (message.chatThreadId) {
-      totals.set(message.chatThreadId, (totals.get(message.chatThreadId) ?? 0) + 1);
-    }
-  }
-  const runs: Run[] = [];
-  for (const message of timeline) {
-    const thread = message.chatThreadId ?? null;
-    const last = runs.at(-1);
-    if (last && last.thread === thread) last.messages.push(message);
-    else runs.push({ thread, messages: [message] });
-  }
-  const qualifies = runs.map((run): { under: string; count: number } | null => {
-    if (!run.thread) return null;
-    const under = run.messages.findLast((message) => message.role === "assistant");
-    if (!under) return null;
-    const total = totals.get(run.thread) ?? 0;
-    const outside = total > run.messages.length;
-    const rootMissing = !run.messages.some((message) => message.id === run.thread);
-    if (!outside && !rootMissing && total < 4) return null;
-    return total - 1 > 0 ? { under: under.id, count: total - 1 } : null;
+  const at = new Map(timeline.map((message, index) => [message.id, index]));
+  const replies = new Map<string, number[]>();
+  timeline.forEach((message, index) => {
+    const thread = message.chatThreadId;
+    if (!thread || message.id === thread) return;
+    replies.set(thread, [...(replies.get(thread) ?? []), index]);
   });
   const lines = new Map<string, number>();
-  let laterKept = false;
-  for (let index = runs.length - 1; index >= 0; index--) {
-    const line = qualifies[index];
-    const kept: boolean = line !== null && !laterKept;
-    if (kept && line) lines.set(line.under, line.count);
-    laterKept = kept;
+  for (const [thread, indexes] of replies) {
+    const newest = indexes[indexes.length - 1] as number;
+    const newestId = timeline[newest]?.id as string;
+    const root = at.get(thread);
+    if (root === undefined) {
+      lines.set(newestId, indexes.length);
+      continue;
+    }
+    lines.set(thread, indexes.length);
+    const apart = timeline
+      .slice(root + 1, newest)
+      .some((message) => message.chatThreadId !== thread);
+    if (apart) lines.set(newestId, indexes.length);
   }
   return lines;
 }
@@ -150,8 +132,8 @@ function wordsOf(message: ChatMessage): string {
 }
 
 /**
- * The subdued "N replies" line under an agent message, which opens the
- * message's chat thread. Renders nothing where {@link threadRepliesLines}
+ * The subdued "N replies" line under a chat thread's root or newest message,
+ * which opens the thread. Renders nothing where {@link threadRepliesLines}
  * puts no line, and inside the thread view.
  */
 export function ThreadRepliesLine({ message }: { message: ChatMessage }) {
@@ -169,11 +151,11 @@ export function ThreadRepliesLine({ message }: { message: ChatMessage }) {
       onClick={() =>
         draft.openThread({
           messageId: message.id,
-          author: "agent",
+          author: message.role === "user" ? "guardian" : "agent",
           preview: replyPreview(wordsOf(message)),
         })
       }
-      className="self-start rounded-4 px-1 text-aux text-muted-foreground outline-1 outline-offset-0 outline-transparent hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
+      className="rounded-4 px-1 text-aux text-muted-foreground outline-1 outline-offset-0 outline-transparent hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
     >
       {t("thread.replies", { count })}
     </button>
