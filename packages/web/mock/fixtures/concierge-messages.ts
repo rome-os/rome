@@ -68,3 +68,35 @@ The invoice is in your email. I paid it from the house account.
 1. The cabinet floor needs replacing. The plumber suggested a carpenter; I asked Ray whether he knows one.
 2. Keep the cabinet door open for two days so the wood dries out.
 3. The plumber recommended checking the bathroom fittings too, since they are the same age. I can book that for next month if you want.`;
+
+export const CONCIERGE_ATTENTION_DIGEST = `Morning digest — one item needs your attention:
+
+**Main chat:** Ray asked whether Saturday's dinner is still on. [Open the main chat](/message)
+
+日历提醒发到这里: [Google 日历](https://calendar.google.com/calendar/r/settings) · [Apple 日历](https://www.icloud.com/calendar/)`;
+
+export const CONCIERGE_LAS_VEGAS_LIST = `## 拉斯维加斯首次到访：8 个值得优先考虑的景点 / 体验
+
+**核实日期：2026 年 8 月 6 日。演出排期、开放时间和票价常有变动，出发前请在官网再确认一次。**
+
+### Strip 地标与城市观景
+
+1. **Bellagio 音乐喷泉＋季节花园｜经典、低预算首选**
+   - **看点 / 适合谁：** 每 15–30 分钟一场的音乐喷泉，配上室内的季节花园，第一次来几乎必看，适合所有人。
+   - **实用信息：** 免费；喷泉下午到午夜开放，花园全天开放。
+   - **特别注意：** 晚上 8 点后人最多，想拍照建议提前到桥上占位。
+2. **High Roller 摩天轮｜城市全景**
+   - **看点 / 适合谁：** 一圈约 30 分钟，能看到整条 Strip，适合情侣和带孩子的家庭。
+   - **实用信息：** 日落时段票价最高，网上提前买票有折扣。
+   - **特别注意：** 有“欢乐时光”车厢，未满 21 岁不能进。
+3. **The Sphere｜沉浸式影像**
+   - **看点 / 适合谁：** 球形巨幕的沉浸式影片，外墙夜景本身就值得一看。
+   - **实用信息：** 影片约 50 分钟，票价随场次浮动。
+   - **特别注意：** 座位越高视角越好，恐高的人选低层。
+
+### 城外一日游
+
+4. **红岩峡谷｜自驾半日**
+   - **看点 / 适合谁：** 离 Strip 约 30 分钟车程的红色砂岩峡谷，适合喜欢徒步和拍照的人。
+   - **实用信息：** 需要提前预约入园时段。
+   - **特别注意：** 夏天中午很热，带足水，尽量上午去。`;

@@ -179,8 +179,7 @@ describe("Concierge long message collapse", () => {
       region(toggles()[0]).querySelector<HTMLElement>("[aria-hidden=true].absolute.bottom-0");
 
     expect(fade()?.className).toContain("pointer-events-none");
-    // A message this long is a document, drawn on the transcript's canvas.
-    expect(fade()?.className).toContain("from-chat-canvas");
+    expect(fade()?.className).toContain("from-surface-muted");
 
     fireEvent.click(toggles()[0]);
 
@@ -632,12 +631,12 @@ describe("Concierge forwarded report", () => {
   const bubbles = () => Array.from(document.querySelectorAll<HTMLElement>("div.rounded-16"));
   const chip = () => screen.getByRole("link", { name: "Open task chat Flights to Lisbon" });
 
-  it("is one document with the chip at its top and the report cut inside, and no quote edge", () => {
+  it("is one bubble with the chip at its top and the report cut inside, and no quote edge", () => {
     render(transcript([agentRow(agent("a1", [forwarded()]))]));
 
     expect(bubbles()).toHaveLength(1);
     const [bubble] = bubbles();
-    expect(bubble.className).toContain("rome-markdown-document");
+    expect(bubble.className).toContain("bg-surface-muted");
     expect(bubble.className).not.toContain("border-l-3");
     expect(bubble.firstElementChild?.contains(chip())).toBe(true);
     expect(bubble.contains(toggles()[0])).toBe(true);
@@ -664,7 +663,7 @@ describe("Concierge forwarded report", () => {
     expect(bubbles()).toHaveLength(2);
     const [lead, report] = bubbles();
     expect(lead.textContent).toBe("Here it is");
-    expect(lead.className).not.toContain("rome-markdown-document");
+    expect(lead.contains(screen.queryByRole("link"))).toBe(false);
     expect(lead.contains(chip())).toBe(false);
     expect(report.contains(chip())).toBe(true);
   });

@@ -69,7 +69,9 @@ import { pickerDevices, settingsHandlers } from "./settings";
 import { recordedAppHandlers } from "./recorded-apps";
 import { curatedChats } from "../fixtures/chats";
 import {
+  CONCIERGE_ATTENTION_DIGEST,
   CONCIERGE_FORWARDED_REPORT,
+  CONCIERGE_LAS_VEGAS_LIST,
   CONCIERGE_MORNING_DIGEST,
   CONCIERGE_RELEASE_DIGEST,
   CONCIERGE_TRIP_PLAN,
@@ -348,6 +350,17 @@ const transcripts: Record<string, ChatMessage[]> = {
         type: "text",
         content: CONCIERGE_FORWARDED_REPORT,
         forwardedFrom: { chatId: "mock-chat-4", title: "Plumber for the leak" },
+      } as TranscriptPart,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 6, "2026-08-07T07:00:00.000Z", "Anything for me this morning?", [
+      text(CONCIERGE_ATTENTION_DIGEST),
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 7, "2026-08-07T09:00:00.000Z", "拉斯维加斯有什么值得去的？", [
+      text("找景点的任务聊天做完了，结果如下："),
+      {
+        type: "text",
+        content: CONCIERGE_LAS_VEGAS_LIST,
+        forwardedFrom: { chatId: "mock-chat-4", title: "拉斯维加斯景点" },
       } as TranscriptPart,
     ]),
   ],

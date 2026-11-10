@@ -326,7 +326,7 @@ describe("Concierge layout", () => {
       return cap;
     };
 
-    it("draws a long message as a document: no fill, at the reading width", () => {
+    it("draws a long message as a bubble like any other, capped at the reading width", () => {
       renderTranscript([
         agentRow(
           agent("a1", 0, [text("Short.")]),
@@ -334,17 +334,16 @@ describe("Concierge layout", () => {
         ),
       ]);
 
-      const short = bubbleOf("Short.").className.split(/\s+/);
-      expect(short).toContain("w-fit");
-      expect(short).toContain("bg-surface-muted");
-      const long = bubbleOf("The long one.").className.split(/\s+/);
-      expect(long).toContain("w-full");
-      expect(long).toContain("rome-markdown-document");
-      expect(long).not.toContain("bg-surface-muted");
-      expect(capOf(bubbleOf("The long one.")).className.split(/\s+/)).toContain("max-w-2xl");
+      const short = bubbleOf("Short.");
+      const long = bubbleOf("The long one.");
+      expect(long.className).toBe(short.className);
+      const classes = long.className.split(/\s+/);
+      expect(classes).toEqual(
+        expect.arrayContaining(["w-fit", "max-w-2xl", "bg-surface-muted", "rome-markdown-message"]),
+      );
     });
 
-    it("caps a bubble at 90% of the column and a document at the reading width, from the group itself", () => {
+    it("caps every kind of bubble at 90% of the column, from the group itself", () => {
       render(
         <MemoryRouter>
           <ThemeProvider>
@@ -374,17 +373,17 @@ describe("Concierge layout", () => {
         </MemoryRouter>,
       );
 
-      const caps: Array<[HTMLElement, string]> = [
-        [bubbleOf("Mine"), "max-w-[90%]"],
-        [bubbleOf("Short."), "max-w-[90%]"],
-        [bubbleOf("The long one."), "max-w-2xl"],
-        [bubbleOf("The report."), "max-w-2xl"],
-        [screen.getByTestId("task-card"), "max-w-[90%]"],
+      const bubbles = [
+        bubbleOf("Mine"),
+        bubbleOf("Short."),
+        bubbleOf("The long one."),
+        bubbleOf("The report."),
+        screen.getByTestId("task-card"),
       ];
-      for (const [bubble, width] of caps) {
+      for (const bubble of bubbles) {
         const cap = capOf(bubble);
         const classes = cap.className.split(/\s+/);
-        expect(classes).toContain(width);
+        expect(classes).toContain("max-w-[90%]");
         expect(classes).not.toContain("max-w-full");
         // A percentage of a box that shrinks to the bubble would wrap short
         // text, so the cap sits right in the group, which spans the column.

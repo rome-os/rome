@@ -18,7 +18,6 @@ import { isSettledUserMessage } from "@/components/chat/reply/reply-source";
 import type { ArrivalProps } from "@/components/chat/use-bubble-arrivals";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
-import { messageLayout } from "./message-layout";
 
 // The same bubble reparses nothing while the transcript re-renders around it;
 // a message's identity changes on every reload, so compare what it shows.
@@ -72,12 +71,10 @@ function originOf(part: TranscriptPart): ForwardedFrom | undefined {
     : undefined;
 }
 
-// Each `say` call is its own message, so each text part is its own bubble. A
-// long or rich one reads as a document instead: no fill, at a reading width
-// (see messageLayout). Either is cut with a toggle when it is tall. A forwarded
-// report is a part of its own with a chip that names its task chat; the intro
-// that came with it is the bubble above. Task chat cards render as they do
-// anywhere.
+// Each `say` call is its own message, so each text part is its own bubble,
+// cut with a toggle when it is tall. A forwarded report is a bubble of its own
+// with a chip that names its task chat; the intro that came with it is the
+// bubble above. Task chat cards render as they do anywhere.
 const AgentEntry = memo(function AgentEntry({
   entry,
   actions,
@@ -143,14 +140,12 @@ const AgentEntry = memo(function AgentEntry({
       );
     }
     if (!part.content.trim()) return null;
-    const format = "format" in part ? part.format : undefined;
-    const layout = messageLayout(part.content, format);
+    const long = "format" in part && part.format === "long";
     const forwardedFrom = originOf(part);
     return (
       <ConciergeBubble
         key={key}
         side="start"
-        layout={layout}
         copyText={part.content}
         createdAt={message.createdAt}
         feedbackTurn={
@@ -161,19 +156,15 @@ const AgentEntry = memo(function AgentEntry({
         reply={replyTo(part.content)}
         anchorId={index === firstBubble ? message.id : undefined}
       >
-        <ChatBubble
-          tone={layout === "document" ? "document" : "received"}
-          data-concierge-bubble
-          {...arrival(message.id)}
-        >
+        <ChatBubble tone="received" data-concierge-bubble {...arrival(message.id)}>
           {forwardedFrom ? (
             <ForwardedChip chatId={forwardedFrom.chatId} title={forwardedFrom.title} />
           ) : null}
-          <CollapsibleBubbleContent fill={layout === "document" ? "canvas" : "bubble"}>
+          <CollapsibleBubbleContent>
             <Markdown
               className="min-w-0 text-foreground"
               compact={false}
-              preserveSoftBreaks={format !== "long"}
+              preserveSoftBreaks={!long}
             >
               {part.content}
             </Markdown>

@@ -11,7 +11,6 @@ import { flushSync } from "react-dom";
 import { ChevronDown, ChevronUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { findScrollableYAncestor } from "@/lib/scroll-container";
 import { scrollTopAfterToggle } from "./scroll-anchor";
@@ -97,9 +96,8 @@ function sharedObserver(): ResizeObserver {
  *
  * The toggle is a small text button under the content, at its start edge, in
  * the same slot whether the message is cut or open: only its label and the
- * revealed text differ, so opening or closing moves nothing above the cut. The
- * fade over the cut ends in `fill`, the color behind the content: the bubble's,
- * or the transcript's canvas for a document. While the message is open and
+ * revealed text differ, so opening or closing moves nothing above the cut.
+ * While the message is open and
  * that button is off screen and the top of the message has scrolled out of view, a
  * small "Show less" pill floats at the top right of the visible part of the
  * message. With the top in view it would sit over the first line, so it waits. It sits in a zero-height sticky wrapper, so
@@ -118,20 +116,7 @@ function sharedObserver(): ResizeObserver {
  * view to the end. The browser's own scroll anchoring is off inside the message:
  * it would add its correction to ours.
  */
-// The fade ends in the color behind the content, so the cut text fades out
-// rather than into a band of another color.
-const FADE: Record<"bubble" | "canvas", string> = {
-  bubble: "from-surface-muted",
-  canvas: "from-chat-canvas",
-};
-
-export function CollapsibleBubbleContent({
-  fill = "bubble",
-  children,
-}: {
-  fill?: "bubble" | "canvas";
-  children: ReactNode;
-}) {
+export function CollapsibleBubbleContent({ children }: { children: ReactNode }) {
   const { t } = useTranslation("chat");
   const regionId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -282,10 +267,7 @@ export function CollapsibleBubbleContent({
         {collapsed ? (
           <div
             aria-hidden
-            className={cn(
-              "pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t to-transparent",
-              FADE[fill],
-            )}
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-surface-muted to-transparent"
           />
         ) : null}
       </div>

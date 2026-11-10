@@ -6,7 +6,6 @@ import { IconButton } from "@/components/ui/icon-button";
 import type { ReplySource } from "@/components/chat/reply/reply-source";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
-import type { MessageLayout } from "./message-layout";
 
 /** Devices that cannot hover, where a tap on the bubble opens its details. */
 const NO_HOVER_QUERY = "(hover: none)";
@@ -21,10 +20,6 @@ const INTERACTIVE = "a,button,input,textarea,select,summary,label,[role=button],
 // Every bubble shrinks to its content up to this share of the column, so even
 // the widest leaves a gap on the other side that tells whose it is.
 const BUBBLE_MAX_WIDTH = "max-w-[90%]";
-
-// A document spans the column up to a reading width: lines past about 80
-// characters are hard to follow back to their start.
-const DOCUMENT_MAX_WIDTH = "w-full max-w-2xl";
 
 /**
  * One Concierge bubble and its details: when it was sent, Reply, a copy button
@@ -48,14 +43,12 @@ const DOCUMENT_MAX_WIDTH = "w-full max-w-2xl";
  *   keyboards and screen readers but is not drawn.
  *
  * `side` is the edge the bubble aligns to: `start` for the agent, `end` for the
- * guardian. `layout` is how its content reads (see `messageLayout`): a
- * bubble shrinks to its content, and a document takes the reading width. `reply` is what the Reply button quotes. `anchorId` makes
+ * guardian. `reply` is what the Reply button quotes. `anchorId` makes
  * the bubble the target of a jump from a quote of it. `arrival` marks a bubble
  * that enters while the chat is open.
  */
 export const ConciergeBubble = memo(function ConciergeBubble({
   side,
-  layout = "bubble",
   copyText,
   createdAt,
   feedbackTurn,
@@ -65,7 +58,6 @@ export const ConciergeBubble = memo(function ConciergeBubble({
   children,
 }: {
   side: "start" | "end";
-  layout?: MessageLayout;
   copyText: string;
   createdAt: string;
   feedbackTurn: { sessionId: string; turnId: string } | null;
@@ -100,14 +92,13 @@ export const ConciergeBubble = memo(function ConciergeBubble({
       data-arrival={arrival}
       className={cn(
         "flex min-w-0 flex-col",
-        layout === "document" ? DOCUMENT_MAX_WIDTH : BUBBLE_MAX_WIDTH,
+        BUBBLE_MAX_WIDTH,
         side === "end" ? "items-end" : "items-start",
       )}
     >
       <div
         className={cn(
           "group/bubble relative flex min-w-0 max-w-full",
-          layout === "document" && "w-full",
           side === "end" && "justify-end",
           touch && "[-webkit-tap-highlight-color:transparent]",
         )}

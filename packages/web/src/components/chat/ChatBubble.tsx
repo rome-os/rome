@@ -1,15 +1,17 @@
 import { forwardRef, type HTMLAttributes } from "react";
 import { cn } from "@/lib/utils";
 
-export type ChatBubbleTone = "sent" | "received" | "muted" | "document";
+export type ChatBubbleTone = "sent" | "received" | "muted";
 
 /**
  * One message bubble in the transcript. `sent` is the guardian's own message on
  * the primary color, `received` is an agent text block on the muted surface,
- * and `muted` is a sent message that never reached the agent. `document` is an
- * agent text block read as a page: no fill, as wide as its box allows up to a
- * reading width, with the tighter Markdown rhythm of `.rome-markdown-document`.
- * It keeps the same padding, so its text lines up with the bubbles around it.
+ * and `muted` is a sent message that never reached the agent.
+ *
+ * Every bubble shrinks to its content up to a reading width, so a long message
+ * keeps lines short enough to follow back to their start. Its Markdown takes
+ * the message type of `.rome-markdown-message`: small headings, a lighter bold
+ * and a tighter rhythm, since a message is a turn of chat, not an article.
  *
  * A `sent` bubble re-maps the markdown color tokens inside it (see
  * `.rome-bubble-on-primary` in globals.css), so links, list markers, and inline
@@ -23,11 +25,10 @@ export const ChatBubble = forwardRef<
     <div
       ref={ref}
       className={cn(
-        "w-fit min-w-0 max-w-full break-words rounded-16 border border-transparent px-3 py-2",
+        "rome-markdown-message w-fit min-w-0 max-w-2xl break-words rounded-16 border border-transparent px-3 py-2",
         tone === "sent" && "rome-bubble-on-primary bg-primary text-primary-foreground",
         tone === "received" && "bg-surface-muted text-foreground",
         tone === "muted" && "bg-surface-muted text-foreground",
-        tone === "document" && "rome-markdown-document w-full max-w-2xl text-foreground",
         className,
       )}
       {...props}
