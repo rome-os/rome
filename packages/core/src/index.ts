@@ -259,7 +259,7 @@ import {
 import { PhoneWatching } from "./lib/phone-watching.js";
 import { DashboardActivity } from "./lib/dashboard-activity.js";
 import { callerNotifyService } from "./apps/actions/caller-notify.js";
-import { ApprovalHandler } from "./apps/actions/approval-handler.js";
+import { ApprovalHandler, executionRequester } from "./apps/actions/approval-handler.js";
 import { createBackendTurnRunner } from "./apps/actions/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { PolicyEngine } from "./core/policy-engine.js";
@@ -1314,6 +1314,8 @@ async function main() {
     backendTurnRunner,
     resolveContinuationWorkingDir,
     appConnections,
+    // An approved action, and the turn it resumes, act for whoever's turn asked.
+    executionRequester(actionExecutionsRepo),
   );
 
   // Learn whether this boot's release version differs from the last completed

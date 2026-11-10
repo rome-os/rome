@@ -4697,13 +4697,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 }
 
 /**
- * Whether the Concierge's reply to a sent message may reach the sender's
- * phone (ConciergePush): only a message the guardian or a visitor wrote,
- * signed in. A message said as someone else (an agent account, an automated
- * source) and a loopback caller acting as the guardian are not a person
- * writing.
- */
-/**
  * The person a sent message's turn acts for: the guardian or a visitor who
  * wrote it. A message said as an agent account, or with no person behind
  * it, gives none.
@@ -4716,6 +4709,13 @@ export function turnActor(
   return actor?.kind === "guardian" || actor?.kind === "visitor" ? actor : undefined;
 }
 
+/**
+ * Whether the Concierge's reply to a sent message may reach the sender's
+ * phone (ConciergePush): only a message the guardian or a visitor wrote,
+ * signed in. A message said as someone else (an agent account, an automated
+ * source) and a loopback caller acting as the guardian are not a person
+ * writing.
+ */
 export function replyPushes(actor: SessionActor | undefined, saidBy: Account | undefined): boolean {
   if (saidBy !== undefined) return false;
   return actor?.kind === "visitor" || (actor?.kind === "guardian" && actor.via === "cookie");
