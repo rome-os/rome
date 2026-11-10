@@ -115,6 +115,7 @@ import {
 import { onConciergeJump } from "@/components/concierge/concierge-jump";
 import {
   CONCIERGE_LEADING_SLOT,
+  CONCIERGE_TITLEBAR_SLOT,
   ConciergeHeaderStatus,
   FLOATING_SURFACE,
 } from "@/components/concierge/ConciergeHeaderStatus";
@@ -2088,8 +2089,10 @@ export function Chat({
 
   const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
   const conciergeTaskList = useConciergeTaskList(concierge ? (mainSessionId ?? null) : null);
-  // A Concierge chat's header buttons sit on round badges like its pill.
-  const actionBadge = concierge
+  // A Concierge chat's header buttons sit on round badges like its pill, except
+  // in the Mac app's title bar, where they are any chat's.
+  const floating = concierge && !navbarSlot;
+  const actionBadge = floating
     ? cn("rounded-full text-foreground", FLOATING_SURFACE)
     : "text-muted-foreground hover:text-foreground";
   const conciergeStatus = concierge ? (
@@ -2135,7 +2138,7 @@ export function Chat({
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <IconButton
-              size={concierge ? "md" : "sm"}
+              size={floating ? "md" : "sm"}
               label={t("navbar.more")}
               icon={<MoreHorizontal />}
               className={actionBadge}
@@ -2174,8 +2177,8 @@ export function Chat({
       )}
       {!toolTrace.paneOpen && (
         <IconButton
-          size={concierge ? "md" : "sm"}
-          className={concierge ? actionBadge : undefined}
+          size={floating ? "md" : "sm"}
+          className={floating ? actionBadge : undefined}
           data-coach="add-widget"
           aria-expanded={false}
           onClick={() => toolTrace.setPaneCollapsed(false)}
@@ -2225,6 +2228,22 @@ export function Chat({
       </div>
     </div>
   );
+  // In the Mac app the title bar takes the header apart: the buttons go into
+  // the bar like any chat's, and the badge and pill hang from its lower edge.
+  // Not while the tool pane covers the chat, whose mascot it would be.
+  const conciergeHeaderWith = navbarSlot
+    ? (trailing: ReactNode) => (
+        <>
+          <SlotContent name={navbarSlot}>
+            <div className="min-w-0 flex-1" />
+            {trailing}
+          </SlotContent>
+          {paneCoversChat ? null : (
+            <SlotContent name={CONCIERGE_TITLEBAR_SLOT}>{conciergeStatus}</SlotContent>
+          )}
+        </>
+      )
+    : floatingHeader;
   const threadOpen = concierge && Boolean(mainSessionId) && replyDraft.thread !== null;
   // The thread view's transcript feeds none of the chat's scroll measures.
   const ignoreThreadContent = useCallback(() => {}, []);
@@ -2234,7 +2253,7 @@ export function Chat({
   const chatThreads = useChatThreadsValue(displayMessages, rethreaded);
   const conciergeHeader = concierge ? (
     <>
-      {threadOpen ? null : floatingHeader(navbarActions)}
+      {threadOpen ? null : conciergeHeaderWith(navbarActions)}
       {conciergeTaskList.sheet}
     </>
   ) : null;
@@ -2536,7 +2555,7 @@ export function Chat({
                 messageId={replyDraft.thread}
                 onClose={replyDraft.closeThread}
                 floor={floorEl}
-                header={floatingHeader(
+                header={conciergeHeaderWith(
                   <IconButton
                     size="md"
                     label={t("thread.close")}
