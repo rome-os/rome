@@ -161,15 +161,17 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     expect([draft.target?.messageId, draft.thread]).toEqual(["a1", "a1"]);
   });
 
-  it("closes the thread view with the reply bar's ✕", () => {
+  it("keeps the reply bar at every width while the thread is open, and closes the thread with its ✕", () => {
     let draft!: ReplyDraft;
-    render(
+    const { container } = render(
       <ThreadsDraft onDraft={(next) => (draft = next)}>
         <ReplyBar />
       </ThreadsDraft>,
     );
     act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
     expect(draft.thread).toBe("a1");
+    // The phone width is the same dashboard: no class hides the bar there.
+    expect(container.querySelector("[data-reply-bar]")!.className).not.toMatch(/hidden/);
 
     fireEvent.click(screen.getByRole("button", { name: "Cancel reply" }));
 
