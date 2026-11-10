@@ -1,19 +1,19 @@
-// The chat threads of a Concierge chat as its main transcript offers them
-// (docs/domains/chats.md#chat-thread): how many replies each thread's first
-// message has. The thread view's own transcript has no provider, so it shows
-// no replies line.
+// The "N replies" line of a Concierge chat's main transcript
+// (docs/domains/chats.md#chat-thread), which opens a thread's view. It
+// follows the iOS app's rule, so it shows only where the timeline alone does
+// not show the whole thread. The thread view's own transcript has no
+// provider, so it shows no line.
 
 import { createContext, useContext, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatMessage } from "@/lib/chat-types";
-import { cn } from "@/lib/utils";
 import { useReplyDraft } from "./reply-draft";
 import { replyPreview } from "./reply-source";
 
 export interface ChatThreads {
-  /** Replies per thread, keyed by the id of the thread's first message. */
-  replies: ReadonlyMap<string, number>;
+  /** The lines to show: by the id of the agent message each sits under, how many replies it counts. */
+  lines: ReadonlyMap<string, number>;
 }
 
 const ChatThreadsContext = createContext<ChatThreads | null>(null);
@@ -25,24 +25,90 @@ export function useChatThreads(): ChatThreads | null {
   return useContext(ChatThreadsContext);
 }
 
-/**
- * How many replies each chat thread has, keyed by its first message: every
- * guardian or agent message placed in a thread other than as its first.
- */
-export function threadReplyCounts(messages: readonly ChatMessage[]): Map<string, number> {
-  const counts = new Map<string, number>();
-  for (const message of messages) {
-    if (message.role !== "user" && message.role !== "assistant") continue;
-    const thread = message.chatThreadId;
-    if (!thread || thread === message.id) continue;
-    counts.set(thread, (counts.get(thread) ?? 0) + 1);
-  }
-  return counts;
+/** A message of the timeline, as the replies rule reads it. */
+export type ThreadTimelineMessage = Pick<ChatMessage, "id" | "role" | "chatThreadId">;
+
+interface Run {
+  thread: string | null;
+  messages: ThreadTimelineMessage[];
 }
 
-/** Memoized {@link threadReplyCounts}, as the provider's value. */
-export function useChatThreadsValue(messages: readonly ChatMessage[]): ChatThreads {
-  return useMemo(() => ({ replies: threadReplyCounts(messages) }), [messages]);
+/**
+ * Where the "N replies" lines go in a loaded timeline, oldest message first:
+ * by the id of the agent message each sits under, the number of replies.
+ *
+ * A run is a stretch of guardian and agent messages in one chat thread, with
+ * no message of another between them. A run gets a line under its last agent
+ * message when the timeline alone does not show its thread whole: the thread
+ * has messages outside the run, its first message is not in the run, or it
+ * has 4 or more messages. A question and its answer alone get none. Of two
+ * neighbouring runs that both qualify, only the later keeps its line. The
+ * count is the thread's loaded messages less one; a thread whose count would
+ * be 0 gets none.
+ */
+export function threadRepliesLines(
+  messages: readonly ThreadTimelineMessage[],
+): Map<string, number> {
+  const timeline = messages.filter(
+    (message) => message.role === "user" || message.role === "assistant",
+  );
+  const totals = new Map<string, number>();
+  for (const message of timeline) {
+    if (message.chatThreadId) {
+      totals.set(message.chatThreadId, (totals.get(message.chatThreadId) ?? 0) + 1);
+    }
+  }
+  const runs: Run[] = [];
+  for (const message of timeline) {
+    const thread = message.chatThreadId ?? null;
+    const last = runs.at(-1);
+    if (last && last.thread === thread) last.messages.push(message);
+    else runs.push({ thread, messages: [message] });
+  }
+  const qualifies = runs.map((run): { under: string; count: number } | null => {
+    if (!run.thread) return null;
+    const under = run.messages.findLast((message) => message.role === "assistant");
+    if (!under) return null;
+    const total = totals.get(run.thread) ?? 0;
+    const outside = total > run.messages.length;
+    const rootMissing = !run.messages.some((message) => message.id === run.thread);
+    if (!outside && !rootMissing && total < 4) return null;
+    return total - 1 > 0 ? { under: under.id, count: total - 1 } : null;
+  });
+  const lines = new Map<string, number>();
+  let laterKept = false;
+  for (let index = runs.length - 1; index >= 0; index--) {
+    const line = qualifies[index];
+    const kept: boolean = line !== null && !laterKept;
+    if (kept && line) lines.set(line.under, line.count);
+    laterKept = kept;
+  }
+  return lines;
+}
+
+/**
+ * Memoized {@link threadRepliesLines}, as the provider's value. `rethreaded`
+ * holds the threads the live `message_chat_thread` events placed messages in
+ * since the timeline was loaded.
+ */
+export function useChatThreadsValue(
+  messages: readonly ThreadTimelineMessage[],
+  rethreaded: ReadonlyMap<string, string>,
+): ChatThreads {
+  return useMemo(
+    () => ({
+      lines: threadRepliesLines(
+        rethreaded.size === 0
+          ? messages
+          : messages.map((message) =>
+              rethreaded.has(message.id)
+                ? { ...message, chatThreadId: rethreaded.get(message.id) }
+                : message,
+            ),
+      ),
+    }),
+    [messages, rethreaded],
+  );
 }
 
 function wordsOf(message: ChatMessage): string {
@@ -52,19 +118,18 @@ function wordsOf(message: ChatMessage): string {
 }
 
 /**
- * The muted "N replies" line under a thread's first message, which opens the
- * thread. Renders nothing for a message that starts no thread with replies,
- * and inside the thread view.
+ * The subdued "N replies" line under an agent message, which opens the
+ * message's chat thread. Renders nothing where {@link threadRepliesLines}
+ * puts no line, and inside the thread view.
  */
 export function ThreadRepliesLine({ message }: { message: ChatMessage }) {
   const { t } = useTranslation("chat");
   const threads = useChatThreads();
   const draft = useReplyDraft();
-  const count = threads?.replies.get(message.id) ?? 0;
+  const count = threads?.lines.get(message.id) ?? 0;
   if (!threads || !draft?.threads || count === 0 || draft.sessionId !== message.sessionId) {
     return null;
   }
-  const guardian = message.role === "user";
   return (
     <button
       type="button"
@@ -72,15 +137,11 @@ export function ThreadRepliesLine({ message }: { message: ChatMessage }) {
       onClick={() =>
         draft.openThread({
           messageId: message.id,
-          author:
-            message.sender?.kind === "automated" ? "automated" : guardian ? "guardian" : "agent",
+          author: "agent",
           preview: replyPreview(wordsOf(message)),
         })
       }
-      className={cn(
-        "rounded-4 px-1 text-aux text-muted-foreground outline-1 outline-offset-0 outline-transparent hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50",
-        guardian ? "self-end" : "self-start",
-      )}
+      className="self-start rounded-4 px-1 text-aux text-muted-foreground outline-1 outline-offset-0 outline-transparent hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
     >
       {t("thread.replies", { count })}
     </button>

@@ -234,9 +234,17 @@ const sessionNameSchema = z.object({
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
 
+const messageChatThreadSchema = z.object({
+  sessionId: z.string(),
+  messageId: z.string(),
+  chatThreadId: z.string(),
+});
+
 interface ChatSessionEventsProps {
   sessionId: string;
   onMessageInsert: (sessionId: string, message: ChatMessage) => void;
+  /** The Concierge placed a message of the chat in a chat thread. */
+  onMessageChatThread?: (event: z.infer<typeof messageChatThreadSchema>) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
   onSessionRunning: (event: z.infer<typeof sessionRunningSchema>) => void;
   onReconnect: (sessionId: string) => void;
@@ -245,6 +253,7 @@ interface ChatSessionEventsProps {
 function ChatSessionEvents({
   sessionId,
   onMessageInsert,
+  onMessageChatThread,
   onSessionName,
   onSessionRunning,
   onReconnect,
@@ -259,6 +268,12 @@ function ChatSessionEvents({
       session_name: {
         schema: sessionNameSchema,
         fn: (event) => onSessionName(sessionId, event),
+      },
+      message_chat_thread: {
+        schema: messageChatThreadSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onMessageChatThread?.(event);
+        },
       },
       session_running: {
         schema: sessionRunningSchema,
@@ -457,6 +472,19 @@ export function Chat({
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  // Where live `message_chat_thread` events placed messages since they loaded,
+  // for the "N replies" lines.
+  const [rethreaded, setRethreaded] = useState<ReadonlyMap<string, string>>(new Map());
+  const handleMessageChatThread = useCallback(
+    ({ messageId, chatThreadId }: { messageId: string; chatThreadId: string }) =>
+      setRethreaded((prev) => {
+        if (prev.get(messageId) === chatThreadId) return prev;
+        const next = new Map(prev);
+        next.set(messageId, chatThreadId);
+        return next;
+      }),
+    [],
+  );
   // Inline share flow: pick turns directly on the transcript.
   const [shareMode, setShareMode] = useState(false);
   const [selectedShareTurns, setSelectedShareTurns] = useState<Set<string>>(new Set());
@@ -2187,7 +2215,7 @@ export function Chat({
   const threadOpen = concierge && Boolean(mainSessionId) && replyDraft.thread !== null;
   // The thread view's transcript feeds none of the chat's scroll measures.
   const ignoreThreadContent = useCallback(() => {}, []);
-  const chatThreads = useChatThreadsValue(displayMessages);
+  const chatThreads = useChatThreadsValue(displayMessages, rethreaded);
   const conciergeHeader = concierge ? (
     <>
       {threadOpen ? null : floatingHeader(navbarActions)}
@@ -2209,6 +2237,7 @@ export function Chat({
           key={sid}
           sessionId={sid}
           onMessageInsert={handleMessageInsert}
+          onMessageChatThread={handleMessageChatThread}
           onSessionName={handleSessionName}
           onSessionRunning={handleSessionRunning}
           onReconnect={handleSessionEventsReconnect}
