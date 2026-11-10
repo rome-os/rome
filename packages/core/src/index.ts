@@ -1269,9 +1269,7 @@ async function main() {
   });
 
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
-    db,
     settingsRepo,
-    reactivateFloating: () => routineEngine.reactivateFloating(),
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
   startConciergeEvents(concierge, turnListeners);

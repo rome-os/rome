@@ -2,7 +2,6 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import type { SessionActor } from "../access/session-actor.js";
 
 const state = rs.hoisted(() => ({ memoryDir: "" }));
 rs.mock("../profile-memory.js", () => ({
@@ -15,11 +14,14 @@ rs.mock("../profile-memory.js", () => ({
 import { ActionEngine, type ActionRunContext } from "../apps/actions/engine.js";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
+import { persons } from "../db/schema.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
 import { registerAgentNameAction } from "./agent-name.js";
 
-const guardian: SessionActor = { kind: "guardian", userId: "guardian", via: "cookie" };
-const visitor: SessionActor = {
+type Actor = NonNullable<ActionRunContext["actor"]>;
+
+const guardian: Actor = { kind: "guardian", userId: "guardian", via: "cookie" };
+const visitor: Actor = {
   kind: "visitor",
   accountId: "visitor",
   email: "visitor@example.test",
@@ -39,13 +41,10 @@ beforeEach(async () => {
   writeFileSync(join(state.memoryDir, "IDENTITY.md"), originalIdentity);
   testDb = createTestDb();
   settings = new SettingsRepository(testDb.db);
-  await settings.set("guardianName", "Guardian");
   await settings.set("agentName", "Flint");
   registry = new ActionRegistryImpl();
   const events = registerAgentNameAction(registry, {
-    db: testDb.db,
     settingsRepo: settings,
-    reactivateFloating: rs.fn(async () => {}),
     ownerOfChat: async (chatId) =>
       chatId === "visitor-chat"
         ? "visitor:visitor"
@@ -155,13 +154,43 @@ describe("core:set_agent_name", () => {
     expect((await rename("x".repeat(60))).status).toBe("ok");
   });
 
-  it("does not notify when the profile rejects an unconfigured guardian", async () => {
-    await settings.delete("guardianName");
+  it("changes only the Agent Name line, leaving the purpose, the guardian profile and settings alone", async () => {
+    const edited =
+      "# Identity\n\n**Agent Name:** Flint\n\n## Purpose\n\nAn evolved purpose the agent wrote.\n\n## Values\n\nKeep promises.\n";
+    const guardianNotes =
+      "# Guardian Profile\n\n**Name:** Edited in memory\n\nNotes the agent learned.\n";
+    writeFileSync(join(state.memoryDir, "IDENTITY.md"), edited);
+    writeFileSync(join(state.memoryDir, "relationship", "GUARDIAN.md"), guardianNotes);
+    await settings.set("agentPurpose", "A preset purpose from setup.");
+    await settings.set("guardianName", "Guardian");
+    await settings.set("guardianTimezone", "Asia/Tokyo");
+
+    expect((await rename("Pebble")).status).toBe("ok");
+
+    expect(identity()).toBe(edited.replace("Flint", "Pebble"));
+    expect(readFileSync(join(state.memoryDir, "relationship", "GUARDIAN.md"), "utf8")).toBe(
+      guardianNotes,
+    );
+    expect(await settings.get("agentPurpose")).toBe("A preset purpose from setup.");
+    expect(await settings.get("guardianName")).toBe("Guardian");
+    expect(await testDb.db.select().from(persons)).toEqual([]);
+  });
+
+  it("renames with no guardian name stored", async () => {
+    expect(await settings.get("guardianName")).toBeNull();
+    expect((await rename("Pebble")).status).toBe("ok");
+    expect(await settings.get("agentName")).toBe("Pebble");
+  });
+
+  it("reports a failed identity write, keeps the setting and does not notify", async () => {
+    rmSync(join(state.memoryDir, "IDENTITY.md"));
+    mkdirSync(join(state.memoryDir, "IDENTITY.md"));
     expect(await rename("Pebble")).toMatchObject({
       status: "error",
-      error: expect.stringContaining("guardian name"),
+      error: expect.stringContaining("Could not save the agent name"),
     });
-    await unchanged();
+    expect(await settings.get("agentName")).toBe("Flint");
+    expect(emit).not.toHaveBeenCalled();
   });
 
   it("unsubscribes dashboard listeners", async () => {

@@ -1,8 +1,9 @@
 import type { ConciergeService } from "../concierge/service.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
+import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { LiveEventEmit } from "../lib/live-event.js";
-import { applyGuardianProfile, type GuardianProfileDeps } from "./guardian-profile.js";
+import { applyAgentName } from "./guardian-profile.js";
 
 export interface AgentNameEvents {
   subscribe(emit: LiveEventEmit): () => void;
@@ -11,7 +12,7 @@ export interface AgentNameEvents {
 /** Registers the guardian's rename action and its dashboard notifications. */
 export function registerAgentNameAction(
   actions: Pick<ActionRegistry, "register">,
-  deps: GuardianProfileDeps & Pick<ConciergeService, "ownerOfChat">,
+  deps: { settingsRepo: Pick<SettingsRepository, "set"> } & Pick<ConciergeService, "ownerOfChat">,
 ): AgentNameEvents {
   const listeners = new Set<LiveEventEmit>();
   actions.register({
@@ -62,9 +63,11 @@ export function registerAgentNameAction(
           error: "Agent name must contain 1 to 60 characters after trimming.",
         };
       }
-      const result = await applyGuardianProfile({ agentName }, deps);
-      if (!result.ok) {
-        return { status: "error", error: "Set the guardian name before changing the agent name." };
+      try {
+        await applyAgentName(agentName, deps.settingsRepo);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : String(error);
+        return { status: "error", error: `Could not save the agent name: ${reason}` };
       }
       for (const emit of listeners) emit("agent_name_changed", { agentName });
       return { status: "ok", data: { agentName } };
