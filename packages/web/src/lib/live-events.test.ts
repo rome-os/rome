@@ -298,6 +298,43 @@ describe("LiveEventsClient", () => {
     error.mockRestore();
   });
 
+  describe("hold", () => {
+    it("opens the socket with no topic and keeps it open, reconnecting, until released", () => {
+      const live = client();
+      const release = live.hold();
+      expect(FakeWebSocket.instances).toHaveLength(1);
+      const socket = FakeWebSocket.latest();
+      socket.open();
+      rs.advanceTimersByTime(5_000);
+      expect(socket.readyState).toBe(FakeWebSocket.OPEN);
+
+      socket.close();
+      rs.advanceTimersByTime(100);
+      const next = FakeWebSocket.latest();
+      expect(next).not.toBe(socket);
+      next.open();
+
+      release();
+      release();
+      rs.advanceTimersByTime(1_000);
+      expect(next.readyState).toBe(FakeWebSocket.CLOSED);
+    });
+
+    it("keeps the socket after the last topic goes while held", () => {
+      const live = client();
+      const unsubscribe = live.subscribe("chat.status", listener());
+      const release = live.hold();
+      const socket = FakeWebSocket.latest();
+      socket.open();
+      unsubscribe();
+      rs.advanceTimersByTime(5_000);
+      expect(socket.readyState).toBe(FakeWebSocket.OPEN);
+      release();
+      rs.advanceTimersByTime(1_000);
+      expect(socket.readyState).toBe(FakeWebSocket.CLOSED);
+    });
+  });
+
   describe("reportActivity", () => {
     const active = { type: "activity", state: "active" };
     const away = { type: "activity", state: "away" };

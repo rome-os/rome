@@ -9,6 +9,7 @@ const owners: Record<string, string> = {
 };
 const ownerOfChat = async (chatId: string) => owners[chatId] ?? null;
 const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
+const other = { kind: "visitor" as const, accountId: "acct-w", email: "w@example.com" };
 const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
 
 function recorder() {
@@ -23,37 +24,60 @@ function recorder() {
 }
 
 describe("send_notification's recipient", () => {
-  it("rings the owner of the calling chat: a visitor by account, the guardian with none", async () => {
+  it("rings the person who acted, whoever owns the chat", async () => {
     const { notify, sent } = recorder();
+    // A visitor in the guardian's chat, and in another visitor's chat.
     await sendForCaller(
       notify,
       ownerOfChat,
-      { actor: visitor, chatId: "visitor-chat" },
+      { actor: visitor, chatId: "guardian-chat" },
       {
-        body: "remind me",
+        body: "a",
       },
     );
     await sendForCaller(
       notify,
       ownerOfChat,
-      { actor: guardian, chatId: "guardian-chat" },
+      { actor: other, chatId: "visitor-chat" },
       {
-        body: "build done",
+        body: "b",
       },
     );
-    await sendForCaller(notify, ownerOfChat, { chatId: null }, undefined);
+    // The guardian in a visitor's chat.
+    await sendForCaller(
+      notify,
+      ownerOfChat,
+      { actor: guardian, chatId: "visitor-chat" },
+      {
+        body: "c",
+      },
+    );
     expect(sent).toEqual([
-      { body: "remind me", recipient: "acct-v" },
-      { body: "build done" },
-      undefined,
+      { body: "a", recipient: "acct-v" },
+      { body: "b", recipient: "acct-w" },
+      { body: "c" },
     ]);
   });
 
-  it("never rings the guardian for a visitor's call, even with no chat to name", async () => {
+  it("never names the guardian for a visitor's call, with or without a chat", async () => {
     const { notify, sent } = recorder();
     await sendForCaller(notify, ownerOfChat, { actor: visitor, chatId: null }, { body: "x" });
     await sendForCaller(notify, ownerOfChat, { actor: visitor, chatId: "gone" }, undefined);
     expect(sent).toEqual([{ body: "x", recipient: "acct-v" }, { recipient: "acct-v" }]);
+  });
+
+  it("sends a call no person made to the calling chat's owner, then the guardian", async () => {
+    const { notify, sent } = recorder();
+    await sendForCaller(notify, ownerOfChat, { chatId: "visitor-chat" }, { body: "routine" });
+    await sendForCaller(notify, ownerOfChat, { chatId: "guardian-chat" }, { body: "routine" });
+    await sendForCaller(notify, ownerOfChat, { chatId: "gone" }, undefined);
+    await sendForCaller(notify, ownerOfChat, { chatId: null }, undefined);
+    expect(sent).toEqual([
+      { body: "routine", recipient: "acct-v" },
+      { body: "routine" },
+      undefined,
+      undefined,
+    ]);
   });
 
   it("reads only a dashboard chat as the calling chat", () => {
@@ -66,7 +90,7 @@ describe("send_notification's recipient", () => {
     });
   });
 
-  it("reads the caller from the running action in the main process", async () => {
+  it("reads the acting visitor from the running action in the main process, in a shared chat", async () => {
     const { notify, sent } = recorder();
     const service = callerNotifyService(notify, ownerOfChat);
     await actionExecutionContext.run(
@@ -75,7 +99,7 @@ describe("send_notification's recipient", () => {
         rootExecutionId: "e1",
         initiator: "agent",
         actor: visitor,
-        channelContext: { channel: "webchat", threadId: "visitor-chat" },
+        channelContext: { channel: "webchat", threadId: "guardian-chat" },
       },
       () => service.send({ body: "hi" }),
     );

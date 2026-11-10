@@ -102,6 +102,8 @@ export class LiveEventsClient {
   private readonly now: () => number;
 
   private readonly topics = new Map<string, TopicEntry>();
+  /** Holders that keep the socket open with no topic. */
+  private holders = 0;
   private readonly transportListeners = new Set<() => void>();
   private transport: LiveEventsTransport | null = null;
   private socket: WebSocket | null = null;
@@ -199,8 +201,31 @@ export class LiveEventsClient {
       if (this.socketOpen && (current.state === "pending" || current.state === "subscribed")) {
         this.send({ type: "unsubscribe", topic });
       }
-      if (this.topics.size === 0) this.scheduleIdleClose();
+      if (!this.wanted()) this.scheduleIdleClose();
     };
+  }
+
+  /**
+   * Keeps the socket open, or reconnecting, until the result is called, even
+   * with no topic subscribed: what `reportActivity` sends needs a socket on
+   * every page. Release it once.
+   */
+  hold(): () => void {
+    this.holders += 1;
+    this.clearIdleTimer();
+    this.ensureSocket();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.holders -= 1;
+      if (!this.wanted()) this.scheduleIdleClose();
+    };
+  }
+
+  /** Whether anything needs the socket: a topic or a holder. */
+  private wanted(): boolean {
+    return this.topics.size > 0 || this.holders > 0;
   }
 
   private ensureSocket(): void {
@@ -248,7 +273,7 @@ export class LiveEventsClient {
     if (this.transport === "fallback") {
       this.transport = "socket";
       for (const listener of [...this.transportListeners]) listener();
-      if (this.topics.size === 0) this.scheduleIdleClose();
+      if (!this.wanted()) this.scheduleIdleClose();
     }
   }
 
@@ -319,10 +344,10 @@ export class LiveEventsClient {
         for (const listener of entry.listeners.keys()) listener.onDrop();
       }
     }
-    if (this.topics.size === 0) return;
+    if (!this.wanted()) return;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
-      if (this.topics.size > 0) this.ensureSocket();
+      if (this.wanted()) this.ensureSocket();
     }, this.reconnectDelayMs(this.failedAttempts));
   }
 
@@ -346,7 +371,7 @@ export class LiveEventsClient {
     this.reprobeTimer = setTimeout(() => {
       this.reprobeTimer = null;
       if (this.socket) return;
-      if (this.topics.size === 0) this.scheduleReprobe();
+      if (!this.wanted()) this.scheduleReprobe();
       else this.openSocket();
     }, this.reprobeMs);
   }
@@ -365,7 +390,7 @@ export class LiveEventsClient {
     this.idleTimer = setTimeout(() => {
       this.idleTimer = null;
       // A probe in flight on the fallback closes itself once it opens idle.
-      if (this.topics.size > 0 || this.transport === "fallback") return;
+      if (this.wanted() || this.transport === "fallback") return;
       if (this.reconnectTimer) {
         clearTimeout(this.reconnectTimer);
         this.reconnectTimer = null;

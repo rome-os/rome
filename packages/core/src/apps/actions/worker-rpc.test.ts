@@ -1203,6 +1203,25 @@ describe("notify.send dispatch", () => {
     expect(send).toHaveBeenCalledWith(expectedArg);
   });
 
+  it("rings the visitor who acted in a shared chat, never the chat's owner, over IPC", async () => {
+    const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
+    const { server, services } = makeServer({ notify: { send } });
+    const ownerOfChat = rs.fn(async () => "guardian");
+    (services as { ownerOfChat: unknown }).ownerOfChat = ownerOfChat;
+    const worker = connect(server);
+    const store = {
+      actionName: "system:send_notification",
+      executionId: "execution-1",
+      rootExecutionId: "execution-1",
+      initiator: "agent",
+      actor: { kind: "visitor", accountId: "acct-v", email: "v@example.com" } as const,
+      channelContext: { channel: "webchat", threadId: "guardian-chat", channelUserId: "v" },
+    };
+    await actionExecutionContext.run(store, () => worker.call("notify.send", { body: "hi" }));
+    expect(send).toHaveBeenCalledWith({ body: "hi", recipient: "acct-v" });
+    expect(ownerOfChat).not.toHaveBeenCalled();
+  });
+
   it("rejects a non-string body without calling the notify service", async () => {
     const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
     const { server } = makeServer({ notify: { send } });

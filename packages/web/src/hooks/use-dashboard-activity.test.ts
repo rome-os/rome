@@ -15,7 +15,7 @@ describe("watchDashboardActivity", () => {
     );
     rs.spyOn(document, "hasFocus").mockImplementation(() => state.focused);
     const reportActivity = rs.fn();
-    stops.push(watchDashboardActivity({ reportActivity }));
+    stops.push(watchDashboardActivity({ reportActivity, hold: () => () => {} }));
     return reportActivity;
   }
 
@@ -37,14 +37,34 @@ describe("watchDashboardActivity", () => {
     expect(report).not.toHaveBeenCalled();
   });
 
-  it("reports away at once when the tab is hidden, the window loses focus, or the page closes", () => {
+  it("reports away when the tab is hidden, the window loses focus, or the page closes", async () => {
     const state = { visible: true, focused: true };
     const report = watch(state);
+    state.focused = false;
     window.dispatchEvent(new Event("blur"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
     window.dispatchEvent(new Event("pagehide"));
     state.visible = false;
     document.dispatchEvent(new Event("visibilitychange"));
     expect(report.mock.calls).toEqual([["away"], ["away"], ["away"]]);
+  });
+
+  it("stays active when focus moves into an embedded app's iframe", async () => {
+    const report = watch({ visible: true, focused: true });
+    // The window blurs, but the document still has focus.
+    window.dispatchEvent(new Event("blur"));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(report).not.toHaveBeenCalled();
+  });
+
+  it("holds the live-events socket open while it watches, and lets go when stopped", () => {
+    const release = rs.fn();
+    const hold = rs.fn(() => release);
+    const stop = watchDashboardActivity({ reportActivity: rs.fn(), hold });
+    expect(hold).toHaveBeenCalledOnce();
+    expect(release).not.toHaveBeenCalled();
+    stop();
+    expect(release).toHaveBeenCalledOnce();
   });
 
   it("reports nothing inside the phone app's web view", () => {

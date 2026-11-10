@@ -20,7 +20,7 @@ const PHONE_APP_WEB_VIEW = /\bRomeiOS\//;
  * Inside the phone app's web view it reports nothing.
  */
 export function watchDashboardActivity(
-  client: Pick<LiveEventsClient, "reportActivity">,
+  client: Pick<LiveEventsClient, "reportActivity" | "hold">,
   target: { window: Window; document: Document } = { window, document },
 ): () => void {
   const { window: win, document: doc } = target;
@@ -32,16 +32,29 @@ export function watchDashboardActivity(
   const onVisibility = () => {
     if (doc.visibilityState !== "visible") onAway();
   };
+  // Focus moving into an embedded app's iframe blurs the window while the
+  // document keeps focus, so the check waits until focus has settled.
+  let blurCheck: ReturnType<typeof setTimeout> | undefined;
+  const onBlur = () => {
+    clearTimeout(blurCheck);
+    blurCheck = setTimeout(() => {
+      if (!doc.hasFocus()) onAway();
+    }, 0);
+  };
+  // The signals need the socket open on a page that subscribes to no topic.
+  const release = client.hold();
   const options = { capture: true, passive: true };
   for (const type of INPUT_EVENTS) win.addEventListener(type, onInput, options);
   doc.addEventListener("visibilitychange", onVisibility);
-  win.addEventListener("blur", onAway);
+  win.addEventListener("blur", onBlur);
   win.addEventListener("pagehide", onAway);
   return () => {
     for (const type of INPUT_EVENTS) win.removeEventListener(type, onInput, options);
     doc.removeEventListener("visibilitychange", onVisibility);
-    win.removeEventListener("blur", onAway);
+    win.removeEventListener("blur", onBlur);
     win.removeEventListener("pagehide", onAway);
+    clearTimeout(blurCheck);
+    release();
   };
 }
 

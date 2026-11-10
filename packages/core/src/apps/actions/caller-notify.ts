@@ -1,5 +1,6 @@
-// Whose phone `send_notification` rings: the owner of the chat that calls it,
-// with no chat the guardian. A visitor's call never reaches the guardian:
+// Whose phone `send_notification` rings: the person who acted, the guardian or
+// a visitor. Only a call no person made falls back to the calling chat's
+// owner, then the guardian. A visitor's call never reaches the guardian:
 // docs/architecture/notification-delivery.md.
 import type { SessionActor } from "../../access/session-actor.js";
 import { WEBCHAT_CHANNEL } from "../../chats/dashboard/dashboard-account.js";
@@ -29,17 +30,20 @@ export function actionCaller(
 }
 
 /**
- * The Rome Cloud account a call's push goes to: the calling chat's owner's,
- * or, with no chat the caller can name, the calling visitor's. Undefined
- * means the guardian.
+ * The Rome Cloud account a call's push goes to, undefined for the guardian.
+ * A person who acted gets it, whoever owns the chat: a visitor in a chat
+ * they share with the guardian or another visitor rings only themselves.
+ * A call no person made, such as a routine's, goes to the calling chat's
+ * owner, and with no chat to the guardian.
  */
 export async function notifyRecipient(
   caller: ActionCaller,
   ownerOfChat: (chatId: string) => Promise<ConciergeOwner | null>,
 ): Promise<string | undefined> {
+  if (caller.actor?.kind === "visitor") return caller.actor.accountId;
+  if (caller.actor?.kind === "guardian") return recipientOf(GUARDIAN_OWNER);
   const owner = caller.chatId ? await ownerOfChat(caller.chatId) : null;
-  if (owner) return recipientOf(owner);
-  return caller.actor?.kind === "visitor" ? caller.actor.accountId : recipientOf(GUARDIAN_OWNER);
+  return recipientOf(owner ?? GUARDIAN_OWNER);
 }
 
 /** Sends `content` to the person `caller` stands for. */

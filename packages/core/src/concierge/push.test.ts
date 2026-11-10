@@ -21,6 +21,7 @@ function pushWith(
     language?: string | null;
     watching?: (owner: string, chatId: string) => boolean;
     dashboardActive?: (owner: string) => boolean;
+    ownerOf?: (chatId: string) => Promise<string | null>;
   } = {},
 ) {
   let now = 1_000_000;
@@ -33,8 +34,9 @@ function pushWith(
         return (await options.outcome?.()) ?? { kind: "ok", attempted: 1, sent: 1, failed: 0 };
       },
     },
-    ownerOf: async (chatId) =>
-      chatId === "gone" ? null : chatId.startsWith("v-") ? VISITOR : GUARDIAN,
+    ownerOf:
+      options.ownerOf ??
+      (async (chatId) => (chatId === "gone" ? null : chatId.startsWith("v-") ? VISITOR : GUARDIAN)),
     quietUntil: async (_at, owner) => options.quietUntil?.(owner) ?? null,
     language: async () => options.language ?? null,
     watching: options.watching,
@@ -52,7 +54,12 @@ function pushWith(
     }
     await settle();
   };
-  return { push, sent, advance };
+  /** Moves the clock without firing timers, as when a due flush has not run yet. */
+  const advanceClock = async (ms: number) => {
+    await settle();
+    now += ms;
+  };
+  return { push, sent, advance, advanceClock };
 }
 
 describe("pushBody", () => {
@@ -210,6 +217,70 @@ describe("ConciergePush", () => {
     push.said({ turnId: "t4", chatId: "a", ownWords: "later", level: "active" });
     await settle();
     expect(sent.at(-1)).toEqual({ body: "later", level: "active", chatId: "a" });
+  });
+
+  it("drops a message held when said, even when the hold clears before its window ends", async () => {
+    let active = false;
+    const { push, sent, advance } = pushWith({ dashboardActive: () => active });
+    push.said({ turnId: "t1", chatId: "c", ownWords: "first", level: "active" });
+    await settle();
+    active = true;
+    push.said({ turnId: "t1", chatId: "c", ownWords: "read at the dashboard", level: "active" });
+    await settle();
+    active = false;
+    await advance(MERGE_MS);
+    await advance(MERGE_MS);
+    expect(sent.map((content) => content.body)).toEqual(["first"]);
+  });
+
+  it("drops a message said while the phone shows the chat, even after the phone leaves", async () => {
+    let shown = false;
+    const { push, sent, advance } = pushWith({ watching: () => shown });
+    push.said({ turnId: "t1", chatId: "c", ownWords: "first", level: "active" });
+    await settle();
+    shown = true;
+    push.said({ turnId: "t1", chatId: "c", ownWords: "read on the phone", level: "active" });
+    await settle();
+    shown = false;
+    await advance(MERGE_MS);
+    expect(sent.map((content) => content.body)).toEqual(["first"]);
+  });
+
+  it("never sends a pending message after a newer one handled past the window's end", async () => {
+    const { push, sent, advance, advanceClock } = pushWith();
+    push.said({ turnId: "t1", chatId: "c", ownWords: "first", level: "active" });
+    await advanceClock(5_000);
+    push.said({ turnId: "t1", chatId: "c", ownWords: "older", level: "active" });
+    // The window ends, but its flush has not run yet.
+    await advanceClock(MERGE_MS);
+    push.said({ turnId: "t1", chatId: "c", ownWords: "newer", level: "active" });
+    await settle();
+    await advance(0);
+    await advance(MERGE_MS);
+    expect(sent.map((content) => content.body)).toEqual(["first", "newer"]);
+  });
+
+  it("keeps the newest message when its owner lookup straddles the window's end", async () => {
+    let release: () => void = () => {};
+    let slow = false;
+    const { push, sent, advance, advanceClock } = pushWith({
+      ownerOf: async () => {
+        if (slow) await new Promise<void>((resolve) => (release = resolve));
+        return GUARDIAN;
+      },
+    });
+    push.said({ turnId: "t1", chatId: "c", ownWords: "first", level: "active" });
+    await advanceClock(5_000);
+    push.said({ turnId: "t1", chatId: "c", ownWords: "older", level: "active" });
+    await advanceClock(8_000);
+    slow = true;
+    push.said({ turnId: "t1", chatId: "c", ownWords: "newer", level: "active" });
+    // The window ends and its flush fires while the newer lookup is still out.
+    await advance(MERGE_MS);
+    release();
+    await settle();
+    await advance(MERGE_MS);
+    expect(sent.map((content) => content.body)).toEqual(["first", "newer"]);
   });
 
   it("drops a merged push that a hold covers when its window ends", async () => {

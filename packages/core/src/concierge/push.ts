@@ -168,6 +168,9 @@ export class ConciergePush {
   private async handle(said: SaidInTurn & { level: NotifyLevel }): Promise<void> {
     const owner = await this.deps.ownerOf(said.chatId);
     if (!owner) return;
+    // A message read or held when said is dropped: it never enters the merge
+    // window, so it cannot go out once the hold clears.
+    if (await this.held(said, owner)) return;
     const chat = this.chatOf(said.chatId);
     const sinceLast = chat.lastPushAt === null ? Infinity : this.now() - chat.lastPushAt;
     if (sinceLast < MERGE_MS) {
@@ -177,6 +180,9 @@ export class ConciergePush {
       chat.pending = { said, owner };
       return;
     }
+    // The window has ended but its flush has not run yet: this newer message
+    // replaces the pending one, so the older never goes out after it.
+    chat.pending = null;
     await this.deliver(chat, { said, owner });
   }
 
@@ -192,19 +198,9 @@ export class ConciergePush {
 
   private async deliver(chat: ChatPushes, { said, owner }: Pending): Promise<void> {
     const { turnId, chatId } = said;
-    if (this.deps.watching?.(owner, chatId)) {
-      log.info("concierge push skipped: the phone shows the chat", { turnId, chatId });
-      return;
-    }
-    if (this.deps.dashboardActive?.(owner)) {
-      log.info("concierge push held back: a dashboard is active", { turnId, chatId });
-      return;
-    }
+    // Checked again at dispatch: a hold may have started while a merged push waited.
+    if (await this.held(said, owner)) return;
     const at = this.now();
-    if ((await this.deps.quietUntil(at, owner)) !== null) {
-      log.info("concierge push held back by quiet hours", { turnId, chatId });
-      return;
-    }
     const rings = chat.lastPushAt === null || at - chat.lastPushAt > RING_MS;
     const level: NotifyLevel = said.level === "active" && rings ? "active" : "passive";
     // Set before the send, so a message said while it is in flight merges.
@@ -238,6 +234,23 @@ export class ConciergePush {
       recipient: recipient === undefined ? "guardian" : "visitor",
       outcome: outcome.kind,
     });
+  }
+
+  /** Whether a hold covers `owner` now, logging which; the phone's watch, their dashboard, then quiet hours. */
+  private async held({ turnId, chatId }: SaidInTurn, owner: ConciergeOwner): Promise<boolean> {
+    if (this.deps.watching?.(owner, chatId)) {
+      log.info("concierge push skipped: the phone shows the chat", { turnId, chatId });
+      return true;
+    }
+    if (this.deps.dashboardActive?.(owner)) {
+      log.info("concierge push held back: a dashboard is active", { turnId, chatId });
+      return true;
+    }
+    if ((await this.deps.quietUntil(this.now(), owner)) !== null) {
+      log.info("concierge push held back by quiet hours", { turnId, chatId });
+      return true;
+    }
+    return false;
   }
 
   private chatOf(chatId: string): ChatPushes {
