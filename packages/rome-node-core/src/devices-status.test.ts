@@ -1,4 +1,4 @@
-import { describe, expect, it, rs } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { setTimeout as delay } from "node:timers/promises";
 import { DeviceStatusReader } from "./devices-status.js";
 import { actionError, type ActionResponse } from "./actions.js";
@@ -92,5 +92,90 @@ describe("shared device checks", () => {
     await expect(reader.read()).rejects.toThrow("Cloud unavailable");
     await expect(reader.read()).rejects.toThrow("Cloud unavailable");
     expect(list).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe("stale snapshots", () => {
+  beforeEach(() => {
+    rs.useFakeTimers();
+  });
+  afterEach(() => {
+    rs.useRealTimers();
+  });
+
+  /** Each Cloud list names the device after its round. `hold` keeps a round's list waiting. */
+  function rounds() {
+    let round = 0;
+    const held = new Map<number, () => void>();
+    const failing = new Set<number>();
+    const list = rs.fn(async () => {
+      const n = ++round;
+      if (held.has(n)) await new Promise<void>((resolve) => held.set(n, resolve));
+      if (failing.has(n)) throw new Error("Cloud unavailable");
+      return { items: [{ id: "a", device_name: `round ${n}` }] };
+    });
+    const reader = new DeviceStatusReader({
+      list,
+      run: async (): Promise<ActionResponse> => ({ type: "response", ok: true, result: {} }),
+      getStatus: () => "online",
+    });
+    const name = async () => (await reader.read()).devices[0]?.name;
+    return {
+      list,
+      reader,
+      name,
+      hold: (n: number) => held.set(n, () => undefined),
+      release: (n: number) => held.get(n)?.(),
+      fail: (n: number) => failing.add(n),
+    };
+  }
+
+  it("answers with the last snapshot at once and refreshes it in the background", async () => {
+    const { list, name, hold, release } = rounds();
+    expect(await name()).toBe("round 1");
+    await rs.advanceTimersByTimeAsync(9_999);
+    expect(await name()).toBe("round 1");
+    expect(list).toHaveBeenCalledTimes(1);
+
+    await rs.advanceTimersByTimeAsync(1);
+    hold(2);
+    // The check of round 2 is still waiting on Cloud, yet both reads answer.
+    expect(await Promise.all([name(), name()])).toEqual(["round 1", "round 1"]);
+    expect(list).toHaveBeenCalledTimes(2);
+
+    release(2);
+    await rs.advanceTimersByTimeAsync(0);
+    expect(await name()).toBe("round 2");
+    expect(list).toHaveBeenCalledTimes(2);
+  });
+
+  it("keeps the last snapshot when a background check fails", async () => {
+    const { list, name, fail } = rounds();
+    expect(await name()).toBe("round 1");
+    await rs.advanceTimersByTimeAsync(10_000);
+    fail(2);
+    expect(await name()).toBe("round 1");
+    await rs.advanceTimersByTimeAsync(0);
+    // The snapshot is still stale, so the next read tries again.
+    expect(await name()).toBe("round 1");
+    await rs.advanceTimersByTimeAsync(0);
+    expect(await name()).toBe("round 3");
+    expect(list).toHaveBeenCalledTimes(3);
+  });
+
+  it("waits after invalidate and ignores a check that started before it", async () => {
+    const { list, reader, name, hold, release } = rounds();
+    expect(await name()).toBe("round 1");
+    await rs.advanceTimersByTimeAsync(10_000);
+    hold(2);
+    expect(await name()).toBe("round 1");
+
+    // A removed device must not come back from the check that was already running.
+    reader.invalidate();
+    expect(await name()).toBe("round 3");
+    release(2);
+    await rs.advanceTimersByTimeAsync(0);
+    expect(await name()).toBe("round 3");
+    expect(list).toHaveBeenCalledTimes(3);
   });
 });
