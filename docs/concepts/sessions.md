@@ -58,7 +58,8 @@ Memory, follows and tasks are not part of it, since a session reads them while i
 - A change to an agent's setup reaches a session only when a fresh session opens.
 - An agent whose policy asks for it gets a fresh session in the same chat when its setup changed since its session opened. The check runs at the start of each turn, whatever opened the session, including a wake-up that resumes it by id. The Concierge's chats work this way, since one of them can run on one session for days.
 - A session that recorded no setup opened before setups were recorded, and is replaced on its next turn under such a policy.
-- A replacement for a changed setup sends no message or push: the chat shows only the line where the session was renewed. It carries the [continuation](#continuation) notice until a turn of its own succeeds, so a first open that fails does not lose it.
+- A replacement for a changed setup sends no message or push: the chat shows only the line where the session was renewed. It carries the [continuation](#continuation) notice until a turn of its own succeeds.
+- A renewal opens the new session exactly as a fresh open would, from the agent's setup as it is then: its prompt, tools, MCP servers, answer shape and working folder. The chat moves to the new session only once its model has opened. If that open fails, the chat stays on its session, and the next turn tries the renewal again on a fresh thread, never the retired one.
 
 ## Session in use
 

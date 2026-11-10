@@ -778,12 +778,20 @@ function deprecatedSameAgent(
  * servers, whether it may `defer`, and Rome's tools for a turn.
  */
 interface SessionSetupSource {
+  /** The agent's definition this setup was built from. Every provider-visible
+   *  field of a session's backend reads it, never one captured at open. */
+  definition: AgentDefinition;
   widgets: WidgetDrawing;
   /** The full system prompt, memory and the opener's context suffix included. */
   systemPrompt(): string;
   allowList: readonly string[];
   subagents: Subagent[];
+  /** The tool names the subagents are called by. */
+  subagentToolNames: Set<string>;
   externalMcpServers: Record<string, McpServerConfig> | undefined;
+  /** Checks an answer against the definition's output schema. Throws when
+   *  the schema itself is invalid. */
+  answerShape(): AnswerShape | undefined;
   /** The `defer` tool, or undefined for a session that may not wake itself. */
   deferTool: DeferTool | undefined;
   romeTools(
@@ -853,13 +861,32 @@ function sessionSetupOf(
       defer: session.defers ? deferTool : undefined,
       sessionTools: session.sessionTools,
     });
+  let answerShape: { shape: AnswerShape | undefined } | undefined;
   return {
+    definition: config,
     widgets,
     systemPrompt: () =>
       deps.systemPrompts.build(promptAgent, { contextSuffix: init.contextSuffix, widgets }),
     allowList,
     subagents,
+    subagentToolNames: new Set(subagents.map((subagent) => subagentToolName(subagent.name))),
     externalMcpServers,
+    answerShape() {
+      if (!answerShape) {
+        try {
+          answerShape = {
+            shape: config.outputSchema ? deps.readAnswerShape(config.outputSchema) : undefined,
+          };
+        } catch (err) {
+          throw new Error(
+            `Agent ${agent.name} declares an invalid outputSchema: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+      return answerShape.shape;
+    },
     deferTool,
     romeTools,
     async fingerprint(key, opening) {
@@ -908,19 +935,36 @@ function sessionSetupOf(
   };
 }
 
-/** The fingerprint of the setup a session of `key`'s agent opens with now
- *  (SessionSetupSource.fingerprint). An agent that is gone has none here: its
- *  session fails where it opens. */
-async function currentSetup(
+/**
+ * One setup of a session, prepared from its agent's definition as it is at
+ * one moment: the source every provider-visible field of the backend is
+ * built from, and the fingerprint of that same source.
+ */
+interface PreparedSetup {
+  source: SessionSetupSource;
+  /** Undefined when the agent's policy keeps a session through setup changes. */
+  fingerprint: string | undefined;
+  /** The system prompt, built once, so every reopen of this setup sends the same. */
+  systemPrompt(): string;
+}
+
+async function prepareSetup(
   deps: ManagerDeps,
+  agent: Agent,
   key: AgentSessionKey,
   init: SessionOpening,
   isSubagent: boolean,
-): Promise<string | undefined> {
-  if (isSubagent) return undefined;
-  const agent = deps.agentLoader.find(key.agentName);
-  if (!agent) return undefined;
-  return sessionSetupOf(deps, agent, init, isSubagent).fingerprint(key, init);
+): Promise<PreparedSetup> {
+  const source = sessionSetupOf(deps, agent, init, isSubagent);
+  let prompt: string | undefined;
+  return {
+    source,
+    fingerprint: await source.fingerprint(key, init),
+    systemPrompt: () => {
+      prompt ??= source.systemPrompt();
+      return prompt;
+    },
+  };
 }
 
 async function openSession(
@@ -942,8 +986,10 @@ async function openSession(
   // Neither set, this open creates one.
   // What the session opens with, and its fingerprint, which a session this
   // open creates records and whose change its turns renew it on.
-  let setupSource = sessionSetupOf(deps, agent, init, !!opts.isSubagent);
-  const setupNow = await setupSource.fingerprint(key, init);
+  // The setup the backend opens with now. A renewal at a turn's start
+  // prepares another and adopts it once its backend has opened.
+  let active = await prepareSetup(deps, agent, key, init, !!opts.isSubagent);
+  const setupNow = active.fingerprint;
   // The session the working-dir check below writes in place of the stored one.
   let prepared: Session | undefined;
   let resumed: Session | undefined;
@@ -1042,22 +1088,9 @@ async function openSession(
     await deps.sessionRepository.add(session);
   }
 
-  let structuredOutputValidator: AnswerShape | undefined;
-  if (config.outputSchema) {
-    try {
-      structuredOutputValidator = deps.readAnswerShape(config.outputSchema);
-    } catch (err) {
-      throw new Error(
-        `Agent ${key.agentName} declares an invalid outputSchema: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-  }
-
-  const { widgets, subagents, externalMcpServers } = setupSource;
-  let systemPrompt = setupSource.systemPrompt();
-  const subagentToolNames = new Set(subagents.map((subagent) => subagentToolName(subagent.name)));
+  const structuredOutputValidator = active.source.answerShape();
+  // How a turn's widgets draw depends on the opening alone, not the definition.
+  const { widgets } = active.source;
 
   // We hold the AgentSessionImpl handle in a closure so the action
   // callback can route channel-context / shared-context from the right place.
@@ -1168,7 +1201,8 @@ async function openSession(
         return { ...(await call.outcome), sessionId: call.sessionId, turnId: call.turnId };
       });
 
-  const reasoningEffort = init.reasoningEffort ?? config.reasoningEffort;
+  const reasoningEffortOf = (setup: PreparedSetup) =>
+    init.reasoningEffort ?? setup.source.definition.reasoningEffort;
 
   // The Rome tools a session serves, bound to the refs that run them. The live
   // session has a speaker; a fork has none and may have no `defer`, and its
@@ -1177,11 +1211,16 @@ async function openSession(
     refs: TurnExecRefs,
     session: { hasSpeaker: boolean; sessionTools: readonly RomeTool[]; defers: boolean },
     turn: TurnFacts = turnFacts(refs),
-  ) => setupSource.romeTools(turn, makeExecuteSubagent(refs), session);
-  const liveRomeTools = (sessionTools: readonly RomeTool[]) =>
-    romeTools(sessionExecRefs, { hasSpeaker: true, sessionTools, defers: true }, liveTurn);
+    setup: PreparedSetup = active,
+  ) => setup.source.romeTools(turn, makeExecuteSubagent(refs), session);
+  const liveRomeTools = (sessionTools: readonly RomeTool[], setup: PreparedSetup = active) =>
+    romeTools(sessionExecRefs, { hasSpeaker: true, sessionTools, defers: true }, liveTurn, setup);
 
+  // The one builder of a backend's params, for an open and a renewal alike:
+  // every provider-visible field reads `setup`, the same object its
+  // fingerprint came from.
   const buildSessionParams = (
+    setup: PreparedSetup,
     resolution: ModelResolution,
     tools: RomeTools,
     resumeProviderId?: string | null,
@@ -1189,14 +1228,16 @@ async function openSession(
   ): ModelSessionParams => ({
     config: {
       model: resolution.model,
-      systemPrompt,
-      builtinTools: config.tools.filter((name) => resolution.modelProvider.builtinTools.has(name)),
-      reasoningEffort,
-      outputSchema: config.outputSchema,
-      workingDir,
-      externalMcpServers,
+      systemPrompt: setup.systemPrompt(),
+      builtinTools: setup.source.definition.tools.filter((name) =>
+        resolution.modelProvider.builtinTools.has(name),
+      ),
+      reasoningEffort: reasoningEffortOf(setup),
+      outputSchema: setup.source.definition.outputSchema,
+      workingDir: impl ? impl.workingDirectory : workingDir,
+      externalMcpServers: setup.source.externalMcpServers,
       env: { ...init.toolEnv },
-      maxTurns: config.maxTurns,
+      maxTurns: setup.source.definition.maxTurns,
     },
     tools,
     // A thread resumes only on the provider that named it; another provider
@@ -1220,11 +1261,13 @@ async function openSession(
     resolution: ModelResolution,
     resumeProviderId?: string | null,
     resumeThreadId?: string,
+    setup: PreparedSetup = active,
   ): Promise<ModelSession> => {
     const sessionTools = await deps.sessionTools.forTurn(liveTurn, true);
     const params = buildSessionParams(
+      setup,
       resolution,
-      liveRomeTools(sessionTools),
+      liveRomeTools(sessionTools, setup),
       resumeProviderId,
       resumeThreadId,
     );
@@ -1278,11 +1321,11 @@ async function openSession(
         params: {
           config: {
             model: fork.model,
-            systemPrompt,
+            systemPrompt: active.systemPrompt(),
             builtinTools: [],
-            reasoningEffort,
-            outputSchema: config.outputSchema,
-            workingDir,
+            reasoningEffort: reasoningEffortOf(active),
+            outputSchema: active.source.definition.outputSchema,
+            workingDir: impl.workingDirectory,
             // A fork's tools run with its source's.
             env: { ...init.toolEnv },
           },
@@ -1380,10 +1423,10 @@ async function openSession(
         }),
       },
       projectProviderMessage: async (msg) => {
-        if (msg.type === "tool_input_delta" && subagentToolNames.has(msg.tool)) {
+        if (msg.type === "tool_input_delta" && active.source.subagentToolNames.has(msg.tool)) {
           return [];
         }
-        if (msg.type === "tool_use" && subagentToolNames.has(msg.tool)) {
+        if (msg.type === "tool_use" && active.source.subagentToolNames.has(msg.tool)) {
           forkPendingSubagentUses.set(msg.id, msg);
           maybeEmitForkSubagentStart(msg.id);
           return [];
@@ -1437,6 +1480,7 @@ async function openSession(
   if (config.codeBacked) {
     modelSession = createNullModelSession({
       ...buildSessionParams(
+        active,
         {
           modelProvider: {
             id: "mock",
@@ -1465,23 +1509,14 @@ async function openSession(
     await deps.sessionRepository.save(resumed);
   }
 
-  // A renewal at a turn's start builds the prompt and tools again from the
-  // agent's setup as it is then, so the fresh thread opens with them.
-  const refreshSetup = (): string => {
-    const current = deps.agentLoader.find(key.agentName);
-    if (current) setupSource = sessionSetupOf(deps, current, init, !!opts.isSubagent);
-    systemPrompt = setupSource.systemPrompt();
-    return systemPrompt;
-  };
-
   impl = new AgentSessionImpl({
     key,
     session,
     modelSession,
     deps,
-    config,
+    config: active.source.definition,
     structuredOutputValidator,
-    systemPrompt,
+    systemPrompt: active.systemPrompt(),
     workingDir,
     buildForkOpenParams,
     liveTurn,
@@ -1507,15 +1542,23 @@ async function openSession(
     modelProvider: initialResolution?.modelProvider,
     toolCount:
       (initialResolution
-        ? config.tools.filter((name) => initialResolution.modelProvider.builtinTools.has(name))
-            .length
-        : 0) + subagents.length,
-    subagentToolNames,
+        ? active.source.definition.tools.filter((name) =>
+            initialResolution.modelProvider.builtinTools.has(name),
+          ).length
+        : 0) + active.source.subagents.length,
+    subagentToolNames: active.source.subagentToolNames,
     keepAlive: opts.keepAlive,
     onClosed: () => opts.onClosed(impl),
     renewOn: {
-      currentSetup: () => currentSetup(deps, key, init, !!opts.isSubagent),
-      refreshSetup,
+      prepare: async () => {
+        // An agent that is gone has no setup to renew to: its session fails
+        // where it next opens.
+        const current = deps.agentLoader.find(key.agentName);
+        return current ? prepareSetup(deps, current, key, init, !!opts.isSubagent) : undefined;
+      },
+      adopt: (setup) => {
+        active = setup;
+      },
       resetPolicy: init.resetPolicy,
     },
   });
@@ -1576,6 +1619,7 @@ interface ImplArgs {
     resolution: ModelResolution,
     resumeProviderId?: string | null,
     resumeThreadId?: string,
+    setup?: PreparedSetup,
   ) => Promise<ModelSession>;
   /** Tools advertised to the model: builtin SDK tools + subagent tools. */
   toolCount: number;
@@ -1588,12 +1632,12 @@ interface ImplArgs {
 
 /** What a session reads, at a turn's start, to tell whether to renew itself. */
 interface RenewOn {
-  /** The fingerprint of the setup it would open with now, or undefined when
-   *  its agent keeps a session through setup changes. */
-  currentSetup(): Promise<string | undefined>;
-  /** Builds the system prompt and tools again, from the setup as it is now,
-   *  for the fresh thread a renewal opens. Answers the new system prompt. */
-  refreshSetup(): string;
+  /** The setup a session would open with now, built by the same path an
+   *  open takes; undefined when its agent is gone. */
+  prepare(): Promise<PreparedSetup | undefined>;
+  /** Makes `setup` the one later reopens and forks build from, once a
+   *  renewal's backend has opened with it. */
+  adopt(setup: PreparedSetup): void;
   /** The chat's reset policy, as its opener read it. */
   resetPolicy?: ProviderSessionResetPolicy;
 }
@@ -1925,9 +1969,6 @@ class AgentSessionImpl implements AgentSession {
 
   private readonly renewOn: RenewOn;
   private resetPolicy?: ProviderSessionResetPolicy;
-  /** A renewal replaced the stored session: the next model open starts a
-   *  fresh thread rather than resuming the retired one's. */
-  private renewThread = false;
 
   /** The chat's reset policy, as the latest opener read it. */
   noteResetPolicy(policy: ProviderSessionResetPolicy): void {
@@ -1935,18 +1976,24 @@ class AgentSessionImpl implements AgentSession {
   }
 
   /**
-   * The one place a session is renewed (docs/concepts/sessions.md#renewal):
+   * The one place a session is renewed (docs/concepts/sessions.md#continuity-key):
    * at the start of a turn, under the turn lock and before the model
    * session is prepared, so no turn of it runs or waits ahead of this one.
    * It renews when a reset is due (a changed setup, or the chat's reset
    * policy), no forked turn runs, and no approval holds it. Otherwise it
    * keeps the session, and the next turn's start decides again.
+   *
+   * The new backend opens on a fresh thread from a setup prepared the way an
+   * open prepares one. Only once it has opened are the successor written and
+   * the session swapped to it. An open that fails changes nothing, so the
+   * next turn's start tries again, fresh.
    */
   private async renewAtTurnStart(): Promise<void> {
     if (this.isSubagent || this.status === "closed" || this.hasActiveForkedTurns) return;
-    const setup = await this.renewOn.currentSetup();
+    const next = await this.renewOn.prepare();
+    if (!next) return;
     let reason: string | undefined;
-    if (setup !== undefined && setupChanged(this.session.setup, setup)) {
+    if (next.fingerprint !== undefined && setupChanged(this.session.setup, next.fingerprint)) {
       reason = "setup";
     } else if (this.resetPolicy) {
       const decision = evaluateProviderSessionReset(this.resetPolicy, this.session, new Date());
@@ -1962,13 +2009,69 @@ class AgentSessionImpl implements AgentSession {
       });
       return;
     }
-    const successor = retired.replace({ setup: setup ?? retired.setup ?? undefined, reason });
-    await this.deps.sessionRepository.replace(retired, successor);
+
+    const definition = next.source.definition;
+    const answerShape = next.source.answerShape();
+    let opened: { session: ModelSession; provider: ModelProvider } | undefined;
+    if (!definition.codeBacked) {
+      const resolution = await this.deps.modelResolver.resolve(
+        modelResolutionRequest(this.selectionId, this.sessionPin, definition),
+      );
+      const previous = this.modelSession;
+      this.replacingModelSession = previous;
+      this.modelSessionAvailable = false;
+      try {
+        await previous.close();
+        await this.modelEventsLoop;
+        // A fresh thread whatever the provider: never the retired one's.
+        const session = await this.openModelSession(resolution, undefined, undefined, next);
+        opened = { session, provider: resolution.modelProvider };
+      } catch (err) {
+        this.replacingModelSession = null;
+        this.log.warn("provider_session.rotate_failed", {
+          agentName: this.key.agentName,
+          oldSessionId: retired.id,
+          resetReason: reason,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        throw err;
+      }
+    }
+
+    const successor = retired.replace({
+      setup: next.fingerprint ?? retired.setup ?? undefined,
+      reason,
+      workingDir: this.workingDir,
+    });
+    try {
+      await this.deps.sessionRepository.replace(retired, successor);
+    } catch (err) {
+      // The successor was never written: keep the retired session, which
+      // the next turn's start renews again.
+      this.replacingModelSession = null;
+      await opened?.session.close().catch(() => undefined);
+      throw err;
+    }
     this.session = successor;
     this.sessionId = successor.id;
-    this.systemPrompt = this.renewOn.refreshSetup();
-    this.renewThread = true;
-    this.modelSessionAvailable = false;
+    this.renewOn.adopt(next);
+    this.config = definition;
+    this.structuredOutputValidator = answerShape;
+    this.subagentToolNames = next.source.subagentToolNames;
+    this.systemPrompt = next.systemPrompt();
+    if (opened) {
+      this.modelProvider = opened.provider;
+      this.modelSession = opened.session;
+      this.modelSessionAvailable = true;
+      this.toolCount =
+        definition.tools.filter((name) => opened.provider.builtinTools.has(name)).length +
+        next.source.subagents.length;
+      this.replacingModelSession = null;
+      this.startModelSessionEvents();
+    }
+    this.threadFresh = true;
+    this.threadContextInjected = false;
+    this.lastPosition = undefined;
     this.continuationPending = true;
     this.renewalPending = { reason, sessionId: successor.id };
     this.log.info("provider_session.rotated", {
@@ -2114,9 +2217,7 @@ class AgentSessionImpl implements AgentSession {
 
     const previous = this.modelSession;
     const sameProvider = previous.providerId === resolution.modelProvider.id;
-    // A renewal starts a fresh thread whatever the provider.
-    const resumeThreadId = sameProvider && !this.renewThread ? previous.modelThreadId : undefined;
-    this.renewThread = false;
+    const resumeThreadId = sameProvider ? previous.modelThreadId : undefined;
     this.replacingModelSession = previous;
     this.modelSessionAvailable = false;
     try {

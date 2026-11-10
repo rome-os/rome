@@ -8,6 +8,7 @@ import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "./session-opening.js";
 import { chatPromptFacts } from "./chat-prompt-facts.js";
 import type { PromptFacts } from "../agent/index.js";
+import type { AgentDefinition } from "../agent/index.js";
 import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
 import { TurnUsageReporter } from "../apps/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
@@ -3323,6 +3324,7 @@ describe("AgentRunner", () => {
         provider: MockModelProvider,
         /** Runs each time a model is resolved, as a turn prepares its model session. */
         onResolve?: () => Promise<void>,
+        extraDeps: Partial<Parameters<typeof createSessions>[0]> = {},
       ): AgentRunner {
         const resolver = createTestModelResolver({ providers: [provider] });
         const resolve = resolver.resolve.bind(resolver);
@@ -3357,6 +3359,7 @@ describe("AgentRunner", () => {
             systemPrompts: createSystemPrompts({ sources }),
             sessionTools: { forTurn: async () => sessionTools },
             heldMidTurn: async (sessionId: string) => held.has(sessionId),
+            ...extraDeps,
           },
           { keepAliveAcrossTurns: true },
         );
@@ -3447,6 +3450,137 @@ describe("AgentRunner", () => {
           expect(newCommand).not.toBe(newArgs);
         } finally {
           definition.mcpServers = declared;
+        }
+      });
+
+      it.each([
+        [
+          "an added builtin tool",
+          (definition: AgentDefinition) => {
+            definition.tools = [...definition.tools, "Bash"];
+          },
+          (params: ModelSessionParams) => expect(params.config.builtinTools).toContain("Bash"),
+        ],
+        [
+          "a changed MCP server",
+          (definition: AgentDefinition) => {
+            definition.mcpServers = { notes: { command: "node", args: ["notes.js", "--v2"] } };
+          },
+          (params: ModelSessionParams) =>
+            expect(params.config.externalMcpServers?.notes).toMatchObject({
+              args: ["notes.js", "--v2"],
+            }),
+        ],
+        [
+          "a changed output schema",
+          (definition: AgentDefinition) => {
+            definition.outputSchema = {
+              type: "object",
+              properties: { answer: { type: "string" } },
+              required: ["answer"],
+              additionalProperties: false,
+            };
+          },
+          (params: ModelSessionParams) =>
+            expect(params.config.outputSchema).toMatchObject({
+              properties: { answer: { type: "string" } },
+            }),
+        ],
+      ])("renews on %s, and the fresh backend opens with it", async (_change, change, check) => {
+        // A reload gives the agent a new definition; the open-time one stays as it was.
+        const agent = agentLoader.find("test-renewing")! as { definition: AgentDefinition };
+        const original = agent.definition;
+        try {
+          // Declared servers reach the provider with the discovered ones.
+          agent.definition = {
+            ...original,
+            networkDiscovery: true,
+            mcpServers: { notes: { command: "node", args: ["notes.js"] } },
+          };
+          const provider = new MockModelProvider(replies(2));
+          provider.builtinTools = new Set(["Bash"]);
+          const runner = renewingRunner(provider, undefined, {
+            networkMcpServers: () => ({ found: { command: "found", args: [] } }),
+          });
+          const first = await turn(runner);
+          const setupBefore = (await sessionRepository.session(first!))?.setup;
+          const reloaded = structuredClone(agent.definition);
+          change(reloaded);
+          agent.definition = reloaded;
+          const renewed = await turn(runner);
+
+          expect(renewed).not.toBe(first);
+          const setupAfter = (await sessionRepository.session(renewed!))?.setup;
+          expect(setupAfter).toMatch(/^[0-9a-f]{64}$/);
+          expect(setupAfter).not.toBe(setupBefore);
+          expect(provider.sessions).toHaveLength(2);
+          check(provider.sessions[1]!);
+          expect(provider.sessions[1]!.thread).toEqual({ kind: "new" });
+        } finally {
+          agent.definition = original;
+        }
+      });
+
+      it("swaps nothing when the renewal's backend fails to open, and retries on a fresh thread", async () => {
+        const provider = new MockModelProvider(replies(3));
+        const open = provider.openSession.bind(provider);
+        let failNext = false;
+        provider.openSession = async (params) => {
+          if (failNext) {
+            failNext = false;
+            provider.sessions.push(params);
+            throw new Error("provider down");
+          }
+          // The provider names a thread the session could resume.
+          return Object.assign(await open(params), { modelThreadId: "thread-1" });
+        };
+        const runner = renewingRunner(provider);
+        const first = await turn(runner);
+        identity.text = "**Agent Name:** YoYo";
+        failNext = true;
+
+        const failed = await collectMessages(
+          runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
+        );
+        expect(failed.some((message) => message.type === "error")).toBe(true);
+        expect((await sessionRepository.session(first!))?.supersededBy).toBeFalsy();
+        expect((await sessionRepository.current(key, "core:test-renewing"))?.id).toBe(first);
+
+        const retried = await turn(runner);
+        expect(retried).not.toBe(first);
+        expect((await sessionRepository.session(first!))?.supersededBy).toBe(retried);
+        // Every open after the first starts a fresh thread: none resumes the retired one.
+        expect(provider.sessions.slice(1).map((params) => params.thread)).toEqual([
+          { kind: "new" },
+          { kind: "new" },
+        ]);
+      });
+
+      it("keeps the working folder on the successor, across an eviction and a resume by id", async () => {
+        const folder = await mkdtemp(join(tmpdir(), "rome-renew-dir-"));
+        try {
+          const provider = new MockModelProvider(replies(3));
+          const runner = renewingRunner(provider);
+          await collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: "Hi",
+              channelThreadKey: key,
+              workingDir: folder,
+            }),
+          );
+          identity.text = "**Agent Name:** YoYo";
+          const renewed = await turn(runner);
+          expect((await sessionRepository.session(renewed!))?.workingDir).toBe(folder);
+
+          // Evicted: a fresh manager has nothing in memory and resumes the row.
+          await Promise.all(managers.splice(0).map((manager) => manager.shutdown()));
+          const resumed = await turn(renewingRunner(provider), { sessionId: renewed });
+
+          expect(resumed).toBe(renewed);
+          expect(provider.sessions.at(-1)?.config.workingDir).toBe(folder);
+        } finally {
+          await rm(folder, { recursive: true, force: true });
         }
       });
 

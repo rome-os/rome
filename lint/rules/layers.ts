@@ -64,18 +64,8 @@ export const layerRules: ImportRule[] = [
   },
 ];
 
-const SESSION = "agent/application/agent-session.ts";
-
 /**
  * Crossings the agent context still makes on its way in. Each leaves the list
  * when the port that replaces it lands.
  */
-export const listedCrossings: ListedCrossing[] = [
-  {
-    rule: "application-imports-inward",
-    from: SESSION,
-    to: "lib/keyed-mutex.ts",
-    ticket: "ZHA-154",
-    why: "A generic lock with no domain meaning, until it moves to a shared package or the context's own code.",
-  },
-];
+export const listedCrossings: ListedCrossing[] = [];
