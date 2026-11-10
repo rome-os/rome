@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import Rome
 
@@ -51,6 +52,34 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         #expect(store.composerThread == ThreadTarget(messageId: "a1", instanceKnowsThreads: true))
         store.closeThread()
         #expect(store.composerThread == nil)
+    }
+
+    /// A failed thread send, restored after a relaunch, edited, and the app
+    /// relaunched again: the draft still goes to its thread. The chat's
+    /// composer saves with `composerThread`, as here.
+    @Test func aRestoredThreadDraftSurvivesAnEditAndARelaunch() async {
+        let root = FileManager.default.temporaryDirectory.appending(path: "rome-thread-relaunch-\(UUID().uuidString)/Drafts", directoryHint: .isDirectory)
+        defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
+        let target = ThreadTarget(messageId: "a1", instanceKnowsThreads: true)
+        let first = DraftStore(root: root, instance: "me")
+        first.sending(chat: "concierge", inputId: "in-1", text: "Will it rain?", photos: [], fromComposer: true, thread: target)
+        await first.flush()
+        // Relaunch: the draft comes back and its thread opens.
+        let second = DraftStore(root: root, instance: "me")
+        let restored = await second.load(chat: "concierge")
+        #expect(restored?.thread == target)
+        let backend = FakeBackend()
+        let store = await chat(backend, [message("a1", at: 0, thread: "a1")])
+        store.reopenThread(restored!.thread!)
+        #expect(store.composerThread == target)
+        // An edit saves with the thread the composer is aimed at.
+        second.save(chat: "concierge", text: "Will it rain tomorrow?", photos: [], thread: store.composerThread)
+        await second.flush()
+        // Relaunch again.
+        let third = await DraftStore(root: root, instance: "me").load(chat: "concierge")
+        #expect(third?.text == "Will it rain tomorrow?")
+        #expect(third?.thread == target)
+        store.closeThread()
     }
 
     // MARK: A thread older than the pages held
@@ -178,5 +207,18 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         #expect(ChatIdentity.announcement("Working on it", announces: true) == "Working on it")
         #expect(ChatIdentity.announcement("Working on it", announces: false) == nil)
         #expect(ChatIdentity.announcement(nil, announces: true) == nil)
+    }
+}
+
+/// A short transcript is laid out at once; one with older pages never is.
+@Suite struct TranscriptStackTests {
+    @Test func eagerOnlyWhileTheWholeHistoryIsHeld() {
+        typealias List = TranscriptList<EmptyView>
+        #expect(!List.isLazy(rows: 12, hasOlder: false, locked: false))
+        // Older pages to fetch: an eager stack would page through all of them.
+        #expect(List.isLazy(rows: 12, hasOlder: true, locked: false))
+        #expect(List.isLazy(rows: List.eagerRowLimit + 1, hasOlder: false, locked: false))
+        // Once lazy, it stays lazy.
+        #expect(List.isLazy(rows: 12, hasOlder: false, locked: true))
     }
 }

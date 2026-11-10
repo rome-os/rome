@@ -42,6 +42,8 @@ struct TopicChatScreen: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Under an open thread, VoiceOver reads the thread, not what it covers.
+        .accessibilityHidden(store?.thread != nil)
         .floatingTopBar {
             ChatHeader(
                 // The Concierge's name, as in the main chat; the topic's own
@@ -63,6 +65,7 @@ struct TopicChatScreen: View {
                 },
                 onArchive: chatId.map { id in { archive(id) } }
             )
+            .accessibilityHidden(store?.thread != nil)
         }
         // Over the header and the transcript; the composer below stays in place.
         .overlay {

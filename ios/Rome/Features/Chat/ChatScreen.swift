@@ -25,6 +25,8 @@ struct ChatScreen: View {
             content
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        // Under an open thread, VoiceOver reads the thread, not what it covers.
+        .accessibilityHidden(store.thread != nil)
         // The bar is clear: the transcript scrolls under its glass items.
         .floatingTopBar {
             VStack(spacing: 0) {
@@ -35,6 +37,7 @@ struct ChatScreen: View {
                 }, onTasks: onTasks)
                 banners
             }
+            .accessibilityHidden(store.thread != nil)
         }
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
@@ -624,9 +627,9 @@ struct TranscriptList<Row: View>: View {
     /// A finger is on the list: an older page waits, so the rows under it
     /// never move. A glide does not hold it back.
     @State private var fingerDown = false
-    /// Laid out all at once: decided when the transcript first loads, and
-    /// kept, so the stack never changes kind under the scroll.
-    @State private var eager: Bool?
+    /// Once the stack has gone lazy it stays lazy, so it changes kind at
+    /// most once.
+    @State private var lazyLocked = false
 
     /// Up to this many rows a transcript is laid out all at once. A lazy
     /// stack guesses the height of rows it has not laid out, and a chat that
@@ -635,11 +638,19 @@ struct TranscriptList<Row: View>: View {
     /// Past this many rows the lazy stack's memory saving wins.
     static var eagerRowLimit: Int { 120 }
 
+    /// Lazy once older pages exist or the rows pass the limit. An eager
+    /// stack runs every row's onAppear at once, so with older pages to
+    /// fetch it would page through the whole history; eager, there is none.
+    static func isLazy(rows: Int, hasOlder: Bool, locked: Bool) -> Bool {
+        locked || hasOlder || rows > eagerRowLimit
+    }
+
     var body: some View {
         let rows = store.rows
+        let lazy = Self.isLazy(rows: rows.count, hasOlder: store.hasOlder, locked: lazyLocked)
         ScrollViewReader { proxy in
             ScrollView {
-                TranscriptStack(lazy: !(eager ?? (rows.count <= Self.eagerRowLimit))) {
+                TranscriptStack(lazy: lazy) {
                     if store.hasOlder {
                         Spinner(size: 16, color: Palette.sub)
                             .padding(.vertical, 12)
@@ -705,8 +716,8 @@ struct TranscriptList<Row: View>: View {
             .onChange(of: bottomVisible) { _, now in
                 transcriptScrollLog.notice("bottom visible \(now, privacy: .public), height \(visibleHeight, privacy: .public)")
             }
-            .onChange(of: store.loaded, initial: true) { _, loaded in
-                if loaded, eager == nil { eager = rows.count <= Self.eagerRowLimit }
+            .onChange(of: lazy, initial: true) { _, now in
+                if now { lazyLocked = true }
             }
             .onChange(of: rows.last?.id) {
                 // Before iOS 18 a list that follows also scrolls to a new last
