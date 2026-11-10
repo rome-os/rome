@@ -65,7 +65,7 @@ What the PR covers and what it deliberately leaves out, such as a follow-up or a
 
 Whether the change is a one-way door (a migration, a deleted record, a published API) or a two-way door that a revert undoes, and its blast radius: who or what it touches, and why that is safe.
 
-> "Two-way door. Blast radius: visitor sign-in. The worst case is one extra small resend."
+> "One-way only for the old email-only records, which a revert does not restore. The next sign-in rebuilds them. Blast radius: visitor sign-in. The worst case is one extra small resend per listed visitor."
 
 ### Evidence
 
@@ -98,7 +98,7 @@ was never resent.
   resends once on next sign-in. Guessing their account could bring the bug back.
 
 ## Merge danger
-Two-way door. Blast radius: visitor sign-in. The worst case is one extra small resend.
+One-way only for the old email-only records, which a revert does not restore. The next sign-in rebuilds them. Blast radius: visitor sign-in. The worst case is one extra small resend per listed visitor.
 
 ## Evidence
 - Same email, new account: resends once. Fails without the fix.
