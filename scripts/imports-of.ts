@@ -1,6 +1,8 @@
 #!/usr/bin/env tsx
 /**
  * Lists what a set of files imports and what imports them, grouped by folder.
+ * It sees only the one package it scans, so importers in other packages are
+ * not counted.
  *
  *   pnpm imports-of [--depth <n>] [--all] <file or folder> [...]
  *
@@ -21,7 +23,7 @@
 import { existsSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
-import { type ScannedImport, scanImports } from "../lint/import-rules.js";
+import { type ImportScan, scanImports } from "../lint/import-rules.js";
 
 const TOP = ".";
 const SITES_SHOWN = 5;
@@ -41,6 +43,8 @@ export interface ImportsOf {
   incoming: Map<string, Crossing[]>;
   /** Every folder holding a file outside the set. */
   folders: string[];
+  /** Imports in the set whose relative or `@/` path names no file, so no folder counts them. */
+  unresolved: { from: string; line: number; specifier: string }[];
 }
 
 /** The folder `depth` levels under the root that holds `path`, or the deepest one above it. */
@@ -55,28 +59,29 @@ export function folderOf(path: string, depth: number): string {
  * relative to the scanned root.
  */
 export function importsOf(
-  imports: readonly ScannedImport[],
+  { files: scanned, imports }: ImportScan,
   set: readonly string[],
   depth = 1,
 ): ImportsOf {
   const inSet = (path: string) => set.some((s) => path === s || path.startsWith(`${s}/`));
-  const files = new Set<string>();
-  const folders = new Set<string>();
+  const files = scanned.filter(inSet);
+  const folders = new Set(scanned.filter((f) => !inSet(f)).map((f) => folderOf(f, depth)));
+  const unresolved: ImportsOf["unresolved"] = [];
   const outgoing = new Map<string, Crossing[]>();
   const incoming = new Map<string, Crossing[]>();
   const add = (map: Map<string, Crossing[]>, key: string, crossing: Crossing) =>
     map.set(key, [...(map.get(key) ?? []), crossing]);
 
   for (const imp of imports) {
-    if (inSet(imp.from)) files.add(imp.from);
-    else folders.add(folderOf(imp.from, depth));
+    if (imp.kind === "unresolved" && inSet(imp.from)) {
+      unresolved.push({ from: imp.from, line: imp.line, specifier: imp.specifier });
+    }
     if (imp.kind !== "file" || imp.to.startsWith("../")) continue;
-    if (!inSet(imp.to)) folders.add(folderOf(imp.to, depth));
     const crossing = { from: imp.from, line: imp.line, to: imp.to };
     if (inSet(imp.from) && !inSet(imp.to)) add(outgoing, folderOf(imp.to, depth), crossing);
     if (!inSet(imp.from) && inSet(imp.to)) add(incoming, folderOf(imp.from, depth), crossing);
   }
-  return { files: [...files].sort(), outgoing, incoming, folders: [...folders].sort() };
+  return { files, outgoing, incoming, folders: [...folders].sort(), unresolved };
 }
 
 /** Renders the report the CLI prints. */
@@ -107,6 +112,13 @@ export function formatImportsOf(report: ImportsOf, all = false): string {
   };
   out.push(`The set imports nothing from: ${without(outgoing)}`);
   out.push(`Nothing in these imports the set: ${without(incoming)}`);
+  if (report.unresolved.length > 0) {
+    out.push(
+      "",
+      `${report.unresolved.length} import(s) in the set do not resolve and are not counted:`,
+    );
+    for (const u of report.unresolved) out.push(`  ${u.from}:${u.line} → ${u.specifier}`);
+  }
   return out.join("\n");
 }
 

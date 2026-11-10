@@ -69,17 +69,25 @@ export type ScannedImport = { line: number } & (
   | { from: string; specifier: string; kind: "unresolved" }
 );
 
+/** Every scanned file, relative to the scanned directory, and every import they make. */
+export interface ImportScan {
+  files: string[];
+  imports: ScannedImport[];
+}
+
 /**
- * Lists every import of every `.ts` and `.tsx` file under `srcDir`, resolved
- * through the TypeScript resolver. `tsconfigPath` gives the resolver options,
- * including path aliases.
+ * Lists every `.ts` and `.tsx` file under `srcDir` and every import it makes,
+ * resolved through the TypeScript resolver. `tsconfigPath` gives the resolver
+ * options, including path aliases.
  */
-export function scanImports(srcDir: string, tsconfigPath: string): ScannedImport[] {
+export function scanImports(srcDir: string, tsconfigPath: string): ImportScan {
   const options = readCompilerOptions(tsconfigPath);
   const cache = ts.createModuleResolutionCache(srcDir, (name) => name, options);
+  const files: string[] = [];
   const imports: ScannedImport[] = [];
   for (const path of listSourceFiles(srcDir)) {
     const from = toPosix(relative(srcDir, path));
+    files.push(from);
     for (const site of importSites(path)) {
       const { line } = site;
       if (site.specifier === null) {
@@ -110,7 +118,7 @@ export function scanImports(srcDir: string, tsconfigPath: string): ScannedImport
       }
     }
   }
-  return imports;
+  return { files, imports };
 }
 
 /**
@@ -128,7 +136,7 @@ export function checkImports(
   const violations: ImportViolation[] = [];
   const unseen = new Set(listed);
 
-  for (const { line, ...imp } of scanImports(srcDir, tsconfigPath)) {
+  for (const { line, ...imp } of scanImports(srcDir, tsconfigPath).imports) {
     const at = `${imp.from}:${line}`;
     if (imp.kind === "unresolved") {
       violations.push({
