@@ -25,7 +25,10 @@ export type ConciergeToolActivity =
 export type ConciergeActivity =
   /** Nothing is running and nothing waits. */
   | { kind: "idle" }
-  /** A card or an approval waits on the owner, in this chat or in a task chat it started. */
+  /**
+   * A card or an approval began waiting on the owner, in this chat or in a
+   * task chat it started, after the owner last said something in this chat.
+   */
   | { kind: "needsYou" }
   /** The chat's own turn is running, in a tool the header names. */
   | { kind: "tool"; tool: ConciergeToolActivity }
@@ -47,6 +50,7 @@ export interface ConciergeActivityEvent {
 export interface TaskChatActivityFacts {
   title: string;
   running: boolean;
+  /** A card or an approval in it began waiting after the owner last spoke in the Concierge chat. */
   awaitingGuardian: boolean;
   /** When its row last changed, epoch milliseconds: the newest running task leads. */
   updatedAt: number;
@@ -54,7 +58,7 @@ export interface TaskChatActivityFacts {
 
 /** The facts one Concierge chat's activity follows from. */
 export interface ConciergeActivityFacts {
-  /** A card or an approval waits on the owner in the chat itself. */
+  /** A card or an approval in the chat itself began waiting on the owner after they last spoke in it. */
   awaitingGuardian: boolean;
   /** The chat's own turn, and the tool it is in now (a call whose result has not come back). */
   turn: { running: boolean; tool: string | null };
@@ -96,18 +100,19 @@ export function toolActivityOf(tool: string): ConciergeToolActivity | null {
 }
 
 /**
- * What a Concierge chat is doing, in order: something waiting on the owner
- * first, then the chat's own turn (the tool it is in, else plain work), then
- * a task result about to be reported, then the task chats it started that
- * are running, else nothing.
+ * What a Concierge chat is doing, in order: the chat's own turn first (the
+ * tool it is in, else plain work), then something that began waiting on the
+ * owner since they last spoke, then a task result about to be reported, then
+ * the task chats it started that are running, else nothing. A wait the owner
+ * had already seen when they last spoke shows in the Tasks list only.
  */
 export function conciergeActivity(facts: ConciergeActivityFacts): ConciergeActivity {
-  if (facts.awaitingGuardian || facts.tasks.some((task) => task.awaitingGuardian)) {
-    return { kind: "needsYou" };
-  }
   if (facts.turn.running) {
     const tool = facts.turn.tool ? toolActivityOf(facts.turn.tool) : null;
     return tool ? { kind: "tool", tool } : { kind: "working" };
+  }
+  if (facts.awaitingGuardian || facts.tasks.some((task) => task.awaitingGuardian)) {
+    return { kind: "needsYou" };
   }
   if (facts.reportPending) return { kind: "working" };
   const running = facts.tasks

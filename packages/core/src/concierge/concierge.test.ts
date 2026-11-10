@@ -318,7 +318,8 @@ function setup(
       listProjects: async () => [{ path: "default" }, { path: "rome-oss" }],
       // The activity's own sources (activity.test.ts covers it).
       onMessageInserted: () => () => {},
-      awaitingGuardianOf: async () => new Set<string>(),
+      awaitingGuardianSince: async () => new Map<string, number>(),
+      ownerSpokeAt: async () => null,
     },
     tasks,
     approvals: {

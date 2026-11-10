@@ -164,7 +164,8 @@ export interface ConciergeDeps {
     | "setSessionTrigger"
     | "listProjects"
     | "onMessageInserted"
-    | "awaitingGuardianOf"
+    | "awaitingGuardianSince"
+    | "ownerSpokeAt"
   >;
   /** The todo list. */
   tasks: ConciergeTasks;

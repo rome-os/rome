@@ -438,7 +438,8 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
         return null;
       }
     },
-    awaitingGuardianOf: (chatIds) => webchatRepo.awaitingGuardianOf(chatIds),
+    awaitingGuardianSince: (chatIds) => webchatRepo.awaitingGuardianSince(chatIds),
+    ownerSpokeAt: (chatId) => webchatRepo.ownerSpokeAt(chatId),
     tasksOf: async (chatId) => {
       const owner = await service.ownerOfChat(chatId);
       if (!owner) return [];

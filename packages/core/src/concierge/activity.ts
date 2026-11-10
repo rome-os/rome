@@ -19,7 +19,7 @@ const log = createLogger("concierge-activity");
  * How long a named tool's activity stays at least, before a lower one (plain
  * work, running tasks, idle) takes its place. A tool such as `chat_start`
  * returns in a few milliseconds, which a header could not show. A card or an
- * approval waiting on the owner never waits for it.
+ * approval that began waiting on the owner never waits for it.
  */
 export const TOOL_HOLD_MS = 1_500;
 
@@ -53,8 +53,13 @@ export interface ConciergeActivitySources {
   /** Whether the chat runs a turn its owner sees: a quiet turn counts once it has said something. */
   isBusy(chatId: string): boolean;
   openTool(chatId: string): string | null;
-  /** Which of the chats wait on their owner: a card or a pending approval. */
-  awaitingGuardianOf(chatIds: readonly string[]): Promise<Set<string>>;
+  /**
+   * The chats that wait on their owner (a card or a pending approval), each
+   * with when its newest wait began, epoch milliseconds.
+   */
+  awaitingGuardianSince(chatIds: readonly string[]): Promise<Map<string, number>>;
+  /** When the owner last said something in the Concierge chat, epoch milliseconds, or null. */
+  ownerSpokeAt(chatId: string): Promise<number | null>;
   /** The Concierge chat's task rows that are not archived. */
   tasksOf(chatId: string): Promise<ActivityTaskRow[]>;
   /** The task rows whose result the Concierge is about to report. */
@@ -112,13 +117,19 @@ export class ConciergeActivityTracker {
     const rows = await this.sources.tasksOf(chatId);
     for (const row of rows) this.chatOfTask.set(row.id, chatId);
     const taskChats = rows.flatMap((row) => (row.chatId ? [row.chatId] : []));
-    const awaiting = await this.sources.awaitingGuardianOf([chatId, ...taskChats]);
+    const [since, spokeAt] = await Promise.all([
+      this.sources.awaitingGuardianSince([chatId, ...taskChats]),
+      this.sources.ownerSpokeAt(chatId),
+    ]);
     const pending = new Set(this.sources.reportPending());
-    // Only a card or an approval still unresolved waits. A running turn does
-    // not answer one: an agent works on with an approval pending, and a quiet
-    // turn runs past an open card. An answer is recorded before its turn
-    // starts, so the turn's own start already reads the card as answered.
-    const waits = (id: string) => awaiting.has(id);
+    // Only a card or an approval still unresolved waits, and only one that
+    // began after the owner last spoke in this chat: one they had seen by
+    // then shows in the Tasks list only. Both times are whole seconds, so a
+    // wait in the second they spoke counts.
+    const waits = (id: string) => {
+      const began = since.get(id);
+      return began !== undefined && (spokeAt === null || began >= spokeAt);
+    };
     const running = this.sources.isBusy(chatId);
     return conciergeActivity({
       awaitingGuardian: waits(chatId),
