@@ -17,6 +17,8 @@ enum DebugCommand: Equatable {
     case photoViewer(Bool)
     /// The Apps page's "New app" sheet, or closed.
     case appIdeas(Bool)
+    /// A page of the instance in its sheet; nil closes it.
+    case page(URL?)
 }
 
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
@@ -163,11 +165,11 @@ enum SnapshotRunner {
             }
             model.debugCommand = .route([])
             try? await Task.sleep(for: .seconds(0.6))
-            // A dashboard page a card opened, in the app's web view.
+            // A dashboard page a card opened, in the app's web view, as a sheet.
             await capture("49-dashboard-page", style: styleName, in: directory, wait: 2.5) {
-                model.debugCommand = .route([.page(URL(string: "https://me.romeos.cc/routines")!)])
+                model.debugCommand = .page(URL(string: "https://me.romeos.cc/routines")!)
             }
-            model.debugCommand = .route([])
+            model.debugCommand = .page(nil)
             try? await Task.sleep(for: .seconds(0.6))
             await capture("37b-apps-new", style: styleName, in: directory, wait: 1.2) {
                 model.debugCommand = .section(.apps)
