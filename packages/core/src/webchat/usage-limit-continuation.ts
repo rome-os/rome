@@ -1,3 +1,4 @@
+import type { SessionActor } from "../access/session-actor.js";
 import type { MainBackendTurnRunner } from "../apps/actions/backend-turn.js";
 import {
   isAnthropicUsageLimitError,
@@ -68,6 +69,8 @@ export interface UsageLimitContinuationOptions {
     | "getRestartLastActivityAt"
   >;
   runner: Pick<MainBackendTurnRunner, "runAndReport">;
+  /** Who a continuation acts for: the person whose turn it continues. Absent, no one. */
+  actorOf?: (turn: ErroredTurn["turn"]) => Promise<SessionActor | undefined>;
 }
 
 /**
@@ -103,6 +106,7 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
         // A continuation against a provider that is limited again would fail at once.
         if (!available(provider)) return;
         attempted.add(turn.messageId);
+        const actor = await options.actorOf?.(turn);
         let dropped = false;
         const outcome = await runner.runAndReport(
           {
@@ -118,6 +122,7 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
           },
           {
             inputLabel: "Usage limit recovery",
+            ...(actor ? { actor } : {}),
             shouldRun: () => {
               const run = !stopped && available(provider) && repo.canContinueAfterRestart(turn);
               if (!run) dropped = true;

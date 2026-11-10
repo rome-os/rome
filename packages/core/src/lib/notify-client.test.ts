@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import { NotifyClient } from "./notify-client.js";
+import { NOT_HOSTED_REMEMBERED_MS, NotifyClient } from "./notify-client.js";
 
 function client(opts: { token?: string | null; origin?: string | null; fetchImpl: typeof fetch }) {
   return new NotifyClient({
@@ -89,6 +89,95 @@ describe("NotifyClient.send", () => {
       chatId: "chat-1",
     });
     expect(new Headers(init?.headers).get("content-type")).toBe("application/json");
+  });
+
+  it("names a visitor recipient, and sends none for the guardian", async () => {
+    const fetchImpl = rs.fn(async (..._a: Parameters<typeof fetch>) =>
+      jsonRes(200, { attempted: 1, sent: 1, failed: 0, recipient: "acct-v" }),
+    );
+    expect(await client({ fetchImpl }).send({ body: "hi", recipient: "acct-v" })).toEqual({
+      kind: "ok",
+      attempted: 1,
+      sent: 1,
+      failed: 0,
+    });
+    expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body))).toEqual({
+      body: "hi",
+      recipient: "acct-v",
+    });
+    await client({ fetchImpl }).send({ body: "hi" });
+    expect(JSON.parse(String(fetchImpl.mock.calls[1][1]?.body))).toEqual({ body: "hi" });
+  });
+
+  it("maps a 200 that does not echo the visitor recipient to outcome_unknown", async () => {
+    for (const echoed of [undefined, "someone-else"]) {
+      const c = client({
+        fetchImpl: rs.fn(async () =>
+          jsonRes(200, { attempted: 1, sent: 1, failed: 0, recipient: echoed }),
+        ),
+      });
+      expect(await c.send({ body: "hi", recipient: "acct-v" })).toEqual({
+        kind: "outcome_unknown",
+      });
+    }
+  });
+
+  it("maps a 200 that says the instance is not hosted to not_hosted, for any recipient", async () => {
+    const notHosted = { attempted: 0, sent: 0, failed: 0, reason: "not_hosted" };
+    const c = client({ fetchImpl: rs.fn(async () => jsonRes(200, notHosted)) });
+    expect(await c.send({ body: "hi" })).toEqual({ kind: "not_hosted" });
+    expect(await c.send({ body: "hi", recipient: "acct-v" })).toEqual({ kind: "not_hosted" });
+  });
+
+  it("remembers not_hosted for an hour, or until the instance token changes", async () => {
+    let now = 0;
+    let token = "romeinst_a";
+    const fetchImpl = rs.fn(async () =>
+      jsonRes(200, { attempted: 0, sent: 0, failed: 0, reason: "not_hosted" }),
+    );
+    const c = new NotifyClient({
+      getToken: () => token,
+      getOrigin: () => "https://romeos.cc",
+      fetchImpl,
+      timeoutMs: 50,
+      now: () => now,
+    });
+    expect(await c.send({ body: "1" })).toEqual({ kind: "not_hosted" });
+    now += NOT_HOSTED_REMEMBERED_MS - 1;
+    expect(await c.send({ body: "2" })).toEqual({ kind: "not_hosted" });
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    now += 1;
+    await c.send({ body: "3" });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    // Re-enrollment mints a new token, which asks again at once.
+    token = "romeinst_b";
+    await c.send({ body: "4" });
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+
+  it("keeps an older Rome Cloud's zero counts, which carry no reason, as ok", async () => {
+    const c = client({
+      fetchImpl: rs.fn(async () => jsonRes(200, { attempted: 0, sent: 0, failed: 0 })),
+    });
+    expect(await c.send({ body: "hi" })).toEqual({ kind: "ok", attempted: 0, sent: 0, failed: 0 });
+  });
+
+  it("maps an older Rome Cloud's 400 for an unknown recipient field to outcome_unknown", async () => {
+    const c = client({ fetchImpl: rs.fn(async () => jsonRes(400, { error: "invalid_request" })) });
+    expect(await c.send({ body: "hi", recipient: "acct-v" })).toEqual({ kind: "outcome_unknown" });
+  });
+
+  it("maps a 403 recipient_not_allowed to its own outcome, and any other 403 to reenroll", async () => {
+    const refused = client({
+      fetchImpl: rs.fn(async () => jsonRes(403, { error: "recipient_not_allowed" })),
+    });
+    expect(await refused.send({ body: "hi", recipient: "acct-v" })).toEqual({
+      kind: "recipient_not_allowed",
+    });
+    const revoked = client({
+      fetchImpl: rs.fn(async () => jsonRes(403, { error: "instance_revoked" })),
+    });
+    expect(await revoked.send({ body: "hi", recipient: "acct-v" })).toEqual({ kind: "reenroll" });
   });
 
   it("forwards an empty-string body verbatim (Rome Cloud owns the fallback)", async () => {

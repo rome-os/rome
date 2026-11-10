@@ -97,18 +97,18 @@ describe("the Concierge agent", () => {
       expect(prompt).toContain(text);
   });
 
-  it("keeps secrets out of a turn's first message, which can reach the lock screen", () => {
+  it("marks a secret private, since every message can reach the lock screen, and sends fewer messages", () => {
     const section = concierge.systemPromptPrefix.slice(
       concierge.systemPromptPrefix.indexOf("# How you speak"),
       concierge.systemPromptPrefix.indexOf("# What you do yourself"),
     );
     for (const text of [
+      "Every message you send also goes to their phone",
       "in your reply to a message they sent",
       "lock screen",
-      "before any `chat_forward` or card",
-      "Never put a code, password, token or other secret in it",
-      "even one they asked for",
-      "give the secret in a later message",
+      "code, password, token or other secret, even one they asked for",
+      "`private: true`",
+      "send fewer of them",
     ])
       expect(section).toContain(text);
   });

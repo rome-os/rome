@@ -102,6 +102,12 @@ export async function resolveSessionActorFromMaterial(
   return { kind: "anonymous" };
 }
 
+/** The guardian as the actor of work no person started, such as an app's routine. Undefined before a seat exists. */
+export async function guardianActor(db: DrizzleDb): Promise<SessionActor | undefined> {
+  const [seat] = await db.select({ userId: guardianAuth.userId }).from(guardianAuth).limit(1);
+  return seat ? { kind: "guardian", userId: seat.userId, via: "loopback" } : undefined;
+}
+
 /** NULL owners belong to the guardian for listing, but never match an anonymous viewer. */
 export function sessionOwnerKey(actor: SessionActor | undefined): string | null {
   if (actor?.kind === "guardian") return "guardian";

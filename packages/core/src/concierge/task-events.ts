@@ -16,6 +16,7 @@
 // did not run to its end, such as when the Concierge is out of quota, spends
 // none of that: it is tried again RETRY_MS later.
 
+import { withoutSessionActor } from "../access/session-actor.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("concierge-task-events");
@@ -166,7 +167,11 @@ export class TaskEventCoalescer {
     if (this.flushing || this.dirty.size === 0) return;
     const due = Math.min(...[...this.dirty.values()].map((entry) => this.dueAt(entry)));
     const at = Math.max(due, this.lastFlushStartedAt + MIN_FLUSH_SPACING_MS);
-    this.timer = setTimeout(() => void this.flush(), Math.max(0, at - this.deps.now()));
+    // A mark arrives in whoever's request changed the row; the flush runs
+    // every owner's turns, so its timer must carry no one's session actor.
+    this.timer = withoutSessionActor(() =>
+      setTimeout(() => void this.flush(), Math.max(0, at - this.deps.now())),
+    );
   }
 
   private async flush(): Promise<void> {

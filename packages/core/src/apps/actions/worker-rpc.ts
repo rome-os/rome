@@ -1,4 +1,4 @@
-import { WEBCHAT_CHANNEL, webchatCaller } from "../../chats/dashboard/dashboard-account.js";
+import { webchatCaller } from "../../chats/dashboard/dashboard-account.js";
 import type { IpcCallContext, IpcRpc } from "./ipc.js";
 import type { ApprovalCard } from "./approval-card.js";
 import { z } from "zod";
@@ -29,7 +29,10 @@ import type { SystemUpgradeChecker } from "../../instance/system-upgrade/service
 import { feedbackSendSchema, type FeedbackService } from "../../lib/feedback-client.js";
 import type { AgentNamesService } from "../../chats/accounts/agent-names.js";
 import type { CloudProfileService } from "../../instance/cloud-profile.js";
-import type { NotifyService } from "../../lib/notify-client.js";
+import type { SendOutcome, SystemNotifyContent } from "../../lib/notify-client.js";
+import type { ConciergeOwner } from "../../concierge/owner.js";
+import { actionCaller, sendForCaller } from "./caller-notify.js";
+import type { MainBackendTurnRunner } from "./backend-turn.js";
 import { SpecSourceSchema } from "../lockfile.js";
 import { parseRemixSource } from "../remix-source.js";
 import type {
@@ -245,8 +248,6 @@ export interface WorkerRpcServices {
   connectionRegistry: ConnectionRegistry;
   channelOf: ChannelOf;
   chatSettings: ChatSettingsControl;
-  /** Live routine engine + repo — the action worker has no in-process engine,
-   * so it persists a routine then calls `routines.schedule` to activate it here. */
   /** Event coordinator (bus + catalog). `events.publish` / `events.searchCatalog`
    * delegate the business logic here so it is shared with the main-process
    * action path; the handler only validates the wire params. */
@@ -284,12 +285,14 @@ export interface WorkerRpcServices {
    * in a worker (a routine-fired root action → subprocess), but running the turn
    * + delivering its reply needs main-only state (AgentSession registry, channel
    * adapters, webchat runtime) — so `session.continue` runs it here. */
-  backendTurnRunner: BackendTurnRunner;
+  backendTurnRunner: Pick<MainBackendTurnRunner, "runAndDeliver">;
   /** Main-process push sender. The `send_notification` action runs in
    * a worker, but the durable instance token must never leave main — so
    * `notify.send` reads the token and calls Rome Cloud's `/api/notify` here and
    * returns only the classified `SendOutcome`. */
-  notify: NotifyService;
+  notify: { send(content?: SystemNotifyContent): Promise<SendOutcome> };
+  /** The one person a dashboard chat is private to, or null for a shared chat: a push it calls for rings them. */
+  privateOwnerOf: (chatId: string) => Promise<ConciergeOwner | null>;
   feedback: FeedbackService;
   /** System-only: what `system:get_guardian_cloud_profile` reads from Rome Cloud. */
   cloudProfile: CloudProfileService;
@@ -305,12 +308,7 @@ export interface WorkerRpcServices {
 
 /** The person and the dashboard chat behind an action's call across the worker boundary. */
 function callerOf(context: IpcCallContext | undefined) {
-  const caller = context?.callerActionContext;
-  const thread = caller?.channelContext;
-  return {
-    actor: caller?.actor,
-    chatId: thread?.channel === WEBCHAT_CHANNEL && thread.threadId ? thread.threadId : null,
-  };
+  return actionCaller(context?.callerActionContext);
 }
 
 /** A method served to app workers: it takes the call's params and returns its result. */
@@ -378,16 +376,22 @@ export class WorkerRpcServer {
         // No params: the probe takes none. All policy (Rome Cloud check,
         // countdown open) runs in the main-process service.
         "system.upgrade.checkAndOffer": () => this.services.systemUpgrade.checkAndOffer(),
-        "session.continue": (params) => this.handleSessionContinue(params),
+        "session.continue": (params, context) => this.handleSessionContinue(params, context),
         "feedback.send": (params) =>
           this.services.feedback.send(parseParams("feedback.send", feedbackSendSchema, params)),
         "cloudProfile.get": () => this.services.cloudProfile.get(),
-        "notify.send": (params) => {
+        "notify.send": (params, context) => {
           // The sender reads token/origin from main-process state; the only wire
           // param is the optional body. Preserve the no-body call shape
-          // so an absent body is `send(undefined)`, not `send({})`.
+          // so an absent body is `send(undefined)`, not `send({})`. Whose
+          // phone it rings comes from the caller the IPC boundary captured.
           const { body } = parseParams("notify.send", NotifySendParams, params);
-          return this.services.notify.send(body !== undefined ? { body } : undefined);
+          return sendForCaller(
+            this.services.notify,
+            this.services.privateOwnerOf,
+            callerOf(context),
+            body !== undefined ? { body } : undefined,
+          );
         },
         "connections.app.list": (params, context) =>
           this.handleAppConnections("list", params, context),
@@ -543,9 +547,15 @@ export class WorkerRpcServer {
     return await this.services.appStore.getListing(parsed);
   }
 
-  private async handleSessionContinue(params: unknown): Promise<{ ok: true }> {
+  private async handleSessionContinue(
+    params: unknown,
+    context?: IpcCallContext,
+  ): Promise<{ ok: true }> {
     const turn = parseParams("session.continue", SessionContinueParams, params);
-    await this.services.backendTurnRunner.runAndDeliver(turn);
+    // The woken turn acts for the person of the action that woke it, as the
+    // IPC boundary captured them, such as the person whose reminder fired.
+    const actor = context?.callerActionContext?.actor;
+    await this.services.backendTurnRunner.runAndDeliver(turn, actor ? { actor } : undefined);
     return { ok: true };
   }
 
