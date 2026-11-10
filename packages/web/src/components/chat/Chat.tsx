@@ -55,6 +55,7 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import {
   buildChatView,
   buildRows,
+  threadInteractionResults,
   currentReplyMessages,
   isAwaitingGuardian,
   isLockedByCard,
@@ -101,7 +102,11 @@ import {
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { ChatThreadView } from "@/components/chat/ChatThreadView";
 import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
-import { ChatThreadsProvider, useChatThreadsValue } from "@/components/chat/reply/chat-threads";
+import {
+  ChatThreadsProvider,
+  type ThreadPlacement,
+  useChatThreadsValue,
+} from "@/components/chat/reply/chat-threads";
 import {
   ConciergeEmptyState,
   ConciergeTopicEmptyState,
@@ -473,14 +478,20 @@ export function Chat({
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   // Where live `message_chat_thread` events placed messages since they loaded,
-  // for the "N replies" lines.
-  const [rethreaded, setRethreaded] = useState<ReadonlyMap<string, string>>(new Map());
+  // for the "N replies" lines, each with the thread the loaded message had
+  // then. `loadedThreads` is that loaded value, kept current every render.
+  const [rethreaded, setRethreaded] = useState<ReadonlyMap<string, ThreadPlacement>>(new Map());
+  const loadedThreads = useRef<ReadonlyMap<string, string | null>>(new Map());
   const handleMessageChatThread = useCallback(
     ({ messageId, chatThreadId }: { messageId: string; chatThreadId: string }) =>
       setRethreaded((prev) => {
-        if (prev.get(messageId) === chatThreadId) return prev;
+        const held = prev.get(messageId);
+        if (held?.to === chatThreadId) return prev;
         const next = new Map(prev);
-        next.set(messageId, chatThreadId);
+        next.set(messageId, {
+          from: held ? held.from : (loadedThreads.current.get(messageId) ?? null),
+          to: chatThreadId,
+        });
         return next;
       }),
     [],
@@ -681,7 +692,14 @@ export function Chat({
       // that window, so the hook releases the pin for us. A smooth scroll's
       // later frames fall outside it. Instant also reads better here: you land
       // and start reading rather than watching half a second of blur.
-      scroller.scrollTo({ top: Math.max(top - TIMELINE_JUMP_OFFSET_PX, 0), behavior: "auto" });
+      // The scroller's own scroll padding keeps it clear of what floats over
+      // the messages, such as a Concierge chat's header; a manual scroll does
+      // not apply it, so it is added here.
+      const clear = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
+      scroller.scrollTo({
+        top: Math.max(top - clear - TIMELINE_JUMP_OFFSET_PX, 0),
+        behavior: "auto",
+      });
 
       // Every user bubble is the same tint, so without this you cannot tell
       // whether the jump landed on the question you picked.
@@ -2215,6 +2233,9 @@ export function Chat({
   const threadOpen = concierge && Boolean(mainSessionId) && replyDraft.thread !== null;
   // The thread view's transcript feeds none of the chat's scroll measures.
   const ignoreThreadContent = useCallback(() => {}, []);
+  loadedThreads.current = new Map(
+    displayMessages.map((message) => [message.id, message.chatThreadId ?? null]),
+  );
   const chatThreads = useChatThreadsValue(displayMessages, rethreaded);
   const conciergeHeader = concierge ? (
     <>
@@ -2296,9 +2317,7 @@ export function Chat({
                 // Concierge has no timeline rail, so no lane for it. Its
                 // header floats over the messages, so the first one starts
                 // below it, and a jump to a message stops below it too.
-                concierge
-                  ? "pt-[var(--rome-concierge-header-height)] scroll-pt-[var(--rome-concierge-header-height)] max-md:pt-[calc(var(--rome-concierge-header-height)+var(--rome-safe-area-top))] max-md:scroll-pt-[calc(var(--rome-concierge-header-height)+var(--rome-safe-area-top))]"
-                  : "@min-[48rem]/transcript:pl-8",
+                concierge ? "concierge-header-clear" : "@min-[48rem]/transcript:pl-8",
               )}
             >
               {conciergeEmpty ? (
@@ -2544,7 +2563,15 @@ export function Chat({
                       textStore: liveTextStore,
                       identity: mainIdentity,
                     }}
-                    actions={blockActions}
+                    actions={{
+                      ...blockActions,
+                      interactionResults: threadInteractionResults(
+                        threadMessages,
+                        mainSessionId,
+                        mainIdentity,
+                        blockActions.interactionResults,
+                      ),
+                    }}
                     contentRef={ignoreThreadContent}
                   />
                 )}

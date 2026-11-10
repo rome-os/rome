@@ -312,6 +312,14 @@ describe("RecentChats", () => {
     expect((await rowOf("My own chat")).className).not.toContain("bg-surface shadow-1");
     expect(screen.getByTestId("location-path").textContent).toBe("/chat/mine");
 
+    // A click back on the open chat before the other one renders: the mark
+    // returns to it.
+    await userEvent.setup().click(await screen.findByRole("link", { name: /^My own chat/ }));
+    expect((await rowOf("My own chat")).className).toContain("bg-surface shadow-1");
+    expect((await rowOf("Find flights")).className).not.toContain("bg-surface shadow-1");
+
+    // Opening the other chat again, and letting it render.
+    await userEvent.setup().click(await screen.findByRole("link", { name: /^Find flights/ }));
     await act(async () => release());
     await waitFor(() =>
       expect(screen.getByTestId("location-path").textContent).toBe("/chat/task-1"),

@@ -11,6 +11,8 @@ import { buildRows } from "./chat-view";
 import type { BlockActions, LivePreview } from "./MessageList";
 import {
   ChatThreadsProvider,
+  placed,
+  type ThreadPlacement,
   type ThreadTimelineMessage,
   threadRepliesLines,
 } from "./reply/chat-threads";
@@ -118,6 +120,28 @@ describe("threadRepliesLines", () => {
     // The live event places q2 and a2 in q1's thread: one run of 4.
     const placed = loaded.map((m) => (m.chatThreadId === null ? { ...m, chatThreadId: "q1" } : m));
     expect(threadRepliesLines(placed)).toEqual(new Map([["a2", 3]]));
+  });
+});
+
+describe("live thread placements", () => {
+  it("apply while the loaded message still is where they were made", () => {
+    const loaded = [g("q1"), a("a1", "q1"), g("q2", null), a("a2", null)];
+    const live = new Map<string, ThreadPlacement>([
+      ["q2", { from: null, to: "q1" }],
+      ["a2", { from: null, to: "q1" }],
+    ]);
+    expect(threadRepliesLines(placed(loaded, live))).toEqual(new Map([["a2", 3]]));
+  });
+
+  it("give way to a reload that says otherwise, so a missed final placement leaves no stray line", () => {
+    // The plain send first joined the latest thread; the Concierge's final
+    // placement (a new thread) was missed while the connection was down.
+    const live = new Map<string, ThreadPlacement>([
+      ["q2", { from: null, to: "q1" }],
+      ["a2", { from: null, to: "q1" }],
+    ]);
+    const reloaded = [g("q1"), a("a1", "q1"), g("q2", "q2"), a("a2", "q2")];
+    expect(threadRepliesLines(placed(reloaded, live))).toEqual(new Map());
   });
 });
 

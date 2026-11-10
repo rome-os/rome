@@ -39,9 +39,9 @@ export function useConciergeActivity(chatId: string | null): ConciergeActivity {
       concierge_activity: {
         schema: activityEventSchema,
         fn: ({ chatId: id, activity: raw }) => {
-          const activity = parseConciergeActivity(raw);
-          // A kind this client does not know is left out.
-          if (!activity) return;
+          // A kind this client does not know reads as idle, over whatever
+          // the chat showed before, live or from the list.
+          const activity = parseConciergeActivity(raw) ?? IDLE;
           setLive((prev) => {
             const next = new Map(prev);
             next.set(id, activity);

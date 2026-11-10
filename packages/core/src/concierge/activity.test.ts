@@ -365,6 +365,65 @@ describe("ConciergeActivityTracker", () => {
     expect(w.last("topic")).toEqual({ kind: "idle" });
   });
 
+  it("shows a pending approval or an open card while a turn runs, and clears it once answered", async () => {
+    const w = world();
+    await flush();
+    // An approval asked for while the agent works on.
+    w.running.add("main");
+    w.awaiting.add("main");
+    await w.tracker.sessionChanged("main");
+    expect(w.last("main")).toEqual({ kind: "needsYou" });
+    w.awaiting.delete("main");
+    await w.tracker.sessionChanged("main");
+    expect(w.last("main")).toEqual({ kind: "working" });
+
+    // An open card while a quiet background turn runs.
+    w.running.add("topic");
+    w.quiet.add("topic");
+    w.awaiting.add("topic");
+    await w.tracker.sessionChanged("topic");
+    expect(w.last("topic")).toEqual({ kind: "needsYou" });
+    // Answering records the answer before its turn starts.
+    w.awaiting.delete("topic");
+    w.quiet.delete("topic");
+    await w.tracker.sessionChanged("topic");
+    expect(w.last("topic")).toEqual({ kind: "working" });
+  });
+
+  it("never lets a subscriber's snapshot replay an older activity after a live one", async () => {
+    const w = world();
+    await flush();
+    for (let round = 0; round < 6; round++) {
+      const heard: ConciergeActivityEvent[] = [];
+      w.tracker.subscribe("guardian", (_event, data) => heard.push(data as ConciergeActivityEvent));
+      // A change lands while the snapshot is still being read.
+      if (round % 2 === 0) w.running.add("main");
+      else w.running.delete("main");
+      void w.tracker.sessionChanged("main");
+      void w.tracker.refresh("topic");
+      await flush();
+      w.advance(IDLE_GRACE_MS);
+      await flush();
+      for (const chatId of ["main", "topic"]) {
+        const last = heard.filter((event) => event.chatId === chatId).at(-1)?.activity;
+        expect(last).toEqual(await w.tracker.current(chatId));
+      }
+    }
+  });
+
+  it("reads the Concierge chat again on its own tool calls, not on its task chats'", async () => {
+    const w = world();
+    await flush();
+    w.rows.push({ id: "t1", title: "Code", chatId: "task-1", updatedAt: 5, conciergeChat: "main" });
+    w.running.add("task-1");
+    await w.tracker.sessionChanged("task-1");
+    const before = w.reads();
+    await w.tracker.sessionChanged("task-1", { toolOnly: true });
+    expect(w.reads()).toBe(before);
+    await w.tracker.sessionChanged("main", { toolOnly: true });
+    expect(w.reads()).toBe(before + 1);
+  });
+
   it("shows a quiet turn only once it has said something", async () => {
     const w = world();
     await flush();

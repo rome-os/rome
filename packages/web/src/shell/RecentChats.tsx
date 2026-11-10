@@ -366,7 +366,8 @@ export function RecentChats({
         new URL(link.getAttribute("href") ?? "", window.location.origin).pathname,
         conciergeChatId,
       );
-      if (opened && opened !== routeSessionId) setOpeningSessionId(opened);
+      // A click back on the chat already open cancels a mark still waiting.
+      if (opened) setOpeningSessionId(opened === routeSessionId ? null : opened);
     },
     [conciergeChatId, routeSessionId],
   );

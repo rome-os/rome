@@ -114,8 +114,11 @@ export class ConciergeActivityTracker {
     const taskChats = rows.flatMap((row) => (row.chatId ? [row.chatId] : []));
     const awaiting = await this.sources.awaitingGuardianOf([chatId, ...taskChats]);
     const pending = new Set(this.sources.reportPending());
-    // A running turn has answered whatever waited, as the chat list reads it.
-    const waits = (id: string) => awaiting.has(id) && !this.sources.isRunning(id);
+    // Only a card or an approval still unresolved waits. A running turn does
+    // not answer one: an agent works on with an approval pending, and a quiet
+    // turn runs past an open card. An answer is recorded before its turn
+    // starts, so the turn's own start already reads the card as answered.
+    const waits = (id: string) => awaiting.has(id);
     const running = this.sources.isBusy(chatId);
     return conciergeActivity({
       awaitingGuardian: waits(chatId),
@@ -171,10 +174,16 @@ export class ConciergeActivityTracker {
     if (before && before !== chatId) await this.refresh(before);
   }
 
-  /** Reads the facts of every Concierge chat a change in session `sessionId` can move. */
-  async sessionChanged(sessionId: string): Promise<void> {
+  /**
+   * Reads the facts of every Concierge chat a change in session `sessionId`
+   * can move. A `toolOnly` change (a tool call opening or closing, with the
+   * turn still running) moves only the session's own activity, so a task
+   * chat's tool calls do not read its Concierge chat again.
+   */
+  async sessionChanged(sessionId: string, change: { toolOnly?: boolean } = {}): Promise<void> {
     if (this.stopped) return;
     for (const chatId of await this.sources.chatsMovedBy(sessionId)) {
+      if (change.toolOnly && chatId !== sessionId) continue;
       await this.refresh(chatId);
     }
   }
@@ -298,12 +307,16 @@ export class ConciergeActivityTracker {
     this.subscribers.add(subscriber);
     void (async () => {
       for (const chatId of await this.sources.chatsOf(owner)) {
-        const activity = await this.current(chatId);
-        if (!activity || !this.subscribers.has(subscriber)) continue;
+        await this.current(chatId);
+        // Read now, with no await before the emit: a refresh that told a
+        // newer activity meanwhile is what the state holds, so the snapshot
+        // never replays an older one after it.
+        const state = this.chats.get(chatId);
+        if (!state || !this.subscribers.has(subscriber)) continue;
         const event: ConciergeActivityEvent = {
           chatId,
-          activity,
-          at: this.chats.get(chatId)?.shownAt ?? this.sources.now(),
+          activity: state.shown,
+          at: state.shownAt,
         };
         emit("concierge_activity", event);
       }

@@ -20,7 +20,7 @@ export type ConciergeToolActivity =
  * What a Concierge chat is doing. New tools and kinds are only ever added,
  * so a client reads what it does not know without failing (see
  * {@link parseConciergeActivity}): a `tool` it does not know is plain work,
- * and a `kind` it does not know is left out, as if the chat were idle.
+ * and a `kind` it does not know reads as idle, over whatever the chat showed.
  */
 export type ConciergeActivity =
   /** Nothing is running and nothing waits. */
@@ -128,7 +128,7 @@ const TOOLS = new Set<string>(Object.values(TOOL_ACTIVITY));
 /**
  * Reads an activity off the wire, by the rule on {@link ConciergeActivity}:
  * a `tool` this client does not know reads as `working`, and a `kind` it does
- * not know, or a malformed value, reads as null, which the caller leaves out.
+ * not know, or a malformed value, reads as null, which the caller shows as idle.
  * Never throws.
  */
 export function parseConciergeActivity(raw: unknown): ConciergeActivity | null {

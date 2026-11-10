@@ -8,6 +8,7 @@ import {
   isAwaitingGuardian,
   isLockedByCard,
   isLastTurnFailed,
+  threadInteractionResults,
   type AgentIdentity,
 } from "./chat-view";
 
@@ -68,6 +69,23 @@ describe("buildChatView", () => {
     const v = buildChatView(messages, MAIN, MAIN_IDENTITY);
     expect(v.interactionResults.get(interactionResultKey(MAIN, "h1"))).toEqual({ ok: 1 });
     expect(v.interactionResults.get("h1")).toBeUndefined();
+  });
+
+  it("reads a thread's card results from its own history, outside the main timeline's page", () => {
+    // The question and its answer are older than the main timeline's page.
+    const thread = [
+      mk(MAIN, "assistant", "t1", [
+        { type: "pending_interaction", toolUseId: "old", appId: "x", render: {} },
+      ]),
+      mk(MAIN, "user", "t2", [
+        { type: "interaction_result", toolUseId: "old", output: { answer: "Friday" } },
+      ]),
+    ];
+    const mainResults = new Map([[interactionResultKey(MAIN, "new"), { answer: "Yes" }]]);
+    const results = threadInteractionResults(thread, MAIN, MAIN_IDENTITY, mainResults);
+    expect(results.get(interactionResultKey(MAIN, "old"))).toEqual({ answer: "Friday" });
+    // A newer result the main timeline holds still applies.
+    expect(results.get(interactionResultKey(MAIN, "new"))).toEqual({ answer: "Yes" });
   });
 
   const questionCard = (toolUseId: string) => ({

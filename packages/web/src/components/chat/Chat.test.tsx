@@ -2171,7 +2171,7 @@ describe("Chat Concierge empty state", () => {
     expect(header.className).toContain("absolute");
     expect(header.className).not.toMatch(/\bbg-|\bborder-b\b/);
     const scroller = header.parentElement!.querySelector<HTMLElement>(".overflow-y-auto")!;
-    expect(scroller.className).toContain("pt-[var(--rome-concierge-header-height)]");
+    expect(scroller.className).toContain("concierge-header-clear");
     const badge = header.querySelector<HTMLElement>("[data-concierge-header-badge]")!;
     const pill = header.querySelector<HTMLElement>("[data-concierge-header-pill]")!;
     expect(badge.querySelector(".rome-mascot")).not.toBeNull();
@@ -2379,6 +2379,25 @@ describe("Chat Concierge jump to a message", () => {
     expect(anchor("m-2")?.hasAttribute("data-timeline-landed")).toBe(true);
     expect(toast.loading).not.toHaveBeenCalled();
     expect(listSessionMessagePage).toHaveBeenCalledTimes(1);
+  });
+
+  it("lands a jumped-to message below the floating header, not under it", async () => {
+    rs.mocked(listSessionMessagePage).mockResolvedValueOnce({
+      messages: [message(1), message(2)],
+      nextCursor: null,
+    });
+    renderChat(<Chat sessionId="concierge" variant="concierge" />);
+    await waitFor(() => expect(rows()).toBe(2));
+    const scroller = document.querySelector<HTMLElement>(".concierge-header-clear")!;
+    // jsdom applies no stylesheet: stand in for the header's scroll padding.
+    scroller.style.scrollPaddingTop = "112px";
+    scroller.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+    Object.defineProperty(scroller, "scrollTop", { value: 1000, configurable: true });
+    anchor("m-2")!.getBoundingClientRect = () => ({ top: 500 }) as DOMRect;
+
+    act(() => requestConciergeJump("m-2"));
+
+    expect(scrollTo).toHaveBeenCalledWith({ top: 1000 + 500 - 112 - 24, behavior: "auto" });
   });
 
   it("pages older history in until the message renders, says so meanwhile, then jumps", async () => {

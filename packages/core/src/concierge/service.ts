@@ -125,9 +125,10 @@ export interface TaskChats {
   openTool(chatId: string): string | null;
   /**
    * Calls `listener` with the chat's id whenever it starts or stops running
-   * a turn, or its running turn enters or leaves a tool. Returns the unsubscribe.
+   * a turn, or its running turn enters or leaves a tool; the latter alone
+   * comes with `toolOnly`. Returns the unsubscribe.
    */
-  onTurnChange(listener: (chatId: string) => void): () => void;
+  onTurnChange(listener: (chatId: string, change: { toolOnly?: boolean }) => void): () => void;
   /** Sends `text` into the chat as the guardian's own message, the way their composer does. */
   sendAsGuardian(chatId: string, text: string): Promise<void>;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
@@ -243,7 +244,7 @@ export class ConciergeService {
   }
 
   private turnWatchers = new Set<{
-    listener: (chatId: string) => void;
+    listener: (chatId: string, change: { toolOnly?: boolean }) => void;
     stop: (() => void) | null;
   }>();
 
@@ -252,7 +253,7 @@ export class ConciergeService {
    * `TaskChats.onTurnChange` says, from when the dashboard is attached, which
    * may be after this call. Returns the unsubscribe.
    */
-  watchTurns(listener: (chatId: string) => void): () => void {
+  watchTurns(listener: (chatId: string, change: { toolOnly?: boolean }) => void): () => void {
     const watcher = {
       listener,
       stop: this.attached ? this.attached.chats.onTurnChange(listener) : null,

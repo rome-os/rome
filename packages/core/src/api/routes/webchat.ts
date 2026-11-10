@@ -699,6 +699,20 @@ interface StreamSubscriber {
   queue: Promise<void>;
 }
 
+/**
+ * The tool a session's turn is in: the latest open call of its unfinished
+ * stream that has one. The queue also holds streams still waiting their
+ * turn, which have no calls, so the newest stream is not the running one.
+ */
+export function openToolOf(
+  streams: readonly Pick<ActiveWebchatStream, "finished" | "openTools">[],
+): string | null {
+  const running = [...streams]
+    .reverse()
+    .find((stream) => !stream.finished && stream.openTools.size > 0);
+  return [...(running?.openTools.values() ?? [])].at(-1) ?? null;
+}
+
 interface ActiveWebchatStream {
   streamId: string;
   sessionId: string;
@@ -825,9 +839,10 @@ export interface WebchatRuntime {
   openTool(sessionId: string): string | null;
   /**
    * Calls `listener` with the chat's id whenever it starts or stops running a
-   * turn, or its running turn enters or leaves a tool. Returns the unsubscribe.
+   * turn, or its running turn enters or leaves a tool; the latter alone comes
+   * with `toolOnly`. Returns the unsubscribe.
    */
-  onTurnChange(listener: (sessionId: string) => void): () => void;
+  onTurnChange(listener: (sessionId: string, change: { toolOnly?: boolean }) => void): () => void;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
   activeTurns(sessionId: string): string[];
   /** Stop a turn. A turn that already ended is not an error. */
@@ -882,9 +897,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // Sessions running right now, so a status stream can open with a snapshot.
   const runningSessions = new Set<string>();
   /** Listeners told when a session's running turn changes in any way, tools included. */
-  const turnListeners = new Set<(sessionId: string) => void>();
-  const notifyTurn = (sessionId: string): void => {
-    for (const listener of turnListeners) listener(sessionId);
+  const turnListeners = new Set<(sessionId: string, change: { toolOnly?: boolean }) => void>();
+  const notifyTurn = (sessionId: string, change: { toolOnly?: boolean } = {}): void => {
+    for (const listener of turnListeners) listener(sessionId, change);
   };
   const notifyRunning = (sessionId: string): void => {
     const event = { sessionId, running: isSessionRunning(sessionId) };
@@ -909,12 +924,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
     if (changed) notifyTurn(message.sessionId);
   });
-  // The latest open call of the session's newest unfinished stream.
-  const openTool = (sessionId: string): string | null => {
-    const streams = (activeStreams.get(sessionId) ?? []).filter((stream) => !stream.finished);
-    const tools = [...(streams.at(-1)?.openTools.values() ?? [])];
-    return tools.at(-1) ?? null;
-  };
+  const openTool = (sessionId: string): string | null =>
+    openToolOf(activeStreams.get(sessionId) ?? []);
   deps.agentTurnStreamRegistry.onSessionChange(notifyRunning);
   const subscribeStatusEvents = (emit: LiveEventEmit): (() => void) => {
     const listener = (event: { sessionId: string; running: boolean }) =>
@@ -2029,7 +2040,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     msg: TraceableEvent & { agent?: string },
   ): void => {
     const block = toTraceEvent(msg);
-    if (trackOpenTool(stream, block)) notifyTurn(stream.sessionId);
+    if (trackOpenTool(stream, block)) notifyTurn(stream.sessionId, { toolOnly: true });
     const changed = stream.segmentBuilder.push(block);
     for (const seg of changed) {
       emitToStream(stream, "segment_upsert", seg, `seg:${seg.id}`);

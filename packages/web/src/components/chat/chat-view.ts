@@ -96,6 +96,25 @@ function buildInteractionResults(messages: ChatMessage[]): Map<string, Record<st
   return map;
 }
 
+/**
+ * The card results a chat thread's own transcript reads: those its fetched
+ * messages record, which can lie well before the main timeline's loaded
+ * page, then those of the main timeline, which may be newer.
+ */
+export function threadInteractionResults(
+  threadMessages: ChatMessage[],
+  sessionId: string,
+  mainIdentity: AgentIdentity,
+  mainResults: ChatView["interactionResults"],
+): ChatView["interactionResults"] {
+  const own = buildChatView(
+    new Map([[sessionId, threadMessages]]),
+    sessionId,
+    mainIdentity,
+  ).interactionResults;
+  return new Map([...own, ...mainResults]);
+}
+
 export function buildChatView(
   messages: Map<string, ChatMessage[]>,
   mainSessionId: string,

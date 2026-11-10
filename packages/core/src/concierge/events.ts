@@ -480,7 +480,8 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
         error: error instanceof Error ? error.message : String(error),
       }),
     );
-  const sessionChanged = (sessionId: string) => void guard(tracker.sessionChanged(sessionId));
+  const sessionChanged = (sessionId: string, change: { toolOnly?: boolean } = {}) =>
+    void guard(tracker.sessionChanged(sessionId, change));
   const approvalChanged = (approval: { payload: unknown }) => {
     const threadId = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
       ?.channelContext?.threadId;

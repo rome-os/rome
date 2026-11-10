@@ -87,28 +87,41 @@ export function threadRepliesLines(
 }
 
 /**
- * Memoized {@link threadRepliesLines}, as the provider's value. `rethreaded`
- * holds the threads the live `message_chat_thread` events placed messages in
- * since the timeline was loaded.
+ * A live placement of a message in a chat thread: `to`, made while the loaded
+ * message was in `from`. It holds only while the loaded message still is, so
+ * an authoritative reload that says otherwise retires it.
+ */
+export interface ThreadPlacement {
+  from: string | null;
+  to: string;
+}
+
+/**
+ * Memoized {@link threadRepliesLines}, as the provider's value, with the
+ * live placements made since the timeline loaded applied over it.
  */
 export function useChatThreadsValue(
   messages: readonly ThreadTimelineMessage[],
-  rethreaded: ReadonlyMap<string, string>,
+  rethreaded: ReadonlyMap<string, ThreadPlacement>,
 ): ChatThreads {
   return useMemo(
-    () => ({
-      lines: threadRepliesLines(
-        rethreaded.size === 0
-          ? messages
-          : messages.map((message) =>
-              rethreaded.has(message.id)
-                ? { ...message, chatThreadId: rethreaded.get(message.id) }
-                : message,
-            ),
-      ),
-    }),
+    () => ({ lines: threadRepliesLines(placed(messages, rethreaded)) }),
     [messages, rethreaded],
   );
+}
+
+/** `messages` with each live placement that still holds applied. */
+export function placed(
+  messages: readonly ThreadTimelineMessage[],
+  rethreaded: ReadonlyMap<string, ThreadPlacement>,
+): ThreadTimelineMessage[] {
+  if (rethreaded.size === 0) return [...messages];
+  return messages.map((message) => {
+    const placement = rethreaded.get(message.id);
+    return placement && (message.chatThreadId ?? null) === placement.from
+      ? { ...message, chatThreadId: placement.to }
+      : message;
+  });
 }
 
 function wordsOf(message: ChatMessage): string {

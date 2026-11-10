@@ -114,7 +114,7 @@ export function ChatThreadView({
       />
       <div
         ref={listRef}
-        className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain pt-[var(--rome-concierge-header-height)] max-md:pt-[calc(var(--rome-concierge-header-height)+var(--rome-safe-area-top))]"
+        className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain concierge-header-clear"
         style={{ paddingBottom: floorHeight }}
       >
         <div className="mt-auto">

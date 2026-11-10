@@ -84,6 +84,20 @@ describe("useConciergeActivity", () => {
     expect(result.current).toEqual({ kind: "working" });
   });
 
+  it("reads a kind it does not know as idle, over a live or a listed activity", async () => {
+    const { result } = renderHook(() => useConciergeActivity("main"), { wrapper });
+    // Listed as running a task.
+    await waitFor(() => expect(result.current.kind).toBe("tasks"));
+    const socket = acceptLatestSocket();
+    act(() => socket.receive(event("main", { kind: "dreaming" })));
+    expect(result.current).toEqual({ kind: "idle" });
+
+    act(() => socket.receive(event("main", { kind: "needsYou" })));
+    expect(result.current).toEqual({ kind: "needsYou" });
+    act(() => socket.receive(event("main", { kind: "dreaming" })));
+    expect(result.current).toEqual({ kind: "idle" });
+  });
+
   it("reads a tool it does not know as plain work", async () => {
     const { result } = renderHook(() => useConciergeActivity("main"), { wrapper });
     await waitFor(() => expect(result.current.kind).toBe("tasks"));
