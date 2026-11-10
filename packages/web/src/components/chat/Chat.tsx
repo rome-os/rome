@@ -348,7 +348,7 @@ export interface ChatProps {
   variant?: ChatVariant;
   /** The signed-in person's main Concierge chat, which shows the starters a topic chat does not. The guardian's by default. */
   conciergeMainChatId?: string;
-  /** What the main Concierge chat is called in its title, in place of the session name the server stores. */
+  /** The Concierge's name, which every Concierge chat's header shows in place of the chat's own name. */
   conciergeName?: string;
 }
 
@@ -2054,13 +2054,9 @@ export function Chat({
     : "text-muted-foreground hover:text-foreground";
   const conciergeStatus = concierge ? (
     <ConciergeHeaderStatus
-      name={
-        sessionLoading && !isMainChat ? (
-          <SessionLoadingTitle />
-        ) : (
-          (isMainChat && conciergeName) || sessionName?.trim() || t("sidebar.newChat")
-        )
-      }
+      // Every Concierge chat, main or topic, goes by the Concierge's name
+      // here; a topic chat's own name is in the chat list.
+      name={conciergeName || "Concierge"}
       activity={conciergeActivity}
     />
   ) : null;
@@ -2162,7 +2158,7 @@ export function Chat({
 
   // A Concierge chat's header floats over its messages: no bar, just the
   // mascot's badge with the name pill under it in the middle, and round
-  // buttons either side, centred on the pill. The equal side columns keep the
+  // buttons either side, centred on the badge. The equal side columns keep the
   // middle centred over the chat. Only its pieces take the pointer, so the
   // messages under the gaps stay reachable.
   const conciergeHeader = concierge ? (
@@ -2173,10 +2169,10 @@ export function Chat({
       {/* The phone shell's back and menu buttons move in here. */}
       <SlotOutlet
         name={CONCIERGE_LEADING_SLOT}
-        className="pointer-events-auto col-start-1 row-start-2 flex items-center gap-1 justify-self-start md:hidden"
+        className="pointer-events-auto col-start-1 row-start-1 flex items-center gap-1 justify-self-start md:hidden"
       />
       {conciergeStatus}
-      <div className="pointer-events-auto col-start-3 row-start-2 flex items-center gap-1 justify-self-end">
+      <div className="pointer-events-auto col-start-3 row-start-1 flex items-center gap-1 justify-self-end">
         {navbarActions}
       </div>
       {conciergeTaskList.sheet}

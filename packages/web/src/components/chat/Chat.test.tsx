@@ -2132,6 +2132,9 @@ describe("Chat Concierge empty state", () => {
     ).toBe("tasks");
     const more = within(header).getByRole("button", { name: "navbar.more" });
     expect(more.className).toContain("rounded-full");
+    // The buttons share the badge's row, so they centre on the mascot.
+    expect(badge.className).toContain("row-start-1");
+    expect(more.closest<HTMLElement>(".col-start-3")!.className).toContain("row-start-1");
     expect(document.querySelector("[data-concierge-tasks-pill]")).toBeNull();
     view.unmount();
 
@@ -2216,7 +2219,7 @@ describe("Chat Concierge empty state", () => {
     expect(screen.getByRole("menuitem", { name: "navbar.delete" })).toBeTruthy();
   });
 
-  it("titles the main Concierge chat with the agent's chosen name, and a topic chat with its own", async () => {
+  it("heads the main chat and a topic chat alike, with the agent's chosen name", async () => {
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
       pinnedAgentMention: null,
@@ -2242,8 +2245,8 @@ describe("Chat Concierge empty state", () => {
         conciergeName="Milo"
       />,
     );
-    expect(await screen.findByText("Calendar")).toBeTruthy();
-    expect(screen.queryByText("Milo")).toBeNull();
+    expect(await screen.findByText("Milo")).toBeTruthy();
+    expect(screen.queryByText("Calendar")).toBeNull();
   });
 
   it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {

@@ -26,8 +26,8 @@ export const CONCIERGE_LEADING_SLOT = "conciergeHeaderLeading";
  * reader hears it change.
  *
  * Its root lays out as `contents`: the badge and the pill are items of the
- * header's grid, the badge in its first row and the pill in its second, so
- * the side buttons centre on the pill whatever its height.
+ * header's grid, the badge in its first row and the pill in its second, and
+ * the side buttons centre on the badge in the first row.
  */
 export function ConciergeHeaderStatus({
   name,
@@ -44,11 +44,12 @@ export function ConciergeHeaderStatus({
       <div
         data-concierge-header-badge
         className={cn(
-          "pointer-events-auto col-start-2 row-start-1 flex size-12 items-center justify-center justify-self-center rounded-full",
+          "pointer-events-auto col-start-2 row-start-1 flex size-14 items-center justify-center justify-self-center rounded-full",
           FLOATING_SURFACE,
         )}
       >
-        <RomeMascot alive={busy && activity.kind !== "needsYou"} className="h-9 w-auto" />
+        {/* About 60% of the badge, so the bob and the squash keep inside it. */}
+        <RomeMascot alive={busy && activity.kind !== "needsYou"} className="h-8 w-auto" />
       </div>
       <div
         data-concierge-header-pill

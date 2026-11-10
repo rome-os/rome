@@ -26,7 +26,11 @@ export function RomeMascot({ alive = false, className }: { alive?: boolean; clas
       onAnimationEnd={(event) => {
         if (event.target === event.currentTarget) setPoked(false);
       }}
-      className={cn("rome-mascot shrink-0 cursor-default select-none text-foreground", className)}
+      // The bob moves the figure past the viewBox's edge, so the svg must not clip it.
+      className={cn(
+        "rome-mascot shrink-0 cursor-default select-none overflow-visible text-foreground",
+        className,
+      )}
     >
       <g className="rome-mascot-figure" fill="currentColor">
         <path d="M9.27213 35.3331H38.9233C41.3072 35.3331 43.5668 34.27 45.0866 32.4335L48.0715 28.8265C48.7983 27.9482 49.1158 26.8016 48.9444 25.6747L45.8596 5.39837C45.5623 3.44405 43.8819 2 41.9051 2H16.9889C14.4932 2 12.1405 3.16467 10.6273 5.14922L2.81921 15.3892C2.19692 16.2053 1.91212 17.2294 2.02374 18.2496L3.30773 29.9857C3.64065 33.0287 6.21098 35.3331 9.27213 35.3331Z" />

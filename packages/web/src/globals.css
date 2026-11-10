@@ -655,7 +655,7 @@
     /* A Concierge chat's floating header: the mascot's badge, the name pill
        under it with the status line, and the gaps around them. The messages
        start below it. */
-    --rome-concierge-header-height: 6.5rem;
+    --rome-concierge-header-height: 7rem;
     /* The screen height not covered by an on-screen keyboard. lib/visual-viewport.ts
        overrides this inline on <html>; the fallback serves browsers without
        `visualViewport`. A page sized to the screen reads this rather than
