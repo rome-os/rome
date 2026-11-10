@@ -3415,6 +3415,29 @@ describe("AgentRunner", () => {
         expect(second).toBe(first);
       });
 
+      it("renews the session when a declared MCP server's command or arguments change", async () => {
+        const definition = agentLoader.find("test-renewing")!.definition as {
+          mcpServers?: Record<string, { command: string; args: string[] }>;
+        };
+        const declared = definition.mcpServers;
+        try {
+          definition.mcpServers = { notes: { command: "node", args: ["notes.js"] } };
+          const runner = renewingRunner(new MockModelProvider(replies(4)));
+          const first = await turn(runner);
+          const unchanged = await turn(runner);
+          definition.mcpServers = { notes: { command: "node", args: ["notes.js", "--v2"] } };
+          const newArgs = await turn(runner);
+          definition.mcpServers = { notes: { command: "deno", args: ["notes.js", "--v2"] } };
+          const newCommand = await turn(runner);
+
+          expect(unchanged).toBe(first);
+          expect(newArgs).not.toBe(first);
+          expect(newCommand).not.toBe(newArgs);
+        } finally {
+          definition.mcpServers = declared;
+        }
+      });
+
       it("keeps the session when an app is installed or the instance's address changes", async () => {
         const runner = renewingRunner(new MockModelProvider(replies(3)));
         const first = await turn(runner);
@@ -6843,6 +6866,65 @@ describe("AgentRunner", () => {
         expect(await executeActionTool(captured[0]!.tools, "granted_later", {})).toEqual({
           ok: "granted_later",
         });
+        await expect(executeActionTool(captured[0]!.tools, "demo_action", {})).rejects.toThrow();
+      } finally {
+        definition.actions = granted;
+      }
+    });
+
+    it("grants nothing once an agent's actions are revoked and then left out, in the same session", async () => {
+      actionRegistry.register({
+        config: {
+          name: "demo_action",
+          type: "system",
+          description: "The demo action",
+          complexity: "simple",
+          speed: "fast",
+          reliability: "high",
+          sideEffects: "write",
+        },
+        inputSchema: { properties: {} },
+        execute: async () => ({ status: "ok", data: { ok: true } }),
+      });
+      const captured: ModelSessionParams[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: async (params) => {
+          captured.push(params);
+          return createSessionFromRun(
+            "mock",
+            async function* () {
+              yield { type: "result", content: "Done" };
+            },
+            params,
+          );
+        },
+      };
+      const runner = createRunner(provider, undefined, { keepAliveAcrossTurns: true });
+      const definition = agentLoader.find("test-main")!.definition as { actions?: string[] };
+      const granted = definition.actions;
+      try {
+        const run = () =>
+          collectMessages(
+            runner.run({
+              agentName: "test-main",
+              prompt: "Hi",
+              channelThreadKey: "webchat:revoked",
+            }),
+          );
+        await run();
+        expect(await listActionNames(captured[0]!.tools)).toEqual(["demo_action"]);
+
+        definition.actions = [];
+        await run();
+        expect(await listActionNames(captured[0]!.tools)).toEqual([]);
+
+        delete definition.actions;
+        await run();
+
+        expect(captured).toHaveLength(1);
+        expect(await listActionNames(captured[0]!.tools)).toEqual([]);
         await expect(executeActionTool(captured[0]!.tools, "demo_action", {})).rejects.toThrow();
       } finally {
         definition.actions = granted;

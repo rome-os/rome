@@ -11,8 +11,8 @@ export interface SessionSetup {
   systemPrompt: string;
   /** The provider's own tools the agent declares. */
   builtinTools: readonly string[];
-  /** The names of the MCP servers the agent declares. */
-  mcpServers: readonly string[];
+  /** The MCP servers the agent declares, each with its whole config, by name. */
+  mcpServers: readonly { name: string; command: string; args: readonly string[] }[];
   /** The schema the agent's final answer follows, or null. */
   outputSchema: unknown;
   /** Rome's tools by group, as the model reads their names and schemas. */

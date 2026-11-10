@@ -959,7 +959,12 @@ function sessionSetupOf(
       return setupFingerprint({
         systemPrompt: deps.systemPrompts.setup(promptAgent, { widgets }),
         builtinTools: config.tools,
-        mcpServers: Object.keys(config.mcpServers ?? {}),
+        // Each declared server's whole config, by name: a changed command or
+        // argument is a changed tool. Only the fingerprint's hash is kept,
+        // so an argument that carries a secret is never stored or logged.
+        mcpServers: Object.entries(config.mcpServers ?? {})
+          .sort(([a], [b]) => a.localeCompare(b))
+          .map(([name, server]) => ({ name, command: server.command, args: [...server.args] })),
         outputSchema: config.outputSchema ?? null,
         tools: Object.fromEntries(
           ROME_TOOL_GROUPS.map((group) => [group, tools.listTools(group)]),
@@ -1108,7 +1113,7 @@ async function openSession(
   }
 
   const setupSource = sessionSetupOf(deps, agent, init, !!opts.isSubagent);
-  const { widgets, allowList, subagents, externalMcpServers } = setupSource;
+  const { widgets, subagents, externalMcpServers } = setupSource;
   const systemPrompt = setupSource.systemPrompt();
   const subagentToolNames = new Set(subagents.map((subagent) => subagentToolName(subagent.name)));
 
@@ -1152,10 +1157,11 @@ async function openSession(
     sessionId: refs.sessionId,
     isSubagent: opts.isSubagent === true,
     // Read on every call, so a grant or a revoke applies from the next turn
-    // in the same session. The agent's definition at open stands in for one
-    // the catalog no longer holds.
+    // in the same session. An agent whose definition omits its actions, or
+    // that the catalog no longer holds, may call none: never the list it
+    // had when the session opened.
     get actions() {
-      return deps.agentLoader.find(key.agentName)?.definition.actions ?? allowList;
+      return deps.agentLoader.find(key.agentName)?.definition.actions ?? [];
     },
     widgets,
     turnId: refs.getTurnId,
