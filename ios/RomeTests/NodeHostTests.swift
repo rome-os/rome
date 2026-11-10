@@ -1,0 +1,662 @@
+import Foundation
+import Testing
+@testable import Rome
+
+/// Answers Rome Cloud's gateway config as a test says, and keeps the requests.
+final class ConfigProtocol: URLProtocol, @unchecked Sendable {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var status = 200
+    nonisolated(unsafe) private static var body = #"{"gatewayUrl":"wss://gw.test/ws"}"#
+    nonisolated(unsafe) private static var recorded: [URLRequest] = []
+
+    static func reset(status: Int = 200, body: String = #"{"gatewayUrl":"wss://gw.test/ws"}"#) {
+        lock.withLock {
+            self.status = status
+            self.body = body
+            recorded = []
+        }
+    }
+
+    static var requests: [URLRequest] { lock.withLock { recorded } }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let (status, body) = Self.lock.withLock { () -> (Int, String) in
+            Self.recorded.append(request)
+            return (Self.status, Self.body)
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// A Gateway socket a test drives: it pushes frames in and reads what was sent.
+final class FakeSocket: NodeSocket, @unchecked Sendable {
+    private let continuation: AsyncThrowingStream<String?, Error>.Continuation
+    nonisolated(unsafe) private var iterator: AsyncThrowingStream<String?, Error>.AsyncIterator
+    private let lock = NSLock()
+    private var sentFrames: [String] = []
+    private var isClosed = false
+    private var pingTotal = 0
+    private var pingBehavior = PingBehavior.pong
+
+    enum PingBehavior { case pong, hang, fail }
+
+    init() {
+        let (stream, continuation) = AsyncThrowingStream<String?, Error>.makeStream()
+        self.continuation = continuation
+        iterator = stream.makeAsyncIterator()
+    }
+
+    var sent: [String] { lock.withLock { sentFrames } }
+    var closed: Bool { lock.withLock { isClosed } }
+
+    /// A text frame, or nil for a binary one.
+    func push(_ frame: String?) { continuation.yield(frame) }
+    func end(code: Int?) { continuation.finish(throwing: NodeSocketClosed(code: code)) }
+
+    func receive() async throws -> String? {
+        guard let frame = try await iterator.next() else { throw NodeSocketClosed(code: nil) }
+        return frame
+    }
+
+    func send(_ text: String) async throws { lock.withLock { sentFrames.append(text) } }
+
+    var pings: Int { lock.withLock { pingTotal } }
+    func pingsAre(_ behavior: PingBehavior) { lock.withLock { pingBehavior = behavior } }
+
+    func ping() async throws {
+        let behavior = lock.withLock { () -> PingBehavior in
+            pingTotal += 1
+            return pingBehavior
+        }
+        switch behavior {
+        case .pong: return
+        case .fail: throw NodeSocketClosed(code: nil)
+        // No pong: only the caller's timeout, or cancellation, ends it.
+        case .hang: try await Task.sleep(for: .seconds(3600))
+        }
+    }
+
+    func close() {
+        lock.withLock { isClosed = true }
+        continuation.finish(throwing: NodeSocketClosed(code: nil))
+    }
+}
+
+/// Hands out sockets in order; with none left, a connection fails.
+final class FakeGateway: @unchecked Sendable {
+    private let lock = NSLock()
+    private var queue: [FakeSocket] = []
+    private var opened: [(url: URL, authorization: String)] = []
+
+    func enqueue(_ socket: FakeSocket) { lock.withLock { queue.append(socket) } }
+    var attempts: [(url: URL, authorization: String)] { lock.withLock { opened } }
+
+    var factory: NodeSocketFactory {
+        { [self] url, authorization in
+            try lock.withLock {
+                opened.append((url, authorization))
+                guard !queue.isEmpty else { throw URLError(.cannotConnectToHost) }
+                return queue.removeFirst()
+            }
+        }
+    }
+}
+
+final class DelayLog: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [TimeInterval] = []
+    var values: [TimeInterval] { lock.withLock { recorded } }
+    func add(_ delay: TimeInterval) { lock.withLock { recorded.append(delay) } }
+}
+
+@MainActor
+final class FakeCredentials: NodeCredentials {
+    let origin = URL(string: "https://cloud.test")!
+    var deviceCredential: CloudCredential? = CloudCredential(accessToken: "romemob_test-token", deviceSessionId: "dev-1")
+    var accountGeneration = 1
+    private(set) var rejected: [CloudCredential] = []
+
+    func rejectCredential(_ credential: CloudCredential) {
+        rejected.append(credential)
+        deviceCredential = nil
+    }
+}
+
+@MainActor
+func eventually(_ condition: () -> Bool) async -> Bool {
+    for _ in 0..<400 {
+        if condition() { return true }
+        try? await Task.sleep(for: .milliseconds(10))
+    }
+    return condition()
+}
+
+@MainActor
+final class HostRig {
+    let credentials = FakeCredentials()
+    let gateway = FakeGateway()
+    let audit = FakeAudit()
+    let health = FakeHealth()
+    let delays = DelayLog()
+    let defaults = UserDefaults(suiteName: "rome-node-\(UUID().uuidString)")!
+    private(set) var host: NodeHost!
+    private(set) var rejections = 0
+    private let pingInterval: TimeInterval
+    private let pingTimeout: TimeInterval
+
+    /// `deviceOn`: the person has turned "Can Rome use this iPhone" on, as
+    /// most tests need; false is a fresh install.
+    init(pingInterval: TimeInterval = 25, pingTimeout: TimeInterval = 10, deviceOn: Bool = true) {
+        self.pingInterval = pingInterval
+        self.pingTimeout = pingTimeout
+        ConfigProtocol.reset()
+        if deviceOn { defaults.set(true, forKey: "nodeEnabled") }
+        host = makeHost()
+        host.onCredentialRejected = { [unowned self] in rejections += 1 }
+    }
+
+    /// A host over the same defaults: the app launched again.
+    func makeHost() -> NodeHost {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ConfigProtocol.self]
+        let delays = delays
+        return NodeHost(
+            credentials: credentials, audit: audit, health: HealthFixtures.actions(health), device: .iPhone, defaults: defaults,
+            http: URLSession(configuration: configuration), connect: gateway.factory,
+            pause: { delay in
+                delays.add(delay)
+                try await Task.sleep(for: .milliseconds(5))
+            },
+            random: { 0.5 }, name: { "Test iPhone" }, pingInterval: pingInterval, pingTimeout: pingTimeout
+        )
+    }
+
+    func online(_ socket: FakeSocket = FakeSocket()) async -> FakeSocket {
+        gateway.enqueue(socket)
+        host.setActive(true)
+        _ = await eventually { host.status == .online }
+        return socket
+    }
+
+    static let request = #"{"id":"r1","from":"inst-1","payload":{"type":"request","action":"system.info"}}"#
+}
+
+@MainActor
+@Suite(.serialized) struct NodeHostTests {
+    @Test func connectsWithTheDeviceTokenInTheHeaderAndAnswersRequests() async throws {
+        let rig = HostRig()
+        let socket = await rig.online()
+        #expect(rig.host.status == .online)
+        let config = try #require(ConfigProtocol.requests.first)
+        #expect(config.url?.absoluteString == "https://cloud.test/v1/gateway/config")
+        #expect(config.value(forHTTPHeaderField: "Authorization") == "Bearer romemob_test-token")
+        let attempt = try #require(rig.gateway.attempts.first)
+        #expect(attempt.url.absoluteString == "wss://gw.test/ws")
+        #expect(attempt.authorization == "Bearer romemob_test-token")
+        #expect(!attempt.url.absoluteString.contains("romemob_"), "never in the URL")
+
+        socket.push(nil) // a binary frame: ignored
+        socket.push(HostRig.request)
+        #expect(await eventually { socket.sent.count == 1 })
+        let reply = parseJSON(socket.sent[0])
+        #expect(reply["id"]?.string == "r1")
+        #expect(reply["to"]?.string == "inst-1")
+        #expect(reply["payload"]?["result"]?["name"]?.string == "Test iPhone")
+        #expect(await eventually { rig.host.requestSerial == 1 })
+    }
+
+    @Test func aGatewayAddressThatBreaksTheRulesIsNotUsed() async {
+        let rig = HostRig()
+        ConfigProtocol.reset(body: #"{"gatewayUrl":"ws://gw.example/ws"}"#)
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.setActive(true)
+        #expect(await eventually { !rig.delays.values.isEmpty })
+        #expect(rig.gateway.attempts.isEmpty)
+        #expect(rig.host.status == .connecting)
+        rig.host.setActive(false)
+    }
+
+    @Test func aSocketReplacedByAnotherConnectionStopsUntilTheAppIsInFrontAgain() async {
+        let rig = HostRig()
+        let socket = await rig.online()
+        socket.end(code: 4002)
+        #expect(await eventually { rig.host.status == .stopped(.superseded) })
+        #expect(await eventually { socket.closed }, "a socket that ended is closed, not left to its session")
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(rig.gateway.attempts.count == 1, "no reconnect")
+        #expect(rig.delays.values.isEmpty)
+
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.setActive(true)
+        #expect(await eventually { rig.host.status == .online })
+        #expect(rig.gateway.attempts.count == 2)
+    }
+
+    @Test func aRevokedDeviceStopsToo() async {
+        let rig = HostRig()
+        let socket = await rig.online()
+        socket.end(code: 4001)
+        #expect(await eventually { rig.host.status == .stopped(.revoked) })
+        #expect(await eventually { socket.closed })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(rig.gateway.attempts.count == 1)
+        #expect(rig.delays.values.isEmpty)
+    }
+
+    @Test func anyOtherDropReconnectsWithBackoff() async {
+        let rig = HostRig()
+        let first = await rig.online()
+        first.end(code: 1006)
+        #expect(await eventually { first.closed }, "each reconnect closes the socket it leaves")
+        // Two more attempts fail (no socket to hand out): 1 s, 2 s, 4 s, here at a jitter of exactly 1.
+        #expect(await eventually { rig.delays.values.count >= 3 })
+        #expect(Array(rig.delays.values.prefix(3)) == [1, 2, 4])
+        #expect(rig.host.status == .connecting)
+        rig.gateway.enqueue(FakeSocket())
+        #expect(await eventually { rig.host.status == .online })
+    }
+
+    @Test func pongsKeepItOnline() async {
+        let rig = HostRig(pingInterval: 0.03, pingTimeout: 0.5)
+        let socket = await rig.online()
+        #expect(await eventually { socket.pings >= 3 })
+        #expect(rig.host.status == .online)
+        #expect(!socket.closed)
+    }
+
+    @Test func aPingThatGetsNoPongClosesTheSocketAndReconnects() async {
+        let rig = HostRig(pingInterval: 0.03, pingTimeout: 0.05)
+        let first = FakeSocket()
+        first.pingsAre(.hang)
+        _ = await rig.online(first)
+        #expect(await eventually { first.closed }, "no pong within the timeout")
+        #expect(await eventually { rig.host.status != .online })
+        // The backoff takes over, and a socket that answers brings it back.
+        #expect(await eventually { !rig.delays.values.isEmpty })
+        #expect(rig.gateway.attempts.count >= 1)
+        let second = FakeSocket()
+        rig.gateway.enqueue(second)
+        #expect(await eventually { rig.host.status == .online && rig.gateway.attempts.count >= 2 })
+        #expect(await eventually { second.pings >= 1 })
+    }
+
+    @Test func aPingThatFailsClosesTheSocketAndReconnects() async {
+        let rig = HostRig(pingInterval: 0.03, pingTimeout: 0.5)
+        let first = FakeSocket()
+        first.pingsAre(.fail)
+        _ = await rig.online(first)
+        #expect(await eventually { first.closed })
+        #expect(await eventually { !rig.delays.values.isEmpty })
+        rig.gateway.enqueue(FakeSocket())
+        #expect(await eventually { rig.host.status == .online && rig.gateway.attempts.count >= 2 })
+    }
+
+    @Test func leavingTheFrontStopsThePings() async {
+        let rig = HostRig(pingInterval: 0.03, pingTimeout: 0.5)
+        let socket = await rig.online()
+        #expect(await eventually { socket.pings >= 1 })
+        rig.host.setActive(false)
+        #expect(await eventually { socket.closed })
+        let before = socket.pings
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(socket.pings <= before + 1)
+    }
+
+    /// A stand-in for `sendPing`: it keeps the pong handler, so a test can call it as often as URLSession might.
+    final class PongHandler: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stored: (@Sendable (Error?) -> Void)?
+        var handler: (@Sendable (Error?) -> Void)? { lock.withLock { stored } }
+        func keep(_ handler: @escaping @Sendable (Error?) -> Void) { lock.withLock { stored = handler } }
+    }
+
+    @Test func aPongHandlerCalledTwiceResumesOnlyOnce() async throws {
+        let pong = PongHandler()
+        let waiting = Task { try await WebSocketTransport.awaitPong { pong.keep($0) } }
+        #expect(await eventually { pong.handler != nil })
+        let handler = try #require(pong.handler)
+        handler(nil)
+        handler(nil)
+        handler(NSError(domain: NSPOSIXErrorDomain, code: 53))
+        try await waiting.value
+    }
+
+    @Test func aCancelledPingsLateSecondCallbackDoesNotCrash() async {
+        let pong = PongHandler()
+        let waiting = Task { try await WebSocketTransport.awaitPong { pong.keep($0) } }
+        #expect(await eventually { pong.handler != nil })
+        let handler = pong.handler!
+        // The cancelled task's socket answers with POSIX 53, then answers again.
+        handler(NSError(domain: NSPOSIXErrorDomain, code: 53))
+        handler(NSError(domain: NSPOSIXErrorDomain, code: 53))
+        handler(nil)
+        do {
+            try await waiting.value
+            Issue.record("the first answer was an error")
+        } catch {
+            #expect((error as NSError).code == 53, "the first answer wins")
+        }
+    }
+
+    @Test func resumeOnceIgnoresEveryCallAfterTheFirst() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            let once = ResumeOnce(continuation)
+            once.resume(nil)
+            once.resume(nil)
+            once.resume(URLError(.cancelled))
+        }
+    }
+
+    @Test func theUpgradeRequestRefusesRedirects() {
+        let transport = WebSocketTransport()
+        let task = URLSession.shared.dataTask(with: URL(string: "https://gateway.test/ws")!)
+        let redirect = HTTPURLResponse(url: URL(string: "https://gateway.test/ws")!, statusCode: 302, httpVersion: nil, headerFields: ["Location": "https://elsewhere.test/ws"])!
+        var answered = false
+        var followed: URLRequest? = URLRequest(url: URL(string: "https://elsewhere.test/ws")!)
+        transport.urlSession(URLSession.shared, task: task, willPerformHTTPRedirection: redirect, newRequest: URLRequest(url: URL(string: "https://elsewhere.test/ws")!)) { request in
+            answered = true
+            followed = request
+        }
+        #expect(answered)
+        #expect(followed == nil, "the credential never goes to another host")
+    }
+
+    @Test func cloudSayingTheDeviceSessionIsInvalidEndsTheSignIn() async {
+        let rig = HostRig()
+        ConfigProtocol.reset(status: 401, body: #"{"error":"invalid_device_session"}"#)
+        rig.host.setActive(true)
+        #expect(await eventually { rig.rejections == 1 })
+        #expect(rig.credentials.rejected.map(\.deviceSessionId) == ["dev-1"])
+        #expect(rig.gateway.attempts.isEmpty)
+        #expect(rig.delays.values.isEmpty, "no retry")
+        #expect(rig.host.status == .off)
+        rig.host.setActive(true)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(ConfigProtocol.requests.count == 1, "the credential is gone: nothing asks again")
+    }
+
+    @Test func otherCloudTroubleIsRetried() async {
+        let rig = HostRig()
+        ConfigProtocol.reset(status: 503, body: "{}")
+        rig.host.setActive(true)
+        #expect(await eventually { rig.delays.values.count >= 2 })
+        #expect(rig.rejections == 0)
+        #expect(rig.credentials.rejected.isEmpty)
+        rig.host.setActive(false)
+    }
+
+    @Test func aFreshInstallIsNotADeviceUntilTheSwitchIsOn() async {
+        let rig = HostRig(deviceOn: false)
+        #expect(!rig.host.isEnabled, "off by default")
+        #expect(rig.defaults.object(forKey: "nodeEnabled") == nil, "nothing is stored until it is chosen")
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.setActive(true)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(rig.host.status == .off)
+        #expect(ConfigProtocol.requests.isEmpty && rig.gateway.attempts.isEmpty, "nothing connects")
+        rig.host.setEnabled(true)
+        #expect(await eventually { rig.host.status == .online })
+        #expect(rig.makeHost().isEnabled, "kept across launches")
+    }
+
+    @Test func theSwitchDisconnectsAndIsKept() async {
+        let rig = HostRig()
+        #expect(rig.host.isEnabled)
+        let socket = await rig.online()
+        rig.host.setEnabled(false)
+        #expect(rig.host.status == .off)
+        #expect(socket.closed)
+        #expect(rig.makeHost().isEnabled == false, "kept across launches")
+
+        rig.host.setActive(true)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(rig.gateway.attempts.count == 1, "off stays off, in front or not")
+
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.setEnabled(true)
+        #expect(await eventually { rig.host.status == .online })
+        #expect(rig.makeHost().isEnabled)
+    }
+
+    @Test func theAppleHealthSwitchIsOffByDefaultAndKept() async {
+        let rig = HostRig()
+        #expect(!rig.host.isHealthEnabled, "Health data goes to an AI model: the guardian turns it on")
+        #expect(rig.host.isEnabled, "turning the device on leaves Health off")
+        #expect(rig.defaults.object(forKey: "nodeHealthEnabled") == nil, "nothing is stored until it is chosen")
+        rig.host.setHealthEnabled(true)
+        #expect(rig.host.isHealthEnabled)
+        #expect(rig.makeHost().isHealthEnabled, "kept across launches")
+        rig.host.setHealthEnabled(false)
+        #expect(!rig.makeHost().isHealthEnabled)
+        #expect(rig.host.isEnabled, "independent of the device switch")
+    }
+
+    @Test func aFreshInstallRefusesHealthRequestsUntilTheSwitchIsOn() async throws {
+        let rig = HostRig()
+        let socket = await rig.online()
+        socket.push(#"{"id":"r1","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#)
+        #expect(await eventually { socket.sent.count == 1 })
+        let error = parseJSON(socket.sent[0])["payload"]?["error"]
+        #expect(error?["code"]?.string == "health_off")
+        #expect(error?["message"]?.string?.contains("Settings → iPhone use → Apple Health") == true)
+        #expect(rig.health.reads == 0 && rig.health.accessRequests == 0)
+    }
+
+    @Test func turningHealthOnAsksOnlyWhileIOSHasNeverBeenAsked() async {
+        let rig = HostRig()
+        rig.health.neverAsked = true
+        await rig.host.setHealthEnabled(true)?.value
+        #expect(rig.health.accessRequests == 1, "the system sheet shows at once")
+        #expect(!rig.health.neverAsked)
+        rig.host.setHealthEnabled(false)
+        await rig.host.setHealthEnabled(true)?.value
+        #expect(rig.health.accessRequests == 1, "once asked, iOS shows nothing more: neither does the app")
+    }
+
+    @Test func turningHealthOffNeverAsks() async {
+        let rig = HostRig()
+        rig.health.neverAsked = true
+        #expect(rig.host.setHealthEnabled(false) == nil)
+        #expect(rig.health.accessRequests == 0)
+    }
+
+    @Test func withTheSwitchOffARequestOnTheSocketGetsHealthOff() async throws {
+        let rig = HostRig()
+        let socket = await rig.online()
+        rig.host.setHealthEnabled(true)
+        rig.host.setHealthEnabled(false)
+        socket.push(#"{"id":"r9","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#)
+        #expect(await eventually { socket.sent.count == 1 })
+        #expect(parseJSON(socket.sent[0])["payload"]?["error"]?["code"]?.string == "health_off")
+        #expect(rig.health.reads == 0)
+        #expect(rig.audit.begun.count == 1, "still audited")
+        rig.host.setHealthEnabled(true)
+        socket.push(#"{"id":"r10","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#)
+        #expect(await eventually { socket.sent.count == 2 })
+        #expect(parseJSON(socket.sent[1])["payload"]?["ok"]?.bool == true)
+    }
+
+    @Test func aPhoneThatShowsSignedOutIsNotADeviceWhateverCredentialItKeeps() async {
+        let rig = HostRig()
+        // The sign-in screen with a credential still in the Keychain (a failed instance sign-in).
+        rig.host.setSignedIn(false)
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.setActive(true)
+        rig.host.sync()
+        try? await Task.sleep(for: .milliseconds(80))
+        #expect(rig.credentials.deviceCredential != nil)
+        #expect(rig.gateway.attempts.isEmpty, "signed out on screen: not connected")
+        #expect(rig.host.status == .off)
+        #expect(!rig.host.isSignedIn)
+
+        rig.host.setSignedIn(true)
+        #expect(await eventually { rig.host.status == .online })
+        #expect(rig.gateway.attempts.count == 1)
+    }
+
+    @Test func movingToTheSignInScreenDisconnectsAndComingBackReconnects() async {
+        let rig = HostRig()
+        let socket = await rig.online()
+        rig.host.setSignedIn(false)
+        #expect(socket.closed)
+        #expect(rig.host.status == .off)
+        rig.host.setSignedIn(false)
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.setActive(true)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(rig.gateway.attempts.count == 1, "foreground alone does not bring it back")
+        rig.host.setSignedIn(true)
+        #expect(await eventually { rig.host.status == .online })
+        #expect(rig.gateway.attempts.count == 2)
+    }
+
+    @Test func itConnectsOnlyWhileTheAppIsInFront() async {
+        let rig = HostRig()
+        rig.host.sync()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(rig.gateway.attempts.isEmpty)
+        #expect(rig.host.status == .off)
+
+        let socket = await rig.online()
+        rig.host.setActive(false)
+        #expect(await eventually { socket.closed })
+        #expect(rig.host.status == .off)
+    }
+
+    @Test func aRequestUnderWayKeepsTheSocketOpenForItsReplyWhenTheAppLeaves() async {
+        let rig = HostRig()
+        let socket = await rig.online()
+        socket.push(HostRig.request)
+        rig.host.setActive(false)
+        #expect(await eventually { socket.sent.count == 1 || socket.closed })
+        // Either the reply made it out first, or nothing was in flight yet: never a closed socket with the reply lost midway.
+        #expect(await eventually { rig.host.status == .off })
+    }
+
+    @Test func signedOutDoesNotConnect() async {
+        let rig = HostRig()
+        rig.credentials.deviceCredential = nil
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.setActive(true)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(rig.gateway.attempts.isEmpty)
+        #expect(rig.host.status == .off)
+    }
+
+    @Test func signingOutDisconnectsAndTheNextSignInConnects() async {
+        let rig = HostRig()
+        let socket = await rig.online()
+        rig.host.accountEnded()
+        #expect(socket.closed)
+        #expect(rig.host.status == .off)
+        // Still holding a credential in the moment between, it must not reconnect.
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.setActive(true)
+        rig.host.sync()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(rig.gateway.attempts.count == 1)
+
+        rig.host.accountStarted()
+        #expect(await eventually { rig.host.status == .online })
+    }
+
+    @Test func anotherAccountReconnectsAsItsOwnDevice() async {
+        let rig = HostRig()
+        let first = await rig.online()
+        rig.credentials.deviceCredential = CloudCredential(accessToken: "romemob_other", deviceSessionId: "dev-2")
+        rig.credentials.accountGeneration = 2
+        rig.gateway.enqueue(FakeSocket())
+        rig.host.sync()
+        #expect(await eventually { rig.gateway.attempts.count == 2 && rig.host.status == .online })
+        #expect(first.closed)
+        #expect(rig.gateway.attempts.last?.authorization == "Bearer romemob_other")
+        // Syncing again with nothing changed does not reconnect.
+        rig.host.sync()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(rig.gateway.attempts.count == 2)
+    }
+
+    // MARK: Bounded work
+
+    private func gateHolds(_ gate: ReadGate, _ count: Int) async -> Bool {
+        for _ in 0..<400 {
+            if await gate.waiting == count { return true }
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        return false
+    }
+
+    @Test func aRequestOverTheCapIsBusyAndSystemInfoStillAnswers() async throws {
+        let rig = HostRig()
+        let gate = ReadGate()
+        rig.health.gate = gate
+        rig.host.setHealthEnabled(true)
+        let socket = await rig.online()
+        func stats(_ id: String) -> String {
+            #"{"id":"\#(id)","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#
+        }
+        for index in 1...NodeHost.maxRequests { socket.push(stats("r\(index)")) }
+        #expect(await gateHolds(gate, NodeHost.maxRequests))
+        socket.push(stats("over"))
+        #expect(await eventually { socket.sent.count == 1 })
+        let busy = parseJSON(socket.sent[0])
+        #expect(busy["id"]?.string == "over")
+        #expect(busy["payload"]?["error"]?["code"]?.string == "busy")
+        #expect(await gate.waiting == NodeHost.maxRequests, "never reached Health")
+        #expect(rig.audit.begun.count == NodeHost.maxRequests, "never recorded: it did not run")
+
+        socket.push(HostRig.request)
+        #expect(await eventually { socket.sent.count == 2 })
+        #expect(parseJSON(socket.sent[1])["payload"]?["ok"]?.bool == true)
+
+        await gate.open()
+        #expect(await eventually { socket.sent.count == 2 + NodeHost.maxRequests })
+        // With room again, the next request runs.
+        socket.push(stats("after"))
+        #expect(await eventually { socket.sent.count == 3 + NodeHost.maxRequests })
+        #expect(parseJSON(try #require(socket.sent.last))["payload"]?["ok"]?.bool == true)
+    }
+
+    // MARK: Another account
+
+    @Test func forgettingTheAccountTurnsBothSwitchesOffAndEmptiesTheLog() async {
+        let rig = HostRig()
+        rig.host.setHealthEnabled(true)
+        await rig.host.forgetAccount().value
+        #expect(!rig.host.isEnabled)
+        #expect(!rig.host.isHealthEnabled)
+        #expect(rig.audit.removals == 1)
+        // Nothing kept for the next launch either.
+        let relaunched = rig.makeHost()
+        #expect(!relaunched.isEnabled)
+        #expect(!relaunched.isHealthEnabled)
+    }
+
+    @Test func theNextAccountsHealthRequestsAreRefusedUntilItTurnsHealthOn() async throws {
+        let rig = HostRig()
+        rig.host.setHealthEnabled(true)
+        rig.host.forgetAccount()
+        rig.host.setEnabled(true)
+        let socket = await rig.online()
+        socket.push(#"{"id":"r1","from":"inst-1","payload":{"type":"request","action":"health.stats","args":{"type":"stepCount"}}}"#)
+        #expect(await eventually { socket.sent.count == 1 })
+        #expect(parseJSON(socket.sent[0])["payload"]?["error"]?["code"]?.string == "health_off")
+        #expect(rig.health.reads == 0)
+    }
+
+    @Test func aDeviceTheLastAccountTurnedOnIsOffForTheNext() async {
+        let rig = HostRig()
+        let socket = await rig.online()
+        rig.host.forgetAccount()
+        #expect(rig.host.status == .off)
+        #expect(socket.closed)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(rig.gateway.attempts.count == 1, "the next account turns it on itself")
+    }
+}

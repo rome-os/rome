@@ -372,6 +372,15 @@ final class AppModel {
             }
         }
 
+        /// Not on the sign-in screen: the phone may be a device. The sign-in
+        /// screen and the browser sign-in are not, even with a credential kept.
+        var isSignedIn: Bool {
+            switch self {
+            case .signedOut, .signingIn: return false
+            default: return true
+            }
+        }
+
         /// Launching or opening an instance: the opening screen shows.
         var isOpening: Bool {
             switch self {
@@ -389,7 +398,11 @@ final class AppModel {
         static let hintShown = "autoOpenHintShown"
     }
 
-    private(set) var phase: Phase = .launching
+    private(set) var phase: Phase = .launching {
+        // Every path to the sign-in screen disconnects the device, and every
+        // path back connects it again.
+        didSet { if phase.isSignedIn != oldValue.isSignedIn { node.setSignedIn(phase.isSignedIn) } }
+    }
     private(set) var workspace: Workspace? {
         // Pictures belong to the workspace that loaded them.
         didSet { if workspace !== oldValue { images.reset() } }
@@ -412,6 +425,8 @@ final class AppModel {
 
     let cloud: CloudAuth
     let push: PushCenter
+    /// This iPhone as a rome-node device: Apple Health for the instance's agent.
+    let node: NodeHost
     /// Light, dark or automatic, for the whole app; kept across sign-out.
     let appearance = AppearanceSetting()
     /// Keeps the open instance on its latest release.
@@ -437,6 +452,8 @@ final class AppModel {
         self.cloud = cloud
         self.images = images
         push = PushCenter(registry: cloud)
+        node = NodeHost(credentials: cloud)
+        node.onCredentialRejected = { [weak self] in self?.nodeCredentialRejected() }
     }
 
     // MARK: Launch
@@ -450,6 +467,7 @@ final class AppModel {
         #endif
         Task { await push.launch() }
         #if DEBUG
+        if HealthSeed.requested { Task { await HealthSeed.run() } }
         let environment = ProcessInfo.processInfo.environment
         if environment["ROME_DEMO"] == "1" {
             openDemo()
@@ -507,6 +525,8 @@ final class AppModel {
                 // before its data is wiped, so nothing of it writes again.
                 leaveAccount()
                 forgetAccountData()
+                // After the wipe, so the device starts with this account's defaults.
+                node.accountStarted()
                 await openInstance(preferring: nil, showHint: true)
             } catch {
                 signInError = (error as? LocalizedError)?.errorDescription ?? String(localized: "Sign-in did not finish")
@@ -704,6 +724,7 @@ final class AppModel {
     func signOut() async {
         // First, so nothing still running for this account writes again.
         cloud.endAccount()
+        node.accountEnded()
         leaveAccount()
         pendingPush = nil
         await push.signOut { await cloud.signOut() }
@@ -728,8 +749,8 @@ final class AppModel {
     }
 
     /// What this phone keeps for the signed-in account: drafts, kept chats,
-    /// pictures, recent apps, closed update banners, the language last seen
-    /// and the last instance. Gone on
+    /// pictures, recent apps, closed update banners, the language last seen,
+    /// the last instance, and this phone's device switches and activity log. Gone on
     /// sign-out, and before a new Cloud sign-in, which may be another
     /// account's. The account has ended first, so no late write follows.
     private func forgetAccountData() {
@@ -743,9 +764,22 @@ final class AppModel {
         URLCache.shared.removeAllCachedResponses()
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstanceRecord)
+        // The device's switches and its Recent activity.
+        node.forgetAccount()
     }
 
     // MARK: Session expiry
+
+    /// Rome Cloud no longer knows this phone's device session (revoked in
+    /// Settings → Devices, or the sign-in expired): signed out, as a 401 from
+    /// Rome Cloud does, and no device connects until the next sign-in.
+    private func nodeCredentialRejected() {
+        node.accountEnded()
+        leaveAccount()
+        pendingPush = nil
+        browserSignIn = nil
+        phase = .signedOut
+    }
 
     /// A 401 from a connection that is no longer the open one changes nothing.
     private func handleUnauthorized(box: TokenBox, instance: CloudInstance) {
@@ -814,6 +848,8 @@ final class AppModel {
 
     func appDidEnterBackground() {
         foreground.enteredBackground(at: .now)
+        // Replies under way go out, then the device disconnects.
+        node.setActive(false)
         // Drafts are written before the app may be killed.
         if let drafts = workspace?.drafts { Task { await drafts.flush() } }
         workspace?.transcripts.flush()
@@ -892,6 +928,7 @@ final class AppModel {
     /// app was suspended, so they refetch and the socket starts over.
     func appDidBecomeActive() {
         appearance.apply()
+        node.setActive(true)
         // Back in front on a chat counts as opening it: its delivered pushes go.
         if let visibleChat { clearDelivered(for: visibleChat) }
         syncLanguage()
@@ -987,6 +1024,8 @@ final class AppModel {
     var debugCommand: DebugCommand?
     /// Text size the snapshot runner forces, to check large Dynamic Type.
     var dynamicTypeOverride: DynamicTypeSize?
+    /// The part of the Apple Health page the snapshot runner scrolls to: "where", "end", or the top.
+    var debugHealthScroll: String?
 
     func debugSetPhase(_ phase: Phase) {
         workspace?.stop()

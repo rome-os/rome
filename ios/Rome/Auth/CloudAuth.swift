@@ -513,7 +513,7 @@ final class CloudAuth {
     }
 }
 
-private final class NoRedirects: NSObject, URLSessionTaskDelegate, Sendable {
+final class NoRedirects: NSObject, URLSessionTaskDelegate, Sendable {
     func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
@@ -534,5 +534,18 @@ extension CloudAuth: DeviceRegistry {
 
     func unregisterDevice(token: String) async throws {
         try await deviceCall("DELETE", body: ["token": token])
+    }
+}
+
+extension CloudAuth: NodeCredentials {
+    var deviceCredential: CloudCredential? { store.value(CloudCredential.self, for: Key.credential) }
+
+    /// Rome Cloud no longer knows this device session: the sign-in is over,
+    /// as when any call of the app gets a 401. Only that credential goes; a
+    /// newer one stays.
+    func rejectCredential(_ rejected: CloudCredential) {
+        guard deviceCredential?.deviceSessionId == rejected.deviceSessionId else { return }
+        endAccount()
+        store.remove(Key.credential)
     }
 }

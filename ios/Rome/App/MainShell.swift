@@ -25,6 +25,8 @@ enum MainSection: Hashable {
 /// Pages pushed inside the Settings sheet.
 enum SettingsRoute: Hashable {
     case instances
+    case requests
+    case health
 }
 
 /// The signed-in app: Chat as the home screen, the drawer that pushes it aside,
@@ -413,6 +415,8 @@ struct MainShell: View {
             SettingsScreen(
                 workspace: workspace,
                 onInstances: { settingsPath.append(.instances) },
+                onHealth: { settingsPath.append(.health) },
+                onRequests: { settingsPath.append(.requests) },
                 onClose: { showSettings = false }
             )
             .navigationDestination(for: SettingsRoute.self) { route in
@@ -422,6 +426,10 @@ struct MainShell: View {
                         showSettings = false
                         show(.chat)
                     })
+                case .requests:
+                    NodeRequestsScreen()
+                case .health:
+                    HealthAccessScreen()
                 }
             }
         }
