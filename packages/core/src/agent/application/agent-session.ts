@@ -119,7 +119,6 @@ import type {
 } from "./subagent-calls.js";
 import { translateTurnSpans, type CapturedEvent } from "./turn-spans.js";
 import { createTurnsById, type TurnsById } from "./turns-by-id.js";
-import { KeyedMutex } from "../../lib/keyed-mutex.js";
 
 export interface AgentSessionKey {
   agentName: string;
@@ -405,7 +404,6 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
   const { log } = deps;
   const sessions = new Map<string, AgentSessionImpl>();
   const acquireLocks = new Map<string, Promise<AgentSessionImpl>>();
-  const lifecycleMutex = new KeyedMutex();
   const keepAlive = options.keepAliveAcrossTurns === true;
   const idleTtlMs = options.idleTtlMs ?? 30 * 60 * 1000;
   const isSubagent = options.isSubagent === true;
@@ -443,87 +441,8 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     key: AgentSessionKey,
     span: Span,
     init?: OpenRequest,
-    /** Set when the reset policy and the setup check already ran for this acquire. */
-    resetChecked?: { prepared?: Session; setup?: string },
   ): Promise<AgentSession> => {
     const k = keyOf(key);
-    const reset = init?.resetPolicy;
-    // A session resumed by id is resumed as it is, so neither applies to it.
-    const setup =
-      init && !init.resumeSessionId && !resetChecked
-        ? await currentSetup(deps, key, init, isSubagent)
-        : undefined;
-    if ((reset || setup !== undefined) && init && !init.resumeSessionId && !resetChecked) {
-      const interactionAt = new Date();
-      const chatId = init.threadContext?.romeSessionId;
-      return await lifecycleMutex.runExclusive(k, async () => {
-        const cached = sessions.get(k);
-        // The whole reset decision, read under the lock: the chat's active
-        // session, whether it is due, and whether something holds it.
-        const decide = async () => {
-          const active = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
-          // A session with a turn in progress is never replaced, whatever the
-          // reason: a send then steers or queues as it always does, and the
-          // reset happens on the next acquire that finds it idle.
-          const busy =
-            cached !== undefined && cached.status !== "closed" && cached.hasTurnInProgress;
-          const due =
-            !active || busy
-              ? { due: false as const }
-              : setup !== undefined && setupChanged(active.setup, setup)
-                ? { due: true as const, reason: "setup" as const }
-                : reset
-                  ? evaluateProviderSessionReset(reset, active, interactionAt)
-                  : { due: false as const };
-          // A turn stopped midway resumes by this session's id, so the
-          // session stays until that turn has ended.
-          const held = due.due && active ? await deps.heldMidTurn?.(active.id) : false;
-          if (held && active && due.due) {
-            log.info("provider_session.reset_held", {
-              chatId,
-              agentName: key.agentName,
-              oldSessionId: active.id,
-              resetReason: due.reason,
-            });
-          }
-          return { active, decision: held ? { due: false as const } : due };
-        };
-        const { active, decision } = await decide();
-        if (decision.due) {
-          log.info("provider_session.reset_due", {
-            chatId,
-            agentName: key.agentName,
-            provider: active?.provider ?? undefined,
-            oldSessionId: active?.id,
-            resetReason: decision.reason,
-            policyMode: reset?.mode,
-            elapsedMinutes: "elapsedMinutes" in decision ? decision.elapsedMinutes : undefined,
-          });
-          if (cached && cached.status !== "closed") {
-            // Only the cleanup of a turn that has ended is left, so this is
-            // brief, and the lock keeps a new turn from starting meanwhile.
-            await waitUntilQuiescent(cached);
-            await cached.close("idle");
-          }
-        }
-        let prepared: Session | undefined;
-        if (decision.due && active) {
-          prepared = active.replace({ setup, reason: decision.reason });
-          await deps.sessionRepository.replace(active, prepared);
-          log.info("provider_session.rotated", {
-            chatId,
-            agentName: key.agentName,
-            provider: active.provider ?? undefined,
-            oldSessionId: active.id,
-            newSessionId: prepared.id,
-            resetReason: decision.reason,
-            policyMode: reset?.mode,
-            result: "succeeded",
-          });
-        }
-        return await acquireInner(key, span, init, { prepared, setup });
-      });
-    }
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
     // from a reopen (a live session existed but was torn down for TTL/auth). The
@@ -543,7 +462,15 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
       });
     };
     const existing = sessions.get(k);
-    const explicitResume = init?.resumeSessionId;
+    let explicitResume = init?.resumeSessionId;
+    // The live session may have renewed itself at a turn's start since the
+    // resume named its session: a superseded id resumes the live one.
+    if (explicitResume && existing && existing.status !== "closed") {
+      if (explicitResume !== existing.sessionId) {
+        const named = await deps.sessionRepository.session(explicitResume);
+        if (named?.supersededBy) explicitResume = existing.sessionId;
+      }
+    }
     if (existing && existing.status !== "closed") {
       // A fork deliberately leaves the source's public status idle: it runs in
       // an isolated provider session and must not make the source chat look as
@@ -559,7 +486,12 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         }
         reopen = true;
         await existing.close("idle");
-      } else if (explicitResume && existing.status === "idle" && !existingIsQuiescent) {
+      } else if (
+        explicitResume &&
+        !keepAlive &&
+        existing.status === "idle" &&
+        !existingIsQuiescent
+      ) {
         // A consumer can finish draining turn_end while runOneTurn is still in
         // its final cleanup. With close-on-turn-boundary sessions, returning
         // that instance would enqueue the continuation behind a close that is
@@ -568,7 +500,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         await waitUntilQuiescent(existing);
         await existing.close("idle");
         reopen = true;
-      } else if (explicitResume && existingIsQuiescent) {
+      } else if (explicitResume && !keepAlive && existingIsQuiescent) {
         await existing.close("idle");
       } else {
         // Provider/model changes are resolved at the serialized turn boundary.
@@ -576,6 +508,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         // session swap only the model backend when needed. A selection made
         // in the open chat applies from the next turn.
         if (init?.selectionId !== undefined) existing.selectModel(init.selectionId);
+        if (init?.resetPolicy) existing.noteResetPolicy(init.resetPolicy);
         recordAcquire("reuse");
         existing.lease();
         return existing;
@@ -584,6 +517,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     const current = sessions.get(k);
     if (current && current.status !== "closed") {
       if (init?.selectionId !== undefined) current.selectModel(init.selectionId);
+      if (init?.resetPolicy) current.noteResetPolicy(init.resetPolicy);
       recordAcquire("reuse");
       current.lease();
       return current;
@@ -598,8 +532,6 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     recordAcquire(reopen ? "reopen" : "cold");
     const promise = (async () => {
       const sess = await openSession(deps, key, init ?? {}, {
-        prepared: resetChecked?.prepared,
-        setup: resetChecked?.setup,
         keepAlive,
         onClosed: onSessionClosed,
         isSubagent,
@@ -641,33 +573,27 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     if (!named?.continuityKey || !deprecatedSameAgent(deps, named.agentName, agentName)) {
       throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
     }
-    // A resume is a lifecycle transition of its chat's sessions, so it takes
-    // the same per-key lock as a reset, and reads which session is current
-    // only once it holds it: no reset can replace that session in between.
-    const chatKey = canonicalizeKey({ agentName, channelThreadKey: named.continuityKey });
-    return await lifecycleMutex.runExclusive(keyOf(chatKey), async () => {
-      // A session a reset replaced is resumed as its chat's current session.
-      const session = await currentSuccessor(deps, sessionId, agentName);
-      if (!session?.continuityKey) {
-        throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
-      }
-      const redirected = session.id !== sessionId;
-      if (redirected) {
-        log.info("provider_session.resume_redirected", {
-          agentName,
-          requestedSessionId: sessionId,
-          sessionId: session.id,
-        });
-      }
-      const resumed = await acquire(
-        { agentName, channelThreadKey: session.continuityKey },
-        { ...(opening ?? {}), resumeSessionId: session.id },
-      );
-      // What resumes the superseded session expects the context it had
-      // there, so the turn says the chat's earlier messages are not in this one.
-      if (redirected && resumed instanceof AgentSessionImpl) resumed.continuesElsewhere();
-      return resumed;
-    });
+    // A session a reset replaced is resumed as its chat's current session.
+    const session = await currentSuccessor(deps, sessionId, agentName);
+    if (!session?.continuityKey) {
+      throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
+    }
+    const redirected = session.id !== sessionId;
+    if (redirected) {
+      log.info("provider_session.resume_redirected", {
+        agentName,
+        requestedSessionId: sessionId,
+        sessionId: session.id,
+      });
+    }
+    const resumed = await acquire(
+      { agentName, channelThreadKey: session.continuityKey },
+      { ...(opening ?? {}), resumeSessionId: session.id },
+    );
+    // What resumes the superseded session expects the context it had
+    // there, so the turn says the chat's earlier messages are not in this one.
+    if (redirected && resumed instanceof AgentSessionImpl) resumed.continuesElsewhere();
+    return resumed;
   };
 
   return {
@@ -705,10 +631,6 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
 }
 
 interface OpenOptions {
-  /** The successor the reset path already wrote, which this open serves. */
-  prepared?: Session;
-  /** The fingerprint of the setup a session this open creates records. */
-  setup?: string;
   keepAlive: boolean;
   onClosed: (s: AgentSessionImpl) => void;
   isSubagent: boolean;
@@ -1018,14 +940,21 @@ async function openSession(
   // thread and system prompt/history.
   // The session the reset path already wrote, or the one this open resumes.
   // Neither set, this open creates one.
-  let prepared = opts.prepared;
+  // What the session opens with, and its fingerprint, which a session this
+  // open creates records and whose change its turns renew it on.
+  let setupSource = sessionSetupOf(deps, agent, init, !!opts.isSubagent);
+  const setupNow = await setupSource.fingerprint(key, init);
+  // The session the working-dir check below writes in place of the stored one.
+  let prepared: Session | undefined;
   let resumed: Session | undefined;
   if (prepared) {
     // The reset already wrote this fresh session. Keep `resumed` empty so
     // provider open and prompt framing use new-session semantics while
     // retaining the id the reset allocated.
   } else if (init.resumeSessionId) {
-    resumed = await resumableSession(deps, init.resumeSessionId, key.agentName);
+    // A session renewed since the resume named it resumes as its chat's
+    // current session.
+    resumed = await currentSuccessor(deps, init.resumeSessionId, key.agentName);
     if (!resumed) {
       throw new Error(`Agent session "${init.resumeSessionId}" was not found or cannot be resumed`);
     }
@@ -1058,7 +987,7 @@ async function openSession(
         channelThreadKey: key.channelThreadKey,
         workingDir: resumed.workingDir,
       });
-      prepared = resumed.replace({ setup: opts.setup, reason: "working_dir" });
+      prepared = resumed.replace({ setup: setupNow, reason: "working_dir" });
       await deps.sessionRepository.replace(resumed, prepared);
       resumed = undefined;
     }
@@ -1072,7 +1001,7 @@ async function openSession(
     Session.create(key.agentName, {
       continuityKey: key.channelThreadKey || undefined,
       workingDir,
-      setup: opts.setup,
+      setup: setupNow,
     });
   const sessionId = session.id;
   const isNewSession = !resumed;
@@ -1126,9 +1055,8 @@ async function openSession(
     }
   }
 
-  const setupSource = sessionSetupOf(deps, agent, init, !!opts.isSubagent);
   const { widgets, subagents, externalMcpServers } = setupSource;
-  const systemPrompt = setupSource.systemPrompt();
+  let systemPrompt = setupSource.systemPrompt();
   const subagentToolNames = new Set(subagents.map((subagent) => subagentToolName(subagent.name)));
 
   // We hold the AgentSessionImpl handle in a closure so the action
@@ -1149,7 +1077,10 @@ async function openSession(
   // current turn, below) and each exact-mode forked turn (refs bound to the
   // fork's own session/turn ids and outbound stream — see buildForkOpenParams).
   const sessionExecRefs: TurnExecRefs = {
-    sessionId,
+    // Read at call time: a renewal at a turn's start gives the session a new id.
+    get sessionId() {
+      return impl ? impl.sessionId : sessionId;
+    },
     getRomeSessionId: () => impl.currentTurnRomeSessionIdRef,
     getTurnId: () => impl.currentTurnId,
     getThreadContext: () => impl.currentTurnThreadContextRef,
@@ -1168,7 +1099,9 @@ async function openSession(
   ): TurnFacts => ({
     agentName: key.agentName,
     continuityKey: key.channelThreadKey,
-    sessionId: refs.sessionId,
+    get sessionId() {
+      return refs.sessionId;
+    },
     isSubagent: opts.isSubagent === true,
     // Read on every call, so a grant or a revoke applies from the next turn
     // in the same session. An agent whose definition omits its actions, or
@@ -1532,6 +1465,15 @@ async function openSession(
     await deps.sessionRepository.save(resumed);
   }
 
+  // A renewal at a turn's start builds the prompt and tools again from the
+  // agent's setup as it is then, so the fresh thread opens with them.
+  const refreshSetup = (): string => {
+    const current = deps.agentLoader.find(key.agentName);
+    if (current) setupSource = sessionSetupOf(deps, current, init, !!opts.isSubagent);
+    systemPrompt = setupSource.systemPrompt();
+    return systemPrompt;
+  };
+
   impl = new AgentSessionImpl({
     key,
     session,
@@ -1571,6 +1513,11 @@ async function openSession(
     subagentToolNames,
     keepAlive: opts.keepAlive,
     onClosed: () => opts.onClosed(impl),
+    renewOn: {
+      currentSetup: () => currentSetup(deps, key, init, !!opts.isSubagent),
+      refreshSetup,
+      resetPolicy: init.resetPolicy,
+    },
   });
 
   impl.startModelSessionEvents();
@@ -1635,6 +1582,20 @@ interface ImplArgs {
   subagentToolNames: Set<string>;
   keepAlive: boolean;
   onClosed: () => void;
+  /** What the session renews itself with at a turn's start. */
+  renewOn: RenewOn;
+}
+
+/** What a session reads, at a turn's start, to tell whether to renew itself. */
+interface RenewOn {
+  /** The fingerprint of the setup it would open with now, or undefined when
+   *  its agent keeps a session through setup changes. */
+  currentSetup(): Promise<string | undefined>;
+  /** Builds the system prompt and tools again, from the setup as it is now,
+   *  for the fresh thread a renewal opens. Answers the new system prompt. */
+  refreshSetup(): string;
+  /** The chat's reset policy, as its opener read it. */
+  resetPolicy?: ProviderSessionResetPolicy;
 }
 
 interface TurnSink {
@@ -1802,9 +1763,11 @@ class ForkStreamQueue implements AsyncIterable<StreamAgentEvent> {
 
 class AgentSessionImpl implements AgentSession {
   readonly key: AgentSessionKey;
-  readonly sessionId: string;
-  /** The stored session this one runs, which each turn and touch is recorded on. */
-  private readonly session: Session;
+  /** The stored session's id; a renewal at a turn's start changes it. */
+  sessionId: string;
+  /** The stored session this one runs, which each turn and touch is
+   *  recorded on. A renewal at a turn's start replaces it. */
+  private session: Session;
   status: AgentSessionStatus = "idle";
   currentTurnId?: string;
   get runningTurn(): Turn | undefined {
@@ -1910,6 +1873,8 @@ class AgentSessionImpl implements AgentSession {
     this.key = args.key;
     this.session = args.session;
     this.sessionId = args.session.id;
+    this.renewOn = args.renewOn;
+    this.resetPolicy = args.renewOn.resetPolicy;
     this.modelSession = args.modelSession;
     this.modelProvider = args.modelProvider;
     this.deps = args.deps;
@@ -1958,6 +1923,66 @@ class AgentSessionImpl implements AgentSession {
     return this.currentSink?.pushLevel;
   }
 
+  private readonly renewOn: RenewOn;
+  private resetPolicy?: ProviderSessionResetPolicy;
+  /** A renewal replaced the stored session: the next model open starts a
+   *  fresh thread rather than resuming the retired one's. */
+  private renewThread = false;
+
+  /** The chat's reset policy, as the latest opener read it. */
+  noteResetPolicy(policy: ProviderSessionResetPolicy): void {
+    this.resetPolicy = policy;
+  }
+
+  /**
+   * The one place a session is renewed (docs/concepts/sessions.md#renewal):
+   * at the start of a turn, under the turn lock and before the model
+   * session is prepared, so no turn of it runs or waits ahead of this one.
+   * It renews when a reset is due (a changed setup, or the chat's reset
+   * policy), no forked turn runs, and no approval holds it. Otherwise it
+   * keeps the session, and the next turn's start decides again.
+   */
+  private async renewAtTurnStart(): Promise<void> {
+    if (this.isSubagent || this.status === "closed" || this.hasActiveForkedTurns) return;
+    const setup = await this.renewOn.currentSetup();
+    let reason: string | undefined;
+    if (setup !== undefined && setupChanged(this.session.setup, setup)) {
+      reason = "setup";
+    } else if (this.resetPolicy) {
+      const decision = evaluateProviderSessionReset(this.resetPolicy, this.session, new Date());
+      if (decision.due) reason = decision.reason;
+    }
+    if (!reason) return;
+    const retired = this.session;
+    if (await this.deps.heldMidTurn?.(retired.id)) {
+      this.log.info("provider_session.reset_held", {
+        agentName: this.key.agentName,
+        oldSessionId: retired.id,
+        resetReason: reason,
+      });
+      return;
+    }
+    const successor = retired.replace({ setup: setup ?? retired.setup ?? undefined, reason });
+    await this.deps.sessionRepository.replace(retired, successor);
+    this.session = successor;
+    this.sessionId = successor.id;
+    this.systemPrompt = this.renewOn.refreshSetup();
+    this.renewThread = true;
+    this.modelSessionAvailable = false;
+    this.continuationPending = true;
+    this.renewalPending = { reason, sessionId: successor.id };
+    this.log.info("provider_session.rotated", {
+      chatId: this.threadContext?.romeSessionId,
+      agentName: this.key.agentName,
+      provider: retired.provider ?? undefined,
+      oldSessionId: retired.id,
+      newSessionId: successor.id,
+      resetReason: reason,
+      policyMode: this.resetPolicy?.mode,
+      result: "succeeded",
+    });
+  }
+
   /** The next turn resumes what an earlier session of the chat started, so
    *  it carries the `<continuation>` notice. */
   continuesElsewhere(): void {
@@ -1991,6 +2016,8 @@ class AgentSessionImpl implements AgentSession {
    * idle eviction or replacement closes it. docs/concepts/sessions.md#session-in-use
    */
   private leases = 0;
+  /** Turns submitted and not yet ended, queued behind the lock or running. */
+  private admitted = 0;
 
   /** Taken by `Sessions` when it hands the session to a caller. */
   lease(): void {
@@ -2008,13 +2035,18 @@ class AgentSessionImpl implements AgentSession {
    *  as opposed to only finishing the cleanup of a turn that has ended. */
   get hasTurnInProgress(): boolean {
     return (
-      this.leases > 0 || this.status !== "idle" || this.inputs.busy || this.hasActiveForkedTurns
+      this.leases > 0 ||
+      this.admitted > 0 ||
+      this.status !== "idle" ||
+      this.inputs.busy ||
+      this.hasActiveForkedTurns
     );
   }
 
   get isQuiescentForRotation(): boolean {
     return (
       this.leases === 0 &&
+      this.admitted === 0 &&
       this.status === "idle" &&
       !this.turnMutex.isLocked() &&
       !this.hasActiveForkedTurns &&
@@ -2082,7 +2114,9 @@ class AgentSessionImpl implements AgentSession {
 
     const previous = this.modelSession;
     const sameProvider = previous.providerId === resolution.modelProvider.id;
-    const resumeThreadId = sameProvider ? previous.modelThreadId : undefined;
+    // A renewal starts a fresh thread whatever the provider.
+    const resumeThreadId = sameProvider && !this.renewThread ? previous.modelThreadId : undefined;
+    this.renewThread = false;
     this.replacingModelSession = previous;
     this.modelSessionAvailable = false;
     try {
@@ -3118,6 +3152,10 @@ class AgentSessionImpl implements AgentSession {
     });
     const turnCtx = trace.setSpan(context.active(), span);
 
+    // Admitted from here until the turn ends, whatever its priority: the
+    // session is in use while it waits for the turn lock.
+    this.admitted += 1;
+
     // Hand the turn off to the per-session FIFO turn mutex. Real work
     // (publishing session_init, sending user input, awaiting result) runs
     // asynchronously in `runOneTurn`; the events iterable above stays empty
@@ -3151,7 +3189,10 @@ class AgentSessionImpl implements AgentSession {
         },
         input.inputId ? 1 : 0,
       )
-      .finally(() => this.emitStatus());
+      .finally(() => {
+        this.admitted -= 1;
+        this.emitStatus();
+      });
 
     this.turns.add(turn);
     return Object.assign(turn, { turnContext: turnCtx });
@@ -3177,7 +3218,10 @@ class AgentSessionImpl implements AgentSession {
     // Turns are FIFO-serialized by turnMutex. Resolve exactly once at this
     // boundary, before the sink is attached, so a backend replacement cannot
     // leak close events into the new turn.
-    if (!sink.lifecycleInterrupted) await this.ensureModelSessionForTurn();
+    if (!sink.lifecycleInterrupted) {
+      await this.renewAtTurnStart();
+      await this.ensureModelSessionForTurn();
+    }
     if (sink.lifecycleInterrupted) {
       await this.modelSession.interrupt("user-stop");
       this.ensureTurnStart(sink);

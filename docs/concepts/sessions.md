@@ -26,11 +26,12 @@ A continuity key is the value that whatever opens a session, and comes back to i
 **Contracts:**
 
 - At most one session per continuity key and agent is active. A reset completes that session and starts the next one under the same continuity key, so the next message continues where the chat left off.
-- A chat's reset policy decides when its session is due for a reset. In code, the rule is `evaluateProviderSessionReset` in [`packages/core/src/agent/domain/session-reset.ts`](../../packages/core/src/agent/domain/session-reset.ts), and the opener reads the policy from Chat settings and hands it over when it opens a session by continuity key. A session resumed by its id takes none, since it is resumed as it is.
+- A chat's reset policy decides when its session is due for a reset. In code, the rule is `evaluateProviderSessionReset` in [`packages/core/src/agent/domain/session-reset.ts`](../../packages/core/src/agent/domain/session-reset.ts), and the opener reads the policy from Chat settings and hands it over when it opens a session by continuity key. A resume by id brings no policy of its own: the session keeps the one it already has, if any.
 - A session that a reset replaced is superseded, not ended: whatever still names it by id, such as a scheduled wake-up, reaches the chat's current session, whatever reset replaced it. A session completed any other way cannot be resumed.
-- A resume by id and a reset of the same chat never overlap: the resume settles which session is current only once no reset of that chat is under way.
+- A resume by id that names a session a reset has just replaced reaches its successor, so a resume never fails because a reset ran meanwhile.
 - A wake-up an agent schedules for itself carries the agent's own note: why it waits, what to do on waking, and what it concerns, with when and from which turn it was set. The woken turn reads the note whichever session wakes. When the wake-up reaches a newer session than the one that set it, its turn also carries the [continuation](#continuation) notice. A wake-up set before notes existed carries none, and reaches the current session with the notice.
-- While something waits to resume a session in the middle of a turn, no reset replaces it. The reset happens on the first turn after the wait ends. A session [in use](#session-in-use) is never replaced either: a message sent meanwhile steers or queues as it always does, and the reset happens on the next turn that finds the session free.
+- A reset happens only at a turn boundary, inside the session's own turn queue: at the start of a turn, before that turn prepares its model, and only when no other turn is admitted, queued or running ahead of it and no approval holds the session. That turn then runs on the new session. Opening, resuming or sending to a session never decides or waits for a reset, so a message sent during a turn steers or queues as it always does.
+- While an approval holds a session, no reset replaces it. The reset happens on the first turn that starts after the hold ends.
 - An approval holds its session for a day: a pending one from when it was asked for, an executing one from when it was approved. A request never answered, or an execution a crash left running, would otherwise keep the chat on one session for good. The cost is that an approval answered after a day resumes in a newer session, which reads the chat's earlier messages through the [continuation](#continuation) notice rather than holding them in context.
 - A chat shows a faint line where its session was replaced, with the reason: the setup changed, an idle or daily reset, or a working folder that is gone. The line is part of the new session's first turn, so it stays after a reload, counts as nothing unread and sends no push.
 - Sessions never reads what a continuity key means. Only the code that minted it may parse it.
@@ -55,18 +56,19 @@ Memory, follows and tasks are not part of it, since a session reads them while i
 **Contracts:**
 
 - A change to an agent's setup reaches a session only when a fresh session opens.
-- An agent whose policy asks for it gets a fresh session in the same chat when its setup changed since its session opened. The check runs before each turn opened by continuity key. A session resumed by its id is never replaced. The Concierge's chats work this way, since one of them can run on one session for days.
+- An agent whose policy asks for it gets a fresh session in the same chat when its setup changed since its session opened. The check runs at the start of each turn, whatever opened the session, including a wake-up that resumes it by id. The Concierge's chats work this way, since one of them can run on one session for days.
 - A session that recorded no setup opened before setups were recorded, and is replaced on its next turn under such a policy.
 - A replacement for a changed setup sends no message or push: the chat shows only the line where the session was renewed. It carries the [continuation](#continuation) notice until a turn of its own succeeds, so a first open that fails does not lose it.
 
 ## Session in use
 
-A session is in use from the moment a caller acquires it, by opening or resuming it, until the turn that caller submits has run, or until the caller lets it go without one, as on an error before its turn. Turns that are running or queued, and forked turns, keep it in use too.
+A session is in use from the moment a caller acquires it, by opening or resuming it, until it submits a turn, or lets it go without one, as on an error before its turn. A submitted turn is admitted from its submit until it ends, whatever submitted it: a message, a backend action or a wake-up, at any priority. Forked turns keep the session in use too.
 
 **Contracts:**
 
-- Only a session that is not in use and has finished its last turn's cleanup is closed or replaced, whatever the reason: a renewal for a changed setup, an idle or daily reset, a working folder that is gone, or an idle eviction. A reset due on a session in use waits for the next acquire that finds it free.
-- A resume by id and a reset of the same chat never overlap, and a session one caller acquired is never closed under another caller's turn.
+- A session is replaced only by a reset inside its own turn queue, at a turn boundary (see [Continuity key](#continuity-key)). Nothing outside the queue replaces it.
+- Only the idle sweeper closes a session from outside, and only one with no caller holding it, no turn admitted or running, and its last turn's cleanup finished. Shutdown closes every session, since the process ends.
+- A caller that acquired a session and has not submitted yet keeps it from being closed. A reset that runs meanwhile swaps the session in place, so that caller's turn runs on the chat's current session.
 - Deleting a chat, or the project it belongs to, is the exception: it closes the chat's session even while a turn runs, since that turn's chat is gone.
 
 ## Model pin

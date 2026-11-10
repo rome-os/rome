@@ -3319,7 +3319,17 @@ describe("AgentRunner", () => {
         await Promise.all(managers.splice(0).map((manager) => manager.shutdown()));
       });
 
-      function renewingRunner(provider: MockModelProvider): AgentRunner {
+      function renewingRunner(
+        provider: MockModelProvider,
+        /** Runs each time a model is resolved, as a turn prepares its model session. */
+        onResolve?: () => Promise<void>,
+      ): AgentRunner {
+        const resolver = createTestModelResolver({ providers: [provider] });
+        const resolve = resolver.resolve.bind(resolver);
+        resolver.resolve = async (request) => {
+          await onResolve?.();
+          return resolve(request);
+        };
         const sources: PromptSources = {
           material: () => ({
             charter: charter.text,
@@ -3343,7 +3353,7 @@ describe("AgentRunner", () => {
         // As in production, a session stays open between turns.
         const manager = createSessions(
           {
-            ...managerDeps(createTestModelResolver({ providers: [provider] })),
+            ...managerDeps(resolver),
             systemPrompts: createSystemPrompts({ sources }),
             sessionTools: { forTurn: async () => sessionTools },
             heldMidTurn: async (sessionId: string) => held.has(sessionId),
@@ -3510,14 +3520,16 @@ describe("AgentRunner", () => {
         );
       });
 
-      it("never renews a session resumed by its id", async () => {
-        const runner = renewingRunner(new MockModelProvider(replies(2)));
+      it("renews at a wake's turn start too, and the wake runs on the fresh session", async () => {
+        const provider = new MockModelProvider(replies(2));
+        const runner = renewingRunner(provider);
         const first = await turn(runner);
         identity.text = "**Agent Name:** YoYo";
         const resumed = await turn(runner, { sessionId: first });
 
-        expect(resumed).toBe(first);
-        expect((await sessionRepository.session(first!))?.status).toBe("active");
+        expect(resumed).not.toBe(first);
+        expect((await sessionRepository.session(first!))?.supersededBy).toBe(resumed);
+        expect(provider.calls[1]?.prompt).toContain("<continuation>");
       });
 
       it("routes a wake-up for a session a renewal replaced to the chat's current session", async () => {
@@ -3574,8 +3586,8 @@ describe("AgentRunner", () => {
         expect(provider.calls[2]?.prompt).toContain("Read CI run 42 for PR #7");
       });
 
-      it("never renews a session with a turn running, and renews it on the next quiet turn", async () => {
-        const provider = new MockModelProvider(replies(4));
+      it("never blocks a send during a running turn: the renewal waits for the next turn's start", async () => {
+        const provider = new MockModelProvider(replies(3));
         let release!: () => void;
         const gate = new Promise<void>((resolve) => {
           release = resolve;
@@ -3592,16 +3604,16 @@ describe("AgentRunner", () => {
         await new Promise((resolve) => setTimeout(resolve, 20));
         identity.text = "**Agent Name:** YoYo";
 
-        // A send while the turn runs goes to the same session, without
-        // waiting for the turn: it steers or queues as it always does.
+        // Sent while the turn runs: admitted at once, run after it, and its
+        // own start is the boundary where the session renews.
         const sentMeanwhile = turn(runner);
         await new Promise((resolve) => setTimeout(resolve, 20));
         release();
 
         expect(await running).toBe(first);
-        expect(await sentMeanwhile).toBe(first);
-        const next = await turn(runner);
-        expect(next).not.toBe(first);
+        const sent = await sentMeanwhile;
+        expect(sent).not.toBe(first);
+        expect(sent).toBe((await sessionRepository.current(key, "core:test-renewing"))?.id);
       });
 
       it("serializes a resume with a renewal: both run on the chat's current session", async () => {
@@ -3662,7 +3674,7 @@ describe("AgentRunner", () => {
           expect(sent.sessionId).toBe(current);
         });
 
-        it("a caller that acquired but has not submitted keeps the session from being replaced", async () => {
+        it("a caller that acquired but has not submitted keeps a usable session through a renewal", async () => {
           const runner = renewingRunner(new MockModelProvider(replies(4)));
           const first = (await run(runner)).sessionId;
           const manager = managers.at(-1)!;
@@ -3671,13 +3683,17 @@ describe("AgentRunner", () => {
           identity.text = "**Agent Name:** YoYo";
 
           const meanwhile = await run(runner);
-          // The held session is still open, and its caller's turn runs on it.
+          // The renewal swapped the session in place, so the held caller's
+          // turn runs on it, on the chat's current session.
           const heldTurn = await held.submit({ prompt: "Late" }, { priority: "after" }).turn;
           const heldEvents = await collectMessages(heldTurn.events());
+          const heldStart = heldEvents.find((message) => message.type === "turn_start");
 
-          expect(meanwhile.sessionId).toBe(first);
+          expect(meanwhile.sessionId).not.toBe(first);
           expect(errorsOf(heldEvents)).toEqual([]);
-          expect((await run(runner)).sessionId).not.toBe(first);
+          expect(heldStart?.type === "turn_start" ? heldStart.sessionId : undefined).toBe(
+            meanwhile.sessionId,
+          );
         });
 
         it("an acquire abandoned before its submit lets the session go", async () => {
@@ -3697,8 +3713,8 @@ describe("AgentRunner", () => {
           expect((await run(runner)).sessionId).not.toBe(first);
         });
 
-        it("an approval set while a turn runs keeps the session after that turn", async () => {
-          const provider = new MockModelProvider(replies(3));
+        it("an approval set while an after turn prepares keeps the session, until the hold clears", async () => {
+          const provider = new MockModelProvider(replies(4));
           let release!: () => void;
           const gate = new Promise<void>((resolve) => {
             release = resolve;
@@ -3720,7 +3736,68 @@ describe("AgentRunner", () => {
           const after = await run(runner);
           expect(after.sessionId).toBe(first);
           expect(after.errors).toEqual([]);
+
+          // The hold clears: the next turn's start renews the session.
+          held.clear();
+          const renewed = await run(runner);
+          expect(renewed.sessionId).not.toBe(first);
+          expect(renewed.errors).toEqual([]);
         });
+      });
+
+      it("an after-priority backend turn that sets an approval while it prepares its model is never renewed under it", async () => {
+        let gated = false;
+        let release!: () => void;
+        const gate = new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        let preparing!: () => void;
+        const prepared = new Promise<void>((resolve) => {
+          preparing = resolve;
+        });
+        const runner = renewingRunner(new MockModelProvider(replies(4)), async () => {
+          if (!gated) return;
+          gated = false;
+          preparing();
+          await gate;
+        });
+        const first = (await turn(runner))!;
+        const session = await managers
+          .at(-1)!
+          .open({ agentName: "test-renewing", channelThreadKey: key });
+        gated = true;
+        const backend = session.submit({ prompt: "backend" }, { priority: "after" });
+        const backendEvents = collectMessages((await backend.turn).events());
+        await prepared;
+        // While the turn prepares its model, the setup changes and the turn
+        // creates an approval that holds the session.
+        identity.text = "**Agent Name:** YoYo";
+        held.add(first);
+
+        // A send meanwhile returns at once; its turn waits behind the backend turn.
+        let sentStarted = false;
+        const sent = (async () => {
+          const messages = await collectMessages(
+            runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
+          );
+          const start = messages.find((message) => message.type === "turn_start");
+          sentStarted = true;
+          return start?.type === "turn_start" ? start.sessionId : undefined;
+        })();
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        expect(sentStarted).toBe(false);
+        release();
+        const backendStart = (await backendEvents).find((message) => message.type === "turn_start");
+
+        expect(backendStart?.type === "turn_start" ? backendStart.sessionId : undefined).toBe(
+          first,
+        );
+        // The send's own turn start is the next boundary, and the hold keeps it.
+        expect(await sent).toBe(first);
+        expect((await sessionRepository.session(first))?.supersededBy).toBeFalsy();
+
+        held.clear();
+        expect(await turn(runner)).not.toBe(first);
       });
 
       it("keeps a session an approval holds mid-turn, and renews it once the hold ends", async () => {
