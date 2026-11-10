@@ -745,16 +745,6 @@
         }
       }
     },
-    "Downloading %@…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在下载 %@…"
-          }
-        }
-      }
-    },
     "Due now" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2455,22 +2445,22 @@
         }
       }
     },
-    "This can take a few minutes. You can leave the app; it picks up where it left off." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这可能需要几分钟。你可以先离开 App，回来后会接着等待。"
-          }
-        }
-      }
-    },
     "This connection cannot start here" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法在这里开始连接"
+          }
+        }
+      }
+    },
+    "This runs on your Rome's server, not on this phone, and can take a few minutes. You can leave the app and come back." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "升级在你的 Rome 服务器上进行，不在这台手机上，可能需要几分钟。你可以先离开 App，稍后再回来。"
           }
         }
       }
@@ -2671,6 +2661,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在更新任务"
+          }
+        }
+      }
+    },
+    "Upgrading to %@…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在升级到 %@…"
           }
         }
       }

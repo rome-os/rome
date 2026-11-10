@@ -139,7 +139,7 @@ struct UpdateScreen: View {
                         .id(line)
                         .transition(.opacity)
                 }
-                Text("This can take a few minutes. You can leave the app; it picks up where it left off.")
+                Text("This runs on your Rome's server, not on this phone, and can take a few minutes. You can leave the app and come back.")
                     .romeFont(15)
                     .lineSpacing(3)
                     .foregroundStyle(Palette.sub)

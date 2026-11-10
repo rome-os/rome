@@ -4,6 +4,7 @@
 import type { StreamAgentEvent, ThreadContext } from "@rome-os/app-runtime";
 import type { DashboardSessions } from "../domain/dashboard-sessions.js";
 import type { AgentName, SessionId } from "../domain/session.js";
+import type { TurnActor } from "../domain/turn-facts.js";
 import {
   newSubagentSession,
   refuseResume,
@@ -42,6 +43,8 @@ export interface CallingTurn {
    *  manager per fork. */
   sessions: SubagentSessions;
   at: SessionPlace;
+  /** Who the calling turn acts for: the subagent's turn acts for the same person. */
+  actor?: TurnActor;
 }
 
 /** One subagent call, from its start to its outcome. */
@@ -87,7 +90,11 @@ export interface SubagentSession {
   submit(
     prompt: string,
     parentTurn: { sessionId: SessionId; turnId: string; agentName: AgentName },
-    context: { threadContext?: ThreadContext; sharedContext?: Record<string, unknown> },
+    context: {
+      threadContext?: ThreadContext;
+      sharedContext?: Record<string, unknown>;
+      actor?: TurnActor;
+    },
   ): { turnId: string; events: AsyncIterable<StreamAgentEvent> };
   stop(reason?: string): Promise<void>;
   /** Lets go of the session when no turn is submitted on it after all. */
@@ -158,7 +165,11 @@ export function createSubagentCalls(deps: {
       const turn = session.submit(
         request.prompt,
         { sessionId: from.agentSessionId, turnId: from.key.turnId, agentName: from.agentName },
-        { threadContext: from.at.threadContext, sharedContext: from.at.sharedContext },
+        {
+          threadContext: from.at.threadContext,
+          sharedContext: from.at.sharedContext,
+          ...(from.actor ? { actor: from.actor } : {}),
+        },
       );
 
       let settled = false;

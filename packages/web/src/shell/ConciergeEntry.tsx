@@ -309,7 +309,13 @@ function ConciergeTopicEntry({
           count > 0 ? t("recentChats.topicChatUnread", { name, count, label }) : undefined
         }
       >
-        <span className={`flex-1 truncate ${chat.archived ? "text-subtle-foreground" : ""}`}>
+        {/* The menu button floats over the row's end, so the name keeps clear
+            of it: the badge holds that room when there is one. */}
+        <span
+          className={`flex-1 truncate ${chat.archived ? "text-subtle-foreground" : ""} ${
+            count > 0 ? "" : "pr-[var(--control-h-sm)]"
+          }`}
+        >
           {name}
         </span>
         {count > 0 ? (

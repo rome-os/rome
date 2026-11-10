@@ -522,6 +522,25 @@ export class ChatsWebChatRepository extends WebChatRepository {
   }
 
   /**
+   * Who wrote the messages that started `turn`, by the account each records
+   * ("guardian", "visitor:<account>"), each once. More than one means the
+   * turn held more than one person's input. An agent's message names no one.
+   */
+  getTurnPromptSenders(turn: Pick<InterruptedTurn, "sessionId" | "turnId">): string[] {
+    return this.db
+      .all<{ sender: string }>(sql`
+      SELECT DISTINCT m.sender_account_id AS sender
+      FROM agent_turn_messages l
+      JOIN ${romeSessions} s ON s.id = l.session_id
+      JOIN ${CHAT_MESSAGES} m ON m.id = l.message_id
+        AND m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+      WHERE l.session_id = ${turn.sessionId} AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
+        AND m.sender_agent IS NULL AND m.sender_account_id IS NOT NULL
+    `)
+      .map((row) => row.sender);
+  }
+
+  /**
    * The newest turn of each dashboard chat that ended in an error, when its
    * trace began at or after `sinceMs` or its runtime session was active then.
    * A turn that began earlier and was active since is listed, and the caller

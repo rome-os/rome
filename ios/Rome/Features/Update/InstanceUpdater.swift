@@ -100,7 +100,7 @@ enum UpdateGate {
             return String(localized: "Asking Rome Cloud to start the update…")
         case .updating(let target, _):
             switch progress {
-            case .downloading: return String(localized: "Downloading \(target)…")
+            case .downloading: return String(localized: "Upgrading to \(target)…")
             case .restarting: return String(localized: "Restarting your Rome…")
             case .almostDone: return String(localized: "Almost done…")
             }

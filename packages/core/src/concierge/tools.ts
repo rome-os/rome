@@ -319,11 +319,17 @@ export async function buildConciergeTools(
   const findListEntry = async (chatId: string) =>
     (await webchatRepo.listSessions("all")).find((chat) => chat.id === chatId);
 
-  // A message the guardian did not ask for may also reach their phone. Its
+  // Every message of a turn with a push level may also reach the phone. Its
   // lock-screen line is only ever words the Concierge wrote in this message,
-  // and null when it wrote none, which pushes a fixed line.
-  const said = (chatId: string, turnId: string, ownWords: string | null) =>
-    service.said({ turnId, chatId, ownWords, level: context.getTurnPushLevel() });
+  // and null when it wrote none or marked them private, which pushes a fixed line.
+  const said = (chatId: string, turnId: string, ownWords: string | null, isPrivate = false) =>
+    service.said({
+      turnId,
+      chatId,
+      ownWords,
+      ...(isPrivate ? { private: true } : {}),
+      level: context.getTurnPushLevel(),
+    });
 
   // The chat thread a message the Concierge says goes into
   // (docs/domains/chats.md#chat-thread), and the placing of the guardian's
@@ -386,6 +392,7 @@ export async function buildConciergeTools(
   const say = async (
     text: string,
     format: "bubble" | "long",
+    isPrivate: boolean,
     thread?: string,
     answers?: string,
   ) => {
@@ -396,7 +403,7 @@ export async function buildConciergeTools(
       [{ type: "text", content: text, ...(format === "long" ? { format } : {}) }],
       { chatThread: await chatThreadFor(thread, answers) },
     );
-    said(chatId, turnId, text);
+    said(chatId, turnId, text, isPrivate);
     return id;
   };
 
@@ -444,7 +451,8 @@ export async function buildConciergeTools(
       name: "say",
       description:
         "Send the guardian one message. This is the only way the guardian hears you: text you write outside this tool is private. " +
-        "One call is one message. Use format bubble (default) for a short chat line, and long for one long message with content the guardian asked for.",
+        "One call is one message. Use format bubble (default) for a short chat line, and long for one long message with content the guardian asked for. " +
+        "Every message can show on the guardian's phone lock screen: set private for one that holds a code, password, token or other secret, and the phone shows a fixed line instead.",
       inputSchema: {
         type: "object",
         required: ["text"],
@@ -455,6 +463,11 @@ export async function buildConciergeTools(
             enum: ["bubble", "long"],
             description: "bubble: a short chat line. long: one long message.",
           },
+          private: {
+            type: "boolean",
+            description:
+              "true: the message holds a secret, so its words never show on the phone's lock screen.",
+          },
           thread: THREAD_PARAMETER,
           answers: ANSWERS_PARAMETER,
         },
@@ -464,6 +477,7 @@ export async function buildConciergeTools(
           const messageId = await say(
             requireString(args, "text"),
             args.format === "long" ? "long" : "bubble",
+            args.private === true,
             optionalString(args, "thread"),
             optionalString(args, "answers"),
           );

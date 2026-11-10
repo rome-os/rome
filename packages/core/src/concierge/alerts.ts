@@ -21,6 +21,7 @@
 // up to BATCH_ATTEMPTS times. An important turn that fails leaves its items owed
 // and is tried again RETRY_MS later.
 
+import { withoutSessionActor } from "../access/session-actor.js";
 import type { ConciergeChatRef, ConciergeQuietHours } from "@rome/api-types/concierge";
 import type { ConciergeFollowItemRow } from "../db/repositories/concierge-follow-items.js";
 import { createLogger } from "../logger.js";
@@ -100,7 +101,10 @@ export class FollowBatcher {
     if (this.timer || this.flushing || this.queue.length === 0) return;
     const first = this.queue[0]?.at ?? this.deps.now();
     const at = Math.max(first + BATCH_WINDOW_MS, this.notBefore);
-    this.timer = setTimeout(() => void this.run(), Math.max(0, at - this.deps.now()));
+    // The batch serves every owner, so it runs as no one's session actor.
+    this.timer = withoutSessionActor(() =>
+      setTimeout(() => void this.run(), Math.max(0, at - this.deps.now())),
+    );
   }
 
   private async run(): Promise<void> {
@@ -205,12 +209,15 @@ export class ImportantDelivery {
 
   private schedule(at: number): void {
     if (this.timer) clearTimeout(this.timer);
-    this.timer = setTimeout(
-      () => {
-        this.timer = null;
-        void this.deliver();
-      },
-      Math.max(0, at - this.deps.now()),
+    // Delivery serves every owner, so it runs as no one's session actor.
+    this.timer = withoutSessionActor(() =>
+      setTimeout(
+        () => {
+          this.timer = null;
+          void this.deliver();
+        },
+        Math.max(0, at - this.deps.now()),
+      ),
     );
     this.timer.unref?.();
   }

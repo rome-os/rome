@@ -1,4 +1,10 @@
-import { describe, it, expect, afterEach } from "@rstest/core";
+import { describe, it, expect, afterEach, rs } from "@rstest/core";
+import { runWithSessionActor } from "../../access/session-actor.js";
+import { actionCaller, sendForCaller } from "./caller-notify.js";
+import { RoutinesRepository } from "../../db/repositories/routines.js";
+import { RoutineRunsRepository } from "../../db/repositories/routine-runs.js";
+import { RoutineEngine } from "../../routines/engine.js";
+import { systemClock } from "../../lib/clock.js";
 import { callAction } from "./call-action.js";
 import { actionExecutionContext } from "./context.js";
 import { buildAgentConfig } from "../../test/helpers.js";
@@ -197,6 +203,130 @@ describe("ApprovalHandler", () => {
       const row = await rome.repos.approvals.findById(approvalId);
       expect(row!.executionState).toBe("succeeded");
       expect(row!.executedAt).not.toBeNull();
+    });
+
+    it("acts for the person whose turn asked, never the guardian who approved", async () => {
+      const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
+      const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+      const pushes: unknown[] = [];
+      // "Do X, then notify me": the notification needs approval.
+      const notifyMe = recordingAction("notify_me", {
+        requiresApproval: true,
+        execute: async () => {
+          await sendForCaller(
+            {
+              send: async (content) => {
+                pushes.push(content);
+                return { kind: "ok", attempted: 1, sent: 1, failed: 0 };
+              },
+            },
+            async () => null,
+            actionCaller(actionExecutionContext.getStore()),
+            { body: "X is done" },
+          );
+          return { status: "ok", data: null };
+        },
+      });
+      await setup({ actions: [notifyMe.action] });
+      const recorded = await rome.actionEngine.run(
+        "notify_me",
+        {},
+        {
+          initiator: "agent:main",
+          actor: visitor,
+          channelContext: { channel: "telegram", threadId: "t-1" },
+          sessionId: "sess-1",
+          agentName: "main",
+          channelThreadKey: "telegram:t-1",
+        },
+      );
+      if (recorded.status !== "pending_approval") throw new Error(recorded.status);
+      const approvalId = recorded.approval.approvalId;
+      await rome.repos.approvals.resolvePending(approvalId, "approve", "test-guardian");
+      await seedAgentSession("sess-1", "main", "telegram:t-1");
+      const run = rs.spyOn(rome.agentRunner, "run");
+
+      await runWithSessionActor(guardian, () => rome.approvalHandler.onApproved(approvalId));
+
+      expect(pushes).toEqual([{ body: "X is done", recipient: "acct-v" }]);
+      expect(run.mock.calls[0]?.[0]).toMatchObject({ actor: visitor });
+    });
+
+    it("approves a visitor's routine fire as that visitor, finding it by the run's root id", async () => {
+      const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
+      const pushes: unknown[] = [];
+      // A routine whose action needs approval, then notifies with no chat.
+      const notifyMe = recordingAction("notify_me", {
+        requiresApproval: true,
+        execute: async () => {
+          await sendForCaller(
+            {
+              send: async (content) => {
+                pushes.push(content);
+                return { kind: "ok", attempted: 1, sent: 1, failed: 0 };
+              },
+            },
+            async () => null,
+            actionCaller(actionExecutionContext.getStore()),
+            { body: "It is 5" },
+          );
+          return { status: "ok", data: null };
+        },
+      });
+      await setup({ actions: [notifyMe.action] });
+      const routines = new RoutinesRepository(rome.db);
+      const routineId = await actionExecutionContext.run(
+        { executionId: "e", rootExecutionId: "e", initiator: "agent:main", actor: visitor },
+        () =>
+          routines.create({
+            name: "remind me",
+            trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "17:00" },
+            actionName: "notify_me",
+            args: {},
+          }),
+      );
+      const engine = new RoutineEngine(
+        routines,
+        new RoutineRunsRepository(rome.db),
+        rome.actionEngine,
+        0,
+        systemClock,
+      );
+      const run = await engine.runNow(routineId);
+      expect(run.status).toBe("pending_approval");
+      const [approval] = await rome.repos.approvals.findPending();
+      await rome.repos.approvals.resolvePending(approval!.id, "approve", "test-guardian");
+
+      await runWithSessionActor({ kind: "guardian", userId: "seat", via: "cookie" }, () =>
+        rome.approvalHandler.onApproved(approval!.id),
+      );
+
+      expect(pushes).toEqual([{ body: "It is 5", recipient: "acct-v" }]);
+    });
+
+    it("resumes a rejected request's turn for the person who asked", async () => {
+      const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
+      const guarded = recordingAction("guarded", { requiresApproval: true });
+      await setup({ actions: [guarded.action] });
+      const recorded = await rome.actionEngine.run(
+        "guarded",
+        {},
+        {
+          initiator: "agent:main",
+          actor: visitor,
+          channelContext: { channel: "telegram", threadId: "t-1" },
+          sessionId: "sess-1",
+          agentName: "main",
+          channelThreadKey: "telegram:t-1",
+        },
+      );
+      if (recorded.status !== "pending_approval") throw new Error(recorded.status);
+      await seedAgentSession("sess-1", "main", "telegram:t-1");
+      const run = rs.spyOn(rome.agentRunner, "run");
+      await runWithSessionActor({ kind: "guardian", userId: "seat", via: "cookie" }, () =>
+        rome.approvalHandler.onRejected(recorded.approval.approvalId),
+      );
+      expect(run.mock.calls[0]?.[0]).toMatchObject({ actor: visitor });
     });
 
     it("resumes the agent session with the formatted success result", async () => {

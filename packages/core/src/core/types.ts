@@ -3,6 +3,7 @@ import type {
   RunParams as SdkRunParams,
 } from "@rome-os/app-runtime";
 import type { NotifyLevel } from "../lib/notify-client.js";
+import type { TurnActor } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
 
 export type { ForkRunMode, ForkSourceCheckpoint, ThreadContext } from "@rome-os/app-runtime";
@@ -11,10 +12,12 @@ export interface RunParams extends SdkRunParams {
   shouldRun?: () => boolean;
   /** Internal continuations should not be treated as guardian-authored turns. */
   initiatedBy?: "user" | "system";
-  /** The guardian did not start this turn, and the first message the agent
-   *  says to them in it goes to their phone as a push at this level. Absent,
-   *  the turn pushes nothing. */
+  /** Each message the agent says in this turn goes to the phone of the person
+   *  the chat serves, as a push at this level (ConciergePush). Absent, the
+   *  turn pushes nothing. */
   pushLevel?: NotifyLevel;
+  /** Who the turn acts for, such as the person whose reminder woke it. Absent, no one. */
+  actor?: TurnActor;
   /** A message of the chat this turn answers though no message there started
    *  it, such as the one that started the task it reports on. Absent, the
    *  turn names none. */
@@ -51,6 +54,8 @@ export interface ForkRunParams extends SdkForkRunParams {
    * until the run starts.
    */
   persistThreadKey?: (forkSessionId: string) => string;
+  /** Who the forked turn acts for: the person who asked for the fork. Absent, no one. */
+  actor?: TurnActor;
 }
 
 export interface AgentRunnerInterface {
