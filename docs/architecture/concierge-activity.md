@@ -32,6 +32,8 @@ flowchart LR
 - **A task result counts from the moment the task chat ends until the turn that reports it ends,** so the chat never reads as idle between the two.
 - **A named tool call stays the activity for at least 1.5 s** before plain work, running task chats or idle takes its place. Something waiting on the owner and another named tool replace it at once.
 - **Idle is told only once it has lasted 1 s,** since one fact often ends a moment before the next begins. Every other change is told at once.
+- **A quiet turn, one the owner is not meant to see, counts as work only once it says something,** as the transcript shows it.
+- **No activity stays stale.** Every chat whose activity is not idle has its facts read again at least every 30 s, so a fact that changes without telling still shows, and a busy chat that is archived or deleted is told idle.
 - **The activity is said as a kind and its parameters, never as text.** Each client words it in its own language, so a server change never changes a client's copy.
 - **It reaches the chat's owner only,** on the owner's own `concierge.activity` live-events topic, and only when it changes. Like the chat, it does not exist for anyone else, the guardian included.
 - **A client that connects or reconnects starts from where each chat stands now:** a new subscription first tells every one of the owner's Concierge chats, and the Concierge chats list carries each chat's current activity. Both are additions, so a client from before them keeps working.
