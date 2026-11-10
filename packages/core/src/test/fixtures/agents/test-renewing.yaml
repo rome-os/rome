@@ -6,5 +6,6 @@ tools:
   - Read
 policy:
   freshSessionOnSetupChange: true
+  loadMemory: true
 systemPromptPrefix: |
   You are a test agent whose setup changes in tests.

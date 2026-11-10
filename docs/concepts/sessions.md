@@ -44,14 +44,20 @@ A continuity key is the value that whatever opens a session, and comes back to i
 
 ## Setup
 
-A session's setup is what it takes when it opens and keeps for its life: its agent's instructions, its identity (`IDENTITY.md`, which holds its name), and its tools with their schemas. Memory, follows and tasks are not part of it, since a session reads them while it runs. Nor is the guardian's profile (`GUARDIAN.md`), which the agent writes down as it learns about the guardian: a change to it does not replace a session.
+A session's setup is what it takes when it opens and keeps for its life. It counts exactly these:
+
+- the agent's own instructions and the charter (`CHARTER.md`), the guardian's rules for every agent
+- its identity (`IDENTITY.md`), which holds its name
+- its tools: Rome's tools with their schemas, the provider's tools it declares, the MCP servers it declares, and the shape its answer must take.
+
+Memory, follows and tasks are not part of it, since a session reads them while it runs. Nor is the guardian's profile (`GUARDIAN.md`), which the agent writes down as it learns about the guardian. Nor are the instance's runtime facts (its folders, address and mailbox) or the list of installed apps, which change with the instance rather than with the agent. A change to any of these does not replace a session. Which actions the agent may call is read on every turn, so a grant or a revoke applies on the next turn without a new session.
 
 **Contracts:**
 
 - A change to an agent's setup reaches a session only when a fresh session opens.
 - An agent whose policy asks for it gets a fresh session in the same chat when its setup changed since its session opened. The check runs before each turn opened by continuity key. A session resumed by its id is never replaced. The Concierge's chats work this way, since one of them can run on one session for days.
 - A session that recorded no setup opened before setups were recorded, and is replaced on its next turn under such a policy.
-- A replacement for a changed setup is silent to the guardian. It carries the [continuation](#continuation) notice until a turn of its own succeeds, so a first open that fails does not lose it.
+- A replacement for a changed setup sends no message or push: the chat shows only the line where the session was renewed. It carries the [continuation](#continuation) notice until a turn of its own succeeds, so a first open that fails does not lose it.
 
 ## Model pin
 

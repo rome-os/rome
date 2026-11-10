@@ -16,9 +16,10 @@ interface PromptOptions {
 export interface SystemPrompts {
   build(agent: PromptAgent, options: PromptOptions): string;
   /**
-   * The system prompt `build` gives, without memory, from the sources as they
-   * are now: what a session's setup holds of its prompt. The caller leaves
-   * out the opener's context suffix when it is living context, such as the
+   * What a session's setup holds of its prompt, from the sources as they are
+   * now: the system prompt without memory, the runtime facts or the
+   * installed apps (docs/concepts/sessions.md#setup). The caller leaves out
+   * the opener's context suffix when it is living context, such as the
    * guardian's profile. When the fixed part
    * changed since it was held, the new one is held, so the next `build` uses
    * it too.
@@ -49,10 +50,10 @@ export function createSystemPrompts(options: { sources: PromptSources }): System
     setup(agent, { contextSuffix, widgets }) {
       // Read again, since a file the fixed part quotes, such as the
       // identity, changes without telling the sources.
-      const prefix = buildPromptPrefix(agent, sources.material());
-      prefixes.set(keyOf(agent), prefix);
+      const material = sources.material();
+      prefixes.set(keyOf(agent), buildPromptPrefix(agent, material));
       return buildSystemPrompt({
-        prefix,
+        prefix: buildPromptPrefix(agent, material, { setup: true }),
         owner: agent.owner,
         memory: null,
         contextSuffix,

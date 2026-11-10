@@ -3304,6 +3304,10 @@ describe("AgentRunner", () => {
       const key = "webchat:renewing-chat";
       const identity = { text: "**Agent Name:** Yo" };
       const charter = { text: "Be kind." };
+      const instance = {
+        apps: [] as { appId: string; description: string }[],
+        publicOrigin: undefined as string | undefined,
+      };
       let sessionTools: RomeTool[];
       const managers: Sessions[] = [];
       /** Sessions an approval waits to resume mid-turn. */
@@ -3326,8 +3330,9 @@ describe("AgentRunner", () => {
               repoAppsDir: "/repo/rome_apps",
               internalApiBaseUrl: "http://127.0.0.1:4141",
               docsDir: null,
+              ...(instance.publicOrigin ? { publicOrigin: instance.publicOrigin } : {}),
             },
-            installedApps: [],
+            installedApps: instance.apps,
           }),
           // Memory is not part of the setup.
           memory: () => ({ index: `Memory read at ${Math.random()}`, projects: [] }),
@@ -3385,6 +3390,8 @@ describe("AgentRunner", () => {
       beforeEach(() => {
         identity.text = "**Agent Name:** Yo";
         charter.text = "Be kind.";
+        instance.apps = [];
+        instance.publicOrigin = undefined;
         sessionTools = [tool("Send one message.")];
         held.clear();
       });
@@ -3406,6 +3413,17 @@ describe("AgentRunner", () => {
         const second = await turn(runner, { contextSuffix: "## Guardian\n\nLikes coffee." });
 
         expect(second).toBe(first);
+      });
+
+      it("keeps the session when an app is installed or the instance's address changes", async () => {
+        const runner = renewingRunner(new MockModelProvider(replies(3)));
+        const first = await turn(runner);
+        instance.apps = [{ appId: "notes", description: "Takes notes." }];
+        const afterInstall = await turn(runner);
+        instance.publicOrigin = "https://rome.example.com";
+        const afterAddress = await turn(runner);
+
+        expect([afterInstall, afterAddress]).toEqual([first, first]);
       });
 
       it.each([
