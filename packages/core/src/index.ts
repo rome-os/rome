@@ -228,6 +228,7 @@ import { EventSources } from "./events/event-sources.js";
 import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
+import { routineWorkerCalls } from "./routines/for-apps.js";
 import { EventCatalog } from "./event-catalog.js";
 import {
   resolveOneOffDate,
@@ -1916,35 +1917,36 @@ async function main() {
     });
   });
 
-  const workerRpcServer = new WorkerRpcServer({
-    channelsService,
-    connectionRegistry,
-    channelOf,
-    chatSettings,
-    routinesRepo,
-    routineEngine,
-    eventService,
-    appLifecycle,
-    appStore,
-    systemUpgrade: systemUpgradeService,
-    hasAgent: (name) => agentLoader.find(name) !== undefined,
-    hasRegisteredAction: (name) => actionRegistry.has(name),
-    isExplicitAction: (name) => actionRegistry.isExplicit(name),
-    validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
-    // Same allow-list resolution as the agent session's tool gate.
-    hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
-    backendTurnRunner,
-    notify: notifyClient,
-    feedback: feedbackClient,
-    cloudProfile: cloudProfileClient,
-    agentNames: agentNameResolver,
-    appConnections,
-    appIdForAction: (actionName) => {
-      const metadata = actionRegistry.getMetadata(actionName);
-      return metadata?.ownerType === "app" ? metadata.ownerId : null;
+  const workerRpcServer = new WorkerRpcServer(
+    {
+      channelsService,
+      connectionRegistry,
+      channelOf,
+      chatSettings,
+      eventService,
+      appLifecycle,
+      appStore,
+      systemUpgrade: systemUpgradeService,
+      hasAgent: (name) => agentLoader.find(name) !== undefined,
+      hasRegisteredAction: (name) => actionRegistry.has(name),
+      isExplicitAction: (name) => actionRegistry.isExplicit(name),
+      validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
+      // Same allow-list resolution as the agent session's tool gate.
+      hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
+      backendTurnRunner,
+      notify: notifyClient,
+      feedback: feedbackClient,
+      cloudProfile: cloudProfileClient,
+      agentNames: agentNameResolver,
+      appConnections,
+      appIdForAction: (actionName) => {
+        const metadata = actionRegistry.getMetadata(actionName);
+        return metadata?.ownerType === "app" ? metadata.ownerId : null;
+      },
+      sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
-    sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
-  });
+    routineWorkerCalls({ routinesRepo, routineEngine }),
+  );
   actionEngine.setWorkerRpcServer(workerRpcServer);
   actionEngine.startWorkerWarmPool();
   // Fallback for worker→main RPC issued from action bodies that run in the main
