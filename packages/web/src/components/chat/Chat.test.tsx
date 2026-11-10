@@ -12,8 +12,11 @@ import { requestConciergeJump } from "@/components/concierge/concierge-jump";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
 import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
-import { SlotProvider, useSlotOutlet } from "@/components/slot";
-import { CONCIERGE_LEADING_SLOT } from "@/components/concierge/ConciergeHeaderStatus";
+import { SlotOutlet, SlotProvider, useSlotOutlet } from "@/components/slot";
+import {
+  CONCIERGE_LEADING_SLOT,
+  CONCIERGE_TITLEBAR_SLOT,
+} from "@/components/concierge/ConciergeHeaderStatus";
 import { ToolTasksContext, type ToolTasksHost } from "@/pages/free/tool-tasks";
 import { Chat } from "./Chat";
 import enChat from "@/i18n/locales/en/chat.json";
@@ -2203,6 +2206,72 @@ describe("Chat Concierge empty state", () => {
     expect(screen.getByRole("button", { name: "navbar.more" }).className).not.toContain(
       "rounded-full",
     );
+  });
+
+  it("hangs the Concierge's mascot from the Mac app's title bar and puts its buttons in the bar", async () => {
+    mockConciergeActivity.mockReturnValue({ kind: "tasks", title: "Book the flight", more: 0 });
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Concierge",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const tasksHost = (compact: boolean): ToolTasksHost => ({
+      active: false,
+      compact,
+      show: rs.fn(),
+      hide: rs.fn(),
+    });
+    const at = (compact: boolean, paneOpen: boolean) => (
+      <MemoryRouter>
+        <SlotProvider>
+          <div data-testid="bar">
+            <SlotOutlet name="titlebar" />
+          </div>
+          <div data-testid="hang">
+            <SlotOutlet name={CONCIERGE_TITLEBAR_SLOT} />
+          </div>
+          <ToolTasksContext.Provider value={tasksHost(compact)}>
+            <ToolTraceContext.Provider
+              value={{
+                outlet: null,
+                paneOpen,
+                setPaneCollapsed: rs.fn(),
+                reveal: rs.fn(),
+                set: rs.fn(),
+              }}
+            >
+              <Chat sessionId="concierge" variant="concierge" navbarSlot="titlebar" />
+            </ToolTraceContext.Provider>
+          </ToolTasksContext.Provider>
+        </SlotProvider>
+      </MemoryRouter>
+    );
+    const view = render(at(false, false));
+    const hang = screen.getByTestId("hang");
+    const bar = screen.getByTestId("bar");
+    // The same badge and pill as the floating header, with the same status line.
+    const badge = await waitFor(() => {
+      const found = hang.querySelector<HTMLElement>("[data-concierge-header-badge]");
+      if (!found) throw new Error("no badge");
+      return found;
+    });
+    expect(badge.querySelector(".rome-mascot")).not.toBeNull();
+    const pill = hang.querySelector<HTMLElement>("[data-concierge-header-pill]")!;
+    expect(within(pill).getByText("Concierge")).toBeTruthy();
+    expect(within(pill).getByText("concierge.activity.tasks")).toBeTruthy();
+    expect(document.querySelector("[data-concierge-header]")).toBeNull();
+    // The buttons are any chat's, in the bar.
+    const more = within(bar).getByRole("button", { name: "navbar.more" });
+    expect(more.className).not.toContain("rounded-full");
+    expect(within(bar).getByRole("button", { name: "chat.expandTools" })).toBeTruthy();
+    expect(document.querySelector<HTMLElement>(".concierge-header-clear")!.className).toContain(
+      "overflow-y-auto",
+    );
+
+    // The pane fills a narrow window in place of the chat: no mascot over it.
+    view.rerender(at(true, true));
+    await waitFor(() => expect(hang.querySelector("[data-concierge-header-badge]")).toBeNull());
+    expect(within(bar).getByRole("button", { name: "navbar.more" })).toBeTruthy();
   });
 
   it("says what the Concierge is doing under its name", async () => {

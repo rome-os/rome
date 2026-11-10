@@ -170,14 +170,13 @@ describe("ThisComputerButton", () => {
     ).toBeTruthy();
   });
 
-  it("shows the switch and state line, and turns the computer off", async () => {
+  it("shows the switch and turns the computer off", async () => {
     const { bridge } = installBridge(status("connected"));
     render(<ThisComputerButton />);
     await userEvent.click(
       await screen.findByRole("button", { name: "Rome can use this computer" }),
     );
-    expect(await screen.findByText("Connected")).toBeTruthy();
-    const toggle = screen.getByRole("switch", { name: "Let Rome use this computer" });
+    const toggle = await screen.findByRole("switch", { name: "Computer use" });
     expect(toggle.getAttribute("aria-checked")).toBe("true");
     await userEvent.click(toggle);
     expect(bridge.setEnabled).toHaveBeenCalledWith(false);
@@ -190,11 +189,21 @@ describe("ThisComputerButton", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: "Rome can't use this computer" }),
     );
-    expect(await screen.findByText("Turned off")).toBeTruthy();
-    const toggle = screen.getByRole("switch", { name: "Let Rome use this computer" });
+    const toggle = await screen.findByRole("switch", { name: "Computer use" });
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     await userEvent.click(toggle);
     expect(bridge.setEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it("does not toggle when the title is clicked", async () => {
+    const { bridge } = installBridge(status("connected"));
+    render(<ThisComputerButton />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Rome can use this computer" }),
+    );
+    await userEvent.click(await screen.findByText("Computer use"));
+    expect(bridge.setEnabled).not.toHaveBeenCalled();
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
   });
 
   it("disables the switch while a change is applied", async () => {
@@ -205,7 +214,7 @@ describe("ThisComputerButton", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: "Rome can use this computer" }),
     );
-    const toggle = await screen.findByRole("switch", { name: "Let Rome use this computer" });
+    const toggle = await screen.findByRole("switch", { name: "Computer use" });
     await userEvent.click(toggle);
     await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(true));
     act(() => finish(status("disabled")));
@@ -218,7 +227,7 @@ describe("ThisComputerButton", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: "Rome can use this computer" }),
     );
-    await userEvent.click(await screen.findByRole("button", { name: "View audit log" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Computer use log" }));
     expect(bridge.openAuditLog).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole("switch")).toBeNull());
   });
@@ -230,7 +239,7 @@ describe("ThisComputerButton", () => {
       await screen.findByRole("button", { name: "Rome can use this computer" }),
     );
     await screen.findByRole("switch");
-    expect(screen.queryByText("View audit log")).toBeNull();
+    expect(screen.queryByText("Computer use log")).toBeNull();
   });
 
   it("speaks Chinese", async () => {
@@ -241,9 +250,8 @@ describe("ThisComputerButton", () => {
       await userEvent.click(
         await screen.findByRole("button", { name: "Rome 暂时无法连接这台电脑" }),
       );
-      expect(await screen.findByRole("switch", { name: "允许 Rome 操作这台电脑" })).toBeTruthy();
-      expect(screen.getByText("离线")).toBeTruthy();
-      expect(screen.getByText("查看操作记录")).toBeTruthy();
+      expect(await screen.findByRole("switch", { name: "电脑操作" })).toBeTruthy();
+      expect(screen.getByText("电脑操作记录")).toBeTruthy();
     } finally {
       await i18n.changeLanguage("en");
     }
@@ -284,7 +292,7 @@ describe("ThisComputerButton", () => {
       await userEvent.click(await screen.findByRole("button", { name: /Computer use off/ }));
       const switches = await screen.findAllByRole("switch");
       expect(switches).toHaveLength(2);
-      const computer = screen.getByRole("switch", { name: "Let Rome use this computer" });
+      const computer = screen.getByRole("switch", { name: "Computer use" });
       const notifications = screen.getByRole("switch", { name: "Notifications" });
       expect(computer.getAttribute("aria-checked")).toBe("false");
       expect(notifications.getAttribute("aria-checked")).toBe("true");
@@ -333,7 +341,7 @@ describe("ThisComputerButton", () => {
       await userEvent.click(notifications);
       await waitFor(() => expect(notifications.hasAttribute("disabled")).toBe(true));
       expect(
-        screen.getByRole("switch", { name: "Let Rome use this computer" }).hasAttribute("disabled"),
+        screen.getByRole("switch", { name: "Computer use" }).hasAttribute("disabled"),
       ).toBe(true);
       act(() => finish(split("connected", true, false)));
       await waitFor(() => expect(notifications.hasAttribute("disabled")).toBe(false));

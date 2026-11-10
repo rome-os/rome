@@ -22,6 +22,12 @@ export const FLOATING_SURFACE =
 export const CONCIERGE_LEADING_SLOT = "conciergeHeaderLeading";
 
 /**
+ * Where the Mac app's title bar takes a Concierge chat's mascot and pill, to
+ * hang them from its lower edge over the chat.
+ */
+export const CONCIERGE_TITLEBAR_SLOT = "conciergeTitlebar";
+
+/**
  * The middle of a Concierge chat's floating header: the mascot in a round
  * badge, and under it, overlapping it, a pill with the chat's name and what
  * the Concierge is doing right now. Idle, the pill holds the name alone and

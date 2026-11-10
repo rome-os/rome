@@ -145,7 +145,7 @@ export function setupTray(options: SetupTrayOptions): Tray {
         label: "Settings…",
         click: openSettings,
       },
-      ...(openAuditLog ? [{ label: "Audit Log…", click: openAuditLog }] : []),
+      ...(openAuditLog ? [{ label: "Computer Use Log…", click: openAuditLog }] : []),
       // The floating icon is off until it is ticked here, and this is the way
       // back after its own menu has hidden it.
       ...(floatingPill

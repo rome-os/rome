@@ -148,8 +148,8 @@
   },
   "thisComputer": {
     "notifications": "通知",
-    "label": "允许 Rome 操作这台电脑",
-    "auditLog": "查看操作记录",
+    "label": "电脑操作",
+    "auditLog": "电脑操作记录",
     "tooltip": {
       "connected": "Rome 可以操作这台电脑",
       "connecting": "正在连接…",
@@ -160,12 +160,6 @@
         "connecting": "正在连接… · 电脑操作已关闭",
         "offline": "离线 · 电脑操作已关闭"
       }
-    },
-    "state": {
-      "connected": "已连接",
-      "connecting": "正在连接…",
-      "offline": "离线",
-      "disabled": "已关闭"
     }
   },
   "terminal": {
