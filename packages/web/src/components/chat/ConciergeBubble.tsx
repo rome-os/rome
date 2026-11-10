@@ -4,15 +4,11 @@ import { useTranslation } from "react-i18next";
 import { ConciergeMessageMeta } from "@/components/chat/ConciergeMessageMeta";
 import { IconButton } from "@/components/ui/icon-button";
 import type { ReplySource } from "@/components/chat/reply/reply-source";
-import { useOpenChatThread } from "@/components/chat/reply/chat-threads";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
 
 /** Devices that cannot hover, where a tap on the bubble opens its details. */
 const NO_HOVER_QUERY = "(hover: none)";
-
-/** Below the `md` breakpoint, where a tap on an agent bubble opens its chat thread. */
-const PHONE_QUERY = "(width < 48rem)";
 
 // The look of the details toggle a keyboard reveals on touch devices.
 const HOVER_CHIP =
@@ -42,9 +38,7 @@ const BUBBLE_MAX_WIDTH = "max-w-[90%]";
  *   opens is open.
  * - Without hover, tapping the bubble toggles a row of the same details under
  *   it. A tap on a link or control inside the bubble, or one that ends a text
- *   selection, does not toggle. On a phone-width screen a tap on the agent's
- *   bubble in a chat that keeps chat threads opens the bubble's thread
- *   instead, under the same exceptions. A details button stays in the tab order for
+ *   selection, does not toggle. A details button stays in the tab order for
  *   keyboards and screen readers but is not drawn.
  *
  * `side` is the edge the bubble aligns to: `start` for the agent, `end` for the
@@ -73,8 +67,6 @@ export const ConciergeBubble = memo(function ConciergeBubble({
 }) {
   const { t } = useTranslation("chat");
   const touch = useMediaQuery(NO_HOVER_QUERY);
-  const phone = useMediaQuery(PHONE_QUERY);
-  const openThread = useOpenChatThread();
   const [open, setOpen] = useState(false);
   const boxRef = useRef<HTMLDivElement>(null);
   // A selection is quoted from this bubble, though a message of several bubbles anchors its first.
@@ -84,13 +76,10 @@ export const ConciergeBubble = memo(function ConciergeBubble({
   );
 
   const onTap = (event: MouseEvent<HTMLElement>) => {
-    if (!touch && !(phone && openThread)) return;
+    if (!touch) return;
     if ((event.target as Element).closest(INTERACTIVE)) return;
     if (window.getSelection()?.isCollapsed === false) return;
-    // On a phone a tap on the agent's bubble opens its chat thread, as on
-    // iOS; inside the thread view, where nothing opens, it shows the details.
-    if (phone && side === "start" && scopedReply && openThread?.(scopedReply)) return;
-    if (touch) setOpen((current) => !current);
+    setOpen((current) => !current);
   };
 
   return (

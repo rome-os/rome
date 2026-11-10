@@ -12,10 +12,8 @@ import type { BlockActions, LivePreview } from "./MessageList";
 import { ChatThreadsProvider, threadReplyCounts } from "./reply/chat-threads";
 import { ReplyDraftProvider, useReplyDraftState } from "./reply/reply-draft";
 
-// The ways into a Concierge chat's thread view from its transcript: the
-// "N replies" line under a thread's first message on every screen, and on a
-// phone a tap on an agent bubble. The thread view's own transcript opens
-// nothing.
+// The "N replies" line into a Concierge chat's thread view from its
+// transcript, and the tap on a bubble, which opens no thread on any screen.
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({
   useDashboardIdentity: () => ({
@@ -149,40 +147,14 @@ describe("the replies line under a thread's first message", () => {
   });
 });
 
-describe("a tap on an agent bubble", () => {
-  it("opens its thread on a phone", () => {
+describe("a tap on an agent bubble on a phone", () => {
+  it("shows its details and opens no thread", () => {
     media({ phone: true, touch: true });
     const thread = renderTranscript();
-    fireEvent.click(screen.getByText("Hotels first, then the days."));
-    expect(thread()).toBe("a1");
-  });
-
-  it("opens nothing on a link, after a text selection, or on the guardian's bubble", () => {
-    media({ phone: true, touch: true });
-    const thread = renderTranscript();
-    fireEvent.click(screen.getByRole("link", { name: "the forecast" }));
-    expect(thread()).toBeNull();
-
-    const selection = rs.spyOn(window, "getSelection").mockReturnValue({
-      isCollapsed: false,
-    } as Selection);
+    expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
     fireEvent.click(screen.getByText("Hotels first, then the days."));
     expect(thread()).toBeNull();
-    selection.mockRestore();
-
-    fireEvent.click(screen.getByText("Plan Kyoto in April"));
-    expect(thread()).toBeNull();
-  });
-
-  it("opens nothing on a desktop, nor inside the thread view", () => {
-    const desktop = renderTranscript();
-    fireEvent.click(screen.getByText("Hotels first, then the days."));
-    expect(desktop()).toBeNull();
-    cleanup();
-
-    media({ phone: true, touch: true });
-    const inView = renderTranscript({ threadView: true });
-    fireEvent.click(screen.getByText("Hotels first, then the days."));
-    expect(inView()).toBeNull();
+    // The details row, with its Reply, opens under the bubble.
+    expect(screen.getByRole("button", { name: "Reply" })).toBeTruthy();
   });
 });

@@ -1,7 +1,7 @@
 // The chat threads of a Concierge chat as its main transcript offers them
 // (docs/domains/chats.md#chat-thread): how many replies each thread's first
-// message has, and a way into a thread from a message. The thread view's own
-// transcript has no provider, so a message there opens nothing.
+// message has. The thread view's own transcript has no provider, so it shows
+// no replies line.
 
 import { createContext, useContext, useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -9,7 +9,7 @@ import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 import { useReplyDraft } from "./reply-draft";
-import { replyPreview, replyTargetOf, type ReplySource } from "./reply-source";
+import { replyPreview } from "./reply-source";
 
 export interface ChatThreads {
   /** Replies per thread, keyed by the id of the thread's first message. */
@@ -43,22 +43,6 @@ export function threadReplyCounts(messages: readonly ChatMessage[]): Map<string,
 /** Memoized {@link threadReplyCounts}, as the provider's value. */
 export function useChatThreadsValue(messages: readonly ChatMessage[]): ChatThreads {
   return useMemo(() => ({ replies: threadReplyCounts(messages) }), [messages]);
-}
-
-/**
- * Opens the thread view on `source`'s thread, as Reply does, when the chat
- * keeps chat threads and the composer sends to `source`'s session. Answers
- * whether it opened. Null inside the thread view, where nothing opens.
- */
-export function useOpenChatThread(): ((source: ReplySource) => boolean) | null {
-  const draft = useReplyDraft();
-  const threads = useChatThreads();
-  if (!draft?.threads || !threads) return null;
-  return (source) => {
-    if (draft.sessionId !== source.sessionId) return false;
-    draft.openThread(replyTargetOf(source));
-    return true;
-  };
 }
 
 function wordsOf(message: ChatMessage): string {
