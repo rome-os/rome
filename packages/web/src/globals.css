@@ -904,6 +904,17 @@ html.is-electron
 html.is-electron [data-app-titlebar] {
   -webkit-app-region: drag;
 }
+/* A Concierge chat's mascot hangs from the title bar and drags the window like
+   it, below the bar too. Its messages start under the pill, which reaches
+   less far below the bar than the floating header does. */
+html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
+  -webkit-app-region: drag;
+}
+@media (width >= 48rem) {
+  html.is-electron {
+    --rome-concierge-header-offset: 4.5rem;
+  }
+}
 
 /* Set for ~900ms on the question a timeline dot jumped to. Every user bubble
    carries the same tint, so without a confirmation you cannot tell whether the
