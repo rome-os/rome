@@ -626,7 +626,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     opening?: ResumeOpening,
   ): Promise<AgentSession> => {
     const named = await deps.sessionRepository.session(sessionId);
-    if (!named?.continuityKey) {
+    if (!named?.continuityKey || !deprecatedSameAgent(deps, named.agentName, agentName)) {
       throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
     }
     // A resume is a lifecycle transition of its chat's sessions, so it takes
