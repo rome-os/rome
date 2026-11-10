@@ -5,7 +5,8 @@ import type { Action } from "../actions/types.js";
 import { createEmptyLegacyArtifactBindings } from "../artifact-id.js";
 import { SkillLoader } from "../skill-loader.js";
 import type { ArtifactMetadata } from "../types.js";
-import { AppFibers, addActions, addSkills } from "./app-fibers.js";
+import { AgentLoader, type LoadedAgent } from "../agent-loader.js";
+import { AppFibers, addActions, addEntries, addSkills } from "./app-fibers.js";
 
 function action(name: string, version = "1"): Action {
   return {
@@ -83,9 +84,9 @@ describe("AppFibers", () => {
     expect(actions.list().sort()).toEqual(["dream:dream", "dream:skill_review"]);
     expect(skills.list().map((s) => s.name)).toEqual(["dream:memory"]);
     expect(fibers.heldBy("dream")).toEqual([
-      "action:dream",
-      "action:skill_review",
-      "skill:dream:memory",
+      "actions:dream",
+      "actions:skill_review",
+      "skills:dream:memory",
     ]);
   });
 
@@ -137,4 +138,78 @@ describe("AppFibers", () => {
 
     expect(actions.get("dream:dream")?.config.description).toBe("dream v2");
   });
+
+  it("the main agent gains an app's agent as a subagent while that app is installed", async () => {
+    const agents = new AgentLoader(identity);
+    fibers = new AppFibers({ agents });
+    const main = loadedAgent("core", "main", ["coding:coding"]);
+    agents.add(main);
+    expect(agents.find("main")?.definition.allowedSubagents).toEqual([]);
+
+    await fibers.contribute(
+      "coding",
+      "agents",
+      addEntries("agents", [loadedAgent("coding", "coding")], (entry) => entry.agent.name),
+    );
+    expect(agents.find("main")?.definition.allowedSubagents).toEqual(["coding:coding"]);
+
+    await fibers.stop("coding");
+    expect(agents.find("coding:coding")).toBeUndefined();
+    expect(agents.find("main")?.definition.allowedSubagents).toEqual([]);
+  });
+
+  it("an app agent naming a missing subagent waits until that agent is installed", async () => {
+    const agents = new AgentLoader(identity);
+    fibers = new AppFibers({ agents });
+    await fibers.contribute(
+      "briefing",
+      "agents",
+      addEntries(
+        "agents",
+        [loadedAgent("briefing", "writer", ["coding:coding"])],
+        (entry) => entry.agent.name,
+      ),
+    );
+    expect(agents.find("briefing:writer")).toBeUndefined();
+    expect(agents.getRegistryLoadFailures().map((failure) => failure.ownerId)).toEqual([
+      "briefing",
+    ]);
+
+    await fibers.contribute(
+      "coding",
+      "agents",
+      addEntries("agents", [loadedAgent("coding", "coding")], (entry) => entry.agent.name),
+    );
+    expect(agents.find("briefing:writer")?.definition.allowedSubagents).toEqual(["coding:coding"]);
+    expect(agents.getRegistryLoadFailures()).toEqual([]);
+  });
 });
+
+function loadedAgent(ownerId: string, localName: string, allowedSubagents?: string[]): LoadedAgent {
+  const name = ownerId === "core" ? localName : `${ownerId}:${localName}`;
+  const ownerType = ownerId === "core" ? ("core" as const) : ("app" as const);
+  return {
+    agent: {
+      name,
+      localName,
+      ownerType,
+      ownerId,
+      definition: {
+        description: localName,
+        reasoningEffort: "high",
+        systemPromptPrefix: "",
+        tools: [],
+        permissionMode: "default",
+        ...(allowedSubagents ? { allowedSubagents } : {}),
+      },
+    },
+    metadata: {
+      kind: "agent",
+      ownerType,
+      ownerId,
+      publicName: localName,
+      aliases: [],
+      sourcePath: "",
+    },
+  };
+}

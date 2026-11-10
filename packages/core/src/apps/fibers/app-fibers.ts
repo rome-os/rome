@@ -6,26 +6,35 @@ import { Context, type Fiber } from "@deepseek-ai/cordis";
 import type { Skill } from "../../agent/index.js";
 import type { Action } from "../actions/types.js";
 import type { ArtifactMetadata } from "../types.js";
+import type { LoadedAgent } from "../agent-loader.js";
+import type { LoadedLifecycleHook } from "../app-turn-hooks.js";
+import type { LoadedMiddleware } from "../app-turn-middleware.js";
+
+/** A registry Rome keeps for one kind of thing apps bring. `add` returns the entry's undo. */
+export interface Registry<T> {
+  add(entry: T): () => void;
+}
 
 /** The registry of every app's actions. `add` returns the entry's undo. */
 export interface ActionsService {
   add(action: Action, metadata: ArtifactMetadata): () => void;
 }
 
-/** The catalog of every app's skills. `add` returns the entry's undo. */
-export interface SkillsService {
-  add(skill: Skill): () => void;
+/** Each kind of thing an app brings, as the Cordis service that registers it. */
+export interface AppRegistries {
+  actions: ActionsService;
+  skills: Registry<Skill>;
+  agents: Registry<LoadedAgent>;
+  turnHooks: Registry<LoadedLifecycleHook>;
+  turnMiddleware: Registry<LoadedMiddleware>;
 }
 
 declare module "@deepseek-ai/cordis" {
-  interface Context {
-    actions: ActionsService;
-    skills: SkillsService;
-  }
+  interface Context extends AppRegistries {}
 }
 
 /** A kind of thing an app brings, registered and replaced as one batch. */
-export type AppArtifactKind = "actions" | "skills";
+export type AppArtifactKind = keyof AppRegistries;
 
 interface RunningApp {
   fiber: Fiber;
@@ -37,9 +46,18 @@ export class AppFibers {
   private readonly root = new Context();
   private readonly running = new Map<string, RunningApp>();
 
-  constructor(services: { actions: ActionsService; skills: SkillsService }) {
-    this.root.provide("actions", services.actions);
-    this.root.provide("skills", services.skills);
+  constructor(registries: Partial<AppRegistries> = {}) {
+    this.provide(registries);
+  }
+
+  /**
+   * Provides registries, possibly after construction. A batch of a kind whose
+   * registry is not provided yet waits, through Cordis `inject`, until it is.
+   */
+  provide(registries: Partial<AppRegistries>): void {
+    for (const [kind, registry] of Object.entries(registries)) {
+      this.root.provide(kind, registry);
+    }
   }
 
   /**
@@ -57,7 +75,7 @@ export class AppFibers {
     // A fresh object per call: Cordis keys a plugin by its identity.
     const child = app.ctx.plugin({
       name: `app:${appId}/${kind}`,
-      inject: ["actions", "skills"],
+      inject: [kind],
       apply: register,
     });
     app.kinds.set(kind, child);
@@ -110,16 +128,26 @@ export function addActions(
 ): (ctx: Context) => void {
   return (ctx) => {
     for (const { action, metadata } of entries) {
-      ctx.effect(() => ctx.actions.add(action, metadata), `action:${action.config.name}`);
+      ctx.effect(() => ctx.actions.add(action, metadata), `actions:${action.config.name}`);
+    }
+  };
+}
+
+/** Registers each entry with the `kind` registry, as an effect of the calling fiber. */
+export function addEntries<K extends Exclude<AppArtifactKind, "actions">>(
+  kind: K,
+  entries: readonly Parameters<AppRegistries[K]["add"]>[0][],
+  label: (entry: Parameters<AppRegistries[K]["add"]>[0]) => string,
+): (ctx: Context) => void {
+  return (ctx) => {
+    const registry = ctx[kind] as Registry<Parameters<AppRegistries[K]["add"]>[0]>;
+    for (const entry of entries) {
+      ctx.effect(() => registry.add(entry), `${kind}:${label(entry)}`);
     }
   };
 }
 
 /** Registers each skill as an effect of the calling fiber. */
 export function addSkills(skills: readonly Skill[]): (ctx: Context) => void {
-  return (ctx) => {
-    for (const skill of skills) {
-      ctx.effect(() => ctx.skills.add(skill), `skill:${skill.name}`);
-    }
-  };
+  return addEntries("skills", skills, (skill) => skill.name);
 }

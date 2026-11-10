@@ -195,7 +195,7 @@ import {
   createSystemPrompts,
 } from "./agent/index.js";
 import { SkillLoader } from "./apps/skill-loader.js";
-import { AppFibers, addActions, addSkills } from "./apps/fibers/app-fibers.js";
+import { AppFibers, addActions, addEntries, addSkills } from "./apps/fibers/app-fibers.js";
 import type { Action } from "./apps/actions/types.js";
 import type { ArtifactMetadata } from "./apps/types.js";
 import { createPromptSources } from "./apps/prompt-sources.js";
@@ -714,14 +714,28 @@ async function main() {
   const actionLoader = new ActionLoader(artifactIdentity);
   const skillCatalog = new SkillLoader(artifactIdentity);
   const actionRegistry = new ActionRegistryImpl(artifactIdentity);
-  const appFibers = new AppFibers({ actions: actionRegistry, skills: skillCatalog });
+  const appFibers = new AppFibers({
+    actions: actionRegistry,
+    skills: skillCatalog,
+    agents: agentLoader,
+  });
+  await agentLoader.loadCore();
   const favorService = new RomeCloudFavorService();
 
   // Each subscriber re-pulls from the catalog after every event. The event
   // is the wake signal; the catalog reads are the data source.
-  appCatalog.subscribe(async function agentLoaderSubscriber() {
+  appCatalog.subscribe(async function agentLoaderSubscriber(event) {
     try {
-      await agentLoader.loadFromCatalog(appCatalog);
+      if (event.change === "removed" || !isResolvedApp(event.current)) {
+        await appFibers.stop(event.appId);
+        return;
+      }
+      const agents = await agentLoader.loadApp(appCatalog, event.appId);
+      await appFibers.contribute(
+        event.appId,
+        "agents",
+        addEntries("agents", agents, (entry) => entry.agent.name),
+      );
     } catch (err) {
       appsLog.warn("agent reload failed", {
         error: err instanceof Error ? err.message : String(err),
@@ -970,6 +984,7 @@ async function main() {
   const turnMiddleware = new AppTurnMiddleware({
     appRuntimeServices: lifecycleAppRuntimeServices,
   });
+  appFibers.provide({ turnHooks: appTurnHooks, turnMiddleware });
   const appStartedDispatcher = createAppStartedDispatcher({
     appRuntimeServices: lifecycleAppRuntimeServices,
   });
@@ -1556,10 +1571,27 @@ async function main() {
     return run;
   };
 
+  // Hooks reload for every app on each event, since an app-keys change reaches
+  // every app's hooks. Each app's batch replaces only that app's previous one.
+  const reloadEveryApp = async <F>(load: (appId: string) => Promise<F[]>): Promise<F[]> => {
+    const failures: F[] = [];
+    for (const app of appCatalog.listResolved()) failures.push(...(await load(app.appId)));
+    return failures;
+  };
+
   const reloadLifecycleHooks = await registerCatalogHookLoad({
     sourcePrefix: "lifecycle",
     warnMessage: "some agent lifecycle hooks failed to initialize",
-    load: () => appTurnHooks.loadFromCatalog(appCatalog),
+    load: () =>
+      reloadEveryApp(async (appId) => {
+        const { hooks, failures } = await appTurnHooks.loadApp(appCatalog, appId);
+        await appFibers.contribute(
+          appId,
+          "turnHooks",
+          addEntries("turnHooks", hooks, (hook) => hook.hookName),
+        );
+        return failures;
+      }),
     failureSource: (failure) => `lifecycle:${failure.hookName}:${failure.path}`,
   });
 
@@ -1567,7 +1599,16 @@ async function main() {
   const reloadTurnMiddlewareHooks = await registerCatalogHookLoad({
     sourcePrefix: "turn-middleware",
     warnMessage: "some turn-middleware hooks failed to initialize",
-    load: () => turnMiddleware.loadFromCatalog(appCatalog),
+    load: () =>
+      reloadEveryApp(async (appId) => {
+        const { middlewares, failures } = await turnMiddleware.loadApp(appCatalog, appId);
+        await appFibers.contribute(
+          appId,
+          "turnMiddleware",
+          addEntries("turnMiddleware", middlewares, () => "turn-middleware"),
+        );
+        return failures;
+      }),
     failureSource: (failure) => `turn-middleware:${failure.path}`,
   });
 
