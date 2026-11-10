@@ -6379,6 +6379,30 @@ describe("Webchat API", () => {
       expect(assistantReplies[0]!.content).toContain("Done — I sent the message.");
     });
 
+    it("carries agent renames on both status transports and removes listeners on close", async () => {
+      const listeners = new Set<(event: string, data: unknown) => void>();
+      deps.agentNameEvents = {
+        subscribe(emit) {
+          listeners.add(emit);
+          return () => {
+            listeners.delete(emit);
+          };
+        },
+      };
+      const { routes: app, runtime } = createWebchatRuntime(deps);
+      const emit = rs.fn();
+      const unsubscribe = runtime.subscribeStatusEvents(emit);
+      const response = await app.request("/chat/status/events");
+      const reader = response.body!.getReader();
+      const received = readSseUntil(reader, "event: agent_name_changed");
+      for (const listener of listeners) listener("agent_name_changed", { agentName: "Pebble" });
+      expect(emit).toHaveBeenCalledExactlyOnceWith("agent_name_changed", { agentName: "Pebble" });
+      expect(await received).toContain('data: {"agentName":"Pebble"}');
+      unsubscribe();
+      await reader.cancel();
+      expect(listeners.size).toBe(0);
+    });
+
     it("reports a running chat in the list and on the status stream", async () => {
       const sessionId = "sess-status";
       await deps.webchatRepo.createSession(sessionId, "Status");
