@@ -78,8 +78,7 @@ export function ConciergeHeaderStatus({
         <span
           aria-live="polite"
           className={cn(
-            "max-w-full truncate text-aux",
-            activity.kind === "needsYou" ? "text-warning-fg" : "text-muted-foreground",
+            "max-w-full truncate text-aux text-muted-foreground",
             // A light band sweeps the line while work is under way; a
             // question waiting on the owner and idle stay still.
             WORKING.has(activity.kind) && "shimmer",
