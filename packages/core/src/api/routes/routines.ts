@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { v4 as uuid } from "uuid";
 import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
-import { routineCreator, toRoutine } from "../../db/repositories/routines.js";
+import { publicRoutineRow, routineCreator, toRoutine } from "../../db/repositories/routines.js";
 import {
   parseDateAndLocalTime,
   resolveOneOffDate,
@@ -252,7 +252,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
     const enriched = rows.map((row) => {
       const lr = latest.get(row.id);
       return {
-        ...row,
+        ...publicRoutineRow(row),
         lastRun: lr ? { status: lr.status, firedAt: lr.firedAt } : null,
       };
     });
@@ -365,7 +365,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       await deps.routineEngine.activate(toRoutine(inserted));
     }
 
-    return c.json(inserted, 201);
+    return c.json(inserted ? publicRoutineRow(inserted) : inserted, 201);
   });
 
   // The dashboard only toggles and renames, so PATCH accepts just those two
@@ -433,7 +433,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       }
     }
 
-    return c.json(updated);
+    return c.json(updated ? publicRoutineRow(updated) : updated);
   });
 
   // This is the guardian/dashboard path, so it never authorizes a managed

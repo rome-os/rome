@@ -121,6 +121,8 @@ export const FIXED_LINE: Record<string, string> = {
 interface Holds {
   watchers: ReadonlySet<ConciergeOwner>;
   active: ReadonlySet<ConciergeOwner>;
+  /** The moment the holds were taken: quiet hours are judged at it. */
+  at: number;
 }
 
 interface Pending {
@@ -193,6 +195,7 @@ export class ConciergePush {
     return {
       watchers: this.deps.watchersOf?.(chatId) ?? new Set(),
       active: this.deps.activeOwners?.() ?? new Set(),
+      at: this.now(),
     };
   }
 
@@ -269,7 +272,10 @@ export class ConciergePush {
     });
   }
 
-  /** Whether a hold covers `owner` now, logging which; the phone's watch, their dashboard, then quiet hours. */
+  /**
+   * Whether a hold covered `owner` when `holds` was taken, logging which: the
+   * phone's watch, their dashboard, then their quiet hours at that moment.
+   */
   private async held(
     { turnId, chatId }: SaidInTurn,
     owner: ConciergeOwner,
@@ -283,7 +289,7 @@ export class ConciergePush {
       log.info("concierge push held back: a dashboard is active", { turnId, chatId });
       return true;
     }
-    if ((await this.deps.quietUntil(this.now(), owner)) !== null) {
+    if ((await this.deps.quietUntil(holds.at, owner)) !== null) {
       log.info("concierge push held back by quiet hours", { turnId, chatId });
       return true;
     }

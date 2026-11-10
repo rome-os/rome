@@ -13,7 +13,14 @@ import { actionExecutionContext } from "../apps/actions/context.js";
 import { replayContext } from "../apps/actions/replay.js";
 import { runWithoutSession } from "../telemetry-context.js";
 import type { Clock, ClockTimer } from "../lib/clock.js";
-import { withoutSessionActor, type SessionActor } from "../access/session-actor.js";
+import {
+  currentSessionActor,
+  withoutSessionActor,
+  type SessionActor,
+} from "../access/session-actor.js";
+
+/** What fired a Run now pressed by no person: the agent, or a CLI over loopback. */
+export const RUN_NOW_IN_BACKGROUND = "run_now_background";
 
 const log = createLogger("routine-engine");
 
@@ -52,12 +59,16 @@ export class RoutineEngine {
       undefined,
   ) {}
 
-  /** The person a fire acts for: who created the routine, never anyone ambient. */
+  /**
+   * The person a fire acts for: who created the routine, read from its stored
+   * row at each fire, so however a routine was activated its fires act for
+   * that person. Never anyone ambient.
+   */
   private async actorOf(routine: Routine): Promise<SessionActor | undefined> {
-    if (routine.createdBy === null || routine.createdBy === undefined) {
-      return this.legacyActorOf(routine);
-    }
-    return routine.createdBy.kind === "anonymous" ? undefined : routine.createdBy;
+    const creator = await this.routinesRepo.creatorOf(routine.id);
+    if (creator === undefined) return undefined;
+    if (creator === null) return this.legacyActorOf(routine);
+    return creator.kind === "anonymous" ? undefined : creator;
   }
 
   registerProvider(type: string, provider: TriggerProvider): void {
@@ -148,7 +159,12 @@ export class RoutineEngine {
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     const row = await this.routinesRepo.findById(routineId);
     if (!row) throw new Error(`routine not found: ${routineId}`);
-    return this.dispatch(toRoutine(row), payload, { manual: true });
+    // The run acts for the routine's creator; whether a person pressed Run now
+    // is kept apart, as what fired it, for usage attribution.
+    const presser = await currentSessionActor();
+    const byPerson =
+      presser?.kind === "visitor" || (presser?.kind === "guardian" && presser.via === "cookie");
+    return this.dispatch(toRoutine(row), payload, { manual: byPerson ? "person" : "background" });
   }
 
   /** Stop a routine's running run(s), forcing each to a terminal "cancelled".
@@ -199,7 +215,7 @@ export class RoutineEngine {
   private dispatch(
     routine: Routine,
     payload: Record<string, unknown>,
-    opts: { manual?: boolean } = {},
+    opts: { manual?: "person" | "background" } = {},
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     // A fire is a new root in every sense. The trigger that fires it was
     // registered from inside the action that created the routine, and a timer
@@ -223,7 +239,7 @@ export class RoutineEngine {
   private async dispatchAsRoot(
     routine: Routine,
     payload: Record<string, unknown>,
-    opts: { manual?: boolean },
+    opts: { manual?: "person" | "background" },
   ): Promise<{ runId: string; status: RoutineRunStatus; error?: string }> {
     const startTime = this.clock.now().getTime();
 
@@ -239,7 +255,12 @@ export class RoutineEngine {
       status: "running",
       // A routine that keeps no payload records only its size.
       payload: keep ? payload : payloadSize(payload),
-      firedBy: opts.manual ? "run_now" : routine.trigger.type,
+      firedBy:
+        opts.manual === "person"
+          ? "run_now"
+          : opts.manual === "background"
+            ? RUN_NOW_IN_BACKGROUND
+            : routine.trigger.type,
     });
 
     // Captured inside the span callback and returned to the caller so a manual

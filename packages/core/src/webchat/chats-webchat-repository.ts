@@ -506,6 +506,23 @@ export class ChatsWebChatRepository extends WebChatRepository {
   }
 
   /** At most 1000 characters of this turn's guardian prompt lines, in chat order. Empty when none exist. */
+  getRestartGuardianPrompt(turn: InterruptedTurn): string {
+    return this.db
+      .all<{ text: string }>(sql`
+      SELECT m.text
+      FROM agent_turn_messages l
+      JOIN ${romeSessions} s ON s.id = l.session_id
+      JOIN ${CHAT_MESSAGES} m ON m.id = l.message_id
+        AND m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
+      WHERE l.session_id = ${turn.sessionId} AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
+        AND m.sender_account_id = 'guardian' AND m.sender_agent IS NULL
+      ORDER BY m.id
+    `)
+      .map((row) => row.text)
+      .join("\n\n")
+      .slice(0, 1000);
+  }
+
   /**
    * Who wrote the messages that started `turn`, by the account each records
    * ("guardian", "visitor:<account>"), each once. More than one means the
@@ -523,23 +540,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
         AND m.sender_agent IS NULL AND m.sender_account_id IS NOT NULL
     `)
       .map((row) => row.sender);
-  }
-
-  getRestartGuardianPrompt(turn: InterruptedTurn): string {
-    return this.db
-      .all<{ text: string }>(sql`
-      SELECT m.text
-      FROM agent_turn_messages l
-      JOIN ${romeSessions} s ON s.id = l.session_id
-      JOIN ${CHAT_MESSAGES} m ON m.id = l.message_id
-        AND m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
-      WHERE l.session_id = ${turn.sessionId} AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
-        AND m.sender_account_id = 'guardian' AND m.sender_agent IS NULL
-      ORDER BY m.id
-    `)
-      .map((row) => row.text)
-      .join("\n\n")
-      .slice(0, 1000);
   }
 
   /**

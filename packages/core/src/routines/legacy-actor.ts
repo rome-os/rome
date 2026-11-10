@@ -1,6 +1,6 @@
 // Who a routine from before routines recorded their creator acts for: its
 // chat's owner, as its fires did then. Every newer routine records its own
-// person (`Routine.createdBy`).
+// person (`RoutinesRepository.creatorOf`).
 
 import { actorOfOwner } from "../access/owner-actor.js";
 import type { SessionActor } from "../access/session-actor.js";

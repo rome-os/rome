@@ -125,6 +125,42 @@ describe("a reminder's push", () => {
     expect(pushes).toEqual([{ body: "It is 5" }]);
   });
 
+  it("fires as the visitor who created it, though it was activated without its creator", async () => {
+    let fire: ((payload: Record<string, unknown>) => Promise<void>) | undefined;
+    engine.registerProvider("schedule", {
+      activate: async (_routine: unknown, onFire: typeof fire) => {
+        fire = onFire;
+      },
+      deactivate: () => {},
+    } as never);
+    const id = await remindFrom(visitor, "shared");
+    // create_routine activates a routine it builds by hand, before any restart.
+    const stored = await routines.findById(id);
+    await engine.activate({
+      id,
+      name: remindAt5.name,
+      enabled: true,
+      trigger: remindAt5.trigger,
+      actionName: remindAt5.actionName,
+      args: (stored?.args ?? {}) as Record<string, unknown>,
+      createdAt: new Date(),
+    });
+    await fire?.({});
+    expect(pushes).toEqual([{ body: "It is 5", recipient: "acct-v" }]);
+  });
+
+  it("keeps who created a routine out of what apps read", async () => {
+    const id = await remindFrom(visitor, "shared");
+    for (const routine of [
+      ...(await routines.listRoutines()),
+      await routines.findByKey("missing"),
+    ].filter(Boolean)) {
+      expect(routine).not.toHaveProperty("createdBy");
+    }
+    expect(JSON.stringify(await routines.listRoutines())).not.toContain("acct-v");
+    expect(await routines.creatorOf(id)).toEqual(visitor);
+  });
+
   it("rings a legacy routine's chat owner", async () => {
     const legacy = async (chat: string) => {
       const id = await routines.create({
@@ -145,7 +181,7 @@ describe("a reminder's push", () => {
   it("refuses a reminder set by a turn that acts for no one, in a shared chat", async () => {
     // A turn with more than one person's input runs its actions as no one.
     const id = await remindFrom(undefined, "shared");
-    expect((await routines.findById(id))?.createdBy).toEqual({ kind: "anonymous" });
+    expect(await routines.creatorOf(id)).toEqual({ kind: "anonymous" });
     await engine.runNow(id);
     expect(outcomes).toEqual([{ kind: "recipient_unknown" }]);
     expect(pushes).toEqual([]);

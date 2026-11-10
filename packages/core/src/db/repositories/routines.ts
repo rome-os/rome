@@ -31,8 +31,16 @@ export function toRoutine(row: RoutineRow): Routine {
     createdAt: row.createdAt,
     lastFiredAt: row.lastFiredAt ?? undefined,
     nextRunAt: row.nextRunAt ?? undefined,
-    createdBy: (row.createdBy as SessionActor | null) ?? null,
   };
+}
+
+/**
+ * A routine row as the dashboard's `/routines` routes answer it. Who created
+ * it stays in core: only the routine engine reads it ({@link RoutinesRepository.creatorOf}).
+ */
+export function publicRoutineRow<T extends RoutineRow>(row: T): Omit<T, "createdBy"> {
+  const { createdBy: _createdBy, ...rest } = row;
+  return rest;
 }
 
 /**
@@ -71,6 +79,21 @@ export class RoutinesRepository {
     return rows[0] ?? null;
   }
 
+  /**
+   * The person a routine's fires act for, as stored: who created it, or the
+   * guardian for one no person made, or `anonymous` for one made in work that
+   * acts for no one. Null for a row from before the record, whose fires act
+   * for its chat's owner. Undefined when no such routine exists.
+   */
+  async creatorOf(id: string): Promise<SessionActor | null | undefined> {
+    const rows = await this.db
+      .select({ createdBy: routines.createdBy })
+      .from(routines)
+      .where(eq(routines.id, id));
+    if (rows.length === 0) return undefined;
+    return (rows[0].createdBy as SessionActor | null) ?? null;
+  }
+
   /** The trigger type shared by every routine named `name`. Names are not
    * unique, so this is null when the routines disagree or none has the name. */
   async findTriggerTypeByName(name: string): Promise<string | null> {
@@ -96,11 +119,7 @@ export class RoutinesRepository {
    * the domain type instead of leaking drizzle row shapes. */
   async listRoutines(): Promise<Routine[]> {
     const rows = await this.findAll();
-    // Who made each routine stays in core: an app has no need to know a person.
-    return rows.map((row) => {
-      const { createdBy: _createdBy, ...routine } = toRoutine(row);
-      return routine;
-    });
+    return rows.map(toRoutine);
   }
 
   /** Delete a routine only if it has no in-flight runs. The active-run count

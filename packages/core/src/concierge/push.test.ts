@@ -17,7 +17,7 @@ const VISITOR = "visitor:acct-v";
 /** A push on a fake clock: `advance` moves time and fires the merge timers that fall due. */
 function pushWith(
   options: {
-    quietUntil?: (owner: string) => number | null;
+    quietUntil?: (owner: string, at: number) => number | null;
     outcome?: () => Promise<SendOutcome>;
     language?: string | null;
     watching?: (owner: string, chatId: string) => boolean;
@@ -38,7 +38,7 @@ function pushWith(
     ownerOf:
       options.ownerOf ??
       (async (chatId) => (chatId === "gone" ? null : chatId.startsWith("v-") ? VISITOR : GUARDIAN)),
-    quietUntil: async (_at, owner) => options.quietUntil?.(owner) ?? null,
+    quietUntil: async (at, owner) => options.quietUntil?.(owner, at) ?? null,
     language: async () => options.language ?? null,
     watchersOf: (chatId) =>
       new Set([GUARDIAN, VISITOR].filter((owner) => options.watching?.(owner, chatId))),
@@ -249,6 +249,24 @@ describe("ConciergePush", () => {
     push.said({ turnId: "t1", chatId: "c", ownWords: "read at the dashboard", level: "active" });
     // The dashboard goes idle while the owner lookup is still out.
     active = false;
+    release();
+    await advance(MERGE_MS);
+    expect(sent).toEqual([]);
+  });
+
+  it("drops a message said in quiet hours even when they end before its owner is known", async () => {
+    let release: () => void = () => {};
+    const quietEnds = 1_000_000 + 1_000;
+    const { push, sent, advance, advanceClock } = pushWith({
+      quietUntil: (_owner, at) => (at < quietEnds ? quietEnds : null),
+      ownerOf: async () => {
+        await new Promise<void>((resolve) => (release = resolve));
+        return GUARDIAN;
+      },
+    });
+    push.said({ turnId: "t1", chatId: "c", ownWords: "said at night", level: "active" });
+    // Quiet hours end while the owner lookup is still out.
+    await advanceClock(2_000);
     release();
     await advance(MERGE_MS);
     expect(sent).toEqual([]);
