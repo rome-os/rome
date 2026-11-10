@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { PublicAccessState } from "./public-access-state.js";
+import { PublicAccessState } from "./permissions.js";
 
 describe("PublicAccessState", () => {
   it("starts empty", () => {

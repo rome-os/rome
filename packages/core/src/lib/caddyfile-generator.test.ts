@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { generateCaddyfile, resolveWebRoot } from "./caddyfile-generator.js";
-import { normalizePublicAccessConfig } from "../access/public-access-config.js";
+import { normalizePublicAccessConfig } from "../apps/app-permissions.js";
 
 const RUNTIME_CONFIG_HANDLE = "handle /runtime-config.js {";
 

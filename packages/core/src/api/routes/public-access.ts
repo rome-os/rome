@@ -6,7 +6,7 @@ import {
   PUBLIC_ACCESS_SETTING_KEY,
   normalizePublicAccessConfig,
   type PublicAccessConfig,
-} from "../../access/public-access-config.js";
+} from "../../apps/app-permissions.js";
 import type { ApiDeps } from "../deps.js";
 
 export function publicAccessRoutes(deps: ApiDeps): Hono {

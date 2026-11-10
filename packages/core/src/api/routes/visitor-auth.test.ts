@@ -7,7 +7,7 @@ import { visitorAuthRoutes, type VisitorAuthSeams } from "./visitor-auth.js";
 import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
 import { VISITOR_COOKIE_NAME, verifyVisitorSession } from "../../access/auth.js";
 import { DashboardAccessState } from "../../access/dashboard-access-state.js";
-import { PublicAccessState } from "../../access/public-access-state.js";
+import { PublicAccessState } from "../../access/permissions.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 
 const testDb = createTestDb();

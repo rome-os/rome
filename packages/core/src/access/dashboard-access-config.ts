@@ -1,4 +1,4 @@
-import { normalizePublicAccessEmail } from "./public-access-config.js";
+import { normalizePublicAccessEmail } from "../apps/app-permissions.js";
 
 export interface DashboardAccessConfig {
   cloudEmailAccess: string[];

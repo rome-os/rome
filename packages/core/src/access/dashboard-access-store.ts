@@ -5,7 +5,7 @@ import {
   readDashboardAccessRevision,
   type DashboardAccessConfig,
 } from "./dashboard-access-config.js";
-import { normalizePublicAccessEmail } from "./public-access-config.js";
+import { normalizePublicAccessEmail } from "../apps/app-permissions.js";
 
 /** The dashboard allow-list as Rome Cloud receives it, with the revision it was saved under. */
 export interface VisitorAllowList {

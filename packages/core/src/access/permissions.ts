@@ -6,7 +6,7 @@ import {
   PUBLIC_ACCESS_SETTING_KEY,
   normalizePublicAccessConfig,
   type PublicAccessConfig,
-} from "./public-access-config.js";
+} from "../apps/app-permissions.js";
 
 /**
  * In-memory cache of public app access policy for the auth-edge probe.

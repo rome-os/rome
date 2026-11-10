@@ -37,7 +37,7 @@ import {
   PUBLIC_ACCESS_SETTING_KEY,
   normalizePublicAccessConfig,
   type PublicAccessConfig,
-} from "../../access/public-access-config.js";
+} from "../../apps/app-permissions.js";
 import { resolveGuardianSession } from "../../access/guardian-session.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import { resolveVisitorSession } from "../../access/visitor-session.js";

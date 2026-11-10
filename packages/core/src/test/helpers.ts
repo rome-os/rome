@@ -58,7 +58,7 @@ import { createBackendTurnRunner } from "../apps/actions/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
 import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
-import { PublicAccessState } from "../access/public-access-state.js";
+import { PublicAccessState } from "../access/permissions.js";
 import { DashboardAccessState } from "../access/dashboard-access-state.js";
 import { DashboardAccessStore } from "../access/dashboard-access-store.js";
 import { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
