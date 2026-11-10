@@ -1151,7 +1151,12 @@ async function openSession(
     continuityKey: key.channelThreadKey,
     sessionId: refs.sessionId,
     isSubagent: opts.isSubagent === true,
-    actions: allowList,
+    // Read on every call, so a grant or a revoke applies from the next turn
+    // in the same session. The agent's definition at open stands in for one
+    // the catalog no longer holds.
+    get actions() {
+      return deps.agentLoader.find(key.agentName)?.definition.actions ?? allowList;
+    },
     widgets,
     turnId: refs.getTurnId,
     threadContext: refs.getThreadContext,

@@ -6787,6 +6787,68 @@ describe("AgentRunner", () => {
       expect(newActionExecutes).toEqual([{ name: "world" }]);
     });
 
+    it("applies a change to an agent's action grants from its next turn, in the same session", async () => {
+      const register = (name: string) =>
+        actionRegistry.register({
+          config: {
+            name,
+            type: "system",
+            description: `The ${name} action`,
+            complexity: "simple",
+            speed: "fast",
+            reliability: "high",
+            sideEffects: "write",
+          },
+          inputSchema: { properties: {} },
+          execute: async () => ({ status: "ok", data: { ok: name } }),
+        });
+      register("demo_action");
+      register("granted_later");
+      const captured: ModelSessionParams[] = [];
+      const provider: ModelProvider = {
+        id: "mock",
+        builtinTools: new Set<string>(),
+        openSession: async (params) => {
+          captured.push(params);
+          return createSessionFromRun(
+            "mock",
+            async function* () {
+              yield { type: "result", content: "Done" };
+            },
+            params,
+          );
+        },
+      };
+      const runner = createRunner(provider, undefined, { keepAliveAcrossTurns: true });
+      const definition = agentLoader.find("test-main")!.definition as { actions?: string[] };
+      const granted = definition.actions;
+      try {
+        const run = () =>
+          collectMessages(
+            runner.run({
+              agentName: "test-main",
+              prompt: "Hi",
+              channelThreadKey: "webchat:grants",
+            }),
+          );
+        await run();
+        expect(await listActionNames(captured[0]!.tools)).toEqual(["demo_action"]);
+
+        // The guardian revokes demo_action and grants granted_later.
+        definition.actions = ["granted_later"];
+        await run();
+
+        expect(captured).toHaveLength(1);
+        expect(await listActionNames(captured[0]!.tools)).toEqual(["granted_later"]);
+        expect(await executeActionTool(captured[0]!.tools, "granted_later", {})).toEqual({
+          ok: "granted_later",
+        });
+        await expect(executeActionTool(captured[0]!.tools, "demo_action", {})).rejects.toThrow();
+      } finally {
+        definition.actions = granted;
+      }
+    });
+
     it("getActionCatalog still honors a non-wildcard agent allow-list", async () => {
       // Security regression guard: an agent yaml that scopes
       // `actions: [demo_action]` must never reach actions it didn't ask
