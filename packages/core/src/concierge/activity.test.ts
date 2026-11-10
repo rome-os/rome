@@ -140,8 +140,7 @@ function world() {
   const tools = new Map<string, string>();
   const awaiting = new Set<string>();
   const pending: string[] = [];
-  // A row is live unless a test says otherwise.
-  const rows: (Omit<ActivityTaskRow, "live"> & { live?: boolean; conciergeChat: string })[] = [];
+  const rows: (ActivityTaskRow & { conciergeChat: string })[] = [];
   const chats = new Map<string, string>([
     ["main", "guardian"],
     ["topic", "guardian"],
@@ -154,9 +153,7 @@ function world() {
     awaitingGuardianOf: async (ids) => new Set(ids.filter((id) => awaiting.has(id))),
     tasksOf: async (chatId) => {
       reads += 1;
-      return rows
-        .filter((row) => row.conciergeChat === chatId)
-        .map((row) => ({ ...row, live: row.live ?? true }));
+      return rows.filter((row) => row.conciergeChat === chatId);
     },
     reportPending: () => pending,
     ownerOf: async (chatId) => chats.get(chatId) ?? null,
@@ -308,73 +305,6 @@ describe("ConciergeActivityTracker", () => {
     w.awaiting.add("task-1");
     await w.tracker.sessionChanged("task-1");
     expect(w.last("topic")).toEqual({ kind: "needsYou" });
-  });
-
-  it("reads a finished task's leftover card as nothing waiting", async () => {
-    const w = world();
-    await flush();
-    // Done or dropped while its card was still open; its chat went quiet.
-    w.rows.push({
-      id: "t1",
-      title: "Cupertino weather",
-      chatId: "task-1",
-      updatedAt: 5,
-      live: false,
-      conciergeChat: "main",
-    });
-    w.awaiting.add("task-1");
-    await w.tracker.sessionChanged("main");
-    w.advance(1_000);
-    await flush();
-    expect(w.last("main") ?? { kind: "idle" }).toEqual({ kind: "idle" });
-    expect((await w.tracker.current("main"))?.kind).toBe("idle");
-  });
-
-  it("reads a finished task that was resumed, or whose chat runs, as going on", async () => {
-    const w = world();
-    await flush();
-    // Resumed after it finished, and waiting on the owner.
-    w.rows.push({
-      id: "t1",
-      title: "Gmail events",
-      chatId: "task-1",
-      updatedAt: 5,
-      live: true,
-      conciergeChat: "main",
-    });
-    w.awaiting.add("task-1");
-    await w.tracker.sessionChanged("task-1");
-    expect(w.last("main")).toEqual({ kind: "needsYou" });
-
-    // A finished row whose chat runs right now, before its activity is read.
-    w.awaiting.delete("task-1");
-    w.rows.push({
-      id: "t2",
-      title: "Forensics",
-      chatId: "task-2",
-      updatedAt: 6,
-      live: false,
-      conciergeChat: "main",
-    });
-    w.running.add("task-2");
-    await w.tracker.sessionChanged("task-2");
-    expect(w.last("main")).toEqual({ kind: "tasks", title: "Forensics", more: 0 });
-  });
-
-  it("reads an open task's card as waiting", async () => {
-    const w = world();
-    await flush();
-    w.rows.push({
-      id: "t1",
-      title: "Book the flight",
-      chatId: "task-1",
-      updatedAt: 5,
-      live: true,
-      conciergeChat: "main",
-    });
-    w.awaiting.add("task-1");
-    await w.tracker.sessionChanged("task-1");
-    expect(w.last("main")).toEqual({ kind: "needsYou" });
   });
 
   it("stays working between a task's end and the turn that reports it", async () => {

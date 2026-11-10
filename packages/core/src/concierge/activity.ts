@@ -44,12 +44,6 @@ export interface ActivityTaskRow {
   /** The task chat the row links, or null. */
   chatId: string | null;
   updatedAt: number;
-  /**
-   * The task is still going on: its row is open, or its task chat was active
-   * after the row finished (a resumed task). A finished task's leftover card
-   * or approval does not wait on the owner.
-   */
-  live: boolean;
 }
 
 /** What the activity reads its facts from. */
@@ -117,13 +111,7 @@ export class ConciergeActivityTracker {
   private async compute(chatId: string): Promise<ConciergeActivity> {
     const rows = await this.sources.tasksOf(chatId);
     for (const row of rows) this.chatOfTask.set(row.id, chatId);
-    // Only a task still going on, or whose chat runs now, says anything.
-    const live = rows.flatMap((row) =>
-      row.chatId && (row.live || this.sources.isRunning(row.chatId))
-        ? [{ ...row, chatId: row.chatId }]
-        : [],
-    );
-    const taskChats = live.map((row) => row.chatId);
+    const taskChats = rows.flatMap((row) => (row.chatId ? [row.chatId] : []));
     const awaiting = await this.sources.awaitingGuardianOf([chatId, ...taskChats]);
     const pending = new Set(this.sources.reportPending());
     // Only a card or an approval still unresolved waits. A running turn does
@@ -136,12 +124,18 @@ export class ConciergeActivityTracker {
       awaitingGuardian: waits(chatId),
       turn: { running, tool: running ? this.sources.openTool(chatId) : null },
       reportPending: rows.some((row) => pending.has(row.id)),
-      tasks: live.map((row) => ({
-        title: row.title,
-        running: this.sources.isRunning(row.chatId),
-        awaitingGuardian: waits(row.chatId),
-        updatedAt: row.updatedAt,
-      })),
+      tasks: rows.flatMap((row) =>
+        row.chatId
+          ? [
+              {
+                title: row.title,
+                running: this.sources.isRunning(row.chatId),
+                awaitingGuardian: waits(row.chatId),
+                updatedAt: row.updatedAt,
+              },
+            ]
+          : [],
+      ),
     });
   }
 
