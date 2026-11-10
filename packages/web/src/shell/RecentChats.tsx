@@ -21,6 +21,7 @@ import {
   useState,
 } from "react";
 import { useTranslation } from "react-i18next";
+import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -46,7 +47,7 @@ import {
   sessionActivityTime,
 } from "@/lib/chat-session";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
-import { useConciergeChatId, useRefreshTopicChats } from "@/hooks/use-concierge";
+import { useConciergeChatId, useConciergeName, useRefreshTopicChats } from "@/hooks/use-concierge";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { ConciergeChats } from "./ConciergeEntry";
 import { emitSessionsChanged, useArchiveSession } from "@/lib/session-events";
@@ -221,7 +222,18 @@ const SESSION_NAME_MAX_LENGTH = 50;
  * The chat's name, linking to the chat. Its tooltip shows the full name while
  * the sidebar is too narrow to show it whole.
  */
-function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: boolean }) {
+function ChatRowLink({
+  id,
+  name,
+  nested,
+  marker,
+}: {
+  id: string;
+  name: string;
+  nested: boolean;
+  /** Names who started the chat, shown as a small mark after the name. */
+  marker?: string;
+}) {
   // Whether the one-line name is actually clipped ("Rewrite the sessi…").
   // Measured lazily right before the tooltip could open (pointerenter /
   // focus) rather than with a ResizeObserver: the answer only matters at that
@@ -254,6 +266,13 @@ function ChatRowLink({ id, name, nested }: { id: string; name: string; nested: b
           <span ref={nameRef} className="truncate">
             {name}
           </span>
+          {marker ? (
+            <ChatBubbleIcon
+              role="img"
+              aria-label={marker}
+              className="ml-2 h-3 w-3 shrink-0 text-subtle-foreground"
+            />
+          ) : null}
         </Link>
       </TooltipTrigger>
       {/* Right of the row, so the bubble reaches into the page rather than
@@ -319,6 +338,7 @@ export function RecentChats({
     [cachedSessions],
   );
   const conciergeChatId = useConciergeChatId();
+  const conciergeName = useConciergeName();
   // Refetches the chat list and the Concierge's list together.
   const refreshTopicChats = useRefreshTopicChats();
   // The Concierge section draws its topic chats from these: an archived one
@@ -660,7 +680,16 @@ export function RecentChats({
             }`}
           />
         ) : (
-          <ChatRowLink id={session.id} name={session.name} nested={nested} />
+          <ChatRowLink
+            id={session.id}
+            name={session.name}
+            nested={nested}
+            marker={
+              chatKind(session) === "task"
+                ? t("recentChats.startedByConcierge", { name: conciergeName })
+                : undefined
+            }
+          />
         )}
         <span
           className={`relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center ${

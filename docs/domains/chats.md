@@ -132,7 +132,7 @@ A chat the Concierge starts to hand one piece of work to another agent. It belon
 
 - A task chat has a row in its owner's task list. It is private to the owner of the Concierge chat that started it, who alone can open it and write in it.
 - A task chat carries one piece of work. It gets no alerts and no digest.
-- A task chat is in the [chat list](#chat-list), under its project with the common chats. It also opens from its row in the task list and from its task card, and search finds it.
+- A task chat is in the [chat list](#chat-list), under its project with the common chats, with a mark saying the Concierge started it. It also opens from its row in the task list and from its task card, and search finds it.
 
 ## Chat list
 

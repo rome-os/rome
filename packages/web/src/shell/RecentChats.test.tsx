@@ -181,10 +181,10 @@ describe("RecentChats", () => {
     await screen.findByRole("link", { name: "My own chat" });
     const task = await screen.findByRole("link", { name: /Find flights/ });
     expect(task.getAttribute("href")).toBe("/chat/task-1");
-    expect(screen.queryByRole("link", { name: /Milo|Concierge/ })).toBeNull();
+    expect(screen.queryByRole("link", { name: /^(Milo|Concierge)$/ })).toBeNull();
   });
 
-  it("gives a task chat's row the same status, menu and link as a common chat's", async () => {
+  it("gives a task chat's row the same status and menu as a common chat's", async () => {
     const user = userEvent.setup();
     const row = (id: string, name: string, extra: Partial<MockSession> = {}) =>
       ({
@@ -205,10 +205,16 @@ describe("RecentChats", () => {
     ]);
     renderRecentChats();
     const rowOf = async (name: string) =>
-      (await screen.findByRole("link", { name })).closest<HTMLElement>("[data-chat-row]")!;
+      (await screen.findByRole("link", { name: new RegExp(`^${name}`) })).closest<HTMLElement>(
+        "[data-chat-row]",
+      )!;
     const shape = async (name: string) => {
       const chatRow = await rowOf(name);
-      const status = within(chatRow).queryByRole("img")?.getAttribute("aria-label") ?? null;
+      const status =
+        within(chatRow)
+          .queryAllByRole("img")
+          .map((img) => img.getAttribute("aria-label"))
+          .find((label) => !label?.startsWith("Started by")) ?? null;
       await user.click(within(chatRow).getByRole("button", { name: "Chat actions" }));
       const items = screen.getAllByRole("menuitem").map((item) => item.textContent);
       await user.keyboard("{Escape}");
@@ -217,6 +223,38 @@ describe("RecentChats", () => {
     const task = await shape("Find flights");
     expect(task.status).toBe("Done · new replies");
     expect(task).toEqual(await shape("My own chat"));
+  });
+
+  it("marks a task chat's row as started by the Concierge, and a common chat's not", async () => {
+    concierge.chatId = "concierge";
+    const row = (id: string, name: string, extra: Partial<MockSession> = {}) =>
+      ({
+        id,
+        name,
+        createdAt: new Date().toISOString(),
+        activityAt: new Date().toISOString(),
+        lastSeenActivityAt: null,
+        unread: false,
+        projectName: "default",
+        projectPath: "default",
+        ...extra,
+      }) as MockSession;
+    mockSessions(
+      [row("task-1", "Find flights", { triggerKind: "concierge" }), row("mine", "My own chat")],
+      { agentName: "Milo" },
+    );
+    renderRecentChats();
+    const rowOf = async (name: string) =>
+      (await screen.findByRole("link", { name: new RegExp(name) })).closest<HTMLElement>(
+        "[data-chat-row]",
+      )!;
+    const task = await rowOf("Find flights");
+    await waitFor(() =>
+      expect(within(task).getByRole("img", { name: "Started by Milo" })).toBeTruthy(),
+    );
+    const mine = await rowOf("My own chat");
+    expect(within(mine).queryByRole("img", { name: /Started by/ })).toBeNull();
+    expect(mine.querySelectorAll("svg").length).toBe(task.querySelectorAll("svg").length - 1);
   });
 
   it("marks the row it opens at once, while the router still holds the old chat", async () => {
@@ -265,9 +303,11 @@ describe("RecentChats", () => {
       </QueryClientProvider>,
     );
     const rowOf = async (name: string) =>
-      (await screen.findByRole("link", { name })).closest<HTMLElement>("[data-chat-row]")!;
+      (await screen.findByRole("link", { name: new RegExp(`^${name}`) })).closest<HTMLElement>(
+        "[data-chat-row]",
+      )!;
     expect((await rowOf("My own chat")).className).toContain("bg-surface shadow-1");
-    await userEvent.setup().click(await screen.findByRole("link", { name: "Find flights" }));
+    await userEvent.setup().click(await screen.findByRole("link", { name: /^Find flights/ }));
     expect((await rowOf("Find flights")).className).toContain("bg-surface shadow-1");
     expect((await rowOf("My own chat")).className).not.toContain("bg-surface shadow-1");
     expect(screen.getByTestId("location-path").textContent).toBe("/chat/mine");
@@ -576,9 +616,14 @@ describe("RecentChats", () => {
     const user = userEvent.setup();
     const view = renderRecentChats();
     const requestedScope = () =>
-      new URL(String(fetchSpy.mock.calls.at(-1)?.[0]), "http://localhost").searchParams.get(
-        "scope",
-      );
+      new URL(
+        String(
+          fetchSpy.mock.calls
+            .filter(([input]) => String(input).startsWith("/api/chat/sessions"))
+            .at(-1)?.[0],
+        ),
+        "http://localhost",
+      ).searchParams.get("scope");
     await waitFor(() => expect(requestedScope()).toBe("mine"));
     await user.click(screen.getByRole("button", { name: "List settings" }));
     const mine = screen.getByRole("menuitem", { name: "My chats" });
@@ -940,7 +985,8 @@ describe("RecentChats", () => {
 
     it("keeps a start that arrives while the list is loading", async () => {
       let respond!: () => void;
-      rs.spyOn(globalThis, "fetch").mockImplementation((async () => {
+      rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+        if (!String(input).startsWith("/api/chat/sessions")) return Response.json({});
         await new Promise<void>((resolve) => {
           respond = resolve;
         });
