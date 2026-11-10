@@ -7,6 +7,10 @@ import Testing
 final class LaunchProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var answers: [String: (Int, String)] = [:]
     nonisolated(unsafe) static var offline = false
+    /// A token the instance refuses, as it refuses one past its time.
+    nonisolated(unsafe) static var refused: String?
+    /// Instance requests that came with the refused token.
+    nonisolated(unsafe) static var refusedPaths: [String] = []
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -15,7 +19,16 @@ final class LaunchProtocol: URLProtocol, @unchecked Sendable {
             client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
             return
         }
-        let (status, body) = Self.answers[request.url?.path() ?? ""] ?? (404, "{}")
+        let path = request.url?.path() ?? ""
+        if let refused = Self.refused, request.value(forHTTPHeaderField: "Cookie")?.hasSuffix("=\(refused)") == true {
+            Self.refusedPaths.append(path)
+            let response = HTTPURLResponse(url: request.url!, statusCode: 401, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+            client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+            client?.urlProtocol(self, didLoad: Data(#"{"error":"unauthorized"}"#.utf8))
+            client?.urlProtocolDidFinishLoading(self)
+            return
+        }
+        let (status, body) = Self.answers[path] ?? (404, "{}")
         let response = HTTPURLResponse(url: request.url!, statusCode: status, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
         client?.urlProtocol(self, didLoad: Data(body.utf8))
@@ -26,150 +39,200 @@ final class LaunchProtocol: URLProtocol, @unchecked Sendable {
 
 /// A launch with the last instance and its session kept opens it at once,
 /// and catches up in the background.
-@MainActor
-@Suite(.serialized) struct CachedLaunchTests {
-    private static let keys = ["lastInstanceID", "lastInstanceRecord", "keptIdentity.b"]
-    private static let b = CloudInstance(id: "b", name: "B", slug: "b", origin: "https://b.example", status: "running")
+/// Suites that write the kept instance (`lastInstanceID`,
+/// `lastInstanceRecord`) in the app's defaults run one at a time.
+@Suite(.serialized) enum LastInstanceDefaults {}
 
-    private func iso(_ seconds: TimeInterval) -> String { ISO8601DateFormatter().string(from: Date().addingTimeInterval(seconds)) }
+extension LastInstanceDefaults {
+    @MainActor
+    @Suite(.serialized) struct CachedLaunchTests {
+        private static let keys = ["lastInstanceID", "lastInstanceRecord", "keptIdentity.b"]
+        private static let b = CloudInstance(id: "b", name: "B", slug: "b", origin: "https://b.example", status: "running")
 
-    private func model(session: InstanceSession? = nil, kept: Bool = true) -> (AppModel, CloudAuth) {
-        let configuration = URLSessionConfiguration.ephemeral
-        configuration.protocolClasses = [LaunchProtocol.self]
-        let store = MemoryStore()
-        store.set(CloudCredential(accessToken: "phone-token", deviceSessionId: "d1"), for: "cloud.credential")
-        if let session { store.set(session, for: "instance.session.https://b.example") }
-        if kept {
-            UserDefaults.standard.set("b", forKey: "lastInstanceID")
-            UserDefaults.standard.set(try? JSONEncoder().encode(Self.b), forKey: "lastInstanceRecord")
+        private func iso(_ seconds: TimeInterval) -> String { ISO8601DateFormatter().string(from: Date().addingTimeInterval(seconds)) }
+
+        private func model(session: InstanceSession? = nil, kept: Bool = true, record: CloudInstance = b, others: [InstanceSession] = []) -> (AppModel, CloudAuth) {
+            let configuration = URLSessionConfiguration.ephemeral
+            configuration.protocolClasses = [LaunchProtocol.self]
+            let store = MemoryStore()
+            store.set(CloudCredential(accessToken: "phone-token", deviceSessionId: "d1"), for: "cloud.credential")
+            if let session { store.set(session, for: record.isVisitor ? "instance.visitorSession.https://b.example" : "instance.session.https://b.example") }
+            for other in others { store.set(other, for: "instance.session.\(other.origin)") }
+            if kept {
+                UserDefaults.standard.set("b", forKey: "lastInstanceID")
+                UserDefaults.standard.set(try? JSONEncoder().encode(record), forKey: "lastInstanceRecord")
+            }
+            let cloud = CloudAuth(origin: URL(string: "https://romeos.cc")!, configuration: configuration, store: store)
+            let app = AppModel(cloud: cloud, images: StoredImageCache(), instanceConfiguration: {
+                let instance = URLSessionConfiguration.ephemeral
+                instance.protocolClasses = [LaunchProtocol.self]
+                return instance
+            })
+            return (app, cloud)
         }
-        let cloud = CloudAuth(origin: URL(string: "https://romeos.cc")!, configuration: configuration, store: store)
-        let app = AppModel(cloud: cloud, images: StoredImageCache(), instanceConfiguration: {
-            let instance = URLSessionConfiguration.ephemeral
-            instance.protocolClasses = [LaunchProtocol.self]
-            return instance
-        })
-        return (app, cloud)
-    }
 
-    private var fresh: InstanceSession { InstanceSession(token: "kept", expiresAt: iso(3600), origin: "https://b.example") }
+        private var fresh: InstanceSession { InstanceSession(token: "kept", expiresAt: iso(3600), origin: "https://b.example") }
 
-    private func list(_ status: String) {
-        LaunchProtocol.answers["/v1/instances"] = (200, #"{"items":[{"id":"b","name":"B","slug":"b","origin":"https://b.example","status":"\#(status)"}]}"#)
-    }
-
-    private func clean(_ body: () async -> Void) async {
-        let saved = Self.keys.map { UserDefaults.standard.object(forKey: $0) }
-        for key in Self.keys { UserDefaults.standard.removeObject(forKey: key) }
-        LaunchProtocol.answers = [:]
-        LaunchProtocol.offline = false
-        await body()
-        LaunchProtocol.answers = [:]
-        LaunchProtocol.offline = false
-        for (key, value) in zip(Self.keys, saved) { UserDefaults.standard.set(value, forKey: key) }
-    }
-
-    private func eventually(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<200 where !condition() { try? await Task.sleep(for: .milliseconds(10)) }
-        return condition()
-    }
-
-    /// Offline, the kept instance opens with its kept role, and stays.
-    @Test func aCachedLaunchIsReadyWithoutANetwork() async {
-        await clean {
-            LaunchProtocol.offline = true
-            KeptIdentity.save(KeptIdentity(guardian: false, name: "Ada", avatarURL: nil), for: "b")
-            let (app, _) = model(session: fresh)
-            await app.launch(skipSnapshot: true)
-            #expect(app.phase == .ready)
-            #expect(app.workspace?.isVisitor == true && app.workspace?.accountLabel == "Ada")
-            try? await Task.sleep(for: .milliseconds(200))
-            #expect(app.phase == .ready && app.workspace != nil)
+        private func list(_ status: String) {
+            LaunchProtocol.answers["/v1/instances"] = (200, #"{"items":[{"id":"b","name":"B","slug":"b","origin":"https://b.example","status":"\#(status)"}]}"#)
         }
-    }
 
-    /// A session past its time opens the workspace, then is renewed quietly.
-    @Test func anExpiredSessionIsRenewedInTheBackground() async {
-        await clean {
-            list("running")
-            LaunchProtocol.answers["/api/auth/cloud/native/start"] = (200, #"{"authorization_request":{"client_id":"rome-instance","state":"s"},"origin":"https://b.example"}"#)
-            LaunchProtocol.answers["/v1/instances/b/authorizations"] = (200, #"{"code":"c","state":"s","iss":"https://romeos.cc"}"#)
-            LaunchProtocol.answers["/api/auth/cloud/native/complete"] = (200, #"{"cookie_name":"rome_session","session_token":"renewed","expires_at":"\#(iso(7200))","origin":"https://b.example"}"#)
-            let (app, cloud) = model(session: InstanceSession(token: "old", expiresAt: iso(-60), origin: "https://b.example"))
-            await app.launch(skipSnapshot: true)
-            #expect(app.phase == .ready)
-            #expect(await eventually { cloud.storedSession(for: Self.b)?.token == "renewed" })
-            #expect(app.phase == .ready)
+        private func clean(_ body: () async -> Void) async {
+            let saved = Self.keys.map { UserDefaults.standard.object(forKey: $0) }
+            for key in Self.keys { UserDefaults.standard.removeObject(forKey: key) }
+            LaunchProtocol.answers = [:]
+            LaunchProtocol.offline = false
+            LaunchProtocol.refused = nil
+            LaunchProtocol.refusedPaths = []
+            await body()
+            LaunchProtocol.answers = [:]
+            LaunchProtocol.offline = false
+            LaunchProtocol.refused = nil
+            LaunchProtocol.refusedPaths = []
+            for (key, value) in zip(Self.keys, saved) { UserDefaults.standard.set(value, forKey: key) }
         }
-    }
 
-    /// Rome Cloud says it stopped: the stopped page replaces the chat.
-    @Test func anInstanceStoppedAfterLaunchShowsItsPage() async {
-        await clean {
-            list("stopped")
-            let (app, _) = model(session: fresh)
-            await app.launch(skipSnapshot: true)
-            #expect(await eventually { app.phase == .stopped(instanceName: "B") })
-            #expect(app.workspace == nil)
+        private func eventually(_ condition: () -> Bool) async -> Bool {
+            for _ in 0..<200 where !condition() { try? await Task.sleep(for: .milliseconds(10)) }
+            return condition()
         }
-    }
 
-    /// Below the minimum, the update page covers the chat when the check answers.
-    @Test func belowTheMinimumAfterLaunchCoversTheChat() async {
-        await clean {
-            list("running")
-            LaunchProtocol.answers["/api/system/upgrade/check"] = (200, #"{"current":{"version":"1.0.1"},"latest":{"version":"9.9.9"},"upgradeAvailable":true}"#)
-            let (app, _) = model(session: fresh)
-            await app.launch(skipSnapshot: true)
-            #expect(app.phase == .ready)
-            #expect(await eventually { app.update.blocking && app.update.belowMinimum })
+        /// Offline, the kept instance opens with its kept role, and stays.
+        @Test func aCachedLaunchIsReadyWithoutANetwork() async {
+            await clean {
+                LaunchProtocol.offline = true
+                KeptIdentity.save(KeptIdentity(guardian: false, name: "Ada", avatarURL: nil), for: "b")
+                let (app, _) = model(session: fresh)
+                await app.launch(skipSnapshot: true)
+                #expect(app.phase == .ready)
+                #expect(app.workspace?.isVisitor == true && app.workspace?.accountLabel == "Ada")
+                try? await Task.sleep(for: .milliseconds(200))
+                #expect(app.phase == .ready && app.workspace != nil)
+            }
         }
-    }
 
-    /// Rome Cloud no longer knows this phone: back to sign-in.
-    @Test func aCloudSignOutAfterLaunchGoesToSignIn() async {
-        await clean {
-            LaunchProtocol.answers["/v1/instances"] = (401, #"{"error":"unauthorized"}"#)
-            let (app, _) = model(session: fresh)
-            await app.launch(skipSnapshot: true)
-            #expect(await eventually { app.phase == .signedOut })
-            #expect(app.workspace == nil)
+        /// A session past its time shows the kept workspace, renews quietly, and
+        /// only then starts what needs the session: no request goes out on the
+        /// old token, and Chat works with nothing kept to show.
+        @Test func anExpiredSessionIsRenewedBeforeTheChatStarts() async {
+            await clean {
+                list("running")
+                LaunchProtocol.refused = "old"
+                LaunchProtocol.answers["/api/concierge/session"] = (200, #"{"id":"main-1","unread":0}"#)
+                LaunchProtocol.answers["/api/chat/sessions/main-1/messages"] = (200, #"{"messages":[],"hasMore":false}"#)
+                LaunchProtocol.answers["/api/auth/cloud/native/start"] = (200, #"{"authorization_request":{"client_id":"rome-instance","state":"s"},"origin":"https://b.example"}"#)
+                LaunchProtocol.answers["/v1/instances/b/authorizations"] = (200, #"{"code":"c","state":"s","iss":"https://romeos.cc"}"#)
+                LaunchProtocol.answers["/api/auth/cloud/native/complete"] = (200, #"{"cookie_name":"rome_session","session_token":"renewed","expires_at":"\#(iso(7200))","origin":"https://b.example"}"#)
+                let (app, cloud) = model(session: InstanceSession(token: "old", expiresAt: iso(-60), origin: "https://b.example"))
+                await app.launch(skipSnapshot: true)
+                #expect(app.phase == .ready)
+                #expect(await eventually { cloud.storedSession(for: Self.b)?.token == "renewed" })
+                #expect(await eventually { app.workspace?.mainChatServerID == "main-1" })
+                #expect(app.workspace?.conciergeState == .ready)
+                #expect(app.phase == .ready)
+                #expect(LaunchProtocol.refusedPaths.isEmpty, "sent on the old token: \(LaunchProtocol.refusedPaths)")
+            }
         }
-    }
 
-    /// Nothing kept: the usual path, behind the loading screen.
-    @Test func withNothingKeptTheLaunchWaitsForRomeCloud() async {
-        await clean {
-            LaunchProtocol.offline = true
-            let (app, _) = model(session: nil, kept: false)
-            await app.launch(skipSnapshot: true)
-            // Offline with nothing kept: sign-in says what went wrong; no workspace opened.
-            #expect(app.workspace == nil)
-            #expect(app.phase != .ready)
+        /// Taken off the kept instance's allow-list while the app was closed:
+        /// another running instance opens in its place.
+        @Test func accessRevokedAtLaunchOpensAnotherInstance() async {
+            await clean {
+                LaunchProtocol.answers["/v1/instances"] = (200, #"{"items":[{"id":"b","name":"B","slug":"b","origin":"https://b.example","status":"running","role":"visitor"},{"id":"c","name":"C","slug":"c","origin":"https://c.example","status":"running"}]}"#)
+                // The visitor sign-in says the dashboard no longer lets this account in.
+                LaunchProtocol.answers["/api/auth/visitor/native/start"] = (404, #"{"error":"dashboard_not_cloud_email_restricted"}"#)
+                var visitorB = Self.b
+                visitorB.role = "visitor"
+                let (app, _) = model(
+                    session: InstanceSession(token: "old", expiresAt: iso(-60), origin: "https://b.example", cookieName: InstanceSession.visitorCookie),
+                    record: visitorB,
+                    others: [InstanceSession(token: "c-token", expiresAt: iso(3600), origin: "https://c.example")]
+                )
+                await app.launch(skipSnapshot: true)
+                #expect(await eventually { app.currentInstanceID == "c" })
+            }
         }
-    }
 
-    /// A push tap for the kept instance opens it at once, then its chat.
-    @Test func aPushTapForTheKeptInstanceOpensItsChat() async {
-        await clean {
-            LaunchProtocol.offline = true
-            let (app, _) = model(session: fresh)
-            await app.openFromPush(PushTarget(instanceId: "b", chatId: "concierge"))
-            await app.launch(skipSnapshot: true)
-            #expect(app.phase == .ready)
-            #expect(app.chatRequest.serial == 1)
+        /// Rome Cloud renamed the kept instance: the name and the kept record follow.
+        @Test func theKeptRecordCatchesUp() async {
+            await clean {
+                LaunchProtocol.answers["/v1/instances"] = (200, #"{"items":[{"id":"b","name":"Team B","slug":"b","origin":"https://b.example","status":"running"}]}"#)
+                let (app, _) = model(session: fresh)
+                await app.launch(skipSnapshot: true)
+                #expect(await eventually { app.workspace?.instanceName == "Team B" })
+                let kept = UserDefaults.standard.data(forKey: "lastInstanceRecord").flatMap { try? JSONDecoder().decode(CloudInstance.self, from: $0) }
+                #expect(kept?.name == "Team B")
+            }
         }
-    }
 
-    /// A push tap for another instance opens that one, not the kept one.
-    @Test func aPushTapForAnotherInstanceOpensIt() async {
-        await clean {
-            LaunchProtocol.answers["/v1/instances"] = (200, #"{"items":[{"id":"b","name":"B","slug":"b","origin":"https://b.example","status":"running"},{"id":"c","name":"C","slug":"c","origin":"https://c.example","status":"stopped"}]}"#)
-            let (app, _) = model(session: fresh)
-            await app.openFromPush(PushTarget(instanceId: "c", chatId: "concierge"))
-            await app.launch(skipSnapshot: true)
-            // C is stopped: its page, not B's chat.
-            #expect(app.phase == .stopped(instanceName: "C"))
+        /// Rome Cloud says it stopped: the stopped page replaces the chat.
+        @Test func anInstanceStoppedAfterLaunchShowsItsPage() async {
+            await clean {
+                list("stopped")
+                let (app, _) = model(session: fresh)
+                await app.launch(skipSnapshot: true)
+                #expect(await eventually { app.phase == .stopped(instanceName: "B") })
+                #expect(app.workspace == nil)
+            }
+        }
+
+        /// Below the minimum, the update page covers the chat when the check answers.
+        @Test func belowTheMinimumAfterLaunchCoversTheChat() async {
+            await clean {
+                list("running")
+                LaunchProtocol.answers["/api/system/upgrade/check"] = (200, #"{"current":{"version":"1.0.1"},"latest":{"version":"9.9.9"},"upgradeAvailable":true}"#)
+                let (app, _) = model(session: fresh)
+                await app.launch(skipSnapshot: true)
+                #expect(app.phase == .ready)
+                #expect(await eventually { app.update.blocking && app.update.belowMinimum })
+            }
+        }
+
+        /// Rome Cloud no longer knows this phone: back to sign-in.
+        @Test func aCloudSignOutAfterLaunchGoesToSignIn() async {
+            await clean {
+                LaunchProtocol.answers["/v1/instances"] = (401, #"{"error":"unauthorized"}"#)
+                let (app, _) = model(session: fresh)
+                await app.launch(skipSnapshot: true)
+                #expect(await eventually { app.phase == .signedOut })
+                #expect(app.workspace == nil)
+            }
+        }
+
+        /// Nothing kept: the usual path, behind the loading screen.
+        @Test func withNothingKeptTheLaunchWaitsForRomeCloud() async {
+            await clean {
+                LaunchProtocol.offline = true
+                let (app, _) = model(session: nil, kept: false)
+                await app.launch(skipSnapshot: true)
+                // Offline with nothing kept: sign-in says what went wrong; no workspace opened.
+                #expect(app.workspace == nil)
+                #expect(app.phase != .ready)
+            }
+        }
+
+        /// A push tap for the kept instance opens it at once, then its chat.
+        @Test func aPushTapForTheKeptInstanceOpensItsChat() async {
+            await clean {
+                LaunchProtocol.offline = true
+                let (app, _) = model(session: fresh)
+                await app.openFromPush(PushTarget(instanceId: "b", chatId: "concierge"))
+                await app.launch(skipSnapshot: true)
+                #expect(app.phase == .ready)
+                #expect(await eventually { app.chatRequest.serial == 1 })
+            }
+        }
+
+        /// A push tap for another instance opens that one, not the kept one.
+        @Test func aPushTapForAnotherInstanceOpensIt() async {
+            await clean {
+                LaunchProtocol.answers["/v1/instances"] = (200, #"{"items":[{"id":"b","name":"B","slug":"b","origin":"https://b.example","status":"running"},{"id":"c","name":"C","slug":"c","origin":"https://c.example","status":"stopped"}]}"#)
+                let (app, _) = model(session: fresh)
+                await app.openFromPush(PushTarget(instanceId: "c", chatId: "concierge"))
+                await app.launch(skipSnapshot: true)
+                // C is stopped: its page, not B's chat.
+                #expect(app.phase == .stopped(instanceName: "C"))
+            }
         }
     }
 }
