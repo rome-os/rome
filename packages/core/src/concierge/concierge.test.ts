@@ -157,6 +157,7 @@ function setup(
   /** The real chat rows the task rows link to. */
   const storedChats = new ChatsWebChatRepository(testDb.db);
   const approvalListeners = new Set<(approval: unknown) => void>();
+  const resolvedListeners = new Set<(approval: unknown) => void>();
   const quietFlags: boolean[] = [];
   /** Every guardian setting written, in order. */
   const settingsWrites: [string, unknown][] = [];
@@ -327,7 +328,10 @@ function setup(
         approvalListeners.add(listener);
         return () => approvalListeners.delete(listener);
       },
-      onResolved: () => () => {},
+      onResolved: (listener: (approval: unknown) => void) => {
+        resolvedListeners.add(listener);
+        return () => resolvedListeners.delete(listener);
+      },
     },
     messages: {
       recent: async (place: Place, limit: number) => {
@@ -408,6 +412,7 @@ function setup(
     text?: string;
     status?: AgentTurnFinishedEvent["status"];
     failure?: AgentTurnFailure;
+    startedAt?: string;
   }) => {
     for (const listener of listeners) {
       listener({
@@ -420,7 +425,7 @@ function setup(
           threadContext: { channel: "webchat", threadId: event.chatId },
         },
         status: event.status ?? "completed",
-        timing: { startedAt: "", finishedAt: "", durationMs: 0 },
+        timing: { startedAt: event.startedAt ?? "", finishedAt: "", durationMs: 0 },
         output: {
           text: event.text ?? "",
           state: "final",
@@ -487,6 +492,9 @@ function setup(
     },
     createApproval: (approval: Record<string, unknown>) => {
       for (const listener of approvalListeners) listener(approval);
+    },
+    resolveApproval: (approval: Record<string, unknown>) => {
+      for (const listener of resolvedListeners) listener(approval);
     },
     chats,
     send,
@@ -1945,6 +1953,85 @@ describe("Concierge events", () => {
     expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=guardian"');
     expect(s.backendTurns[0].prompt).toContain("guardian: Make it a window seat");
     expect(s.quietFlags).toEqual([true]);
+  });
+
+  it("reports at once a task turn the guardian started by answering the task's own card", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    s.messages.get(chatId)?.push({
+      id: "answer",
+      role: "user",
+      content: JSON.stringify([
+        { type: "interaction_result", toolUseId: "ask-1", output: { answers: ["LIS"] } },
+      ]),
+      turnId: "task-turn-2",
+    });
+    await finishTask(s, chatId, { turnId: "task-turn-2" });
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=concierge"');
+    expect(s.quietFlags).toEqual([false]);
+  });
+
+  it("keeps a typed reply that dismisses the open card the guardian's own, quiet turn", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    s.messages.get(chatId)?.push({
+      id: "typed",
+      role: "user",
+      content: JSON.stringify([
+        { type: "text", content: "Actually, Porto" },
+        { type: "interaction_result", toolUseId: "ask-1", output: { dismissed: true } },
+      ]),
+      turnId: "task-turn-2",
+    });
+    await finishTask(s, chatId, { turnId: "task-turn-2" });
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toEqual([]);
+    await rs.advanceTimersByTimeAsync(58_000);
+    expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=guardian"');
+    expect(s.quietFlags).toEqual([true]);
+  });
+
+  it("reports at once the task turn that carries on from the guardian's answer to its approval", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    s.resolveApproval({ status: "approved", payload: { channelContext: { threadId: chatId } } });
+    // The carried-on turn's prompt is the action's result, recorded with no sender.
+    s.messages.get(chatId)?.push({
+      id: "result",
+      role: "user",
+      content: JSON.stringify([{ type: "text", content: "Sent." }]),
+      turnId: "task-turn-2",
+    });
+    await s.finish({
+      turnId: "task-turn-2",
+      agentName: "core:main",
+      chatId,
+      startedAt: new Date(Date.now() + 1_000).toISOString(),
+    });
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=concierge"');
+
+    // Only that one turn: the guardian's next typed message is theirs again.
+    s.messages.get(chatId)?.push({
+      id: "typed",
+      role: "user",
+      content: JSON.stringify([{ type: "text", content: "Thanks" }]),
+      turnId: "task-turn-3",
+    });
+    await s.finish({
+      turnId: "task-turn-3",
+      agentName: "core:main",
+      chatId,
+      startedAt: new Date(Date.now() + 5_000).toISOString(),
+    });
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
   });
 
   it("tells the Concierge of a pending approval in a task chat at once", async () => {

@@ -68,6 +68,26 @@ function replyExcerpt(text: string): string {
 }
 
 /** The text of a stored user message, for the guardian's words in a task event. */
+/**
+ * Whether the line answers a card: it carries an `interaction_result` that is
+ * not a dismissal. A typed reply dismisses the open cards it passes, which
+ * still makes it the guardian's own words.
+ */
+function answersCard(content: string): boolean {
+  try {
+    const parts: unknown = JSON.parse(content);
+    if (!Array.isArray(parts)) return false;
+    return parts.some((part) => {
+      if (!part || typeof part !== "object") return false;
+      const { type, output } = part as { type?: unknown; output?: unknown };
+      if (type !== "interaction_result") return false;
+      return !(output && typeof output === "object" && "dismissed" in output && output.dismissed);
+    });
+  } catch {
+    return false;
+  }
+}
+
 function userText(content: string): string {
   try {
     const parts: unknown = JSON.parse(content);
@@ -272,7 +292,20 @@ export function startConciergeEvents(
     return (await tasks.repo.findBySession(chatId))?.id ?? null;
   };
 
+  // When the guardian last answered an approval in each chat. The turn that
+  // carries on from it is the first to start after.
+  const approvalAnswered = new Map<string, number>();
+  const onApprovalResolved = (approval: { payload: unknown }) => {
+    const context = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
+      ?.channelContext;
+    if (typeof context?.threadId === "string") approvalAnswered.set(context.threadId, Date.now());
+  };
+
   const onTaskChatTurn = async (event: AgentTurnFinishedEvent, chatId: string) => {
+    const answeredAt = approvalAnswered.get(chatId);
+    const carriesApproval =
+      answeredAt !== undefined && Date.parse(event.timing.startedAt) >= answeredAt;
+    if (carriesApproval) approvalAnswered.delete(chatId);
     const taskId = await taskOf(chatId);
     if (!taskId) return;
     await waitForTurnStream(service, chatId, event.turn.turnId);
@@ -280,8 +313,12 @@ export function startConciergeEvents(
     const userRows = rows.filter((row) => row.role === "user");
     // A follow-up the task chat queued or deferred sits under the turn that
     // answered it, so the turn is Concierge's when any of its inputs was said
-    // as Concierge's account.
-    const started = userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id);
+    // as Concierge's account. The guardian answering the task's own card or
+    // approval carries on what the Concierge started, so it counts as the
+    // Concierge's too. Only the guardian's typed words are their own turn.
+    const started =
+      carriesApproval ||
+      userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id || answersCard(row.content));
     const by = started ? "concierge" : userRows.length > 0 ? "guardian" : "system";
     // The guardian's own words reach the chat through the user-input path, which
     // announces nothing, so they are read from the rows of the turn they started.
@@ -386,6 +423,7 @@ export function startConciergeEvents(
       if (change === "write") coalescer.settle(row.id);
     }),
     approvals.onCreated((approval) => void guard("approval event", onApproval(approval))),
+    approvals.onResolved(onApprovalResolved),
   ];
 
   return () => {
