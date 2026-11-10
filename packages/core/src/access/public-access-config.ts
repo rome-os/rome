@@ -1,5 +1,3 @@
-import { isValidAppId } from "../apps/packaging/app-id.js";
-
 export interface PublicAccessConfig {
   allowedApps: string[];
   cloudEmailAccess: Record<string, string[]>;
@@ -40,7 +38,7 @@ export function normalizePublicAccessConfig(raw: unknown): PublicAccessConfig {
           body.allowedApps
             .filter((s): s is string => typeof s === "string")
             .map((s) => s.trim())
-            .filter(isValidAppId),
+            .filter((appId) => appId.length > 0),
         ),
       )
     : [];
@@ -51,7 +49,7 @@ export function normalizePublicAccessConfig(raw: unknown): PublicAccessConfig {
       body.cloudEmailAccess as Record<string, unknown>,
     )) {
       const appId = rawAppId.trim();
-      if (!isValidAppId(appId)) continue;
+      if (appId.length === 0) continue;
       const emails = normalizeEmailList(rawEmails);
       if (emails.length > 0) cloudEmailAccess[appId] = emails;
     }
