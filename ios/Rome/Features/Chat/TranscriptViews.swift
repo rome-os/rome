@@ -345,16 +345,12 @@ struct AgentBubble: View {
                 .frame(maxHeight: capped ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
                 .clipped()
                 .overlay(alignment: .bottom) {
-                    if folds && !expanded {
-                        // The fade is part of the chevron's tap target.
-                        LinearGradient(colors: [Palette.bubble.opacity(0), Palette.bubble], startPoint: .top, endPoint: .bottom)
-                            .frame(height: 48)
-                            .contentShape(Rectangle())
-                            .onTapGesture(perform: toggle)
-                            .accessibilityHidden(true)
-                    }
+                    // Folded, the chevron sits on the fade over the last
+                    // lines, so the bubble does not grow for it.
+                    if folds && !expanded { expandButton }
                 }
-            if folds { expandButton }
+            // Open, it sits right under the last line.
+            if folds && expanded { expandButton.padding(.top, -6) }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -370,21 +366,24 @@ struct AgentBubble: View {
         .padding(.trailing, forwardedFrom == nil ? 64 : 32)
     }
 
-    /// A small grey chevron, centred: the row is 44 pt tall to tap, but
-    /// reaches into the spacing above and the padding below, so it adds
-    /// little height.
+    /// A small grey chevron, centred. Folded, its backdrop is the fade into
+    /// the bubble's colour; open, it stands alone. Either way it lays out
+    /// short and taps 44 pt tall: the tap area reaches past its frame.
     private var expandButton: some View {
         Button(action: toggle) {
             Image(systemName: expanded ? "chevron.up" : "chevron.down")
                 .romeFont(13, .semibold)
                 .foregroundStyle(Palette.sub)
-                .frame(maxWidth: .infinity, minHeight: 44)
-                .contentShape(Rectangle())
+                .frame(maxWidth: .infinity, minHeight: expanded ? 16 : 40, alignment: .bottom)
+                .background {
+                    if !expanded {
+                        LinearGradient(colors: [Palette.bubble.opacity(0), Palette.bubble], startPoint: .top, endPoint: .bottom)
+                    }
+                }
+                .contentShape(Rectangle().inset(by: expanded ? -14 : -4))
         }
         .buttonStyle(.plain)
         .accessibilityLabel(expanded ? Text("Show less") : Text("Show more"))
-        .padding(.top, -14)
-        .padding(.bottom, -12)
     }
 
     private func toggle() {
