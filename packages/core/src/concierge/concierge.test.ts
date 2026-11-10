@@ -302,10 +302,6 @@ function setup(
       ),
       placeInChatThread: async (chatId: string, id: string, placement: ChatThreadPlacement) =>
         placeInThread(chatId, id, placement),
-      chatThreadSettled: async (chatId: string, id: string) => {
-        const row = (messages.get(chatId) ?? []).find((candidate) => candidate.id === id);
-        return row ? row.settled === true : null;
-      },
       getReplyTarget: async (chatId: string, messageId: string) => {
         const row = [
           ...(isConciergeChatId(chatId) && options.said !== false ? [ACKNOWLEDGEMENT] : []),
@@ -666,7 +662,7 @@ describe("Concierge tools", () => {
       expect(threadOf(s, ack)).toBeUndefined();
     });
 
-    it("keeps a task's story under one root: a later card or forward does not move its anchor", async () => {
+    it("keeps a task's story under one root: a later card in its thread may take the anchor", async () => {
       const s = setup({ said: false });
       guardianSays(s, { id: "g0" });
       const ack = saidId(await s.tool("say", { text: "On it" }));
@@ -677,12 +673,16 @@ describe("Concierge tools", () => {
       s.threadAnchor(ack);
       await s.tool("say", { text: "Found 3 flights" });
 
-      // A later turn shows the task's card again: it reports in the task's thread, and the row keeps its anchor.
+      // A later turn shows the task's card again: it reports in the task's
+      // thread, so the row may point to it, under the same root.
       s.inTurn("later-turn");
       s.threadAnchor(undefined);
       const card = saidId(await s.tool("chat_card", { chatId }));
       expect(threadOf(s, card)).toBe("g0");
-      expect((await s.tasks.repo.getWithChat(taskId))?.sourceMessageId).toBe(ack);
+      expect((await s.tasks.repo.getWithChat(taskId))?.sourceMessageId).toBe(card);
+      s.inTurn("next-event-turn");
+      s.threadAnchor(card);
+      expect(threadOf(s, saidId(await s.tool("say", { text: "Booked" })))).toBe("g0");
     });
 
     it("lets a turn about several tasks name the thread a message reports on, never a new one", async () => {
@@ -752,6 +752,53 @@ describe("Concierge tools", () => {
       s.inTurn("task-events-turn");
       const said = saidId(await s.tool("say", { text: "Update", thread: "answer" }));
       expect(threadOf(s, said)).toBe("answer");
+    });
+
+    it("puts a task's card in its thread when the guardian asks for it from the timeline", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, { id: "g0" });
+      const ack = saidId(await s.tool("say", { text: "On it" }));
+      const { chatId } = JSON.parse(
+        (await s.tool("chat_start", { title: "Flights", brief: "Find flights" })).content[0].text,
+      );
+      s.inTurn("task-event-turn");
+      s.threadAnchor(ack);
+      await s.tool("say", { text: "Found 3 flights" });
+
+      // "Show me the flights task", typed in the main composer.
+      s.inTurn("show-turn");
+      s.threadAnchor(undefined);
+      guardianSays(s, { id: "show", turnId: "show-turn" });
+      const card = saidId(await s.tool("chat_card", { chatId }));
+      expect(threadOf(s, card)).toBe("g0");
+      expect(threadOf(s, "show")).toBeUndefined();
+    });
+
+    it("keeps a task's root before its first result, and jumps to the forwarded result after", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, { id: "g0" });
+      const ack = saidId(await s.tool("say", { text: "On it" }));
+      const { chatId, taskId } = JSON.parse(
+        (await s.tool("chat_start", { title: "Flights", brief: "Find flights" })).content[0].text,
+      );
+      // "How's it going?" before any result: the card does not take the task.
+      s.inTurn("progress-turn");
+      guardianSays(s, { id: "g1", turnId: "progress-turn" });
+      await s.tool("chat_card", { chatId });
+      expect((await s.tasks.repo.getWithChat(taskId))?.sourceMessageId).toBe(ack);
+
+      // The first result is forwarded: it roots at g0, and the row now jumps to it.
+      s.messages.get(chatId)?.push({
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "3 options" }]),
+      });
+      s.inTurn("task-event-turn");
+      s.threadAnchor(ack);
+      const forwarded = JSON.parse((await s.tool("chat_forward", { chatId })).content[0].text)
+        .messageId as string;
+      expect(threadOf(s, forwarded)).toBe("g0");
+      expect(threadOf(s, "g1")).toBeUndefined();
+      expect((await s.tasks.repo.getWithChat(taskId))?.sourceMessageId).toBe(forwarded);
     });
 
     it("takes the guardian's words sent on to a task into the task's thread, but never a reply", async () => {

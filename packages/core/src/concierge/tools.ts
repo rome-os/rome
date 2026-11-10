@@ -315,7 +315,7 @@ export async function buildConciergeTools(
     } else if (messageId) {
       const anchor = await requireSourceMessage(messageId);
       // A task with a chat thread keeps its anchor, and so its root.
-      if (!(await anchorFixed(write.id))) {
+      if (await mayRepoint(write.id, anchor)) {
         write.sourceMessageId = anchor;
         write.chatId = currentTurn().chatId;
       }
@@ -339,10 +339,11 @@ export async function buildConciergeTools(
     });
 
   // The chat thread a message the Concierge says goes into
-  // (docs/domains/chats.md#chat-thread). An answer goes where the guardian's
-  // message it answers is: into that message's thread, or into none. A turn
-  // no guardian message started reports on a task, and its messages join the
-  // thread of the message that started the task.
+  // (docs/domains/chats.md#chat-thread). A card or forward about a task with
+  // a thread goes into it. An answer goes where the guardian's message it
+  // answers is: into that message's thread, or into none. A turn no guardian
+  // message started reports on a task, and its messages join the thread of
+  // the message that started the task.
   const chatThreadFor = async (
     answers: string | undefined,
     report: { thread?: string; taskChatId?: string } = {},
@@ -354,6 +355,11 @@ export async function buildConciergeTools(
         `No guardian message ${answers} in this turn. Pass a message_id from this turn's <chat_thread> lines.`,
       );
     }
+    // A card or forward about a task with a thread goes there, whoever
+    // started the turn.
+    const taskAnchorId = report.taskChatId ? await taskAnchor(report.taskChatId) : null;
+    const taskThread = taskAnchorId ? await starterThread(chatId, taskAnchorId, false) : null;
+    if (taskThread) return { in: taskThread };
     if (prompts.length > 0) {
       // With several guardian messages and no `answers`, which one this
       // answers is a guess, so it goes in no thread.
@@ -370,9 +376,7 @@ export async function buildConciergeTools(
       }
       return { in: thread };
     }
-    const anchor = report.taskChatId
-      ? ((await taskAnchor(report.taskChatId)) ?? context.getTurnThreadAnchor())
-      : context.getTurnThreadAnchor();
+    const anchor = taskAnchorId ?? context.getTurnThreadAnchor();
     const root = anchor ? await starterThread(chatId, anchor) : null;
     return root ? { in: root } : undefined;
   };
@@ -399,20 +403,17 @@ export async function buildConciergeTools(
   const threadOf = async (chatId: string, messageId: string) =>
     (await webchatRepo.getReplyTarget(chatId, messageId))?.chatThreadId ?? null;
 
-  // The thread of the guardian's message that started a task, given the
-  // message its row points to. The row points to what the Concierge said; the
-  // guardian's message that turn answered started the task. That message
-  // becomes the thread's root when it is in none, unless `start` is false.
-  // Null when no guardian message started it.
-  const starterThread = async (
+  // Where a task stands, given the message its row points to: the chat
+  // thread it has, and the guardian message that started it. The row points
+  // to what the Concierge said; the guardian's message that turn answered
+  // started the task, when the turn had just one.
+  const taskRoot = async (
     chatId: string,
     anchor: string,
-    start = true,
-  ): Promise<string | null> => {
+  ): Promise<{ thread: string | null; starter: string | null }> => {
     const pointed = await webchatRepo.getReplyTarget(chatId, anchor);
-    if (!pointed) return null;
-    if (pointed.chatThreadId) return pointed.chatThreadId;
-    let starter: string | undefined = pointed.id;
+    if (!pointed) return { thread: null, starter: null };
+    let starter: string | null = pointed.id;
     if (pointed.role !== "user") {
       const prompts = pointed.turnId
         ? (await webchatRepo.getTurnChatMessages(chatId, pointed.turnId)).filter(
@@ -420,12 +421,23 @@ export async function buildConciergeTools(
           )
         : [];
       // Of several guardian messages, which one started the task is a guess.
-      starter = prompts.length === 1 ? prompts[0]?.id : undefined;
+      starter = prompts.length === 1 ? (prompts[0]?.id ?? null) : null;
     }
-    // A task no one guardian message started has no thread to join.
-    if (!starter) return null;
-    const thread = await threadOf(chatId, starter);
-    if (thread || !start) return thread;
+    const thread = pointed.chatThreadId ?? (starter ? await threadOf(chatId, starter) : null);
+    return { thread, starter };
+  };
+
+  // The thread of the guardian's message that started a task, given the
+  // message its row points to. That message becomes the thread's root when
+  // it is in none, unless `start` is false. Null when no one guardian
+  // message started it.
+  const starterThread = async (
+    chatId: string,
+    anchor: string,
+    start = true,
+  ): Promise<string | null> => {
+    const { thread, starter } = await taskRoot(chatId, anchor);
+    if (thread || !start || !starter) return thread;
     return webchatRepo.placeInChatThread(chatId, starter, { starts: true, settle: true });
   };
 
@@ -457,23 +469,25 @@ export async function buildConciergeTools(
     });
   };
 
-  // Whether task `taskId`'s anchor is fixed: once the task has a chat
-  // thread, its story stays under that one root.
-  const anchorFixed = async (taskId: string) => {
+  // Whether task `taskId` may point to `messageId` instead. A task with a
+  // starter keeps its story under one root: it moves only to a message
+  // already in its thread, which is the same root, so the panel's jump can
+  // follow its latest result.
+  const mayRepoint = async (taskId: string, messageId: string) => {
     const found = await tasks.repo.getWithChat(taskId);
-    return Boolean(
-      found?.sourceMessageId &&
-        (await starterThread(found.conciergeChat.id, found.sourceMessageId, false)),
-    );
+    if (!found?.sourceMessageId) return true;
+    const chatId = found.conciergeChat.id;
+    const { thread, starter } = await taskRoot(chatId, found.sourceMessageId);
+    if (!thread && !starter) return true;
+    return thread !== null && (await threadOf(chatId, messageId)) === thread;
   };
 
-  // Points the task in task chat `taskChatId` to `messageId`, unless it
-  // already has a thread: then its story stays under that one root. Answers
-  // the row it pointed, or null.
+  // Points the task in task chat `taskChatId` to `messageId`, when it may.
+  // Answers the row it pointed, or null.
   const pointTaskTo = async (taskChatId: string, messageId: string) => {
     const { chatId } = currentTurn();
     const task = await tasks.repo.findBySession(taskChatId);
-    if (!task || (await anchorFixed(task.id))) return null;
+    if (!task || !(await mayRepoint(task.id, messageId))) return null;
     await tasks.repo.setSourceMessage(task.id, chatId, messageId);
     return task;
   };
@@ -747,7 +761,7 @@ export async function buildConciergeTools(
           const sourceMessageId = taskId
             ? messageId
               ? await requireSourceMessage(messageId).then(async (anchor) =>
-                  (await anchorFixed(taskId)) ? undefined : anchor,
+                  (await mayRepoint(taskId, anchor)) ? anchor : undefined,
                 )
               : undefined
             : await sourceMessageForNewRow(messageId);

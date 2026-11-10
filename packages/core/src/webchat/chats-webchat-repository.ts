@@ -399,11 +399,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return thread;
   }
 
-  override async chatThreadSettled(sessionId: string, messageId: string): Promise<boolean | null> {
-    const standing = this.standingOf(sessionId);
-    return standing ? this.lines.chatThreadSettled(standing.place.chat, messageId) : null;
-  }
-
   override async chatThreadOf(sessionId: string, messageId: string): Promise<string | null> {
     const standing = this.standingOf(sessionId);
     return standing ? this.lines.chatThreadOf(standing.place.chat, messageId) : null;

@@ -350,16 +350,6 @@ export class MessageRepository {
     return rooted.length > 0;
   }
 
-  /** Whether the message keyed `key` in `chat` is settled in its chat
-   *  thread, or null when Rome holds no such message. */
-  chatThreadSettled(chat: ChatRef, key: string): boolean | null {
-    const row = this.db.all<{ settled: number }>(sql`
-      SELECT chat_thread_settled AS settled FROM chat_messages
-      WHERE chat_id = ${chatIdOf(chat)} AND key = ${key}
-    `)[0];
-    return row ? row.settled === 1 : null;
-  }
-
   /** The chat on `platform` that holds a message its adapter keys `key`, the
    *  oldest such message's, or null when Rome holds none. For platforms whose
    *  keys are unique across chats, as an email's message id is. */

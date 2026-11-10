@@ -870,12 +870,6 @@ export class WebChatRepository {
     return null;
   }
 
-  /** Whether message `messageId` of chat `sessionId` is settled in its chat
-   *  thread, or null when the chat holds no such message. */
-  async chatThreadSettled(_sessionId: string, _messageId: string): Promise<boolean | null> {
-    return null;
-  }
-
   /**
    * The messages of the chat thread that message `messageId` of chat
    * `sessionId` is in, in the order they were said. A message in no chat

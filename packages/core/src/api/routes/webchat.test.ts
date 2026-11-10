@@ -6250,11 +6250,18 @@ describe("Webchat API", () => {
       expect(await repo.get(row.id)).toMatchObject({ state: "doing", sessionId: null });
     });
 
-    it("keeps the main Concierge chat, and retires a topic chat before archiving or deleting it", async () => {
+    it("keeps the main Concierge chat, retires a topic chat before deleting it, and tells the activity after", async () => {
       const retired: [string, string][] = [];
+      const gone: [string, boolean][] = [];
       deps.concierge = {
         taskOfChat: async () => null,
-        retireChat: async (chatId: string, how: string) => void retired.push([chatId, how]),
+        retireChat: async (chatId: string, how: string) => {
+          retired.push([chatId, how]);
+          return "concierge";
+        },
+        // The activity hears of a deleted chat once it is gone, as an archive.
+        chatGone: async (chatId: string) =>
+          void gone.push([chatId, (await deps.webchatRepo.getSession(chatId)) === null]),
       } as never;
       const topic = (id: string) =>
         deps.webchatRepo.createSession(
@@ -6300,6 +6307,7 @@ describe("Webchat API", () => {
         ["topic-1", "archived"],
         ["topic-2", "deleted"],
       ]);
+      expect(gone).toEqual([["topic-2", true]]);
     });
 
     it("lists a quiet backend turn as quiet, and an ordinary one without the flag", async () => {

@@ -160,7 +160,6 @@ export interface ConciergeDeps {
     | "getReplyTarget"
     | "addBackendMessage"
     | "placeInChatThread"
-    | "chatThreadSettled"
     | "setSessionTrigger"
     | "listProjects"
     | "onMessageInserted"
@@ -470,31 +469,43 @@ export class ConciergeService {
    * A Concierge chat is being archived or deleted. Its follows, its unfinished
    * tasks and the events owed to it move to its owner's main chat, and the
    * Concierge says so there. A main chat is never retired: this throws for one.
+   * Answers the main chat the chat's work moved to, or null when it is no
+   * Concierge chat. After a delete, call `chatGone` once the chat is gone.
    */
-  async retireChat(chatId: string, how: RetiredHow): Promise<void> {
+  async retireChat(chatId: string, how: RetiredHow): Promise<string | null> {
     const chat = await this.deps.webchatRepo.getSession(chatId);
     if (chatId === CONCIERGE_CHAT_ID || (chat && this.isMainChat(chat)))
       throw new Error("The main Concierge chat cannot be archived or deleted");
-    if (!chat || !isConciergeChat(chat)) return;
+    if (!chat || !isConciergeChat(chat)) return null;
     const owner = ownerOf(chat);
     const main = await this.ensureChatId(owner);
     const follows = (await this.attachedFollowing?.moveToMainChat(chatId, storedChatId(main))) ?? 0;
     const tasks = await this.deps.tasks.repo.moveToMainChat(chatId, storedChatId(main));
     log.info("concierge chat retired", { chatId, how, follows, tasks });
-    // Finished rows stay on the topic chat, so no row write tells the
-    // activity that their task chats now move the main chat.
-    await this.activity?.retired(chatId, main).catch((error: unknown) =>
-      log.warn("concierge activity retire failed", {
-        error: error instanceof Error ? error.message : String(error),
-      }),
-    );
-    if (follows === 0 && tasks === 0) return;
+    // A deleted chat is still there now: its caller tells the activity once
+    // it is gone, so finished rows read as the main chat's by then.
+    if (how === "archived") await this.chatGone(chatId, main);
+    if (follows === 0 && tasks === 0) return main;
     void this.runSystemTurn(
       main,
       `<concierge_chat_retired name="${attr(chat.name)}" how="${how}" follows="${follows}" tasks="${tasks}"/>`,
       { quiet: true, inputLabel: "Concierge chat retired" },
     ).catch((error: unknown) =>
       log.warn("retired chat notice failed", {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return main;
+  }
+
+  /**
+   * A retired Concierge chat is archived or deleted now, and its tasks are
+   * `mainChatId`'s. Finished rows stay on the retired chat, so no row write
+   * tells the activity that their task chats now move the main chat.
+   */
+  async chatGone(chatId: string, mainChatId: string): Promise<void> {
+    await this.activity?.retired(chatId, mainChatId).catch((error: unknown) =>
+      log.warn("concierge activity retire failed", {
         error: error instanceof Error ? error.message : String(error),
       }),
     );

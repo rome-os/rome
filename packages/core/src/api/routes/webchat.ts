@@ -2727,7 +2727,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (isMainConciergeChat(session)) {
       return c.json({ error: "The main Concierge chat cannot be deleted" }, 409);
     }
-    if (isConciergeChat(session)) await deps.concierge?.retireChat(sessionId, "deleted");
+    const retiredTo = isConciergeChat(session)
+      ? ((await deps.concierge?.retireChat(sessionId, "deleted")) ?? null)
+      : null;
     // Closing the chat session also closes the live AgentSession
     // so we don't keep an idle SDK CLI subprocess pinned to a deleted thread.
     const sess = deps.agentSessionManager.find({
@@ -2741,6 +2743,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // chat is gone; the Concierge hears of it quietly.
     const taskId = (await deps.concierge?.taskOfChat(sessionId)) ?? null;
     await deps.webchatRepo.deleteSession(sessionId);
+    // Told after the delete, as an archive is, so the activity reads the
+    // chat's finished rows as the main chat's.
+    if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo);
     if (taskId) deps.concierge?.chatDeleted(taskId);
     // Durable audit signal for guardian-initiated chat deletion. Keep the
     // payload free of chat titles and message content because the OTLP
