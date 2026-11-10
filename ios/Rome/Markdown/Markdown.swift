@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// A block of Markdown. The parser covers what agents write in chat: paragraphs,
-/// headings, bullet and numbered lists, quotes, fenced code, and rules.
+/// headings, bullet and numbered lists, quotes, fenced code, rules and
+/// GitHub-flavoured tables.
 enum MarkdownBlock: Hashable {
     case paragraph(String)
     case heading(level: Int, text: String)
@@ -11,6 +12,14 @@ enum MarkdownBlock: Hashable {
     case rule
     /// `![alt](src)`, lifted out of its paragraph to stand at its place.
     case image(alt: String, src: String)
+    /// A table: its header, how each column aligns, and its rows, each with
+    /// as many cells as the header. Cells keep their inline Markdown.
+    case table(header: [String], alignments: [TableAlignment], rows: [[String]])
+}
+
+/// How a table column aligns, from its delimiter cell.
+enum TableAlignment: Hashable {
+    case leading, center, trailing
 }
 
 enum MarkdownParser {
@@ -48,8 +57,11 @@ enum MarkdownParser {
             flushQuote()
         }
 
-        for rawLine in source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n") {
-            let line = rawLine
+        let lines = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        var next = 0
+        while next < lines.count {
+            let line = lines[next]
+            next += 1
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
             if var lines = code {
@@ -83,6 +95,24 @@ enum MarkdownParser {
                 flushAll()
                 blocks.append(.heading(level: heading.level, text: heading.text))
                 continue
+            }
+            // A table: a row of cells, then its delimiter row, then body rows
+            // up to a blank line or a line without a pipe.
+            if trimmed.contains("|"), next < lines.count, let alignments = delimiterRow(lines[next]) {
+                let header = tableCells(trimmed)
+                if header.count == alignments.count {
+                    flushAll()
+                    next += 1
+                    var rows: [[String]] = []
+                    while next < lines.count {
+                        let row = lines[next].trimmingCharacters(in: .whitespaces)
+                        guard !row.isEmpty, row.contains("|") else { break }
+                        rows.append(fitted(tableCells(row), to: header.count))
+                        next += 1
+                    }
+                    blocks.append(.table(header: header, alignments: alignments, rows: rows))
+                    continue
+                }
             }
             if trimmed.hasPrefix(">") {
                 flushParagraph()
@@ -143,6 +173,57 @@ enum MarkdownParser {
         let after = nsText.substring(from: cursor).trimmingCharacters(in: .whitespacesAndNewlines)
         if !after.isEmpty { blocks.append(.paragraph(after)) }
         return blocks
+    }
+
+    /// A row's cells: split at each pipe not escaped with a backslash, the
+    /// outer pipes dropped, `\|` read as a pipe.
+    static func tableCells(_ line: String) -> [String] {
+        var row = line.trimmingCharacters(in: .whitespaces)
+        if row.hasPrefix("|") { row.removeFirst() }
+        if row.hasSuffix("|"), !row.hasSuffix("\\|") { row.removeLast() }
+        var cells: [String] = []
+        var cell = ""
+        var escaped = false
+        for character in row {
+            if escaped {
+                // Only a pipe loses its backslash; anything else keeps it for the inline pass.
+                if character != "|" { cell.append("\\") }
+                cell.append(character)
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if character == "|" {
+                cells.append(cell.trimmingCharacters(in: .whitespaces))
+                cell = ""
+            } else {
+                cell.append(character)
+            }
+        }
+        if escaped { cell.append("\\") }
+        cells.append(cell.trimmingCharacters(in: .whitespaces))
+        return cells
+    }
+
+    /// A delimiter row's alignments, or nil when the line is not one: every
+    /// cell is dashes with an optional colon at either end.
+    static func delimiterRow(_ line: String) -> [TableAlignment]? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("-"), trimmed.contains("|") || trimmed.hasPrefix(":") || trimmed.hasPrefix("-") else { return nil }
+        var alignments: [TableAlignment] = []
+        for cell in tableCells(trimmed) {
+            let left = cell.hasPrefix(":"), right = cell.hasSuffix(":")
+            let dashes = cell.dropFirst(left ? 1 : 0).dropLast(right && cell.count > 1 ? 1 : 0)
+            guard !dashes.isEmpty, dashes.allSatisfy({ $0 == "-" }) else { return nil }
+            alignments.append(left && right ? .center : right ? .trailing : .leading)
+        }
+        // One cell needs its pipe, or "---" alone is a rule.
+        guard alignments.count > 1 || trimmed.contains("|") else { return nil }
+        return alignments
+    }
+
+    /// A body row padded with empty cells, or cut, to the header's width.
+    private static func fitted(_ cells: [String], to count: Int) -> [String] {
+        cells.count >= count ? Array(cells.prefix(count)) : cells + Array(repeating: "", count: count - cells.count)
     }
 
     private static func headingLevel(_ line: String) -> (level: Int, text: String)? {
@@ -430,6 +511,86 @@ struct MarkdownText: View {
                 viewerStart = gallery.firstIndex { $0.matches(position: position) } ?? 0
                 showViewer = true
             }
+        case .table(let header, let alignments, let rows):
+            MarkdownTable(header: header, alignments: alignments, rows: rows, fontSize: fontSize - 1)
         }
+    }
+}
+
+/// A Markdown table in the bubble: the header in medium weight, hairlines
+/// between rows, no borders or fills. Wider than the bubble, it scrolls
+/// sideways inside it; a cell wraps past `maxColumn`.
+struct MarkdownTable: View {
+    let header: [String]
+    let alignments: [TableAlignment]
+    let rows: [[String]]
+    var fontSize: CGFloat = 15
+
+    /// The widest a column grows before its cells wrap.
+    static let maxColumn: CGFloat = 220
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(horizontalSpacing: 16, verticalSpacing: 0) {
+                GridRow(alignment: .firstTextBaseline) {
+                    ForEach(Array(header.enumerated()), id: \.offset) { column, cell in
+                        self.cell(cell, column: column, weight: .medium)
+                    }
+                }
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    Rectangle().fill(Palette.hair).frame(height: 0.5).gridCellUnsizedAxes(.horizontal)
+                    GridRow(alignment: .firstTextBaseline) {
+                        ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
+                            self.cell(cell, column: column, weight: .regular)
+                        }
+                    }
+                }
+            }
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        // VoiceOver reads a row at a time, each cell under its header.
+        .accessibilityRepresentation {
+            VStack(alignment: .leading) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    Text(verbatim: Self.spoken(row, header: header))
+                }
+            }
+        }
+    }
+
+    private func cell(_ text: String, column: Int, weight: Font.Weight) -> some View {
+        let alignment = column < alignments.count ? alignments[column] : .leading
+        let frame: Alignment = alignment == .center ? .center : alignment == .trailing ? .trailing : .leading
+        return CappedWidth(max: Self.maxColumn) {
+            Text(MarkdownParser.inline(text))
+                .romeFont(fontSize, weight)
+                .lineSpacing(3)
+                .multilineTextAlignment(alignment == .center ? .center : alignment == .trailing ? .trailing : .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: frame)
+        .padding(.vertical, 7)
+    }
+
+    /// Its content at its natural width, up to `max`, past which it wraps.
+    private struct CappedWidth: Layout {
+        let max: CGFloat
+
+        func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+            guard let child = subviews.first else { return .zero }
+            let ideal = child.sizeThatFits(.unspecified).width
+            return child.sizeThatFits(ProposedViewSize(width: Swift.min(ideal, max), height: nil))
+        }
+
+        func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+            subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: nil))
+        }
+    }
+
+    /// "Header: value, Header: value" for one row, as plain text.
+    nonisolated static func spoken(_ row: [String], header: [String]) -> String {
+        zip(header, row).map { name, value in
+            let name = MarkdownParser.plain(name), value = MarkdownParser.plain(value)
+            return name.isEmpty ? value : "\(name): \(value)"
+        }.joined(separator: ", ")
     }
 }

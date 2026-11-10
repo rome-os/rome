@@ -128,6 +128,53 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
         #expect(MarkdownParser.plain("**bold** and `code`") == "bold and code")
     }
 
+    @Test func aTableReadsItsAlignmentsAndRows() {
+        let blocks = MarkdownParser.parse("""
+        Prices:
+
+        | Model | Price | Hours |
+        | :--- | ---: | :---: |
+        | **Sony** | ¥2,499 | 30 |
+        | [Bose](https://bose.com) | `¥2,299` |
+        | Max | ¥3,999 | 20 | extra |
+
+        After.
+        """)
+        #expect(blocks == [
+            .paragraph("Prices:"),
+            .table(header: ["Model", "Price", "Hours"], alignments: [.leading, .trailing, .center], rows: [
+                ["**Sony**", "¥2,499", "30"],
+                // A short row is padded, a long one cut, to the header's width.
+                ["[Bose](https://bose.com)", "`¥2,299`", ""],
+                ["Max", "¥3,999", "20"],
+            ]),
+            .paragraph("After."),
+        ])
+        // Cells keep their inline marks.
+        #expect(String(MarkdownParser.inline("**Sony**").characters) == "Sony")
+    }
+
+    @Test func aTableWithoutOuterPipesAndWithEscapedPipes() {
+        #expect(MarkdownParser.parse("a | b\n--- | ---\nx \\| y | z") == [
+            .table(header: ["a", "b"], alignments: [.leading, .leading], rows: [["x | y", "z"]]),
+        ])
+        #expect(MarkdownParser.tableCells(#"| a \| b | c |"#) == ["a | b", "c"])
+    }
+
+    @Test func pipesWithoutADelimiterRowStayText() {
+        // No delimiter row: a paragraph.
+        #expect(MarkdownParser.parse("| a | b |\n| c | d |") == [.paragraph("| a | b |\n| c | d |")])
+        // A delimiter row with another number of cells than the header.
+        #expect(MarkdownParser.parse("| a | b |\n| --- |") == [.paragraph("| a | b |\n| --- |")])
+        // A rule is still a rule.
+        #expect(MarkdownParser.parse("a\n\n---\n\nb") == [.paragraph("a"), .rule, .paragraph("b")])
+        #expect(MarkdownParser.delimiterRow("|:-:|-x-|") == nil)
+    }
+
+    @Test func aTableRowIsSpokenWithItsHeaders() {
+        #expect(MarkdownTable.spoken(["**Sony**", "¥2,499"], header: ["Model", "Price"]) == "Model: Sony, Price: ¥2,499")
+    }
+
     /// The ranges with an intent, as plain strings.
     private func spans(_ text: String, _ intent: InlinePresentationIntent) -> [String] {
         let result = MarkdownParser.inline(text)

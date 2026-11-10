@@ -160,6 +160,8 @@ enum SnapshotRunner {
             try? await Task.sleep(for: .seconds(0.4))
             // Routine cards with their state, and the rows for cards only the web draws.
             await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }
+            // Markdown tables: a narrow one, and a wide one that scrolls inside its bubble.
+            await capture("56-markdown-tables", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-table")) }
             // The drawer over a topic chat: its row selected.
             await capture("05b-drawer-topic", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)

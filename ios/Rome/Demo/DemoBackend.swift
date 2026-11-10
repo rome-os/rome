@@ -555,6 +555,7 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-mail", name: "每天的邮件摘要", main: false, unread: 0),
             ConciergeChat(id: "topic-mail-setup", name: "邮件摘要设置", main: false, unread: 0),
             ConciergeChat(id: "topic-routine", name: "每周读书提醒", main: false, unread: 0),
+            ConciergeChat(id: "topic-table", name: "耳机比价", main: false, unread: 0),
         ]
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false) -> ConciergeTask {
@@ -700,6 +701,28 @@ final class DemoBackend: RomeBackend {
             ], at: at(11, 2), session: routine),
             // The AI tools card was answered on the web: its row says Done.
             parts([.object(["type": .string("interaction_result"), "toolUseId": .string("ai-1"), "output": .object(["connected": .bool(true)])])], at: at(11, 3), session: routine, role: "user"),
+        ]
+        // A narrow table, and one wider than the bubble that scrolls inside it.
+        messages["topic-table"] = [
+            user("tb1", "帮我比一下这三款降噪耳机。", at: at(12, 0), session: "topic-table"),
+            agent("""
+            三款的价格和续航：
+
+            | 型号 | 价格 | 续航 |
+            | :--- | ---: | :---: |
+            | Sony WH-1000XM6 | ¥2,499 | 30 h |
+            | Bose QC Ultra | ¥2,299 | 24 h |
+            | AirPods Max | ¥3,999 | 20 h |
+            """, at: at(12, 1), session: "topic-table"),
+            agent("""
+            细节对比：
+
+            | 型号 | 降噪 | 佩戴 | 通话 | 适合谁 |
+            | --- | --- | --- | --- | --- |
+            | **Sony WH-1000XM6** | 三款里最强，地铁和飞机上都很安静 | 偏紧，戴久了耳朵会热 | 清楚 | 经常出差、坐飞机的人 |
+            | Bose QC Ultra | 接近 Sony，人声压得更干净 | 最轻最松，适合长时间戴 | 一般 | 每天通勤、要戴一整天的人 |
+            | AirPods Max | 比前两款弱一些 | 重，但做工最好 | 很好 | 已经在用 `iPhone` 和 Mac 的人 |
+            """, at: at(12, 2), session: "topic-table"),
         ]
         messages["topic-mail-setup"] = [
             user("ms1", "摘要按什么来整理？", at: at(10, 1), session: "topic-mail-setup"),
