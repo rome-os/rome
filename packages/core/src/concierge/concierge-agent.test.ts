@@ -20,12 +20,35 @@ const actionName = (action: string) =>
   ).name;
 
 describe("the Concierge agent", () => {
+  it("renames through the core action instead of editing the setting-owned identity line", () => {
+    expect(concierge.actions).toContain("core:set_agent_name");
+    for (const prompt of [
+      concierge.systemPromptPrefix,
+      (
+        parseYaml(readFileSync(resolve(here, "../../agents/main.yaml"), "utf8")) as {
+          systemPromptPrefix: string;
+        }
+      ).systemPromptPrefix,
+    ]) {
+      expect(prompt).toContain("`core:set_agent_name` with `execute_action`");
+      expect(prompt).toContain("Do not edit the `Agent Name` line");
+    }
+  });
   it("can find and delete the routine that watches a task row", () => {
     expect(concierge.actions).toContain("system:search_routine");
     expect(concierge.actions).toContain("system:delete_routine");
     // The names are the system app's own actions, not a guess at them.
     expect(actionName("search-routine")).toBe("search_routine");
     expect(actionName("delete-routine")).toBe("delete_routine");
+  });
+
+  it("tells dream to preserve the setting-owned agent name", () => {
+    const dream = parseYaml(
+      readFileSync(resolve(here, "../../../../rome_apps/dream/src/agents/dream.yaml"), "utf8"),
+    ) as { systemPromptPrefix: string };
+    expect(dream.systemPromptPrefix).toContain(
+      "Preserve the `Agent Name` line in `memory/IDENTITY.md` unchanged",
+    );
   });
 
   it("preserves saved follow settings before applying the requested changes", () => {

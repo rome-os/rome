@@ -781,9 +781,9 @@ export interface WebchatRuntime {
     options?: BackendTurnOptions,
   ): Promise<void>;
   /**
-   * Emits `session_running` whenever a chat starts or stops running a turn,
-   * after first emitting one for every chat running now. Returns the
-   * unsubscribe.
+   * Emits `session_running` when a chat starts or stops a turn, after
+   * replaying every running chat. Also emits `agent_name_changed` on a rename.
+   * Returns the unsubscribe.
    */
   subscribeStatusEvents(emit: LiveEventEmit): () => void;
   /**
@@ -869,9 +869,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const listener = (event: { sessionId: string; running: boolean }) =>
       emit("session_running", event);
     runningListeners.add(listener);
+    const unsubscribeName = deps.agentNameEvents?.subscribe(emit);
     for (const sessionId of runningSessions) listener({ sessionId, running: true });
     return () => {
       runningListeners.delete(listener);
+      unsubscribeName?.();
     };
   };
   // `session_running` here is the open chat's cue to look up the turn to

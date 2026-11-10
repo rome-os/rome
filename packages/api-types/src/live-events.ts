@@ -4,6 +4,9 @@ import { z } from "zod";
 // packages/web/src/lib/live-events.ts. Frames are JSON text.
 
 export const CHAT_STATUS_TOPIC = "chat.status";
+
+/** The agent's display name changed. Carried on chat.status alongside running state. */
+export const agentNameChangedSchema = z.object({ agentName: z.string() });
 /** The Concierge task panel's rows. Its only event is `task_upsert`. */
 export const CONCIERGE_TASKS_TOPIC = "concierge.tasks";
 export const APP_CATALOG_TOPIC = "apps.catalog";
