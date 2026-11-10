@@ -1,5 +1,6 @@
-// Tells the server whether the guardian is at this dashboard, so the
-// Concierge holds back its pushes to their phone meanwhile:
+// Tells the server whether the person signed in, the guardian or a visitor, is
+// at this dashboard, so the Concierge holds back its pushes to their phone
+// meanwhile:
 // docs/architecture/notification-delivery.md. Input on a visible, focused tab
 // reports `active`; hiding the tab, leaving the window or closing the page
 // reports `away` at once. A page inside the phone app's web view reports
@@ -44,7 +45,7 @@ export function watchDashboardActivity(
   };
 }
 
-/** Reports this tab's activity while `enabled`: only a guardian's dashboard counts. */
+/** Reports this tab's activity while `enabled`: while someone is signed in. */
 export function useDashboardActivity(enabled: boolean): void {
   const client = useContext(LiveEventsClientContext);
   useEffect(() => {

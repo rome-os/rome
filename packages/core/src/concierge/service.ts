@@ -35,8 +35,6 @@ import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeTasks } from "./tasks.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
-import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
-import { quietWindowEnd } from "./alerts.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 import {
   type ConciergeOwner,
@@ -167,19 +165,19 @@ export interface ConciergeDeps {
     params: BackendTurnParams,
     options?: SystemTurnOptions,
   ) => Promise<"completed" | "stopped" | "interrupted" | "failed" | void>;
-  /** Asks Rome Cloud to push to the guardian's phone. Absent, nothing is pushed. */
+  /** Asks Rome Cloud to push to a person's phone. Absent, nothing is pushed. */
   notify?: ConciergePushDeps["notify"];
-  /** The chats the guardian's phone app holds open; nothing said there is pushed. */
+  /** The chats each person's phone app holds open; nothing said there is pushed to them. */
   phoneWatching?: Pick<PhoneWatching, "isWatching">;
-  /** Whether the guardian is at a web dashboard; while they are, nothing is pushed. */
+  /** Whether each person is at a web dashboard; while they are, nothing is pushed to them. */
   dashboardActivity?: Pick<DashboardActivity, "isActive">;
 }
 
 export interface SystemTurnOptions {
   quiet?: boolean;
   inputLabel?: string;
-  /** The first message the Concierge says in the turn goes to the guardian's
-   *  phone at this level. A reminder, a recovery or a notice has none. */
+  /** Each message the Concierge says in the turn goes to the phone of the
+   *  person the chat serves at this level. A reminder, a recovery or a notice has none. */
   pushLevel?: NotifyLevel;
 }
 
@@ -197,10 +195,12 @@ export class ConciergeService {
     this.push = deps.notify
       ? new ConciergePush({
           notify: deps.notify,
-          quietUntil: (at) => this.quietUntil(at),
-          pushesFor: async (chatId) => (await this.ownerOfChat(chatId)) === GUARDIAN_OWNER,
-          watching: (chatId) => deps.phoneWatching?.isWatching(chatId) ?? false,
-          dashboardActive: () => deps.dashboardActivity?.isActive() ?? false,
+          ownerOf: (chatId) => this.ownerOfChat(chatId),
+          quietUntil: async (at, owner) =>
+            (await this.attachedFollowing?.quietUntil(at, owner)) ?? null,
+          watching: (owner, chatId) => deps.phoneWatching?.isWatching(owner, chatId) ?? false,
+          dashboardActive: (owner) => deps.dashboardActivity?.isActive(owner) ?? false,
+          // A visitor has no language setting of their own; the dashboard's is the guardian's.
           language: async () => {
             const stored = await this.deps.settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
             return typeof stored === "string" ? stored : null;
@@ -210,20 +210,12 @@ export class ConciergeService {
   }
 
   /**
-   * The Concierge said something in a chat. The first message of a turn with a
-   * push level in one of the guardian's chats also goes to the guardian's
-   * phone, outside quiet hours. A visitor's Concierge never pushes: Rome Cloud
-   * delivers only to the guardian's devices.
+   * The Concierge said something in a chat. A message of a turn with a push
+   * level also goes to the phone of the person the chat serves, the guardian
+   * or a visitor, by the rules of {@link ConciergePush}.
    */
   said(said: SaidInTurn): void {
     this.push?.said(said);
-  }
-
-  /** When the guardian's quiet window `at` falls in ends, or null outside it. */
-  private async quietUntil(at: number): Promise<number | null> {
-    const quietHours = (await this.attachedFollowing?.rules(GUARDIAN_OWNER))?.quietHours;
-    if (!quietHours) return null;
-    return quietWindowEnd(at, quietHours, await resolveGuardianTimezone(this.deps.settingsRepo));
   }
 
   attachDashboard(dashboard: ConciergeDashboard): void {

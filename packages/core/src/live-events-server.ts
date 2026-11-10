@@ -9,12 +9,13 @@
 // Concierge rows, and another owner's Concierge or task chat is not found.
 //
 // The wire contract lives in @rome/api-types/live-events. `subscribed` precedes
-// the snapshot `chat.status` replays too. The guardian's phone app marks its
-// socket with a header and holds `chat.watch:<id>` for the chat on its screen;
-// that chat counts as watched (`PhoneWatching`), which holds back the
-// Concierge's push there. Its data subscriptions never count. A guardian
-// dashboard's `activity` frames count it as active or away
-// (`DashboardActivity`): while one is active, the Concierge pushes nothing.
+// the snapshot `chat.status` replays too. The phone app marks its socket with
+// a header and holds `chat.watch:<id>` for the chat on its screen; that chat
+// counts as watched for the person signed in on it (`PhoneWatching`), which
+// holds back the Concierge's push there. Its data subscriptions never count.
+// A dashboard's `activity` frames count its person as active or away
+// (`DashboardActivity`): while one is active, none of that person's
+// Concierge pushes goes out.
 import type { IncomingMessage, Server } from "node:http";
 import type { Duplex } from "node:stream";
 import { WebSocket, WebSocketServer, type RawData } from "ws";
@@ -132,9 +133,6 @@ export function attachLiveEventsServer(
     const subscriptions = new Map<string, { unsubscribe: Unsubscribe | null }>();
     let closed = false;
     let alive = true;
-    // Only the guardian's dashboard holds back the guardian's pushes; a
-    // phone's or a visitor's activity frames count for nothing.
-    const activity = !phone && caller.kind === "guardian" ? dashboardActivity?.open() : undefined;
 
     const send = (message: LiveEventsServerMessage) => {
       if (ws.readyState !== WebSocket.OPEN) return;
@@ -155,6 +153,9 @@ export function attachLiveEventsServer(
       caller.kind === "guardian" || (topic.kind !== "apps.catalog" && visitorAllowed());
     // Whose Concierge todo list and private chats this socket may read.
     const owner = caller.kind === "guardian" ? "guardian" : `visitor:${caller.accountId}`;
+    // A dashboard holds back only its own person's pushes; a phone's
+    // activity frames count for nothing.
+    const activity = phone ? undefined : dashboardActivity?.open(owner);
     const exists = async (topic: Topic): Promise<boolean> =>
       topic.kind === "chat.session" || topic.kind === "chat.watch"
         ? sources.hasChatSession(topic.sessionId, owner)
@@ -171,11 +172,11 @@ export function attachLiveEventsServer(
         case "chat.session":
           return sources.subscribeChatSession(topic.sessionId, emit);
         case "chat.watch":
-          // The chat on the guardian's phone: what the Concierge says there is
-          // read on the phone, so it is not pushed to it. Anyone else's watch
+          // The chat on its person's phone: what the Concierge says there is
+          // read on the phone, so it is not pushed to it. A dashboard's watch
           // is held and counts for nothing.
-          if (!phone || caller.kind !== "guardian" || !phoneWatching) return () => {};
-          return phoneWatching.watch(topic.sessionId);
+          if (!phone || !phoneWatching) return () => {};
+          return phoneWatching.watch(owner, topic.sessionId);
       }
     };
 
@@ -274,8 +275,8 @@ export function attachLiveEventsServer(
       const message = result.data;
       if (message.type === "subscribe") subscribe(message.topic);
       else if (message.type === "unsubscribe") unsubscribe(message.topic);
-      else if (message.state === "active") activity?.active();
-      else activity?.away();
+      else if (message.state === "away") activity?.away();
+      else if (visitorAllowed()) activity?.active();
     });
     ws.on("close", teardown);
     ws.on("error", (err) => {

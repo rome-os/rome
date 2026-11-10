@@ -11,9 +11,9 @@ export interface RunParams extends SdkRunParams {
   shouldRun?: () => boolean;
   /** Internal continuations should not be treated as guardian-authored turns. */
   initiatedBy?: "user" | "system";
-  /** The guardian did not start this turn, and the first message the agent
-   *  says to them in it goes to their phone as a push at this level. Absent,
-   *  the turn pushes nothing. */
+  /** Each message the agent says in this turn goes to the phone of the person
+   *  the chat serves, as a push at this level (ConciergePush). Absent, the
+   *  turn pushes nothing. */
   pushLevel?: NotifyLevel;
   /** Whether the runner saves the turn's trace. Defaults to every channel but
    *  webchat, whose chat route saves the trace of the turns it runs. */

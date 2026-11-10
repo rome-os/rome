@@ -115,6 +115,10 @@ describe("send_notification action", () => {
       status: "error",
       error: "notification_outcome_unknown",
     });
+    expect(await withOutcome({ kind: "recipient_not_allowed" }).execute({})).toEqual({
+      status: "error",
+      error: "recipient_not_allowed",
+    });
   });
 
   it("rethrows an unexpected error from the notify capability", async () => {

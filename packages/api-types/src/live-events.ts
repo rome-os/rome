@@ -9,9 +9,10 @@ export const CONCIERGE_TASKS_TOPIC = "concierge.tasks";
 export const APP_CATALOG_TOPIC = "apps.catalog";
 export const CHAT_SESSION_TOPIC_PREFIX = "chat.session:";
 /**
- * The chat the guardian's phone app has on screen. It carries no events: the
- * phone holds it for that one chat, and the Concierge does not push what it
- * says there. Only a phone socket's watch counts ({@link LIVE_EVENTS_CLIENT_HEADER}).
+ * The chat the phone app has on screen, for the guardian or a visitor signed
+ * in on it. It carries no events: the phone holds it for that one chat, and
+ * the Concierge does not push what it says there to that person. Only a phone
+ * socket's watch counts ({@link LIVE_EVENTS_CLIENT_HEADER}).
  */
 export const CHAT_WATCH_TOPIC_PREFIX = "chat.watch:";
 
@@ -36,9 +37,10 @@ export function chatWatchTopicName(chatId: string): string {
 /**
  * Client to server. Subscribing to a topic the socket already holds is a no-op.
  * `activity` says whether the person is at this dashboard: `active` after
- * input, `away` once the tab is hidden, loses focus or closes. Only a
- * guardian dashboard's signal counts, and while one counts as active the
- * Concierge pushes nothing to the guardian's phone. The server answers none.
+ * input, `away` once the tab is hidden, loses focus or closes. While a
+ * person's dashboard counts as active, the Concierge pushes nothing to that
+ * person's phone. A phone socket's signals count for nothing. The server
+ * answers none.
  */
 export const liveEventsClientMessageSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("subscribe"), topic: z.string().max(256) }),

@@ -266,6 +266,8 @@ export interface ConciergeFollowing {
    */
   unfollow(source: string, target: string, owner?: ConciergeOwner): Promise<{ removed: boolean }>;
   rules(owner?: ConciergeOwner): Promise<ConciergeFollowRules>;
+  /** When `owner`'s quiet window `at` falls in ends, in their time zone, or null outside quiet hours. */
+  quietUntil(at: number, owner: ConciergeOwner): Promise<number | null>;
   /** Changes the fields given and answers the rules as stored. */
   setRules(
     input: Partial<ConciergeFollowRules>,
@@ -1205,6 +1207,8 @@ export function startConciergeFollowing(
     },
 
     rules: async (owner = GUARDIAN_OWNER) => rulesOf(await readStored(), owner),
+
+    quietUntil,
 
     async setRules(change, owner = GUARDIAN_OWNER) {
       const stored = await readStored();

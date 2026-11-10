@@ -16,6 +16,8 @@ export type SendOutcome =
   | { kind: "no_token" }
   | { kind: "unconfigured" }
   | { kind: "reenroll" }
+  /** Rome Cloud refused the named recipient: not the instance's owner nor on its visitor list. Nothing was sent. */
+  | { kind: "recipient_not_allowed" }
   | { kind: "outcome_unknown" };
 
 /** Structural copy of core's `NotifyContent`. An optional
@@ -76,6 +78,8 @@ export function createSendNotificationAction(
           return { status: "error", error: "unconfigured" };
         case "reenroll":
           return { status: "error", error: "instance_reenrollment_required" };
+        case "recipient_not_allowed":
+          return { status: "error", error: "recipient_not_allowed" };
         case "outcome_unknown":
           return { status: "error", error: "notification_outcome_unknown" };
         default: {

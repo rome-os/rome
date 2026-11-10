@@ -14,6 +14,8 @@ export type SendOutcome =
   | { kind: "no_token" }
   | { kind: "unconfigured" }
   | { kind: "reenroll" }
+  /** Rome Cloud refused the named recipient: not the instance's owner nor on its visitor list. Nothing was sent. */
+  | { kind: "recipient_not_allowed" }
   | { kind: "outcome_unknown" };
 
 /**
@@ -44,6 +46,12 @@ export type NotifyLevel = "active" | "passive";
 export interface SystemNotifyContent extends NotifyContent {
   level?: NotifyLevel;
   chatId?: string;
+  /**
+   * The Rome Cloud account of the visitor the push is for. Absent, the push
+   * is for the guardian. A Rome Cloud that does not know the field refuses
+   * the request, so a visitor's push never falls back to the guardian.
+   */
+  recipient?: string;
 }
 
 const HTTP_TIMEOUT_MS = 120_000;
@@ -95,6 +103,7 @@ export class NotifyClient implements NotifyService {
       ...(content?.body !== undefined ? { body: content.body } : {}),
       ...(content?.level !== undefined ? { level: content.level } : {}),
       ...(content?.chatId !== undefined ? { chatId: content.chatId } : {}),
+      ...(content?.recipient !== undefined ? { recipient: content.recipient } : {}),
     };
     if (Object.keys(fields).length > 0) {
       headers["Content-Type"] = "application/json";
@@ -113,6 +122,12 @@ export class NotifyClient implements NotifyService {
         body: requestBody,
         signal: controller.signal,
       });
+      if (res.status === 403 && content?.recipient !== undefined) {
+        if ((await errorCode(res)) === "recipient_not_allowed") {
+          return { kind: "recipient_not_allowed" };
+        }
+        return { kind: "reenroll" };
+      }
       // 401/403 are terminal auth signals. We do NOT clear the
       // token here; the heartbeat/enrollment flow owns that.
       if (res.status === 401 || res.status === 403) {
@@ -125,12 +140,30 @@ export class NotifyClient implements NotifyService {
       }
       const body: unknown = await res.json();
       if (!isCounts(body)) return { kind: "outcome_unknown" };
+      // A Rome Cloud that served the recipient echoes it. One that answers
+      // without it may have sent the push to the guardian's devices instead.
+      if (content?.recipient !== undefined) {
+        const served = (body as { recipient?: unknown }).recipient;
+        if (served !== content.recipient) return { kind: "outcome_unknown" };
+      }
       return { kind: "ok", attempted: body.attempted, sent: body.sent, failed: body.failed };
     } catch {
       return { kind: "outcome_unknown" }; // network error, abort/timeout, or unparseable body
     } finally {
       clearTimeout(timer);
     }
+  }
+}
+
+/** The `error` code of a JSON error body, or null when there is none. */
+async function errorCode(res: Response): Promise<string | null> {
+  try {
+    const body: unknown = await res.json();
+    const code =
+      typeof body === "object" && body !== null ? (body as { error?: unknown }).error : null;
+    return typeof code === "string" ? code : null;
+  } catch {
+    return null;
   }
 }
 

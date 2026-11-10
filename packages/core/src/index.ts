@@ -253,6 +253,7 @@ import {
 } from "./access/visitor-allowlist-sync.js";
 import { PhoneWatching } from "./lib/phone-watching.js";
 import { DashboardActivity } from "./lib/dashboard-activity.js";
+import { callerNotifyService } from "./apps/actions/caller-notify.js";
 import { ApprovalHandler } from "./apps/actions/approval-handler.js";
 import { createBackendTurnRunner } from "./apps/actions/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
@@ -1367,8 +1368,9 @@ async function main() {
     // The `resume_session` action's orchestrator. Real runner in main;
     // the worker gets a BackendTurnRunnerProxy.
     backendTurnRunner,
-    // Real push sender in main; the worker gets a NotifyServiceProxy.
-    notify: notifyClient,
+    // Real push sender in main, to the person the calling chat serves; the
+    // worker gets a NotifyServiceProxy.
+    notify: callerNotifyService(notifyClient, (chatId) => concierge.ownerOfChat(chatId)),
     // Image generation capability: provider-neutral registry the generate_image
     // action consumes. Codex is the only provider today; its report reads
     // the same model accounts the model resolver gates on.
@@ -1940,6 +1942,7 @@ async function main() {
     hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
     backendTurnRunner,
     notify: notifyClient,
+    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
     feedback: feedbackClient,
     cloudProfile: cloudProfileClient,
     agentNames: agentNameResolver,

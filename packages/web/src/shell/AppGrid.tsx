@@ -212,8 +212,9 @@ export function AppGrid({ onSearch, chatPeek }: AppGridProps = {}) {
   useAppCatalogChanges(hasSession(bootstrap), () => {
     void invalidateApps.list();
   });
-  // The catalog stream keeps the guardian's socket open on every page, so the
-  // activity signals have a socket to ride on.
+  // The catalog subscription keeps the socket open on every page, so the
+  // activity signals have a socket to ride on. A visitor's stays open too:
+  // the server refuses them the topic, and the client keeps holding it.
   useDashboardActivity(hasSession(bootstrap));
 
   const { data: settings } = useSettings();

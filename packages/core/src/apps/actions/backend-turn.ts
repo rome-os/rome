@@ -52,7 +52,7 @@ export interface BackendTurnOptions {
   quiet?: boolean;
   /** Keeps the turn's input in its saved trace under this label. */
   inputLabel?: string;
-  /** Pushes the first message the agent says in the turn at this level
+  /** Pushes the messages the agent says in the turn at this level
    *  (RunParams.pushLevel). Absent, the turn pushes nothing. */
   pushLevel?: NotifyLevel;
 }

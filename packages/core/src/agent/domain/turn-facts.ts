@@ -4,7 +4,7 @@
 import type { ThreadContext } from "@rome-os/app-runtime";
 import type { WidgetDrawing } from "./widget-drawing.js";
 
-/** The level at which a turn pushes the first message it says to the guardian. */
+/** The level at which a turn pushes the messages it says to the person the chat serves. */
 export type PushLevel = "active" | "passive";
 
 /**
@@ -28,7 +28,7 @@ export interface TurnFacts {
   /** Where the running turn stands, else where the session does. */
   threadContext(): ThreadContext | undefined;
   sharedContext(): Record<string, unknown> | undefined;
-  /** The level the running turn pushes its first message at, or undefined when it pushes none. */
+  /** The level the running turn pushes its messages at, or undefined when it pushes none. */
   pushLevel(): PushLevel | undefined;
   /** Runs `fn` in the turn's trace context, so the work it starts nests under the turn. */
   inTurn<T>(fn: () => T): T;

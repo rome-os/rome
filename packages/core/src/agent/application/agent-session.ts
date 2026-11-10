@@ -240,7 +240,7 @@ export interface SendTurnOptions {
    *  stands, or null when Rome holds none. Read only with `promptFacts`. */
   quoted?: PromptMessage | null;
   initiatedBy?: "user" | "system";
-  /** Pushes the first message said in the turn at this level (RunParams.pushLevel). */
+  /** Pushes the messages said in the turn at this level (RunParams.pushLevel). */
   pushLevel?: PushLevel;
 }
 

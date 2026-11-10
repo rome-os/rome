@@ -91,6 +91,55 @@ describe("NotifyClient.send", () => {
     expect(new Headers(init?.headers).get("content-type")).toBe("application/json");
   });
 
+  it("names a visitor recipient, and sends none for the guardian", async () => {
+    const fetchImpl = rs.fn(async (..._a: Parameters<typeof fetch>) =>
+      jsonRes(200, { attempted: 1, sent: 1, failed: 0, recipient: "acct-v" }),
+    );
+    expect(await client({ fetchImpl }).send({ body: "hi", recipient: "acct-v" })).toEqual({
+      kind: "ok",
+      attempted: 1,
+      sent: 1,
+      failed: 0,
+    });
+    expect(JSON.parse(String(fetchImpl.mock.calls[0][1]?.body))).toEqual({
+      body: "hi",
+      recipient: "acct-v",
+    });
+    await client({ fetchImpl }).send({ body: "hi" });
+    expect(JSON.parse(String(fetchImpl.mock.calls[1][1]?.body))).toEqual({ body: "hi" });
+  });
+
+  it("maps a 200 that does not echo the visitor recipient to outcome_unknown", async () => {
+    for (const echoed of [undefined, "someone-else"]) {
+      const c = client({
+        fetchImpl: rs.fn(async () =>
+          jsonRes(200, { attempted: 1, sent: 1, failed: 0, recipient: echoed }),
+        ),
+      });
+      expect(await c.send({ body: "hi", recipient: "acct-v" })).toEqual({
+        kind: "outcome_unknown",
+      });
+    }
+  });
+
+  it("maps an older Rome Cloud's 400 for an unknown recipient field to outcome_unknown", async () => {
+    const c = client({ fetchImpl: rs.fn(async () => jsonRes(400, { error: "invalid_request" })) });
+    expect(await c.send({ body: "hi", recipient: "acct-v" })).toEqual({ kind: "outcome_unknown" });
+  });
+
+  it("maps a 403 recipient_not_allowed to its own outcome, and any other 403 to reenroll", async () => {
+    const refused = client({
+      fetchImpl: rs.fn(async () => jsonRes(403, { error: "recipient_not_allowed" })),
+    });
+    expect(await refused.send({ body: "hi", recipient: "acct-v" })).toEqual({
+      kind: "recipient_not_allowed",
+    });
+    const revoked = client({
+      fetchImpl: rs.fn(async () => jsonRes(403, { error: "instance_revoked" })),
+    });
+    expect(await revoked.send({ body: "hi", recipient: "acct-v" })).toEqual({ kind: "reenroll" });
+  });
+
   it("forwards an empty-string body verbatim (Rome Cloud owns the fallback)", async () => {
     const fetchImpl = rs.fn(async (..._a: Parameters<typeof fetch>) =>
       jsonRes(200, { attempted: 1, sent: 1, failed: 0 }),
