@@ -15,6 +15,7 @@ struct TopicChatScreen: View {
     let onArchived: () -> Void
     let onCreated: (String) -> Void
 
+    @Environment(AppModel.self) private var model
     @State private var draft = ""
     @State private var starting: String?
     @State private var startFailed = false
@@ -48,6 +49,7 @@ struct TopicChatScreen: View {
                 name: workspace.mainChatTitle,
                 menuTitle: title,
                 activity: workspace.topics.activity(for: chatId),
+                announces: chatId != nil && model.visibleChat == chatId,
                 onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
@@ -93,7 +95,7 @@ struct TopicChatScreen: View {
                 if showsStarters {
                     ConciergeStarters { send(text: $0.text) }
                 }
-                Composer(text: $draft, placeholder: store?.thread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) { send() }
+                Composer(text: $draft, placeholder: store?.composerThread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) { send() }
             }
             .animation(.easeOut(duration: 0.2), value: showsStarters)
             .disabled(starting != nil)
@@ -158,7 +160,7 @@ struct TopicChatScreen: View {
         let images = attachments.images
         if let store {
             // While a chat thread is open, the composer sends into it.
-            if store.send(draft, images: images, fromComposer: true, thread: store.thread?.target) {
+            if store.send(draft, images: images, fromComposer: true, thread: store.composerThread) {
                 draft = ""
                 _ = attachments.take()
                 store.closeThread()

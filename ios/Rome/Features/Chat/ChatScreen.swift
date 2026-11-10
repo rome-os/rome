@@ -28,7 +28,7 @@ struct ChatScreen: View {
         // The bar is clear: the transcript scrolls under its glass items.
         .floatingTopBar {
             VStack(spacing: 0) {
-                ChatHeader(name: workspace.mainChatTitle, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), onMenu: {
+                ChatHeader(name: workspace.mainChatTitle, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), announces: model.visibleChat == conciergeChatID, onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     onMenu()
@@ -64,10 +64,10 @@ struct ChatScreen: View {
                         ConciergeStarters { store.send($0.text) }
                     }
                     // While a chat thread is open, the composer sends into it.
-                    Composer(text: $draft, placeholder: store.thread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) {
+                    Composer(text: $draft, placeholder: store.composerThread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) {
                         // A photo still being made small would land in the next message.
                         guard !attachments.isPreparing else { return }
-                        if store.send(draft, images: attachments.images, fromComposer: true, thread: store.thread?.target) {
+                        if store.send(draft, images: attachments.images, fromComposer: true, thread: store.composerThread) {
                             draft = ""
                             _ = attachments.take()
                             store.closeThread()
@@ -251,6 +251,8 @@ struct ChatHeader: View {
     var menuTitle: String? = nil
     /// What the Concierge is doing here; nil shows the name alone.
     var activity: ConciergeActivity? = nil
+    /// The chat is the one on screen: its status changes are read out.
+    var announces = false
     let onMenu: () -> Void
     let onTasks: () -> Void
     /// A topic chat's options in the "…" menu, below Tasks.
@@ -265,7 +267,7 @@ struct ChatHeader: View {
             GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
                 MenuGlyph()
             }
-            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity) }
+            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces) }
             ChatMoreMenu(title: menuTitle ?? name, onTasks: onTasks, onRename: onRename, onArchive: onArchive)
         }
         .padding(.horizontal, 12)
@@ -281,13 +283,21 @@ struct ChatIdentity: View {
     let name: String
     /// Nil or idle: the name alone, and the pill shrinks back.
     var activity: ConciergeActivity? = nil
-    /// A copy laid over the header (a chat thread): no reactions to a tap,
-    /// and no announcement, which the header below already makes.
+    /// A copy laid over the header (a chat thread): no reactions to a tap.
     var still = false
+    /// Read status changes out: only for the chat on screen, and only once
+    /// (the header below a thread does it, not the copy over it).
+    var announces = false
 
     @State private var pokes = 0
     @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// What VoiceOver reads when the status changes: nothing for a chat
+    /// that is not the one on screen.
+    static func announcement(_ line: String?, announces: Bool) -> String? {
+        announces ? line : nil
+    }
 
     static let avatarSize: CGFloat = 50
     /// How far the avatar reaches down over the pill.
@@ -364,7 +374,7 @@ struct ChatIdentity: View {
         .accessibilityAddTraits(.isHeader)
         .onChange(of: status) { _, line in
             // Read out politely, as the web's live region is.
-            guard !still, let line else { return }
+            guard let line = Self.announcement(line, announces: announces) else { return }
             var announcement = AttributedString(line)
             announcement.accessibilitySpeechAnnouncementPriority = .low
             AccessibilityNotification.Announcement(announcement).post()
@@ -606,12 +616,22 @@ struct TranscriptList<Row: View>: View {
     /// A finger is on the list: an older page waits, so the rows under it
     /// never move. A glide does not hold it back.
     @State private var fingerDown = false
+    /// Laid out all at once: decided when the transcript first loads, and
+    /// kept, so the stack never changes kind under the scroll.
+    @State private var eager: Bool?
+
+    /// Up to this many rows a transcript is laid out all at once. A lazy
+    /// stack guesses the height of rows it has not laid out, and a chat that
+    /// mixes cards with short bubbles makes it guess wrong: the content then
+    /// shrinks under the scroll as rows leave the screen, and the rows jump.
+    /// Past this many rows the lazy stack's memory saving wins.
+    static var eagerRowLimit: Int { 120 }
 
     var body: some View {
         let rows = store.rows
         ScrollViewReader { proxy in
             ScrollView {
-                LazyVStack(spacing: 0) {
+                TranscriptStack(lazy: !(eager ?? (rows.count <= Self.eagerRowLimit))) {
                     if store.hasOlder {
                         Spinner(size: 16, color: Palette.sub)
                             .padding(.vertical, 12)
@@ -676,6 +696,9 @@ struct TranscriptList<Row: View>: View {
             }
             .onChange(of: bottomVisible) { _, now in
                 transcriptScrollLog.notice("bottom visible \(now, privacy: .public), height \(visibleHeight, privacy: .public)")
+            }
+            .onChange(of: store.loaded, initial: true) { _, loaded in
+                if loaded, eager == nil { eager = rows.count <= Self.eagerRowLimit }
             }
             .onChange(of: rows.last?.id) {
                 // Before iOS 18 a list that follows also scrolls to a new last
@@ -786,6 +809,21 @@ struct TranscriptList<Row: View>: View {
         unseen = 0
         // Eases out onto the bottom: a spring would run past it and back.
         withAnimation(.easeOut(duration: 0.35)) { proxy.scrollTo("bottom", anchor: .bottom) }
+    }
+}
+
+/// The transcript's stack: lazy for a long transcript, all at once for a
+/// short one (`TranscriptList.eagerRowLimit`).
+private struct TranscriptStack<Content: View>: View {
+    let lazy: Bool
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        if lazy {
+            LazyVStack(spacing: 0, content: content)
+        } else {
+            VStack(spacing: 0, content: content)
+        }
     }
 }
 

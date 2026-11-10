@@ -238,11 +238,14 @@ enum TranscriptBuilder {
     /// messages outside the run (later ones elsewhere, or its first message
     /// is not in the run, perhaps not loaded), or it has four or more. Two
     /// runs next to each other never both get one: the later keeps it. The
-    /// count is the thread's loaded messages, less one.
+    /// count is the thread's loaded messages, less its first when that is
+    /// loaded: what is left are replies.
     static func threadLines(_ messages: [ChatMessage]) -> [String: Int] {
         let shown = messages.filter { !$0.isTrace && $0.parts.contains(where: \.isVisible) }
         var sizes: [String: Int] = [:]
         for message in shown { if let root = message.chatThreadId { sizes[root, default: 0] += 1 } }
+        let loaded = Set(shown.map(\.id))
+        func replies(_ thread: String) -> Int { (sizes[thread] ?? 0) - (loaded.contains(thread) ? 1 : 0) }
 
         struct Run { let thread: String?; var messages: [ChatMessage] }
         var runs: [Run] = []
@@ -263,8 +266,8 @@ enum TranscriptBuilder {
         var lines: [String: Int] = [:]
         var laterKept = false
         for run in runs.reversed() {
-            if !laterKept, let id = qualifies(run), let thread = run.thread, let size = sizes[thread] {
-                lines[id] = size - 1
+            if !laterKept, let id = qualifies(run), let thread = run.thread, replies(thread) > 0 {
+                lines[id] = replies(thread)
                 laterKept = true
             } else {
                 laterKept = false

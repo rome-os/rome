@@ -167,6 +167,7 @@ final class TranscriptStore {
             }
             loaded = true
             loadError = nil
+            if reopening != nil { await resolveReopening() }
             await refreshRunning()
         } catch let error as APIError {
             loadError = error
@@ -245,7 +246,14 @@ final class TranscriptStore {
     /// arrived in; the order never changes when the same rows arrive again.
     private func merge(_ incoming: [ChatMessage], persist: Bool = true) {
         var byID = Dictionary(messages.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
-        for message in incoming {
+        for var message in incoming {
+            if message.knowsThreads {
+                instanceKnowsThreads = true
+            } else if let held = byID[message.id], held.knowsThreads {
+                // A live insert leaves the thread out: keep the one already known.
+                message.chatThreadId = held.chatThreadId
+                message.knowsThreads = true
+            }
             byID[message.id] = message
             if seen[message.id] == nil {
                 seen[message.id] = seen.count
@@ -305,14 +313,29 @@ final class TranscriptStore {
 
     /// The chat thread shown over the chat, if one is open.
     private(set) var thread: ThreadStore?
+    /// The instance has chat threads: a read showed `chatThreadId`, on any
+    /// message. Live inserts leave the field out, so one message cannot tell.
+    private(set) var instanceKnowsThreads = false
+    /// A thread a restored draft was written in, being looked up because its
+    /// message is not in the pages held.
+    private(set) var reopening: ThreadTarget?
+
+    /// Where the composer sends, and what its draft keeps: the open thread,
+    /// or one still being looked up.
+    var composerThread: ThreadTarget? { thread?.target ?? reopening }
 
     /// Opens the chat thread a stored message is in, over the chat.
     /// `toReply`: Reply was chosen, so the composer takes the keyboard; the
     /// replies line opens it for reading, keyboard down.
     func openThread(at messageId: String, toReply: Bool = true) {
         guard kind == .concierge, let anchor = messages.first(where: { $0.id == messageId }) else { return }
+        open(anchor: anchor, older: [], toReply: toReply)
+    }
+
+    private func open(anchor: ChatMessage, older: [ChatMessage], toReply: Bool) {
         thread?.stop()
-        let opened = ThreadStore(anchor: anchor, chat: self, backend: backend, toReply: toReply)
+        reopening = nil
+        let opened = ThreadStore(anchor: anchor, chat: self, backend: backend, toReply: toReply, older: older)
         thread = opened
         opened.start()
     }
@@ -320,14 +343,40 @@ final class TranscriptStore {
     func closeThread() {
         thread?.stop()
         thread = nil
+        reopening = nil
     }
 
-    /// The composer took back a send from a chat thread that did not get
-    /// through: the thread opens again. Gone from the chat, the text stays
-    /// in the composer for the chat itself.
+    /// A restored draft was written in a chat thread: it opens again. Its
+    /// message may be older than the pages held, so an instance with chat
+    /// threads is asked for it, and only a thread the server no longer has
+    /// leaves the text to the chat. An older instance cannot be asked: there
+    /// the text goes to the chat when the message is not held.
     func reopenThread(_ target: ThreadTarget) {
-        guard thread == nil, message(target.messageId) != nil else { return }
-        openThread(at: target.messageId)
+        guard kind == .concierge, thread == nil else { return }
+        if message(target.messageId) != nil {
+            openThread(at: target.messageId)
+            return
+        }
+        guard target.instanceKnowsThreads || instanceKnowsThreads else { return }
+        reopening = target
+        Task { await resolveReopening() }
+    }
+
+    /// Looks up the thread a draft waits on. Unreachable now, it keeps
+    /// waiting, and the next reload asks again.
+    func resolveReopening() async {
+        guard let target = reopening, thread == nil else { return }
+        do {
+            let found = try await backend.thread(sessionId: sessionId, messageId: target.messageId)
+            guard reopening == target, thread == nil else { return }
+            guard let anchor = found.first(where: { $0.id == target.messageId }) ?? found.last else {
+                reopening = nil
+                return
+            }
+            open(anchor: anchor, older: found, toReply: true)
+        } catch APIError.notFound {
+            if reopening == target { reopening = nil }
+        } catch {}
     }
 
     /// The messages held for this chat that are in `root`'s thread.

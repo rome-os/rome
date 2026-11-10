@@ -50,11 +50,11 @@ import Testing
     }
 
     @Test func theEventIsRead() {
-        guard case .conciergeActivity(let chat, let state) = LiveEventsSocket.decode(name: "concierge_activity", data: .object(["chatId": .string("c1"), "activity": .object(["kind": .string("working")]), "at": .number(1)])) else {
+        guard case .conciergeActivity(let chat, let state, _) = LiveEventsSocket.decode(name: "concierge_activity", data: .object(["chatId": .string("c1"), "activity": .object(["kind": .string("working")]), "at": .number(1)])) else {
             Issue.record("not read"); return
         }
         #expect(chat == "c1" && state == .working)
-        guard case .conciergeActivity(_, let unknown) = LiveEventsSocket.decode(name: "concierge_activity", data: .object(["chatId": .string("c1"), "activity": .object(["kind": .string("later")])])) else {
+        guard case .conciergeActivity(_, let unknown, _) = LiveEventsSocket.decode(name: "concierge_activity", data: .object(["chatId": .string("c1"), "activity": .object(["kind": .string("later")])])) else {
             Issue.record("not read"); return
         }
         #expect(unknown == nil)

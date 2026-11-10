@@ -60,8 +60,13 @@ final class FakeBackend: RomeBackend {
     var calls: [String] = []
     var startFails = false
 
+    /// Runs inside the chat-list fetch, before it answers.
+    var duringChatsFetch: (() async -> Void)?
+
     func conciergeChats() async throws -> [ConciergeChat] {
-        [ConciergeChat(id: conciergeChatID, name: "", main: true, unread: 0)] + topicChats
+        let answer = [ConciergeChat(id: conciergeChatID, name: "", main: true, unread: 0)] + topicChats
+        await duringChatsFetch?()
+        return answer
     }
 
     func startTopicChat() async throws -> ConciergeChat {
@@ -98,8 +103,15 @@ final class FakeBackend: RomeBackend {
     var threads: [String: [ChatMessage]] = [:]
     var threadReads: [String] = []
 
+    /// Set, every thread read fails with it (a network error, say).
+    var threadError: APIError?
+    /// Runs inside a thread read, before it answers.
+    var duringThreadRead: (() async -> Void)?
+
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
         threadReads.append(messageId)
+        await duringThreadRead?()
+        if let threadError { throw threadError }
         guard let thread = threads[messageId] else { throw APIError.notFound }
         return thread
     }

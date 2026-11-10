@@ -90,7 +90,10 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
     /// The thread's first message is not loaded (an older page): the
     /// stretch still says there is more.
     @Test func aThreadWhoseStartIsNotLoadedShowsIt() {
-        #expect(lines([message("u", role: "user", at: 0, thread: "old"), message("a", at: 10, thread: "old")]) == ["a": 1])
+        // Both are replies: the first message is not loaded, so none is taken off.
+        #expect(lines([message("u", role: "user", at: 0, thread: "old"), message("a", at: 10, thread: "old")]) == ["a": 2])
+        // A lone reply counts as one, never "0 replies".
+        #expect(lines([message("a", at: 0, thread: "old")]) == ["a": 1])
     }
 
     /// Two stretches next to each other never both show it: the later keeps it.
@@ -99,10 +102,10 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
             message("x", role: "user", at: 0, thread: "oldX"), message("xa", at: 10, thread: "oldX"),
             message("y", role: "user", at: 20, thread: "oldY"), message("ya", at: 30, thread: "oldY"),
         ]
-        #expect(lines(messages) == ["ya": 1])
+        #expect(lines(messages) == ["ya": 2])
         // A stretch in between that shows nothing lets both show.
         let apart = messages[0...1] + [message("p", role: "user", at: 15), message("pa", at: 16)] + messages[2...3]
-        #expect(lines(Array(apart)) == ["xa": 1, "ya": 1])
+        #expect(lines(Array(apart)) == ["xa": 2, "ya": 2])
     }
 
     /// A stretch of only the guardian's messages has no Agent message to carry it.

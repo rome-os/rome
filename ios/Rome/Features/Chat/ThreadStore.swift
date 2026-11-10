@@ -1,18 +1,22 @@
 import Foundation
 import Observation
 
-/// One chat thread of a Concierge chat, open over it: its messages, oldest
-/// first, kept live. An instance without chat threads, or a message that is
-/// alone, shows just that message.
+/// One chat thread of a Concierge chat, open over it. Its live messages are
+/// the chat's own, filtered by thread, so everything the chat receives (a
+/// live insert, an answer a reload brings, a placement) shows here as well.
+/// The `?thread=` read only adds older messages of the thread that the
+/// chat's pages do not hold yet; it never replaces a message the chat has.
+/// An instance without chat threads shows just the message it opened from.
 @MainActor
 @Observable
 final class ThreadStore {
     /// The message the guardian opened the thread from.
     let anchor: ChatMessage
-    private(set) var messages: [ChatMessage]
     /// The thread's first message, as the server names it; the anchor's own
     /// id while it is alone, so a reply placed under it is recognised.
     private(set) var root: String
+    /// Messages of the thread the chat does not hold, from the read.
+    private(set) var older: [ChatMessage]
     private(set) var loaded = false
     /// Opened to reply (the keyboard comes up) or to read (it stays down).
     let toReply: Bool
@@ -22,18 +26,29 @@ final class ThreadStore {
     @ObservationIgnored private var tokens: [UUID] = []
     @ObservationIgnored private var loads = 0
 
-    init(anchor: ChatMessage, chat: TranscriptStore, backend: RomeBackend, toReply: Bool = true) {
+    init(anchor: ChatMessage, chat: TranscriptStore, backend: RomeBackend, toReply: Bool = true, older: [ChatMessage] = []) {
         self.anchor = anchor
         self.toReply = toReply
         self.chat = chat
         self.backend = backend
-        root = anchor.threadRoot
-        // What the chat holds already shows at once; the read fills the rest.
-        messages = Self.ordered(chat.messages(inThread: anchor.threadRoot) + [anchor])
+        root = older.first?.chatThreadId ?? anchor.threadRoot
+        self.older = older
+    }
+
+    /// The thread's messages, oldest first: the chat's own copies, then any
+    /// older ones the read brought.
+    var messages: [ChatMessage] {
+        let held = chat?.messages(inThread: root) ?? []
+        let heldIDs = Set(held.map(\.id))
+        let anchorCopy = chat?.message(anchor.id) ?? anchor
+        let extra = (older + [anchorCopy]).filter { !heldIDs.contains($0.id) }
+        return Self.ordered(held + extra)
     }
 
     /// Where a send from this thread goes.
-    var target: ThreadTarget { ThreadTarget(messageId: anchor.id, instanceKnowsThreads: anchor.knowsThreads) }
+    var target: ThreadTarget { ThreadTarget(messageId: anchor.id, instanceKnowsThreads: knowsThreads) }
+
+    private var knowsThreads: Bool { (chat?.instanceKnowsThreads ?? false) || anchor.knowsThreads }
 
     var sessionId: String { anchor.sessionId }
 
@@ -50,10 +65,10 @@ final class ThreadStore {
         tokens = []
     }
 
-    /// Reads the whole thread when the instance has chat threads. An older
-    /// instance, or a failed read, keeps what the chat holds.
+    /// Reads the whole thread when the instance has chat threads, for the
+    /// messages older than the chat's pages. A failed read keeps what is shown.
     func load() async {
-        guard anchor.knowsThreads else {
+        guard knowsThreads else {
             loaded = true
             return
         }
@@ -63,38 +78,30 @@ final class ThreadStore {
             let thread = try await backend.thread(sessionId: sessionId, messageId: anchor.id)
             guard mine == loads else { return }
             if let first = thread.first?.chatThreadId { root = first }
-            messages = Self.ordered(thread.isEmpty ? [anchor] : thread)
+            older = thread
         } catch {
-            // The thread stays as the chat holds it.
+            // The thread stays as it is shown.
         }
         loaded = true
     }
 
     func handle(_ event: LiveEvent) {
         switch event {
-        case .messageInsert(let message) where message.sessionId == sessionId:
-            if message.chatThreadId == root || messages.contains(where: { $0.id == message.id }) {
-                merge(message)
-            }
         case .messageThread(let id, let messageId, let thread) where id == sessionId:
-            let held = messages.contains { $0.id == messageId }
-            if thread == root, !held {
-                // Placed here: the event names it, the read brings it.
-                Task { await load() }
-            } else if held, thread != root, messageId != anchor.id {
-                messages.removeAll { $0.id == messageId }
+            if thread == root {
+                // Placed here, and neither the chat nor the read holds it: read again.
+                if chat?.message(messageId) == nil, !older.contains(where: { $0.id == messageId }) {
+                    Task { await load() }
+                }
+            } else if messageId != anchor.id {
+                // Moved to another thread: it leaves this one.
+                older.removeAll { $0.id == messageId }
             }
         case .reconnected:
             Task { await load() }
         default:
             break
         }
-    }
-
-    private func merge(_ message: ChatMessage) {
-        var all = messages.filter { $0.id != message.id }
-        all.append(message)
-        messages = Self.ordered(all)
     }
 
     /// Oldest first; messages written in the same second keep the order they came in.
@@ -106,8 +113,12 @@ final class ThreadStore {
             .map(\.element)
     }
 
-    /// The rows the thread shows: the chat's bubbles and cards, without replies counts.
+    /// The rows the thread shows: the chat's bubbles and cards, without
+    /// replies counts. Answers come from the chat and from the thread's own
+    /// older messages, so a card answered before the chat's pages shows done.
     func rows(answers: [String: JSONValue]) -> [TranscriptRow] {
-        TranscriptBuilder.rows(messages: messages, pending: [], answers: answers, options: .init())
+        var all = TranscriptBuilder.answers(in: older)
+        all.merge(answers) { _, chat in chat }
+        return TranscriptBuilder.rows(messages: messages, pending: [], answers: all, options: .init())
     }
 }

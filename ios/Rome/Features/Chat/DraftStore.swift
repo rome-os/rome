@@ -78,10 +78,11 @@ final class DraftStore {
 
     // MARK: Writing
 
-    /// Keeps the composer as it is; written a moment later, and an empty one
-    /// clears the live slot. Only the newest content of a chat is written.
-    func save(chat: String, text: String, photos: [ComposerImage]) {
-        pending[chat] = Draft(text: text, photos: photos)
+    /// Keeps the composer as it is, with the chat thread it is aimed at;
+    /// written a moment later, and an empty one clears the live slot. Only
+    /// the newest content of a chat is written.
+    func save(chat: String, text: String, photos: [ComposerImage], thread: ThreadTarget? = nil) {
+        pending[chat] = Draft(text: text, photos: photos, thread: thread)
         debounce[chat]?.cancel()
         debounce[chat] = Task { [weak self] in
             try? await Task.sleep(for: Self.saveDelay)
@@ -224,7 +225,7 @@ final class DraftStore {
                 try? FileManager.default.removeItem(at: live)
                 Self.removeIfEmpty(folder)
             } else {
-                Self.write(live, text: draft.text, photos: draft.photos, root: root)
+                Self.write(live, text: draft.text, photos: draft.photos, root: root, thread: draft.thread)
             }
         }
     }
@@ -466,6 +467,8 @@ private struct ComposerDraft: ViewModifier {
             .onChange(of: prefill.wrappedValue) { applyPrefill() }
             .onChange(of: text) { save() }
             .onChange(of: attachments.images.map(\.id)) { save() }
+            // Opening or closing a thread aims the draft there, or back at the chat.
+            .onChange(of: transcript?.composerThread) { save() }
             .onDisappear {
                 save()
                 Task { await store.flush() }
@@ -481,7 +484,7 @@ private struct ComposerDraft: ViewModifier {
 
     private func save() {
         guard restored else { return }
-        store.save(chat: chat, text: text, photos: attachments.images)
+        store.save(chat: chat, text: text, photos: attachments.images, thread: transcript?.composerThread)
     }
 }
 
