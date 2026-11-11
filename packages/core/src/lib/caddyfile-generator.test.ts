@@ -43,7 +43,7 @@ describe("generateCaddyfile runtime-config.js delivery", () => {
 describe("generateCaddyfile app document routes", () => {
   it("proxies /apps and /full/apps documents to Hono, after the asset handlers", () => {
     const caddyfile = generateCaddyfile();
-    expect(caddyfile).toContain("@appDocs path /apps /apps/* /full/apps /full/apps/*");
+    expect(caddyfile).toContain("@appDocs path /apps /apps/* /full/apps /full/apps/* /share/*");
     const appDocsAt = caddyfile.indexOf("handle @appDocs {");
     const missingAssetsAt = caddyfile.indexOf("handle @missingSpaAssets {");
     const fallbackAt = caddyfile.lastIndexOf("try_files {path} /index.html");
@@ -53,6 +53,15 @@ describe("generateCaddyfile app document routes", () => {
     expect(body).toContain("reverse_proxy 127.0.0.1:");
     expect(body).toContain("encode zstd gzip");
     expect(body).not.toContain("forward_auth");
+  });
+});
+
+describe("generateCaddyfile shared chats", () => {
+  it("tells crawlers not to index a share page or its API reads, and nothing else", () => {
+    const caddyfile = generateCaddyfile();
+    expect(caddyfile).toContain("@sharePages path /share /share/* /api/share /api/share/*");
+    expect(caddyfile).toContain('header @sharePages X-Robots-Tag "noindex, nofollow"');
+    expect(caddyfile.match(/X-Robots-Tag/g)).toHaveLength(1);
   });
 });
 

@@ -67,7 +67,16 @@ import { routineHandlers } from "./routines";
 import { sessionQueryHandlers } from "./sessions";
 import { pickerDevices, settingsHandlers } from "./settings";
 import { recordedAppHandlers } from "./recorded-apps";
+import { shareHandlers } from "./shares";
 import { curatedChats } from "../fixtures/chats";
+import {
+  CONCIERGE_ATTENTION_DIGEST,
+  CONCIERGE_FORWARDED_REPORT,
+  CONCIERGE_LAS_VEGAS_LIST,
+  CONCIERGE_MORNING_DIGEST,
+  CONCIERGE_RELEASE_DIGEST,
+  CONCIERGE_TRIP_PLAN,
+} from "../fixtures/concierge-messages";
 
 // Fixtures are typed against the same types the fetch sites parse into
 // (@rome/api-types where the contract lives there, the web-local types
@@ -313,16 +322,49 @@ const turn = (
 // chats that mention it, and "brief" matches one title *and* its transcript,
 // which is the session that keeps its title rank and gains a snippet.
 const transcripts: Record<string, ChatMessage[]> = {
-  [CONCIERGE_CHAT_ID]: turn(
-    CONCIERGE_CHAT_ID,
-    1,
-    "2026-08-05T08:42:00.000Z",
-    "Draft the launch email and let Ray know about the plumber.",
-    [
-      { type: "task_chat", chatId: "mock-task-question", title: "Draft launch email" },
-      { type: "task_chat", chatId: "mock-chat-4", title: "Plumber for the leak" },
-    ],
-  ),
+  // The later turns cover the message shapes the Concierge sends: a short
+  // answer, and long ones with a table, many links, a digest and a forward.
+  [CONCIERGE_CHAT_ID]: [
+    ...turn(
+      CONCIERGE_CHAT_ID,
+      1,
+      "2026-08-05T08:42:00.000Z",
+      "Draft the launch email and let Ray know about the plumber.",
+      [
+        { type: "task_chat", chatId: "mock-task-question", title: "Draft launch email" },
+        { type: "task_chat", chatId: "mock-chat-4", title: "Plumber for the leak" },
+      ],
+    ),
+    ...turn(CONCIERGE_CHAT_ID, 2, "2026-08-05T09:10:00.000Z", "帮我排一下京都三天的行程", [
+      text(CONCIERGE_TRIP_PLAN),
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 3, "2026-08-05T09:30:00.000Z", "What shipped this week?", [
+      text(CONCIERGE_RELEASE_DIGEST),
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 4, "2026-08-06T07:00:00.000Z", "Weather today?", [
+      text("Sunny, 24° high, light wind. No umbrella needed."),
+      text(CONCIERGE_MORNING_DIGEST),
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 5, "2026-08-06T10:00:00.000Z", "How did the plumber visit go?", [
+      text("Ray's task chat finished. Here is the report:"),
+      {
+        type: "text",
+        content: CONCIERGE_FORWARDED_REPORT,
+        forwardedFrom: { chatId: "mock-chat-4", title: "Plumber for the leak" },
+      } as TranscriptPart,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 6, "2026-08-07T07:00:00.000Z", "Anything for me this morning?", [
+      text(CONCIERGE_ATTENTION_DIGEST),
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 7, "2026-08-07T09:00:00.000Z", "拉斯维加斯有什么值得去的？", [
+      text("找景点的任务聊天做完了，结果如下："),
+      {
+        type: "text",
+        content: CONCIERGE_LAS_VEGAS_LIST,
+        forwardedFrom: { chatId: "mock-chat-4", title: "拉斯维加斯景点" },
+      } as TranscriptPart,
+    ]),
+  ],
   "mock-task-question": turn(
     "mock-task-question",
     1,
@@ -804,7 +846,7 @@ const session = (
 
 const chatSessions: ChatSession[] = [
   // The guardian's main chat, which Chat and `/` open at /message.
-  session(CONCIERGE_CHAT_ID, "Concierge", "default", CONCIERGE_AGENT_ID),
+  session(CONCIERGE_CHAT_ID, "Main chat", "default", CONCIERGE_AGENT_ID),
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
   {
@@ -1609,6 +1651,7 @@ export const handlers = [
   // chats the conversation routes serve — one inventory row per chat, its run
   // and message counts read off that chat's transcript.
   ...sessionQueryHandlers(chatSessions, transcripts),
+  ...shareHandlers(chatSessions, transcripts),
   ...settingsHandlers,
   ...connectorHandlers,
   ...recordedAppHandlers,

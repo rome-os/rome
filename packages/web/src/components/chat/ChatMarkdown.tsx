@@ -14,11 +14,7 @@ function ChatInlineCode({ children, className, node: _node, ...props }: ChatInli
   const color = typeof children === "string" && HEX_COLOR_LITERAL.test(children) ? children : null;
 
   return (
-    <code
-      {...props}
-      className={cn("rounded-4 bg-muted font-mono", className)}
-      data-streamdown="inline-code"
-    >
+    <code {...props} className={cn("font-mono", className)} data-streamdown="inline-code">
       {children}
       {color ? (
         <span
@@ -32,14 +28,25 @@ function ChatInlineCode({ children, className, node: _node, ...props }: ChatInli
   );
 }
 
-// Chat links open in the workspace, and fenced blocks can be collapsed.
-// Chat entries import this instead of `@/components/markdown`.
-export default function ChatMarkdown({ disclosureStateKey, ...props }: ChatMarkdownProps) {
+/**
+ * The text of a chat message, wherever one renders: in a bubble, as a bare
+ * final answer, in a thread, or on a share page. It sets the kit's message
+ * type (`.rome-markdown-message`: small headings, a loose line, and blocks
+ * one body size apart); Markdown that is not a message keeps the kit's default. Chat links
+ * open in the workspace, and fenced blocks can be collapsed. Chat entries
+ * import this instead of `@/components/markdown`.
+ */
+export default function ChatMarkdown({
+  disclosureStateKey,
+  className,
+  ...props
+}: ChatMarkdownProps) {
   return (
     <ChatCodeBlockScopeContext.Provider value={disclosureStateKey ?? null}>
       <Markdown
         key={disclosureStateKey}
         {...props}
+        className={cn("rome-markdown-message", className)}
         inlineCodeComponent={ChatInlineCode}
         linkComponent={ChatLink}
         preComponent={ChatCodeBlock}

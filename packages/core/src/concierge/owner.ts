@@ -25,6 +25,9 @@ export function ownerOf(chat: { ownerKey?: string | null }): ConciergeOwner {
   return chat.ownerKey || GUARDIAN_OWNER;
 }
 
+/** The name a main chat is created with. A client labels it by `main: true`. */
+export const MAIN_CHAT_NAME = "Main chat";
+
 /**
  * The id of an owner's main Concierge chat. The guardian's is the fixed
  * `concierge`. A visitor's is derived from their owner key, since a chat id

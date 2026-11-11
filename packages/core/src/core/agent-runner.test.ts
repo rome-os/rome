@@ -9,7 +9,7 @@ import { sessionOpeningFor } from "./session-opening.js";
 import { chatPromptFacts } from "./chat-prompt-facts.js";
 import type { PromptFacts } from "../agent/index.js";
 import type { AgentDefinition } from "../agent/index.js";
-import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
+import { claudeStoppedTurnResult, readAnswerShape, romeSessionTracing } from "../agent/index.js";
 import { TurnUsageReporter } from "../apps/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { canOpenChat } from "../concierge/privacy.js";
@@ -2811,6 +2811,93 @@ describe("AgentRunner", () => {
       expect(prompts).toEqual(["backend", "urgent", "behind"]);
       expect(cancels).toHaveBeenCalledOnce();
       await manager.shutdown();
+    });
+
+    describe("a Claude turn a now input follows", () => {
+      // A Claude stop ends with the adapter's own result, which marks the turn
+      // stopped; a turn the model finished first ends with its real result.
+      // Only a turn a `now` input superseded hands its read request on.
+      type Ending = "superseded" | "finished first" | "stopped by the guardian";
+      const follow = async (ending: Ending) => {
+        const prompts: string[] = [];
+        let releaseFirst!: () => void;
+        const firstGate = new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+        const provider: ModelProvider = {
+          id: "anthropic",
+          builtinTools: new Set(),
+          async openSession(params) {
+            const model = createSessionFromRun(
+              "anthropic",
+              async function* ({ prompt }) {
+                prompts.push(prompt);
+                if (prompts.length > 1) {
+                  yield { type: "result", content: `answer:${prompt}` };
+                  return;
+                }
+                // Claude has read the request when the stop comes.
+                yield { type: "input_status", inputId: "first", state: "consumed" };
+                await firstGate;
+                yield ending === "finished first"
+                  ? { type: "result", content: "done" }
+                  : claudeStoppedTurnResult({
+                      provider: "anthropic",
+                      model: "claude-test",
+                      content: "",
+                      reasoningEffort: "high",
+                    });
+              },
+              params,
+            );
+            return {
+              ...model,
+              async interrupt() {
+                // The guardian's Stop ends the turn only once the next input is in.
+                if (ending !== "stopped by the guardian") releaseFirst();
+              },
+            };
+          },
+        };
+        const manager = createSessions(
+          managerDeps(createTestModelResolver({ providers: [provider] })),
+          { keepAliveAcrossTurns: true },
+        );
+        const session = await manager.open({
+          agentName: "test-main",
+          channelThreadKey: `webchat:claude-${ending.replaceAll(" ", "-")}`,
+        });
+        const first = session.submit(
+          { inputId: "first", prompt: "Start a task" },
+          { priority: "now" },
+        );
+        const firstTurn = await first.turn;
+        const firstMessages = collectMessages(firstTurn.events());
+        await rs.waitFor(() => expect(prompts).toHaveLength(1));
+        if (ending === "stopped by the guardian") await firstTurn.stop!("user-stop");
+        const second = session.submit({ prompt: "What is 6 times 9?" }, { priority: "now" });
+        releaseFirst();
+        await firstMessages;
+        await collectMessages((await second.turn).events());
+        await manager.shutdown();
+        return prompts[1];
+      };
+
+      it("carries a superseded turn's request into the next prompt", async () => {
+        const next = await follow("superseded");
+        // The input queue's note that names interrupted work.
+        expect(next).toMatch(/previous turn was stopped before it finished/);
+        expect(next).toContain("Start a task");
+        expect(next).toContain("What is 6 times 9?");
+      });
+
+      it("carries nothing from a turn that completed before the stop reached it", async () => {
+        expect(await follow("finished first")).toBe("What is 6 times 9?");
+      });
+
+      it("carries nothing from a turn the guardian stopped", async () => {
+        expect(await follow("stopped by the guardian")).toBe("What is 6 times 9?");
+      });
     });
 
     it("takes the next input on the same model session after an interrupt", async () => {

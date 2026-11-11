@@ -183,7 +183,7 @@ describe("ComposioConnectionSection", () => {
 
     expect(
       await screen.findByText(
-        "Connect your services again in this project, then ask Concierge to follow them again.",
+        "Connect your services again in this project, then ask Rome to follow them again.",
       ),
     ).toBeTruthy();
     expect(onFlash).toHaveBeenCalledWith("Relay is not configured.");

@@ -29,11 +29,12 @@ const BUBBLE_MAX_WIDTH = "max-w-[90%]";
  * - With a pointer that can hover, the details are a small toolbar that floats
  *   over the bubble's top edge on hover or keyboard focus, aligned to the
  *   bubble's outer corner and running past its inner side when the bubble is
- *   narrower. It is 26px tall: 12px over the bubble's border, top padding, and
- *   the space above its first line, and 14px above, over the 4px gap and the
- *   bubble above's bottom padding. Two grouped bubbles of body text leave
- *   exactly that between their lines, so it covers no text. The overlap also
- *   bridges the pointer from the bubble to the toolbar. The toolbar takes no
+ *   narrower. It is 26px tall: 8px over the bubble's top border and padding,
+ *   which hold no text whatever the first line is, and 18px above, within the
+ *   group's 8px gap, the bubble above's 8px bottom padding, and the half
+ *   leading under its last line. The overlap also bridges the pointer from the
+ *   bubble to the toolbar.
+ *   The toolbar takes no
  *   pointer events while hidden, and stays visible while the feedback form it
  *   opens is open.
  * - Without hover, tapping the bubble toggles a row of the same details under
@@ -127,7 +128,7 @@ export const ConciergeBubble = memo(function ConciergeBubble({
           <div
             data-bubble-toolbar
             className={cn(
-              "absolute bottom-full flex w-max translate-y-3 items-center rounded-8 border border-border bg-surface shadow-4",
+              "absolute bottom-full flex w-max translate-y-2 items-center rounded-8 border border-border bg-surface shadow-4",
               side === "start" ? "left-0" : "right-0",
               "pointer-events-none opacity-0 transition-opacity group-focus-within/bubble:pointer-events-auto group-focus-within/bubble:opacity-100 group-hover/bubble:pointer-events-auto group-hover/bubble:opacity-100 has-data-[state=open]:pointer-events-auto has-data-[state=open]:opacity-100 motion-reduce:transition-none",
             )}

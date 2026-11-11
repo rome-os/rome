@@ -1,4 +1,5 @@
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
+import { ShareMessageButton } from "@/components/chat/ShareMessageButton";
 import { TurnBranchButton } from "@/components/chat/TurnBranchButton";
 import { TurnFeedbackButtons } from "@/components/chat/TurnFeedbackButtons";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
@@ -23,8 +24,9 @@ export function turnCopyText(messages: ChatMessage[]): string {
 }
 
 /**
- * The action row under a settled agent turn: copy, feedback, branch, and the
- * time. Renders nothing when the turn has none of them. The row's parent sets
+ * The action row under a settled agent turn: copy, Reply, Share (the chat's
+ * share mode with this turn selected), feedback, branch, and the time.
+ * Renders nothing when the turn has none of them. The row's parent sets
  * `group`, which reveals it on hover on pointer devices.
  */
 export function TurnActions({
@@ -53,6 +55,7 @@ export function TurnActions({
     <div className="-ml-[var(--control-action-offset)] mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
       {copyText ? <CopyMessageButton text={copyText} /> : null}
       {reply ? <ReplyButton source={reply} /> : null}
+      {reply ? <ShareMessageButton messageId={reply.messageId} turn={reply} /> : null}
       {feedbackTurn ? (
         <TurnFeedbackButtons
           key={`${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}

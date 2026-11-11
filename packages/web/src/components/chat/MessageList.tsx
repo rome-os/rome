@@ -1,6 +1,5 @@
 import { memo, type ReactNode, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Check } from "lucide-react";
 import type {
   TraceSegment,
   TraceSnapshot,
@@ -26,6 +25,7 @@ import { lastTextMessage, turnAnswerText } from "@/components/chat/reply/reply-s
 import type { AgentIdentity, ChatRow } from "@/components/chat/chat-view";
 import { EMPTY_LIVE_TEXT, type LiveTextStore } from "@/hooks/live-text";
 import type { ChatMessage } from "@/lib/chat-types";
+import { SelectableRow } from "@/components/chat/SelectableRow";
 
 // The block-level callbacks + resolved-interaction map threaded into
 // renderFlatEntries — a single bag instead of six loose props.
@@ -369,47 +369,6 @@ function rowTurnRef(row: ChatRow): { turnId: string | null; sessionId: string } 
   return { turnId: first?.turnId ?? null, sessionId: first?.sessionId ?? "" };
 }
 
-// Wraps a transcript row with a checkbox + full-row click target during share
-// selection. The overlay button sits above the row, so in selection mode a
-// click toggles the turn instead of activating links/cards underneath.
-function SelectableRow({
-  selected,
-  onToggle,
-  label,
-  children,
-}: {
-  selected: boolean;
-  onToggle: () => void;
-  label: string;
-  children: ReactNode;
-}) {
-  return (
-    <div className="relative">
-      <div
-        className={`rounded-8 pl-9 transition-colors ${selected ? "bg-primary/5" : "opacity-60"}`}
-      >
-        {children}
-      </div>
-      <span
-        className={`pointer-events-none absolute left-2 top-3 flex size-5 items-center justify-center rounded-4 border ${
-          selected
-            ? "border-primary bg-primary text-primary-foreground"
-            : "border-border bg-surface"
-        }`}
-      >
-        {selected && <Check className="size-3.5" />}
-      </span>
-      <button
-        type="button"
-        onClick={onToggle}
-        aria-pressed={selected}
-        aria-label={label}
-        className="absolute inset-0 rounded-8 ring-primary/40 focus-visible:outline-none focus-visible:ring-2"
-      />
-    </div>
-  );
-}
-
 export function MessageList({
   rows,
   live,
@@ -430,6 +389,7 @@ export function MessageList({
       <ConciergeTranscript
         rows={rows}
         live={live}
+        selection={selection}
         actions={actions}
         contentRef={contentRef}
         feedback={feedback}

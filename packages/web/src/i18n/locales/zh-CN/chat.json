@@ -172,6 +172,8 @@
     "cancel": "取消",
     "create": "创建链接",
     "creating": "创建中…",
+    "tagline": "专业的个人助手",
+    "learnAbout": "了解 Rome",
     "unavailableTitle": "该分享对话不可用",
     "unavailableBody": "链接可能已被撤销或失效。"
   },
@@ -187,6 +189,7 @@
   "message": {
     "copy": "复制消息",
     "copied": "已复制",
+    "share": "分享",
     "feedback": {
       "thumbsUp": "标记为有帮助",
       "thumbsDown": "标记为无帮助",

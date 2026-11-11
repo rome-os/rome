@@ -430,6 +430,20 @@ const keys = (s: ReturnType<typeof setup>) =>
     .filter((key) => !key?.startsWith("concierge-digest:"))
     .sort();
 
+describe("routine names", () => {
+  it("names the digest and follow routines without the Concierge", async () => {
+    const s = setup({});
+    await s.following().follow({ source: "github", target: "acme/widgets" });
+    const names = [...s.routines.values()].map((r) => r.name).sort();
+    expect(names).toEqual([
+      "Digest at 09:00",
+      "Digest at 18:00",
+      "Follow acme/widgets (GitHub)",
+      "Follow acme/widgets (GitHub)",
+    ]);
+  });
+});
+
 describe("following_list", () => {
   it("returns every source with status, offer and follows, and the rules, in one structure", async () => {
     const s = setup({ gmailStatus: "not_connected" });

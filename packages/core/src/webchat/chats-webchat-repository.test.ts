@@ -59,7 +59,7 @@ describe("ChatsWebChatRepository", () => {
     backfillLegacyChats(testDb.db);
     const deps = {
       db: testDb.db,
-      // No agent name set: the Concierge keeps its role label.
+      // No agent name set: the Concierge goes by the main agent's default name.
       settingsRepo: { get: async (key: string) => (key === "agentName" ? null : "Ray") },
       agentLoader: { list: () => [buildAgent("core:concierge")] },
       appCatalog: { get: () => undefined },
@@ -71,7 +71,7 @@ describe("ChatsWebChatRepository", () => {
       await repo.getUserMessageActors("old-chat"),
       sources,
     );
-    expect(senders.get("old-concierge")).toMatchObject({ kind: "automated", name: "Concierge" });
+    expect(senders.get("old-concierge")).toMatchObject({ kind: "automated", name: "Rome" });
     expect(senders.get("old-concierge")).not.toHaveProperty("onBehalfOf");
     expect(senders.get("old-loopback")).toMatchObject({ kind: "guardian", name: "Ray" });
     expect(senders.get("old-cookie")).toMatchObject({ kind: "guardian", name: "Ray" });

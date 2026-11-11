@@ -8,6 +8,8 @@ export interface ReplySource {
   /** The message the server looks up. For an agent turn, its last row with text. */
   messageId: string;
   sessionId: string;
+  /** The turn the message belongs to, when known; Share picks it. */
+  turnId?: string | null;
   author: "guardian" | "agent" | "automated";
   name?: string;
   /** The text a whole-message reply quotes. */

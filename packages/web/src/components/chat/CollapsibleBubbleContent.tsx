@@ -28,7 +28,7 @@ const COLLAPSED_MAX_HEIGHT_REM = 20;
  */
 const MIN_HIDDEN_REM = 3;
 
-// The end bar can sit behind the composer that floats over the bottom of the
+// The end button can sit behind the composer that floats over the bottom of the
 // transcript; this much of the scroller's bottom is not counted as visible.
 const COMPOSER_ALLOWANCE = "0px 0px -96px 0px";
 
@@ -94,14 +94,15 @@ function sharedObserver(): ResizeObserver {
  * reaches a match, opens the content. The open state is local: a message starts
  * cut and keeps its choice until it unmounts.
  *
- * The toggle is one full-width bar under the content, in the same slot whether
- * the message is cut or open: only its label and the revealed text differ, so
- * opening or closing moves nothing above the cut. While the message is open and
- * that bar is off screen and the top of the message has scrolled out of view, a
+ * The toggle is a small text button under the content, at its start edge, in
+ * the same slot whether the message is cut or open: only its label and the
+ * revealed text differ, so opening or closing moves nothing above the cut.
+ * While the message is open and
+ * that button is off screen and the top of the message has scrolled out of view, a
  * small "Show less" pill floats at the top right of the visible part of the
  * message. With the top in view it would sit over the first line, so it waits. It sits in a zero-height sticky wrapper, so
  * it takes no room and its coming and going moves nothing. It is hidden from
- * assistive technology and the tab order, which keep the bar as the one toggle.
+ * assistive technology and the tab order, which keep the button as the one toggle.
  * Top, not bottom, because the composer floats over the bottom of the
  * transcript at a height that varies.
  *
@@ -184,7 +185,7 @@ export function CollapsibleBubbleContent({ children }: { children: ReactNode }) 
     };
   }, [expanded]);
 
-  // Whether the bar is on screen, and whether the message's top has scrolled
+  // Whether the end button is on screen, and whether the message's top has scrolled
   // above the transcript: together they decide whether the pill floats.
   useEffect(() => {
     const bar = barRef.current;
@@ -266,18 +267,18 @@ export function CollapsibleBubbleContent({ children }: { children: ReactNode }) 
         {collapsed ? (
           <div
             aria-hidden
-            className="pointer-events-none absolute inset-x-0 bottom-0 h-12 bg-gradient-to-t from-surface-muted to-transparent"
+            className="pointer-events-none absolute inset-x-0 bottom-0 h-10 bg-gradient-to-t from-surface-muted to-transparent"
           />
         ) : null}
       </div>
       {collapsible ? (
-        <div className="mt-2">
+        <div className="mt-1">
           <Button
             ref={barRef}
             type="button"
-            variant="secondary"
-            size="sm"
-            className="w-full"
+            variant="ghost"
+            size="xs"
+            className="-ms-[var(--control-px-center-xs)] text-muted-foreground hover:text-foreground"
             aria-expanded={expanded}
             aria-controls={regionId}
             onClick={press}

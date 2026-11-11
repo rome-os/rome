@@ -201,7 +201,7 @@ describe("Concierge layout", () => {
       const toolbar = toolbarOf("Found three.");
       expect(toolbar.className).toContain("absolute");
       expect(toolbar.className).toContain("bottom-full");
-      expect(toolbar.className).toContain("translate-y-3");
+      expect(toolbar.className).toContain("translate-y-2");
       expect(toolbar.className).toContain("w-max");
       expect(toolbar.contains(bubbleOf("Found three."))).toBe(false);
     });
@@ -326,7 +326,7 @@ describe("Concierge layout", () => {
       return cap;
     };
 
-    it("draws a long message as a normal bubble", () => {
+    it("draws a long message as a bubble like any other, capped at the reading width", () => {
       renderTranscript([
         agentRow(
           agent("a1", 0, [text("Short.")]),
@@ -337,11 +337,15 @@ describe("Concierge layout", () => {
       const short = bubbleOf("Short.");
       const long = bubbleOf("The long one.");
       expect(long.className).toBe(short.className);
-      for (const bubble of [short, long]) {
-        const classes = bubble.className.split(/\s+/);
-        expect(classes).toContain("w-fit");
-        expect(classes).not.toContain("w-full");
-      }
+      const classes = long.className.split(/\s+/);
+      expect(classes).toEqual(
+        expect.arrayContaining([
+          "w-fit",
+          "max-w-[min(100%,var(--container-2xl))]",
+          "bg-surface-muted",
+        ]),
+      );
+      expect(long.querySelector(".rome-markdown")?.classList).toContain("rome-markdown-message");
     });
 
     it("caps every kind of bubble at 90% of the column, from the group itself", () => {
@@ -388,7 +392,7 @@ describe("Concierge layout", () => {
         expect(classes).not.toContain("max-w-full");
         // A percentage of a box that shrinks to the bubble would wrap short
         // text, so the cap sits right in the group, which spans the column.
-        expect(cap.parentElement?.className).toContain("gap-1");
+        expect(cap.parentElement?.className).toContain("gap-2");
       }
     });
 
@@ -447,7 +451,7 @@ describe("Concierge layout", () => {
       expect(within(mine as HTMLElement).getByText("Two")).toBeTruthy();
       expect(within(theirs as HTMLElement).getByText("Reply A")).toBeTruthy();
       expect(within(theirs as HTMLElement).getByText("Reply B")).toBeTruthy();
-      expect((mine as HTMLElement).className).toContain("gap-1");
+      expect((mine as HTMLElement).className).toContain("gap-2");
       expect((mine as HTMLElement).parentElement?.className).toContain("gap-4");
     });
 

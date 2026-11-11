@@ -92,7 +92,13 @@ function setup(first: FakeQuery, thread: ThreadStart = { kind: "new" }) {
     reopened.push(next);
     return next;
   });
-  const session = createReopeningSession({ params, first, open, reasoningEffort: "high" });
+  const session = createReopeningSession({
+    params,
+    first,
+    open,
+    provider: "anthropic",
+    reasoningEffort: "high",
+  });
   return { session, open, reopened, events: session.events[Symbol.asyncIterator]() };
 }
 
@@ -144,7 +150,13 @@ describe("createReopeningSession", () => {
 
     await expect(events.next()).resolves.toEqual({
       done: false,
-      value: { type: "result", content: "", reasoningEffort: "high" },
+      // A stopped turn, not a completed one, so its read inputs are handed on.
+      value: {
+        type: "result",
+        content: "",
+        reasoningEffort: "high",
+        accounting: expect.objectContaining({ stop: { reason: "interrupted" } }),
+      },
     });
     await session.close();
   });

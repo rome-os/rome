@@ -47,7 +47,13 @@ import { mergeConnectors, type ProviderService, type ProviderWatchSection } from
 import { addressedToOf, cleanLabels } from "./event-shape.js";
 import { optionValue, renderOptions } from "./follow-options.js";
 import type { ConciergeService } from "./service.js";
-import { type ConciergeOwner, GUARDIAN_OWNER, mainChatIdOf, storedChatId } from "./owner.js";
+import {
+  type ConciergeOwner,
+  GUARDIAN_OWNER,
+  MAIN_CHAT_NAME,
+  mainChatIdOf,
+  storedChatId,
+} from "./owner.js";
 import {
   type FollowEvent,
   MAX_EVENTS_PER_TRIAGE,
@@ -538,7 +544,7 @@ export function startConciergeFollowing(
     const live = chatId ? await service.conciergeChat(chatId) : null;
     if (live) return live;
     const main = mainChatIdOf(owner);
-    return (await service.conciergeChat(main)) ?? { id: main, name: "Concierge", main: true };
+    return (await service.conciergeChat(main)) ?? { id: main, name: MAIN_CHAT_NAME, main: true };
   };
 
   /**
@@ -820,7 +826,7 @@ export function startConciergeFollowing(
       const id = existing
         ? existing.id
         : await deps.routines.create({
-            name: `Concierge digest at ${localTime}`,
+            name: `Digest at ${localTime}`,
             key,
             trigger,
             actionName: CONCIERGE_DIGEST_ACTION,
@@ -900,7 +906,7 @@ export function startConciergeFollowing(
       } else {
         // An event's payload (a whole mail, say) stays out of the run history.
         id = await deps.routines.create({
-          name: `Concierge follows ${follow.target} (${source.label})`,
+          name: `Follow ${follow.target} (${source.label})`,
           key,
           trigger: routineTrigger,
           actionName: CONCIERGE_FOLLOW_ACTION,

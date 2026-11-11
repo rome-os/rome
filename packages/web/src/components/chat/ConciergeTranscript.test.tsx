@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import i18n from "@/i18n";
 import { readFileSync } from "node:fs";
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({
@@ -11,7 +11,7 @@ rs.mock("@/hooks/use-dashboard-identity", () => ({
 }));
 import { type AgentIdentity, buildRows } from "./chat-view";
 import { ConciergeTranscript } from "./ConciergeTranscript";
-import type { BlockActions, LivePreview } from "./MessageList";
+import type { BlockActions, LivePreview, ShareSelection } from "./MessageList";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
 import type { ChatMessage } from "@/lib/chat-types";
@@ -302,4 +302,69 @@ it.each([
   } finally {
     await i18n.changeLanguage("en");
   }
+});
+
+describe("ConciergeTranscript in share mode", () => {
+  const messages = [
+    user("u1", "t1"),
+    agent("a1", "t1"),
+    user("u2", "t2"),
+    agent("a2", "t2"),
+    { ...agent("x1", "t3"), sessionId: "elsewhere" },
+  ];
+  const shareMode = (selection?: ShareSelection) => {
+    const rows = buildRows(messages, new Map(), IDENTITY, {
+      runningTurnId: null,
+      isStreaming: false,
+    });
+    return (
+      <ThemeProvider>
+        <ConciergeTranscript
+          rows={rows}
+          live={live}
+          selection={selection}
+          actions={actions}
+          contentRef={() => {}}
+        />
+      </ThemeProvider>
+    );
+  };
+  const row = (text: string) => screen.getByText(text).closest("[data-share-pick]") as HTMLElement;
+
+  it("draws no pickers outside share mode", () => {
+    render(shareMode());
+    expect(screen.queryByRole("button", { name: /select message/i })).toBeNull();
+  });
+
+  it("marks every bubble of a picked turn, and toggles the turn from any of them", () => {
+    const onToggleTurn = rs.fn();
+    render(
+      shareMode({
+        selectedTurns: new Set(["t2"]),
+        selectableSessionId: "concierge",
+        onToggleTurn,
+      }),
+    );
+    for (const text of ["asked u2", "said a2"]) {
+      expect(within(row(text)).getByRole("button", { name: "Deselect message" })).toBeTruthy();
+    }
+    for (const text of ["asked u1", "said a1"]) {
+      expect(within(row(text)).getByRole("button", { name: "Select message" })).toBeTruthy();
+    }
+    fireEvent.click(within(row("said a1")).getByRole("button", { name: "Select message" }));
+    fireEvent.click(within(row("asked u2")).getByRole("button", { name: "Deselect message" }));
+    expect(onToggleTurn.mock.calls).toEqual([["t1"], ["t2"]]);
+  });
+
+  it("does not offer a bubble of another session", () => {
+    render(
+      shareMode({
+        selectedTurns: new Set(),
+        selectableSessionId: "concierge",
+        onToggleTurn: rs.fn(),
+      }),
+    );
+    // Two turns of two bubbles each; the other session's bubble has none.
+    expect(screen.getAllByRole("button", { name: /select message/i })).toHaveLength(4);
+  });
 });

@@ -118,7 +118,7 @@ The one Concierge chat each owner always has.
 - The dashboard opens it at `/message`, for the guardian and for each visitor alike. A topic chat is at `/chat/<id>`. The old `/chat/concierge` address redirects to `/message`.
 - The digest goes to the main chat and lists every Concierge chat's items, grouped by chat.
 - Alerts and tasks whose Concierge chat is archived or deleted come here.
-- In the header of every Concierge chat, a topic chat's included, and in the Concierge's own copy, the dashboard calls the Concierge by the name the guardian gave their agent (else "Concierge"). A topic chat's own name shows in the chat list. The chat list labels the main chat "Main chat". The stored chat name stays "Concierge".
+- In the header of every Concierge chat, a topic chat's included, and in the Concierge's own copy, the dashboard calls the Concierge by the name the guardian gave their agent (else "Rome", as the main agent). A topic chat's own name shows in the chat list. The main chat is stored as "Main chat", and the chat list labels it "Main chat" in the dashboard's language. Product copy never names it "Concierge".
 
 ## Topic chat
 
@@ -165,6 +165,19 @@ One thing a participant said or did in a chat.
 - Every message reads as plain text, so any person on any platform, and any agent, can follow the chat. A widget brings its own plain-text line.
 - Acting on a widget is a message of its own, from whoever did it, in the place the widget is in. It says what they meant, such as answering Q3, approving or picking a place, not how they did it: a button on one platform may be a typed reply on another. Without it, someone reading the chat later could not tell what was chosen.
 - A delegate's reply is recorded as said by the agent on the guardian's behalf, under the guardian's account.
+
+## Share link
+
+A read-only copy of chosen turns of a dashboard chat, which anyone with its link can open at `/share/<token>` without signing in.
+
+- Every dashboard chat shares the same way: a common chat, a fork chat, a task chat and a [Concierge chat](#concierge-chat) alike. Its owner picks the turns in the chat's share mode, from Share chat in the chat's menu, and makes the link there. Share chat starts with every turn picked, except in a Concierge chat, where it starts with none.
+- Share on a message opens the same share mode with that message's turn already picked. Its owner can make the link at once or pick more turns. There is no link to one message on its own.
+- A link carries the picked turns' messages, and the app and project panels its owner leaves in. App panels start in and the project panel starts out, since it opens every file in the project. It never carries the work behind the messages, from any chat: no trace, tool call or subagent, and the page shows none, even for a link made before this rule. It also keeps the name the chat showed for its agent, and the page labels the agent's turns by it.
+- The page shows a task chat named in a shared message by its title only, without its status or a way to open it.
+- A link is named by the first line of the first picked turn's own message, or else of its first reply. A Concierge chat's link is never named after the chat. Another chat's link takes the chat's name while it has one.
+- A link is a snapshot made when it is shared. What is said or changed in the chat later does not reach it.
+- The page tells search engines not to index it. A link pasted elsewhere previews with the share's title and a fixed line about Rome, never with the chat's words.
+- A chat's links are listed in its share mode, and its owner revokes any of them there. A revoked link opens nothing, and deleting the chat removes its links.
 
 ## Delivery
 
@@ -246,6 +259,7 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 
 ## Decided against
 
+- **A link to one message, apart from sharing turns.** It was a second way to share, with its own card, its own link per message and its own rules, beside the share mode every chat already has. Share on a message now opens that share mode with its turn picked.
 - **A New chat button, pinned chats and pinned projects at the top of the chat list.** They showed the same ideas twice beside the main chat, and a person had to choose between the Concierge and a new chat for every request. The main chat is where a person talks to Rome, and a common chat starts from Projects.
 - **Task chats out of the chat list.** The guardian lost sight of work running on their behalf, and the task list and cards were the only way back to it.
 - **Channel as a thing the guardian meets, with its own identity and lifetime.** A channel is one to one with a connected account, so the two words name one thing and the guardian only ever sees the account. Its jobs went to account, connection, connected account and chat. The code's channel layer ([Channels](../architecture/channels.md)) is retired as those words replace it.

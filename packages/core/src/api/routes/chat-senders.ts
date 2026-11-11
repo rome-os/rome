@@ -90,11 +90,10 @@ export async function resolveAutomatedSender(
   let appId: string | undefined;
   if (source.type === "agent" && source.id) {
     const agent = deps.agentLoader.list().find((candidate) => candidate.name === source.id);
-    // The main agent and the Concierge go by the name the guardian gave the agent.
-    if (isCoreMainAgentId(source.id)) {
+    // The main agent and the Concierge go by the name the guardian gave the
+    // agent, else by the same default.
+    if (isCoreMainAgentId(source.id) || isConciergeAgent(source.id)) {
       name = mainAgentDisplayName(await deps.settingsRepo.get("agentName"));
-    } else if (isConciergeAgent(source.id)) {
-      name = mainAgentDisplayName(await deps.settingsRepo.get("agentName"), "Concierge");
     } else {
       name = agent ? prettyAgentName(source.id) : source.id;
     }

@@ -25,7 +25,7 @@ const anyEvent = z.unknown();
 // area around it: any bubble of a message, a card, a bubble's details, the
 // header's pieces.
 const CONTENT =
-  "[data-concierge-bubble-part],[data-timeline-anchor],[data-chat-card-message],[data-bubble-toolbar],[data-concierge-header-badge],[data-concierge-header-pill],a,button,input,textarea,select,[role=menu]";
+  "[data-concierge-bubble-part],[data-timeline-anchor],[data-chat-card-message],[data-bubble-toolbar],[data-concierge-header-badge],[data-concierge-header-name],[data-concierge-header-activity],a,button,input,textarea,select,[role=menu]";
 
 /**
  * One chat thread of a Concierge chat on its own (docs/domains/chats.md#chat-thread),

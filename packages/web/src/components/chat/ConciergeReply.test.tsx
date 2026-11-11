@@ -147,8 +147,10 @@ describe("the reply the toolbar and the tap row send", () => {
       expect(toolbar.className).toContain("bottom-full");
       expect(toolbar.closest("[data-concierge-bubble]")).toBeNull();
     }
-    // The toolbar overlaps 12px of the bubble: the border and padding take 9px, so the chip adds 4.
-    expect(screen.getByRole("link", { name: "Open task chat Flights" }).className).toContain(
+    // The toolbar overlaps 8px of the bubble, inside its 9px of border and
+    // padding, so the chip at the top needs no margin of its own.
+    for (const toolbar of toolbars) expect(toolbar.className).toContain("translate-y-2");
+    expect(screen.getByRole("link", { name: "Open task chat Flights" }).className).not.toContain(
       "mt-1",
     );
   });

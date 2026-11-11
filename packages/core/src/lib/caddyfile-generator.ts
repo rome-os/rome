@@ -6,6 +6,7 @@
 // `/api/auth/verify`, so a policy change never needs a Caddy reload.
 
 import { RUNTIME_CONFIG_FILENAME } from "./runtime-config.js";
+import { SHARE_ROBOTS } from "./share-robots.js";
 
 const DEFAULT_WEB_ROOT = "/app/packages/web/dist";
 
@@ -13,9 +14,9 @@ const DEFAULT_WEB_ROOT = "/app/packages/web/dist";
 const PROXIED_SURFACE_PATHS =
   "/api /api/* /webhooks /webhooks/* /app-assets /app-assets/* /app-og /app-og/* " +
   "/app-manifest/* /app-icon/* /ws/* /desktop-proxy /desktop-proxy/* " +
-  "/apps /apps/* /full/apps /full/apps/*";
+  "/apps /apps/* /full/apps /full/apps/* /share/*";
 const PROXIED_SURFACE_PREFIXES =
-  "api|webhooks|app-assets|app-og|app-manifest|app-icon|ws|desktop-proxy|apps|full/apps";
+  "api|webhooks|app-assets|app-og|app-manifest|app-icon|ws|desktop-proxy|apps|full/apps|share";
 
 // The one place the served-SPA disk root is resolved. The boot script writes
 // `runtime-config.js` into this same root — resolving it anywhere
@@ -102,9 +103,10 @@ handle @nonCanonicalPath {
   //     Unknown paths fall back to `index.html` for the client router.
   //     Hono keeps its own copy for loopback callers that reach
   //     `:4141` without going via Caddy.
-  //   - `@appDocs` (`/apps/*`, `/full/apps/*`) is the shell too, but served
-  //     by Hono so the social meta can be swapped per app. Public, no
-  //     forward_auth: the shell was public from disk already.
+  //   - `@appDocs` (`/apps/*`, `/full/apps/*`, `/share/*`) is the shell too,
+  //     but served by Hono so the social meta can be swapped per app or per
+  //     shared chat. Public, no forward_auth: the shell was public from disk
+  //     already.
   //
   // WebSocket-bearing paths (`/ws/*`, `/desktop-proxy*`) are split out
   // because \`forward_auth\` forwards Upgrade/Connection headers verbatim
@@ -115,9 +117,14 @@ handle @nonCanonicalPath {
   // documented workaround if we ever fold them back in is
   // \`header_up -Connection\` inside the \`forward_auth { ... }\` block,
   // which strips the upgrade headers on the probe copy only.
+  // A shared chat is public to anyone with its link, but not for search
+  // engines: its page and its API reads carry `noindex`. Set at the site level
+  // so it reaches both the shell served from disk and the proxied reads.
   const body = `
 root * ${webRoot}
 ${canonicalPathGuard}
+@sharePages path /share /share/* /api/share /api/share/*
+header @sharePages X-Robots-Tag "${SHARE_ROBOTS}"
 @wsUpgrade path /ws/* /desktop-proxy /desktop-proxy/*
 handle @wsUpgrade {
 \t${proxy}
@@ -142,7 +149,7 @@ handle @spaAssets {
 handle @missingSpaAssets {
 \trespond 404
 }
-@appDocs path /apps /apps/* /full/apps /full/apps/*
+@appDocs path /apps /apps/* /full/apps /full/apps/* /share/*
 handle @appDocs {
 \tencode zstd gzip
 \t${proxy}

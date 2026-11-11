@@ -14,6 +14,7 @@ import {
   joinPrompts,
   markReady,
   nextInput,
+  NOTHING_CARRIED,
   release,
   retain,
   seal as sealTurn,
@@ -22,6 +23,7 @@ import {
   startTurn as startInputTurn,
   supersede,
   SUPERSEDED_INTERRUPT_REASON,
+  type Carried,
   type InputPriority,
   type InputTurn,
   type Landing,
@@ -91,8 +93,8 @@ interface ActiveInputTurn {
 export class AgentInputQueue {
   private active?: ActiveInputTurn;
   private queued: Entry[] = [];
-  /** Inputs of a superseded turn that the provider never consumed, for the next turn. */
-  private carried: Entry[] = [];
+  /** What a superseded turn hands the next turn. */
+  private carried: Carried<Entry> = NOTHING_CARRIED;
   private entries = new Map<string, Entry>();
   private closed = false;
 
@@ -108,7 +110,7 @@ export class AgentInputQueue {
   ) {}
 
   get busy(): boolean {
-    return !!this.active || this.queued.length > 0 || this.carried.length > 0;
+    return !!this.active || this.queued.length > 0 || this.carried.inputs.length > 0;
   }
 
   submit(input: AgentTurnInput & { inputId: string }, options: QueueOptions): AgentInputReceipt {
@@ -165,15 +167,18 @@ export class AgentInputQueue {
   private start(first: Entry): void {
     const { turn, queued } = startInputTurn(first, this.queued, this.carried);
     this.queued = queued;
-    this.carried = [];
+    this.carried = NOTHING_CARRIED;
     // Inputs from more than one person in one turn leave it acting for no one,
     // so nothing it does is taken as any one of theirs.
-    const mixed = turn.prompted.some((part) => !sameActor(part.options.actor, first.options.actor));
+    const mixed = [...turn.interrupted, ...turn.prompted].some(
+      (part) => !sameActor(part.options.actor, first.options.actor),
+    );
     const { actor: _firstActor, ...rest } = first.options;
     const handle = this.startTurn(
       joinPrompts(
         first.input,
         turn.prompted.map((part) => part.input),
+        turn.interrupted.map((part) => part.input),
       ),
       mixed ? rest : first.options,
     );
@@ -278,13 +283,18 @@ export class AgentInputQueue {
     await active.dispatch;
   }
 
-  finish(turnId: string): void {
+  /**
+   * Turn `turnId` ended. `completed` says the provider finished it, even when a
+   * `now` input asked to stop it, so a superseded turn hands no interrupted
+   * work on.
+   */
+  finish(turnId: string, completed = false): void {
     const active = this.active;
     if (active?.handle.id !== turnId) return;
     active.turn = sealTurn(active.turn);
     this.active = undefined;
     if (active.turn.superseded) {
-      this.carried = carryOver(active.turn, this.queued);
+      this.carried = carryOver(active.turn, this.queued, completed);
     } else {
       for (const [entry, state] of endTurn(active.turn, this.queued)) {
         // An input sent but never confirmed is never replayed, so it stays in this turn.
@@ -315,11 +325,11 @@ export class AgentInputQueue {
     const active = this.active;
     if (active?.handle.id !== turnId) return;
     active.turn = sealTurn(active.turn);
-    for (const entry of [active.turn.pending, ...this.queued, ...this.carried]) {
+    for (const entry of [active.turn.pending, ...this.queued, ...this.carried.inputs]) {
       if (entry) void this.update(entry, "cancelled").catch(this.reportError);
     }
     this.queued = [];
-    this.carried = [];
+    this.carried = NOTHING_CARRIED;
   }
 
   close(): void {

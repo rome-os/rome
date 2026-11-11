@@ -239,6 +239,7 @@ export { TurnListeners } from "./infrastructure/turn-listeners.js";
 // The model port's adapters, for the composition root alone. Everything else
 // reaches the context through the ports above.
 export { AnthropicProvider } from "./infrastructure/model/anthropic/provider.js";
+export { claudeStoppedTurnResult } from "./infrastructure/model/anthropic/stop.js";
 export { ClaudeAccount } from "./infrastructure/model/anthropic/account.js";
 // How Claude words an exhausted subscription, for a stored error that carries no code.
 export { isAnthropicUsageLimitError } from "./infrastructure/model/anthropic/usage-limit.js";

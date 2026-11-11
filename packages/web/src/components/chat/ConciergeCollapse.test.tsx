@@ -631,15 +631,13 @@ describe("Concierge forwarded report", () => {
   const bubbles = () => Array.from(document.querySelectorAll<HTMLElement>("div.rounded-16"));
   const chip = () => screen.getByRole("link", { name: "Open task chat Flights to Lisbon" });
 
-  it("is one bubble with a quote's gray left edge, the chip at its top, and the report cut inside", () => {
+  it("is one bubble with the chip at its top and the report cut inside, and no quote edge", () => {
     render(transcript([agentRow(agent("a1", [forwarded()]))]));
 
     expect(bubbles()).toHaveLength(1);
     const [bubble] = bubbles();
-    expect(bubble.className).toContain("border-l-3");
-    expect(bubble.className).toContain("border-l-muted-foreground");
-    // No card inside the bubble.
-    expect(bubble.querySelector("div.rounded-8.border-l-3")).toBeNull();
+    expect(bubble.className).toContain("bg-surface-muted");
+    expect(bubble.className).not.toContain("border-l-3");
     expect(bubble.firstElementChild?.contains(chip())).toBe(true);
     expect(bubble.contains(toggles()[0])).toBe(true);
     expect(bubble.contains(screen.getByText(/^Line 1\.+$/))).toBe(true);
@@ -665,7 +663,7 @@ describe("Concierge forwarded report", () => {
     expect(bubbles()).toHaveLength(2);
     const [lead, report] = bubbles();
     expect(lead.textContent).toBe("Here it is");
-    expect(lead.className).not.toContain("border-l-3");
+    expect(lead.contains(screen.queryByRole("link"))).toBe(false);
     expect(lead.contains(chip())).toBe(false);
     expect(report.contains(chip())).toBe(true);
   });
@@ -707,11 +705,10 @@ describe("Concierge forwarded report", () => {
     expect(bubbles()).toHaveLength(1);
   });
 
-  it("has no chip and no quote edge on a message that was not forwarded", () => {
+  it("has no chip on a message that was not forwarded", () => {
     render(transcript([agentRow(agent("a1", [text(LONG, { format: "long" })]))]));
 
     expect(screen.queryByRole("link")).toBeNull();
-    expect(bubbles()[0].className).not.toContain("border-l-3");
     // The same cut and the same button as the forwarded report's.
     expect(toggles()).toHaveLength(1);
   });

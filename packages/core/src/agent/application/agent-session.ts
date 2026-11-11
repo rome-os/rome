@@ -1752,6 +1752,9 @@ interface TurnSink {
   reportedTask?: string;
   lifecycleFinishDispatched: boolean;
   lifecycleInterrupted: boolean;
+  /** The guardian stopped the turn, not a `now` input superseding it. Its
+   *  read inputs are then done with: the next turn hands none of them on. */
+  stoppedByGuardian: boolean;
   subagentCallsByToolUse: Map<string, { key: SubagentCallKey; call: SubagentCall }>;
   pendingSubagentToolUses: Map<string, Extract<AgentEvent, { type: "tool_use" }>>;
   emittedSubagentStarts: Set<string>;
@@ -2683,7 +2686,14 @@ class AgentSessionImpl implements AgentSession {
     this.status = "idle";
     this.currentTurnId = undefined;
     this.emitStatus();
-    this.inputs.finish(sink.turnId);
+    // A turn the provider finished before the stop reached it completed, so its
+    // inputs are not handed on as interrupted work. Nor are a turn's the
+    // guardian stopped: a later `now` input is not a request to redo them.
+    this.inputs.finish(
+      sink.turnId,
+      turnStatus({ terminal: sink.saidTerminal, stoppedByRome: false }) === "completed" ||
+        sink.stoppedByGuardian,
+    );
   }
 
   private clearSubagentLinks(sink: TurnSink): void {
@@ -3162,6 +3172,7 @@ class AgentSessionImpl implements AgentSession {
       reportedTask: options?.reportedTask,
       lifecycleFinishDispatched: false,
       lifecycleInterrupted: false,
+      stoppedByGuardian: false,
       subagentCallsByToolUse: new Map(),
       pendingSubagentToolUses: new Map(),
       emittedSubagentStarts: new Set(),
@@ -3679,6 +3690,7 @@ class AgentSessionImpl implements AgentSession {
     const sink = this.currentSink;
     if (!sink || sink.done || (expectedTurnId && sink.turnId !== expectedTurnId)) return;
     sink.lifecycleInterrupted = true;
+    if (reason !== SUPERSEDED_INTERRUPT_REASON) sink.stoppedByGuardian = true;
     // Cancel the provider before awaiting child cleanup. A slow child must
     // not keep its parent generating after the user presses Stop.
     await Promise.all([
