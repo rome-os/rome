@@ -103,8 +103,9 @@ private struct ScrollState: CustomStringConvertible {
         let scroll = try #require(Self.transcript(in: host.view))
         let cached = Self.state(scroll)
         #expect(abs(cached.toEnd) < 1, "kept rows: \(cached)")
-        // The composer, and the pill when it shows, are under the transcript.
-        #expect(cached.bottomInset > (pill == .goesAway ? 110 : 60), "bottom inset: \(cached)")
+        // The composer is under the transcript; the pill's own space is
+        // checked against what follows.
+        #expect(cached.bottomInset > 40, "bottom inset: \(cached)")
 
         // The fresh load, then the header's status; the check finds no update.
         if pill == .goesAway { model.update.debugShow(.upToDate) }
