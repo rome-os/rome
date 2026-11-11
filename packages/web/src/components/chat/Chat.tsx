@@ -256,6 +256,8 @@ const messageChatThreadSchema = z.object({
   sessionId: z.string(),
   messageId: z.string(),
   chatThreadId: z.string(),
+  /** The task's title, when the thread is a task's. */
+  chatThreadTitle: z.string().optional(),
 });
 
 interface ChatSessionEventsProps {
@@ -505,11 +507,21 @@ export function Chat({
   // a placement after a reload builds on what the reload said.
   const [rethreaded, setRethreaded] = useState<ReadonlyMap<string, ThreadPlacement>>(new Map());
   const loadedThreads = useRef<ReadonlyMap<string, string | null>>(new Map());
+  // Task titles live placements told, by the thread they name.
+  const [liveThreadTitles, setLiveThreadTitles] = useState<ReadonlyMap<string, string>>(new Map());
   const handleMessageChatThread = useCallback(
-    ({ messageId, chatThreadId }: { messageId: string; chatThreadId: string }) =>
+    ({ messageId, chatThreadId, chatThreadTitle }: z.infer<typeof messageChatThreadSchema>) => {
       setRethreaded((prev) =>
         placeLive(prev, messageId, chatThreadId, loadedThreads.current.get(messageId) ?? null),
-      ),
+      );
+      if (chatThreadTitle) {
+        setLiveThreadTitles((prev) =>
+          prev.get(chatThreadId) === chatThreadTitle
+            ? prev
+            : new Map(prev).set(chatThreadId, chatThreadTitle),
+        );
+      }
+    },
     [],
   );
   // Status reactions live events changed since the messages loaded. A
@@ -2325,7 +2337,7 @@ export function Chat({
   loadedThreads.current = new Map(
     displayMessages.map((message) => [message.id, message.chatThreadId ?? null]),
   );
-  const chatThreads = useChatThreadsValue(displayMessages, rethreaded);
+  const chatThreads = useChatThreadsValue(displayMessages, rethreaded, liveThreadTitles);
   // Every message in a chat thread, roots included, as the timeline shows them now.
   threadedRef.current = new Set(
     placed(displayMessages, rethreaded).flatMap((message) =>

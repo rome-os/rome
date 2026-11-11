@@ -588,9 +588,8 @@
     "title": "对话串",
     "close": "关闭对话串",
     "loadFailed": "无法加载这个对话串。",
-    "replies_one": "{{count}} 条回复",
-    "replies_other": "{{count}} 条回复",
-    "replyPlaceholder": "回复"
+    "replyPlaceholder": "回复",
+    "replyTo": "回复：{{preview}}"
   },
   "sessionRenewal": {
     "notice": "新会话 · {{reason}}",

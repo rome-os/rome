@@ -15,13 +15,13 @@ import {
   placeLive,
   type ThreadPlacement,
   type ThreadTimelineMessage,
-  threadRepliesLines,
+  threadLabels,
 } from "./reply/chat-threads";
 import { ReplyDraftProvider, useReplyDraftState } from "./reply/reply-draft";
 
-// The "N replies" line of a Concierge chat's transcript: where it shows, what
-// it counts, and that it opens the thread. A tap on a message itself opens
-// nothing.
+// The thread label under the agent's messages in a Concierge chat's
+// transcript: where it shows, what it names, and that it opens the thread. A
+// tap on a message itself opens nothing.
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({
   useDashboardIdentity: () => ({
@@ -66,67 +66,47 @@ const free = (id: string, role: "user" | "assistant" = "user"): ThreadTimelineMe
   chatThreadId: null,
 });
 
-describe("threadRepliesLines", () => {
+/** Where each label goes and what thread it names, as `[messageId, thread]` pairs. */
+const where = (labels: ReturnType<typeof threadLabels>) =>
+  [...labels].map(([id, label]) => [id, label.thread]);
+
+describe("threadLabels", () => {
   it("shows none for messages in no thread: a plain question and its answer", () => {
-    expect(threadRepliesLines([free("q1"), free("a1", "assistant")])).toEqual(new Map());
+    expect(threadLabels([free("q1"), free("a1", "assistant")])).toEqual(new Map());
   });
 
-  it("6. shows a thread said in one stretch under its root only", () => {
-    expect(threadRepliesLines([g("q1"), a("a1", "q1"), g("q2", "q1"), a("a2", "q1")])).toEqual(
-      new Map([["q1", 3]]),
-    );
-  });
-
-  it("6. shows it under its newest message too when another message lies between", () => {
+  it("labels every agent message in a thread, and none of the guardian's", () => {
     expect(
-      threadRepliesLines([
-        g("q1"),
-        a("a1", "q1"),
-        free("w1"),
-        free("w2", "assistant"),
-        a("a2", "q1"),
-      ]),
-    ).toEqual(
-      new Map([
-        ["q1", 2],
-        ["a2", 2],
-      ]),
-    );
+      where(threadLabels([g("q1"), a("a1", "q1"), g("q2", "q1"), free("w1"), a("a2", "q1")])),
+    ).toEqual([
+      ["a1", "q1"],
+      ["a2", "q1"],
+    ]);
   });
 
-  it("7. shows it under its newest message only when its root is not loaded", () => {
-    expect(threadRepliesLines([g("q2", "q1"), free("w1"), a("a2", "q1")])).toEqual(
-      new Map([["a2", 2]]),
-    );
+  it("names a task's thread by its title, from any of its messages", () => {
+    const labels = threadLabels([
+      { ...g("q1"), chatThreadTitle: "Tokyo weather" },
+      a("a1", "q1"),
+      a("b1", "r1"),
+    ]);
+    expect(labels.get("a1")).toMatchObject({ title: "Tokyo weather" });
+    expect(labels.get("b1")).toMatchObject({ title: null });
   });
 
-  it("8. counts the same on both lines, and moves the newest line as a message arrives", () => {
-    const before = [g("q1"), a("a1", "q1"), free("w1"), a("a2", "q1")];
-    expect(threadRepliesLines(before)).toEqual(
-      new Map([
-        ["q1", 2],
-        ["a2", 2],
-      ]),
-    );
-    expect(threadRepliesLines([...before, free("w2"), g("q3", "q1")])).toEqual(
-      new Map([
-        ["q1", 3],
-        ["q3", 3],
-      ]),
-    );
+  it("names a thread no task has by the start of its first message, when it is loaded", () => {
+    const root = {
+      ...free("r1", "assistant"),
+      content: JSON.stringify([{ type: "text", content: "Sunny,\n24°" }]),
+    };
+    const labels = threadLabels([root, g("q2", "r1"), a("a2", "r1"), a("a3", "gone")]);
+    expect(labels.get("a2")).toMatchObject({ title: null, rootPreview: "Sunny, 24°" });
+    expect(labels.get("a3")).toMatchObject({ title: null, rootPreview: null });
   });
 
-  it("counts a root that was in no thread when the thread started at it", () => {
-    expect(threadRepliesLines([free("q1"), free("ack", "assistant"), a("result", "q1")])).toEqual(
-      new Map([
-        ["q1", 1],
-        ["result", 1],
-      ]),
-    );
-  });
-
-  it("shows none for a root with no replies", () => {
-    expect(threadRepliesLines([g("q1")])).toEqual(new Map());
+  it("takes a title a live placement told", () => {
+    const labels = threadLabels([g("q1"), a("a1", "q1")], new Map([["q1", "Flights"]]));
+    expect(labels.get("a1")).toMatchObject({ title: "Flights" });
   });
 });
 
@@ -137,26 +117,33 @@ describe("live thread placements", () => {
       ["q2", { from: null, to: "q1" }],
       ["a2", { from: null, to: "q1" }],
     ]);
-    expect(threadRepliesLines(placed(loaded, live))).toEqual(new Map([["q1", 3]]));
+    expect(where(threadLabels(placed(loaded, live)))).toEqual([
+      ["a1", "q1"],
+      ["a2", "q1"],
+    ]);
   });
 
   it("give way to a reload that says otherwise", () => {
-    const live = new Map<string, ThreadPlacement>([["q2", { from: null, to: "q1" }]]);
+    const live = new Map<string, ThreadPlacement>([["a2", { from: null, to: "q1" }]]);
     const reloaded = [g("q1"), a("a1", "q1"), g("q2", "q2"), a("a2", "q2")];
-    expect(threadRepliesLines(placed(reloaded, live))).toEqual(
-      new Map([
-        ["q1", 1],
-        ["q2", 1],
-      ]),
-    );
+    expect(where(threadLabels(placed(reloaded, live)))).toEqual([
+      ["a1", "q1"],
+      ["a2", "q2"],
+    ]);
   });
 
   it("build on a reload between two placements", () => {
-    let live = placeLive(new Map(), "q2", "q1", null);
-    const reloaded = [g("q1"), a("a1", "q1"), g("q2", "q1")];
-    expect(threadRepliesLines(placed(reloaded, live))).toEqual(new Map([["q1", 2]]));
-    live = placeLive(live, "q2", "q2", "q1");
-    expect(threadRepliesLines(placed(reloaded, live))).toEqual(new Map([["q1", 1]]));
+    let live = placeLive(new Map(), "a2", "q1", null);
+    const reloaded = [g("q1"), a("a1", "q1"), a("a2", "q1")];
+    expect(where(threadLabels(placed(reloaded, live)))).toEqual([
+      ["a1", "q1"],
+      ["a2", "q1"],
+    ]);
+    live = placeLive(live, "a2", "q2", "q1");
+    expect(where(threadLabels(placed(reloaded, live)))).toEqual([
+      ["a1", "q1"],
+      ["a2", "q2"],
+    ]);
   });
 });
 
@@ -179,7 +166,7 @@ const message = (
   }) as ChatMessage;
 
 const messages = [
-  message("m1", "user", "Plan Kyoto in April", "m1", 0),
+  { ...message("m1", "user", "Plan Kyoto in April", "m1", 0), chatThreadTitle: "Kyoto trip" },
   message("a1", "assistant", "Hotels first, then the days.", "m1", 1),
   message("m2", "user", "Which one is closest?", "m1", 2),
   message("a2", "assistant", "The river one.", "m1", 3),
@@ -219,7 +206,7 @@ function renderTranscript() {
       <MemoryRouter>
         <ReplyDraftProvider value={draft}>
           <ThemeProvider>
-            <ChatThreadsProvider value={{ lines: threadRepliesLines(messages) }}>
+            <ChatThreadsProvider value={{ labels: threadLabels(messages) }}>
               <ConciergeTranscript
                 rows={rows}
                 live={idle}
@@ -236,13 +223,24 @@ function renderTranscript() {
   return () => box.thread;
 }
 
-describe("the replies line in the transcript", () => {
-  it("sits under the thread's root and opens its thread", () => {
+describe("the thread label in the transcript", () => {
+  it("sits under each of the agent's messages in the thread, names its task, and opens it", () => {
     const thread = renderTranscript();
-    const line = screen.getByRole("button", { name: "3 replies" });
-    expect(line.getAttribute("data-thread-replies")).toBe("m1");
-    fireEvent.click(line);
-    expect(thread()).toBe("m1");
+    const labels = screen.getAllByRole("button", { name: "Kyoto trip" });
+    expect(labels).toHaveLength(2);
+    expect(labels[0]?.getAttribute("title")).toBe("Kyoto trip");
+    // The thread view loads a thread named by any of its messages.
+    fireEvent.click(labels[1]!);
+    expect(thread()).toBe("a2");
+  });
+
+  it("sits under none of the guardian's messages", () => {
+    renderTranscript();
+    const labelled = screen
+      .getAllByRole("button", { name: "Kyoto trip" })
+      .map((label) => label.previousElementSibling?.textContent ?? "");
+    expect(labelled.some((text) => text.includes("Plan Kyoto in April"))).toBe(false);
+    expect(labelled.some((text) => text.includes("Which one is closest?"))).toBe(false);
   });
 
   it("is the way in from the transcript: a tap on a message opens nothing", () => {

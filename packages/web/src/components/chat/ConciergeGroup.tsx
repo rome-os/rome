@@ -1,4 +1,4 @@
-import { ThreadRepliesLine } from "@/components/chat/reply/chat-threads";
+import { ThreadLabelLine } from "@/components/chat/reply/chat-threads";
 import { Fragment, memo, useMemo, type ReactNode } from "react";
 import type { ForwardedFrom } from "@rome/api-types/chat";
 import { UserMessage } from "./UserMessage";
@@ -242,7 +242,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
                 arrival={arrival}
               />
             )}
-            <ThreadRepliesLine message={entry.message} />
+            <ThreadLabelLine message={entry.message} />
           </>
         );
         if (!selection) return <Fragment key={entry.message.id}>{bubble}</Fragment>;

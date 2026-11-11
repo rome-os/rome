@@ -1,8 +1,7 @@
-// The "N replies" line of a Concierge chat's main transcript
-// (docs/domains/chats.md#chat-thread), which opens a thread's view. It
-// follows the iOS app's rule, so it shows only where the timeline alone does
-// not show the whole thread. The thread view's own transcript has no
-// provider, so it shows no line.
+// The label under each of the agent's messages in a chat thread, in a
+// Concierge chat's main transcript (docs/domains/chats.md#chat-thread): it
+// names the thread and opens its view. The thread view's own transcript has
+// no provider, so it shows none.
 
 import { createContext, useContext, useMemo } from "react";
 import { useTranslation } from "react-i18next";
@@ -11,9 +10,18 @@ import type { ChatMessage } from "@/lib/chat-types";
 import { useReplyDraft } from "./reply-draft";
 import { replyPreview } from "./reply-source";
 
+/** What the label under one message names: its thread, by the task's title or the root's words. */
+export interface ThreadLabel {
+  thread: string;
+  /** The title of the task the thread is, or null for a thread no task has. */
+  title: string | null;
+  /** The start of the thread's first message, when it is loaded. */
+  rootPreview: string | null;
+}
+
 export interface ChatThreads {
-  /** The lines to show: by the id of the agent message each sits under, how many replies it counts. */
-  lines: ReadonlyMap<string, number>;
+  /** The labels to show, by the id of the agent message each sits under. */
+  labels: ReadonlyMap<string, ThreadLabel>;
 }
 
 const ChatThreadsContext = createContext<ChatThreads | null>(null);
@@ -25,47 +33,40 @@ export function useChatThreads(): ChatThreads | null {
   return useContext(ChatThreadsContext);
 }
 
-/** A message of the timeline, as the replies rule reads it. */
-export type ThreadTimelineMessage = Pick<ChatMessage, "id" | "role" | "chatThreadId">;
+/** A message of the timeline, as the label rule reads it. */
+export type ThreadTimelineMessage = Pick<ChatMessage, "id" | "role" | "chatThreadId"> &
+  Partial<Pick<ChatMessage, "content" | "chatThreadTitle">>;
 
 /**
- * Where the "N replies" lines go in a loaded timeline, oldest message first:
- * by the id of the message each sits under, the count it shows. A thread's
- * count is its loaded messages less its root, the message that names it.
- * A thread with replies shows a line under its root, and one under its
- * newest message when a message of another thread, or of none, lies between
- * the two. A thread whose root is not loaded shows one under its newest
- * message only. A line moves to the newest message as one arrives.
+ * The labels of a loaded timeline: one under every agent message in a chat
+ * thread, and none under the guardian's. A thread is named by its task's
+ * title, from any of its messages or `liveTitles`, else by its root's words.
  */
-export function threadRepliesLines(
+export function threadLabels(
   messages: readonly ThreadTimelineMessage[],
-): Map<string, number> {
-  const timeline = messages.filter(
-    (message) => message.role === "user" || message.role === "assistant",
-  );
-  const at = new Map(timeline.map((message, index) => [message.id, index]));
-  const replies = new Map<string, number[]>();
-  timeline.forEach((message, index) => {
-    const thread = message.chatThreadId;
-    if (!thread || message.id === thread) return;
-    replies.set(thread, [...(replies.get(thread) ?? []), index]);
-  });
-  const lines = new Map<string, number>();
-  for (const [thread, indexes] of replies) {
-    const newest = indexes[indexes.length - 1] as number;
-    const newestId = timeline[newest]?.id as string;
-    const root = at.get(thread);
-    if (root === undefined) {
-      lines.set(newestId, indexes.length);
-      continue;
+  liveTitles: ReadonlyMap<string, string> = new Map(),
+): Map<string, ThreadLabel> {
+  const titles = new Map<string, string>();
+  const byId = new Map(messages.map((message) => [message.id, message]));
+  for (const message of messages) {
+    if (message.chatThreadId && message.chatThreadTitle) {
+      titles.set(message.chatThreadId, message.chatThreadTitle);
     }
-    lines.set(thread, indexes.length);
-    const apart = timeline
-      .slice(root + 1, newest)
-      .some((message) => message.chatThreadId !== thread);
-    if (apart) lines.set(newestId, indexes.length);
   }
-  return lines;
+  for (const [thread, title] of liveTitles) titles.set(thread, title);
+  const labels = new Map<string, ThreadLabel>();
+  for (const message of messages) {
+    const thread = message.chatThreadId;
+    if (message.role !== "assistant" || !thread) continue;
+    const root = byId.get(thread);
+    const words = root?.content ? wordsOf({ id: root.id, content: root.content }) : "";
+    labels.set(message.id, {
+      thread,
+      title: titles.get(thread) ?? null,
+      rootPreview: words ? replyPreview(words) : null,
+    });
+  }
+  return labels;
 }
 
 /**
@@ -79,16 +80,17 @@ export interface ThreadPlacement {
 }
 
 /**
- * Memoized {@link threadRepliesLines}, as the provider's value, with the
- * live placements made since the timeline loaded applied over it.
+ * Memoized {@link threadLabels}, as the provider's value, with the live
+ * placements and task titles told since the timeline loaded applied over it.
  */
 export function useChatThreadsValue(
   messages: readonly ThreadTimelineMessage[],
   rethreaded: ReadonlyMap<string, ThreadPlacement>,
+  liveTitles: ReadonlyMap<string, string>,
 ): ChatThreads {
   return useMemo(
-    () => ({ lines: threadRepliesLines(placed(messages, rethreaded)) }),
-    [messages, rethreaded],
+    () => ({ labels: threadLabels(placed(messages, rethreaded), liveTitles) }),
+    [messages, rethreaded, liveTitles],
   );
 }
 
@@ -125,39 +127,43 @@ export function placed(
   });
 }
 
-function wordsOf(message: ChatMessage): string {
+function wordsOf(message: Pick<ChatMessage, "id" | "content">): string {
   return parseMessageEntries(message)
     .flatMap((part) => (part.type === "text" && part.content.trim() ? [part.content] : []))
-    .join("\n\n");
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
- * The subdued "N replies" line under a chat thread's root or newest message,
- * which opens the thread. Renders nothing where {@link threadRepliesLines}
- * puts no line, and inside the thread view.
+ * The subdued `↳ <name>` label under an agent message in a chat thread, which
+ * opens the thread. The name is the task's title, else the start of the
+ * thread's first message. Renders nothing under the guardian's messages and
+ * inside the thread view.
  */
-export function ThreadRepliesLine({ message }: { message: ChatMessage }) {
+export function ThreadLabelLine({ message }: { message: ChatMessage }) {
   const { t } = useTranslation("chat");
   const threads = useChatThreads();
   const draft = useReplyDraft();
-  const count = threads?.lines.get(message.id) ?? 0;
-  if (!threads || !draft?.threads || count === 0 || draft.sessionId !== message.sessionId) {
-    return null;
-  }
+  const label = threads?.labels.get(message.id);
+  if (!label || !draft?.threads || draft.sessionId !== message.sessionId) return null;
+  const name = label.title ?? t("thread.replyTo", { preview: label.rootPreview ?? "…" });
   return (
     <button
       type="button"
-      data-thread-replies={message.id}
+      data-thread-label={label.thread}
+      title={name}
       onClick={() =>
         draft.openThread({
           messageId: message.id,
-          author: message.role === "user" ? "guardian" : "agent",
+          author: "agent",
           preview: replyPreview(wordsOf(message)),
         })
       }
-      className="-mt-1 rounded-4 px-1 text-aux text-muted-foreground outline-1 outline-offset-0 outline-transparent hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
+      className="-mt-1 max-w-full truncate rounded-4 px-1 text-left text-aux text-muted-foreground outline-1 outline-offset-0 outline-transparent hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
     >
-      {t("thread.replies", { count })}
+      <span aria-hidden="true">↳ </span>
+      {name}
     </button>
   );
 }

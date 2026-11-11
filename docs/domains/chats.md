@@ -38,7 +38,7 @@ One line of conversation inside a [Concierge chat](#concierge-chat) that its own
 - Any other message is in no chat thread: an owner's message typed in the chat, and the Concierge's answer to one. The Concierge's answer to a message in a thread is in that thread.
 - A message in no chat thread opens a thread view that shows it alone.
 - The chat's timeline shows every message in the order it was said, whatever its thread. The thread view shows one thread's messages on their own.
-- A thread with replies shows its count under its root, and under its newest message when other messages lie between the two. A thread whose root is not loaded shows it under its newest message only.
+- In the chat's timeline, every Concierge message in a chat thread shows a label under it that names the thread and opens it: the task's title for a task's thread, else the start of its first message. The owner's own messages show none, and neither does the thread view. A label shows no count.
 
 ## Place
 

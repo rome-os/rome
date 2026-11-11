@@ -171,6 +171,9 @@ export interface ChatMessage {
   /** The chat thread the message is in, in a Concierge chat: the id of the
    *  thread's first message. Absent or null when it is in none. */
   chatThreadId?: string | null;
+  /** The title of the task whose chat thread the message is in, when the
+   *  thread is a task's. Absent for a thread no task has, and in no thread. */
+  chatThreadTitle?: string | null;
   /** Rome's status reaction on a guardian message in a Concierge chat: how
    *  the task it started or was passed on to stands. Absent when it has none. */
   statusReaction?: import("@rome/api-types/concierge").ConciergeStatusReaction | null;

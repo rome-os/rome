@@ -588,9 +588,8 @@
     "title": "Chat thread",
     "close": "Close chat thread",
     "loadFailed": "Couldn't load this chat thread.",
-    "replies_one": "{{count}} reply",
-    "replies_other": "{{count}} replies",
-    "replyPlaceholder": "Reply"
+    "replyPlaceholder": "Reply",
+    "replyTo": "Reply: {{preview}}"
   },
   "sessionRenewal": {
     "notice": "New session · {{reason}}",

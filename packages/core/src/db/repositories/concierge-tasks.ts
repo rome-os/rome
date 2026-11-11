@@ -176,6 +176,26 @@ export class ConciergeTasksRepository {
     await this.announce(id, "refresh");
   }
 
+  /**
+   * The title of the task whose chat thread each of `roots` names in
+   * Concierge chat `chatId`, for the roots a task's thread has. A task
+   * started from a message in another task's thread shares it, and the
+   * thread keeps the name of the task that started it: the oldest.
+   */
+  async threadTitles(chatId: string, roots: readonly string[]): Promise<Map<string, string>> {
+    const titles = new Map<string, string>();
+    if (roots.length === 0) return titles;
+    for (const { row, conciergeChat } of await this.withChat(
+      inArray(conciergeTasks.threadRoot, [...new Set(roots)]),
+    )) {
+      // Oldest first, so the first title kept is the thread's own.
+      if (row.threadRoot && conciergeChat.id === chatId && !titles.has(row.threadRoot)) {
+        titles.set(row.threadRoot, row.title);
+      }
+    }
+    return titles;
+  }
+
   /** The key of the message that names the row's chat thread, or null. */
   async threadRoot(id: string): Promise<string | null> {
     return (await this.get(id))?.threadRoot ?? null;

@@ -959,8 +959,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const unsubscribeSessionName = deps.webchatRepo.onSessionNameChanged((event) => {
       if (event.sessionId === sessionId) emit("session_name", event);
     });
+    // A task's thread carries its title, so the label under the message can
+    // name it.
     const unsubscribeChatThread = deps.webchatRepo.onChatThreadPlaced((event) => {
-      if (event.sessionId === sessionId) emit("message_chat_thread", event);
+      if (event.sessionId !== sessionId) return;
+      void threadTitlesOf(sessionId, [event.chatThreadId])
+        .catch(() => new Map<string, string>())
+        .then((titles) => {
+          const chatThreadTitle = titles.get(event.chatThreadId);
+          emit("message_chat_thread", chatThreadTitle ? { ...event, chatThreadTitle } : event);
+        });
     });
     // A status reaction is no message, so it only changes the bubble and
     // never pushes (docs/domains/chats.md#status-reaction).
@@ -1362,6 +1370,30 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : message;
     });
   };
+  // The title of the task each chat thread of `roots` is, in a Concierge chat.
+  const threadTitlesOf = async (sessionId: string, roots: readonly string[]) =>
+    (await deps.concierge?.deps.tasks.repo.threadTitles(sessionId, roots)) ??
+    new Map<string, string>();
+  // The title of the task whose thread each message is in, when it is a task's.
+  const attachChatThreadTitles = async <T extends StoredMessages[number]>(
+    sessionId: string,
+    messages: T[],
+  ): Promise<(T & { chatThreadTitle?: string })[]> => {
+    // Only a transcript line has a chat thread; a trace row has none.
+    const threadOf = (message: T) =>
+      "chatThreadId" in message && typeof message.chatThreadId === "string"
+        ? message.chatThreadId
+        : null;
+    const roots = messages.flatMap((message) => threadOf(message) ?? []);
+    if (roots.length === 0) return messages;
+    const titles = await threadTitlesOf(sessionId, roots);
+    if (titles.size === 0) return messages;
+    return messages.map((message) => {
+      const thread = threadOf(message);
+      const chatThreadTitle = thread ? titles.get(thread) : undefined;
+      return chatThreadTitle ? { ...message, chatThreadTitle } : message;
+    });
+  };
   // The status reaction on each guardian message that has one, which only a
   // Concierge chat's can.
   const attachStatusReactions = async <T extends StoredMessages[number]>(
@@ -1379,9 +1411,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   };
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
-    const withTraces = await attachStatusReactions(
+    const withTraces = await attachChatThreadTitles(
       sessionId,
-      await attachTraceSummaries(sessionId, messages),
+      await attachStatusReactions(sessionId, await attachTraceSummaries(sessionId, messages)),
     );
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
     const shownIds = new Set(messages.map((m) => m.id));

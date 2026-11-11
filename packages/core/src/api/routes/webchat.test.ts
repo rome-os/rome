@@ -6271,6 +6271,55 @@ describe("Webchat API", () => {
       expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("statusReaction");
     });
 
+    it("names a task's chat thread on its messages and on a live placement, and no other thread", async () => {
+      const repo = new ConciergeTasksRepository(testDb.db);
+      deps.concierge = { deps: { tasks: { repo } } } as never;
+      await deps.webchatRepo.createSession(
+        "topic",
+        "Topic",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const text = (content: string) => JSON.stringify([{ type: "text", content }]);
+      await deps.webchatRepo.addMessage("g1", "topic", "user", text("Weather?"), "turn-1");
+      await deps.webchatRepo.addMessage("g2", "topic", "user", text("Thanks"), "turn-2");
+      await deps.webchatRepo.addMessage("g3", "topic", "user", text("And this?"), "turn-3");
+      await deps.webchatRepo.placeInChatThread("topic", "g1", { starts: true, settle: true });
+      await deps.webchatRepo.placeInChatThread("topic", "g3", { starts: true, settle: true });
+      const [task] = await repo.upsertMany([
+        { title: "Tokyo weather", state: "doing", chatId: "topic" },
+      ]);
+      await repo.setThreadRoot(task.id, "g1");
+      // A later task started from a message in that thread shares it, and the
+      // thread keeps its first task's name.
+      const [later] = await repo.upsertMany(
+        [{ title: "London weather", state: "doing", chatId: "topic" }],
+        new Date(Date.now() + 1_000),
+      );
+      await repo.setThreadRoot(later.id, "g1");
+      const app = createWebchatRuntime(deps).routes;
+
+      const listed = (await (await app.request("/chat/sessions/topic/messages")).json()) as {
+        id: string;
+        chatThreadTitle?: string;
+      }[];
+      expect(listed.find((m) => m.id === "g1")?.chatThreadTitle).toBe("Tokyo weather");
+      // A thread no task has, and a message in none, carry no title.
+      expect(listed.find((m) => m.id === "g3")).not.toHaveProperty("chatThreadTitle");
+      expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("chatThreadTitle");
+
+      const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
+      const placed = readSseUntil(events, "event: message_chat_thread");
+      await deps.webchatRepo.placeInChatThread("topic", "g2", { in: "g1", settle: true });
+      expect(await placed).toContain(
+        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g2", chatThreadId: "g1", chatThreadTitle: "Tokyo weather" })}`,
+      );
+      await events.cancel();
+    });
+
     it("keeps a deleted task chat's row on the Concierge's list and tells the Concierge", async () => {
       const repo = new ConciergeTasksRepository(testDb.db);
       const deleted: string[] = [];
