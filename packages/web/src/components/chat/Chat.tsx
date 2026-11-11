@@ -92,6 +92,7 @@ import {
   useReplyDraftState,
 } from "@/components/chat/reply/reply-draft";
 import { findMessageAnchor } from "@/components/chat/reply/reply-source";
+import { chatFloorLayering } from "@/components/chat/chat-floor";
 import { isAnchorInView, LANDING_MS } from "@/components/chat/reply/thread-anchor";
 import { useDesktop } from "@/hooks/use-desktop";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
@@ -2546,16 +2547,16 @@ export function Chat({
                 and bottom padding sit outside the box's blur, and on a phone a
                 transparent strip there shows table rows and text beside and
                 below the box, which reads as a second transcript. The floor
-                also takes pointer events there, so a tap on the canvas cannot
+                also takes pointer events there, while no thread view is open, so a tap on the canvas cannot
                 land on a link it hides. It stays inside the scroller, so the
                 scroll and keyboard geometry match the desktop layout. */}
               <div
                 ref={setFloorEl}
                 data-chat-floor
                 className={cn(
-                  "pointer-events-none sticky bottom-0 px-3 max-md:pointer-events-auto md:px-6",
-                  // Over the thread view, whose blur runs down behind it.
-                  threadOpen ? "z-30" : "z-10 max-md:bg-chat-canvas",
+                  "pointer-events-none sticky bottom-0 px-3 md:px-6",
+                  // Over an open thread view only the composer takes presses.
+                  chatFloorLayering(threadOpen),
                   // Presentation mode gives the draft's bottom gap 5x its normal
                   // size so a recording framed on the empty state keeps the
                   // composer clear of the capture's lower edge.
