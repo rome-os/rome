@@ -6,10 +6,8 @@ import type {
   WebChatRecapRepository,
 } from "@rome-os/app-runtime";
 import { openChannelChat, type OpenSpeakerDeps } from "../connections/open-chat.js";
-import type { DrizzleDb } from "../db/index.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../db/repositories/webchat.js";
-import { applyGuardianProfile } from "../people/guardian-profile.js";
 import { type AppChatReadsDeps, appChatReads } from "./chat-reads.js";
 import { type AppChatWritesDeps, appChatWrites } from "./chat-writes.js";
 
@@ -27,7 +25,7 @@ export interface CreateAppRuntimeRepositoriesDeps {
   inChats?: { reads: AppChatReadsDeps; writes: AppChatWritesDeps };
   /** Present in the main process only, where the profile write can reschedule
    *  floating routines. An action worker gets no guardianProfile repository. */
-  guardianProfile?: { db: DrizzleDb; reactivateFloating: () => Promise<void> };
+  guardianProfile?: GuardianProfileRepository;
 }
 
 export function createAppRuntimeRepositories(
@@ -49,31 +47,7 @@ export function createAppRuntimeRepositories(
     webchatRecaps: createWebChatRecapRepository(deps.webchatRepo),
     chats,
     conversations: chats,
-    ...(deps.guardianProfile
-      ? {
-          guardianProfile: createGuardianProfileRepository({
-            db: deps.guardianProfile.db,
-            settingsRepo: deps.settingsRepo,
-            reactivateFloating: deps.guardianProfile.reactivateFloating,
-          }),
-        }
-      : {}),
-  };
-}
-
-function createGuardianProfileRepository(deps: {
-  db: DrizzleDb;
-  settingsRepo: SettingsRepository;
-  reactivateFloating: () => Promise<void>;
-}): GuardianProfileRepository {
-  return {
-    write: async (input) => {
-      const result = await applyGuardianProfile(
-        { guardianName: input.guardianName, agentName: input.agentName },
-        deps,
-      );
-      return { ok: result.ok };
-    },
+    ...(deps.guardianProfile ? { guardianProfile: deps.guardianProfile } : {}),
   };
 }
 
