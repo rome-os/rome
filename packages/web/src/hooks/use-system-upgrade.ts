@@ -14,18 +14,18 @@ export const UPGRADE_CHECK_PATH = "/api/system/upgrade/check";
 
 const RESTART_POLL_INTERVAL_MS = 3_000;
 const RESTART_PROBE_TIMEOUT_MS = 5_000;
-// Give up waiting for the new backend after this long and point the guardian
+// Give up waiting for the new backend after this long and point the viewer
 // at Rome Cloud instead — the upgrade may have failed server-side, and polling
 // forever reads as "still working" when nobody is. Matches the iOS app and
 // Rome Cloud: a cold image pull plus a slow migration can take this long.
 export const RESTART_TIMEOUT_MS = 40 * 60_000;
 // Above the server's 15 s Rome Cloud relay budget, so an honest answer still
-// lands; past it the request is treated as lost and the guardian can retry
+// lands; past it the request is treated as lost and they can retry
 // (a duplicate is rejected as `upgrade_in_progress`).
 const UPGRADE_REQUEST_TIMEOUT_MS = 20_000;
 
 export interface SystemUpgrade {
-  /** Starts the upgrade to `target`, the latest version the guardian confirmed. */
+  /** Starts the upgrade to `target`, the latest version the viewer confirmed. */
   upgrade: (target: string) => void;
   /** True while the upgrade request is in flight. */
   pending: boolean;
@@ -42,13 +42,13 @@ export interface SystemUpgrade {
 }
 
 /**
- * The guardian-confirmed upgrade: POST /api/system/upgrade, then wait for the
+ * The confirmed upgrade: POST /api/system/upgrade, then wait for the
  * restarted backend to report the target version and reload the page. Shared
  * by the Settings section and the sidebar's upgrade dialog.
  *
  * `recheck` re-runs the caller's upgrade check: a 409 `target_not_latest`
  * means a newer version was published between check and confirm, so the
- * caller shows the new latest and asks the guardian to confirm again.
+ * caller shows the new latest and asks the viewer to confirm again.
  */
 export function useSystemUpgrade(recheck: () => unknown): SystemUpgrade {
   const { t } = useTranslation("settings");

@@ -49,7 +49,7 @@ export interface UseUpgradeStatusResult {
   state: UpgradeBannerState | null;
   /** Both verbs resolve `false` when the request failed (network error or a
    * non-2xx such as Rome Cloud rejecting the cutover) — the banner is left
-   * standing, and the caller owes the guardian visible feedback. */
+   * standing, and the caller owes the viewer visible feedback. */
   updateNow: () => Promise<boolean>;
   defer: () => Promise<boolean>;
   /** Hide the stalled banner. Recovery polling continues; a later fresh offer
@@ -334,7 +334,7 @@ export function useUpgradeStatus(): UseUpgradeStatusResult {
           signal: request.signal,
         });
         // A received non-2xx is a definitive rejection (Rome Cloud said no):
-        // the countdown stands and the guardian sees the retry hint.
+        // the countdown stands and the viewer sees the retry hint.
         if (!response.ok) return false;
         const parsed = upgradeStatusSchema.safeParse(await response.json());
         if (mountedRef.current === false) return true;

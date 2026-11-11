@@ -118,11 +118,24 @@ describe("UpgradeIndicator", () => {
     expect(screen.queryByRole("button", { name: ARROW })).toBeNull();
   });
 
-  it("shows nothing to a dashboard visitor, and does not check", async () => {
-    mockBackend({
+  it("shows a dashboard visitor the same arrow and dialog", async () => {
+    const backend = mockBackend({
       identity: { kind: "visitor", accountId: "a", email: "v@example.com", avatarUrl: null },
       check: [available("1.1.0", "1.2.0")],
+      upgrade: [{ status: 202, body: { status: "upgrading", target: "1.2.0" } }],
     });
+    renderIndicator();
+    const user = userEvent.setup();
+
+    await user.click(await screen.findByRole("button", { name: ARROW }));
+    await user.click(await screen.findByRole("button", { name: "Upgrade and restart" }));
+
+    expect(await screen.findByText("Milo is restarting")).toBeTruthy();
+    expect(backend.upgradeRequests).toEqual([{ target: "1.2.0" }]);
+  });
+
+  it("does not check before anyone is signed in", async () => {
+    mockBackend({ identity: { kind: "anonymous" }, check: [available("1.1.0", "1.2.0")] });
     renderIndicator();
 
     await waitFor(() =>

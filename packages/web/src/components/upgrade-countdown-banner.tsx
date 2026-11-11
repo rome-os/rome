@@ -8,7 +8,7 @@ import { estimatedServerNow, useUpgradeStatus } from "../hooks/use-upgrade-statu
 
 /**
  * Global top banner fronting the upgrade consent countdown. Persistent and
- * non-blocking, so the prompt itself doesn't disrupt a guardian mid-task.
+ * non-blocking, so the prompt itself doesn't disrupt anyone mid-task.
  * Four states, driven by useUpgradeStatus's poll loop: countdown (the human
  * gate), updating (the restart, tracked client-side so it survives the server
  * going away), stalled (restart overdue — dismissable), hidden. The desktop
