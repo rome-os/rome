@@ -235,6 +235,7 @@ import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
 import { routineWorkerCalls } from "./routines/for-apps.js";
 import { instanceWorkerCalls } from "./instance/for-apps.js";
+import { agentWorkerCalls } from "./agent/index.js";
 import { EventCatalog } from "./event-catalog.js";
 import {
   resolveOneOffDate,
@@ -1954,12 +1955,9 @@ async function main() {
       eventService,
       appLifecycle,
       appStore,
-      hasAgent: (name) => agentLoader.find(name) !== undefined,
       hasRegisteredAction: (name) => actionRegistry.has(name),
       isExplicitAction: (name) => actionRegistry.isExplicit(name),
       validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
-      // Same allow-list resolution as the agent session's tool gate.
-      hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
       backendTurnRunner,
       notify: notifyClient,
       privateOwnerOf: privateOwnerOfChat,
@@ -1973,6 +1971,11 @@ async function main() {
     },
     {
       ...routineWorkerCalls({ routinesRepo, routineEngine }),
+      ...agentWorkerCalls({
+        hasAgent: (name) => agentLoader.find(name) !== undefined,
+        // Same allow-list resolution as the agent session's tool gate.
+        hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
+      }),
       ...instanceWorkerCalls({
         systemUpgrade: systemUpgradeService,
         feedback: feedbackClient,
