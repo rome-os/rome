@@ -144,13 +144,20 @@ export function RomeShellLayout() {
   // is a slide-over, so a collapse saved on desktop must not empty the drawer.
   const onChat = isChatPath(location.pathname);
   // Whether the open page is a Concierge chat, whose header floats over it.
-  // The main chat's path says so before the chat mounts and claims its
-  // header, so a reload never shows this bar first. A main chat that failed
-  // to load shows a page of its own, which keeps the bar.
-  const mainChat = useConciergeChat();
-  const conciergeHeader =
-    useSlotOutlet(CONCIERGE_LEADING_SLOT) ||
-    (location.pathname === MAIN_CHAT_PATH && !mainChat.failed);
+  // The chat says so by mounting the header's leading slot, and takes it away
+  // when its tool pane covers it, which gives this bar back as the way out.
+  // On a visit to the main chat, its path says so first, until the chat
+  // claims its header, so a reload never shows this bar before the header. A
+  // main chat that failed to load shows a page of its own, which keeps the bar.
+  const onMainChat = location.pathname === MAIN_CHAT_PATH;
+  const mainChat = useConciergeChat(onMainChat);
+  const leadingSlot = useSlotOutlet(CONCIERGE_LEADING_SLOT);
+  const [headerClaimed, setHeaderClaimed] = useState(false);
+  useEffect(() => {
+    if (!onMainChat) setHeaderClaimed(false);
+    else if (leadingSlot) setHeaderClaimed(true);
+  }, [onMainChat, leadingSlot]);
+  const conciergeHeader = leadingSlot || (onMainChat && !mainChat.failed && !headerClaimed);
   const leadingButtons = (className?: string) => (
     <>
       {onChat ? (
