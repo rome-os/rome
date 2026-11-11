@@ -33,15 +33,21 @@ export interface DashboardCaller {
  */
 export const webchatCaller = new AsyncLocalStorage<DashboardCaller>();
 
-function dashboardCaller(): DashboardCaller {
-  const given = webchatCaller.getStore();
-  if (given) return given;
-  const store = actionExecutionContext.getStore();
-  const context = store?.channelContext;
+/** The caller an action stands for: its person, and its chat when that chat is a dashboard chat. */
+export function dashboardCallerOf(
+  action:
+    | { actor?: SessionActor; channelContext?: { channel: string; threadId?: string } }
+    | undefined,
+): DashboardCaller {
+  const context = action?.channelContext;
   return {
-    actor: store?.actor,
+    actor: action?.actor,
     chatId: context?.channel === WEBCHAT_CHANNEL && context.threadId ? context.threadId : null,
   };
+}
+
+function dashboardCaller(): DashboardCaller {
+  return webchatCaller.getStore() ?? dashboardCallerOf(actionExecutionContext.getStore());
 }
 
 /**

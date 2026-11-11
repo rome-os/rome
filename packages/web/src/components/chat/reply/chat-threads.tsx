@@ -155,7 +155,7 @@ export function ThreadRepliesLine({ message }: { message: ChatMessage }) {
           preview: replyPreview(wordsOf(message)),
         })
       }
-      className="rounded-4 px-1 text-aux text-muted-foreground outline-1 outline-offset-0 outline-transparent hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
+      className="-mt-1 rounded-4 px-1 text-aux text-muted-foreground outline-1 outline-offset-0 outline-transparent hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
     >
       {t("thread.replies", { count })}
     </button>

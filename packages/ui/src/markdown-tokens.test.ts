@@ -145,17 +145,57 @@ describe("Markdown semantic tokens", () => {
     expect(list).toContain("padding-inline-start: calc(var(--markdown-body-font-size) * 1.5);");
   });
 
-  it("sets a table as text in the column, at the body size", () => {
+  it("frames a table lightly, one step under the body, as wide as its content", () => {
     const wrapper = declarations(markdownCss, '.rome-markdown [data-streamdown="table-wrapper"]');
     expect(wrapper).toContain("border: 0;");
     expect(wrapper).toContain("padding: 0;");
     expect(wrapper).toContain("background: transparent;");
+    const frame = declarations(
+      markdownCss,
+      '.rome-markdown [data-streamdown="table-wrapper"] > :has(> table)',
+    );
+    expect(frame).toContain("width: fit-content;");
+    expect(frame).toContain("max-width: 100%;");
+    expect(frame).toContain("border: 1px solid var(--markdown-table-rule);");
+    const table = declarations(markdownCss, '.rome-markdown [data-streamdown="table"]');
+    expect(table).toContain("width: auto;");
+    expect(table).toContain("font-size: var(--markdown-table-font-size);");
+    expect(table).toContain("line-height: var(--markdown-table-line-height);");
+    expectToken(normal, "table-font-size", "var(--rome-font-size-14)");
+    expectToken(compact, "table-font-size", "var(--rome-font-size-13)");
     for (const cell of ["table-header-cell", "table-cell"]) {
       const block = declarations(markdownCss, `.rome-markdown [data-streamdown="${cell}"]`);
       expect(block).toContain("font-size: inherit;");
       expect(block).toContain("line-height: inherit;");
       expect(block).toContain("border-bottom: 1px solid");
     }
+  });
+
+  it("sets message prose with small headings, a loose line and a block gap on the grid", () => {
+    const message = declarations(markdownCss, ".rome-markdown-message");
+    expectToken(message, "body-line-height", "var(--rome-line-height-175)");
+    expectToken(message, "heading-1-font-size", "var(--rome-font-size-17)");
+    expectToken(message, "heading-2-font-size", "var(--rome-font-size-17)");
+    expectToken(message, "heading-3-font-size", "var(--rome-font-size-16)");
+    expectToken(message, "block-space-between", "var(--rome-space-4)");
+    expectToken(message, "heading-2-space-before", "var(--rome-space-6)");
+    expectToken(message, "heading-2-space-after", "var(--rome-space-2)");
+    expectToken(message, "heading-3-space-before", "var(--rome-space-5)");
+    expectToken(message, "list-item-gap", "var(--rome-space-1)");
+    // The body keeps its size, and bold keeps the heading weight.
+    expect(message).not.toContain("--markdown-body-font-size");
+    expect(message).not.toContain("--markdown-strong-font-weight");
+    expectToken(normal, "strong-font-weight", "600");
+    expectToken(normal, "list-item-gap", "var(--rome-space-0)");
+    expect(
+      declarations(markdownCss, '.rome-markdown :is(strong, b, [data-streamdown="strong"])'),
+    ).toContain("font-weight: var(--markdown-strong-font-weight);");
+    expect(
+      declarations(
+        markdownCss,
+        '.rome-markdown [data-streamdown="list-item"] + [data-streamdown="list-item"]',
+      ),
+    ).toContain("margin-block-start: var(--markdown-list-item-gap);");
   });
 
   it("rebinds the same tokens for compact mode", () => {

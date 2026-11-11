@@ -113,7 +113,7 @@ export function splitBundleOptions(entry, outdir) {
 
 const entrypoints = [
   ["packages/core/src/index.ts", "packages/core/dist/index.js", "esm"],
-  ["packages/core/src/apps/actions/worker.ts", "packages/core/dist/apps/actions/worker.js", "esm"],
+  ["packages/core/src/app-host/worker.ts", "packages/core/dist/app-host/worker.js", "esm"],
   ["scripts/generate-caddyfile.ts", "dist/scripts/generate-caddyfile.js", "cjs"],
 ];
 

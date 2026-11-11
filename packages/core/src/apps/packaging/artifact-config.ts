@@ -36,7 +36,7 @@ const FavorRequirementSchema = z
  * (`action.yaml`, agent yamls). Unknown fields are rejected, not stripped:
  * packed bundles are immutable once published, so a field tolerated here
  * would have to be tolerated forever. One schema serves both gates — the
- * runtime loaders (`apps/actions/loader.ts`, `apps/agent-loader.ts`) and
+ * runtime loaders (`apps/actions/loader.ts`, `app-host/agent-loader.ts`) and
  * pack/install validation (`validate.ts`) — and the bundle's
  * `formatVersion` (in app.yaml) governs it.
  */

@@ -1,4 +1,5 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
+import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { WebChatDashboardSessions } from "./webchat/webchat-dashboard-sessions.js";
@@ -129,13 +130,13 @@ import {
   byAccount,
   byChannel,
 } from "./chats/connected-accounts/account-agents.js";
-import { romeAccounts } from "./apps/rome-accounts.js";
+import { romeAccounts } from "./chats/connected-accounts/rome-accounts.js";
 import { recordedChannelOf } from "./chats/connected-accounts/connection-ports.js";
 import { ChannelRecordsRepository } from "./db/repositories/channel-records.js";
 import { ConnectedAccountsRepository } from "./db/repositories/connected-accounts.js";
 import { accountLinkOf, connectionKindOf } from "./chats/connected-accounts/account-links.js";
 import { recordedCardChannels, sendApprovalCard } from "./apps/actions/approval-card.js";
-import { createChannelsService, emailConnection } from "./apps/accounts-service.js";
+import { createChannelsService, emailConnection } from "./app-host/accounts-service.js";
 import { createAgentNames } from "./chats/accounts/agent-names.js";
 import {
   WechatUserReader,
@@ -161,10 +162,10 @@ import {
   rootSession,
   TurnListeners,
 } from "./agent/index.js";
-import { AgentLoader } from "./apps/agent-loader.js";
-import { AppTurnHooks, inOneHookChain } from "./apps/app-turn-hooks.js";
-import { AppTurnMiddleware } from "./apps/app-turn-middleware.js";
-import { TurnUsageReporter } from "./apps/turn-usage-reporter.js";
+import { AgentLoader } from "./app-host/agent-loader.js";
+import { AppTurnHooks, inOneHookChain } from "./app-host/app-turn-hooks.js";
+import { AppTurnMiddleware } from "./app-host/app-turn-middleware.js";
+import { TurnUsageReporter } from "./app-host/turn-usage-reporter.js";
 import { agentsByLegacyName } from "./apps/agents-by-legacy-name.js";
 import { ActionRegistryImpl } from "./apps/actions/registry.js";
 import { ActionLoader } from "./apps/actions/loader.js";
@@ -194,8 +195,8 @@ import {
   resolveAgentPolicy,
   createSystemPrompts,
 } from "./agent/index.js";
-import { SkillLoader } from "./apps/skill-loader.js";
-import { createPromptSources } from "./apps/prompt-sources.js";
+import { SkillLoader } from "./app-host/skill-loader.js";
+import { createPromptSources } from "./app-host/prompt-sources.js";
 import { startCodexLoginChoice } from "./rome-cloud/codex-login.js";
 import { createConversationTitleGenerator } from "./core/conversation-title.js";
 import { createSessions } from "./agent/index.js";
@@ -233,15 +234,20 @@ import { EventSources } from "./events/event-sources.js";
 import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
-import { routineWorkerCalls } from "./routines/for-apps.js";
-import { instanceWorkerCalls } from "./instance/for-apps.js";
+import { routineWorkerCalls } from "./app-host/routine-calls.js";
+import { appRoutinePauser } from "./routines/app-routine-pauser.js";
+import { instanceWorkerCalls } from "./app-host/instance-calls.js";
+import { agentWorkerCalls } from "./app-host/agent-calls.js";
+import { sessionWorkerCalls } from "./app-host/session-calls.js";
+import { chatWorkerCalls } from "./app-host/chat-calls.js";
+import { connectionWorkerCalls } from "./app-host/connection-calls.js";
 import { EventCatalog } from "./event-catalog.js";
 import {
   resolveOneOffDate,
   ScheduleTriggerProvider,
 } from "./routines/schedule-trigger-provider.js";
 import type { Trigger } from "./routines/types.js";
-import { resolveGuardianTimezone } from "./routines/guardian-timezone.js";
+import { resolveGuardianTimezone } from "./instance/timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
 import { linkGuardianToAccount } from "./people/guardian-mapping.js";
@@ -261,9 +267,9 @@ import {
 } from "./access/visitor-allowlist-sync.js";
 import { PhoneWatching } from "./lib/phone-watching.js";
 import { DashboardActivity } from "./lib/dashboard-activity.js";
-import { callerNotifyService } from "./apps/actions/caller-notify.js";
+import { callerNotifyService } from "./app-host/caller-notify.js";
 import { ApprovalHandler, executionRequester } from "./apps/actions/approval-handler.js";
-import { createBackendTurnRunner } from "./apps/actions/backend-turn.js";
+import { createBackendTurnRunner } from "./app-host/backend-turn.js";
 import { emitAgentMessage } from "./apps/actions/runtime-events.js";
 import { PolicyEngine } from "./core/policy-engine.js";
 import { ensureProfileMemoryInitialized, resolveProfileMemoryPath } from "./profile-memory.js";
@@ -299,7 +305,7 @@ import {
   createChannelMessageHookFromCatalog,
   createChannelMessageHookReloader,
   registerAppActions,
-} from "./apps/actions/app-actions-wiring.js";
+} from "./app-host/app-actions-wiring.js";
 import type { ChannelMessageHook } from "./apps/hooks/types.js";
 import {
   createCodexImageGenerationProvider,
@@ -315,7 +321,7 @@ import {
 import { createAppDomain, createBundleFetcher } from "./apps/index.js";
 import { createAppStoreService } from "./apps/store-service.js";
 import { AppLifecycleService } from "./apps/lifecycle-service.js";
-import { createAppRuntimeRepositories } from "./apps/repositories.js";
+import { createAppRuntimeRepositories } from "./app-host/repositories.js";
 import {
   ARTIFACT_LEGACY_BINDINGS_SETTING,
   isCoreMainAgentId,
@@ -342,7 +348,7 @@ import { createAppOgImageSubscriber } from "./apps/og/subscriber.js";
 import { createOgImageStore } from "./apps/og/store.js";
 import type { ResolvedApp } from "./apps/state.js";
 import type { RomeAppRuntimeServices } from "./apps/context.js";
-import { AppApiDispatcher } from "./apps/api.js";
+import { AppApiDispatcher } from "./app-host/api.js";
 import { RelayDrainer, buildRelayReplayRequest } from "./relay/drainer.js";
 import {
   RELAY_SETTING_KEY,
@@ -533,7 +539,11 @@ async function main() {
         open: (input) => openChannelChat({ webchatRepo, speakers: appSpeakers }, input),
       },
     },
-    guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
+    guardianProfile: appGuardianProfile({
+      db,
+      settingsRepo,
+      reactivateFloating: () => routineEngine.reactivateFloating(),
+    }),
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const usageOutboxRepo = new UsageOutboxRepository(db);
@@ -702,7 +712,7 @@ async function main() {
     installedRoot: getProfileInstalledAppsDir(),
     bundleFetcher: appBundleFetcher,
     romeCloudListings,
-    routines: {
+    pauseRoutines: appRoutinePauser({
       repository: routinesRepo,
       legacyBindings: artifactIdentity.legacyBindings,
       engine: {
@@ -710,7 +720,7 @@ async function main() {
           await deactivateRoutine?.(id);
         },
       },
-    },
+    }),
   });
   const appStore = createAppStoreService({ appCatalog });
 
@@ -1947,32 +1957,36 @@ async function main() {
 
   const workerRpcServer = new WorkerRpcServer(
     {
-      channelsService,
-      connectionRegistry,
-      channelOf,
-      chatSettings,
       eventService,
       appLifecycle,
       appStore,
-      hasAgent: (name) => agentLoader.find(name) !== undefined,
       hasRegisteredAction: (name) => actionRegistry.has(name),
       isExplicitAction: (name) => actionRegistry.isExplicit(name),
       validateActionArgs: (name, args) => actionRegistry.validateArgs(name, args),
-      // Same allow-list resolution as the agent session's tool gate.
-      hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
-      backendTurnRunner,
-      notify: notifyClient,
-      privateOwnerOf: privateOwnerOfChat,
-      agentNames: agentNameResolver,
-      appConnections,
-      appIdForAction: (actionName) => {
-        const metadata = actionRegistry.getMetadata(actionName);
-        return metadata?.ownerType === "app" ? metadata.ownerId : null;
-      },
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
     {
       ...routineWorkerCalls({ routinesRepo, routineEngine }),
+      ...connectionWorkerCalls({
+        appConnections,
+        appIdForAction: (actionName) => {
+          const metadata = actionRegistry.getMetadata(actionName);
+          return metadata?.ownerType === "app" ? metadata.ownerId : null;
+        },
+        connectionRegistry,
+        emailConnectionId: () => emailConnection(connectionRegistry, channelOf)?.id,
+      }),
+      ...chatWorkerCalls({ channelsService, chatSettings, agentNames: agentNameResolver }),
+      ...sessionWorkerCalls({
+        backendTurnRunner,
+        notify: notifyClient,
+        privateOwnerOf: privateOwnerOfChat,
+      }),
+      ...agentWorkerCalls({
+        hasAgent: (name) => agentLoader.find(name) !== undefined,
+        // Same allow-list resolution as the agent session's tool gate.
+        hasAction: (agentName, actionName) => agentRunner.hasAction(agentName, actionName),
+      }),
       ...instanceWorkerCalls({
         systemUpgrade: systemUpgradeService,
         feedback: feedbackClient,

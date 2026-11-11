@@ -773,6 +773,8 @@ export async function saveSetting(key: string, value: unknown): Promise<boolean>
 
 export interface ChatShareSnapshot {
   mainSessionId: string;
+  /** The name the chat showed for its main agent; absent on older shares. */
+  agentName?: string;
   messages: ChatMessage[];
   traces: Record<string, TraceSnapshot>;
 }
@@ -793,6 +795,8 @@ export interface ShareSummary {
 
 export interface CreateShareInput {
   turnIds: string[];
+  /** The name the chat shows for its main agent, frozen for the shared page. */
+  agentName?: string;
   title?: string;
   layout?: WidgetPlacement[];
 }

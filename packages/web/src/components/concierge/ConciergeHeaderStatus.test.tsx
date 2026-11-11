@@ -13,11 +13,48 @@ afterEach(() => cleanup());
 const mascot = (container: HTMLElement) => container.querySelector<SVGElement>(".rome-mascot")!;
 
 describe("ConciergeHeaderStatus", () => {
-  it("shows the name alone and a still mascot when idle", () => {
+  it("shows the name alone and a still mascot when idle, with the status read but not drawn", () => {
     const { container } = render(<ConciergeHeaderStatus name="Milo" activity={{ kind: "idle" }} />);
     expect(screen.getByText("Milo")).toBeTruthy();
-    expect(screen.getByText("Idle").className).toContain("sr-only");
+    const capsule = container.querySelector<HTMLElement>("[data-concierge-header-activity]")!;
+    expect(capsule.className).toContain("sr-only");
+    expect(capsule.getAttribute("aria-live")).toBe("polite");
+    expect(capsule.textContent).toBe("Idle");
     expect(mascot(container).hasAttribute("data-alive")).toBe(false);
+  });
+
+  it("puts the name in its own tag under the mascot, and the status in a capsule below it", () => {
+    const { container } = render(
+      <ConciergeHeaderStatus
+        name="Yo"
+        activity={{ kind: "tasks", title: "Summarise every meeting this week", more: 0 }}
+      />,
+    );
+    const tag = container.querySelector<HTMLElement>("[data-concierge-header-name]")!;
+    const capsule = container.querySelector<HTMLElement>("[data-concierge-header-activity]")!;
+    expect(tag.textContent).toBe("Yo");
+    expect(tag.contains(capsule)).toBe(false);
+    // The tag sits in the column under the mascot; the status spans the header.
+    expect(tag.className).toContain("row-start-2");
+    expect(tag.className).toContain("col-start-2");
+    expect(capsule.className).toContain("row-start-3");
+    expect(capsule.className).toContain("col-span-3");
+    expect(capsule.className).not.toContain("sr-only");
+    // A long name ends in an ellipsis rather than widening the tag without end.
+    expect(tag.querySelector("span")!.className).toEqual(expect.stringContaining("truncate"));
+  });
+
+  it("lifts the name tag and the status a row when the badge is left out", () => {
+    const { container } = render(
+      <ConciergeHeaderStatus name="Milo" activity={{ kind: "working" }} badge={false} />,
+    );
+    expect(container.querySelector("[data-concierge-header-badge]")).toBeNull();
+    expect(container.querySelector("[data-concierge-header-name]")!.className).toContain(
+      "row-start-1",
+    );
+    expect(container.querySelector("[data-concierge-header-activity]")!.className).toContain(
+      "row-start-2",
+    );
   });
 
   it("says a running task chat's title, and how many more run", () => {
@@ -33,7 +70,9 @@ describe("ConciergeHeaderStatus", () => {
 
   it("says the tool the Concierge is in", () => {
     render(<ConciergeHeaderStatus name="Milo" activity={{ kind: "tool", tool: "startingTask" }} />);
-    expect(screen.getByText("Starting a task").getAttribute("aria-live")).toBe("polite");
+    expect(
+      screen.getByText("Starting a task").closest("[aria-live]")?.getAttribute("aria-live"),
+    ).toBe("polite");
   });
 
   it("says it waits on the guardian in the muted colour of every status, still and unshimmered", () => {
@@ -85,7 +124,7 @@ describe("ConciergeHeaderStatus", () => {
       const { container, unmount } = render(
         <ConciergeHeaderStatus name="Milo" activity={activity} />,
       );
-      const span = container.querySelector<HTMLElement>("[aria-live]")!;
+      const span = container.querySelector<HTMLElement>("[aria-live] > span")!;
       const shimmers = span.classList.contains("shimmer");
       unmount();
       return shimmers;

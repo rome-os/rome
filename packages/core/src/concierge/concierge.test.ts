@@ -1253,7 +1253,7 @@ describe("Concierge tools", () => {
         chatId: "task-1",
         title: "Flights",
         kind: "task chat",
-        from: { chatId: CONCIERGE_CHAT, title: "Concierge" },
+        from: { chatId: CONCIERGE_CHAT, title: "Main chat" },
         status: "idle",
       },
       {
@@ -2853,7 +2853,7 @@ describe("Concierge chat", () => {
     expect(createSession).toHaveBeenCalledTimes(1);
     expect(createSession).toHaveBeenCalledWith(
       "concierge",
-      "Concierge",
+      "Main chat",
       undefined,
       undefined,
       "gpt-6-luna",
@@ -2872,7 +2872,7 @@ describe("Concierge chat", () => {
     expect(id).toMatch(/^concierge-v-[0-9a-f]{24}$/);
     expect(createSession).toHaveBeenCalledWith(
       id,
-      "Concierge",
+      "Main chat",
       undefined,
       undefined,
       "gpt-6-luna",

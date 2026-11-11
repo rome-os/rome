@@ -64,6 +64,10 @@ import {
   type AgentIdentity,
 } from "@/components/chat/chat-view";
 import { ShareBar } from "@/components/chat/ShareBar";
+import {
+  MessageSharingContext,
+  type SharedMessageTurn,
+} from "@/components/chat/ShareMessageButton";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { useFreeCells } from "@/pages/free/use-free-cells";
 import { useToolTrace } from "@/pages/free/tool-trace";
@@ -781,10 +785,33 @@ export function Chat({
     inThread: (messageId) => threadedRef.current.has(messageId),
   });
 
+  // Share chat picks every turn in a common chat. A Concierge chat holds its
+  // owner's private history, so there it starts with none picked.
   const enterShareMode = useCallback(() => {
-    setSelectedShareTurns(new Set(mainTurnIds));
+    setSelectedShareTurns(new Set(concierge ? [] : mainTurnIds));
     setShareMode(true);
-  }, [mainTurnIds]);
+  }, [concierge, mainTurnIds]);
+
+  // Share on a message: the same share mode, with only that message's turn
+  // selected. A message outside the chat's own turns selects nothing. Read
+  // through the ref so the shortcut keeps one identity while messages arrive.
+  // From the thread view, the view closes first: share mode picks turns in the
+  // chat's own timeline, which the view covers.
+  const { thread: openThreadId, closeThread } = replyDraft;
+  const shareMessageTurn = useCallback(
+    (messageId: string, turn?: SharedMessageTurn) => {
+      if (openThreadId) closeThread();
+      // The loaded timeline first; else the turn the message's own view knows,
+      // for an older thread message the timeline has not loaded.
+      const turnId = mainSessionId
+        ? (messagesRef.current.get(mainSessionId)?.find((m) => m.id === messageId)?.turnId ??
+          (turn?.sessionId === mainSessionId ? turn.turnId : undefined))
+        : undefined;
+      setSelectedShareTurns(new Set(turnId ? [turnId] : []));
+      setShareMode(true);
+    },
+    [mainSessionId, openThreadId, closeThread],
+  );
 
   const exitShareMode = useCallback(() => {
     setShareMode(false);
@@ -1924,8 +1951,20 @@ export function Chat({
     turnEnds,
   );
 
+  // Share mode hides the composer, so it takes no dropped file: the drop is
+  // refused rather than filed into a draft no one sees.
+  const sharingRef = useRef(false);
+  sharingRef.current = shareMode && Boolean(mainSessionId);
+  const refuseDrop = (event: React.DragEvent<HTMLDivElement>): boolean => {
+    if (!sharingRef.current) return false;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "none";
+    return true;
+  };
+
   const handleDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     if (!dataTransferHasFiles(event.dataTransfer)) return;
+    if (refuseDrop(event)) return;
     event.preventDefault();
     dragDepthRef.current += 1;
     event.dataTransfer.dropEffect = "copy";
@@ -1934,6 +1973,7 @@ export function Chat({
 
   const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     if (!dataTransferHasFiles(event.dataTransfer)) return;
+    if (refuseDrop(event)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
   }, []);
@@ -1952,6 +1992,7 @@ export function Chat({
     event.stopPropagation();
     dragDepthRef.current = 0;
     setIsDraggingFiles(false);
+    if (sharingRef.current) return;
     const files = extractFilesFromDataTransfer(event.dataTransfer);
     if (files.length === 0) return;
     composerRef.current?.addFiles(files);
@@ -2101,11 +2142,14 @@ export function Chat({
   const actionBadge = floating
     ? cn("rounded-full text-foreground", FLOATING_SURFACE)
     : "text-muted-foreground hover:text-foreground";
+  // The name the header shows for the Concierge, which a share of this chat
+  // labels its turns by too.
+  const conciergeDisplayName = resolveMainAgentDisplayName(conciergeName);
   const conciergeStatus = concierge ? (
     <ConciergeHeaderStatus
       // Every Concierge chat, main or topic, goes by the Concierge's name
       // here; a topic chat's own name is in the chat list.
-      name={conciergeName || "Concierge"}
+      name={conciergeDisplayName}
       activity={conciergeActivity}
       // A chat with no messages yet draws its own large mascot.
       badge={!conciergeEmpty}
@@ -2487,64 +2531,70 @@ export function Chat({
                     <ShareBar
                       sessionId={mainSessionId}
                       selectedTurnIds={[...selectedShareTurns]}
+                      agentName={concierge ? conciergeDisplayName : mainIdentity.name}
                       onExit={exitShareMode}
                     />
-                  ) : isArchived ? (
-                    <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
-                      <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void handleUnarchive()}
-                      >
-                        <ArchiveRestore data-icon="inline-start" className="size-3.5" />
-                        {t("archived.unarchive")}
-                      </Button>
-                    </div>
-                  ) : concierge ? (
-                    <ConciergeComposer
-                      ref={composerRef}
-                      boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
-                      onSend={handleComposerSend}
-                      isStreaming={displayedStreaming}
-                      onStop={stopComposerTurn}
-                      streamError={streamError}
-                      modelSelection={
-                        chatModelPickable
-                          ? { value: chatModelValue, onChange: pickChatModel }
-                          : undefined
-                      }
-                    />
-                  ) : (
-                    <ChatComposer
-                      persistNewChatDraft={!mainSessionId}
-                      ref={composerRef}
-                      // The box look lives on the composer now so the chip row can sit
-                      // outside it; this mount adds the floating blur/translucency.
-                      boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
-                      onSend={handleComposerSend}
-                      // A draft picks the session's project, model, and agent.
-                      // A session keeps its project and agent, and its model
-                      // can change from the next turn.
-                      showProjectSelector={!mainSessionId}
-                      showModelSelector={!mainSessionId || chatModelPickable}
-                      chatModelSelection={composerModelSelection}
-                      initialProjectName={initialProjectName}
-                      initialDeviceFolder={initialDeviceFolder}
-                      initialAgentMention={initialAgentMention}
-                      isStreaming={displayedStreaming}
-                      onStop={stopComposerTurn}
-                      streamError={streamError}
-                      pinnedAgentMention={pinnedAgentMention}
-                      lockAgentMention={Boolean(mainSessionId)}
-                      // Locks once the turn that saved the card has ended, so
-                      // Stop stays in reach while it still streams.
-                      lockedReason={
-                        lockedByCard && !displayedStreaming ? t("composer.lockedByCard") : null
-                      }
-                    />
-                  )}
+                  ) : null}
+                  {/* Share mode hides the composer rather than unmounting it,
+                      so a draft is still there when share mode ends. */}
+                  <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
+                    {isArchived ? (
+                      <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
+                        <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void handleUnarchive()}
+                        >
+                          <ArchiveRestore data-icon="inline-start" className="size-3.5" />
+                          {t("archived.unarchive")}
+                        </Button>
+                      </div>
+                    ) : concierge ? (
+                      <ConciergeComposer
+                        ref={composerRef}
+                        boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                        onSend={handleComposerSend}
+                        isStreaming={displayedStreaming}
+                        onStop={stopComposerTurn}
+                        streamError={streamError}
+                        modelSelection={
+                          chatModelPickable
+                            ? { value: chatModelValue, onChange: pickChatModel }
+                            : undefined
+                        }
+                      />
+                    ) : (
+                      <ChatComposer
+                        persistNewChatDraft={!mainSessionId}
+                        ref={composerRef}
+                        // The box look lives on the composer now so the chip row can sit
+                        // outside it; this mount adds the floating blur/translucency.
+                        boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                        onSend={handleComposerSend}
+                        // A draft picks the session's project, model, and agent.
+                        // A session keeps its project and agent, and its model
+                        // can change from the next turn.
+                        showProjectSelector={!mainSessionId}
+                        showModelSelector={!mainSessionId || chatModelPickable}
+                        chatModelSelection={composerModelSelection}
+                        initialProjectName={initialProjectName}
+                        initialDeviceFolder={initialDeviceFolder}
+                        initialAgentMention={initialAgentMention}
+                        isStreaming={displayedStreaming}
+                        onStop={stopComposerTurn}
+                        streamError={streamError}
+                        pinnedAgentMention={pinnedAgentMention}
+                        lockAgentMention={Boolean(mainSessionId)}
+                        // Locks once the turn that saved the card has ended, so
+                        // Stop stays in reach while it still streams.
+                        lockedReason={
+                          lockedByCard && !displayedStreaming ? t("composer.lockedByCard") : null
+                        }
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
               {/* Pairs with the empty state's `md:flex-auto`. Both use auto basis,
@@ -2638,5 +2688,11 @@ export function Chat({
     </TooltipProvider>
   );
 
-  return <ReplyDraftProvider value={replyDraft}>{page}</ReplyDraftProvider>;
+  return (
+    <ReplyDraftProvider value={replyDraft}>
+      <MessageSharingContext.Provider value={shareMessageTurn}>
+        {page}
+      </MessageSharingContext.Provider>
+    </ReplyDraftProvider>
+  );
 }

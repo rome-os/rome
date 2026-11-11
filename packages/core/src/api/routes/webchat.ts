@@ -30,7 +30,7 @@ import type {
   TraceSnapshot,
   TraceTokenUsage,
 } from "@rome/api-types/trace-segments";
-import type { ChatShareSnapshot, ChatShareMessage } from "../share-snapshot.js";
+import { type ChatShareSnapshot, type ChatShareMessage, shareTitleOf } from "../share-snapshot.js";
 import { createRegistryAppResolver } from "../registry-app-resolver.js";
 import {
   ensureWebchatProjectWorkspace,
@@ -102,7 +102,7 @@ import type {
   BackendEmitOptions,
   BackendSessionTask,
   BackendTurnOptions,
-} from "../../apps/actions/backend-turn.js";
+} from "../../app-host/backend-turn.js";
 import { z } from "zod";
 import { withReplyContext } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
@@ -1420,58 +1420,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   };
 
   // Freeze the selected turns of a session into a self-contained
-  // ChatShareSnapshot. Reuses the exact read-path repo methods as /chat so turn
-  // grouping on the public side goes through the identical chat-view pipeline. Trace summaries are
-  // prebuilt here with the guardian's resolver so the public reader needs none.
+  // ChatShareSnapshot: their messages only. A share never carries the work
+  // behind them (trace rows, tool calls, subagents), from any chat
+  // (docs/domains/chats.md#share-link). Reuses the read path's repo methods,
+  // so turn grouping on the public side goes through the same chat-view
+  // pipeline as /chat.
   const buildChatShareSnapshot = async (
     rootSessionId: string,
     turnIds: Set<string>,
   ): Promise<ChatShareSnapshot> => {
     const messages: ChatShareMessage[] = [];
-    const traces: Record<string, TraceSnapshot> = {};
-
-    const addSession = async (sid: string, turnFilter: Set<string>): Promise<void> => {
-      const rows = await deps.webchatRepo.getMessages(sid);
-      const traceContents = await deps.webchatRepo.getTraceContents(sid);
-      const contentById = new Map(traceContents.map((r) => [r.id, r.content]));
-      for (const row of rows) {
-        // Only the chosen turns are kept; rows with no turnId are skipped.
-        if (!row.turnId || !turnFilter.has(row.turnId)) continue;
-        const message: ChatShareMessage = {
-          id: row.id,
-          sessionId: row.sessionId,
-          turnId: row.turnId,
-          role: row.role,
-          content: row.content,
-          createdAt: row.createdAt.toISOString(),
-        };
-        if (row.role === "trace") {
-          const content = contentById.get(row.id);
-          if (content) {
-            let blocks: TraceEventDto[] = [];
-            try {
-              const parsed = JSON.parse(content);
-              if (Array.isArray(parsed)) blocks = parsed as TraceEventDto[];
-            } catch {
-              blocks = [];
-            }
-            if (blocks.length > 0) {
-              const snapshot = buildTraceSnapshot({
-                idPrefix: `msg-${row.id}`,
-                blocks,
-                resolver: appResolver,
-              });
-              traces[row.id] = snapshot;
-              message.traceSummary = snapshot.summary;
-            }
-          }
-        }
-        messages.push(message);
-      }
-    };
-
-    await addSession(rootSessionId, turnIds);
-    return { mainSessionId: rootSessionId, messages, traces };
+    for (const row of await deps.webchatRepo.getMessages(rootSessionId)) {
+      // Only the chosen turns are kept; rows with no turnId are skipped.
+      if (!row.turnId || !turnIds.has(row.turnId) || row.role === "trace") continue;
+      messages.push({
+        id: row.id,
+        sessionId: row.sessionId,
+        turnId: row.turnId,
+        role: row.role,
+        content: row.content,
+        createdAt: row.createdAt.toISOString(),
+      });
+    }
+    return { mainSessionId: rootSessionId, messages, traces: {} };
   };
 
   // The source session's frozen widget layout: browser/noVNC (`desktop`) is
@@ -1491,27 +1462,29 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         projectPrefix = null;
       }
     }
-    return layout
-      .filter((item) => {
-        if (!item || typeof item !== "object") return true;
-        const widgetType = (item as { type?: unknown }).type;
-        // A desktop card is host-private; a chat card pins a private session
-        // id, and the public renderer has no case for it. Defense on the
-        // stored-layout fallback — the client already excludes both.
-        return widgetType !== "desktop" && widgetType !== "chat";
-      })
-      .map((item) => {
-        if (!item || typeof item !== "object") return item;
-        const widget = item as { type?: unknown; selectedPath?: unknown };
-        if (widget.type !== "projects" || typeof widget.selectedPath !== "string") return item;
-        const sel = widget.selectedPath;
-        if (!projectPrefix) return { ...widget, selectedPath: undefined };
-        if (sel === projectPrefix) return { ...widget, selectedPath: "projects" };
-        if (sel.startsWith(`${projectPrefix}/`)) {
-          return { ...widget, selectedPath: `projects/${sel.slice(projectPrefix.length + 1)}` };
-        }
-        return { ...widget, selectedPath: undefined };
-      });
+    return (
+      layout
+        // Only app and project tiles ride along. A desktop card is host-private,
+        // a chat card pins a private session id, and anything else the client
+        // sends (a trace or tool pane) is work a share never carries.
+        .filter((item) => {
+          if (!item || typeof item !== "object") return false;
+          const widgetType = (item as { type?: unknown }).type;
+          return widgetType === "app" || widgetType === "projects";
+        })
+        .map((item) => {
+          if (!item || typeof item !== "object") return item;
+          const widget = item as { type?: unknown; selectedPath?: unknown };
+          if (widget.type !== "projects" || typeof widget.selectedPath !== "string") return item;
+          const sel = widget.selectedPath;
+          if (!projectPrefix) return { ...widget, selectedPath: undefined };
+          if (sel === projectPrefix) return { ...widget, selectedPath: "projects" };
+          if (sel.startsWith(`${projectPrefix}/`)) {
+            return { ...widget, selectedPath: `projects/${sel.slice(projectPrefix.length + 1)}` };
+          }
+          return { ...widget, selectedPath: undefined };
+        })
+    );
   };
 
   // 256-bit URL-safe bearer token: the link IS the credential (Share Chat).
@@ -2907,8 +2880,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const { session } = lookup;
 
     const body = await c.req
-      .json<{ turnIds?: unknown; title?: unknown; layout?: unknown }>()
-      .catch(() => ({}) as { turnIds?: unknown; title?: unknown; layout?: unknown });
+      .json<{ turnIds?: unknown; title?: unknown; layout?: unknown; agentName?: unknown }>()
+      .catch(
+        () => ({}) as { turnIds?: unknown; title?: unknown; layout?: unknown; agentName?: unknown },
+      );
 
     const turnIds = Array.isArray(body.turnIds)
       ? body.turnIds.filter((t): t is string => typeof t === "string" && t.length > 0)
@@ -2921,6 +2896,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (snapshot.messages.length === 0) {
       return c.json({ error: "No messages match the selected turns" }, 400);
     }
+    // The name the chat showed for its agent, so the shared page labels the
+    // agent's turns by it rather than by the page's own "Rome".
+    if (typeof body.agentName === "string" && body.agentName.trim()) {
+      snapshot.agentName = body.agentName.trim().slice(0, 80);
+    }
 
     const projectPath = session.projectPath ?? null;
     const layoutSource = Array.isArray(body.layout)
@@ -2928,10 +2908,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       : ((await deps.webchatRepo.getLayout(sessionId)) ?? []);
     const layout = filterShareLayout(layoutSource, projectPath);
 
+    // A title the client sends wins. Otherwise a Concierge chat's share is
+    // named by what it shows, since its chat name ("Concierge") says nothing
+    // of it; any other chat by its name while it has one.
     const title =
       typeof body.title === "string" && body.title.trim()
         ? body.title.trim().slice(0, 200)
-        : session.name;
+        : !isConciergeChat(session) && session.name.trim()
+          ? session.name
+          : shareTitleOf(snapshot.messages);
 
     const id = generateShareToken();
     await deps.webchatRepo.createSharedChat({

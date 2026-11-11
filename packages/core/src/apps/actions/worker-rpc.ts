@@ -1,49 +1,16 @@
-import { webchatCaller } from "../../chats/dashboard/dashboard-account.js";
 import type { IpcCallContext, IpcRpc } from "./ipc.js";
 import type { ApprovalCard } from "./approval-card.js";
 import { z } from "zod";
+import { parseWorkerCallParams } from "../../lib/worker-call-params.js";
 import { runWithHookInvocationContext } from "../../core/hook-recursion.js";
-import type { EmailInboundResult } from "../../connections/kinds/email/email-control.js";
-import { emailConnection } from "../accounts-service.js";
-import type { ChannelOf } from "../../chats/connected-accounts/connection-ports.js";
-import type {
-  BackendTurnRunner,
-  ChatId,
-  ChatRef,
-  ChatSettingsControl,
-  ChannelMessage,
-  OutgoingMessage,
-  ChannelsService,
-  MessageReceipt,
-  UpdateChatSettingsInput,
-  ResetChatSettingsInput,
-  ListChatSettingsInput,
-  PreviewPayload,
-  ThreadContext,
-} from "@rome-os/app-runtime";
-import type { ConnectionRegistry } from "../../connections/registry.js";
+import type { BackendTurnRunner, PreviewPayload, ThreadContext } from "@rome-os/app-runtime";
 import type { EventService } from "../../events/event-service.js";
 import type { AppLifecycleService } from "../lifecycle-service.js";
 import type { AppStoreReader } from "../store-service.js";
-import type { AgentNamesService } from "../../chats/accounts/agent-names.js";
-import type { SendOutcome, SystemNotifyContent } from "../../lib/notify-client.js";
-import type { ConciergeOwner } from "../../concierge/owner.js";
-import { actionCaller, sendForCaller } from "./caller-notify.js";
-import type { MainBackendTurnRunner } from "./backend-turn.js";
 import { SpecSourceSchema } from "../lockfile.js";
 import { parseRemixSource } from "../remix-source.js";
-import type {
-  AppConnectionBrokerPort,
-  AppConnectionBrokerResult,
-} from "../../connections/app-connections.js";
 
 const AppIdSchema = z.string().min(1);
-
-// An app names one of Rome's accounts, or a channel by its name.
-const AccountOrChannel = z.union([
-  z.string().min(1),
-  z.object({ platform: z.string().min(1), id: z.string().min(1) }).strict(),
-]);
 
 // An approval's card, which a worker asks main to put in the conversation the
 // approval came from, so it is recorded in that chat as main records it.
@@ -56,55 +23,10 @@ const ApprovalCardParams = z.object({
     .optional(),
 });
 
-const ChannelsSendParams = z.object({
-  channel: AccountOrChannel,
-  chatId: z.string(),
-  message: z.custom<OutgoingMessage>((val) => typeof val === "object" && val !== null, {
-    message: "message must be an object",
-  }),
-});
-
-// `query` reads the channel's own `messages`, which names no Connection, so a
-// request naming one is refused rather than answered from another account.
-const ChannelsQueryParams = z
-  .object({
-    channel: AccountOrChannel,
-    chatId: z.string().optional(),
-    since: z.string().datetime().optional(),
-    after: z.string().optional(),
-    limit: z.number().int().positive().optional(),
-  })
-  .strict();
-
-const AgentNamesResolveParams = z.object({ name: z.string().min(1) }).strict();
-
-const ChatRefParams = z.object({
-  ref: z.object({ connectionId: z.string().min(1), chatId: z.string() }),
-});
-const ChatSettingsInput = z.custom<
-  UpdateChatSettingsInput | ResetChatSettingsInput | ListChatSettingsInput
->((value) => typeof value === "object" && value !== null);
-
-const EmailIngestInboundParams = z.object({
-  rawBody: z.string(),
-  signature: z.string(),
-});
-
-// An optional sender-supplied body. `{}` (the legacy no-arg call) is
-// valid; a present body must be a string. `.strict()` so an unknown key on this
-// internal wire contract surfaces as an error rather than being silently
-// stripped — a typo'd param must not degrade to the default alert unnoticed.
-const NotifySendParams = z.object({ body: z.string().optional() }).strict();
-
 const ActionHasParams = z.object({ actionName: z.string().min(1) });
 const ActionValidateArgsParams = z.object({
   actionName: z.string().min(1),
   args: z.record(z.string(), z.unknown()),
-});
-const AgentHasAgentParams = z.object({ name: z.string().min(1) });
-const AgentHasActionParams = z.object({
-  agentName: z.string().min(1),
-  actionName: z.string().min(1),
 });
 
 const AppsCreateParams = z.union([
@@ -182,69 +104,7 @@ const EventsSearchCatalogParams = z.object({
   match: z.record(z.string(), z.string()).optional(),
 });
 
-const SessionContinueParams = z.object({
-  agentName: z.string().min(1),
-  sessionId: z.string().min(1),
-  channel: z.string().min(1),
-  threadId: z.string().min(1),
-  channelUserId: z.string().optional(),
-  prompt: z.string(),
-  ownerKey: z.string().optional(),
-});
-
-const AppConnectionsListParams = z
-  .object({
-    cursor: z.string().optional(),
-    limit: z.number().int().positive().max(50).optional(),
-  })
-  .strict();
-const AppConnectionsIdentityParams = z
-  .object({ connectionId: z.string().min(1), identity: z.string().min(1) })
-  .strict();
-const AppConnectionsOperationsParams = AppConnectionsIdentityParams.extend({
-  cursor: z.string().optional(),
-  limit: z.number().int().positive().max(50).optional(),
-}).strict();
-const AppConnectionsInvokeParams = AppConnectionsIdentityParams.extend({
-  operation: z.string().min(1),
-  input: z.unknown().optional(),
-  requestId: z.string().optional(),
-}).strict();
-
-function parseParams<T extends z.ZodType>(method: string, schema: T, params: unknown): z.infer<T> {
-  const result = schema.safeParse(params);
-  if (result.success) return result.data;
-  const issues = result.error.issues
-    .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-    .join("; ");
-  throw new Error(`${method}: invalid params — ${issues}`);
-}
-
-function parseAppConnectionParams<T extends z.ZodType>(
-  method: string,
-  schema: T,
-  params: unknown,
-): AppConnectionBrokerResult<z.infer<T>> {
-  try {
-    return { ok: true, value: parseParams(method, schema, params) };
-  } catch {
-    return {
-      ok: false,
-      error: {
-        code: "invalid_input",
-        message: "The App connection request is invalid.",
-        retryable: false,
-      },
-    };
-  }
-}
-
 export interface WorkerRpcServices {
-  /** How a worker's actions send and read on channels (`channels.*`). */
-  channelsService: ChannelsService;
-  connectionRegistry: ConnectionRegistry;
-  channelOf: ChannelOf;
-  chatSettings: ChatSettingsControl;
   /** Event coordinator (bus + catalog). `events.publish` / `events.searchCatalog`
    * delegate the business logic here so it is shared with the main-process
    * action path; the handler only validates the wire params. */
@@ -254,11 +114,6 @@ export interface WorkerRpcServices {
   appLifecycle: AppLifecycleService;
   /** Rome App Store read surface. */
   appStore: AppStoreReader;
-  /** Catalog membership check. Action workers hold an `RpcAgentRunner` that has
-   * no local catalog, so `agent.hasAgent` bridges the lookup back to main —
-   * this is how the inbox trusted-path fallback (route to `main` when the bound
-   * agent was uninstalled) actually runs in the worker runtime. */
-  hasAgent: (name: string) => boolean;
   /** Main-process action registry existence check. Worker-local lazy stubs are
    * presence-only, so validation paths such as `create_routine` ask the eager
    * main registry whether an action is actually registered there. */
@@ -268,36 +123,9 @@ export interface WorkerRpcServices {
    * one worker-local lazy stubs lack. Returns an error message, or null when
    * the args fit, the action declares no schema, or the action is unknown. */
   validateActionArgs: (name: string, args: Record<string, unknown>) => string | null;
-  /** Capability check bridged to the worker-side `RpcAgentRunner.hasAction`:
-   * does the named agent's allow-list resolve the named action? Mirrors the
-   * agent session's own gate so the inbox channel-control cue can match what
-   * the routed agent can actually do. Returns false for an unknown agent. */
-  hasAction: (agentName: string, actionName: string) => boolean;
-  /** Main-process backend-turn orchestrator. The `resume_session` action runs
-   * in a worker (a routine-fired root action → subprocess), but running the turn
-   * + delivering its reply needs main-only state (AgentSession registry, channel
-   * adapters, webchat runtime) — so `session.continue` runs it here. */
-  backendTurnRunner: Pick<MainBackendTurnRunner, "runAndDeliver">;
-  /** Main-process push sender. The `send_notification` action runs in
-   * a worker, but the durable instance token must never leave main — so
-   * `notify.send` reads the token and calls Rome Cloud's `/api/notify` here and
-   * returns only the classified `SendOutcome`. */
-  notify: { send(content?: SystemNotifyContent): Promise<SendOutcome> };
-  /** The one person a dashboard chat is private to, or null for a shared chat: a push it calls for rings them. */
-  privateOwnerOf: (chatId: string) => Promise<ConciergeOwner | null>;
-  /** System-only: how `system:send_message` turns an agent's name into its id. */
-  agentNames: AgentNamesService;
-  appConnections: AppConnectionBrokerPort;
-  /** Resolve the owner from the action that the Core IPC boundary captured. */
-  appIdForAction: (actionName: string) => string | null;
   /** Puts an approval's card in the conversation it came from, recorded in
    *  that chat (`approvals.sendCard`). */
   sendApprovalCard: (approval: ApprovalCard) => Promise<void>;
-}
-
-/** The person and the dashboard chat behind an action's call across the worker boundary. */
-function callerOf(context: IpcCallContext | undefined) {
-  return actionCaller(context?.callerActionContext);
 }
 
 /** A method served to app workers: it takes the call's params and returns its result. */
@@ -317,43 +145,13 @@ export class WorkerRpcServer {
   ) {
     this.handlers = new Map<string, WorkerRpcHandler>(
       Object.entries({
-        "channels.list": () => this.services.channelsService.list(),
-        "channels.send": (params, context) => this.handleChannelsSend(params, context),
         "approvals.sendCard": (params) =>
           this.services.sendApprovalCard(
-            parseParams("approvals.sendCard", ApprovalCardParams, params),
+            parseWorkerCallParams("approvals.sendCard", ApprovalCardParams, params),
           ),
-        "channels.query": (params, context) => this.handleChannelsQuery(params, context),
-        "agentNames.resolve": (params) => {
-          const { name } = parseParams("agentNames.resolve", AgentNamesResolveParams, params);
-          return this.services.agentNames.resolve(name);
-        },
-        "chatSettings.list": (params) =>
-          this.services.chatSettings.list(
-            parseParams("chatSettings.list", ChatSettingsInput, params) as ListChatSettingsInput,
-          ),
-        "chatSettings.get": (params) => {
-          const { ref } = parseParams("chatSettings.get", ChatRefParams, params);
-          return this.services.chatSettings.get(ref as ChatRef);
-        },
-        "chatSettings.update": (params) =>
-          this.services.chatSettings.update(
-            parseParams(
-              "chatSettings.update",
-              ChatSettingsInput,
-              params,
-            ) as UpdateChatSettingsInput,
-          ),
-        "chatSettings.reset": (params) =>
-          this.services.chatSettings.reset(
-            parseParams("chatSettings.reset", ChatSettingsInput, params) as ResetChatSettingsInput,
-          ),
-        "channels.email.ingestInbound": (params) => this.handleEmailIngestInbound(params),
         "actions.has": (params) => this.handleActionsHas(params),
         "actions.isExplicit": (params) => this.handleActionsIsExplicit(params),
         "actions.validateArgs": (params) => this.handleActionsValidateArgs(params),
-        "agent.hasAgent": (params) => this.handleAgentHasAgent(params),
-        "agent.hasAction": (params) => this.handleAgentHasAction(params),
         "events.publish": (params) => this.handleEventsPublish(params),
         "events.searchCatalog": (params) => this.handleEventsSearchCatalog(params),
         "apps.create": (params) => this.handleAppsCreate(params),
@@ -362,30 +160,6 @@ export class WorkerRpcServer {
         "apps.setEnabled": (params) => this.handleAppsSetEnabled(params),
         "appStore.listListings": (params) => this.handleAppStoreListListings(params),
         "appStore.getListing": (params) => this.handleAppStoreGetListing(params),
-        // No params: the probe takes none. All policy (Rome Cloud check,
-        // countdown open) runs in the main-process service.
-        "session.continue": (params, context) => this.handleSessionContinue(params, context),
-        "notify.send": (params, context) => {
-          // The sender reads token/origin from main-process state; the only wire
-          // param is the optional body. Preserve the no-body call shape
-          // so an absent body is `send(undefined)`, not `send({})`. Whose
-          // phone it rings comes from the caller the IPC boundary captured.
-          const { body } = parseParams("notify.send", NotifySendParams, params);
-          return sendForCaller(
-            this.services.notify,
-            this.services.privateOwnerOf,
-            callerOf(context),
-            body !== undefined ? { body } : undefined,
-          );
-        },
-        "connections.app.list": (params, context) =>
-          this.handleAppConnections("list", params, context),
-        "connections.app.describe": (params, context) =>
-          this.handleAppConnections("describe", params, context),
-        "connections.app.operations": (params, context) =>
-          this.handleAppConnections("operations", params, context),
-        "connections.app.invoke": (params, context) =>
-          this.handleAppConnections("invoke", params, context),
       }),
     );
     for (const [method, handler] of Object.entries(calls)) {
@@ -415,69 +189,8 @@ export class WorkerRpcServer {
     return await handler(params);
   }
 
-  private async handleAppConnections(
-    method: "list" | "describe" | "operations" | "invoke",
-    params: unknown,
-    context?: IpcCallContext,
-  ): Promise<unknown> {
-    const actionName = context?.callerActionName;
-    const appId = actionName ? this.services.appIdForAction(actionName) : null;
-    if (!appId) {
-      return {
-        ok: false,
-        error: {
-          code: "access_denied",
-          message: "Connection access requires an App-owned action context.",
-          retryable: false,
-        },
-      };
-    }
-    switch (method) {
-      case "list": {
-        const parsed = parseAppConnectionParams(
-          "connections.app.list",
-          AppConnectionsListParams,
-          params,
-        );
-        if (!parsed.ok) return parsed;
-        return await this.services.appConnections.list(appId, parsed.value);
-      }
-      case "describe": {
-        const parsed = parseAppConnectionParams(
-          "connections.app.describe",
-          AppConnectionsIdentityParams,
-          params,
-        );
-        if (!parsed.ok) return parsed;
-        return await this.services.appConnections.describe(appId, parsed.value);
-      }
-      case "operations": {
-        const parsed = parseAppConnectionParams(
-          "connections.app.operations",
-          AppConnectionsOperationsParams,
-          params,
-        );
-        if (!parsed.ok) return parsed;
-        return await this.services.appConnections.operations(appId, parsed.value);
-      }
-      case "invoke": {
-        const parsed = parseAppConnectionParams(
-          "connections.app.invoke",
-          AppConnectionsInvokeParams,
-          params,
-        );
-        if (!parsed.ok) return parsed;
-        return await this.services.appConnections.invoke(
-          appId,
-          parsed.value,
-          context?.callerActionContext,
-        );
-      }
-    }
-  }
-
   private async handleAppsCreate(params: unknown): Promise<unknown> {
-    const createParams = parseParams("apps.create", AppsCreateParams, params);
+    const createParams = parseWorkerCallParams("apps.create", AppsCreateParams, params);
     if ("name" in createParams) {
       const from = parseRemixSource(createParams.from);
       if (!from) throw new Error("apps.create: invalid params: invalid Remix source");
@@ -490,7 +203,7 @@ export class WorkerRpcServer {
   // Running under none is deliberate: a pooled worker's IPC callback carries
   // the async context of whatever forked it, which is not this caller's.
   private async handleAppsInstall(params: unknown): Promise<unknown> {
-    const { hookInvocationContext, ...installParams } = parseParams(
+    const { hookInvocationContext, ...installParams } = parseWorkerCallParams(
       "apps.install",
       AppsInstallParams,
       params,
@@ -501,7 +214,7 @@ export class WorkerRpcServer {
   }
 
   private async handleAppsUninstall(params: unknown): Promise<unknown> {
-    const { appId, purge, hookInvocationContext } = parseParams(
+    const { appId, purge, hookInvocationContext } = parseWorkerCallParams(
       "apps.uninstall",
       AppsUninstallParams,
       params,
@@ -512,7 +225,7 @@ export class WorkerRpcServer {
   }
 
   private async handleAppsSetEnabled(params: unknown): Promise<unknown> {
-    const { appId, enabled, hookInvocationContext } = parseParams(
+    const { appId, enabled, hookInvocationContext } = parseWorkerCallParams(
       "apps.setEnabled",
       AppsSetEnabledParams,
       params,
@@ -523,71 +236,17 @@ export class WorkerRpcServer {
   }
 
   private async handleAppStoreListListings(params: unknown): Promise<unknown> {
-    const parsed = parseParams("appStore.listListings", AppStoreListListingsParams, params);
+    const parsed = parseWorkerCallParams(
+      "appStore.listListings",
+      AppStoreListListingsParams,
+      params,
+    );
     return await this.services.appStore.listListings(parsed);
   }
 
   private async handleAppStoreGetListing(params: unknown): Promise<unknown> {
-    const parsed = parseParams("appStore.getListing", AppStoreGetListingParams, params);
+    const parsed = parseWorkerCallParams("appStore.getListing", AppStoreGetListingParams, params);
     return await this.services.appStore.getListing(parsed);
-  }
-
-  private async handleSessionContinue(
-    params: unknown,
-    context?: IpcCallContext,
-  ): Promise<{ ok: true }> {
-    const turn = parseParams("session.continue", SessionContinueParams, params);
-    // The woken turn acts for the person of the action that woke it, as the
-    // IPC boundary captured them, such as the person whose reminder fired.
-    const actor = context?.callerActionContext?.actor;
-    await this.services.backendTurnRunner.runAndDeliver(turn, actor ? { actor } : undefined);
-    return { ok: true };
-  }
-
-  private async handleChannelsSend(
-    params: unknown,
-    context?: IpcCallContext,
-  ): Promise<MessageReceipt> {
-    const { channel, chatId, message } = parseParams("channels.send", ChannelsSendParams, params);
-    // The dashboard chat writes only where the calling action's person may.
-    return await webchatCaller.run(callerOf(context), () =>
-      this.services.channelsService.send(channel, chatId as ChatId, message),
-    );
-  }
-
-  private async handleChannelsQuery(
-    params: unknown,
-    context?: IpcCallContext,
-  ): Promise<ChannelMessage[]> {
-    const { channel, chatId, since, after, limit } = parseParams(
-      "channels.query",
-      ChannelsQueryParams,
-      params,
-    );
-    // The dashboard chat reads as the person accountable for the calling
-    // action's turn, in the chat it runs in.
-    return await webchatCaller.run(callerOf(context), () =>
-      this.services.channelsService.query(channel, {
-        ...(chatId ? { chatId: chatId as ChatId } : {}),
-        ...(since ? { since: new Date(since) } : {}),
-        ...(after ? { after } : {}),
-        ...(limit ? { limit } : {}),
-      }),
-    );
-  }
-
-  private async handleEmailIngestInbound(params: unknown): Promise<EmailInboundResult> {
-    const { rawBody, signature } = parseParams(
-      "channels.email.ingestInbound",
-      EmailIngestInboundParams,
-      params,
-    );
-    const email = emailConnection(this.services.connectionRegistry, this.services.channelOf);
-    if (!email) return { status: "skipped", reason: "channel_inactive" };
-    return (await this.services.connectionRegistry.ingest(email.id, {
-      rawBody,
-      signature,
-    })) as EmailInboundResult;
   }
 
   /**
@@ -596,19 +255,19 @@ export class WorkerRpcServer {
    * agent's allow-list.
    */
   private handleActionsHas(params: unknown): { hasAction: boolean } {
-    const { actionName } = parseParams("actions.has", ActionHasParams, params);
+    const { actionName } = parseWorkerCallParams("actions.has", ActionHasParams, params);
     return { hasAction: this.services.hasRegisteredAction(actionName) };
   }
 
   /** Visibility check for the worker-side create_routine explicit-target gate. */
   private handleActionsIsExplicit(params: unknown): { explicit: boolean } {
-    const { actionName } = parseParams("actions.isExplicit", ActionHasParams, params);
+    const { actionName } = parseWorkerCallParams("actions.isExplicit", ActionHasParams, params);
     return { explicit: this.services.isExplicitAction(actionName) };
   }
 
   /** Input-schema check for the worker-side create_routine args gate. */
   private handleActionsValidateArgs(params: unknown): { error: string | null } {
-    const { actionName, args } = parseParams(
+    const { actionName, args } = parseWorkerCallParams(
       "actions.validateArgs",
       ActionValidateArgsParams,
       params,
@@ -616,35 +275,17 @@ export class WorkerRpcServer {
     return { error: this.services.validateActionArgs(actionName, args) };
   }
 
-  /**
-   * Catalog membership check for the worker-side `RpcAgentRunner.hasAgent`.
-   * Lets the inbox trusted-path fallback decide whether a channel's bound agent
-   * still exists (vs. was uninstalled) without coupling the worker to the
-   * in-process `AgentLoader`.
-   */
-  private handleAgentHasAgent(params: unknown): { hasAgent: boolean } {
-    const { name } = parseParams("agent.hasAgent", AgentHasAgentParams, params);
-    return { hasAgent: this.services.hasAgent(name) };
-  }
-
-  /**
-   * Capability check for the worker-side `RpcAgentRunner.hasAction`. Lets the
-   * inbox trusted path decide whether a bound app agent can actually call an
-   * action without coupling the worker to the in-process `AgentLoader` /
-   * `ActionRegistry`.
-   */
-  private handleAgentHasAction(params: unknown): { hasAction: boolean } {
-    const { agentName, actionName } = parseParams("agent.hasAction", AgentHasActionParams, params);
-    return { hasAction: this.services.hasAction(agentName, actionName) };
-  }
-
   private async handleEventsPublish(params: unknown): Promise<{ accepted: true }> {
-    const { name, source, payload } = parseParams("events.publish", EventsPublishParams, params);
+    const { name, source, payload } = parseWorkerCallParams(
+      "events.publish",
+      EventsPublishParams,
+      params,
+    );
     return await this.services.eventService.publish({ name, source, payload });
   }
 
   private async handleEventsSearchCatalog(params: unknown): Promise<unknown> {
-    const { query, limit, match } = parseParams(
+    const { query, limit, match } = parseWorkerCallParams(
       "events.searchCatalog",
       EventsSearchCatalogParams,
       params,

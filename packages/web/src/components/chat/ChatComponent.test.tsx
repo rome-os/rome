@@ -333,7 +333,7 @@ describe("ChatComponent Concierge name", () => {
 
   it.each([
     ["the agent name the guardian chose", " Milo ", "Milo"],
-    ["Concierge when the agent name is blank", "  ", "Concierge"],
+    ["Rome when the agent name is blank", "  ", "Rome"],
   ])("hands Chat %s", async (_label, agentName, expected) => {
     renderChatComponent(
       { sessionId: "concierge" },

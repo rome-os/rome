@@ -348,6 +348,24 @@
   }
 }
 
+/* Rich message (chat ChatBubble): text with a heading, a list, a table or a
+   code block reads as structured content, and gets more room inside its
+   bubble than a one-line reply does. Keyed on the rendered content, so every
+   bubble decides it the same way, wherever it renders. */
+[data-chat-bubble]:has(
+    .rome-markdown
+      :is(
+        [data-streamdown^="heading-"],
+        [data-streamdown="ordered-list"],
+        [data-streamdown="unordered-list"],
+        [data-streamdown="table-wrapper"],
+        [data-streamdown="code-block"],
+        [data-chat-code-block]
+      )
+  ) {
+  padding: var(--rome-space-4) var(--rome-space-5);
+}
+
 /* Sent bubble (chat ChatBubble): the content sits on the primary fill, so the
    color tokens markdown reads are re-mapped onto the primary foreground for
    the bubble's children. The bubble itself keeps the real `--primary` for its
@@ -359,6 +377,14 @@
   --muted: color-mix(in oklab, var(--primary-foreground) 18%, transparent);
   --border: color-mix(in oklab, var(--primary-foreground) 30%, transparent);
   --border-strong: color-mix(in oklab, var(--primary-foreground) 45%, transparent);
+}
+
+/* The remap gives a link the text's own color on the primary fill, so there
+   the underline is what marks it, at full strength in the text's color rather
+   than the faint prose-link underline. */
+.rome-bubble-on-primary a {
+  text-decoration-line: underline;
+  text-decoration-color: currentColor;
 }
 
 /* A fenced block inside the sent bubble keeps the page's light `--surface` for
@@ -652,9 +678,9 @@
       var(--rome-safe-area-inset-bottom) - var(--rome-keyboard-height)
     );
     --rome-mobile-header-height: calc(3rem + var(--rome-safe-area-top));
-    /* A Concierge chat's floating header: the mascot's badge, the name pill
-       under it with the status line, and the gaps around them. The messages
-       start below it. */
+    /* A Concierge chat's floating header: the mascot's badge, the name tag
+       under it, the status capsule under that, and the gaps around them. The
+       messages start below it. */
     --rome-concierge-header-height: 6.25rem;
     /* How far a Concierge chat's messages start below the top of their
        column: the header, plus the phone's safe area, where the header
@@ -869,15 +895,19 @@
    in the browser build (functions like a media query for "running inside
    the Mac app").
 
-   Drag-region model: `-webkit-app-region` resolves to a flat geometric
-   mask (drag minus no-drag), independent of z-index / paint order. So
-   any interactive element that lives inside a drag region would otherwise
-   be eaten by window-drag. We pre-emptively mark every interactive
-   primitive `no-drag` site-wide; the titlebar rule below then re-adds the
-   background of the title bar (shell/DesktopTitlebar.tsx) as drag, which
-   leaves clickable children punched out. `[data-no-drag]` is an escape
-   hatch for non-semantic clickable wrappers (e.g. Radix `asChild`
-   rendering a `<div>`). */
+   Drag-region model: `-webkit-app-region` is inherited (Chromium 152+,
+   Electron 44+), and every element whose value is not `none` adds its own
+   box to the window's drag mask, in document order, a later box winning
+   over an earlier one. z-index and pointer-events play no part. So any
+   interactive element that lives inside a drag region would otherwise be
+   eaten by window-drag. We pre-emptively mark every interactive primitive
+   `no-drag` site-wide; the titlebar rule below then makes the title bar
+   (shell/DesktopTitlebar.tsx) drag, which leaves clickable children punched
+   out. A layer placed over the bar after its buttons inherits drag and
+   covers them again, so it opts out with `initial`: an explicit `none`
+   acts as `no-drag` (a Chromium legacy quirk) and would cut the bar's drag
+   area instead. `[data-no-drag]` is an escape hatch for non-semantic
+   clickable wrappers (e.g. Radix `asChild` rendering a `<div>`). */
 html.is-electron
   :where(
     button,
@@ -902,14 +932,19 @@ html.is-electron [data-app-titlebar] {
   -webkit-app-region: drag;
 }
 /* A Concierge chat's mascot hangs from the title bar and drags the window like
-   it, below the bar too. Its messages start under the pill, which reaches
+   it, below the bar too. The layer it hangs in spans the page's bar and comes
+   after its buttons, so it takes no part, or it would cover them; only the
+   badge drags. Its messages start under the status capsule, which reaches
    less far below the bar than the floating header does. */
+html.is-electron [data-titlebar-mascot] {
+  -webkit-app-region: initial;
+}
 html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
   -webkit-app-region: drag;
 }
 @media (width >= 48rem) {
   html.is-electron {
-    --rome-concierge-header-offset: 4.5rem;
+    --rome-concierge-header-offset: 5rem;
   }
 }
 

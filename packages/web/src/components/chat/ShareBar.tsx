@@ -25,6 +25,11 @@ function shareableWidgets(placements: WidgetPlacement[]): WidgetPlacement[] {
     .sort((a, b) => a.order - b.order);
 }
 
+/** The tiles a new link includes until its owner changes them: the apps. */
+function defaultIncluded(widgets: WidgetPlacement[]): Set<string> {
+  return new Set(widgets.filter((w) => w.type !== "projects").map((w) => w.id));
+}
+
 // The panel shown while picking turns to share. Turn selection itself lives on
 // the MessageList (inline checkboxes); this panel configures which workspace
 // panels ride along, mints the link, and lists/revokes existing ones. It takes
@@ -32,10 +37,13 @@ function shareableWidgets(placements: WidgetPlacement[]): WidgetPlacement[] {
 export function ShareBar({
   sessionId,
   selectedTurnIds,
+  agentName,
   onExit,
 }: {
   sessionId: string;
   selectedTurnIds: string[];
+  /** The name the chat shows for its agent, which the shared page shows too. */
+  agentName?: string;
   onExit: () => void;
 }) {
   const { t } = useTranslation("chat");
@@ -44,8 +52,10 @@ export function ShareBar({
   const widgets = useMemo(() => shareableWidgets(placements), [placements]);
   const appById = useMemo(() => new Map((apps ?? []).map((a) => [a.id, a])), [apps]);
 
-  const [selectedWidgets, setSelectedWidgets] = useState<Set<string>>(
-    () => new Set(widgets.map((w) => w.id)),
+  // App tiles start included. A project tile starts left out: it exposes every
+  // file in the project, so its owner opts in.
+  const [selectedWidgets, setSelectedWidgets] = useState<Set<string>>(() =>
+    defaultIncluded(widgets),
   );
   const [shares, setShares] = useState<ShareSummary[]>([]);
   const [creating, setCreating] = useState(false);
@@ -71,7 +81,7 @@ export function ShareBar({
 
   // Keep widget toggles in sync if the layout changes while the panel is open.
   useEffect(() => {
-    setSelectedWidgets(new Set(widgets.map((w) => w.id)));
+    setSelectedWidgets(defaultIncluded(widgets));
   }, [widgets]);
 
   const refreshShares = useCallback(() => {
@@ -109,7 +119,7 @@ export function ShareBar({
     setError(null);
     try {
       const layout = widgets.filter((w) => selectedWidgets.has(w.id));
-      const result = await createShare(sessionId, { turnIds: selectedTurnIds, layout });
+      const result = await createShare(sessionId, { turnIds: selectedTurnIds, layout, agentName });
       const url = `${window.location.origin}${result.url}`;
       setCreatedUrl(url);
       handleCopy(url);
@@ -123,7 +133,16 @@ export function ShareBar({
     } finally {
       setCreating(false);
     }
-  }, [sessionId, selectedTurnIds, selectedWidgets, widgets, handleCopy, refreshShares, t]);
+  }, [
+    sessionId,
+    selectedTurnIds,
+    agentName,
+    selectedWidgets,
+    widgets,
+    handleCopy,
+    refreshShares,
+    t,
+  ]);
 
   const handleRevoke = useCallback(
     async (id: string) => {

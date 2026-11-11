@@ -1,6 +1,7 @@
 import { Loader2 } from "lucide-react";
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
+import { RomeLogo } from "@/components/logo";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
@@ -59,12 +60,11 @@ export function UpgradeDialog({
       initialFocusRef={confirmRef}
       className="p-6"
     >
-      <div className="mb-2">
-        <div className="inline-flex h-8 w-8 items-center justify-center rounded-8 bg-primary text-badge text-primary-foreground">
-          R
-        </div>
+      <RomeLogo className="mb-2 block h-8 w-8 text-foreground" aria-hidden />
+      <div className="flex items-center gap-2">
+        {restarting ? <Loader2 aria-hidden className="size-5 shrink-0 animate-spin" /> : null}
+        <DialogTitle>{title}</DialogTitle>
       </div>
-      <DialogTitle>{title}</DialogTitle>
 
       {restartingTo === null ? (
         <>
@@ -123,12 +123,8 @@ export function UpgradeDialog({
           </div>
         </>
       ) : (
-        <DialogDescription className="mt-2 flex items-start gap-2">
-          {/* One text line tall, so the spinner centers on the first line. */}
-          <span className="flex h-lh shrink-0 items-center">
-            <Loader2 aria-hidden className="size-4 animate-spin" />
-          </span>
-          <span>{t("system.restartingBody", { name, version: restartingTo })}</span>
+        <DialogDescription className="mt-2">
+          {t("system.restartingBody", { version: restartingTo })}
         </DialogDescription>
       )}
     </Dialog>

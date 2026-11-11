@@ -69,12 +69,12 @@
       "entry": [
         // The action engine spawns these by resolved path, so no import
         // reaches them. See packages/core/src/apps/actions/engine.ts.
-        "src/apps/actions/worker.ts",
-        "src/apps/actions/worker-bootstrap.ts",
+        "src/app-host/worker.ts",
+        "src/app-host/worker-bootstrap.ts",
         // oclif discovers commands by directory, named in package.json.
         "src/apps/cli/commands/**/*.ts",
         "src/bin/*.ts",
-        "src/apps/__fixtures__/**",
+        "src/app-host/__fixtures__/**",
         "drizzle.*.config.ts"
       ]
     },

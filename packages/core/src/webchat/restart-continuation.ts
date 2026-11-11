@@ -1,5 +1,5 @@
 import type { SessionActor } from "../access/session-actor.js";
-import type { MainBackendTurnRunner } from "../apps/actions/backend-turn.js";
+import type { MainBackendTurnRunner } from "../app-host/backend-turn.js";
 import type { InterruptedTurn } from "../db/repositories/webchat.js";
 import { createLogger } from "../logger.js";
 import type { ChatsWebChatRepository } from "./chats-webchat-repository.js";

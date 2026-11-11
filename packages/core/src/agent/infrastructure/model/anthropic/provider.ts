@@ -28,7 +28,7 @@ import type { ModelLoginKind } from "../../../domain/model-login.js";
 import { ROME_TOOL_GROUPS, type RomeTools } from "../../../domain/rome-tools.js";
 import { buildAgentAccounting } from "../provider-accounting.js";
 import type { LearnsRefusedTurns } from "../refused-turn.js";
-import { anthropicStop } from "./stop.js";
+import { anthropicStop, claudeStoppedTurnResult } from "./stop.js";
 import { AsyncMessageQueue } from "./async-message-queue.js";
 import { createReopeningSession, type ClaudeQuerySession } from "./reopening-session.js";
 import { createLogger } from "../../../../logger.js";
@@ -506,6 +506,7 @@ export class AnthropicProvider implements ModelProvider {
       params,
       first: await open(params),
       open,
+      provider: this.id,
       reasoningEffort: toAnthropicEffort(params.config.reasoningEffort),
     });
   }
@@ -544,6 +545,14 @@ export class AnthropicProvider implements ModelProvider {
     const effectiveModel = queryEnv.ANTHROPIC_MODEL ?? model;
     const authRevokedSource = queryContext.authRevokedSource;
     const providerId = this.id;
+    // An abort that reached no SDK result still ends as a stopped turn.
+    const stoppedTurnResult = (content: string) =>
+      claudeStoppedTurnResult({
+        provider: providerId,
+        model: effectiveModel,
+        content,
+        reasoningEffort: effort,
+      });
     // Captured for the events generator below (a plain `async function*` with no
     // `this`): update runtime state before classified terminals become observable.
     const account = this.options.account;
@@ -1031,11 +1040,7 @@ export class AnthropicProvider implements ModelProvider {
           running = false;
           yield params.config.outputSchema
             ? { type: "error", error: "Claude structured-output turn was interrupted" }
-            : {
-                type: "result",
-                content: partialText || pendingText || "",
-                reasoningEffort: effort,
-              };
+            : stoppedTurnResult(partialText || pendingText || "");
         }
       } catch (err) {
         // The stream threw without delivering a terminal `result` (raw abort,
@@ -1055,11 +1060,7 @@ export class AnthropicProvider implements ModelProvider {
             running = false;
             yield params.config.outputSchema
               ? { type: "error", error: "Claude structured-output turn was interrupted" }
-              : {
-                  type: "result",
-                  content: partialText || pendingText || "",
-                  reasoningEffort: effort,
-                };
+              : stoppedTurnResult(partialText || pendingText || "");
           }
           return;
         }

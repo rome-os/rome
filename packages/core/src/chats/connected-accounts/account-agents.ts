@@ -15,7 +15,7 @@ import {
 import { createLogger } from "../../logger.js";
 import type { AccountLinkOf } from "./account-links.js";
 import type { InboundListening } from "./connection-ports.js";
-import { isAccount, type RomeAccounts } from "../../apps/rome-accounts.js";
+import { isAccount, type RomeAccounts } from "./rome-accounts.js";
 
 const log = createLogger("account-agents");
 

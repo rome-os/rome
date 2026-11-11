@@ -1,6 +1,6 @@
 import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { useQuery } from "@tanstack/react-query";
-import { useState } from "react";
+import { createContext, useContext, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { z } from "zod";
@@ -18,10 +18,40 @@ const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolea
 type TaskStatus = "running" | "waiting" | "failed" | "idle";
 
 /**
- * A task chat another agent started on the guardian's behalf: its title, its
- * live status, and a link that opens it.
+ * Whether the card is read where no one is signed in, such as a shared chat's
+ * public page. There a task chat shows as a fixed label: its status, its link
+ * and its waiting card all read the signed-in API.
  */
-export function TaskChatCard({
+export const PublicTaskChatContext = createContext(false);
+
+/**
+ * A task chat another agent started on the guardian's behalf: its title, its
+ * live status, and a link that opens it. On a public page, its title alone.
+ */
+export function TaskChatCard(props: { chatId: string; title: string; isLatestForChat: boolean }) {
+  return useContext(PublicTaskChatContext) ? (
+    <StaticTaskChatCard title={props.title} />
+  ) : (
+    <LiveTaskChatCard {...props} />
+  );
+}
+
+function StaticTaskChatCard({ title }: { title: string }) {
+  const { t } = useTranslation("chat");
+  return (
+    <div className="w-full min-w-0 max-w-md rounded-16 border border-border bg-surface px-3 py-2">
+      <div className="flex min-w-0 items-center gap-3">
+        <ChatBubbleIcon className="size-4 shrink-0 text-subtle-foreground" aria-hidden />
+        <div className="flex min-w-0 flex-1 flex-col">
+          <span className="truncate text-ui text-foreground">{title}</span>
+          <span className="text-aux text-muted-foreground">{t("concierge.taskChat")}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LiveTaskChatCard({
   chatId,
   title,
   isLatestForChat,

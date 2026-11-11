@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
@@ -171,11 +171,20 @@ describe("UpgradeIndicator", () => {
     await user.click(await screen.findByRole("button", { name: ARROW }));
     expect(await screen.findByText("Upgrade Milo to 1.2.0?")).toBeTruthy();
     expect(backend.upgradeRequests).toHaveLength(0);
+    // The Rome logo marks the dialog, not a lettered placeholder tile.
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector("svg[viewBox='0 0 51 48']")).toBeTruthy();
+    expect(within(dialog).queryByText("R")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Upgrade and restart" }));
 
-    expect(await screen.findByText("Milo is restarting")).toBeTruthy();
+    const title = await screen.findByRole("heading", { name: "Milo is restarting" });
     expect(backend.upgradeRequests).toEqual([{ target: "1.2.0" }]);
+    // The spinner sits right before the title; the body is plain text.
+    expect(title.previousElementSibling?.getAttribute("class")).toContain("animate-spin");
+    const body = screen.getByText("Upgrading to 1.2.0.");
+    expect(body.querySelector("svg")).toBeNull();
+    expect(screen.queryByText(/reload automatically/)).toBeNull();
     // Nothing to cancel any more: the page reloads on the new version.
     expect(screen.queryByRole("button", { name: "Cancel" })).toBeNull();
   });
@@ -265,6 +274,11 @@ describe("UpgradeIndicator", () => {
       await waitFor(() =>
         expect(screen.getByText("The upgrade is taking longer than expected")).toBeTruthy(),
       );
+      // Not restarting any more: no spinner next to the title.
+      const timedOut = screen.getByRole("heading", {
+        name: "The upgrade is taking longer than expected",
+      });
+      expect(timedOut.previousElementSibling).toBeNull();
       expect(screen.getByRole("button", { name: "Close" })).toBeTruthy();
     } finally {
       rs.useRealTimers();

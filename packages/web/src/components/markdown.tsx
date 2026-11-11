@@ -5,6 +5,7 @@ import { Link } from "react-router-dom";
 import {
   MARKDOWN_LINK_CLASS,
   Markdown as BaseMarkdown,
+  markdownLinkLabel,
   type MarkdownLinkProps,
   type MarkdownProps,
   type MarkdownTheme,
@@ -109,10 +110,11 @@ export function MarkdownLink({
   ref: _ref,
   ...rest
 }: MarkdownLinkProps) {
+  const { label, full } = markdownLinkLabel(children);
   if (isInternalHref(href)) {
     return (
-      <Link to={toInternalPath(href)} className={MARKDOWN_LINK_CLASS} {...rest}>
-        {children}
+      <Link to={toInternalPath(href)} className={MARKDOWN_LINK_CLASS} title={full} {...rest}>
+        {label}
       </Link>
     );
   }
@@ -122,9 +124,10 @@ export function MarkdownLink({
       target="_blank"
       rel="noopener noreferrer"
       className={MARKDOWN_LINK_CLASS}
+      title={full}
       {...(rest as ComponentPropsWithoutRef<"a">)}
     >
-      {children}
+      {label}
     </a>
   );
 }

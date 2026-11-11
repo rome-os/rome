@@ -1,10 +1,11 @@
 import { romeToolPorts } from "../core/rome-tool-ports.js";
+import { appGuardianProfile } from "../app-host/guardian-profile.js";
 import { WebChatDashboardSessions } from "../webchat/webchat-dashboard-sessions.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
 import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
-import { TurnUsageReporter } from "../apps/turn-usage-reporter.js";
+import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
 import {
@@ -29,9 +30,9 @@ import type {
   ModelSessionParams,
 } from "../core/agent-runner.js";
 import { AgentRunner, createSessionFromRun } from "../core/agent-runner.js";
-import { AgentLoader } from "../apps/agent-loader.js";
+import { AgentLoader } from "../app-host/agent-loader.js";
 import { agentsByLegacyName } from "../apps/agents-by-legacy-name.js";
-import { SkillLoader } from "../apps/skill-loader.js";
+import { SkillLoader } from "../app-host/skill-loader.js";
 import { createTestSystemPrompts } from "./system-prompts.js";
 import {
   createModelAccounts,
@@ -51,10 +52,10 @@ import {
 } from "../core/subagent-call-ports.js";
 import { createSubagentCalls } from "../agent/index.js";
 import { TurnListeners } from "../agent/index.js";
-import { AppTurnHooks } from "../apps/app-turn-hooks.js";
+import { AppTurnHooks } from "../app-host/app-turn-hooks.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
 import { ApprovalHandler } from "../apps/actions/approval-handler.js";
-import { createBackendTurnRunner } from "../apps/actions/backend-turn.js";
+import { createBackendTurnRunner } from "../app-host/backend-turn.js";
 import { RoutineEngine } from "../routines/engine.js";
 import { systemClock } from "../lib/clock.js";
 import { EventCatalog } from "../event-catalog.js";
@@ -94,7 +95,7 @@ import type {
 } from "../chats/connected-accounts/connection-ports.js";
 import type { Connection, ConnectionDescriptor } from "../connections/types.js";
 import { channelList } from "../chats/connected-accounts/connected-account-list.js";
-import { createChannelsService } from "../apps/accounts-service.js";
+import { createChannelsService } from "../app-host/accounts-service.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { ConnectionKindOfChannel } from "../db/repositories/channel-records.js";
@@ -119,11 +120,11 @@ import { ActionLoader } from "../apps/actions/loader.js";
 import {
   assertNoAppActionLoadFailures,
   registerAppActions,
-} from "../apps/actions/app-actions-wiring.js";
+} from "../app-host/app-actions-wiring.js";
 import { appsRoutes } from "../api/routes/apps.js";
 import { migrateAppByMetadata } from "../db/migrate.js";
 import { createAppDomain } from "../apps/index.js";
-import { createAppRuntimeRepositories } from "../apps/repositories.js";
+import { createAppRuntimeRepositories } from "../app-host/repositories.js";
 import type { BundleFetcher } from "../apps/installer.js";
 import type { AppCatalog } from "../apps/catalog.js";
 import type { AppManager } from "../apps/manager.js";
@@ -569,7 +570,11 @@ export async function buildTestDeps(
       adapters: chatsWired.adapters,
       speakers: chatsWired.speakers,
     },
-    guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
+    guardianProfile: appGuardianProfile({
+      db,
+      settingsRepo,
+      reactivateFloating: () => routineEngine.reactivateFloating(),
+    }),
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const executionJournalRepo = new ExecutionJournalRepository(db);

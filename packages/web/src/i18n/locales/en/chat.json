@@ -172,6 +172,7 @@
     "cancel": "Cancel",
     "create": "Create link",
     "creating": "Creating…",
+    "tagline": "Your personal assistant",
     "unavailableTitle": "This shared chat is unavailable",
     "unavailableBody": "The link may have been revoked or is no longer valid."
   },
@@ -187,6 +188,7 @@
   "message": {
     "copy": "Copy message",
     "copied": "Copied",
+    "share": "Share",
     "feedback": {
       "thumbsUp": "Mark this turn helpful",
       "thumbsDown": "Mark this turn unhelpful",

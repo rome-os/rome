@@ -1,4 +1,5 @@
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
+import { ShareMessageButton } from "@/components/chat/ShareMessageButton";
 import { TurnBranchButton } from "@/components/chat/TurnBranchButton";
 import { TurnFeedbackButtons } from "@/components/chat/TurnFeedbackButtons";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
@@ -6,6 +7,7 @@ import { ReplyButton } from "@/components/chat/reply/ReplyButton";
 import type { ReplySource } from "@/components/chat/reply/reply-source";
 import type { ChatMessage } from "@/lib/chat-types";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
+import { useMessageActions } from "@/components/chat/message-actions";
 
 // The raw text a copy button puts on the clipboard for an agent turn: every
 // text block (commentary + final answer) across the turn's messages, joined as
@@ -23,8 +25,10 @@ export function turnCopyText(messages: ChatMessage[]): string {
 }
 
 /**
- * The action row under a settled agent turn: copy, feedback, branch, and the
- * time. Renders nothing when the turn has none of them. The row's parent sets
+ * The action row under a settled agent turn: copy, Reply, Share (the chat's
+ * share mode with this turn selected), feedback, branch, and the time.
+ * Renders nothing when the turn has none of them, or where the transcript
+ * shows no actions. The row's parent sets
  * `group`, which reveals it on hover on pointer devices.
  */
 export function TurnActions({
@@ -42,7 +46,9 @@ export function TurnActions({
   /** What Reply quotes; null hides it. */
   reply?: ReplySource | null;
 }) {
+  const showActions = useMessageActions();
   const timestamp = createdAt ? formatMessageTimestamp(createdAt) : "";
+  if (!showActions) return null;
   if (!copyText && !feedbackTurn && !timestamp && !reply) return null;
   return (
     // Hover-revealed on pointer devices, always visible on touch — mirrors the affordance
@@ -53,6 +59,7 @@ export function TurnActions({
     <div className="-ml-[var(--control-action-offset)] mt-1 flex items-center md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100 md:has-[[aria-expanded=true]]:opacity-100 md:has-[[aria-pressed=true]]:opacity-100">
       {copyText ? <CopyMessageButton text={copyText} /> : null}
       {reply ? <ReplyButton source={reply} /> : null}
+      {reply ? <ShareMessageButton messageId={reply.messageId} turn={reply} /> : null}
       {feedbackTurn ? (
         <TurnFeedbackButtons
           key={`${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}

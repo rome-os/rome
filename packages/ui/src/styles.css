@@ -222,6 +222,7 @@
   --rome-line-height-141: calc(1.5 / 1.0625);
   --rome-line-height-143: calc(1.25 / 0.875);
   --rome-line-height-150: 1.5;
+  --rome-line-height-175: 1.75;
 }
 
 /* ──────────────────────────── TYPOGRAPHY ROLES ─────────────────────────────
@@ -441,6 +442,11 @@
      room to spare; compact's 20px line does not, and rebinds one step down. */
   --markdown-inline-code-font-size: var(--rome-font-size-14);
 
+  /* A table sets one step under the body: its cells are reference read in
+     short pieces, and the smaller face lets more columns fit before it scrolls. */
+  --markdown-table-font-size: var(--rome-font-size-14);
+  --markdown-table-line-height: var(--rome-line-height-143);
+
   --markdown-heading-1-font-size: var(--rome-font-size-24);
   --markdown-heading-1-line-height: var(--rome-line-height-133);
   --markdown-heading-2-font-size: var(--rome-font-size-20);
@@ -452,6 +458,9 @@
   --markdown-heading-floor-font-size: var(--rome-font-size-16);
   --markdown-heading-floor-line-height: var(--rome-line-height-150);
   --markdown-heading-font-weight: 600;
+  /* Bold carries the heading's weight, so `b` and a Streamdown span set the
+     same weight as `strong` instead of the browser's 700. */
+  --markdown-strong-font-weight: 600;
   --markdown-heading-letter-spacing: 0;
 
   --markdown-block-space-between: var(--rome-space-4);
@@ -468,6 +477,7 @@
   /* A list item carries its own padding, so 12 + 4 meets the paragraph gap. */
   --markdown-list-space-block: var(--rome-space-3);
   --markdown-list-item-space-block: var(--rome-space-1);
+  --markdown-list-item-gap: var(--rome-space-0);
   --markdown-code-block-space-block: var(--rome-space-5);
   --markdown-blockquote-space-block: var(--rome-space-5);
   --markdown-table-space-block: var(--rome-space-5);

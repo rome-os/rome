@@ -7,8 +7,10 @@ import type { ChannelsService, ChatId, ChatRepository } from "@rome-os/app-runti
 import { executeSendMessage } from "../../../../../../rome_apps/system/src/actions/send-message/index.js";
 import type { SendMessageEmailInput } from "../../../../../../rome_apps/system/src/actions/send-message/types.js";
 import { DEFAULT_RPC_TIMEOUT_MS, IpcRpcTimeoutError } from "../../../apps/actions/ipc.js";
-import { ChannelsServiceProxy } from "../../../apps/actions/service-proxies.js";
-import { setWorkerRpcInProcessDispatcher } from "../../../apps/actions/worker-rpc-client.js";
+import {
+  callMain,
+  setWorkerRpcInProcessDispatcher,
+} from "../../../apps/actions/worker-rpc-client.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";
 import {
@@ -614,13 +616,12 @@ describe("email thread lookup under the channel-send RPC deadline", () => {
     setWorkerRpcInProcessDispatcher(null);
   });
 
-  // Route the action through the worker proxy, so `channels.send` runs under
+  // Route the send through a worker call to main, so `channels.send` runs under
   // the deadline an action worker applies to it.
   async function throughRpc(provider: Partial<MailProvider>) {
     const h = await harness(provider);
     process.send = undefined;
     setWorkerRpcInProcessDispatcher(async (method, params) => {
-      if (method === "channels.list") return [{ name: "email", sendable: true }];
       if (method !== "channels.send") throw new Error(`unexpected RPC ${method}`);
       const { chatId, message } = params as {
         chatId: ChatId;
@@ -628,7 +629,10 @@ describe("email thread lookup under the channel-send RPC deadline", () => {
       };
       return h.adapter.send(chatId, message);
     });
-    h.channels = new ChannelsServiceProxy();
+    h.channels = {
+      ...h.channels,
+      send: (channel, chatId, message) => callMain("channels.send", { channel, chatId, message }),
+    };
     return h;
   }
 

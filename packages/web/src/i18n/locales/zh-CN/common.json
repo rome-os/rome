@@ -204,7 +204,7 @@
     "verbFailed": "请求未成功，请重试。",
     "remindLater": "稍后提醒",
     "updatingTitle": "正在更新 Rome…",
-    "updatingBody": "Rome 正在重启以完成更新，请稍候。",
+    "updatingBody": "Rome 正在重启以完成更新。",
     "stalledTitle": "更新耗时超出预期",
     "stalledBody": "更新开始后 Rome 尚未恢复。它可能仍会自行完成——请稍后刷新本页面。",
     "dismiss": "关闭"

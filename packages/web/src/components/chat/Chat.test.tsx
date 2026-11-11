@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { forwardRef, memo, useImperativeHandle, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
@@ -11,6 +12,7 @@ import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
 import { requestConciergeJump } from "@/components/concierge/concierge-jump";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
+import { ShareMessageButton } from "@/components/chat/ShareMessageButton";
 import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
 import { SlotOutlet, SlotProvider, useSlotOutlet } from "@/components/slot";
 import {
@@ -47,6 +49,7 @@ const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
 const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
 const conciergeInsertText = rs.hoisted(() => rs.fn());
+const conciergeAddFiles = rs.hoisted(() => rs.fn());
 const toast = rs.hoisted(() => ({
   loading: rs.fn(() => "finding"),
   error: rs.fn(),
@@ -165,7 +168,24 @@ rs.mock("@/components/chat/AgentAvatar", () => ({
 }));
 
 rs.mock("@/components/chat/ShareBar", () => ({
-  ShareBar: () => null,
+  ShareBar: ({
+    selectedTurnIds,
+    agentName,
+    onExit,
+  }: {
+    selectedTurnIds: string[];
+    agentName?: string;
+    onExit: () => void;
+  }) => (
+    <>
+      <div data-testid="share-bar" data-agent-name={agentName}>
+        {selectedTurnIds.join(",")}
+      </div>
+      <button type="button" data-testid="share-exit" onClick={onExit}>
+        exit
+      </button>
+    </>
+  ),
 }));
 
 rs.mock("@/pages/free/WidgetPicker", () => ({
@@ -175,9 +195,27 @@ rs.mock("@/pages/free/WidgetPicker", () => ({
 function ReplyJump() {
   const reply = useReplyDraft();
   return (
-    <button type="button" data-testid="reply-jump" onClick={() => reply?.jump("a2")}>
-      jump
-    </button>
+    <>
+      <button type="button" data-testid="reply-jump" onClick={() => reply?.jump("a2")}>
+        jump
+      </button>
+      <button
+        type="button"
+        data-testid="open-thread"
+        onClick={() =>
+          reply?.openThread({ messageId: "u-1", author: "guardian", preview: "First" })
+        }
+      >
+        open thread
+      </button>
+      {/* An older thread message the timeline has not loaded, as the thread view draws it. */}
+      <div data-testid="older-thread-message">
+        <ShareMessageButton
+          messageId="u-old"
+          turn={{ sessionId: "session-1", turnId: "turn-old" }}
+        />
+      </div>
+    </>
   );
 }
 
@@ -241,6 +279,7 @@ rs.mock("@/components/chat/MessageList", () => ({
             data-sender-avatar={row.message?.sender?.avatarUrl}
           >
             {row.message?.content}
+            {row.message?.id ? <ShareMessageButton messageId={row.message.id} /> : null}
           </div>
         ))}
       {rows
@@ -353,7 +392,11 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
     },
     ref,
   ) {
-    useImperativeHandle(ref, () => ({ insertText: conciergeInsertText }));
+    useImperativeHandle(ref, () => ({
+      insertText: conciergeInsertText,
+      addFiles: conciergeAddFiles,
+      focus: () => {},
+    }));
     return (
       <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
         <button
@@ -2170,14 +2213,14 @@ describe("Chat Concierge empty state", () => {
     await screen.findByRole("region", { name: "concierge.empty.title" });
     const header = document.querySelector<HTMLElement>("[data-concierge-header]")!;
     expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
-    // The pill takes the badge's row, and the buttons centre on it.
-    const pill = header.querySelector<HTMLElement>("[data-concierge-header-pill]")!;
-    expect(pill.className).toContain("row-start-1");
-    expect(within(pill).getByText("Concierge")).toBeTruthy();
+    // The name tag takes the badge's row, and the buttons centre on it.
+    const name = header.querySelector<HTMLElement>("[data-concierge-header-name]")!;
+    expect(name.className).toContain("row-start-1");
+    expect(within(name).getByText("Rome")).toBeTruthy();
     expect(within(header).getByRole("button", { name: "navbar.more" })).toBeTruthy();
   });
 
-  it("floats the Concierge's header over its messages: the mascot's badge, a name pill and round buttons", async () => {
+  it("floats the Concierge's header over its messages: the mascot's badge, a name tag, a status capsule and round buttons", async () => {
     mockConciergeActivity.mockReturnValue({ kind: "tasks", title: "Book the flight", more: 0 });
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
@@ -2206,11 +2249,16 @@ describe("Chat Concierge empty state", () => {
     const scroller = header.parentElement!.querySelector<HTMLElement>(".overflow-y-auto")!;
     expect(scroller.className).toContain("concierge-header-clear");
     const badge = header.querySelector<HTMLElement>("[data-concierge-header-badge]")!;
-    const pill = header.querySelector<HTMLElement>("[data-concierge-header-pill]")!;
     expect(badge.querySelector(".rome-mascot")).not.toBeNull();
     expect(badge.className).toContain("rounded-full");
-    expect(within(pill).getByText("Concierge")).toBeTruthy();
-    expect(within(pill).getByText("concierge.activity.tasks")).toBeTruthy();
+    expect(
+      within(header.querySelector<HTMLElement>("[data-concierge-header-name]")!).getByText("Rome"),
+    ).toBeTruthy();
+    expect(
+      within(header.querySelector<HTMLElement>("[data-concierge-header-activity]")!).getByText(
+        "concierge.activity.tasks",
+      ),
+    ).toBeTruthy();
     expect(
       header.querySelector("[data-concierge-header-status]")!.getAttribute("data-activity"),
     ).toBe("tasks");
@@ -2276,16 +2324,21 @@ describe("Chat Concierge empty state", () => {
     const view = render(at(false, false));
     const hang = screen.getByTestId("hang");
     const bar = screen.getByTestId("bar");
-    // The same badge and pill as the floating header, with the same status line.
+    // The same badge, name tag and status as the floating header.
     const badge = await waitFor(() => {
       const found = hang.querySelector<HTMLElement>("[data-concierge-header-badge]");
       if (!found) throw new Error("no badge");
       return found;
     });
     expect(badge.querySelector(".rome-mascot")).not.toBeNull();
-    const pill = hang.querySelector<HTMLElement>("[data-concierge-header-pill]")!;
-    expect(within(pill).getByText("Concierge")).toBeTruthy();
-    expect(within(pill).getByText("concierge.activity.tasks")).toBeTruthy();
+    expect(
+      within(hang.querySelector<HTMLElement>("[data-concierge-header-name]")!).getByText("Rome"),
+    ).toBeTruthy();
+    expect(
+      within(hang.querySelector<HTMLElement>("[data-concierge-header-activity]")!).getByText(
+        "concierge.activity.tasks",
+      ),
+    ).toBeTruthy();
     expect(document.querySelector("[data-concierge-header]")).toBeNull();
     // The buttons are any chat's, in the bar.
     const more = within(bar).getByRole("button", { name: "navbar.more" });
@@ -2322,7 +2375,9 @@ describe("Chat Concierge empty state", () => {
     // Idle, the line is there for a screen reader only.
     mockConciergeActivity.mockReturnValue({ kind: "idle" });
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
-    expect((await screen.findByText("concierge.activity.idle")).className).toContain("sr-only");
+    expect(
+      (await screen.findByText("concierge.activity.idle")).closest("[aria-live]")!.className,
+    ).toContain("sr-only");
   });
 
   it("opens the task list from a plain Tasks item in a Concierge chat's menu", async () => {
@@ -2340,7 +2395,7 @@ describe("Chat Concierge empty state", () => {
     expect(mockOpenTaskList).toHaveBeenCalledTimes(1);
   });
 
-  it("offers no Archive or Delete for the main chat, and both for a topic chat", async () => {
+  it("offers Share chat but no Archive or Delete for the main chat, and all three for a topic chat", async () => {
     const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
@@ -2367,6 +2422,142 @@ describe("Chat Concierge empty state", () => {
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     expect(screen.getByRole("menuitem", { name: "navbar.archive" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "navbar.delete" })).toBeTruthy();
+    expect(screen.getByRole("menuitem", { name: "share.title" })).toBeTruthy();
+  });
+
+  it("offers Share chat in a common chat too", async () => {
+    const user = userEvent.setup();
+    renderChat(<Chat sessionId="session-1" />);
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    expect(screen.getByRole("menuitem", { name: "share.title" })).toBeTruthy();
+  });
+
+  const twoTurns = () =>
+    rs.mocked(listSessionMessages).mockResolvedValueOnce(
+      [
+        ["u-1", "turn-a", "First"],
+        ["u-2", "turn-b", "Second"],
+      ].map(([id, turnId, text]) => ({
+        id: id!,
+        sessionId: "session-1",
+        turnId: turnId!,
+        role: "user",
+        content: JSON.stringify([{ type: "text", content: text }]),
+        createdAt: "2026-11-10T10:00:00Z",
+      })),
+    );
+  const shareFrom = async (text: string) => {
+    const row = (await screen.findAllByTestId("user-row")).find((r) =>
+      r.textContent?.includes(text),
+    );
+    await userEvent.click(within(row!).getByRole("button", { name: "message.share" }));
+  };
+
+  it("opens share mode from a message's Share, with only that message's turn selected", async () => {
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    expect(screen.queryByTestId("share-bar")).toBeNull();
+    await shareFrom("Second");
+    expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-b");
+  });
+
+  it("picks every turn for Share chat in a common chat, and none in a Concierge chat", async () => {
+    const user = userEvent.setup();
+    twoTurns();
+    const common = renderChat(<Chat sessionId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "share.title" }));
+    expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-a,turn-b");
+    common.unmount();
+
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "share.title" }));
+    expect((await screen.findByTestId("share-bar")).textContent).toBe("");
+  });
+
+  it("picks an older thread message's own turn, which the timeline has not loaded", async () => {
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    fireEvent.click(
+      within(screen.getByTestId("older-thread-message")).getByRole("button", {
+        name: "message.share",
+      }),
+    );
+    expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-old");
+  });
+
+  it("refuses a file dropped in share mode, and takes one again after it", async () => {
+    const user = userEvent.setup();
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    const drop = () => {
+      const file = new File(["x"], "plan.txt", { type: "text/plain" });
+      fireEvent.drop(screen.getByTestId("message-list").closest(".\\@container\\/chat")!, {
+        dataTransfer: { types: ["Files"], files: [file], items: [] },
+      });
+    };
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "share.title" }));
+    await screen.findByTestId("share-bar");
+    drop();
+    expect(conciergeAddFiles).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("share-exit"));
+    await waitFor(() => expect(screen.queryByTestId("share-bar")).toBeNull());
+    drop();
+    expect(conciergeAddFiles).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the composer, and its draft, through share mode", async () => {
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    const composer = screen.getByTestId("chat-composer");
+    await shareFrom("Second");
+    await screen.findByTestId("share-bar");
+    // Hidden, not unmounted: the same composer, with whatever it holds.
+    expect(composer.isConnected).toBe(true);
+    expect(composer.parentElement?.className).toContain("hidden");
+    fireEvent.click(screen.getByTestId("share-exit"));
+    await waitFor(() => expect(screen.queryByTestId("share-bar")).toBeNull());
+    expect(screen.getByTestId("chat-composer")).toBe(composer);
+    expect(composer.parentElement?.className).not.toContain("hidden");
+  });
+
+  it("labels a Concierge share's agent by the name its header shows", async () => {
+    twoTurns();
+    renderChat(
+      <Chat
+        sessionId="session-1"
+        variant="concierge"
+        conciergeMainChatId="session-1"
+        conciergeName="Flint"
+      />,
+    );
+    await shareFrom("Second");
+    expect((await screen.findByTestId("share-bar")).dataset.agentName).toBe("Flint");
+  });
+
+  it("closes the thread view before a message's Share opens share mode behind it", async () => {
+    twoTurns();
+    // The thread view reads its messages through a query.
+    renderChat(
+      <QueryClientProvider client={new QueryClient()}>
+        <Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />
+      </QueryClientProvider>,
+    );
+    await screen.findAllByTestId("user-row");
+    fireEvent.click(screen.getByTestId("open-thread"));
+    expect(await screen.findByRole("button", { name: "thread.close" })).toBeTruthy();
+    await shareFrom("Second");
+    expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-b");
+    expect(screen.queryByRole("button", { name: "thread.close" })).toBeNull();
   });
 
   it("heads the main chat and a topic chat alike, with the agent's chosen name", async () => {
@@ -2411,8 +2602,10 @@ describe("Chat Concierge empty state", () => {
       },
       archivedAt: null,
     });
-    const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
-    await screen.findByText("Concierge");
+    const view = renderChat(
+      <Chat sessionId="concierge" variant="concierge" conciergeName="Flint" />,
+    );
+    await screen.findByText("Flint");
     expect(screen.queryByText("Rome")).toBeNull();
     view.unmount();
 

@@ -1,11 +1,13 @@
 import { memo, useMemo } from "react";
 import { useTranslation } from "react-i18next";
 import { CopyMessageButton } from "@/components/chat/CopyMessageButton";
+import { ShareMessageButton } from "@/components/chat/ShareMessageButton";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
 import type { ChatMessage } from "@/lib/chat-types";
 import { userMessageText } from "@/components/chat/chat-view";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { cn } from "@/lib/utils";
+import { useMessageActions } from "@/components/chat/message-actions";
 import { MessageRow } from "@/components/chat/MessageRow";
 import { ReplyButton } from "@/components/chat/reply/ReplyButton";
 import { isSettledUserMessage } from "@/components/chat/reply/reply-source";
@@ -26,6 +28,7 @@ export const UserMessage = memo(
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
     const timestamp = useMemo(() => formatMessageTimestamp(msg.createdAt), [msg.createdAt]);
     const concierge = useSaidByConcierge(msg.sender);
+    const showActions = useMessageActions();
     // Some user turns carry only a structured part with no text (e.g. an
     // interaction_result, whose inline component re-renders its own read-only
     // state), so suppress the empty bubble.
@@ -59,7 +62,7 @@ export const UserMessage = memo(
     // Timestamp + copy under the bubble. Hover-revealed on pointer devices,
     // always visible on touch. Precision tracks recency: time of day today,
     // month + day this year, full date for older years.
-    const actions = (
+    const actions = showActions ? (
       <div
         className={cn(
           "flex items-center gap-2 md:opacity-0 md:transition-opacity md:group-focus-within:opacity-100 md:group-hover:opacity-100",
@@ -89,8 +92,9 @@ export const UserMessage = memo(
             }}
           />
         ) : null}
+        {isSettledUserMessage(msg) ? <ShareMessageButton messageId={msg.id} turn={msg} /> : null}
       </div>
-    );
+    ) : null;
     const footer = (
       <>
         {sourceBadge}

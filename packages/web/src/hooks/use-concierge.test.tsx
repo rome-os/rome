@@ -77,9 +77,9 @@ describe("useConciergeName", () => {
     ["unset", {}],
     ["blank", { agentName: "   " }],
     ["not text", { agentName: 7 }],
-  ])("falls back to Concierge when the agent name is %s", async (_label, settings) => {
+  ])("falls back to the main agent's default name when the agent name is %s", async (_label, settings) => {
     renderName(settings);
     await new Promise((resolve) => setTimeout(resolve, 20));
-    expect(screen.getByRole("status").textContent).toBe("Concierge");
+    expect(screen.getByRole("status").textContent).toBe("Rome");
   });
 });

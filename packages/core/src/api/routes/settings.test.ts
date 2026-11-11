@@ -4,7 +4,7 @@ import { settingsRoutes } from "./settings.js";
 import { createTestDb, buildTestDeps, type TestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
 import { ANTHROPIC_COMPATIBLE_CREDENTIALS_SETTING } from "../../agent/index.js";
-import { GUARDIAN_TIMEZONE_SETTING_KEY } from "../../routines/guardian-timezone.js";
+import { GUARDIAN_TIMEZONE_SETTING_KEY } from "../../instance/timezone.js";
 import { COOKIE_NAME, createSession } from "../../access/auth.js";
 import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";

@@ -10,7 +10,8 @@ import { ForwardedChip } from "@/components/chat/ForwardedChip";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
 import { renderFlatEntries } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
-import type { BlockActions } from "@/components/chat/MessageList";
+import type { BlockActions, ShareSelection } from "@/components/chat/MessageList";
+import { SelectableRow } from "@/components/chat/SelectableRow";
 import { userMessageText } from "@/components/chat/chat-view";
 import type { ReplySource } from "@/components/chat/reply/reply-source";
 import type { ConciergeEntry, ConciergeItem } from "@/components/chat/concierge-groups";
@@ -37,6 +38,7 @@ const GuardianBubble = memo(
             ? {
                 messageId: msg.id,
                 sessionId: msg.sessionId,
+                turnId: msg.turnId,
                 author: "guardian",
                 name: msg.sender?.name ?? undefined,
                 text,
@@ -71,11 +73,10 @@ function originOf(part: TranscriptPart): ForwardedFrom | undefined {
     : undefined;
 }
 
-// Each `say` call is its own message, so each text part is its own bubble. A
-// long message is the same bubble with markdown that reads as a document, cut
-// with a toggle when it is tall. A forwarded report is a bubble of its own with
-// a quote's gray left edge and a chip that names its task chat; the intro that
-// came with it is the bubble above. Task chat cards render as they do anywhere.
+// Each `say` call is its own message, so each text part is its own bubble,
+// cut with a toggle when it is tall. A forwarded report is a bubble of its own
+// with a chip that names its task chat; the intro that came with it is the
+// bubble above. Task chat cards render as they do anywhere.
 const AgentEntry = memo(function AgentEntry({
   entry,
   actions,
@@ -102,6 +103,7 @@ const AgentEntry = memo(function AgentEntry({
   const replyTo = (text: string): ReplySource => ({
     messageId: message.id,
     sessionId: message.sessionId,
+    turnId: message.turnId,
     author: "agent",
     text,
     ...(bubbles > 1 ? { ownBubble: true } : {}),
@@ -157,12 +159,7 @@ const AgentEntry = memo(function AgentEntry({
         reply={replyTo(part.content)}
         anchorId={index === firstBubble ? message.id : undefined}
       >
-        <ChatBubble
-          tone="received"
-          data-concierge-bubble
-          className={forwardedFrom ? "border-l-3 border-l-muted-foreground" : undefined}
-          {...arrival(message.id)}
-        >
+        <ChatBubble tone="received" data-concierge-bubble {...arrival(message.id)}>
           {forwardedFrom ? (
             <ForwardedChip chatId={forwardedFrom.chatId} title={forwardedFrom.title} />
           ) : null}
@@ -185,11 +182,16 @@ const AgentEntry = memo(function AgentEntry({
  * One stretch of messages from a single sender, packed close together. The
  * guardian's bubbles align to the end, the agent's to the start. `typing` is
  * the agent's typing bubble, drawn after its messages.
+ *
+ * In share mode (`selection`), every bubble carries its turn's checkbox, and a
+ * click anywhere on it picks or drops the whole turn, as a common chat's row
+ * does. A bubble of no turn, or of another session, is dimmed and not picked.
  */
 export const ConciergeGroup = memo(function ConciergeGroup({
   group,
   actions,
   runningTurnId,
+  selection,
   feedback,
   arrival,
   typing,
@@ -197,6 +199,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
   group: Extract<ConciergeItem, { kind: "group" }>;
   actions: BlockActions;
   runningTurnId: string | null;
+  selection?: ShareSelection;
   feedback: boolean;
   /** Marks the bubbles that arrived while the transcript is open. */
   arrival: ArrivalProps;
@@ -205,38 +208,66 @@ export const ConciergeGroup = memo(function ConciergeGroup({
   return (
     <div
       className={cn(
-        "flex flex-col gap-1",
+        "flex flex-col gap-2",
         group.sender === "guardian" ? "items-end" : "items-start",
       )}
     >
-      {group.entries.map((entry) => (
-        <Fragment key={entry.message.id}>
-          {entry.message.sender?.kind === "automated" ? (
+      {group.entries.map((entry) => {
+        const bubble = (
+          <>
+            {entry.message.sender?.kind === "automated" ? (
+              <div
+                key={entry.message.id}
+                data-timeline-anchor={entry.message.id}
+                className="w-full self-start"
+              >
+                <UserMessage msg={entry.message} />
+              </div>
+            ) : group.sender === "guardian" ? (
+              <GuardianBubble
+                key={entry.message.id}
+                msg={entry.message}
+                arrival={arrival(entry.message.id)["data-arrival"]}
+              />
+            ) : (
+              <AgentEntry
+                key={entry.message.id}
+                entry={entry}
+                actions={actions}
+                rateable={feedback && (!runningTurnId || entry.message.turnId !== runningTurnId)}
+                arrival={arrival}
+              />
+            )}
+            <ThreadRepliesLine message={entry.message} />
+          </>
+        );
+        if (!selection) return <Fragment key={entry.message.id}>{bubble}</Fragment>;
+        const side = group.sender === "guardian" ? "items-end" : "items-start";
+        const turnId = entry.message.turnId;
+        if (!turnId || entry.message.sessionId !== selection.selectableSessionId) {
+          return (
             <div
               key={entry.message.id}
-              data-timeline-anchor={entry.message.id}
-              className="w-full self-start"
+              className={cn("flex w-full flex-col gap-2 pl-9 opacity-60", side)}
             >
-              <UserMessage msg={entry.message} />
+              {bubble}
             </div>
-          ) : group.sender === "guardian" ? (
-            <GuardianBubble
-              key={entry.message.id}
-              msg={entry.message}
-              arrival={arrival(entry.message.id)["data-arrival"]}
-            />
-          ) : (
-            <AgentEntry
-              key={entry.message.id}
-              entry={entry}
-              actions={actions}
-              rateable={feedback && (!runningTurnId || entry.message.turnId !== runningTurnId)}
-              arrival={arrival}
-            />
-          )}
-          <ThreadRepliesLine message={entry.message} />
-        </Fragment>
-      ))}
+          );
+        }
+        const selected = selection.selectedTurns.has(turnId);
+        return (
+          <div key={entry.message.id} className="w-full">
+            <SelectableRow
+              selected={selected}
+              onToggle={() => selection.onToggleTurn(turnId)}
+              label={selected ? "Deselect message" : "Select message"}
+              contentClassName={cn("flex flex-col gap-2", side)}
+            >
+              {bubble}
+            </SelectableRow>
+          </div>
+        );
+      })}
       {group.typing ? typing : null}
     </div>
   );
