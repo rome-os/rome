@@ -676,9 +676,9 @@
       var(--rome-safe-area-inset-bottom) - var(--rome-keyboard-height)
     );
     --rome-mobile-header-height: calc(3rem + var(--rome-safe-area-top));
-    /* A Concierge chat's floating header: the mascot's badge, the name pill
-       under it with the status line, and the gaps around them. The messages
-       start below it. */
+    /* A Concierge chat's floating header: the mascot's badge, the name tag
+       under it, the status capsule under that, and the gaps around them. The
+       messages start below it. */
     --rome-concierge-header-height: 6.25rem;
     /* How far a Concierge chat's messages start below the top of their
        column: the header, plus the phone's safe area, where the header
@@ -926,14 +926,14 @@ html.is-electron [data-app-titlebar] {
   -webkit-app-region: drag;
 }
 /* A Concierge chat's mascot hangs from the title bar and drags the window like
-   it, below the bar too. Its messages start under the pill, which reaches
-   less far below the bar than the floating header does. */
+   it, below the bar too. Its messages start under the status capsule, which
+   reaches less far below the bar than the floating header does. */
 html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
   -webkit-app-region: drag;
 }
 @media (width >= 48rem) {
   html.is-electron {
-    --rome-concierge-header-offset: 4.5rem;
+    --rome-concierge-header-offset: 5rem;
   }
 }
 

@@ -9,7 +9,8 @@ const WORKING = new Set<ConciergeActivity["kind"]>(["working", "tool", "tasks"])
 
 /**
  * The translucent surface every piece of a Concierge chat's floating header
- * sits on: the mascot's badge, the name pill and the round buttons. It blurs
+ * sits on: the mascot's badge, the name tag, the status capsule and the round
+ * buttons. It blurs
  * the messages scrolling under it, so its text stays readable without a bar.
  */
 export const FLOATING_SURFACE =
@@ -22,22 +23,26 @@ export const FLOATING_SURFACE =
 export const CONCIERGE_LEADING_SLOT = "conciergeHeaderLeading";
 
 /**
- * Where the Mac app's title bar takes a Concierge chat's mascot and pill, to
+ * Where the Mac app's title bar takes a Concierge chat's mascot, name and status, to
  * hang them from its lower edge over the chat.
  */
 export const CONCIERGE_TITLEBAR_SLOT = "conciergeTitlebar";
 
 /**
- * The middle of a Concierge chat's floating header: the mascot in a round
- * badge, and under it, overlapping it, a pill with the chat's name and what
- * the Concierge is doing right now. Idle, the pill holds the name alone and
+ * The middle of a Concierge chat's floating header, centred top to bottom: the
+ * mascot in a round badge, a small name tag overlapping the badge's lower
+ * edge, and under it, a capsule with what the Concierge is doing right now.
+ * The name and the status are separate, so a short name stays under the
+ * mascot whatever the status's length. Idle, the status capsule is gone, and
  * the mascot only blinks. The status line is a live region, so a screen
- * reader hears it change.
+ * reader hears it change; idle, it stays in the page, read but not drawn.
  *
- * Its root lays out as `contents`: the badge and the pill are items of the
- * header's grid, the badge in its first row and the pill in its second, and
- * the side buttons centre on the badge in the first row. Without the badge,
- * the pill takes the first row and the buttons centre on it.
+ * Its root lays out as `contents`: the pieces are items of the header's grid.
+ * The badge takes the first row, where the side buttons centre on it, and
+ * the name tag the second. The status takes the third, across all three
+ * columns, so its width is a share of the header's and does not widen the
+ * middle column the buttons are placed around. Without the badge, the name
+ * tag takes the first row and the status the second.
  */
 export function ConciergeHeaderStatus({
   name,
@@ -46,7 +51,7 @@ export function ConciergeHeaderStatus({
 }: {
   name: ReactNode;
   activity: ConciergeActivity;
-  /** Whether the mascot's badge shows. Without it the pill takes the badge's row. */
+  /** Whether the mascot's badge shows. Without it the name tag takes the badge's row. */
   badge?: boolean;
 }) {
   const { t } = useTranslation("chat");
@@ -67,22 +72,32 @@ export function ConciergeHeaderStatus({
         </div>
       ) : null}
       <div
-        data-concierge-header-pill
+        data-concierge-header-name
         className={cn(
-          badge ? "row-start-2 -mt-2" : "row-start-1",
-          "pointer-events-auto relative col-start-2 flex min-w-0 max-w-full flex-col items-center justify-self-center rounded-full px-4 py-1 text-center leading-tight",
+          badge ? "row-start-2 -mt-1" : "row-start-1",
+          // Above the badge, so the tag covers the badge's edge, not the reverse.
+          "pointer-events-auto relative z-10 col-start-2 flex h-5 min-w-0 max-w-full items-center justify-self-center rounded-full px-2",
           FLOATING_SURFACE,
         )}
       >
-        <span className="max-w-full truncate text-ui font-medium text-foreground">{name}</span>
+        {/* Eight CJK characters at the tag's own size, then an ellipsis. */}
+        <span className="max-w-[8em] truncate text-aux font-medium text-foreground">{name}</span>
+      </div>
+      <div
+        data-concierge-header-activity
+        aria-live="polite"
+        className={cn(
+          badge ? "row-start-3" : "row-start-2",
+          "col-span-3 col-start-1 mt-1 flex h-6 min-w-0 max-w-[70%] items-center justify-self-center rounded-full px-3",
+          status ? cn("pointer-events-auto", FLOATING_SURFACE) : "sr-only",
+        )}
+      >
         <span
-          aria-live="polite"
           className={cn(
-            "max-w-full truncate text-aux text-muted-foreground",
+            "min-w-0 truncate text-aux text-muted-foreground",
             // A light band sweeps the line while work is under way; a
             // question waiting on the owner and idle stay still.
             WORKING.has(activity.kind) && "shimmer",
-            !status && "sr-only",
           )}
         >
           {status ?? t("concierge.activity.idle")}

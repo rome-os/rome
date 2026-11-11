@@ -2170,14 +2170,14 @@ describe("Chat Concierge empty state", () => {
     await screen.findByRole("region", { name: "concierge.empty.title" });
     const header = document.querySelector<HTMLElement>("[data-concierge-header]")!;
     expect(header.querySelector("[data-concierge-header-badge]")).toBeNull();
-    // The pill takes the badge's row, and the buttons centre on it.
-    const pill = header.querySelector<HTMLElement>("[data-concierge-header-pill]")!;
-    expect(pill.className).toContain("row-start-1");
-    expect(within(pill).getByText("Concierge")).toBeTruthy();
+    // The name tag takes the badge's row, and the buttons centre on it.
+    const name = header.querySelector<HTMLElement>("[data-concierge-header-name]")!;
+    expect(name.className).toContain("row-start-1");
+    expect(within(name).getByText("Concierge")).toBeTruthy();
     expect(within(header).getByRole("button", { name: "navbar.more" })).toBeTruthy();
   });
 
-  it("floats the Concierge's header over its messages: the mascot's badge, a name pill and round buttons", async () => {
+  it("floats the Concierge's header over its messages: the mascot's badge, a name tag, a status capsule and round buttons", async () => {
     mockConciergeActivity.mockReturnValue({ kind: "tasks", title: "Book the flight", more: 0 });
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
@@ -2206,11 +2206,18 @@ describe("Chat Concierge empty state", () => {
     const scroller = header.parentElement!.querySelector<HTMLElement>(".overflow-y-auto")!;
     expect(scroller.className).toContain("concierge-header-clear");
     const badge = header.querySelector<HTMLElement>("[data-concierge-header-badge]")!;
-    const pill = header.querySelector<HTMLElement>("[data-concierge-header-pill]")!;
     expect(badge.querySelector(".rome-mascot")).not.toBeNull();
     expect(badge.className).toContain("rounded-full");
-    expect(within(pill).getByText("Concierge")).toBeTruthy();
-    expect(within(pill).getByText("concierge.activity.tasks")).toBeTruthy();
+    expect(
+      within(header.querySelector<HTMLElement>("[data-concierge-header-name]")!).getByText(
+        "Concierge",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(header.querySelector<HTMLElement>("[data-concierge-header-activity]")!).getByText(
+        "concierge.activity.tasks",
+      ),
+    ).toBeTruthy();
     expect(
       header.querySelector("[data-concierge-header-status]")!.getAttribute("data-activity"),
     ).toBe("tasks");
@@ -2276,16 +2283,23 @@ describe("Chat Concierge empty state", () => {
     const view = render(at(false, false));
     const hang = screen.getByTestId("hang");
     const bar = screen.getByTestId("bar");
-    // The same badge and pill as the floating header, with the same status line.
+    // The same badge, name tag and status as the floating header.
     const badge = await waitFor(() => {
       const found = hang.querySelector<HTMLElement>("[data-concierge-header-badge]");
       if (!found) throw new Error("no badge");
       return found;
     });
     expect(badge.querySelector(".rome-mascot")).not.toBeNull();
-    const pill = hang.querySelector<HTMLElement>("[data-concierge-header-pill]")!;
-    expect(within(pill).getByText("Concierge")).toBeTruthy();
-    expect(within(pill).getByText("concierge.activity.tasks")).toBeTruthy();
+    expect(
+      within(hang.querySelector<HTMLElement>("[data-concierge-header-name]")!).getByText(
+        "Concierge",
+      ),
+    ).toBeTruthy();
+    expect(
+      within(hang.querySelector<HTMLElement>("[data-concierge-header-activity]")!).getByText(
+        "concierge.activity.tasks",
+      ),
+    ).toBeTruthy();
     expect(document.querySelector("[data-concierge-header]")).toBeNull();
     // The buttons are any chat's, in the bar.
     const more = within(bar).getByRole("button", { name: "navbar.more" });
@@ -2322,7 +2336,9 @@ describe("Chat Concierge empty state", () => {
     // Idle, the line is there for a screen reader only.
     mockConciergeActivity.mockReturnValue({ kind: "idle" });
     renderChat(<Chat sessionId="concierge" variant="concierge" />);
-    expect((await screen.findByText("concierge.activity.idle")).className).toContain("sr-only");
+    expect(
+      (await screen.findByText("concierge.activity.idle")).closest("[aria-live]")!.className,
+    ).toContain("sr-only");
   });
 
   it("opens the task list from a plain Tasks item in a Concierge chat's menu", async () => {
