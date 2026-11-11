@@ -651,6 +651,16 @@
         }
       }
     },
+    "Build Rome" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建造 Rome"
+          }
+        }
+      }
+    },
     "Can Rome use this iPad" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1197,16 +1207,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "事件例程"
-          }
-        }
-      }
-    },
-    "Every block builds on the last." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "每一块，都建立在上一块之上。"
           }
         }
       }
@@ -2613,6 +2613,16 @@
         }
       }
     },
+    "Rome wasn't built in a day." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "罗马不是一天建成的。"
+          }
+        }
+      }
+    },
     "Run action" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3037,16 +3047,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "出了点问题"
-          }
-        }
-      }
-    },
-    "Stack up" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "叠一叠"
           }
         }
       }

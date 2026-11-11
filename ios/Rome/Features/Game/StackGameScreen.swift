@@ -13,7 +13,7 @@ struct StackGameLaunch: Identifiable, Equatable {
     var sample: Sample? = nil
 }
 
-/// "Stack up", full screen over the app. The tower is drawn in a `Canvas`;
+/// "Build Rome", full screen over the app. The tower is drawn in a `Canvas`;
 /// every moving part is a function of time since the last event, so the
 /// timeline only reads the game and taps are the only writes.
 struct StackGameScreen: View {
@@ -230,7 +230,7 @@ struct StackGameScreen: View {
                 // The ground: one line, then a giant faded "Rome" under it,
                 // like a site footer's logo, dissolving into the ground.
                 anchored(at: CGPoint(x: size.width / 2, y: layout.y(0) + 18), alignment: .top) {
-                    Text("Every block builds on the last.")
+                    Text("Rome wasn't built in a day.")
                         .romeFont(13)
                         .foregroundStyle(Palette.sub)
                         .multilineTextAlignment(.center)
@@ -285,7 +285,7 @@ struct StackGameScreen: View {
         .contentShape(Rectangle())
         .onTapGesture { point in tap(at: point, size: size, fieldWidth: fieldWidth) }
         .accessibilityElement()
-        .accessibilityLabel(Text("Stack up"))
+        .accessibilityLabel(Text("Build Rome"))
         .accessibilityValue(Text(verbatim: "\(game.score)"))
         .accessibilityHint(Text("Tap to drop the block"))
         .accessibilityAddTraits(.allowsDirectInteraction)

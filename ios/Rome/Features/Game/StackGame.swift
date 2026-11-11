@@ -1,7 +1,7 @@
 import CoreGraphics
 import Foundation
 
-/// "Stack up": a block slides above the tower and a tap drops it. What
+/// "Build Rome": a block slides above the tower and a tap drops it. What
 /// overlaps the block below stays, the overhang falls away, and a drop
 /// that misses ends the game. Pure logic: the sliding block's place is a
 /// function of time, so the view only reads it and nothing ticks.
