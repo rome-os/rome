@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen } from "@testing-library/react";
+import { act, cleanup, render, screen } from "@testing-library/react";
 import { useRef } from "react";
 import { useFittedPlaceholder } from "./use-fitted-placeholder";
 
@@ -44,6 +44,52 @@ describe("useFittedPlaceholder", () => {
     const text = screen.getByRole("textbox").getAttribute("placeholder")!;
     expect(text).toBe("Message in Planning…");
     expect(text.length).toBeLessThanOrEqual(20);
+  });
+
+  it("never splits an emoji or a flag when it cuts", () => {
+    for (const name of [
+      "Vacation 🚀 planning and other activities",
+      "🇵🇹🇯🇵🇺🇸 Lisbon Kyoto Boston trip plans",
+      "Family 👨‍👩‍👧‍👦 weekend and more things",
+    ]) {
+      for (let room = 12; room < 40; room++) {
+        fit(room);
+        const view = render(<Box name={name} />);
+        const text = screen.getByRole("textbox").getAttribute("placeholder")!;
+        // A lone surrogate is a high half with no low half after it, or the reverse.
+        expect(text).not.toMatch(
+          /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/,
+        );
+        view.unmount();
+        rs.restoreAllMocks();
+      }
+    }
+  });
+
+  it("measures again when the web fonts finish loading", async () => {
+    fit(40);
+    const fonts = new EventTarget() as EventTarget & { ready: Promise<unknown> };
+    fonts.ready = Promise.resolve();
+    Object.defineProperty(document, "fonts", { value: fonts, configurable: true });
+    try {
+      render(<Box name="Planning the long weekend" />);
+      await act(async () => {});
+      // The first measure used a narrow fallback font; the real one is wider.
+      expect(screen.getByRole("textbox").getAttribute("placeholder")).toBe(
+        "Message in Planning the long weekend",
+      );
+      HTMLCanvasElement.prototype.getContext = (() => ({
+        font: "",
+        measureText: (text: string) => ({ width: text.length }),
+      })) as unknown as typeof HTMLCanvasElement.prototype.getContext;
+      rs.spyOn(HTMLElement.prototype, "clientWidth", "get").mockReturnValue(20);
+      await act(async () => {
+        fonts.dispatchEvent(new Event("loadingdone"));
+      });
+      expect(screen.getByRole("textbox").getAttribute("placeholder")).toBe("Message in Planning…");
+    } finally {
+      Reflect.deleteProperty(document, "fonts");
+    }
   });
 
   it("falls back to the whole text where there is no canvas to measure on", () => {
