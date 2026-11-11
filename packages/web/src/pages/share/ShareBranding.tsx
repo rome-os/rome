@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 
 /** Where the share page's Rome marks point. */
-export const ROME_SITE_URL = "https://romeos.io";
+export const ROME_SITE_URL = "https://romeos.cc";
 
 /**
  * Asks search engines not to index the shared page or follow its links while

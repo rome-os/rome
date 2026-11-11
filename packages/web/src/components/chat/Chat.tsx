@@ -782,23 +782,29 @@ export function Chat({
     inThread: (messageId) => threadedRef.current.has(messageId),
   });
 
+  // Share chat picks every turn in a common chat. A Concierge chat holds its
+  // owner's private history, so there it starts with none picked.
   const enterShareMode = useCallback(() => {
-    setSelectedShareTurns(new Set(mainTurnIds));
+    setSelectedShareTurns(new Set(concierge ? [] : mainTurnIds));
     setShareMode(true);
-  }, [mainTurnIds]);
+  }, [concierge, mainTurnIds]);
 
   // Share on a message: the same share mode, with only that message's turn
   // selected. A message outside the chat's own turns selects nothing. Read
   // through the ref so the shortcut keeps one identity while messages arrive.
+  // From the thread view, the view closes first: share mode picks turns in the
+  // chat's own timeline, which the view covers.
+  const { thread: openThreadId, closeThread } = replyDraft;
   const shareMessageTurn = useCallback(
     (messageId: string) => {
+      if (openThreadId) closeThread();
       const turnId = mainSessionId
         ? messagesRef.current.get(mainSessionId)?.find((m) => m.id === messageId)?.turnId
         : undefined;
       setSelectedShareTurns(new Set(turnId ? [turnId] : []));
       setShareMode(true);
     },
-    [mainSessionId],
+    [mainSessionId, openThreadId, closeThread],
   );
 
   const exitShareMode = useCallback(() => {

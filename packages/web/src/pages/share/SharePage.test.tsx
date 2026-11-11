@@ -77,10 +77,10 @@ describe("SharePage", () => {
     await screen.findByText("Day one: walk the Alfama.");
     const header = screen.getByRole("banner");
     const mark = within(header).getByRole("link", { name: /^Rome/ });
-    expect(mark.getAttribute("href")).toBe("https://romeos.io");
+    expect(mark.getAttribute("href")).toBe("https://romeos.cc");
     expect(mark.textContent).toContain("Your personal assistant");
     const learn = within(header).getByRole("link", { name: "Learn about Rome" });
-    expect(learn.getAttribute("href")).toBe("https://romeos.io");
+    expect(learn.getAttribute("href")).toBe("https://romeos.cc");
     expect(learn.getAttribute("target")).toBe("_blank");
     expect(learn.getAttribute("rel")).toBe("noopener");
     expect(screen.queryByRole("contentinfo")).toBeNull();
@@ -119,6 +119,41 @@ describe("SharePage", () => {
     await screen.findByText("Day one: walk the Alfama.");
     // The header's, and the agent's sender row.
     expect(screen.getAllByText("Rome")).toHaveLength(2);
+  });
+
+  it("shows a task chat card by its title, with no link and no signed-in call", async () => {
+    const fetchSpy = rs.fn(() => Promise.resolve(new Response("{}", { status: 401 })));
+    rs.stubGlobal("fetch", fetchSpy);
+    rs.mocked(fetchSharedChat).mockResolvedValue({
+      id: "tok",
+      title: "Trip",
+      snapshot: {
+        mainSessionId: "s",
+        messages: [
+          {
+            id: "a1",
+            sessionId: "s",
+            turnId: "t1",
+            role: "assistant",
+            content: JSON.stringify([
+              { type: "text", content: "Day one: walk the Alfama." },
+              { type: "task_chat", chatId: "task-1", title: "Book a hotel" },
+            ]),
+            createdAt: "2026-11-10T10:00:00.000Z",
+          },
+        ],
+        traces: {},
+      },
+      layout: [],
+    });
+    renderAt("tok");
+    expect(await screen.findByText("Book a hotel")).toBeTruthy();
+    expect(screen.queryByRole("link", { name: "Open" })).toBeNull();
+    expect(document.querySelector('a[href="/chat/task-1"]')).toBeNull();
+    // Nothing reads the signed-in chat API.
+    expect(fetchSpy.mock.calls.map(([url]) => String(url))).not.toContainEqual(
+      expect.stringContaining("/api/chat"),
+    );
   });
 
   it("keeps the branding and noindex on an unavailable link", async () => {

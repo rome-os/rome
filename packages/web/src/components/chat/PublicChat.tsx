@@ -9,6 +9,7 @@ import { buildChatView, buildRows, type AgentIdentity } from "@/components/chat/
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import { MessageList, type BlockActions } from "@/components/chat/MessageList";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
+import { PublicTaskChatContext } from "@/components/chat/entries/TaskChatCard";
 import type { ChatMessage } from "@/lib/chat-types";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
@@ -87,56 +88,59 @@ export function PublicChat({
     [traces],
   );
 
+  // No one is signed in here: task chat cards show their title only.
   return (
-    <TooltipProvider delayDuration={150}>
-      {/* Fills the column under the share page's header. */}
-      <div className="@container/chat relative flex flex-1">
-        {/* Mirror Chat.tsx: in the wide / no-apps layout (@5xl/chat) the trace
+    <PublicTaskChatContext.Provider value>
+      <TooltipProvider delayDuration={150}>
+        {/* Fills the column under the share page's header. */}
+        <div className="@container/chat relative flex flex-1">
+          {/* Mirror Chat.tsx: in the wide / no-apps layout (@5xl/chat) the trace
             drawer is `fixed` and out of flow, so reserve its 480px here to keep
             the messages clear of it. */}
-        <div
-          className={`relative flex min-w-0 flex-1 flex-col @5xl/chat:transition-[width] @5xl/chat:duration-200 @5xl/chat:ease-out ${traceDrawerContentInsetClass(
-            traceDrawerTarget !== null,
-            hasApps,
-          )}`}
-        >
-          <MessageList
-            rows={rows}
-            live={{
-              isStreaming: false,
-              runningTurnId: null,
-              snapshot: null,
-              textStore: EMPTY_LIVE_TEXT,
-              identity: mainIdentity,
-            }}
-            contentRef={NO_OP}
-            onOpenLiveTrace={NO_OP}
-            onOpenStoredTrace={setTraceDrawerTarget}
-            actions={actions}
+          <div
+            className={`relative flex min-w-0 flex-1 flex-col @5xl/chat:transition-[width] @5xl/chat:duration-200 @5xl/chat:ease-out ${traceDrawerContentInsetClass(
+              traceDrawerTarget !== null,
+              hasApps,
+            )}`}
+          >
+            <MessageList
+              rows={rows}
+              live={{
+                isStreaming: false,
+                runningTurnId: null,
+                snapshot: null,
+                textStore: EMPTY_LIVE_TEXT,
+                identity: mainIdentity,
+              }}
+              contentRef={NO_OP}
+              onOpenLiveTrace={NO_OP}
+              onOpenStoredTrace={setTraceDrawerTarget}
+              actions={actions}
+            />
+          </div>
+          <TraceDrawer
+            target={traceDrawerTarget}
+            onClose={() => setTraceDrawerTarget(null)}
+            hasApps={hasApps}
+            loadStoredTrace={loadStoredTrace}
+            allowSubagentUsage={false}
+            readOnly
+            renderInlineBlock={(block, key) =>
+              renderSingleEntry(block, key, {
+                onApprovalResolved: NO_OP,
+                compact: true,
+              })
+            }
+            renderRunBlocks={(blocks, live) =>
+              renderFlatEntries(blocks, {
+                onApprovalResolved: NO_OP,
+                compact: true,
+                live,
+              })
+            }
           />
         </div>
-        <TraceDrawer
-          target={traceDrawerTarget}
-          onClose={() => setTraceDrawerTarget(null)}
-          hasApps={hasApps}
-          loadStoredTrace={loadStoredTrace}
-          allowSubagentUsage={false}
-          readOnly
-          renderInlineBlock={(block, key) =>
-            renderSingleEntry(block, key, {
-              onApprovalResolved: NO_OP,
-              compact: true,
-            })
-          }
-          renderRunBlocks={(blocks, live) =>
-            renderFlatEntries(blocks, {
-              onApprovalResolved: NO_OP,
-              compact: true,
-              live,
-            })
-          }
-        />
-      </div>
-    </TooltipProvider>
+      </TooltipProvider>
+    </PublicTaskChatContext.Provider>
   );
 }

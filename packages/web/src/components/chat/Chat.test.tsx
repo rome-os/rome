@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testi
 import userEvent from "@testing-library/user-event";
 import { forwardRef, memo, useImperativeHandle, type ReactNode } from "react";
 import { MemoryRouter } from "react-router-dom";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import * as chatApiModule from "@/lib/chat-api" with { rstest: "importActual" };
 import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
@@ -178,9 +179,20 @@ rs.mock("@/pages/free/WidgetPicker", () => ({
 function ReplyJump() {
   const reply = useReplyDraft();
   return (
-    <button type="button" data-testid="reply-jump" onClick={() => reply?.jump("a2")}>
-      jump
-    </button>
+    <>
+      <button type="button" data-testid="reply-jump" onClick={() => reply?.jump("a2")}>
+        jump
+      </button>
+      <button
+        type="button"
+        data-testid="open-thread"
+        onClick={() =>
+          reply?.openThread({ messageId: "u-1", author: "guardian", preview: "First" })
+        }
+      >
+        open thread
+      </button>
+    </>
   );
 }
 
@@ -357,7 +369,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
     },
     ref,
   ) {
-    useImperativeHandle(ref, () => ({ insertText: conciergeInsertText }));
+    useImperativeHandle(ref, () => ({ insertText: conciergeInsertText, focus: () => {} }));
     return (
       <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
         <button
@@ -2397,27 +2409,68 @@ describe("Chat Concierge empty state", () => {
     expect(screen.getByRole("menuitem", { name: "share.title" })).toBeTruthy();
   });
 
-  it("opens share mode from a message's Share, with only that message's turn selected", async () => {
-    const user = userEvent.setup();
-    const message = (id: string, turnId: string, text: string) => ({
-      id,
-      sessionId: "session-1",
-      turnId,
-      role: "user",
-      content: JSON.stringify([{ type: "text", content: text }]),
-      createdAt: "2026-11-10T10:00:00Z",
-    });
-    rs.mocked(listSessionMessages).mockResolvedValueOnce([
-      message("u-1", "turn-a", "First"),
-      message("u-2", "turn-b", "Second"),
-    ]);
-    renderChat(<Chat sessionId="session-1" />);
-    const row = (await screen.findAllByTestId("user-row")).find((r) =>
-      r.textContent?.includes("Second"),
+  const twoTurns = () =>
+    rs.mocked(listSessionMessages).mockResolvedValueOnce(
+      [
+        ["u-1", "turn-a", "First"],
+        ["u-2", "turn-b", "Second"],
+      ].map(([id, turnId, text]) => ({
+        id: id!,
+        sessionId: "session-1",
+        turnId: turnId!,
+        role: "user",
+        content: JSON.stringify([{ type: "text", content: text }]),
+        createdAt: "2026-11-10T10:00:00Z",
+      })),
     );
+  const shareFrom = async (text: string) => {
+    const row = (await screen.findAllByTestId("user-row")).find((r) =>
+      r.textContent?.includes(text),
+    );
+    await userEvent.click(within(row!).getByRole("button", { name: "message.share" }));
+  };
+
+  it("opens share mode from a message's Share, with only that message's turn selected", async () => {
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" />);
+    await screen.findAllByTestId("user-row");
     expect(screen.queryByTestId("share-bar")).toBeNull();
-    await user.click(within(row!).getByRole("button", { name: "message.share" }));
+    await shareFrom("Second");
     expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-b");
+  });
+
+  it("picks every turn for Share chat in a common chat, and none in a Concierge chat", async () => {
+    const user = userEvent.setup();
+    twoTurns();
+    const common = renderChat(<Chat sessionId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    await user.click(screen.getByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "share.title" }));
+    expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-a,turn-b");
+    common.unmount();
+
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "share.title" }));
+    expect((await screen.findByTestId("share-bar")).textContent).toBe("");
+  });
+
+  it("closes the thread view before a message's Share opens share mode behind it", async () => {
+    twoTurns();
+    // The thread view reads its messages through a query.
+    renderChat(
+      <QueryClientProvider client={new QueryClient()}>
+        <Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />
+      </QueryClientProvider>,
+    );
+    await screen.findAllByTestId("user-row");
+    fireEvent.click(screen.getByTestId("open-thread"));
+    expect(await screen.findByRole("button", { name: "thread.close" })).toBeTruthy();
+    await shareFrom("Second");
+    expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-b");
+    expect(screen.queryByRole("button", { name: "thread.close" })).toBeNull();
   });
 
   it("heads the main chat and a topic chat alike, with the agent's chosen name", async () => {
