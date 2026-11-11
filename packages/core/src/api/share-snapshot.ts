@@ -26,3 +26,62 @@ export interface ChatShareSnapshot {
   // shape: an older share may hold trace message id → TraceSnapshot here.
   traces: Record<string, TraceSnapshot>;
 }
+
+/** The title a share falls back to when its messages give none. */
+export const NEUTRAL_SHARE_TITLE = "Shared chat";
+
+/** Longest derived share title, in characters, before an ellipsis. */
+const MAX_DERIVED_TITLE = 100;
+
+/** A message's text, as the dashboard reads stored content: its text parts, or the raw string. */
+function messageText(content: string): string {
+  try {
+    const parsed: unknown = JSON.parse(content);
+    if (!Array.isArray(parsed)) return typeof parsed === "string" ? parsed : content;
+    return parsed
+      .map((part) =>
+        part && typeof part === "object" && (part as { type?: unknown }).type === "text"
+          ? String((part as { content?: unknown }).content ?? "")
+          : "",
+      )
+      .join("\n");
+  } catch {
+    return content;
+  }
+}
+
+/** The first non-blank line of `markdown`, as plain reading text. */
+function firstPlainLine(markdown: string): string {
+  for (const raw of markdown.split("\n")) {
+    const line = raw
+      .replace(/!?\[([^\]]*)\]\([^)]*\)/g, "$1")
+      .replace(/^\s{0,3}(?:#{1,6}\s+|[-*+]\s+|\d+[.)]\s+|>\s?)+/, "")
+      .replace(/\*\*|__|`|~~/g, "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (line) {
+      return line.length > MAX_DERIVED_TITLE
+        ? `${line.slice(0, MAX_DERIVED_TITLE - 1).trimEnd()}…`
+        : line;
+    }
+  }
+  return "";
+}
+
+/**
+ * A share's title from what it shows: the first line of the first picked
+ * turn's own message, else of that turn's first reply, else a neutral title.
+ * Never the chat's name, which for a Concierge chat says nothing of the share.
+ */
+export function shareTitleOf(messages: ChatShareMessage[]): string {
+  const firstTurn = messages[0]?.turnId;
+  const turn = messages.filter((message) => message.turnId === firstTurn);
+  for (const role of ["user", "assistant"]) {
+    for (const message of turn) {
+      if (message.role !== role) continue;
+      const line = firstPlainLine(messageText(message.content));
+      if (line) return line;
+    }
+  }
+  return NEUTRAL_SHARE_TITLE;
+}

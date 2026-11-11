@@ -30,7 +30,7 @@ import type {
   TraceSnapshot,
   TraceTokenUsage,
 } from "@rome/api-types/trace-segments";
-import type { ChatShareSnapshot, ChatShareMessage } from "../share-snapshot.js";
+import { type ChatShareSnapshot, type ChatShareMessage, shareTitleOf } from "../share-snapshot.js";
 import { createRegistryAppResolver } from "../registry-app-resolver.js";
 import {
   ensureWebchatProjectWorkspace,
@@ -2908,10 +2908,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       : ((await deps.webchatRepo.getLayout(sessionId)) ?? []);
     const layout = filterShareLayout(layoutSource, projectPath);
 
+    // A title the client sends wins. Otherwise a Concierge chat's share is
+    // named by what it shows, since its chat name ("Concierge") says nothing
+    // of it; any other chat by its name while it has one.
     const title =
       typeof body.title === "string" && body.title.trim()
         ? body.title.trim().slice(0, 200)
-        : session.name;
+        : !isConciergeChat(session) && session.name.trim()
+          ? session.name
+          : shareTitleOf(snapshot.messages);
 
     const id = generateShareToken();
     await deps.webchatRepo.createSharedChat({

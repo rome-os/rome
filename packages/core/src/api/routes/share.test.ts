@@ -125,6 +125,25 @@ describe("Share chat", () => {
     expect(JSON.stringify(payload)).not.toMatch(/PRIVATE-/);
   });
 
+  it("titles a share by the client's title, else a common chat by its name", async () => {
+    const sessionId = await seedTwoTurnSession();
+    const manage = createWebchatRuntime(deps).routes;
+    const share = async (body: Record<string, unknown>) =>
+      (
+        (await (
+          await manage.request(`/chat/sessions/${sessionId}/share`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ turnIds: ["turn-2"], ...body }),
+          })
+        ).json()) as { title: string }
+      ).title;
+    expect(await share({})).toBe("My chat");
+    expect(await share({ title: "  Picked by me " })).toBe("Picked by me");
+    await deps.webchatRepo.updateSessionName(sessionId, "");
+    expect(await share({})).toBe("second question");
+  });
+
   it("strips browser (desktop) widgets from the frozen layout", async () => {
     const sessionId = await seedTwoTurnSession();
     await deps.webchatRepo.saveLayout(sessionId, [
@@ -525,7 +544,12 @@ describe("Share chat", () => {
       }),
     });
     expect(created.status).toBe(201);
-    const { id } = (await created.json()) as { id: string };
+    const { id, title } = (await created.json()) as { id: string; title: string };
+    // Named by its first message, never by the chat's name.
+    expect(title).toBe("Plan my trip");
+    expect((await deps.webchatRepo.listSharedChatsBySession("topic"))[0]?.title).toBe(
+      "Plan my trip",
+    );
     const payload = (await (
       await shareRoutes(deps).request(`/share/${id}`)
     ).json()) as PublicSharePayload;
