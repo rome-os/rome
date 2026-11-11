@@ -7,10 +7,6 @@ import type { BackendTurnRunner, PreviewPayload, ThreadContext } from "@rome-os/
 import type { EventService } from "../../events/event-service.js";
 import type { AppLifecycleService } from "../lifecycle-service.js";
 import type { AppStoreReader } from "../store-service.js";
-import type { SendOutcome, SystemNotifyContent } from "../../lib/notify-client.js";
-import type { ConciergeOwner } from "../../concierge/owner.js";
-import { actionCaller, sendForCaller } from "./caller-notify.js";
-import type { MainBackendTurnRunner } from "./backend-turn.js";
 import { SpecSourceSchema } from "../lockfile.js";
 import { parseRemixSource } from "../remix-source.js";
 
@@ -26,12 +22,6 @@ const ApprovalCardParams = z.object({
     .custom<ThreadContext>((val) => typeof val === "object" && val !== null)
     .optional(),
 });
-
-// An optional sender-supplied body. `{}` (the legacy no-arg call) is
-// valid; a present body must be a string. `.strict()` so an unknown key on this
-// internal wire contract surfaces as an error rather than being silently
-// stripped — a typo'd param must not degrade to the default alert unnoticed.
-const NotifySendParams = z.object({ body: z.string().optional() }).strict();
 
 const ActionHasParams = z.object({ actionName: z.string().min(1) });
 const ActionValidateArgsParams = z.object({
@@ -114,16 +104,6 @@ const EventsSearchCatalogParams = z.object({
   match: z.record(z.string(), z.string()).optional(),
 });
 
-const SessionContinueParams = z.object({
-  agentName: z.string().min(1),
-  sessionId: z.string().min(1),
-  channel: z.string().min(1),
-  threadId: z.string().min(1),
-  channelUserId: z.string().optional(),
-  prompt: z.string(),
-  ownerKey: z.string().optional(),
-});
-
 export interface WorkerRpcServices {
   /** Event coordinator (bus + catalog). `events.publish` / `events.searchCatalog`
    * delegate the business logic here so it is shared with the main-process
@@ -143,26 +123,9 @@ export interface WorkerRpcServices {
    * one worker-local lazy stubs lack. Returns an error message, or null when
    * the args fit, the action declares no schema, or the action is unknown. */
   validateActionArgs: (name: string, args: Record<string, unknown>) => string | null;
-  /** Main-process backend-turn orchestrator. The `resume_session` action runs
-   * in a worker (a routine-fired root action → subprocess), but running the turn
-   * + delivering its reply needs main-only state (AgentSession registry, channel
-   * adapters, webchat runtime) — so `session.continue` runs it here. */
-  backendTurnRunner: Pick<MainBackendTurnRunner, "runAndDeliver">;
-  /** Main-process push sender. The `send_notification` action runs in
-   * a worker, but the durable instance token must never leave main — so
-   * `notify.send` reads the token and calls Rome Cloud's `/api/notify` here and
-   * returns only the classified `SendOutcome`. */
-  notify: { send(content?: SystemNotifyContent): Promise<SendOutcome> };
-  /** The one person a dashboard chat is private to, or null for a shared chat: a push it calls for rings them. */
-  privateOwnerOf: (chatId: string) => Promise<ConciergeOwner | null>;
   /** Puts an approval's card in the conversation it came from, recorded in
    *  that chat (`approvals.sendCard`). */
   sendApprovalCard: (approval: ApprovalCard) => Promise<void>;
-}
-
-/** The person and the dashboard chat behind an action's call across the worker boundary. */
-function callerOf(context: IpcCallContext | undefined) {
-  return actionCaller(context?.callerActionContext);
 }
 
 /** A method served to app workers: it takes the call's params and returns its result. */
@@ -197,22 +160,6 @@ export class WorkerRpcServer {
         "apps.setEnabled": (params) => this.handleAppsSetEnabled(params),
         "appStore.listListings": (params) => this.handleAppStoreListListings(params),
         "appStore.getListing": (params) => this.handleAppStoreGetListing(params),
-        // No params: the probe takes none. All policy (Rome Cloud check,
-        // countdown open) runs in the main-process service.
-        "session.continue": (params, context) => this.handleSessionContinue(params, context),
-        "notify.send": (params, context) => {
-          // The sender reads token/origin from main-process state; the only wire
-          // param is the optional body. Preserve the no-body call shape
-          // so an absent body is `send(undefined)`, not `send({})`. Whose
-          // phone it rings comes from the caller the IPC boundary captured.
-          const { body } = parseWorkerCallParams("notify.send", NotifySendParams, params);
-          return sendForCaller(
-            this.services.notify,
-            this.services.privateOwnerOf,
-            callerOf(context),
-            body !== undefined ? { body } : undefined,
-          );
-        },
       }),
     );
     for (const [method, handler] of Object.entries(calls)) {
@@ -300,18 +247,6 @@ export class WorkerRpcServer {
   private async handleAppStoreGetListing(params: unknown): Promise<unknown> {
     const parsed = parseWorkerCallParams("appStore.getListing", AppStoreGetListingParams, params);
     return await this.services.appStore.getListing(parsed);
-  }
-
-  private async handleSessionContinue(
-    params: unknown,
-    context?: IpcCallContext,
-  ): Promise<{ ok: true }> {
-    const turn = parseWorkerCallParams("session.continue", SessionContinueParams, params);
-    // The woken turn acts for the person of the action that woke it, as the
-    // IPC boundary captured them, such as the person whose reminder fired.
-    const actor = context?.callerActionContext?.actor;
-    await this.services.backendTurnRunner.runAndDeliver(turn, actor ? { actor } : undefined);
-    return { ok: true };
   }
 
   /**

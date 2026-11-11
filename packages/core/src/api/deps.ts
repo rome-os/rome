@@ -25,7 +25,7 @@ import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { WebhookInvocationsRepository } from "../apps/repositories/webhook-invocations.js";
 import type { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { ApprovalHandler } from "../apps/actions/approval-handler.js";
-import type { MainBackendTurnRunner } from "../apps/actions/backend-turn.js";
+import type { MainBackendTurnRunner } from "../app-host/backend-turn.js";
 import type { RoutineEngine } from "../routines/engine.js";
 import type { EventCatalog } from "../event-catalog.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
@@ -38,7 +38,7 @@ import type { RomeCloudListingClient } from "../apps/rome-cloud-listing-client.j
 import type { AppStoreReader } from "../apps/store-service.js";
 import type { ActionRegistryImpl } from "../apps/actions/registry.js";
 import type { Agent, AgentCatalog } from "../agent/index.js";
-import type { AgentLoader } from "../apps/agent-loader.js";
+import type { AgentLoader } from "../app-host/agent-loader.js";
 import type { SkillCatalog, SubagentCalls } from "../agent/index.js";
 import type { FeedbackRelay } from "../lib/feedback-client.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
@@ -73,7 +73,7 @@ import type { AgentRunnerInterface } from "../core/types.js";
 import type { ConversationTitleGenerator } from "../core/conversation-title.js";
 import type { ComputerUseService } from "../desktops/computer-use.js";
 import type { WechatApp } from "../connections/kinds/wechat-user/wechat-app.js";
-import type { AppConnectionsContextFactory } from "../connections/app-connections.js";
+import type { AppConnectionsContextFactory } from "../apps/app-connections-port.js";
 
 export interface ApiConfig {
   port: number;

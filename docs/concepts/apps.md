@@ -79,6 +79,7 @@ Apps consume three supported packages published under the `@rome-os/` scope: `@r
 **Contracts:**
 
 - These three packages are the entire supported app-author surface. Rome also publishes internal packages for its own cross-repository use. Apps must not depend on them.
+- Apps defines what an app receives from `@rome-os/app-runtime` and runs the app, without depending on the contexts that supply it. The app host builds each part of that surface from Chats, People, Routines, Connections and the other contexts. It may depend on any of them, and none of them depends on it.
 
 **Not to be confused with:**
 
@@ -287,7 +288,7 @@ Hooks are event handlers that trigger behavior in response to system events. An 
 
 The primary hook type is **channel-message**, the entry point for all incoming messages. It fires when a message arrives through any of Rome's [accounts](../domains/chats.md#account) and triggers the message-handling [action](actions.md), which runs the [policy engine](messaging.md#policies) to decide routing. Its `createHook(deps)` receives `ChannelMessageHookDeps` from `@rome-os/app-runtime`, and the hook hears messages through `deps.channels`, one subscription per channel that can receive.
 
-Apps can also observe the agent turn lifecycle with the **agent-turn-started** and **agent-turn-finished** hooks. Lifecycle payloads carry stable session and turn ids, agent name, channel thread context, timing, metrics, status, and final output text where available. The agent context tells Rome a turn started or ended through the `TurnLifecycle` port in [`packages/core/src/agent/domain/turn-lifecycle.ts`](../../packages/core/src/agent/domain/turn-lifecycle.ts), and `AppTurnHooks` in [`packages/core/src/apps/app-turn-hooks.ts`](../../packages/core/src/apps/app-turn-hooks.ts) delivers it to these hooks.
+Apps can also observe the agent turn lifecycle with the **agent-turn-started** and **agent-turn-finished** hooks. Lifecycle payloads carry stable session and turn ids, agent name, channel thread context, timing, metrics, status, and final output text where available. The agent context tells Rome a turn started or ended through the `TurnLifecycle` port in [`packages/core/src/agent/domain/turn-lifecycle.ts`](../../packages/core/src/agent/domain/turn-lifecycle.ts), and `AppTurnHooks` in [`packages/core/src/app-host/app-turn-hooks.ts`](../../packages/core/src/app-host/app-turn-hooks.ts) delivers it to these hooks.
 
 An app sets up the state it depends on, such as a routine it must always have, with the **app-started** hook. An *app start* is one installed bundle of one enabled app becoming active in the daemon. Boot starts every enabled app, and an install, an upgrade, or a re-enable starts that app again. A re-install of identical content is not a new start. Rome calls the hook's `onAppStarted(event)` once per app start, and `event` carries the app id and its manifest version.
 

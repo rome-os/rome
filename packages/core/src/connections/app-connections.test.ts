@@ -5,7 +5,7 @@ import type { ChatId } from "@rome-os/app-runtime";
 import { ActionEngine } from "../apps/actions/engine.js";
 import { sendApprovalCard } from "../apps/actions/approval-card.js";
 import { ApprovalHandler } from "../apps/actions/approval-handler.js";
-import type { BackendSessionTask } from "../apps/actions/backend-turn.js";
+import type { BackendSessionTask } from "../apps/actions/session-runner.js";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { createRomeAppContext, type RomeAppRuntimeServices } from "../apps/context.js";
 import type { AppCatalog } from "../apps/catalog.js";

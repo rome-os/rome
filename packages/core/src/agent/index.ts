@@ -266,6 +266,3 @@ export {
 } from "./infrastructure/model/anthropic/claude-login-code.js";
 export { createClaudeLoginWatcher } from "./infrastructure/model/anthropic/claude-login-watch.js";
 export { fetchRomeCredits } from "./infrastructure/model/codex/rome-credits.js";
-
-// What app workers call on the main process.
-export { agentWorkerCalls } from "./for-apps.js";

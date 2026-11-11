@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { createLogger } from "../../logger.js";
-import { AppApiDispatcher, type RomeAppCaller } from "../../apps/api.js";
+import { AppApiDispatcher, type RomeAppCaller } from "../../app-host/api.js";
 import { InvalidAppApiPathError, decodeAppApiPath, decodeAppIdPathSegment } from "../helpers.js";
 import type { ApiDeps } from "../deps.js";
 import { stripInternalHeaders } from "../../relay/protocol.js";

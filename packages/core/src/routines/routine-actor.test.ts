@@ -7,7 +7,7 @@ import type { SessionActor } from "../access/session-actor.js";
 import { runWithSessionActor } from "../access/session-actor.js";
 import type { ActionEngine, ActionRunContext } from "../apps/actions/engine.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
-import { sendForCaller } from "../apps/actions/caller-notify.js";
+import { sendForCaller } from "../app-host/caller-notify.js";
 import { privateOwnerOf } from "../concierge/privacy.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";

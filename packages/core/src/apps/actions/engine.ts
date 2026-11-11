@@ -100,10 +100,10 @@ export function resolveActionWorkerEntryPath(moduleUrl: string): string {
   if (basename(modulePath) === `index${workerExtension}`) {
     const moduleDir = dirname(modulePath);
     const distDir = basename(moduleDir) === "daemon" ? dirname(moduleDir) : moduleDir;
-    return resolve(distDir, "apps", "actions", `worker-bootstrap${workerExtension}`);
+    return resolve(distDir, "app-host", `worker-bootstrap${workerExtension}`);
   }
 
-  return fileURLToPath(new URL(`./worker-bootstrap${workerExtension}`, moduleUrl));
+  return fileURLToPath(new URL(`../../app-host/worker-bootstrap${workerExtension}`, moduleUrl));
 }
 
 const WORKER_ENTRY_PATH = resolveActionWorkerEntryPath(import.meta.url);

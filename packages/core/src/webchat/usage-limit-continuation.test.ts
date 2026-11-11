@@ -6,16 +6,13 @@ import {
   type ModelAccountReport,
   type ModelAccounts,
 } from "../agent/index.js";
-import {
-  createBackendTurnRunner,
-  type MainBackendTurnRunner,
-} from "../apps/actions/backend-turn.js";
+import { createBackendTurnRunner, type MainBackendTurnRunner } from "../app-host/backend-turn.js";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { guardianAuth, romeSessions, sessions } from "../db/schema.js";
 import { createMockAgentRunner, createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 import { continuationActor } from "./continuation-actor.js";
-import { sendForCaller } from "../apps/actions/caller-notify.js";
+import { sendForCaller } from "../app-host/caller-notify.js";
 import type { SessionActor } from "../access/session-actor.js";
 import { continueInterruptedTurns } from "./restart-continuation.js";
 import {

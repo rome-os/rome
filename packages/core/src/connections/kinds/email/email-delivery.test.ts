@@ -7,7 +7,7 @@ import type { ChannelsService, ChatId, ChatRepository } from "@rome-os/app-runti
 import { executeSendMessage } from "../../../../../../rome_apps/system/src/actions/send-message/index.js";
 import type { SendMessageEmailInput } from "../../../../../../rome_apps/system/src/actions/send-message/types.js";
 import { DEFAULT_RPC_TIMEOUT_MS, IpcRpcTimeoutError } from "../../../apps/actions/ipc.js";
-import { ChannelsServiceProxy } from "../../../apps/actions/service-proxies.js";
+import { ChannelsServiceProxy } from "../../../app-host/service-proxies.js";
 import { setWorkerRpcInProcessDispatcher } from "../../../apps/actions/worker-rpc-client.js";
 import type { PeopleRepository } from "../../../db/repositories/people.js";
 import type { SettingsRepository } from "../../../db/repositories/settings.js";

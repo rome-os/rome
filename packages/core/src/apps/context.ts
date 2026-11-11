@@ -21,17 +21,14 @@ import type { ActionResult } from "./actions/types.js";
 import type { DrizzleDb } from "../db/index.js";
 import { toRoutine } from "../db/repositories/routines.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
-import type { Routine } from "../routines/types.js";
+import type { Routine } from "@rome-os/app-runtime";
 import { createAppLogger, type Logger } from "../logger.js";
 import type { AppCatalog } from "./catalog.js";
 import type { ResolvedApp } from "./state.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { RomeAppViewer } from "../access/visitor-session.js";
 import type { FavorService } from "../favors/index.js";
-import {
-  DeniedAppConnections,
-  type AppConnectionsContextFactory,
-} from "../connections/app-connections.js";
+import { DeniedAppConnections, type AppConnectionsContextFactory } from "./app-connections-port.js";
 
 export interface AppDbContext {
   connection: DrizzleDb;
