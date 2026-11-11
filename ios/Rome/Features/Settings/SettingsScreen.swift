@@ -278,24 +278,27 @@ struct SettingsScreen: View {
     private var accountCard: some View {
         Button(action: onInstances) {
             HStack(spacing: 14) {
-                InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host, account: workspace.backend.account, size: 48)
+                InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host, account: workspace.backend.account, size: 44)
                 VStack(alignment: .leading, spacing: 1) {
-                    HStack(spacing: 6) {
-                        Text(workspace.accountLabel)
-                            .romeFont(17, .semibold)
-                            .foregroundStyle(Palette.fg)
-                            .lineLimit(1)
-                        if model.currentInstance?.isVisitor == true { VisitorBadge() }
-                    }
+                    // An email keeps its start and its domain.
+                    Text(workspace.accountLabel)
+                        .romeFont(16, .semibold)
+                        .foregroundStyle(Palette.fg)
+                        .lineLimit(1)
+                        .truncationMode(workspace.accountLabel.contains("@") ? .middle : .tail)
                     HStack(spacing: 6) {
                         Circle().fill(Palette.success).frame(width: 7, height: 7)
-                        // The version first: a long domain is cut, never the version.
+                        // A visitor's role leads the line, in place of a badge.
+                        if model.currentInstance?.isVisitor == true {
+                            (Text("Visitor") + Text(verbatim: " ·")).fixedSize()
+                        }
+                        // The version before the host: a long domain is cut, never the version.
                         if let version = InstanceLine.version(model.update.runningVersion) {
                             Text(verbatim: "\(version) ·").fixedSize()
                         }
                         Text(verbatim: workspace.host).lineLimit(1).truncationMode(.middle)
                     }
-                    .romeFont(14)
+                    .romeFont(13)
                     .foregroundStyle(Palette.sub)
                 }
                 Spacer(minLength: 0)

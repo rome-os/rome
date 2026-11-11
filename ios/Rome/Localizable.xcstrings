@@ -2623,16 +2623,6 @@
         }
       }
     },
-    "Running" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "运行中"
-          }
-        }
-      }
-    },
     "Running…" : {
       "localizations" : {
         "zh-Hans" : {
