@@ -207,23 +207,24 @@ The report links to sources alongside the analysis. Follow those links when you 
     ],
   },
   {
-    // The long answers the Concierge sends, in a common chat.
+    // The long answers the Concierge sends, in a common chat. Dated before
+    // the other chats, so it does not lead the chat list the e2e specs walk.
     id: "mock-chat-long-answers",
     name: "Kyoto trip and the week's releases",
     project: "default",
     turns: [
       {
-        at: "2026-09-16T09:10:00.000Z",
+        at: "2026-06-01T09:10:00.000Z",
         prompt: "帮我排一下京都三天的行程",
         reply: CONCIERGE_TRIP_PLAN,
       },
       {
-        at: "2026-09-16T09:30:00.000Z",
+        at: "2026-06-01T09:30:00.000Z",
         prompt: "What shipped this week?",
         reply: CONCIERGE_RELEASE_DIGEST,
       },
       {
-        at: "2026-09-16T09:32:00.000Z",
+        at: "2026-06-01T09:32:00.000Z",
         prompt: "Thanks!",
         reply: "Any time.",
       },

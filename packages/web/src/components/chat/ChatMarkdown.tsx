@@ -31,8 +31,8 @@ function ChatInlineCode({ children, className, node: _node, ...props }: ChatInli
 /**
  * The text of a chat message, wherever one renders: in a bubble, as a bare
  * final answer, in a thread, or on a share page. It sets the kit's message
- * type (`.rome-markdown-message`: small headings, a lighter bold, a tighter
- * rhythm); Markdown that is not a message keeps the kit's default. Chat links
+ * type (`.rome-markdown-message`: small headings, a loose line, and blocks
+ * one body size apart); Markdown that is not a message keeps the kit's default. Chat links
  * open in the workspace, and fenced blocks can be collapsed. Chat entries
  * import this instead of `@/components/markdown`.
  */

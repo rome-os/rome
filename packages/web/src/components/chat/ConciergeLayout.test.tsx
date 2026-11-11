@@ -338,7 +338,13 @@ describe("Concierge layout", () => {
       const long = bubbleOf("The long one.");
       expect(long.className).toBe(short.className);
       const classes = long.className.split(/\s+/);
-      expect(classes).toEqual(expect.arrayContaining(["w-fit", "max-w-2xl", "bg-surface-muted"]));
+      expect(classes).toEqual(
+        expect.arrayContaining([
+          "w-fit",
+          "max-w-[min(100%,var(--container-2xl))]",
+          "bg-surface-muted",
+        ]),
+      );
       expect(long.querySelector(".rome-markdown")?.classList).toContain("rome-markdown-message");
     });
 
