@@ -163,6 +163,10 @@ struct LoginView: View {
             .frame(height: 44)
     }
 
+    /// The shared browser session, so the Rome Cloud and Google sign-in the
+    /// guardian already has in Safari is offered instead of an empty form.
+    /// Signing out here does not end that sign-in: Rome Cloud's authorize page
+    /// names the account and offers another.
     private func signIn() {
         let request = model.beginSignIn()
         Task {
@@ -171,7 +175,7 @@ struct LoginView: View {
                 let url = try await webAuthenticationSession.authenticate(
                     using: request.authorizeURL,
                     callbackURLScheme: request.callbackScheme,
-                    preferredBrowserSession: .ephemeral
+                    preferredBrowserSession: .shared
                 )
                 result = .success(url)
             } catch {
