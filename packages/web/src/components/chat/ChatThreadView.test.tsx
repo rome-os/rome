@@ -80,12 +80,9 @@ function host(children: ReactNode) {
 function ThreadsDraft({
   onDraft,
   children,
-  threaded = ["a1"],
 }: {
   onDraft: (draft: ReplyDraft) => void;
   children: ReactNode;
-  /** The messages the timeline shows in a chat thread. */
-  threaded?: string[];
 }) {
   const draft = useReplyDraftState({
     chatId: "concierge",
@@ -94,18 +91,32 @@ function ThreadsDraft({
     jump: () => {},
     focusComposer: () => {},
     threads: true,
-    inThread: (messageId) => threaded.includes(messageId),
   });
   onDraft(draft);
   return <ReplyDraftProvider value={draft}>{children}</ReplyDraftProvider>;
 }
 
 describe("the reply draft of a chat that keeps chat threads", () => {
-  it("opens the thread view on Reply, and closing it clears the reply", () => {
+  it("opens only the reply bar on Reply, even to a message in a thread", () => {
+    let draft!: ReplyDraft;
+    render(
+      <ThreadsDraft onDraft={(next) => (draft = next)}>
+        <ReplyBar />
+      </ThreadsDraft>,
+    );
+
+    act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
+
+    expect(draft.thread).toBeNull();
+    expect(draft.target?.messageId).toBe("a1");
+    expect(document.querySelector("[data-reply-bar]")?.textContent).toContain("Which day?");
+  });
+
+  it("opens the thread view from its label, and closing it clears the reply", () => {
     let draft!: ReplyDraft;
     render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
 
-    act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
+    act(() => draft.openThread({ messageId: "a1", author: "agent", preview: "Which day?" }));
     expect(draft.thread).toBe("a1");
     expect(draft.target?.messageId).toBe("a1");
 
@@ -117,7 +128,7 @@ describe("the reply draft of a chat that keeps chat threads", () => {
   it("keeps the timeline on Reply to a message in no thread, with the quote bar on the main composer", () => {
     let draft!: ReplyDraft;
     render(
-      <ThreadsDraft onDraft={(next) => (draft = next)} threaded={[]}>
+      <ThreadsDraft onDraft={(next) => (draft = next)}>
         <ReplyBar />
       </ThreadsDraft>,
     );
@@ -132,14 +143,10 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     expect(draft.target).toBeNull();
   });
 
-  it("keeps the thread view open on Reply to a message older than the loaded timeline", () => {
+  it("keeps the thread view open on Reply inside it, to a message older than the loaded timeline too", () => {
     let draft!: ReplyDraft;
-    render(
-      <ThreadsDraft onDraft={(next) => (draft = next)} threaded={["a1"]}>
-        {null}
-      </ThreadsDraft>,
-    );
-    act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
+    render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
+    act(() => draft.openThread({ messageId: "a1", author: "agent", preview: "Which day?" }));
     // "old" is in the open thread, but not in the timeline's loaded pages.
     act(() => draft.set({ messageId: "old", author: "guardian", preview: "Move my 3pm" }));
 
@@ -170,22 +177,18 @@ describe("the reply draft of a chat that keeps chat threads", () => {
 
   it("puts a failed send's reply and thread back only when nothing changed since the send", () => {
     let draft!: ReplyDraft;
-    render(
-      <ThreadsDraft onDraft={(next) => (draft = next)} threaded={["a1", "b1"]}>
-        {null}
-      </ThreadsDraft>,
-    );
+    render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
     const a = { messageId: "a1", author: "agent" as const, preview: "Which day?" };
     const b = { messageId: "b1", author: "agent" as const, preview: "Flights?" };
 
-    // Sent from thread A; the guardian picks B before A's send fails.
-    act(() => draft.set(a));
+    // Sent from thread A; the guardian opens B before A's send fails.
+    act(() => draft.openThread(a));
     let sentAt = 0;
     act(() => {
       sentAt = draft.clear();
     });
-    act(() => draft.set(b));
-    act(() => draft.restore(a, sentAt));
+    act(() => draft.openThread(b));
+    act(() => draft.restore(a, sentAt, "a1"));
     expect([draft.target?.messageId, draft.thread]).toEqual(["b1", "b1"]);
 
     // B picked and dropped again: the draft stays closed.
@@ -196,16 +199,24 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     act(() => {
       draft.clear();
     });
-    act(() => draft.restore(a, sentAt));
+    act(() => draft.restore(a, sentAt, "a1"));
     expect([draft.target, draft.thread]).toEqual([null, null]);
 
     // Nothing changed: A comes back with its thread.
+    act(() => draft.openThread(a));
+    act(() => {
+      sentAt = draft.clear();
+    });
+    act(() => draft.restore(a, sentAt, "a1"));
+    expect([draft.target?.messageId, draft.thread]).toEqual(["a1", "a1"]);
+
+    // A reply sent from the timeline comes back with the reply bar alone.
     act(() => draft.set(a));
     act(() => {
       sentAt = draft.clear();
     });
     act(() => draft.restore(a, sentAt));
-    expect([draft.target?.messageId, draft.thread]).toEqual(["a1", "a1"]);
+    expect([draft.target?.messageId, draft.thread]).toEqual(["a1", null]);
   });
 
   it("keeps the reply bar at every width while the thread is open, and closes the thread with its ✕", () => {
@@ -215,7 +226,7 @@ describe("the reply draft of a chat that keeps chat threads", () => {
         <ReplyBar />
       </ThreadsDraft>,
     );
-    act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
+    act(() => draft.openThread({ messageId: "a1", author: "agent", preview: "Which day?" }));
     expect(draft.thread).toBe("a1");
     // The phone width is the same dashboard: no class hides the bar there.
     expect(container.querySelector("[data-reply-bar]")!.className).not.toMatch(/hidden/);

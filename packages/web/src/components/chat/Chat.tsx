@@ -116,7 +116,6 @@ import {
   ChatThreadsProvider,
   placeLive,
   type ThreadPlacement,
-  placed,
   useChatThreadsValue,
 } from "@/components/chat/reply/chat-threads";
 import {
@@ -802,7 +801,6 @@ export function Chat({
     return onConciergeJump((messageId) => void showSourceMessage(messageId));
   }, [concierge, showSourceMessage]);
 
-  const threadedRef = useRef<ReadonlySet<string>>(new Set());
   const displayedMessageIds = useMemo(
     () => new Set(displayMessages.map((message) => message.id)),
     [displayMessages],
@@ -813,10 +811,9 @@ export function Chat({
     messageIds: displayedMessageIds,
     jump: jumpToMessage,
     focusComposer: () => composerRef.current?.focus(),
-    // A Concierge chat keeps chat threads: Reply on a message in one, and a
-    // quote, open the thread view.
+    // A Concierge chat keeps chat threads. Only a thread label opens the
+    // thread view; Reply opens the reply bar alone.
     threads: concierge,
-    inThread: (messageId) => threadedRef.current.has(messageId),
   });
 
   // Share chat picks every turn in a common chat. A Concierge chat holds its
@@ -2338,12 +2335,6 @@ export function Chat({
     displayMessages.map((message) => [message.id, message.chatThreadId ?? null]),
   );
   const chatThreads = useChatThreadsValue(displayMessages, rethreaded, liveThreadTitles);
-  // Every message in a chat thread, roots included, as the timeline shows them now.
-  threadedRef.current = new Set(
-    placed(displayMessages, rethreaded).flatMap((message) =>
-      message.chatThreadId ? [message.id, message.chatThreadId] : [],
-    ),
-  );
   const conciergeHeader = concierge ? (
     <>
       {threadOpen ? null : conciergeHeaderWith(navbarActions)}
