@@ -33,7 +33,6 @@ export function useStatusReaction(msg: ChatMessage): ConciergeStatusReaction | n
 
 const EMOJI: Record<ConciergeStatusReaction, string> = {
   working: "👀",
-  done: "✅",
   failed: "⚠️",
 };
 

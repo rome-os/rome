@@ -70,7 +70,7 @@ export interface ReactionTarget {
  * How one task's work for a message stands. A stopped task counts toward no
  * reaction (docs/domains/chats.md#status-reaction).
  */
-export type TaskReactionState = ConciergeStatusReaction | "stopped";
+export type TaskReactionState = ConciergeStatusReaction | "done" | "stopped";
 
 /** How a task's work for its messages ends. */
 export type TaskReactionEnd = Exclude<TaskReactionState, "working">;
@@ -84,13 +84,13 @@ export type ReactionListener = (
 /**
  * One reaction for a message from the work of every task it started or was
  * passed on to that was not stopped: working while any of them works, then
- * failed when any failed, else done. None when every one was stopped.
+ * failed when any failed. None once all of them are done, since the reply
+ * says so, nor when every one was stopped.
  */
 export function reactionOf(states: readonly TaskReactionState[]): ConciergeStatusReaction | null {
   const counted = states.filter((state) => state !== "stopped");
-  if (counted.length === 0) return null;
   if (counted.includes("working")) return "working";
-  return counted.includes("failed") ? "failed" : "done";
+  return counted.includes("failed") ? "failed" : null;
 }
 
 /**

@@ -3810,7 +3810,7 @@ describe("Concierge status reactions", () => {
   });
 
   it.each([
-    ["completed", "done"],
+    ["completed", null],
     ["error", "failed"],
     ["interrupted", null],
     ["stopped", "failed"],
@@ -3848,7 +3848,7 @@ describe("Concierge status reactions", () => {
     expect(await reactionOf(s, "g1")).toBe("working");
     s.chats.activeTurns = () => [];
     await finishTask(s, chatId);
-    expect(await reactionOf(s, "g1")).toBe("done");
+    expect(await reactionOf(s, "g1")).toBeNull();
   });
 
   it("marks a message passed on to a task, and settles only the work still open", async () => {
@@ -3865,7 +3865,7 @@ describe("Concierge status reactions", () => {
     expect(seen).toEqual([["g2", "working"]]);
 
     await finishTask(s, chatId, "error");
-    expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual(["done", "failed"]);
+    expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, "failed"]);
   });
 
   it("marks only the message chat_send names when the guardian sent several", async () => {
@@ -3905,7 +3905,7 @@ describe("Concierge status reactions", () => {
   });
 
   it.each([
-    ["completed", "done"],
+    ["completed", null],
     ["error", "failed"],
   ] as const)("a message whose other task was stopped takes the reaction of the one that ended %s", async (status, reaction) => {
     const s = setup({ said: false });
@@ -3928,7 +3928,7 @@ describe("Concierge status reactions", () => {
     expect(await reactionOf(s, "g1")).toBe("working");
     s.chats.activeTurns = () => [];
     await finishTask(s, chatId);
-    expect(await reactionOf(s, "g1")).toBe("done");
+    expect(await reactionOf(s, "g1")).toBeNull();
   });
 
   it("a stopped task works again when it is given more words", async () => {
@@ -3942,7 +3942,7 @@ describe("Concierge status reactions", () => {
     await s.tool("chat_send", { chatId, text: "Go on" });
     expect(await reactionOf(s, "g2")).toBe("working");
     await finishTask(s, chatId);
-    expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, "done"]);
+    expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, null]);
   });
 
   it("settles when the Concierge closes the row, as after a question the guardian answered", async () => {
@@ -3950,7 +3950,7 @@ describe("Concierge status reactions", () => {
     guardianSays(s, "g1");
     const { taskId } = await started(s);
     await s.taskRepo.upsertMany([{ id: taskId, state: "done" }]);
-    expect(await reactionOf(s, "g1")).toBe("done");
+    expect(await reactionOf(s, "g1")).toBeNull();
   });
 
   it("clears the reaction when the Concierge drops the row, as a stop does", async () => {
@@ -3966,7 +3966,7 @@ describe("Concierge status reactions", () => {
     guardianSays(s, "g1");
     const { taskId } = await started(s);
     await s.taskRepo.settleReactions(taskId, "done");
-    expect(await reactionOf(s, "g1")).toBe("done");
+    expect(await reactionOf(s, "g1")).toBeNull();
     expect(s.pushes).toEqual([]);
   });
 });

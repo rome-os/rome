@@ -6257,17 +6257,23 @@ describe("Webchat API", () => {
       expect(await working).toContain(
         `data: ${JSON.stringify({ sessionId: "topic", messageId: "g1", statusReaction: "working" })}`,
       );
-      const done = readSseUntil(events, '"statusReaction":"done"');
+      // Finished work shows none: the event carries null.
+      const cleared = readSseUntil(events, '"statusReaction":null');
       await repo.settleReactions(task.id, "done");
-      expect(await done).toContain('"messageId":"g1"');
+      expect(await cleared).toContain('"messageId":"g1"');
+      const [retry] = await repo.upsertMany([{ title: "Retry", state: "doing" }]);
+      await repo.markWorking(retry.id, { chatId: "topic", messageKey: "g1" });
+      const failed = readSseUntil(events, '"statusReaction":"failed"');
+      await repo.settleReactions(retry.id, "failed");
+      expect(await failed).toContain('"messageId":"g1"');
       await events.cancel();
 
       const listed = (await (await app.request("/chat/sessions/topic/messages")).json()) as {
         id: string;
         statusReaction?: string;
       }[];
-      // Only the message a task worked for has one; the other carries no field.
-      expect(listed.find((m) => m.id === "g1")?.statusReaction).toBe("done");
+      // Only the message a task failed for has one; the other carries no field.
+      expect(listed.find((m) => m.id === "g1")?.statusReaction).toBe("failed");
       expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("statusReaction");
     });
 

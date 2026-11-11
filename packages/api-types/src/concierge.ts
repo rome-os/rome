@@ -16,10 +16,11 @@ export type ConciergeTaskState = (typeof CONCIERGE_TASK_STATES)[number];
 
 /**
  * How the work a guardian message started stands, as its status reaction in a
- * Concierge chat shows it (docs/domains/chats.md#status-reaction). Rome sets
- * it, never the Concierge.
+ * Concierge chat shows it (docs/domains/chats.md#status-reaction): working,
+ * or failed. Work that finished shows none, since the reply says so. Rome
+ * sets it, never the Concierge.
  */
-export const CONCIERGE_STATUS_REACTIONS = ["working", "done", "failed"] as const;
+export const CONCIERGE_STATUS_REACTIONS = ["working", "failed"] as const;
 export type ConciergeStatusReaction = (typeof CONCIERGE_STATUS_REACTIONS)[number];
 
 /** A message's status reaction changed (`message_status_reaction`). Null: it has none. */

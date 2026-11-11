@@ -101,8 +101,8 @@ describe("Concierge status reaction", () => {
 
   it("follows the live reaction once one arrives", () => {
     const { container, rerender } = render(transcript());
-    rerender(transcript(new Map([["weather", "done"]])));
-    expect(badges(container)).toEqual([["weather", "done", "✅"]]);
+    rerender(transcript(new Map([["weather", "failed"]])));
+    expect(badges(container)).toEqual([["weather", "failed", "⚠️"]]);
     rerender(
       transcript(
         new Map([
@@ -120,8 +120,16 @@ describe("Concierge status reaction", () => {
   });
 
   it("reads the live event the server sends, and refuses a value it does not know", () => {
-    const event = { sessionId: "concierge", messageId: "weather", statusReaction: "done" };
+    const event = { sessionId: "concierge", messageId: "weather", statusReaction: "failed" };
     expect(messageStatusReactionSchema.parse(event)).toEqual(event);
+    expect(messageStatusReactionSchema.parse({ ...event, statusReaction: null })).toEqual({
+      ...event,
+      statusReaction: null,
+    });
+    // Finished work shows no mark, so there is no "done".
+    expect(
+      messageStatusReactionSchema.safeParse({ ...event, statusReaction: "done" }).success,
+    ).toBe(false);
     expect(
       messageStatusReactionSchema.safeParse({ ...event, statusReaction: "thumbs_up" }).success,
     ).toBe(false);
