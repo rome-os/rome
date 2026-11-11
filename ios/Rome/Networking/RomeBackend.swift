@@ -66,6 +66,8 @@ protocol RomeBackend: AnyObject, Sendable {
     /// The Concierge's own name, as the dashboard shows it (`agentName` in
     /// `GET /settings`); nil when none is set or it cannot be read.
     func agentName() async -> String?
+    /// Shares one message as a public link to a snapshot of its text.
+    func shareMessage(sessionId: String, messageId: String) async throws -> SharedMessage
     /// Whether this session is the instance's guardian, not a visitor.
     func isGuardian() async -> Bool
     /// The instance's apps, every origin; `AppLinks.mine` picks the guardian's.
@@ -224,6 +226,10 @@ final class LiveBackend: RomeBackend {
         try await client.get("/chat/sessions/search", query: [URLQueryItem(name: "q", value: query)])
     }
 
+    func shareMessage(sessionId: String, messageId: String) async throws -> SharedMessage {
+        try await client.post("/chat/sessions/\(escape(sessionId))/messages/\(escape(messageId))/share", as: SharedMessage.self)
+    }
+
     func agentName() async -> String? {
         guard let settings: JSONValue = try? await client.get("/settings", reportsUnauthorized: false) else { return nil }
         return AgentName.display(settings["agentName"]?.string)
@@ -343,6 +349,8 @@ extension RomeBackend {
     var account: AccountStamp { .unchecked }
 
     func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply { throw APIError.notFound }
+    /// As an instance before message links answers: no such route.
+    func shareMessage(sessionId: String, messageId: String) async throws -> SharedMessage { throw APIError.server(status: 404, message: nil) }
     func connectors() async throws -> [ConnectorState] { [] }
     func agentName() async -> String? { nil }
     func pendingApprovals() async throws -> [PendingApproval] { [] }

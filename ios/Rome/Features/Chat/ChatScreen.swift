@@ -217,7 +217,7 @@ struct ConciergeRow: View {
         let onReply: (() -> Void)? = reply && !inThread
             ? row.messageId.map { id in { store.reply(to: id) } }
             : nil
-        return BubbleMenu(date: message?.date, onReply: onReply, inThread: inThread)
+        return BubbleMenu(date: message?.date, onReply: onReply, inThread: inThread, share: BubbleMenu.share(for: message))
     }
 
     var body: some View {

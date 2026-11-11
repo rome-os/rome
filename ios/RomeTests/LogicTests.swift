@@ -494,6 +494,45 @@ final class StubBackend: RomeBackend {
     }
 }
 
+/// Share on a message: a link to its snapshot, as the web shares it
+/// (rome-os/rome#1983), or its text on an instance without the route.
+@MainActor
+@Suite struct MessageShareTests {
+    private let origin = URL(string: "https://me.romeos.cc")!
+
+    @Test func theLinkIsOnTheInstancesOrigin() {
+        let made = MessageSharer.outcome(.success(SharedMessage(id: "s1", url: "/share/abc", title: "Milo")), origin: origin)
+        #expect(made == .link(URL(string: "https://me.romeos.cc/share/abc")!, title: "Milo"))
+    }
+
+    /// An instance without the route shares the text, as before; the route's
+    /// own refusal is said, never hidden behind the text.
+    @Test func anOlderInstanceSharesTheText() {
+        #expect(MessageSharer.outcome(.failure(APIError.server(status: 404, message: nil)), origin: origin) == .text)
+        #expect(MessageSharer.outcome(.failure(APIError.server(status: 405, message: nil)), origin: origin) == .text)
+        #expect(MessageSharer.outcome(.failure(APIError.server(status: 404, message: "Message not found")), origin: origin) == .failed)
+        #expect(MessageSharer.outcome(.failure(APIError.server(status: 400, message: "The message has no text to share")), origin: origin) == .failed)
+        #expect(MessageSharer.outcome(.failure(APIError.network), origin: origin) == .failed)
+    }
+
+    @Test func theFallbackOpensTheSheetWithTheText() async {
+        let sharer = MessageSharer(backend: FakeBackend(), origin: origin)
+        var shown: [Any] = []
+        sharer.present = { shown = $0 }
+        await sharer.share(sessionId: "s", messageId: "m", text: "hello")
+        #expect(shown.first as? String == "hello")
+        #expect(sharer.state == .idle)
+    }
+
+    /// A stored message shares its link; one not sent yet has no Share.
+    @Test func aPendingMessageHasNoShare() {
+        let stored = ChatMessage(id: "m1", sessionId: "server-chat", role: "user", content: "[]", createdAt: "2026-11-10T10:00:00Z")
+        #expect(BubbleMenu.share(for: stored) == .link(sessionId: "server-chat", messageId: "m1"))
+        #expect(BubbleMenu.share(for: nil) == .text)
+        #expect(BubbleMenu(share: .link(sessionId: "s", messageId: "m")).unsent.share == .none)
+    }
+}
+
 /// The chat on screen, which Chat's read marks, the server's watch and push
 /// banners all go by.
 @MainActor

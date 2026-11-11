@@ -184,7 +184,8 @@ struct TaskChatScreen: View {
 
     /// A task chat's bubbles: the time, Copy and Share; no threads to reply in.
     private func menu(_ row: TranscriptRow) -> BubbleMenu {
-        BubbleMenu(date: row.messageId.flatMap(store.message)?.date)
+        let message = row.messageId.flatMap(store.message)
+        return BubbleMenu(date: message?.date, share: BubbleMenu.share(for: message))
     }
 
     /// Task chats space every block by 12 pt, as on the board; bubbles in a run keep 3 pt.

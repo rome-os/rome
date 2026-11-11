@@ -130,6 +130,7 @@ struct MainShell: View {
                     }
                 }
                 .environment(\.chatLinkOpener, openChatLink)
+                .environment(\.messageSharer, workspace.sharer)
                 .instancePageSheet(workspace: workspace, url: $page)
                 .environment(\.isVisitor, workspace.isVisitor)
                 // Pushed aside, the page becomes a card of its own color, following the drag.
@@ -137,6 +138,8 @@ struct MainShell: View {
                 // Over the page, so beside a pinned drawer they sit above the chat.
                 // The page reaches under the status bar; they start below it.
                 .overlay(alignment: .top) { banners.padding(.top, geometry.safeAreaInsets.top) }
+                // A message's link being made, under the header.
+                .overlay(alignment: .top) { MessageShareStatus(sharer: workspace.sharer).padding(.top, geometry.safeAreaInsets.top + 112) }
                 .frame(width: geometry.size.width - column, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
                 .clipShape(RoundedRectangle(cornerRadius: 44 * progress, style: .continuous))
                 .overlay {
