@@ -175,7 +175,6 @@ struct StackGameScreen: View {
         let eased = CGFloat(progress < 0.5 ? 4 * pow(progress, 3) : 1 - pow(-2 * progress + 2, 3) / 2)
         layout.camera *= 1 - eased
         layout.scale = 1 + (fit - 1) * eased
-        layout.shift = -min(40, size.width * 0.1) * eased
         return layout
     }
 
@@ -193,13 +192,17 @@ struct StackGameScreen: View {
                     slabLabel("skill").tag(StackGame.Tier.skill)
                     slabLabel("app").tag(StackGame.Tier.app)
                 }
-                // How the tiers add up, on the ground under the base.
-                anchored(at: CGPoint(x: left + fieldWidth / 2, y: layout.y(0) + 18), alignment: .top) {
+                // The ground: one line, then a giant faded "Rome" under it,
+                // like a site footer's logo, dissolving into the ground.
+                anchored(at: CGPoint(x: size.width / 2, y: layout.y(0) + 18), alignment: .top) {
                     Text("Every block builds on the last.")
                         .romeFont(13)
                         .foregroundStyle(Palette.sub)
                         .multilineTextAlignment(.center)
                         .frame(width: min(fieldWidth - 48, 320))
+                }
+                anchored(at: CGPoint(x: size.width / 2, y: layout.y(0) + 22), alignment: .top) {
+                    GroundWordmark(width: min(size.width, Metrics.readableWidth) - Metrics.pagePadding * 2)
                 }
                 if game.phase == .ready {
                     anchored(at: CGPoint(x: pose.center.x, y: pose.top - 6), alignment: .bottom) {
@@ -209,9 +212,9 @@ struct StackGameScreen: View {
                 if game.phase == .over, let ended = effects.ended {
                     let age = now - ended
                     if age >= Self.againAfter {
-                        // Running right from the mascot, clear of the tower.
+                        // Running right from the mascot; it may cover some of the tower.
                         anchored(at: CGPoint(x: pose.center.x - MascotBubble.tailInset, y: pose.top - 6), alignment: .bottomLeading) {
-                            MascotBubble(text: "Tap me to play again", tailLeading: true)
+                            MascotBubble(text: "Play again", tailLeading: true)
                         }
                     }
                     if age >= Self.toastFrom, age < Self.againAfter {
@@ -254,10 +257,8 @@ struct StackGameScreen: View {
         var camera: CGFloat
         var size: CGSize
         var scale: CGFloat = 1
-        /// At the end the tower moves left a little, to leave the mascot room.
-        var shift: CGFloat = 0
 
-        func x(_ world: CGFloat) -> CGFloat { size.width / 2 + shift + (left + world - size.width / 2) * scale }
+        func x(_ world: CGFloat) -> CGFloat { size.width / 2 + (left + world - size.width / 2) * scale }
         func y(_ height: CGFloat) -> CGFloat { groundY - height * scale + camera }
 
         func rect(_ block: StackGame.Block, level: Int, height: CGFloat = StackGame.blockHeight) -> CGRect {
@@ -612,6 +613,28 @@ struct StackGameScreen: View {
             .frame(height: 40)
             .glassSurface(Capsule())
             .allowsHitTesting(false)
+    }
+}
+
+/// "Rome" across the ground, in the opening screen's wordmark style, as
+/// wide as the page allows; a shade off the ground, gone by two-thirds
+/// of its height. Decoration only.
+private struct GroundWordmark: View {
+    let width: CGFloat
+
+    var body: some View {
+        Text(verbatim: "Rome")
+            .romeFont(320, .medium)
+            .tracking(-6)
+            .lineLimit(1)
+            .minimumScaleFactor(0.05)
+            .foregroundStyle(Palette.stackWordmark)
+            .frame(width: width)
+            .mask {
+                LinearGradient(stops: [.init(color: .black, location: 0.2), .init(color: .clear, location: 0.67)], startPoint: .top, endPoint: .bottom)
+            }
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
     }
 }
 
