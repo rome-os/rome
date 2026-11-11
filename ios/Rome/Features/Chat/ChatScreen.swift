@@ -280,7 +280,8 @@ private extension View {
 struct ChatHeader: View {
     /// The Concierge's name, in the main chat and in topic chats alike.
     let name: String
-    /// The chat's own title, for the "…" menu: the topic's name, or the name.
+    /// The chat's own title, atop the "…" menu: a topic chat's name. The
+    /// main Chat's menu has no title.
     var menuTitle: String? = nil
     /// What the Concierge is doing here; nil shows the name alone.
     var activity: ConciergeActivity? = nil
@@ -301,7 +302,7 @@ struct ChatHeader: View {
                 MenuGlyph()
             }
             ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces) }
-            ChatMoreMenu(title: menuTitle ?? name, onTasks: onTasks, onRename: onRename, onArchive: onArchive)
+            ChatMoreMenu(title: menuTitle ?? "", onTasks: onTasks, onRename: onRename, onArchive: onArchive)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -502,8 +503,8 @@ enum MenuTitle {
     }
 }
 
-/// A Concierge chat's "…" button: the chat's title in small grey text on
-/// top, then Tasks, then the chat's own options.
+/// A Concierge chat's "…" button: a topic chat's title in small grey text
+/// on top, then Tasks, the chat's own options, and Shared links.
 struct ChatMoreMenu: View {
     let title: String
     let onTasks: () -> Void
@@ -520,7 +521,8 @@ struct ChatMoreMenu: View {
                     Button(action: onRename) { Label("Rename", systemImage: "pencil") }
                 }
                 if let onArchive {
-                    Button(role: .destructive, action: onArchive) { Label("Archive", systemImage: "archivebox") }
+                    // Not red: an archived chat can come back.
+                    Button(action: onArchive) { Label("Archive", systemImage: "archivebox") }
                 }
                 ChatShareMenuItems(share: share)
             } header: {
