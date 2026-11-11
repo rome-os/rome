@@ -56,7 +56,11 @@ export function TurnActions({
       {copyText ? <CopyMessageButton text={copyText} /> : null}
       {reply ? <ReplyButton source={reply} /> : null}
       {reply ? (
-        <ShareMessageButton sessionId={reply.sessionId} messageId={reply.messageId} />
+        <ShareMessageButton
+          sessionId={reply.sessionId}
+          messageId={reply.messageId}
+          preview={reply.text}
+        />
       ) : null}
       {feedbackTurn ? (
         <TurnFeedbackButtons

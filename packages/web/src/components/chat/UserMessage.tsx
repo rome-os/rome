@@ -91,7 +91,7 @@ export const UserMessage = memo(
           />
         ) : null}
         {isSettledUserMessage(msg) ? (
-          <ShareMessageButton sessionId={msg.sessionId} messageId={msg.id} />
+          <ShareMessageButton sessionId={msg.sessionId} messageId={msg.id} preview={text} />
         ) : null}
       </div>
     );

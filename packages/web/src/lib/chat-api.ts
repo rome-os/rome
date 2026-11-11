@@ -816,16 +816,29 @@ export async function createShare(
   return jsonOrThrow<CreateShareResult>(res);
 }
 
-/** Share one message as a link: a snapshot of its text alone. */
-export async function shareMessage(
+/**
+ * Share one message as a link: a snapshot of its text alone. A message has one
+ * live link, so sharing it again answers the link it already has.
+ */
+export async function shareMessage(sessionId: string, messageId: string): Promise<ShareSummary> {
+  const res = await fetch(messageShareUrl(sessionId, messageId), {
+    method: "POST",
+    credentials: "include",
+  });
+  return jsonOrThrow<ShareSummary>(res);
+}
+
+/** The message's live link, or null when it has none. */
+export async function getMessageShare(
   sessionId: string,
   messageId: string,
-): Promise<CreateShareResult> {
-  const res = await fetch(
-    `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/share`,
-    { method: "POST", credentials: "include" },
-  );
-  return jsonOrThrow<CreateShareResult>(res);
+): Promise<ShareSummary | null> {
+  const res = await fetch(messageShareUrl(sessionId, messageId), { credentials: "include" });
+  return (await jsonOrThrow<{ share: ShareSummary | null }>(res)).share;
+}
+
+function messageShareUrl(sessionId: string, messageId: string): string {
+  return `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/share`;
 }
 
 export async function listShares(sessionId: string): Promise<ShareSummary[]> {

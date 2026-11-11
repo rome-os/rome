@@ -46,7 +46,7 @@ export const ConciergeMessageMeta = memo(function ConciergeMessageMeta({
         <ShareMessageButton
           sessionId={reply.sessionId}
           messageId={reply.messageId}
-          onShare={onReply}
+          preview={reply.text}
           size={size}
         />
       ) : null}

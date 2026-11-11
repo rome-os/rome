@@ -12,6 +12,7 @@ import type { SharedChatPayload } from "@/lib/chat-api";
 
 interface MockShare {
   sessionId: string;
+  messageId?: string;
   createdAt: string;
   payload: SharedChatPayload;
 }
@@ -38,7 +39,13 @@ function textOf(content: string): string {
 
 export function shareHandlers(sessions: ChatSession[], transcripts: Record<string, ChatMessage[]>) {
   const shares = new Map<string, MockShare>();
-  const save = (sessionId: string, title: string, messages: ChatMessage[]) => {
+  const summary = (share: MockShare) => ({
+    id: share.payload.id,
+    title: share.payload.title,
+    url: `/share/${share.payload.id}`,
+    createdAt: share.createdAt,
+  });
+  const save = (sessionId: string, title: string, messages: ChatMessage[], messageId?: string) => {
     const id = `mock-share-${nextToken++}`;
     const payload: SharedChatPayload = {
       id,
@@ -46,9 +53,15 @@ export function shareHandlers(sessions: ChatSession[], transcripts: Record<strin
       snapshot: { mainSessionId: sessionId, messages, traces: {} },
       layout: [],
     };
-    shares.set(id, { sessionId, createdAt: new Date().toISOString(), payload });
-    return HttpResponse.json({ id, url: `/share/${id}`, title }, { status: 201 });
+    const share = { sessionId, messageId, createdAt: new Date().toISOString(), payload };
+    shares.set(id, share);
+    return HttpResponse.json(summary(share), { status: 201 });
   };
+  // A message's one live link, as core finds it by the message its snapshot froze.
+  const messageShare = (sessionId: string, messageId: string) =>
+    [...shares.values()].find(
+      (share) => share.sessionId === sessionId && share.messageId === messageId,
+    );
 
   return [
     http.post("/api/chat/sessions/:id/share", async ({ params, request }) => {
@@ -74,8 +87,14 @@ export function shareHandlers(sessions: ChatSession[], transcripts: Record<strin
       }
       return save(sessionId, session.name, messages);
     }),
+    http.get("/api/chat/sessions/:id/messages/:messageId/share", ({ params }) => {
+      const share = messageShare(String(params.id), String(params.messageId));
+      return HttpResponse.json({ share: share ? summary(share) : null });
+    }),
     http.post("/api/chat/sessions/:id/messages/:messageId/share", ({ params }) => {
       const sessionId = String(params.id);
+      const existing = messageShare(sessionId, String(params.messageId));
+      if (existing) return HttpResponse.json(summary(existing));
       const message = (transcripts[sessionId] ?? []).find((m) => m.id === params.messageId);
       if (!message || (message.role !== "user" && message.role !== "assistant")) {
         return HttpResponse.json({ error: "Message not found" }, { status: 404 });
@@ -98,19 +117,14 @@ export function shareHandlers(sessions: ChatSession[], transcripts: Record<strin
         content: JSON.stringify([{ type: "text", content: text }]),
         createdAt: message.createdAt,
       };
-      return save(sessionId, title, [frozen]);
+      return save(sessionId, title, [frozen], message.id);
     }),
     http.get("/api/chat/sessions/:id/shares", ({ params }) =>
       HttpResponse.json(
         [...shares.values()]
           .filter((share) => share.sessionId === params.id)
           .reverse()
-          .map((share) => ({
-            id: share.payload.id,
-            title: share.payload.title,
-            url: `/share/${share.payload.id}`,
-            createdAt: share.createdAt,
-          })),
+          .map(summary),
       ),
     ),
     http.delete("/api/chat/shares/:shareId", ({ params }) =>
