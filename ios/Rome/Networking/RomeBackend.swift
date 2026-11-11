@@ -88,6 +88,13 @@ protocol RomeBackend: AnyObject, Sendable {
     func routines() async throws -> [RoutineRef]
     /// Tells Chat in `chatId` that `service` is connected, so it goes on.
     func notifyServiceConnected(chatId: String, service: String) async
+    /// Makes a public link to these turns of the chat. An older instance
+    /// answers 404 for a chat it cannot share, a Concierge chat among them.
+    func shareChat(sessionId: String, turnIds: [String]) async throws -> ChatShareLink
+    /// The chat's live share links, newest first.
+    func chatShares(sessionId: String) async throws -> [ChatShareLink]
+    /// Revokes a share link: it stops opening.
+    func revokeShare(id: String) async throws
 }
 
 @MainActor
@@ -290,6 +297,18 @@ final class LiveBackend: RomeBackend {
         try await client.get("/build-info", reportsUnauthorized: false)
     }
 
+    func shareChat(sessionId: String, turnIds: [String]) async throws -> ChatShareLink {
+        try await client.post("/chat/sessions/\(escape(sessionId))/share", json: .object(["turnIds": .array(turnIds.map(JSONValue.string))]), as: ChatShareLink.self)
+    }
+
+    func chatShares(sessionId: String) async throws -> [ChatShareLink] {
+        try await client.get("/chat/sessions/\(escape(sessionId))/shares")
+    }
+
+    func revokeShare(id: String) async throws {
+        try await client.delete("/chat/shares/\(escape(id))")
+    }
+
     private func escape(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? value
     }
@@ -357,6 +376,9 @@ extension RomeBackend {
     func setGuardianLanguage(_ code: String) async throws {}
     func apps() async throws -> [InstalledApp] { [] }
     func webSessionCookie() -> HTTPCookie? { nil }
+    func shareChat(sessionId: String, turnIds: [String]) async throws -> ChatShareLink { throw APIError.notFound }
+    func chatShares(sessionId: String) async throws -> [ChatShareLink] { [] }
+    func revokeShare(id: String) async throws {}
 }
 
 /// The Concierge's name as the dashboard shows it: trimmed, and nil when

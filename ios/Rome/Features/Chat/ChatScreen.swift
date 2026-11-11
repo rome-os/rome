@@ -35,6 +35,7 @@ struct ChatScreen: View {
                     composerFocused = false
                     onMenu()
                 }, onTasks: onTasks)
+                .shareModeHeader(store.share)
                 banners
             }
             .accessibilityHidden(store.thread != nil)
@@ -77,6 +78,7 @@ struct ChatScreen: View {
                         }
                     }
                 }
+                .shareModeComposer(store.share)
                 .animation(.easeOut(duration: 0.2), value: store.rows.isEmpty)
                 .padding(.horizontal, Metrics.pagePadding)
                 .readableColumn()
@@ -183,7 +185,7 @@ struct ChatScreen: View {
                     set: { workspace.focusMessageID = $0 }
                 ), latestRequest: workspace.latestRequest) { row, previous in
                     ConciergeRow(row: row, store: store, tasks: workspace.tasks, onOpenChat: onOpenChat)
-                        .padding(.top, TranscriptSpacing.top(row, after: previous))
+                        .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
                 }
                 .onTapGesture { composerFocused = false }
                 .onAppear { store.arrived() }
@@ -209,7 +211,9 @@ struct ConciergeRow: View {
         let onReply: (() -> Void)? = reply && !inThread
             ? row.messageId.map { id in { store.openThread(at: id) } }
             : nil
-        return BubbleMenu(date: message?.date, onReply: onReply, inThread: inThread)
+        // Share opens share mode on the message's turn; a pending send has none.
+        let onShare: (() -> Void)? = message?.turnId == nil ? nil : { [row] in store.share.begin(fromRow: row.id) }
+        return BubbleMenu(date: message?.date, onReply: onReply, onShare: onShare, inThread: inThread)
     }
 
     var body: some View {
@@ -456,12 +460,14 @@ struct ChatMoreMenu: View {
     let onTasks: () -> Void
     var onRename: (() -> Void)? = nil
     var onArchive: (() -> Void)? = nil
+    @Environment(\.chatShare) private var share
 
     var body: some View {
         Menu {
             Section {
                 // No count: task progress is not reported accurately enough to badge.
                 Button(action: onTasks) { Label("Tasks", systemImage: "checklist") }
+                ChatShareMenuItems(share: share)
                 if let onRename {
                     Button(action: onRename) { Label("Rename", systemImage: "pencil") }
                 }
@@ -687,6 +693,7 @@ struct TranscriptList<Row: View>: View {
                 }
                 .padding(.horizontal, Metrics.pagePadding)
                 .readableColumn()
+                .environment(\.shareTurns, store.share.isSelecting ? ShareTurns(messages: store.messages, rows: rows) : nil)
                 // Never shorter than the space between the bars. Content shorter
                 // than that is held at the bottom by a top inset the scroll view
                 // adds, and takes back a frame late once the rows outgrow the

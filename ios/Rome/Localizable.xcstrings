@@ -183,6 +183,16 @@
         }
       }
     },
+    "%lld selected" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已选择 %lld 项"
+          }
+        }
+      }
+    },
     "%lld unread" : {
       "localizations" : {
         "zh-Hans" : {
@@ -853,6 +863,26 @@
         }
       }
     },
+    "Couldn't create the link." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法创建链接。"
+          }
+        }
+      }
+    },
+    "Couldn't load the links." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法加载链接。"
+          }
+        }
+      }
+    },
     "Couldn't read Health" : {
       "localizations" : {
         "zh-Hans" : {
@@ -873,12 +903,42 @@
         }
       }
     },
+    "Couldn't stop sharing." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法停止分享。"
+          }
+        }
+      }
+    },
+    "Create link" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建链接"
+          }
+        }
+      }
+    },
     "Create one in Rome Cloud, then open it here." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 Rome Cloud 创建一个后再打开。"
+          }
+        }
+      }
+    },
+    "Creating…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建中…"
           }
         }
       }
@@ -1291,6 +1351,16 @@
         }
       }
     },
+    "Links you create in this chat show here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这个对话中创建的链接会显示在这里。"
+          }
+        }
+      }
+    },
     "Loading approval…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1322,6 +1392,7 @@
       }
     },
     "Make a new app" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -1577,6 +1648,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有网络连接"
+          }
+        }
+      }
+    },
+    "No shared links" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有分享的链接"
           }
         }
       }
@@ -2286,6 +2367,7 @@
       }
     },
     "Rome" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -2435,6 +2517,16 @@
         }
       }
     },
+    "Select turn" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择这一轮"
+          }
+        }
+      }
+    },
     "Send" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2521,6 +2613,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "分享"
+          }
+        }
+      }
+    },
+    "Share chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享对话"
+          }
+        }
+      }
+    },
+    "Shared chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享的对话"
+          }
+        }
+      }
+    },
+    "Shared links" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已分享的链接"
+          }
+        }
+      }
+    },
+    "Shares the link" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享这个链接"
           }
         }
       }
@@ -2799,6 +2931,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "停止"
+          }
+        }
+      }
+    },
+    "Stop sharing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止分享"
           }
         }
       }

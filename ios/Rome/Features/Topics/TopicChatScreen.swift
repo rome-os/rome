@@ -65,6 +65,7 @@ struct TopicChatScreen: View {
                 },
                 onArchive: chatId.map { id in { archive(id) } }
             )
+            .shareModeHeader(store?.share)
             .accessibilityHidden(store?.thread != nil)
         }
         // Over the header and the transcript; the composer below stays in place.
@@ -100,6 +101,7 @@ struct TopicChatScreen: View {
                 }
                 Composer(text: $draft, placeholder: store?.composerThread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) { send() }
             }
+            .shareModeComposer(store?.share)
             .animation(.easeOut(duration: 0.2), value: showsStarters)
             .disabled(starting != nil)
             .padding(.horizontal, Metrics.pagePadding)
@@ -128,7 +130,7 @@ struct TopicChatScreen: View {
         if let store, store.loaded {
             TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
                 ConciergeRow(row: row, store: store, tasks: workspace.tasks, onOpenChat: onOpenChat)
-                    .padding(.top, TranscriptSpacing.top(row, after: previous))
+                    .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
             .onTapGesture { composerFocused = false }
             .onAppear { markRead(store) }

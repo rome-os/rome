@@ -55,6 +55,7 @@ struct TaskChatScreen: View {
                 },
                 onStop: { store.stopTurn() }
             )
+            .shareModeComposer(store.share)
             .padding(.horizontal, Metrics.pagePadding)
             .readableColumn()
             .padding(.top, 6)
@@ -104,6 +105,7 @@ struct TaskChatScreen: View {
                 } label: {
                     Label("Copy link", systemImage: "link")
                 }
+                ChatShareMenuItems(share: store.share)
             } label: {
                 Image(systemName: "ellipsis")
                     .romeFont(17, .semibold)
@@ -116,6 +118,7 @@ struct TaskChatScreen: View {
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .frame(height: 52)
+        .shareModeHeader(store.share)
         .headerFade()
     }
 
@@ -129,7 +132,7 @@ struct TaskChatScreen: View {
             footer: store.running && store.loaded ? AnyView(runningLine(store)) : nil
         ) { row, previous in
             taskRow(row, store: store, briefID: briefID)
-                .padding(.top, spacing(row, after: previous))
+                .shareSelectable(row, share: store.share, top: spacing(row, after: previous))
         }
         .onTapGesture { composerFocused = false }
     }
@@ -181,7 +184,9 @@ struct TaskChatScreen: View {
 
     /// A task chat's bubbles: the time, Copy and Share; no threads to reply in.
     private func menu(_ row: TranscriptRow) -> BubbleMenu {
-        BubbleMenu(date: row.messageId.flatMap(store.message)?.date)
+        let message = row.messageId.flatMap(store.message)
+        let onShare: (() -> Void)? = message?.turnId == nil ? nil : { store.share.begin(fromRow: row.id) }
+        return BubbleMenu(date: message?.date, onShare: onShare)
     }
 
     /// Task chats space every block by 12 pt, as on the board; bubbles in a run keep 3 pt.

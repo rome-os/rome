@@ -50,6 +50,8 @@ final class DemoBackend: RomeBackend {
     private var approvals: [String: ApprovalRecord] = [:]
     private var running: [String: String] = [:]
     private var counter = 0
+    /// Share links, by chat.
+    private var shares: [String: [ChatShareLink]] = [:]
 
     /// `updateRequired`: the full data on a Rome below the app's minimum, so the
     /// update page shows; "Update now" brings it up to date after a few seconds.
@@ -155,7 +157,39 @@ final class DemoBackend: RomeBackend {
         let all = messages[sessionId] ?? []
         let end = before.flatMap { cursor in all.firstIndex { $0.id == cursor } } ?? all.count
         let start = max(0, end - limit)
-        return MessagePage(messages: Array(all[start..<end]).map(Self.withThreads), nextCursor: start > 0 ? all[start].id : nil)
+        let turned = Self.withTurns(all)
+        return MessagePage(messages: Array(turned[start..<end]).map(Self.withThreads), nextCursor: start > 0 ? all[start].id : nil)
+    }
+
+    /// Turns the way the server keeps them: each message the guardian writes
+    /// starts one, and what follows answers it.
+    private static func withTurns(_ messages: [ChatMessage]) -> [ChatMessage] {
+        var turn: String?
+        return messages.map { message in
+            var message = message
+            if message.isUser { turn = "turn-\(message.id)" }
+            if message.turnId == nil { message.turnId = turn ?? "turn-\(message.id)" }
+            return message
+        }
+    }
+
+    func shareChat(sessionId: String, turnIds: [String]) async throws -> ChatShareLink {
+        try await pause(0.4)
+        guard !turnIds.isEmpty else { throw APIError.server(status: 400, message: nil) }
+        let title = topicChats.first { $0.id == sessionId }?.name ?? String(localized: "Chat")
+        let link = ChatShareLink(id: "share-\(nextID())", url: "/share/demo\(nextID())", title: title, createdAt: RomeDate.string(.now))
+        shares[sessionId, default: []].insert(link, at: 0)
+        return link
+    }
+
+    func chatShares(sessionId: String) async throws -> [ChatShareLink] {
+        try await pause(0.25)
+        return shares[sessionId] ?? []
+    }
+
+    func revokeShare(id: String) async throws {
+        try await pause(0.2)
+        for key in shares.keys { shares[key]?.removeAll { $0.id == id } }
     }
 
     /// The demo is an instance with chat threads: every message says its thread.
@@ -453,7 +487,7 @@ final class DemoBackend: RomeBackend {
     }
 
     private func insert(_ sessionId: String, _ message: ChatMessage) {
-        let message = Self.withThreads(message)
+        let message = Self.withThreads(Self.withTurns((messages[sessionId] ?? []) + [message]).last ?? message)
         messages[sessionId, default: []].append(message)
         bus.emit(LiveTopic.chat(sessionId), .messageInsert(message))
     }
@@ -539,6 +573,10 @@ final class DemoBackend: RomeBackend {
             "chat-login": ChatSession(id: "chat-login", name: "修复登录页样式", triggerKind: "concierge", running: false, lastTurnFailed: false, awaitingGuardian: false),
         ]
         running = ["chat-site": "turn-site", "chat-notes": "turn-notes"]
+        shares = ["topic-trip": [
+            ChatShareLink(id: "share-trip", url: "/share/demo-trip", title: "京都旅行计划", createdAt: RomeDate.string(.now.addingTimeInterval(-2 * 3600))),
+            ChatShareLink(id: "share-weather", url: "/share/demo-weather", title: "四月京都天气", createdAt: RomeDate.string(at(21, 5, daysAgo: 3))),
+        ]]
 
         topicChats = [
             ConciergeChat(id: "topic-trip", name: "京都旅行计划", main: false, unread: 2),

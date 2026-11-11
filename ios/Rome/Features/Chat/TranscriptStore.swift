@@ -69,10 +69,15 @@ final class TranscriptStore {
     private var resyncWork: Task<Void, Never>?
     private var resyncAgain = false
 
+    /// Share mode and the chat's share links.
+    let share: ChatShareFlow
+
     init(sessionId: String, kind: Kind, backend: RomeBackend) {
         self.sessionId = sessionId
         self.kind = kind
         self.backend = backend
+        share = ChatShareFlow(backend: backend)
+        share.chat = self
     }
 
     /// Answers given to cards: stored ones, then those sent this session.
