@@ -68,6 +68,13 @@ const message = (
 
 const messages: ChatMessage[] = [
   message("weather", "user", 0, { statusReaction: "working" }),
+  message("quoted", "user", 0, {
+    statusReaction: "working",
+    content: JSON.stringify([
+      { type: "reply_to", messageId: "weather", author: "guardian", text: "weather" },
+      { type: "text", content: "And tomorrow?" },
+    ]),
+  }),
   message("thanks", "user", 1),
   message("you're welcome", "assistant", 1),
 ];
@@ -96,13 +103,31 @@ const badges = (container: HTMLElement) =>
 describe("Concierge status reaction", () => {
   it("draws a badge on the guardian's bubble from the message's field, and none elsewhere", () => {
     const { container } = render(transcript());
-    expect(badges(container)).toEqual([["weather", "working", "👀"]]);
+    expect(badges(container)).toEqual([
+      ["weather", "working", "👀"],
+      ["quoted", "working", "👀"],
+    ]);
+  });
+
+  it("sits inside the colored bubble, a bubble with a reply quote too, not beside it in the row", () => {
+    const { container } = render(transcript());
+    const placed = Array.from(container.querySelectorAll<HTMLElement>("[data-status-reaction]"));
+    expect(placed).toHaveLength(2);
+    for (const badge of placed) {
+      const bubble = badge.parentElement;
+      expect(bubble?.hasAttribute("data-chat-bubble")).toBe(true);
+      // The bubble is the badge's positioned ancestor.
+      expect(bubble?.className).toMatch(/\brelative\b/);
+    }
   });
 
   it("follows the live reaction once one arrives", () => {
     const { container, rerender } = render(transcript());
     rerender(transcript(new Map([["weather", "failed"]])));
-    expect(badges(container)).toEqual([["weather", "failed", "⚠️"]]);
+    expect(badges(container)).toEqual([
+      ["weather", "failed", "⚠️"],
+      ["quoted", "working", "👀"],
+    ]);
     rerender(
       transcript(
         new Map([
@@ -113,9 +138,17 @@ describe("Concierge status reaction", () => {
     );
     expect(badges(container)).toEqual([
       ["weather", "failed", "⚠️"],
+      ["quoted", "working", "👀"],
       ["thanks", "working", "👀"],
     ]);
-    rerender(transcript(new Map([["weather", null]])));
+    rerender(
+      transcript(
+        new Map([
+          ["weather", null],
+          ["quoted", null],
+        ]),
+      ),
+    );
     expect(badges(container)).toEqual([]);
   });
 

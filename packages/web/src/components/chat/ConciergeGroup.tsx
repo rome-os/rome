@@ -50,8 +50,12 @@ const GuardianBubble = memo(
         anchorId={msg.id}
         arrival={arrival}
       >
-        <UserMessageBubble msg={msg} text={text} own />
-        {reaction ? <StatusReactionBadge reaction={reaction} /> : null}
+        <UserMessageBubble
+          msg={msg}
+          text={text}
+          own
+          badge={reaction ? <StatusReactionBadge reaction={reaction} /> : null}
+        />
       </ConciergeBubble>
     );
   },

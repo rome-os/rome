@@ -1,4 +1,5 @@
 import { CircleAlert, CircleHelp, CircleSlash } from "lucide-react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
@@ -18,11 +19,14 @@ export function UserMessageBubble({
   text,
   own,
   className,
+  badge,
 }: {
   msg: ChatMessage;
   text: string;
   own: boolean;
   className?: string;
+  /** Sits on the bubble's own surface, positioned against it, as a status reaction does. */
+  badge?: ReactNode;
 }) {
   const { t } = useTranslation("chat");
   const undelivered =
@@ -41,6 +45,8 @@ export function UserMessageBubble({
         tone={undelivered ? "muted" : own ? "sent" : "received"}
         className={cn(
           "transition-colors motion-reduce:transition-none",
+          // The badge hangs half below the bubble; the margin keeps it off the next row.
+          badge && "relative mb-5",
           undelivered && "flex items-start gap-2",
           // A pending bubble is the normal bubble, breathing until the agent
           // takes the input in (see `.rome-bubble-pending` in globals.css).
@@ -66,6 +72,7 @@ export function UserMessageBubble({
             {text}
           </Markdown>
         </div>
+        {badge}
       </ChatBubble>
       <span className="sr-only" role="status">
         {statusLabel}

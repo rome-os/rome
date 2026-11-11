@@ -6,7 +6,6 @@ import {
   type ConciergeStatusReaction,
 } from "@rome/api-types/concierge";
 import type { ChatMessage } from "@/lib/chat-types";
-import { cn } from "@/lib/utils";
 
 /** A `message_status_reaction` event: a message's status reaction changed. */
 export const messageStatusReactionSchema = z.object({
@@ -38,8 +37,11 @@ const EMOJI: Record<ConciergeStatusReaction, string> = {
 
 /**
  * Rome's status reaction on a guardian message in a Concierge chat
- * (docs/domains/chats.md#status-reaction): a small badge on the bubble's
- * inner bottom corner, like a tapback. It only shows; it does nothing.
+ * (docs/domains/chats.md#status-reaction): a small capsule at the
+ * bubble's bottom-right corner, like a tapback, hanging mostly below the
+ * bubble so it never covers its text. It is a child of the bubble, so it
+ * stays on the bubble whatever the row around it holds. It only shows; it
+ * does nothing.
  */
 export function StatusReactionBadge({ reaction }: { reaction: ConciergeStatusReaction }) {
   const { t } = useTranslation("chat");
@@ -50,10 +52,7 @@ export function StatusReactionBadge({ reaction }: { reaction: ConciergeStatusRea
       aria-label={label}
       title={label}
       data-status-reaction={reaction}
-      className={cn(
-        "pointer-events-none absolute -bottom-2 -left-2 z-10 flex size-6 select-none items-center justify-center",
-        "rounded-full border border-border bg-surface text-aux shadow-10",
-      )}
+      className="pointer-events-none absolute right-3 -bottom-4.5 z-10 flex h-6 select-none items-center rounded-full bg-surface-muted px-2 text-composer"
     >
       {EMOJI[reaction]}
     </span>
