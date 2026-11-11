@@ -72,17 +72,16 @@ describe("SharePage", () => {
     expect(robots()).toBeUndefined();
   });
 
-  it("puts Rome's mark, tagline and a link to learn about Rome in one header", async () => {
+  it("puts Rome's mark and tagline, linking to Rome's site, in one header", async () => {
     renderAt("tok");
     await screen.findByText("Day one: walk the Alfama.");
     const header = screen.getByRole("banner");
     const mark = within(header).getByRole("link", { name: /^Rome/ });
     expect(mark.getAttribute("href")).toBe("https://romeos.cc");
     expect(mark.textContent).toContain("Your personal assistant");
-    const learn = within(header).getByRole("link", { name: "Learn about Rome" });
-    expect(learn.getAttribute("href")).toBe("https://romeos.cc");
-    expect(learn.getAttribute("target")).toBe("_blank");
-    expect(learn.getAttribute("rel")).toBe("noopener");
+    expect(mark.getAttribute("target")).toBe("_blank");
+    expect(mark.getAttribute("rel")).toBe("noopener");
+    expect(within(header).getAllByRole("link")).toHaveLength(1);
     expect(screen.queryByRole("contentinfo")).toBeNull();
   });
 
@@ -194,11 +193,46 @@ describe("SharePage", () => {
     expect(screen.queryByText(/3 steps?/i)).toBeNull();
   });
 
+  it("shows each message without its time or copy button", async () => {
+    rs.mocked(fetchSharedChat).mockResolvedValue({
+      id: "tok",
+      title: "Trip",
+      snapshot: {
+        mainSessionId: "s",
+        messages: [
+          {
+            id: "u1",
+            sessionId: "s",
+            turnId: "t1",
+            role: "user",
+            content: JSON.stringify([{ type: "text", content: "Plan day one." }]),
+            createdAt: "2026-11-10T09:59:00.000Z",
+          },
+          {
+            id: "m1",
+            sessionId: "s",
+            turnId: "t1",
+            role: "assistant",
+            content: JSON.stringify([{ type: "text", content: "Day one: walk the Alfama." }]),
+            createdAt: "2026-11-10T10:00:00.000Z",
+          },
+        ],
+        traces: {},
+      },
+      layout: [],
+    });
+    const page = renderAt("tok");
+    await screen.findByText("Day one: walk the Alfama.");
+    expect(screen.getByText("Plan day one.")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Copy message" })).toBeNull();
+    expect(page.container.querySelector("time")).toBeNull();
+  });
+
   it("keeps the branding and noindex on an unavailable link", async () => {
     rs.mocked(fetchSharedChat).mockResolvedValue(null);
     renderAt("gone");
     await screen.findByText("This shared chat is unavailable");
     expect(robots()).toBe("noindex, nofollow");
-    expect(screen.getByRole("link", { name: "Learn about Rome" })).toBeTruthy();
+    expect(within(screen.getByRole("banner")).getByRole("link", { name: /^Rome/ })).toBeTruthy();
   });
 });
