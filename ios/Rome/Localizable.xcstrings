@@ -261,12 +261,22 @@
         }
       }
     },
+    "5 actions make a skill. 5 skills make an app." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5 个 action 合成一个 skill，5 个 skill 合成一个 app。"
+          }
+        }
+      }
+    },
     "5 actions → 1 skill" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "5 个动作 → 1 个技能"
+            "value" : "5 个 action → 1 个 skill"
           }
         }
       }
@@ -276,7 +286,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "5 个技能 → 1 个应用"
+            "value" : "5 个 skill → 1 个 app"
           }
         }
       }
@@ -351,16 +361,6 @@
         }
       }
     },
-    "Action" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "动作"
-          }
-        }
-      }
-    },
     "Active energy" : {
       "localizations" : {
         "zh-Hans" : {
@@ -427,16 +427,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已回答"
-          }
-        }
-      }
-    },
-    "App" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "应用"
           }
         }
       }
@@ -587,6 +577,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "返回"
+          }
+        }
+      }
+    },
+    "Back to chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回到 Chat"
+          }
+        }
+      }
+    },
+    "Back to update" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回到更新"
+          }
+        }
+      }
+    },
+    "Best %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最高 %lld"
           }
         }
       }
@@ -3011,16 +3031,6 @@
         }
       }
     },
-    "Skill" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "技能"
-          }
-        }
-      }
-    },
     "Sleep" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3231,22 +3241,22 @@
         }
       }
     },
+    "Tap me to start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点我开始"
+          }
+        }
+      }
+    },
     "Tap to drop the block" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "点一下放下方块"
-          }
-        }
-      }
-    },
-    "Tap to start" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "点一下开始"
           }
         }
       }
@@ -4181,16 +4191,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等你回复"
-          }
-        }
-      }
-    },
-    "×%lld · Best %lld" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "×%lld · 最高 %lld"
           }
         }
       }
