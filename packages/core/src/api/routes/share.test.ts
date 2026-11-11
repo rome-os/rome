@@ -85,6 +85,7 @@ describe("Share chat", () => {
     const publicApp = shareRoutes(deps);
     const readRes = await publicApp.request(`/share/${created.id}`);
     expect(readRes.status).toBe(200);
+    expect(readRes.headers.get("x-robots-tag")).toBe("noindex, nofollow");
     const payload = (await readRes.json()) as PublicSharePayload;
     expect(payload.title).toBe("My chat");
     expect(payload.snapshot.mainSessionId).toBe(sessionId);
@@ -432,6 +433,7 @@ describe("Share chat", () => {
 
     const missing = await shareRoutes(deps).request("/share/does-not-exist");
     expect(missing.status).toBe(404);
+    expect(missing.headers.get("x-robots-tag")).toBe("noindex, nofollow");
   });
 
   describe("in a Concierge chat", () => {

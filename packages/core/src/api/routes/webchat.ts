@@ -2936,7 +2936,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // A Concierge chat mixes chat threads, task reports and digests, so a turn
     // is the wrong unit to share from it: its owner shares one message instead.
     if (isConciergeChat(session)) {
-      return c.json({ error: "A Concierge chat can't be shared. Share one message instead." }, 403);
+      return c.json(
+        { error: "A Concierge chat cannot be shared. Share one message instead." },
+        403,
+      );
     }
 
     const body = await c.req

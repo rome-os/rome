@@ -56,6 +56,15 @@ describe("generateCaddyfile app document routes", () => {
   });
 });
 
+describe("generateCaddyfile shared chats", () => {
+  it("tells crawlers not to index a share page or its API reads, and nothing else", () => {
+    const caddyfile = generateCaddyfile();
+    expect(caddyfile).toContain("@sharePages path /share /share/* /api/share /api/share/*");
+    expect(caddyfile).toContain('header @sharePages X-Robots-Tag "noindex, nofollow"');
+    expect(caddyfile.match(/X-Robots-Tag/g)).toHaveLength(1);
+  });
+});
+
 describe("generateCaddyfile social card images", () => {
   it("proxies /app-og through the dynamic matcher", () => {
     const caddyfile = generateCaddyfile();

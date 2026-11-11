@@ -7,6 +7,7 @@ import { serve, type ServerType } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
 import { createLogger } from "../logger.js";
 import { renderAppIdentity, renderSocialMeta } from "../lib/social-meta.js";
+import { SHARE_ROBOTS } from "../lib/share-robots.js";
 import { buildAppIdentity } from "./app-home-screen.js";
 import { buildAppSocialCard } from "./app-social-card.js";
 import { attachTerminalServer } from "../terminal-server.js";
@@ -283,6 +284,13 @@ function mountSpa(
   };
   app.get("/apps/*", appDocument);
   app.get("/full/apps/*", appDocument);
+
+  // A shared chat's page is public but not for search engines. Caddy sets the
+  // same header for external traffic.
+  app.use("/share/*", async (c, next) => {
+    await next();
+    c.header("X-Robots-Tag", SHARE_ROBOTS);
+  });
 
   // Serve hashed assets + public files. `serveStatic` calls next() on
   // miss, so unknown paths fall through to the SPA fallback below.

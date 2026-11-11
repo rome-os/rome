@@ -99,6 +99,20 @@ async function buildTestHost() {
 
 const HEADERS = { host: "jessie.romeos.cc", "x-forwarded-proto": "https" };
 
+describe("shared chat pages through buildApp", () => {
+  it("serves a share page with noindex, and the dashboard without it", async () => {
+    const { app } = await buildTestHost();
+    const share = await app.request("/share/some-token", { headers: HEADERS });
+    expect(share.status).toBe(200);
+    expect(share.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    const read = await app.request("/api/share/missing-token", { headers: HEADERS });
+    expect(read.status).toBe(404);
+    expect(read.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    const dashboard = await app.request("/dashboard", { headers: HEADERS });
+    expect(dashboard.headers.get("x-robots-tag")).toBeNull();
+  });
+});
+
 describe("app document routes through buildApp", () => {
   it("swaps the shell's social meta for a routed app on /full/apps/:id", async () => {
     const { app } = await buildTestHost();

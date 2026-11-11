@@ -6,6 +6,7 @@
 // `/api/auth/verify`, so a policy change never needs a Caddy reload.
 
 import { RUNTIME_CONFIG_FILENAME } from "./runtime-config.js";
+import { SHARE_ROBOTS } from "./share-robots.js";
 
 const DEFAULT_WEB_ROOT = "/app/packages/web/dist";
 
@@ -115,9 +116,14 @@ handle @nonCanonicalPath {
   // documented workaround if we ever fold them back in is
   // \`header_up -Connection\` inside the \`forward_auth { ... }\` block,
   // which strips the upgrade headers on the probe copy only.
+  // A shared chat is public to anyone with its link, but not for search
+  // engines: its page and its API reads carry `noindex`. Set at the site level
+  // so it reaches both the shell served from disk and the proxied reads.
   const body = `
 root * ${webRoot}
 ${canonicalPathGuard}
+@sharePages path /share /share/* /api/share /api/share/*
+header @sharePages X-Robots-Tag "${SHARE_ROBOTS}"
 @wsUpgrade path /ws/* /desktop-proxy /desktop-proxy/*
 handle @wsUpgrade {
 \t${proxy}
