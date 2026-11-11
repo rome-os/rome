@@ -120,9 +120,6 @@ export const contextRules: ImportRule[] = contexts.flatMap((from) =>
 
 const SESSIONS_REPOSITORY = "agent/infrastructure/drizzle-session-repository";
 
-/** The apps/ files that give apps `ctx.favors` through Favors' `FavorService` type. */
-const APP_FAVOR_CAPABILITY = ["apps/context.ts"];
-
 /** One listed crossing for each `[from, to]` pair, all under one rule and ticket. */
 function crossingsOf(
   rule: string,
@@ -135,25 +132,6 @@ function crossingsOf(
 
 /** Crossings that remain until their ticket lands. */
 export const contextCrossings: ListedCrossing[] = [
-  ...[
-    [
-      "connections-never-imports-app-host",
-      "connections/kinds/email/email-delivery.test.ts",
-      "app-host/service-proxies.ts",
-    ],
-    ["people-never-imports-app-host", "people/account-directory.test.ts", "app-host/chat-reads.ts"],
-    [
-      "routines-never-imports-app-host",
-      "routines/routine-actor.test.ts",
-      "app-host/caller-notify.ts",
-    ],
-  ].map(([rule, from, to]) => ({
-    rule,
-    from,
-    to,
-    ticket: "ZHA-167",
-    why: "The test drives its scenario through App host code, until the scenario moves into an App host test.",
-  })),
   ...crossingsOf(
     "people-never-imports-routines",
     "ZHA-166",
@@ -163,13 +141,6 @@ export const contextCrossings: ListedCrossing[] = [
       ["people/guardian-profile.test.ts", "routines/guardian-timezone.ts"],
     ],
   ),
-  ...APP_FAVOR_CAPABILITY.map((from) => ({
-    rule: "apps-never-imports-favors",
-    from,
-    to: "favors/index.ts",
-    ticket: "ZHA-163",
-    why: "Apps offers `ctx.favors` by naming Favors' `FavorService` type, until Apps reaches favor requests without it.",
-  })),
   {
     rule: "agent-never-imports-apps",
     from: `${SESSIONS_REPOSITORY}.ts`,

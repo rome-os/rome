@@ -27,7 +27,7 @@ import type { AppCatalog } from "./catalog.js";
 import type { ResolvedApp } from "./state.js";
 import type { AgentRunnerInterface } from "../core/types.js";
 import type { RomeAppViewer } from "../access/visitor-session.js";
-import type { FavorService } from "../favors/index.js";
+import type { AppFavorRequests } from "./app-favors-port.js";
 import { DeniedAppConnections, type AppConnectionsContextFactory } from "./app-connections-port.js";
 
 export interface AppDbContext {
@@ -69,7 +69,7 @@ export interface RomeAppRuntimeServices {
   agentRunner?: AgentRunnerInterface;
   routinesRepo?: RoutinesRepository;
   repositories: AppRuntimeRepositories;
-  favorService?: FavorService;
+  favorService?: AppFavorRequests;
   appConnections?: AppConnectionsContextFactory;
   /** What this context's out-of-execution `runAction` does when every action
    * worker is busy (see ActionRunContext.whenWorkersBusy). Defaults to
