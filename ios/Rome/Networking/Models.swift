@@ -595,3 +595,16 @@ struct AccountIdentity: Equatable, Sendable {
         isGuardian = body["kind"]?.string == "guardian"
     }
 }
+
+/// A read-only public link to some turns of a chat: one row of
+/// `GET /chat/sessions/:id/shares`, or the answer of
+/// `POST /chat/sessions/:id/share`. `url` is a path on the instance,
+/// `/share/<token>`.
+struct ChatShareLink: Codable, Identifiable, Hashable, Sendable {
+    let id: String
+    var url: String
+    var title: String?
+    var createdAt: String?
+
+    var date: Date? { createdAt.flatMap(RomeDate.parse) }
+}

@@ -11,7 +11,7 @@ struct TopicChatScreen: View {
     let onMenu: () -> Void
     let onTasks: (String?) -> Void
     let onOpenChat: (String, String) -> Void
-    /// The chat was archived: the shell shows the main Chat.
+    /// The chat was archived or deleted: the shell shows the main Chat.
     let onArchived: () -> Void
     let onCreated: (String) -> Void
 
@@ -22,6 +22,7 @@ struct TopicChatScreen: View {
     @State private var startFailed = false
     @State private var startingImages: [ComposerImage] = []
     @State private var renaming = false
+    @State private var confirmDelete = false
     @State private var newName = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
@@ -49,7 +50,7 @@ struct TopicChatScreen: View {
             ChatHeader(
                 // The Concierge's name, as in the main chat; the topic's own
                 // title stays in the "…" menu.
-                name: workspace.mainChatTitle,
+                name: workspace.agentDisplayName,
                 menuTitle: title,
                 activity: workspace.topics.activity(for: chatId),
                 announces: chatId != nil && model.visibleChat == chatId,
@@ -59,19 +60,21 @@ struct TopicChatScreen: View {
                     onMenu()
                 },
                 onTasks: { onTasks(chatId) },
-                // A blank chat has nothing to rename or archive yet.
+                // A blank chat has nothing to rename, archive or delete yet.
                 onRename: chatId == nil ? nil : {
                     newName = title
                     renaming = true
                 },
-                onArchive: chatId.map { id in { archive(id) } }
+                onArchive: chatId.map { id in { archive(id) } },
+                onDelete: chatId == nil ? nil : { confirmDelete = true }
             )
+            .shareModeHeader(store?.share)
             .accessibilityHidden(store?.thread != nil)
         }
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let store, let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.mainChatTitle, activity: workspace.topics.activity(for: chatId), onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: workspace.topics.activity(for: chatId), onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
         // Reply brings the keyboard up; the replies line opens it for reading.
@@ -85,6 +88,10 @@ struct TopicChatScreen: View {
                 let name = newName
                 Task { await workspace.renameTopic(chatId, to: name) }
             }
+        }
+        .deleteChatAlert(isPresented: $confirmDelete) {
+            guard let chatId else { return }
+            Task { if await workspace.deleteTopic(chatId) { onArchived() } }
         }
         .pageBackground()
         .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onThread: { store?.reopenThread($0) })
@@ -108,6 +115,7 @@ struct TopicChatScreen: View {
                 }
                 Composer(text: $draft, placeholder: store?.composerThread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) { send() }
             }
+            .shareModeComposer(store?.share)
             .animation(.easeOut(duration: 0.2), value: showsStarters)
             .animation(.easeOut(duration: 0.2), value: store?.quote)
             .disabled(starting != nil)
@@ -140,7 +148,7 @@ struct TopicChatScreen: View {
         if let store, store.loaded {
             TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.topicLatest[store.sessionId] ?? 0) { row, previous in
                 ConciergeRow(row: row, store: store, tasks: workspace.tasks, onOpenChat: onOpenChat)
-                    .padding(.top, TranscriptSpacing.top(row, after: previous))
+                    .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
             }
             .onTapGesture { composerFocused = false }
             .onAppear { markRead(store) }

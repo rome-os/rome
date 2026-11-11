@@ -271,11 +271,25 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(name == "Pebble")
     }
 
-    /// An instance with no name set, or none readable, shows "Chat".
-    @Test func withoutANameTheMainChatIsChat() async {
+    /// An instance with no name set, or none readable, calls the Agent Rome:
+    /// never "Chat", the screen's name, or "Concierge", the code's.
+    @Test func withoutANameTheAgentIsRome() async {
         let workspace = Workspace(backend: FakeBackend(), instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-agent-name-\(UUID().uuidString)/Drafts"), instance: "t"))
-        #expect(workspace.mainChatTitle == "Chat")
+        #expect(workspace.agentName == nil)
+        #expect(workspace.agentDisplayName == "Rome")
+        workspace.debugSetAgentName("  ")
+        #expect(workspace.agentDisplayName == "Rome")
+        workspace.debugSetAgentName("Milo")
+        #expect(workspace.agentDisplayName == "Milo")
+        // The update copy says the same.
+        #expect(UpdateCopy.agent(nil) == "Rome" && UpdateCopy.banner(UpdateCopy.agent(nil)) == "Rome has an update")
         workspace.stop()
+    }
+
+    @Test func theFallbackNameIsRome() {
+        #expect(AgentName.shown(nil) == "Rome")
+        #expect(AgentName.shown(" ") == "Rome")
+        #expect(AgentName.shown(" Milo ") == "Milo")
     }
 }
 

@@ -160,6 +160,43 @@ enum SnapshotRunner {
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
             // Chat threads: the replies lines, then one thread open over its chat.
             await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
+            // Share mode on the last two turns, then the chat's links.
+            await capture("61-share-select", style: styleName, in: directory, wait: 2) {
+                model.debugCommand = .section(.topic("topic-trip"))
+                Task {
+                    try? await Task.sleep(for: .seconds(1))
+                    guard let share = model.workspace?.topicStore("topic-trip").share, let order = share.turns?.order else { return }
+                    share.begin(turn: order.last)
+                    if order.count > 1 { share.toggle(order[order.count - 2]) }
+                }
+            }
+            await capture("62-shared-links", style: styleName, in: directory, wait: 1.5) {
+                guard let share = model.workspace?.topicStore("topic-trip").share else { return }
+                share.cancel()
+                share.openLinks()
+            }
+            await capture("63-shared-links-empty", style: styleName, in: directory, wait: 2) {
+                model.workspace?.topicStore("topic-trip").share.showsLinks = false
+                model.debugCommand = .section(.chat)
+                model.workspace?.concierge.share.openLinks()
+            }
+            // A task chat: its brief, a card, starts the first turn.
+            await capture("64-share-task", style: styleName, in: directory, wait: 2.5) {
+                model.workspace?.concierge.share.showsLinks = false
+                model.debugCommand = .route([.taskChat(chatId: "chat-login", title: "修复登录页样式")])
+                Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    guard let share = model.workspace?.taskStore("chat-login").share, let order = share.turns?.order else { return }
+                    share.begin(turn: order.first)
+                }
+            }
+            model.workspace?.taskStore("chat-login").share.cancel()
+            model.debugCommand = .route([])
+            if let workspace = model.workspace {
+                workspace.topicStore("topic-trip").share.cancel()
+                workspace.topicStore("topic-trip").share.showsLinks = false
+                workspace.concierge.share.showsLinks = false
+            }
             // A long chat thread: its root carries the replies line.
             await capture("53-topic-long-thread", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-books")) }
             // A long topic name: cut at the end inside the header's pill.

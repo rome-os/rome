@@ -8,7 +8,7 @@ import Observation
 enum UpdateGate {
     /// The oldest instance release with every API the app calls. Raise it
     /// only when the app starts calling an API a newer release brought.
-    static let minimumInstanceVersion = "1.1.189"
+    static let minimumInstanceVersion = "1.1.191"
 
     /// Whether the app works with an instance on `version`. An unknown or
     /// unreadable version is never held against it.
@@ -20,6 +20,9 @@ enum UpdateGate {
         }
         return true
     }
+
+    /// Whether `version` reads as a release number at all.
+    static func isVersion(_ version: String) -> Bool { numbers(version) != nil }
 
     /// "v1.1.185" or "1.1.185-rc.1" as [1, 1, 185]; nil when it is not a version.
     private static func numbers(_ version: String) -> [Int]? {

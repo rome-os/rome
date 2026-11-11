@@ -17,8 +17,7 @@ enum UpdateCopy {
 
     /// The Agent's name as the chat header shows it, or Rome before it is known.
     static func agent(_ name: String?) -> String {
-        guard let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return "Rome" }
-        return shortName(name)
+        shortName(AgentName.shown(name))
     }
 }
 
@@ -36,22 +35,24 @@ struct UpdatePill: View {
 
     var body: some View {
         let name = UpdateCopy.agent(agentName)
+        // Part of the fixed bar with the composer: it comes and goes in place,
+        // with no motion of its own. Animated, the space under the transcript
+        // changed on its own schedule, and on a cold launch the pill's late
+        // arrival left the transcript pushed up with a gap under it.
         Group {
             if updater.showsBanner {
                 offer(name)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
             } else if let version = updater.updatedTo {
                 done(name, version: version)
-                    .transition(.opacity)
                     // Said once, for about three seconds.
                     .task(id: version) {
                         try? await Task.sleep(for: .seconds(3))
-                        withAnimation(.easeOut(duration: 0.4)) { updater.clearUpdated() }
+                        updater.clearUpdated()
                     }
             }
         }
         .frame(maxWidth: .infinity)
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: updater.showsBanner)
+        .transaction { $0.animation = nil }
     }
 
     /// Update opens the update page; the cross closes it for this release.

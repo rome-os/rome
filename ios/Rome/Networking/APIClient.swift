@@ -158,6 +158,11 @@ final class APIClient: Sendable {
         return try await send(request)
     }
 
+    @discardableResult
+    func delete(_ path: String) async throws -> Data {
+        try await send(request(path, method: "DELETE"))
+    }
+
     /// A request to an `/api/…` path on this instance that answers any status
     /// with its JSON body. The session cookie goes only here: the URL is built
     /// on the instance's origin, never taken whole from a server's answer.

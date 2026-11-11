@@ -9,13 +9,13 @@ struct TaskChatScreen: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var model
-    @Environment(\.openInstancePage) private var openInstancePage
     /// Kept on the workspace, so a failed send's bubble and Retry are still
     /// there when the guardian comes back, and the draft waits for it to load.
     private var store: TranscriptStore { workspace.taskStore(chatId) }
     @State private var draft = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
+    @State private var confirmDelete = false
 
     private var title: String { workspace.tasks.title(forChat: chatId, fallback: initialTitle) }
 
@@ -55,6 +55,7 @@ struct TaskChatScreen: View {
                 },
                 onStop: { store.stopTurn() }
             )
+            .shareModeComposer(store.share)
             .padding(.horizontal, Metrics.pagePadding)
             .readableColumn()
             .padding(.top, 6)
@@ -70,6 +71,13 @@ struct TaskChatScreen: View {
         }
         // Keep the swipe-back gesture with a hidden navigation bar.
         .background(SwipeBackEnabler())
+        .deleteChatAlert(isPresented: $confirmDelete) {
+            Task { if await workspace.deleteTaskChat(chatId) { dismiss() } }
+        }
+    }
+
+    private func archive() {
+        Task { if await workspace.archiveTaskChat(chatId) { dismiss() } }
     }
 
     private var header: some View {
@@ -94,16 +102,11 @@ struct TaskChatScreen: View {
             .frame(maxWidth: .infinity)
             .animation(.easeInOut(duration: 0.25), value: spinning)
             Menu {
-                Button {
-                    if let origin = model.webURL { openInstancePage(InstancePages.chat(origin: origin, sessionId: chatId)) }
-                } label: {
-                    Label("Open on the web", systemImage: "globe")
+                Button(action: archive) { Label("Archive", systemImage: "archivebox") }
+                Button(role: .destructive) { confirmDelete = true } label: {
+                    Label("Delete", systemImage: "trash")
                 }
-                Button {
-                    UIPasteboard.general.url = model.webURL.map { InstancePages.chat(origin: $0, sessionId: chatId) }
-                } label: {
-                    Label("Copy link", systemImage: "link")
-                }
+                ChatShareMenuItems(share: store.share)
             } label: {
                 Image(systemName: "ellipsis")
                     .romeFont(17, .semibold)
@@ -116,6 +119,7 @@ struct TaskChatScreen: View {
         .padding(.horizontal, 12)
         .padding(.top, 4)
         .frame(height: 52)
+        .shareModeHeader(store.share)
         .headerFade()
     }
 
@@ -129,7 +133,7 @@ struct TaskChatScreen: View {
             footer: store.running && store.loaded ? AnyView(runningLine(store)) : nil
         ) { row, previous in
             taskRow(row, store: store, briefID: briefID)
-                .padding(.top, spacing(row, after: previous))
+                .shareSelectable(row, share: store.share, top: spacing(row, after: previous), placement: isBrief(row, briefID) ? .corner : nil)
         }
         .onTapGesture { composerFocused = false }
     }
@@ -162,7 +166,7 @@ struct TaskChatScreen: View {
                 BriefCard(text: text)
             } else if let message = row.messageId.flatMap(store.message), message.saidByAgent {
                 // The Concierge relays the guardian's words: their side, its name.
-                ConciergeBubble(name: message.sender?.name ?? model.workspace?.mainChatTitle ?? "Rome", text: text, menu: menu(row))
+                ConciergeBubble(name: message.sender?.name ?? model.workspace?.agentDisplayName ?? AgentName.fallback, text: text, menu: menu(row))
             } else {
                 UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, menu: menu(row))
             }
@@ -182,9 +186,17 @@ struct TaskChatScreen: View {
         }
     }
 
+    /// The brief opens the chat as a card, though it is the guardian's message.
+    private func isBrief(_ row: TranscriptRow, _ briefID: String?) -> Bool {
+        guard let briefID, case .userText(let id, _, _, _) = row else { return false }
+        return id.hasPrefix(briefID + ":")
+    }
+
     /// A task chat's bubbles: the time, Copy and Share; no threads to reply in.
     private func menu(_ row: TranscriptRow) -> BubbleMenu {
-        BubbleMenu(date: row.messageId.flatMap(store.message)?.date)
+        let message = row.messageId.flatMap(store.message)
+        let onShare: (() -> Void)? = message?.turnId == nil ? nil : { store.share.begin(fromRow: row.id) }
+        return BubbleMenu(date: message?.date, onShare: onShare)
     }
 
     /// Task chats space every block by 12 pt, as on the board; bubbles in a run keep 3 pt.

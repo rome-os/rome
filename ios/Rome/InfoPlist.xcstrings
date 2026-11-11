@@ -37,6 +37,24 @@
         }
       }
     },
+    "NSHealthUpdateUsageDescription" : {
+      "comment" : "Required by Apple alongside HealthKit; the app never writes to Health",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome only reads the Health data you allow. It never writes to Apple Health."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 只读取你允许的健康数据，不会写入 Apple 健康。"
+          }
+        }
+      }
+    },
     "NSPhotoLibraryAddUsageDescription" : {
       "comment" : "Asked before saving a photo from the viewer",
       "extractionState" : "manual",

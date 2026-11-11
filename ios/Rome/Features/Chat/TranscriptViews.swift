@@ -27,6 +27,8 @@ struct BubbleMenu {
     var date: Date? = nil
     /// Opens the message's chat thread; nil where there are none.
     var onReply: (() -> Void)? = nil
+    /// Opens share mode on the message's turn; nil shares the text.
+    var onShare: (() -> Void)? = nil
     /// Inside a thread: the text is selectable instead, and there is no menu.
     var inThread = false
 }
@@ -42,7 +44,11 @@ private struct BubbleMenuItems: View {
                 Button(action: onReply) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
             }
             CopyButton(text: text)
-            ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
+            if let onShare = menu.onShare {
+                Button(action: onShare) { Label("Share", systemImage: "square.and.arrow.up") }
+            } else {
+                ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
+            }
         } header: {
             if let date = menu.date { Text(verbatim: RelativeTime.separator(date)) }
         }
