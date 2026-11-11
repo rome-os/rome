@@ -89,7 +89,7 @@ export function ThisComputerButton({ tooltipSide = "top" }: { tooltipSide?: "top
         <PopoverContent
           side="top"
           align="start"
-          className="w-64 gap-0 p-1"
+          className="w-max gap-0 p-1"
           onCloseAutoFocus={() => {
             refocused.current = true;
           }}
