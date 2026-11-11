@@ -10,7 +10,8 @@ import { ForwardedChip } from "@/components/chat/ForwardedChip";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
 import { renderFlatEntries } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
-import type { BlockActions } from "@/components/chat/MessageList";
+import type { BlockActions, ShareSelection } from "@/components/chat/MessageList";
+import { SelectableRow } from "@/components/chat/SelectableRow";
 import { userMessageText } from "@/components/chat/chat-view";
 import type { ReplySource } from "@/components/chat/reply/reply-source";
 import type { ConciergeEntry, ConciergeItem } from "@/components/chat/concierge-groups";
@@ -179,11 +180,16 @@ const AgentEntry = memo(function AgentEntry({
  * One stretch of messages from a single sender, packed close together. The
  * guardian's bubbles align to the end, the agent's to the start. `typing` is
  * the agent's typing bubble, drawn after its messages.
+ *
+ * In share mode (`selection`), every bubble carries its turn's checkbox, and a
+ * click anywhere on it picks or drops the whole turn, as a common chat's row
+ * does. A bubble of no turn, or of another session, is dimmed and not picked.
  */
 export const ConciergeGroup = memo(function ConciergeGroup({
   group,
   actions,
   runningTurnId,
+  selection,
   feedback,
   arrival,
   typing,
@@ -191,6 +197,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
   group: Extract<ConciergeItem, { kind: "group" }>;
   actions: BlockActions;
   runningTurnId: string | null;
+  selection?: ShareSelection;
   feedback: boolean;
   /** Marks the bubbles that arrived while the transcript is open. */
   arrival: ArrivalProps;
@@ -203,34 +210,62 @@ export const ConciergeGroup = memo(function ConciergeGroup({
         group.sender === "guardian" ? "items-end" : "items-start",
       )}
     >
-      {group.entries.map((entry) => (
-        <Fragment key={entry.message.id}>
-          {entry.message.sender?.kind === "automated" ? (
+      {group.entries.map((entry) => {
+        const bubble = (
+          <>
+            {entry.message.sender?.kind === "automated" ? (
+              <div
+                key={entry.message.id}
+                data-timeline-anchor={entry.message.id}
+                className="w-full self-start"
+              >
+                <UserMessage msg={entry.message} />
+              </div>
+            ) : group.sender === "guardian" ? (
+              <GuardianBubble
+                key={entry.message.id}
+                msg={entry.message}
+                arrival={arrival(entry.message.id)["data-arrival"]}
+              />
+            ) : (
+              <AgentEntry
+                key={entry.message.id}
+                entry={entry}
+                actions={actions}
+                rateable={feedback && (!runningTurnId || entry.message.turnId !== runningTurnId)}
+                arrival={arrival}
+              />
+            )}
+            <ThreadRepliesLine message={entry.message} />
+          </>
+        );
+        if (!selection) return <Fragment key={entry.message.id}>{bubble}</Fragment>;
+        const side = group.sender === "guardian" ? "items-end" : "items-start";
+        const turnId = entry.message.turnId;
+        if (!turnId || entry.message.sessionId !== selection.selectableSessionId) {
+          return (
             <div
               key={entry.message.id}
-              data-timeline-anchor={entry.message.id}
-              className="w-full self-start"
+              className={cn("flex w-full flex-col gap-2 pl-9 opacity-60", side)}
             >
-              <UserMessage msg={entry.message} />
+              {bubble}
             </div>
-          ) : group.sender === "guardian" ? (
-            <GuardianBubble
-              key={entry.message.id}
-              msg={entry.message}
-              arrival={arrival(entry.message.id)["data-arrival"]}
-            />
-          ) : (
-            <AgentEntry
-              key={entry.message.id}
-              entry={entry}
-              actions={actions}
-              rateable={feedback && (!runningTurnId || entry.message.turnId !== runningTurnId)}
-              arrival={arrival}
-            />
-          )}
-          <ThreadRepliesLine message={entry.message} />
-        </Fragment>
-      ))}
+          );
+        }
+        const selected = selection.selectedTurns.has(turnId);
+        return (
+          <div key={entry.message.id} className="w-full">
+            <SelectableRow
+              selected={selected}
+              onToggle={() => selection.onToggleTurn(turnId)}
+              label={selected ? "Deselect message" : "Select message"}
+              contentClassName={cn("flex flex-col gap-2", side)}
+            >
+              {bubble}
+            </SelectableRow>
+          </div>
+        );
+      })}
       {group.typing ? typing : null}
     </div>
   );

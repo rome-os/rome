@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import { ConciergeGroup } from "@/components/chat/ConciergeGroup";
 import { ConciergeTimeSeparator } from "@/components/chat/ConciergeTimeSeparator";
-import type { BlockActions, LivePreview } from "@/components/chat/MessageList";
+import type { BlockActions, LivePreview, ShareSelection } from "@/components/chat/MessageList";
 import { LatestTaskChatsContext } from "@/components/chat/entries/render";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatEntry } from "@/lib/chat-types";
@@ -42,12 +42,15 @@ const TYPING_BUBBLE = <TypingBubble />;
 export function ConciergeTranscript({
   rows,
   live,
+  selection,
   actions,
   contentRef,
   feedback = false,
 }: {
   rows: ChatRow[];
   live: LivePreview;
+  /** Share mode: each bubble picks its turn, as a common chat's rows do. */
+  selection?: ShareSelection;
   actions: BlockActions;
   contentRef: (node: HTMLElement | null) => void;
   /** Shows the feedback buttons under each settled turn. */
@@ -109,6 +112,7 @@ export function ConciergeTranscript({
                 group={item}
                 actions={actions}
                 runningTurnId={runningTurnId}
+                selection={selection}
                 feedback={feedback}
                 arrival={arrival}
                 typing={TYPING_BUBBLE}
