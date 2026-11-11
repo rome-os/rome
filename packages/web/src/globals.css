@@ -988,6 +988,27 @@ html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
 [data-concierge-transcript] [data-timeline-landed] {
   box-shadow: 0 0 0 4px color-mix(in srgb, var(--primary) 18%, transparent);
 }
+/* The chat thread view fades in on open and out while it closes, each layer
+   on its own (ChatThreadView.tsx). 180ms is THREAD_FADE_MS in
+   reply/thread-anchor.ts. */
+@keyframes rome-thread-fade-in {
+  from {
+    opacity: 0;
+  }
+}
+[data-chat-thread-fade] {
+  animation: rome-thread-fade-in 180ms ease-out;
+  transition: opacity 180ms ease-in;
+}
+[data-chat-thread-view][data-closing] [data-chat-thread-fade] {
+  opacity: 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-chat-thread-fade] {
+    animation: none;
+    transition: none;
+  }
+}
 [data-chat-pending-card]:focus-visible {
   outline: 1px solid color-mix(in srgb, var(--ring) 50%, transparent);
   outline-offset: -1px;

@@ -92,6 +92,8 @@ import {
   useReplyDraftState,
 } from "@/components/chat/reply/reply-draft";
 import { findMessageAnchor } from "@/components/chat/reply/reply-source";
+import { isAnchorInView, LANDING_MS, THREAD_FADE_MS } from "@/components/chat/reply/thread-anchor";
+import { useDesktop } from "@/hooks/use-desktop";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useChatTabStatus } from "@/hooks/use-tab-status";
@@ -181,8 +183,6 @@ import { DEFAULT_LARGE_MODEL_SELECTION } from "@/lib/chat-constants";
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
 const TIMELINE_JUMP_OFFSET_PX = 24;
-// How long the landed-on question stays tinted.
-const TIMELINE_LANDING_MS = 900;
 /** How many older pages a jump to a Concierge message loads before it gives up. */
 const MAX_JUMP_PAGES = 20;
 
@@ -705,6 +705,17 @@ export function Chat({
 
   const landingTimerRef = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(landingTimerRef.current), []);
+  // Tints a message's row for a moment, so the eye finds it.
+  const landOn = useCallback((scroller: HTMLElement, anchor: HTMLElement) => {
+    window.clearTimeout(landingTimerRef.current);
+    for (const el of scroller.querySelectorAll("[data-timeline-landed]")) {
+      el.removeAttribute("data-timeline-landed");
+    }
+    anchor.setAttribute("data-timeline-landed", "");
+    landingTimerRef.current = window.setTimeout(() => {
+      anchor.removeAttribute("data-timeline-landed");
+    }, LANDING_MS);
+  }, []);
 
   // Scrolls to a message and tints it. An anchor names one message id, or
   // every id of an agent turn separated by spaces.
@@ -739,16 +750,31 @@ export function Chat({
 
       // Every user bubble is the same tint, so without this you cannot tell
       // whether the jump landed on the question you picked.
-      window.clearTimeout(landingTimerRef.current);
-      for (const el of scroller.querySelectorAll("[data-timeline-landed]")) {
-        el.removeAttribute("data-timeline-landed");
-      }
-      anchor.setAttribute("data-timeline-landed", "");
-      landingTimerRef.current = window.setTimeout(() => {
-        anchor.removeAttribute("data-timeline-landed");
-      }, TIMELINE_LANDING_MS);
+      landOn(scroller, anchor);
     },
-    [scrollerEl],
+    [scrollerEl, landOn],
+  );
+
+  // Brings a message back into view after the thread view opened from it
+  // closes, and tints it, so the reader finds where they were. A message
+  // still in view only gets the tint.
+  const revealMessage = useCallback(
+    (messageId: string) => {
+      const scroller = scrollerEl;
+      const anchor = scroller ? findMessageAnchor(scroller, messageId) : null;
+      if (!scroller || !anchor) return;
+      const box = scroller.getBoundingClientRect();
+      const clear = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
+      const bottom = floorEl
+        ? Math.min(box.bottom, floorEl.getBoundingClientRect().top)
+        : box.bottom;
+      if (isAnchorInView(anchor.getBoundingClientRect(), { top: box.top + clear, bottom })) {
+        landOn(scroller, anchor);
+      } else {
+        jumpToMessage(messageId);
+      }
+    },
+    [scrollerEl, floorEl, landOn, jumpToMessage],
   );
 
   // A row of the task panel points to a Concierge message that may sit pages
@@ -2329,6 +2355,46 @@ export function Chat({
       )
     : floatingHeader;
   const threadOpen = concierge && Boolean(mainSessionId) && replyDraft.thread !== null;
+  // The thread view stays on the message it opened from while it is open,
+  // and for its fade once it closed. Closing takes effect at once: the
+  // fading view takes no input.
+  const draftThread = threadOpen ? replyDraft.thread : null;
+  const [threadView, setThreadView] = useState<{ id: string; closing: boolean } | null>(null);
+  if (draftThread && (!threadView || threadView.closing)) {
+    setThreadView({ id: draftThread, closing: false });
+  } else if (!draftThread && threadView && !threadView.closing) {
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    setThreadView(still ? null : { id: threadView.id, closing: true });
+  }
+  const threadClosing = threadView?.closing === true;
+  useEffect(() => {
+    if (!threadClosing) return;
+    const timer = window.setTimeout(
+      () => setThreadView((current) => (current?.closing ? null : current)),
+      THREAD_FADE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [threadClosing]);
+  const openedFromRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (draftThread) {
+      openedFromRef.current ??= draftThread;
+      return;
+    }
+    const from = openedFromRef.current;
+    openedFromRef.current = null;
+    if (from) revealMessage(from);
+  }, [draftThread, revealMessage]);
+  // On a desktop the thread view holds the message it opened from where it
+  // sat in the timeline; a phone keeps the thread on the composer.
+  const desktop = useDesktop();
+  const threadOrigin = useCallback(
+    (messageId: string) => () => {
+      if (!desktop || !scrollerEl) return null;
+      return findMessageAnchor(scrollerEl, messageId)?.getBoundingClientRect().top ?? null;
+    },
+    [desktop, scrollerEl],
+  );
   // The thread view's transcript feeds none of the chat's scroll measures.
   const ignoreThreadContent = useCallback(() => {}, []);
   loadedThreads.current = new Map(
@@ -2641,22 +2707,28 @@ export function Chat({
                 onJump={jumpToMessage}
               />
             )}
-            {threadOpen && mainSessionId && replyDraft.thread ? (
+            {threadView && mainSessionId ? (
               <ChatThreadView
-                key={replyDraft.thread}
+                key={threadView.id}
                 sessionId={mainSessionId}
-                messageId={replyDraft.thread}
+                messageId={threadView.id}
                 onClose={replyDraft.closeThread}
                 floor={floorEl}
-                header={conciergeHeaderWith(
-                  <IconButton
-                    size={floating ? "md" : "sm"}
-                    label={t("thread.close")}
-                    icon={<X />}
-                    onClick={replyDraft.closeThread}
-                    className={actionBadge}
-                  />,
-                )}
+                closing={threadView.closing}
+                originTop={threadOrigin(threadView.id)}
+                header={
+                  threadView.closing
+                    ? undefined
+                    : conciergeHeaderWith(
+                        <IconButton
+                          size={floating ? "md" : "sm"}
+                          label={t("thread.close")}
+                          icon={<X />}
+                          onClick={replyDraft.closeThread}
+                          className={actionBadge}
+                        />,
+                      )
+                }
                 renderMessages={(threadMessages) => (
                   <ConciergeTranscript
                     rows={buildRows(threadMessages, identityBySession, mainIdentity, {

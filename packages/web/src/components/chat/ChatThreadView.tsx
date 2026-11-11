@@ -13,6 +13,8 @@ import { chatSessionTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { listChatThreadMessages } from "@/lib/chat-api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
+import { findMessageAnchor } from "./reply/reply-source";
+import { LANDING_MS, THREAD_FADE_MS, threadAnchor } from "./reply/thread-anchor";
 
 /** The query key of one chat thread, named by any of its messages. */
 export function chatThreadQueryKey(sessionId: string, messageId: string) {
@@ -20,6 +22,9 @@ export function chatThreadQueryKey(sessionId: string, messageId: string) {
 }
 
 const anyEvent = z.unknown();
+
+/** How much of the opened message stays above the composer, at least. */
+const KEEP_IN_VIEW_PX = 48;
 
 // A press on one of these belongs to the thread's content, not the blurred
 // area around it: any bubble of a message, a card, a bubble's details, the
@@ -32,7 +37,9 @@ const CONTENT =
  * laid over the transcript column. The chat behind it stays in view, blurred
  * and lightly dimmed; `header` floats on top, and the thread's messages, drawn
  * by `renderMessages`, sit at the bottom above the composer and scroll when
- * long. New messages in the thread appear as they are said.
+ * long. With `originTop`, the message it was opened from keeps the place it
+ * had in the timeline instead (see `threadAnchor`). New messages in the
+ * thread appear as they are said. It fades in, and out while `closing`.
  *
  * The composer is not part of it: `floor` is the element holding it, whose
  * height the messages keep clear of. It closes on Esc and on a press on the
@@ -45,6 +52,8 @@ export function ChatThreadView({
   header,
   renderMessages,
   floor = null,
+  originTop,
+  closing = false,
   className,
 }: {
   sessionId: string;
@@ -54,6 +63,14 @@ export function ChatThreadView({
   header?: ReactNode;
   renderMessages: (messages: ChatMessage[]) => ReactNode;
   floor?: HTMLElement | null;
+  /**
+   * Where `messageId` sat in the timeline when the view opened, as a
+   * viewport y, read once on open. Null or absent: the thread sits at the
+   * bottom.
+   */
+  originTop?: () => number | null;
+  /** Fading out after it closed: it takes no input and hears no Esc. */
+  closing?: boolean;
   className?: string;
 }) {
   const { t } = useTranslation("chat");
@@ -72,12 +89,13 @@ export function ChatThreadView({
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
+    if (closing) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeRef.current();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, []);
+  }, [closing]);
 
   // The composer's floor rides over the bottom of the column, so the last
   // message keeps clear of it however tall the draft grows.
@@ -100,21 +118,94 @@ export function ChatThreadView({
   // when the composer's floor is measured or grows while the thread is read
   // at its bottom. A cached thread draws its messages before the floor is
   // measured, so the first scroll alone would leave the newest behind it.
+  //
+  // Opened from a message, the view holds that message where it was instead,
+  // until the reader scrolls or a new message arrives.
   const following = useRef(true);
   const shownCount = useRef(0);
+  const origin = useRef<number | null | undefined>(undefined);
+  if (origin.current === undefined) origin.current = originTop?.() ?? null;
+  const anchoring = useRef(origin.current !== null);
+  const [lift, setLift] = useState(0);
+  const placedAt = useRef<number | null>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     const list = listRef.current;
     if (!list || count === 0) return;
-    if (count !== shownCount.current) following.current = true;
+    if (shownCount.current !== 0 && count !== shownCount.current) {
+      following.current = true;
+      anchoring.current = false;
+      setLift(0);
+    }
     shownCount.current = count;
+    const copy = anchoring.current ? findMessageAnchor(list, messageId) : null;
+    if (copy && origin.current !== null && contentRef.current) {
+      const listTop = list.getBoundingClientRect().top;
+      const slack = Number.parseFloat(getComputedStyle(contentRef.current).marginTop) || 0;
+      // The message stays below the header and its first lines above the
+      // composer's floor.
+      const minTop = Number.parseFloat(getComputedStyle(list).paddingTop) || 0;
+      const maxTop = list.clientHeight - floorHeight - KEEP_IN_VIEW_PX;
+      const place = threadAnchor({
+        desired: (origin.current ?? 0) - listTop,
+        minTop,
+        maxTop,
+        // Measured back to no scroll and no lift: a lift takes its height
+        // out of the free space above.
+        copyTop: copy.getBoundingClientRect().top - listTop + list.scrollTop + lift,
+        slack: slack + lift,
+        viewHeight: list.clientHeight,
+        scrollHeight: list.scrollHeight,
+      });
+      if (place.lift !== lift) setLift(place.lift);
+      list.scrollTop = place.scrollTop;
+      placedAt.current = list.scrollTop;
+      following.current = list.scrollHeight - list.scrollTop - list.clientHeight < 8;
+      return;
+    }
     if (following.current) list.scrollTop = list.scrollHeight;
-  }, [count, floorHeight]);
+  }, [count, floorHeight, lift, messageId]);
+  // The thread's copy of the message it opened from gets the same brief tint
+  // a jump gives, once the view has faded in, so the eye finds it.
+  const landed = useRef(false);
+  const shown = count > 0;
+  useEffect(() => {
+    const list = listRef.current;
+    if (!list || !shown || landed.current || closing) return;
+    landed.current = true;
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    let copy: HTMLElement | null = null;
+    const start = window.setTimeout(
+      () => {
+        copy = findMessageAnchor(list, messageId);
+        copy?.setAttribute("data-timeline-landed", "");
+      },
+      still ? 0 : THREAD_FADE_MS,
+    );
+    const end = window.setTimeout(
+      () => copy?.removeAttribute("data-timeline-landed"),
+      (still ? 0 : THREAD_FADE_MS) + LANDING_MS,
+    );
+    return () => {
+      window.clearTimeout(start);
+      window.clearTimeout(end);
+      copy?.removeAttribute("data-timeline-landed");
+    };
+  }, [shown, closing, messageId]);
+
   const onScroll = () => {
     const list = listRef.current;
-    if (list) following.current = list.scrollHeight - list.scrollTop - list.clientHeight < 8;
+    if (!list) return;
+    // The view's own placement scrolls too; only the reader's scroll lets go.
+    if (placedAt.current === null || Math.abs(list.scrollTop - placedAt.current) > 1) {
+      anchoring.current = false;
+      placedAt.current = null;
+    }
+    following.current = list.scrollHeight - list.scrollTop - list.clientHeight < 8;
   };
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
+    if (closing) return;
     // A layer the thread's content opened in a portal (a popover, a menu)
     // bubbles here through React, though it lies outside the overlay.
     if (!event.currentTarget.contains(event.target as Node)) return;
@@ -126,21 +217,31 @@ export function ChatThreadView({
     <div
       role="dialog"
       aria-label={t("thread.title")}
+      aria-hidden={closing || undefined}
       data-chat-thread-view
+      data-closing={closing || undefined}
       onPointerDown={onPointerDown}
-      className={cn("absolute inset-0 z-20 flex flex-col", className)}
+      className={cn(
+        "absolute inset-0 z-20 flex flex-col",
+        closing && "pointer-events-none",
+        className,
+      )}
     >
+      {/* Each layer fades on its own: an ancestor's opacity would cut the
+          backdrop's blur off from the chat behind it while it fades. */}
       <div
         aria-hidden
+        data-chat-thread-fade
         className="absolute inset-0 bg-chat-canvas/90 backdrop-blur-xl supports-[backdrop-filter]:bg-chat-canvas/75"
       />
       <div
         ref={listRef}
         onScroll={onScroll}
+        data-chat-thread-fade
         className="scrollbar-idle-hidden relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain concierge-header-clear"
-        style={{ paddingBottom: floorHeight }}
+        style={{ paddingBottom: floorHeight + lift }}
       >
-        <div className="mt-auto">
+        <div ref={contentRef} className="mt-auto">
           {renderMessages(messages)}
           {thread.isError ? (
             <p className="px-3 text-center text-ui text-muted-foreground md:px-6">
@@ -149,7 +250,7 @@ export function ChatThreadView({
           ) : null}
         </div>
       </div>
-      {header}
+      {header ? <div data-chat-thread-fade>{header}</div> : null}
     </div>
   );
 }

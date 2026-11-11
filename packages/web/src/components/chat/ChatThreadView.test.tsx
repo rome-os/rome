@@ -397,6 +397,76 @@ describe("ChatThreadView", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
   });
 
+  it("while it fades out after closing, takes no press and hears no Esc", async () => {
+    const onClose = rs.fn();
+    render(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={onClose}
+          closing
+          renderMessages={paragraphs}
+        />,
+      ),
+    );
+    await screen.findByText("Which day?");
+    const view = document.querySelector<HTMLElement>("[data-chat-thread-view]")!;
+    expect(view.hasAttribute("data-closing")).toBe(true);
+    expect(view.className).toMatch(/pointer-events-none/);
+
+    fireEvent.pointerDown(view);
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("tints the message it opened from once it has faded in, then lets it go", async () => {
+    render(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={() => {}}
+          renderMessages={paragraphs}
+        />,
+      ),
+    );
+    const copy = (await screen.findByText("Which day?")).closest("[data-timeline-anchor]")!;
+    expect(copy.hasAttribute("data-timeline-landed")).toBe(false);
+    await waitFor(() => expect(copy.hasAttribute("data-timeline-landed")).toBe(true));
+    await waitFor(() => expect(copy.hasAttribute("data-timeline-landed")).toBe(false), {
+      timeout: 2000,
+    });
+  });
+
+  it("reads where the message it opened from sat once, on open", async () => {
+    const originTop = rs.fn(() => 320);
+    const { rerender } = render(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={() => {}}
+          originTop={originTop}
+          renderMessages={paragraphs}
+        />,
+      ),
+    );
+    await screen.findByText("Which day?");
+    rerender(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={() => {}}
+          originTop={originTop}
+          renderMessages={paragraphs}
+        />,
+      ),
+    );
+    expect(originTop).toHaveBeenCalledTimes(1);
+  });
+
   it("stays open on a press inside a layer its content opened in a portal", async () => {
     const onClose = rs.fn();
     render(
