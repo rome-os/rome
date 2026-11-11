@@ -1,8 +1,9 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
-import { appGuardianProfile } from "./people/for-apps.js";
+import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
-import { WebChatDashboardSessions } from "./webchat/webchat-dashboard-sessions.js";
+import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
+import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
@@ -31,7 +32,7 @@ import { NotifyClient } from "./lib/notify-client.js";
 import { CloudProfileClient } from "./instance/cloud-profile.js";
 import { getGuardianAuthState, recordResolvedAccount } from "./access/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
-import { provisionRelayMailboxAtBoot } from "./apps/rome-cloud-relay.js";
+import { provisionRelayMailboxAtBoot } from "./relay/mailbox.js";
 import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
 import { createNodeCallerProvisioner } from "./desktops/rome-node-provisioning.js";
 import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./instance/rome-cloud-origin.js";
@@ -116,11 +117,8 @@ import {
   channelList,
   joinLaterChannel,
 } from "./chats/connected-accounts/connected-account-list.js";
-import {
-  WEBCHAT_CHANNEL,
-  WEBCHAT_SURFACE,
-  webchatChannel,
-} from "./chats/dashboard/dashboard-account.js";
+import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./webchat/dashboard-account.js";
+import { ownPlatforms } from "./webchat/send.js";
 import { claimChannels, recordChannelAccounts } from "./wiring/boot.js";
 import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
 import { domainOf, domainOfGrant } from "./connections/platform.js";
@@ -213,7 +211,8 @@ import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
 import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
-import { privateOwnerOf } from "./concierge/privacy.js";
+import { privateChildren, privateOwnerOf } from "./webchat/privacy.js";
+import { ownerOfChat } from "./webchat/owner.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { continuationActor } from "./webchat/continuation-actor.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
@@ -247,7 +246,7 @@ import {
   ScheduleTriggerProvider,
 } from "./routines/schedule-trigger-provider.js";
 import type { Trigger } from "./routines/types.js";
-import { resolveGuardianTimezone } from "./routines/guardian-timezone.js";
+import { resolveGuardianTimezone } from "./instance/timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
 import { linkGuardianToAccount } from "./people/guardian-mapping.js";
@@ -497,11 +496,15 @@ async function main() {
     channelsOn: (platform) => channelRecords.namesOn(platform),
   });
   const chatsEvents = new ChatsEvents();
-  // The dashboard's sessions, with each dashboard chat's lines in Chats.
+  // Every agent session's records, which the dashboard and the connections
+  // both write, with a private chat's children kept private to its owner.
+  const sessionRecords = new SessionRecords(db, privateChildren);
+  // The dashboard's sessions, with each dashboard chat's messages in Chats.
   const webchatRepo = new ChatsWebChatRepository(db, {
     chats: chatsWired.chats,
     lines: chatsWired.messages,
     links: chatsWired.links,
+    records: sessionRecords,
   });
   await webchatRepo.recoverInterruptedInputs();
   // Only turns within a day of the newest one, so the stopped process's turns
@@ -536,7 +539,7 @@ async function main() {
         adapters: chatsWired.adapters,
         // `builtChannels` is set further down, before any app runs.
         channel: (name) => builtChannels?.find((channel) => channel.name === name) ?? null,
-        open: (input) => openChannelChat({ webchatRepo, speakers: appSpeakers }, input),
+        open: (input) => openChannelChat({ records: sessionRecords, speakers: appSpeakers }, input),
       },
     },
     guardianProfile: appGuardianProfile({
@@ -849,7 +852,16 @@ async function main() {
   });
   artifactLoadFailuresBooted = true;
   artifactLoadFailureReporter.report("boot");
-  const sessionRepository = new DrizzleSessionRepository(db, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(db);
+  // Sessions and chats saved before agent names carried their app are moved to
+  // the new names, so a session is found by its agent's name as written.
+  const renamedAgents = {
+    sessions: sessionRepository.deprecatedRenameAgents(artifactIdentity.legacyBindings.agent),
+    chats: webchatRepo.deprecatedRenameAgents(artifactIdentity.legacyBindings.agent),
+  };
+  if (renamedAgents.sessions + renamedAgents.chats > 0) {
+    appsLog.info("old agent names renamed", renamedAgents);
+  }
 
   // Set once the email adapter is created (further down). Lets the main-agent
   // runtime context surface Rome's own provisioned inbox address, which is read
@@ -993,7 +1005,11 @@ async function main() {
     systemClock,
     // A routine from before routines recorded their creator acts for its
     // chat's owner, as its fires did then.
-    (routine) => legacyRoutineActor(routine, { db, webchatRepo }),
+    (routine) =>
+      legacyRoutineActor(routine, {
+        db,
+        ownerOfChat: (chatId) => ownerOfChat((id) => webchatRepo.getSession(id), chatId),
+      }),
   );
   deactivateRoutine = (id) => routineEngine.deactivate(id);
   const scheduleTriggerProvider = new ScheduleTriggerProvider(routinesRepo, () =>
@@ -1075,9 +1091,9 @@ async function main() {
 
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
   const chatTurns = createChatTurns();
-  const dashboardSessions = new WebChatDashboardSessions(webchatRepo);
+  const recordedSessions = new AgentRecordedSessions(sessionRecords);
   const subagentCalls = createSubagentCalls({
-    dashboard: dashboardSessions,
+    recorded: recordedSessions,
     turnLog: subagentTurnLog(webchatRepo),
     liveTurns: subagentLiveTurns(agentTurnStreamRegistry),
   });
@@ -1101,7 +1117,7 @@ async function main() {
   const usageAttribution = new UsageAttributionResolver(
     {
       getSession: (id) => webchatRepo.getSession(id),
-      rootSession: (id) => rootSession(dashboardSessions, id),
+      rootSession: (id) => rootSession(recordedSessions, id),
       getExecution: async (id) => {
         const row = await actionExecutionsRepo.findById(id);
         return row
@@ -2131,6 +2147,7 @@ async function main() {
         chats: chatsWired.chats,
         messages: chatsWired.messages,
       },
+      ownPlatforms: ownPlatforms(),
       chats: chatsWired.chats,
       messages: chatsWired.messages,
       webhookInvocationsRepo,

@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionEngine } from "../apps/actions/engine.js";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/db.js";
 import { AgentLoader } from "../app-host/agent-loader.js";
 import { TurnListeners } from "../agent/index.js";
@@ -62,7 +62,7 @@ describe("Sessions working dirs", () => {
     const loader = new AgentLoader(artifactIdentity);
     await loader.loadAll(directory);
     testDb = createTestDb();
-    sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
+    sessionRepository = new DrizzleSessionRepository(testDb.db);
     webchatRepo = new ChatsWebChatRepository(testDb.db);
     const provider: ModelProvider = {
       id: "anthropic",
@@ -403,7 +403,10 @@ describe("Sessions working dirs", () => {
 
   it("resumes a legacy session with no recorded working dir in the default project", async () => {
     await sessionRepository.add(
-      Session.create(AGENT, { deprecatedId: "legacy-session", continuityKey: "action:legacy" }),
+      Session.create(`core:${AGENT}`, {
+        deprecatedId: "legacy-session",
+        continuityKey: "action:legacy",
+      }),
     );
 
     await manager.resume({ id: "legacy-session", agent: AGENT });

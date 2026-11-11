@@ -83,7 +83,7 @@ describe("Sessions textPrivate", () => {
     manager = createSessions(
       {
         agentLoader: loader,
-        sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
+        sessionRepository: new DrizzleSessionRepository(testDb.db),
         sessionSettings: new ChatSessionSettings({
           webchatRepo: new ChatsWebChatRepository(testDb.db),
         }),

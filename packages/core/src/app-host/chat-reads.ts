@@ -9,10 +9,10 @@
 import type { ChatLine, ChatReads, RecentChat, SessionTrace } from "@rome-os/app-runtime/chats";
 import { and, asc, eq, sql, type SQL } from "drizzle-orm";
 import { platformOf } from "@rome/api-types/platform";
-import { DASHBOARD_PLATFORM } from "../connections/send.js";
+import { DASHBOARD_PLATFORM } from "../webchat/dashboard-account.js";
 import { CHAT_MESSAGES, CHATS } from "../chats/storage/messages-sql.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import { romeAgentMessages } from "../db/schema/system.js";
 import type { ChatReadModel } from "../webchat/chat-read-model.js";
 

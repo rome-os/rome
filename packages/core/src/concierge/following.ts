@@ -32,7 +32,7 @@ import type { ConciergeFollowItemsRepository } from "../db/repositories/concierg
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { RoutineEngine } from "../routines/engine.js";
-import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
+import { resolveGuardianTimezone } from "../instance/timezone.js";
 import { createLogger } from "../logger.js";
 import {
   FollowBatcher,
@@ -47,13 +47,8 @@ import { mergeConnectors, type ProviderService, type ProviderWatchSection } from
 import { addressedToOf, cleanLabels } from "./event-shape.js";
 import { optionValue, renderOptions } from "./follow-options.js";
 import type { ConciergeService } from "./service.js";
-import {
-  type ConciergeOwner,
-  GUARDIAN_OWNER,
-  MAIN_CHAT_NAME,
-  mainChatIdOf,
-  storedChatId,
-} from "./owner.js";
+import { type ConciergeOwner, GUARDIAN_OWNER, storedChatId } from "../webchat/owner.js";
+import { MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
 import {
   type FollowEvent,
   MAX_EVENTS_PER_TRIAGE,

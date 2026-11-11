@@ -4,7 +4,7 @@
 import { actorOfOwner } from "../access/owner-actor.js";
 import type { SessionActor } from "../access/session-actor.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { InterruptedTurn } from "../db/repositories/webchat.js";
+import type { InterruptedTurn } from "./repository.js";
 import type { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
 /** The actor a restart or usage-limit continuation of `turn` runs as, or undefined for no one. */

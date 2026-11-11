@@ -1,8 +1,8 @@
 import { describe, expect, it } from "@rstest/core";
 import { join } from "node:path";
-import { AgentLoader } from "../app-host/agent-loader.js";
+import { AgentLoader } from "./agent-loader.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
-import { ROME_AGENT_TRAITS } from "./agent-traits.js";
+import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
 
 describe("ROME_AGENT_TRAITS", () => {
   it("gives the shipped Concierge a saved model that outranks its session's pinned one", async () => {

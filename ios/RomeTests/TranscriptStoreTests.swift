@@ -92,6 +92,40 @@ final class FakeBackend: RomeBackend {
         topicChats.removeAll { $0.id == id }
     }
 
+    func deleteChat(_ id: String) async throws {
+        calls.append("delete \(id)")
+        topicChats.removeAll { $0.id == id }
+    }
+
+    /// Share links: what each create asked for, the answer it gets, the
+    /// chat's links, and the revokes, in order.
+    var shareRequests: [(sessionId: String, turnIds: [String], agentName: String?)] = []
+    var shareAnswer: Result<ChatShareLink, APIError> = .success(ChatShareLink(id: "s1", url: "/share/tok1", title: "Trip"))
+    var shareLinks: [ChatShareLink] = []
+    var revoked: [String] = []
+    var revokeError: APIError?
+
+    /// Runs inside a share, after the instance took it.
+    var duringShare: (() async -> Void)?
+
+    func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink {
+        shareRequests.append((sessionId, turnIds, agentName))
+        await duringShare?()
+        return try shareAnswer.get()
+    }
+
+    func chatShares(sessionId: String) async throws -> [ChatShareLink] { shareLinks }
+
+    /// Runs inside a revoke, before it answers.
+    var duringRevoke: (() async -> Void)?
+
+    func revokeShare(id: String) async throws {
+        revoked.append(id)
+        await duringRevoke?()
+        if let revokeError { throw revokeError }
+        shareLinks.removeAll { $0.id == id }
+    }
+
     /// The files of the last send.
     var sentFiles: [OutgoingFile] = []
 

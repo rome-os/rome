@@ -14,6 +14,11 @@ rs.mock("@/lib/chat-api", () => ({
   createRoutine: rs.fn(),
   listRoutineRefs: rs.fn(),
 }));
+// The routine card reads run state through the Routines page's hooks.
+rs.mock("@/hooks/use-routines", () => ({
+  useRoutines: () => ({ routines: [], refetch: () => Promise.resolve() }),
+  useRunRoutineNow: () => () => Promise.resolve({ runId: "run", status: "success" }),
+}));
 
 let cardTop = -200;
 const scrollTo = rs.fn();
@@ -248,7 +253,8 @@ describe("ChatPendingCardJump", () => {
       { id: "routine", key: "chat-routine:test", name: "Weekly update", enabled: true },
     ]);
     render(<Harness />);
-    await screen.findByText("On");
+    // The saved card is one row whose title links to the routine.
+    await screen.findByRole("link", { name: "Every Monday, remind me to send an update." });
     expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull();
   });
 

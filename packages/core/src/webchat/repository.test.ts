@@ -1,13 +1,13 @@
-import { resolveChatSenders } from "../../api/routes/chat-senders.js";
-import { resolveReply } from "../../api/routes/webchat-reply.js";
+import { resolveChatSenders } from "../api/routes/chat-senders.js";
+import { resolveReply } from "../api/routes/webchat-reply.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq, sql } from "drizzle-orm";
-import { buildAgent, createTestDb, testChatsWiring, type TestDb } from "../../test/helpers.js";
-import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
-import { ChatSettingsRepository } from "../../chat-settings/repository.js";
-import type { DrizzleDb } from "../index.js";
-import { sessionTraceCutoff } from "../../webchat/trace-retention.js";
-import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../schema.js";
+import { buildAgent, createTestDb, testChatsWiring, type TestDb } from "../test/helpers.js";
+import { ApprovalsRepository } from "../apps/repositories/approvals.js";
+import { ChatSettingsRepository } from "../chat-settings/repository.js";
+import type { DrizzleDb } from "../db/index.js";
+import { sessionTraceCutoff } from "./trace-retention.js";
+import { romeAgentMessages, romeSessions, romeAgentTraceBlocks } from "../db/schema.js";
 import {
   INTERRUPTED_TURN_ERROR,
   WebChatRepository,
@@ -15,8 +15,8 @@ import {
   sessionAwaitingGuardian,
   sessionLastTurnFailed,
   validateTurnRecapAudioUrl,
-} from "./webchat.js";
-import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
+} from "./repository.js";
+import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
 // Records which statement entry points (`select`, `insert`, `update`, `delete`,
 // `transaction`) a repository reaches for on the connection itself, so a test
@@ -55,6 +55,16 @@ describe("WebChatRepository", () => {
   afterEach(() => {
     rs.useRealTimers();
     testDb.close();
+  });
+
+  it("renames chats saved under an agent's old name, and leaves the rest", async () => {
+    await repo.createSession("old", "Old", undefined, undefined, null, undefined, "coding");
+    await repo.createSession("main", "Main");
+
+    expect(repo.deprecatedRenameAgents({ coding: "coding:coding" })).toBe(1);
+    expect(repo.deprecatedRenameAgents({ coding: "coding:coding" })).toBe(0);
+    expect((await repo.getSession("old"))?.agentName).toBe("coding:coding");
+    expect((await repo.getSession("main"))?.agentName).toBeNull();
   });
 
   it("lists a turn's messages in the order they were stored, even inside one second", async () => {

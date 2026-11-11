@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
-import type { DashboardSession, DashboardSessions } from "../domain/dashboard-sessions.js";
+import type { RecordedSession, RecordedSessions } from "../domain/recorded-sessions.js";
 import {
   createSubagentCalls,
   type CallingTurn,
@@ -41,10 +41,10 @@ function answering(text: string, wait?: Promise<void>) {
   };
 }
 
-function setup(rows: Record<string, DashboardSession> = {}) {
+function setup(rows: Record<string, RecordedSession> = {}) {
   const added: unknown[] = [];
   const order: string[] = [];
-  const dashboard: DashboardSessions = {
+  const recorded: RecordedSessions = {
     parentSession: async () => null,
     get: async (id) => rows[id] ?? null,
     addSubagentSession: async (session) => {
@@ -56,7 +56,7 @@ function setup(rows: Record<string, DashboardSession> = {}) {
   const finish = rs.fn();
   const registered: Array<{ sessionId: string; turnId: string }> = [];
   const calls = createSubagentCalls({
-    dashboard,
+    recorded,
     turnLog: { open: () => ({ record: async (e) => void logged.push(e) }) },
     liveTurns: {
       register: (turn) => {
@@ -68,7 +68,7 @@ function setup(rows: Record<string, DashboardSession> = {}) {
   return { calls, added, order, logged, finish, registered };
 }
 
-const parentRow: DashboardSession = {
+const parentRow: RecordedSession = {
   type: "webchat",
   name: "Trip",
   agentName: null,
@@ -89,7 +89,7 @@ function callingTurn(sessions: SubagentSessions, toolUseId = "tool-1"): CallingT
 }
 
 describe("SubagentCalls", () => {
-  it("opens a fresh session, adds it to the dashboard, and answers with the turn's result", async () => {
+  it("opens a fresh session, adds it to the recorded, and answers with the turn's result", async () => {
     const { calls, added, order, logged, finish, registered } = setup({ chat: parentRow });
     const child = fakeSession("sub-1", answering("done"));
     const sessions: SubagentSessions = {
@@ -145,7 +145,7 @@ describe("SubagentCalls", () => {
   });
 
   it("resumes a session the same parent started, without adding it again", async () => {
-    const stored: DashboardSession = {
+    const stored: RecordedSession = {
       ...parentRow,
       type: "subagent",
       agentName: "core:helper",

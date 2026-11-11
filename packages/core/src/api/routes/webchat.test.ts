@@ -16,7 +16,7 @@ import { createWebchatRuntime, openToolOf } from "./webchat.js";
 import { Session } from "../../agent/index.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
-import { webchatChannel, webchatCaller } from "../../chats/dashboard/dashboard-account.js";
+import { webchatChannel, webchatCaller } from "../../webchat/dashboard-account.js";
 import {
   buildAgent,
   createTestDb,
@@ -2309,7 +2309,7 @@ describe("Webchat API", () => {
       const read = async () => (await app.request(`/chat/sessions/${session.id}`)).json();
       expect(await read()).toMatchObject({ model: null, reasoningEffort: null });
 
-      const runtime = Session.create("main", { continuityKey: `webchat:${session.id}` });
+      const runtime = Session.create("core:main", { continuityKey: `webchat:${session.id}` });
       runtime.recordTurn({
         provider: "codex",
         modelThreadId: "thread-1",

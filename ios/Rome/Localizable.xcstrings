@@ -213,6 +213,16 @@
         }
       }
     },
+    "%lld selected" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已选择 %lld 项"
+          }
+        }
+      }
+    },
     "%lld unread" : {
       "localizations" : {
         "zh-Hans" : {
@@ -593,6 +603,16 @@
         }
       }
     },
+    "Can't share right now. Try again." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂时无法分享，请重试。"
+          }
+        }
+      }
+    },
     "Cancel" : {
       "localizations" : {
         "zh-Hans" : {
@@ -893,6 +913,26 @@
         }
       }
     },
+    "Couldn't create the link." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法创建链接。"
+          }
+        }
+      }
+    },
+    "Couldn't load the links." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法加载链接。"
+          }
+        }
+      }
+    },
     "Couldn't read Health" : {
       "localizations" : {
         "zh-Hans" : {
@@ -923,12 +963,42 @@
         }
       }
     },
+    "Couldn't stop sharing." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法停止分享。"
+          }
+        }
+      }
+    },
+    "Create link" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建链接"
+          }
+        }
+      }
+    },
     "Create one in Rome Cloud, then open it here." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 Rome Cloud 创建一个后再打开。"
+          }
+        }
+      }
+    },
+    "Creating…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建中…"
           }
         }
       }
@@ -959,6 +1029,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "调试"
+          }
+        }
+      }
+    },
+    "Delete" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除"
+          }
+        }
+      }
+    },
+    "Delete this chat?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除这个聊天？"
           }
         }
       }
@@ -1341,6 +1431,16 @@
         }
       }
     },
+    "Links you create in this chat show here." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在这个对话中创建的链接会显示在这里。"
+          }
+        }
+      }
+    },
     "Loading approval…" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1631,6 +1731,16 @@
         }
       }
     },
+    "No shared links" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有分享的链接"
+          }
+        }
+      }
+    },
     "No tasks yet" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1887,16 +1997,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开导航"
-          }
-        }
-      }
-    },
-    "Open on the web" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 Web 中打开"
           }
         }
       }
@@ -2465,6 +2565,16 @@
         }
       }
     },
+    "Select turn" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择这一轮"
+          }
+        }
+      }
+    },
     "Send" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2551,6 +2661,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "分享"
+          }
+        }
+      }
+    },
+    "Shared chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享的对话"
+          }
+        }
+      }
+    },
+    "Shared links" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已分享的链接"
+          }
+        }
+      }
+    },
+    "Shares the link" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "分享这个链接"
           }
         }
       }
@@ -2833,6 +2973,16 @@
         }
       }
     },
+    "Stop sharing" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止分享"
+          }
+        }
+      }
+    },
     "Stopped" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3069,6 +3219,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这个 Rome 还没准备好"
+          }
+        }
+      }
+    },
+    "This can't be undone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此操作无法撤销。"
           }
         }
       }

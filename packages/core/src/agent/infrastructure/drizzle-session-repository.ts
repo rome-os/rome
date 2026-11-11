@@ -3,7 +3,6 @@
 // Aggregate: agent/domain/session.ts.
 
 import { and, desc, eq } from "drizzle-orm";
-import { resolveArtifactId, type ArtifactIdentityContext } from "../../apps/artifact-id.js";
 import type { DrizzleDb, DrizzleTx } from "../../db/index.js";
 import { sessions, sessionTurnCheckpoints } from "../../db/schema.js";
 import {
@@ -24,14 +23,10 @@ type SessionRow = typeof sessions.$inferSelect;
  * that touches `sessions` and `session_turn_checkpoints`, except the
  * `chat_id` column: the web chat side reads and records which chat has a
  * session there (`chatOfSession`, `recordSessionInChat` in
- * db/repositories/webchat.ts). The agent also matches under its legacy names
- * in `current`, through {@link deprecatedSameAgent}.
+ * webchat/repository.ts).
  */
 export class DrizzleSessionRepository implements SessionRepository {
-  constructor(
-    private readonly db: DrizzleDb,
-    private readonly identity: ArtifactIdentityContext,
-  ) {}
+  constructor(private readonly db: DrizzleDb) {}
 
   /** The session, or null when none has the id. Never creates one. */
   async session(id: SessionId): Promise<Session | null> {
@@ -53,10 +48,10 @@ export class DrizzleSessionRepository implements SessionRepository {
     const rows = await this.db
       .select()
       .from(sessions)
-      .where(and(eq(sessions.channelThreadKey, continuityKey), eq(sessions.status, "active")))
-      .orderBy(desc(sessions.createdAt), desc(sessions.lastActiveAt));
-    const row = rows.find((candidate) => this.deprecatedSameAgent(candidate.agentName, agentName));
-    return row ? restore(row) : null;
+      .where(exactlyActive(continuityKey, agentName))
+      .orderBy(desc(sessions.createdAt), desc(sessions.lastActiveAt))
+      .limit(1);
+    return rows[0] ? restore(rows[0]) : null;
   }
 
   /**
@@ -187,20 +182,24 @@ export class DrizzleSessionRepository implements SessionRepository {
     return rows[0] ?? null;
   }
 
-  /** @deprecated Matches an agent under its legacy names, which is identity
-   *  resolution Sessions should not do. Goes when agent names are canonical
-   *  before they reach Sessions, and `current` compares them as strings. */
-  private deprecatedSameAgent(storedName: string, requestedName: string): boolean {
-    if (storedName === requestedName) return true;
-    try {
-      const legacyBindings = this.identity.legacyBindings;
-      return (
-        resolveArtifactId({ kind: "agent", value: storedName, legacyBindings }) ===
-        resolveArtifactId({ kind: "agent", value: requestedName, legacyBindings })
-      );
-    } catch {
-      return false;
-    }
+  /**
+   * @deprecated Renames the agent of every session saved under an agent's
+   * old bare name, such as `coding`, to its app-prefixed name, such as
+   * `coding:coding`. Goes once no instance has a session saved under an old
+   * name.
+   */
+  deprecatedRenameAgents(newNameOf: Readonly<Record<string, string>>): number {
+    return this.db.transaction((tx) => {
+      let renamed = 0;
+      for (const [oldName, newName] of Object.entries(newNameOf)) {
+        renamed += tx
+          .update(sessions)
+          .set({ agentName: newName })
+          .where(eq(sessions.agentName, oldName))
+          .run().changes;
+      }
+      return renamed;
+    });
   }
 }
 

@@ -75,7 +75,7 @@ write(
     "\n",
   ),
 );
-write("src/apps/agent-probe.ts", 'import "../agent/index.js";\n');
+write("src/routines/agent-probe.ts", 'import "../agent/index.js";\n');
 
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -119,7 +119,7 @@ describe("checkImports with the layer rules", () => {
 });
 
 describe("checkImports with the context rules", () => {
-  it("rejects every import from agent/ into apps/, type-only included, and allows the reverse", () => {
+  it("rejects every import from agent/ into apps/, type-only included, and allows one a context may make", () => {
     const lines = checkImports(join(root, "src"), join(root, "tsconfig.json"), contextRules)
       .map(formatImportViolation)
       .map((line) => line.replace(/: .*$/, ""))

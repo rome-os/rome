@@ -145,6 +145,9 @@ final class HostRig {
     let health = FakeHealth()
     let delays = DelayLog()
     let defaults = UserDefaults(suiteName: "rome-node-\(UUID().uuidString)")!
+    /// Marks this rig's requests: a host left from an earlier test can still
+    /// ask for its config while this one runs.
+    let id = UUID().uuidString
     private(set) var host: NodeHost!
     private(set) var rejections = 0
     private let pingInterval: TimeInterval
@@ -165,6 +168,7 @@ final class HostRig {
     func makeHost() -> NodeHost {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [ConfigProtocol.self]
+        configuration.httpAdditionalHeaders = ["X-Test-Rig": id]
         let delays = delays
         return NodeHost(
             credentials: credentials, audit: audit, health: HealthFixtures.actions(health), device: .iPhone, defaults: defaults,
@@ -185,6 +189,11 @@ final class HostRig {
     }
 
     static let request = #"{"id":"r1","from":"inst-1","payload":{"type":"request","action":"system.info"}}"#
+
+    /// The config requests this rig's hosts made.
+    var configRequests: [URLRequest] {
+        ConfigProtocol.requests.filter { $0.value(forHTTPHeaderField: "X-Test-Rig") == id }
+    }
 }
 
 @MainActor
@@ -193,7 +202,7 @@ final class HostRig {
         let rig = HostRig()
         let socket = await rig.online()
         #expect(rig.host.status == .online)
-        let config = try #require(ConfigProtocol.requests.first)
+        let config = try #require(rig.configRequests.first)
         #expect(config.url?.absoluteString == "https://cloud.test/v1/gateway/config")
         #expect(config.value(forHTTPHeaderField: "Authorization") == "Bearer romemob_test-token")
         let attempt = try #require(rig.gateway.attempts.first)
@@ -378,7 +387,7 @@ final class HostRig {
         #expect(rig.host.status == .off)
         rig.host.setActive(true)
         try? await Task.sleep(for: .milliseconds(50))
-        #expect(ConfigProtocol.requests.count == 1, "the credential is gone: nothing asks again")
+        #expect(rig.configRequests.count == 1, "the credential is gone: nothing asks again")
     }
 
     @Test func otherCloudTroubleIsRetried() async {
@@ -399,7 +408,7 @@ final class HostRig {
         rig.host.setActive(true)
         try? await Task.sleep(for: .milliseconds(50))
         #expect(rig.host.status == .off)
-        #expect(ConfigProtocol.requests.isEmpty && rig.gateway.attempts.isEmpty, "nothing connects")
+        #expect(rig.configRequests.isEmpty && rig.gateway.attempts.isEmpty, "nothing connects")
         rig.host.setEnabled(true)
         #expect(await eventually { rig.host.status == .online })
         #expect(rig.makeHost().isEnabled, "kept across launches")

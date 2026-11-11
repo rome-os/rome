@@ -88,7 +88,7 @@ export interface GoldenTraceOptions {
 export async function buildGoldenTraceRig(options: GoldenTraceOptions): Promise<GoldenTraceRig> {
   const testDb = createTestDb();
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
-  const sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(testDb.db);
   const systemPrompts = createTestSystemPrompts();
   const actionRegistry = new ActionRegistryImpl();
   const actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db), {

@@ -4,7 +4,7 @@
 // push is sent with, which never leaves the main process.
 
 import { z } from "zod";
-import type { ConciergeOwner } from "../concierge/owner.js";
+import type { ConciergeOwner } from "../webchat/owner.js";
 import { parseWorkerCallParams } from "../lib/worker-call-params.js";
 import type { SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
 import type { IpcCallContext } from "../apps/actions/ipc.js";

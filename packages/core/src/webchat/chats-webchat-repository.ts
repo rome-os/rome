@@ -27,6 +27,7 @@ import { partsText, type SaidBy } from "../chats/storage/message.js";
 import { MessageRepository } from "../chats/storage/message-repository.js";
 import { type ChatRef, chatKey, type Place, placeIn } from "../chats/storage/place.js";
 import type { DrizzleDb, DrizzleTx } from "../db/index.js";
+import type { SessionRecords } from "../sessions/session-records.js";
 import {
   type ChatThreadPlacement,
   type EnsureRomeSessionInput,
@@ -37,7 +38,7 @@ import {
   type StoredWebchatMessage,
   type TraceBatch,
   WebChatRepository,
-} from "../db/repositories/webchat.js";
+} from "./repository.js";
 import {
   agentTurnMessages,
   romeAgentMessages,
@@ -94,9 +95,14 @@ export class ChatsWebChatRepository extends WebChatRepository {
 
   constructor(
     db: DrizzleDb,
-    deps: { chats?: ChatRepository; lines?: MessageRepository; links?: TurnLinks } = {},
+    deps: {
+      chats?: ChatRepository;
+      lines?: MessageRepository;
+      links?: TurnLinks;
+      records?: SessionRecords;
+    } = {},
   ) {
-    super(db);
+    super(db, deps.records);
     this.chats = deps.chats ?? new ChatRepository(db);
     this.lines = deps.lines ?? new MessageRepository(db);
     this.links = deps.links ?? new TurnLinks(db, this.lines);

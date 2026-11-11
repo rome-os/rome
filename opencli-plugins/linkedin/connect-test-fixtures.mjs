@@ -95,6 +95,24 @@ export const messageAndConnectLayout = `
     ${peopleYouMayKnow}
   </main>`;
 
+/**
+ * A second-degree profile whose header also keeps relationship markup that LinkedIn does not
+ * show, as one variant per entry in `badges`, beside the owner's own Connect.
+ */
+export const relationshipVariantsLayout = (badges) => `
+  <main>
+    <section class="pv-top-card">
+      <h1>Jane Doe</h1>
+      ${badges.join("\n      ")}
+      <div class="pvs-profile-actions">
+        <button aria-label="Invite Jane Doe to connect">Connect</button>
+        <a href="/messaging/compose/?recipient=jane-doe">Message</a>
+        <button aria-label="More actions">More</button>
+      </div>
+    </section>
+    ${peopleYouMayKnow}
+  </main>`;
+
 /** A profile whose Connect is an invitation-route link, beside a sidebar link for someone else. */
 export const connectLinkLayout = `
   <main>

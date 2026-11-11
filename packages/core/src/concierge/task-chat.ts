@@ -9,11 +9,10 @@ import { MessageRepository as ChatLines } from "../chats/storage/message-reposit
 import { placeIn as placeInChat } from "../chats/storage/place.js";
 import type { DrizzleDb } from "../db/index.js";
 import { TurnLinks, type TurnLink } from "../sessions/turn-links.js";
-import { WEBCHAT_CHANNEL } from "../chats/dashboard/dashboard-account.js";
+import { DASHBOARD_PLATFORM, WEBCHAT_CHANNEL } from "../webchat/dashboard-account.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { MessagePage, MessageRepository } from "../chats/message-repository.js";
 import { chatKey, placeIn, type Place } from "../chats/place.js";
-import { DASHBOARD_PLATFORM } from "../connections/send.js";
 
 /** A task chat is a direct message on the dashboard, read through its channel. */
 const DASHBOARD = { channel: WEBCHAT_CHANNEL };

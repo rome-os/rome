@@ -191,6 +191,11 @@ final class Workspace {
         topics = TopicChatsStore(backend: backend)
     }
 
+    /// A chat's Shared links sheet or share sheet is up: it covers the chat.
+    var sharingCoversChat: Bool {
+        ([concierge] + Array(topicStores.values) + Array(taskStores.values)).contains { $0.share.coversChat }
+    }
+
     func topicStore(_ chatId: String) -> TranscriptStore {
         if let store = topicStores[chatId] { return store }
         let store = TranscriptStore(sessionId: chatId, kind: .concierge, backend: backend)
@@ -271,9 +276,47 @@ final class Workspace {
     @discardableResult
     func archiveTopic(_ chatId: String) async -> Bool {
         guard (try? await backend.archiveChat(chatId)) != nil else { return false }
+        dropTopic(chatId)
+        return true
+    }
+
+    /// Deletes a topic chat and drops it from the drawer. Returns whether the
+    /// server took it.
+    @discardableResult
+    func deleteTopic(_ chatId: String) async -> Bool {
+        guard (try? await backend.deleteChat(chatId)) != nil else { return false }
+        dropTopic(chatId)
+        // Its open tasks now belong to the main Chat.
+        tasks.resync()
+        return true
+    }
+
+    private func dropTopic(_ chatId: String) {
         topics.remove(chatId)
         topicStores.removeValue(forKey: chatId)?.stop()
+    }
+
+    /// Archives a task chat and drops it from the task list and the cards.
+    /// Returns whether the server took it.
+    @discardableResult
+    func archiveTaskChat(_ chatId: String) async -> Bool {
+        guard (try? await backend.archiveChat(chatId)) != nil else { return false }
+        dropTaskChat(chatId)
         return true
+    }
+
+    /// Deletes a task chat and drops it from the task list and the cards.
+    /// Returns whether the server took it.
+    @discardableResult
+    func deleteTaskChat(_ chatId: String) async -> Bool {
+        guard (try? await backend.deleteChat(chatId)) != nil else { return false }
+        dropTaskChat(chatId)
+        return true
+    }
+
+    private func dropTaskChat(_ chatId: String) {
+        tasks.forget(chat: chatId)
+        taskStores.removeValue(forKey: chatId)?.stop()
     }
 
     /// A tapped push for a topic chat: its newest rows, fetched again.
@@ -316,7 +359,8 @@ final class Workspace {
     #endif
 
     /// The main chat's name in its header: the Concierge's own, else "Chat".
-    var mainChatTitle: String { agentName ?? String(localized: "Chat") }
+    /// The Agent's name on screen: the header's name tag and its bubbles.
+    var agentDisplayName: String { AgentName.shown(agentName) }
 
     /// Kept rows from last time stay on screen while this runs, and when the
     /// instance cannot be reached: the store fetches again when it is back.
@@ -537,6 +581,10 @@ final class AppModel {
         }
         if environment["ROME_DEMO"] == "many-apps" {
             openDemo(.manyApps)
+            return
+        }
+        if environment["ROME_DEMO"] == "long-chat" {
+            openDemo(.longChat)
             return
         }
         if let origin = environment["ROME_LOCAL_ORIGIN"],

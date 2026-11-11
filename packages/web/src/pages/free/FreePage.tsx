@@ -51,8 +51,10 @@ export default function FreePage() {
 
   return (
     // Plain div: RomeShellLayout owns the `main` landmark. `hideSidebar` drops
-    // the sidebar but keeps the layout, so this is nested either way.
+    // the sidebar but keeps the layout, so this is nested either way. It fills
+    // the viewport and scrolls inside, so the document keeps no scrollbar track.
     <div
+      data-fills-viewport
       className={`flex min-h-0 flex-col overflow-hidden ${
         hideSidebar
           ? "h-[var(--rome-viewport-height)] pt-safe"

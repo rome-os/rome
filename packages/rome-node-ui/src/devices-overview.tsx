@@ -238,13 +238,8 @@ function DeviceCard({
   );
 }
 
-/** The start of the latest bucket with a command, or -1 without one. */
-function lastActive(stats: DeviceStats | undefined): number {
-  const buckets = stats?.buckets ?? [];
-  for (let index = buckets.length - 1; index >= 0; index -= 1)
-    if (buckets[index]!.counts.all) return buckets[index]!.start;
-  return -1;
-}
+/** Holds the curve's place while the counts load, so the card does not shift when it arrives. */
+const CHART_SLOT = <span aria-hidden className="h-8 w-24 shrink-0" />;
 
 /** The device's curve. A device without commands draws an empty one. */
 function chartOf(
@@ -286,9 +281,10 @@ function useFirstOrder(
 /**
  * The devices linked to the account, one card each with a curve of its commands over the last
  * 24 hours.
- * The cards keep the order they had when the page drew them: this computer, the connected
- * devices, then the rest, each by its latest command. Each card links to the device's activity
- * page through `navigation`. Needs `@rome-os/node-ui/styles.css` in the host's Tailwind build.
+ * The cards draw with the devices, and each curve follows once the counts arrive. The cards keep
+ * the order they had when the page drew them: this computer, the connected devices, then the
+ * rest, each by name. Each card links to the device's activity page through `navigation`.
+ * Needs `@rome-os/node-ui/styles.css` in the host's Tailwind build.
  */
 export function NodeDevices({
   url,
@@ -305,8 +301,9 @@ export function NodeDevices({
   const since = windowStart(now);
   const query = useMemo(() => ({ since, bucketMs: BUCKET_MS }), [since]);
   const { stats, supported, settled } = useStats(socket, query);
-  // The cards wait for the devices and their counts, so the page draws them once.
-  const ready = !loading && settled;
+  // The cards wait only for the devices. The counts come over the socket, which can take
+  // seconds to open on a slow network.
+  const ready = !loading;
   const byPeer = useMemo(() => (stats ? statsByPeer(stats) : new Map()), [stats]);
   const [showRevoked, setShowRevoked] = useState(false);
   const [linkOpen, setLinkOpen] = useState(false);
@@ -329,22 +326,18 @@ export function NodeDevices({
     listed.filter((device) => device.status !== "revoked"),
     ready,
     (list) =>
-      list
-        .map((device) => ({ device, last: lastActive(statsOf(device)) }))
-        .sort(
-          (a, b) =>
-            Number(!selfOf(a.device)) - Number(!selfOf(b.device)) ||
-            Number(!connected(a.device)) - Number(!connected(b.device)) ||
-            b.last - a.last ||
-            a.device.name.localeCompare(b.device.name, locale),
-        )
-        .map(({ device }) => device),
+      [...list].sort(
+        (a, b) =>
+          Number(!selfOf(a)) - Number(!selfOf(b)) ||
+          Number(!connected(a)) - Number(!connected(b)) ||
+          a.name.localeCompare(b.name, locale),
+      ),
   );
 
   return (
     <Section
       aria-labelledby="node-devices-title"
-      aria-busy={!ready || undefined}
+      aria-busy={!(ready && settled) || undefined}
       className="@container gap-6"
     >
       <SectionHeader>
@@ -381,7 +374,9 @@ export function NodeDevices({
                 navigation={navigation}
                 manage={manage}
                 m={m}
-                chart={supported && chartOf(statsOf(device), since, m, locale)}
+                chart={
+                  settled ? supported && chartOf(statsOf(device), since, m, locale) : CHART_SLOT
+                }
               />
             </li>
           ))}

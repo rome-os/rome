@@ -33,6 +33,8 @@ protocol RomeBackend: AnyObject, Sendable {
     func renameChat(_ id: String, to name: String) async throws
     /// Archives a chat; a Concierge topic chat retires with it.
     func archiveChat(_ id: String) async throws
+    /// Deletes a chat for good; a Concierge topic chat retires with it.
+    func deleteChat(_ id: String) async throws
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn
     /// A send from a chat thread: it lands in that thread.
@@ -88,6 +90,14 @@ protocol RomeBackend: AnyObject, Sendable {
     func routines() async throws -> [RoutineRef]
     /// Tells Chat in `chatId` that `service` is connected, so it goes on.
     func notifyServiceConnected(chatId: String, service: String) async
+    /// Makes a public link to these turns of the chat, showing the Agent as
+    /// `agentName` (nil: the page says Rome). No title: the instance names
+    /// the share after the first turn.
+    func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink
+    /// The chat's live share links, newest first.
+    func chatShares(sessionId: String) async throws -> [ChatShareLink]
+    /// Revokes a share link: it stops opening.
+    func revokeShare(id: String) async throws
 }
 
 @MainActor
@@ -123,6 +133,10 @@ final class LiveBackend: RomeBackend {
 
     func archiveChat(_ id: String) async throws {
         try await client.patch("/chat/sessions/\(escape(id))/archive", json: .object(["archived": .bool(true)]))
+    }
+
+    func deleteChat(_ id: String) async throws {
+        try await client.delete("/chat/sessions/\(escape(id))")
     }
 
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
@@ -290,6 +304,27 @@ final class LiveBackend: RomeBackend {
         try await client.get("/build-info", reportsUnauthorized: false)
     }
 
+    func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink {
+        try await client.post("/chat/sessions/\(escape(sessionId))/share", json: Self.shareBody(turnIds: turnIds, agentName: agentName), as: ChatShareLink.self)
+    }
+
+    /// `layout` is always empty: the app shares turns only, so a chat's
+    /// saved tiles (a project's files) never ride along, as they would by
+    /// default.
+    static func shareBody(turnIds: [String], agentName: String?) -> JSONValue {
+        var body: [String: JSONValue] = ["turnIds": .array(turnIds.map(JSONValue.string)), "layout": .array([])]
+        if let agentName { body["agentName"] = .string(agentName) }
+        return .object(body)
+    }
+
+    func chatShares(sessionId: String) async throws -> [ChatShareLink] {
+        try await client.get("/chat/sessions/\(escape(sessionId))/shares")
+    }
+
+    func revokeShare(id: String) async throws {
+        try await client.delete("/chat/shares/\(escape(id))")
+    }
+
     private func escape(_ value: String) -> String {
         value.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/"))) ?? value
     }
@@ -357,6 +392,9 @@ extension RomeBackend {
     func setGuardianLanguage(_ code: String) async throws {}
     func apps() async throws -> [InstalledApp] { [] }
     func webSessionCookie() -> HTTPCookie? { nil }
+    func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink { throw APIError.notFound }
+    func chatShares(sessionId: String) async throws -> [ChatShareLink] { [] }
+    func revokeShare(id: String) async throws {}
 }
 
 /// The Concierge's name as the dashboard shows it: trimmed, and nil when
@@ -365,5 +403,13 @@ enum AgentName {
     static func display(_ configured: String?) -> String? {
         let name = configured?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return name.isEmpty ? nil : name
+    }
+
+    /// What the Agent is called on screen: its own name, or Rome when none is
+    /// set. Never "Chat" or "Concierge", which name the screen and the code.
+    static let fallback = "Rome"
+
+    static func shown(_ configured: String?) -> String {
+        display(configured) ?? fallback
     }
 }

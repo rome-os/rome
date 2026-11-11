@@ -214,10 +214,10 @@ export {
   type StoredRoot,
 } from "./domain/session-parent.js";
 export type {
-  DashboardSession,
-  DashboardSessions,
+  RecordedSession,
+  RecordedSessions,
   NewSubagentSession,
-} from "./domain/dashboard-sessions.js";
+} from "./domain/recorded-sessions.js";
 export {
   createSubagentCalls,
   type LiveTurns,
@@ -266,3 +266,8 @@ export {
 } from "./infrastructure/model/anthropic/claude-login-code.js";
 export { createClaudeLoginWatcher } from "./infrastructure/model/anthropic/claude-login-watch.js";
 export { fetchRomeCredits } from "./infrastructure/model/codex/rome-credits.js";
+export {
+  ambiguousQuota,
+  failoverReason,
+  type FailoverReason,
+} from "./domain/failover-reason.js";

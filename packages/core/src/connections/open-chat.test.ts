@@ -5,7 +5,7 @@ import { chatsWiring } from "../chats-wiring.js";
 import { ChannelWithoutAccount } from "./chat-adapter.js";
 import { ChatAddresses } from "./chat-addresses.js";
 import { openChannelChat, type OpenChannelChatDeps } from "./open-chat.js";
-import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { SessionRecords } from "../sessions/session-records.js";
 
 describe("openChannelChat as a speaker", () => {
   let testDb: TestDb;
@@ -24,7 +24,7 @@ describe("openChannelChat as a speaker", () => {
       channelsOn: (platform) => [platform],
     });
     deps = {
-      webchatRepo: new ChatsWebChatRepository(testDb.db),
+      records: new SessionRecords(testDb.db, { triggerKindUnder: () => null }),
       speakers: { chats: wired.chats, adapters: wired.adapters, speakers: wired.speakers },
     };
   });

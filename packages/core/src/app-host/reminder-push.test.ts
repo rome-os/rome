@@ -7,8 +7,9 @@ import type { SessionActor } from "../access/session-actor.js";
 import { runWithSessionActor } from "../access/session-actor.js";
 import type { ActionEngine, ActionRunContext } from "../apps/actions/engine.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
-import { sendForCaller } from "../app-host/caller-notify.js";
-import { privateOwnerOf } from "../concierge/privacy.js";
+import { sendForCaller } from "./caller-notify.js";
+import { privateOwnerOf } from "../webchat/privacy.js";
+import { ownerOfChat } from "../webchat/owner.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { guardianAuth, routines as routinesTable, visitorProfiles } from "../db/schema.js";
@@ -16,8 +17,8 @@ import type { SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
-import { RoutineEngine } from "./engine.js";
-import { legacyRoutineActor } from "./legacy-actor.js";
+import { RoutineEngine } from "../routines/engine.js";
+import { legacyRoutineActor } from "../routines/legacy-actor.js";
 
 const guardian: SessionActor = { kind: "guardian", userId: "seat-1", via: "cookie" };
 const visitor: SessionActor = { kind: "visitor", accountId: "acct-v", email: "v@example.com" };
@@ -84,7 +85,11 @@ describe("a reminder's push", () => {
       actionEngine,
       0,
       systemClock,
-      (routine) => legacyRoutineActor(routine, { db: testDb.db, webchatRepo }),
+      (routine) =>
+        legacyRoutineActor(routine, {
+          db: testDb.db,
+          ownerOfChat: (chatId) => ownerOfChat((id) => webchatRepo.getSession(id), chatId),
+        }),
     );
   });
 

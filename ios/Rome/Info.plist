@@ -7,6 +7,8 @@
 		<string>en</string>
 		<string>zh-Hans</string>
 	</array>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>Rome only reads the Health data you allow. It never writes to Apple Health.</string>
 	<key>NSHealthShareUsageDescription</key>
 	<string>When your Rome asks, Rome sends the Health data you allow to your Rome and its AI model. Rome never changes your Health data.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>

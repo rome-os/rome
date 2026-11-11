@@ -69,6 +69,12 @@ enum SnapshotRunner {
                     workspace.topics.setActivity(.working, for: main)
                 }
                 workspace.debugSetAgentName("Milo")
+                // A chat thread open over a busy chat: its header carries the status too.
+                await capture("57e-header-thread-open", style: styleName, in: directory, wait: 1.5) {
+                    workspace.topics.setActivity(.tasks(title: "Mac app 右上角按钮点不到", more: 1), for: main)
+                    if let id = workspace.concierge.messages.last(where: { !$0.isUser })?.id { workspace.concierge.openThread(at: id) }
+                }
+                workspace.concierge.closeThread()
                 workspace.topics.setActivity(nil, for: main)
             }
             // Reply on an Agent message in no chat thread: quoted above the composer.
@@ -154,6 +160,43 @@ enum SnapshotRunner {
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
             // Chat threads: the replies lines, then one thread open over its chat.
             await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
+            // Share mode on the last two turns, then the chat's links.
+            await capture("61-share-select", style: styleName, in: directory, wait: 2) {
+                model.debugCommand = .section(.topic("topic-trip"))
+                Task {
+                    try? await Task.sleep(for: .seconds(1))
+                    guard let share = model.workspace?.topicStore("topic-trip").share, let order = share.turns?.order else { return }
+                    share.begin(turn: order.last)
+                    if order.count > 1 { share.toggle(order[order.count - 2]) }
+                }
+            }
+            await capture("62-shared-links", style: styleName, in: directory, wait: 1.5) {
+                guard let share = model.workspace?.topicStore("topic-trip").share else { return }
+                share.cancel()
+                share.openLinks()
+            }
+            await capture("63-shared-links-empty", style: styleName, in: directory, wait: 2) {
+                model.workspace?.topicStore("topic-trip").share.showsLinks = false
+                model.debugCommand = .section(.chat)
+                model.workspace?.concierge.share.openLinks()
+            }
+            // A task chat: its brief, a card, starts the first turn.
+            await capture("64-share-task", style: styleName, in: directory, wait: 2.5) {
+                model.workspace?.concierge.share.showsLinks = false
+                model.debugCommand = .route([.taskChat(chatId: "chat-login", title: "修复登录页样式")])
+                Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    guard let share = model.workspace?.taskStore("chat-login").share, let order = share.turns?.order else { return }
+                    share.begin(turn: order.first)
+                }
+            }
+            model.workspace?.taskStore("chat-login").share.cancel()
+            model.debugCommand = .route([])
+            if let workspace = model.workspace {
+                workspace.topicStore("topic-trip").share.cancel()
+                workspace.topicStore("topic-trip").share.showsLinks = false
+                workspace.concierge.share.showsLinks = false
+            }
             // A long chat thread: its root carries the replies line.
             await capture("53-topic-long-thread", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-books")) }
             // A long topic name: cut at the end inside the header's pill.
@@ -173,6 +216,14 @@ enum SnapshotRunner {
                 model.workspace?.topicStore("topic-books").openThread(at: "b23")
             }
             model.workspace?.topicStore("topic-books").closeThread()
+            try? await Task.sleep(for: .seconds(0.4))
+            // The same long thread while the chat runs a task: rows scroll under the status.
+            await capture("54b-long-thread-busy", style: styleName, in: directory, wait: 1.5) {
+                model.workspace?.topics.setActivity(.tasks(title: "Mac app 右上角按钮点不到", more: 1), for: "topic-books")
+                model.workspace?.topicStore("topic-books").openThread(at: "b23")
+            }
+            model.workspace?.topicStore("topic-books").closeThread()
+            model.workspace?.topics.setActivity(nil, for: "topic-books")
             try? await Task.sleep(for: .seconds(0.4))
             // Routine cards with their state, and the rows for cards only the web draws.
             await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }

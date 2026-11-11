@@ -46,15 +46,6 @@ struct MainShell: View {
     @State private var drawerOpen = false
     /// Marks this view as the one that set the chat on screen.
     @State private var screenID = UUID()
-    /// A finger is on the drawer's edge.
-    @State private var edgeTouched = false
-    /// The finger's pull on the drawer while a drag runs. It springs back to
-    /// zero with the drawer when the drag ends or the system cancels it.
-    @GestureState(resetTransaction: Transaction(animation: MainShell.drawerSpring))
-    private var drag = DrawerDrag()
-    /// The axis the running drag locked on its first movement, for `onEnded`,
-    /// which gets only the final translation.
-    @State private var dragAxis: DragAxis?
     @State private var showTasks = false
     /// The Concierge chat whose tasks the sheet lists.
     @State private var tasksChatId = conciergeChatID
@@ -86,13 +77,17 @@ struct MainShell: View {
         GeometryReader { geometry in
             let width = min(318, geometry.size.width * 0.81)
             // Pinned, the drawer takes this much of the width beside the page;
-            // pushed aside (compact), none, and `progress` moves the page instead.
+            // pushed aside (compact), none, and the slide moves the page instead.
             let column: CGFloat = usesSidebar && sidebarShown ? width : 0
-            let progress = usesSidebar ? 0 : drawerProgress(width: width)
 
-            ZStack(alignment: .topLeading) {
-                Palette.drawer.ignoresSafeArea()
-
+            DrawerSlide(
+                width: width,
+                column: column,
+                pinned: usesSidebar,
+                pinnedShown: sidebarShown,
+                edge: !usesSidebar && !drawerOpen && path.isEmpty,
+                open: $drawerOpen
+            ) {
                 DrawerView(
                     workspace: workspace,
                     section: section,
@@ -116,13 +111,7 @@ struct MainShell: View {
                     }
                 )
                 .frame(width: width, height: geometry.size.height)
-                // Pinned, it slides in from the left edge as the page makes room.
-                .offset(x: usesSidebar ? column - width : (progress - 1) * 36)
-                // Closed, it is not drawn: under a page still fading in (the
-                // opening screen's hand-off) its rows showed through.
-                .opacity(usesSidebar ? (sidebarShown ? 1 : 0) : (progress > 0 ? 0.4 + 0.6 * progress : 0))
-                .allowsHitTesting(usesSidebar ? sidebarShown : drawerOpen)
-
+            } page: {
                 NavigationStack(path: $path) {
                     root
                     .navigationDestination(for: Route.self) { route in
@@ -133,43 +122,12 @@ struct MainShell: View {
                 .environment(\.visibleChat, visibleChat)
                 .instancePageSheet(workspace: workspace, url: $page)
                 .environment(\.isVisitor, workspace.isVisitor)
-                // Pushed aside, the page becomes a card of its own color, following the drag.
-                .environment(\.pageBackground, Palette.blend(Palette.bg, Palette.drawerPage, progress))
+                .environment(\.shareAgentName, AgentName.display(workspace.agentName))
                 // Over the page, so beside a pinned drawer they sit above the chat.
                 // The page reaches under the status bar; they start below it.
                 .overlay(alignment: .top) { banners.padding(.top, geometry.safeAreaInsets.top) }
                 .frame(width: geometry.size.width - column, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
-                .clipShape(RoundedRectangle(cornerRadius: 44 * progress, style: .continuous))
-                .overlay {
-                    if progress > 0 {
-                        RoundedRectangle(cornerRadius: 44 * progress, style: .continuous)
-                            .fill(Color.clear)
-                            .contentShape(Rectangle())
-                            .onTapGesture { closeDrawer() }
-                    }
-                }
-                .shadow(color: .black.opacity(0.12 * progress), radius: 15, x: -8, y: 0)
-                .offset(x: column + width * progress)
-                .ignoresSafeArea()
-                .overlay(alignment: .leading) {
-                    if !usesSidebar && !drawerOpen && path.isEmpty {
-                        Color.clear
-                            .frame(width: 22)
-                            .contentShape(Rectangle())
-                            .gesture(drawerDrag(width: width))
-                            // The edge sits above the list, which never feels this
-                            // touch: stop its glide on touch-down, as the list would.
-                            .simultaneousGesture(
-                                DragGesture(minimumDistance: 0)
-                                    .onChanged { _ in if !edgeTouched { edgeTouched = true; Scrolling.stopGlides() } }
-                                    .onEnded { _ in edgeTouched = false }
-                            )
-                    }
-                }
             }
-            // While the drawer is open, a sideways drag anywhere, on the drawer or
-            // the uncovered chat, pulls it closed.
-            .gesture(drawerDrag(width: width), including: drawerOpen ? .all : .subviews)
         }
         .sheet(isPresented: $showTasks) {
             TasksSheet(store: workspace.tasks, chatId: tasksChatId) { task in
@@ -467,25 +425,14 @@ struct MainShell: View {
 
     static let drawerSpring = Animation.spring(response: 0.38, dampingFraction: 0.86)
 
-    /// A drag's direction is fixed by its first movement, so a vertical scroll
-    /// never moves the drawer.
-    struct DrawerDrag {
-        var horizontal: Bool?
-        var offset: CGFloat = 0
-    }
-
-    struct DragAxis {
-        let start: CGPoint
-        let horizontal: Bool
-    }
-
     /// The chat on screen, by its store's id.
     private var visibleChat: String? {
-        Self.visibleChat(section: section, path: path, covered: drawerOpen || showTasks || showSettings || page != nil)
+        Self.visibleChat(section: section, path: path, covered: drawerOpen || showTasks || showSettings || page != nil || workspace.sharingCoversChat)
     }
 
     /// The chat on screen: none while something covers the page (the drawer,
-    /// the Tasks or Settings sheet, an instance page's sheet); a pushed task
+    /// the Tasks or Settings sheet, an instance page's sheet, a chat's share
+    /// sheets); a pushed task
     /// chat; else the section's chat. Chat's read marks, the server's watch
     /// and push banners all go by this one answer.
     static func visibleChat(section: MainSection, path: [Route], covered: Bool) -> String? {
@@ -499,11 +446,6 @@ struct MainShell: View {
         case .topic(let chatId): return chatId
         default: return nil
         }
-    }
-
-    private func drawerProgress(width: CGFloat) -> CGFloat {
-        let base: CGFloat = drawerOpen ? 1 : 0
-        return min(1, max(0, base + drag.offset / width))
     }
 
     private func openDrawer() {
@@ -522,17 +464,131 @@ struct MainShell: View {
     private func closeDrawer() {
         withAnimation(Self.drawerSpring) { drawerOpen = false }
     }
+}
+
+/// The drawer and the page, and the drag that slides one over the other. The
+/// drag's state lives here, not in the shell: a drag tick runs only this body,
+/// and the drawer and the page, built once by the shell, are the same values
+/// each time, so SwiftUI leaves their trees alone while the finger moves. Only
+/// the offsets, corners, shadow and page color below follow it.
+private struct DrawerSlide<Drawer: View, Page: View>: View {
+    let width: CGFloat
+    /// Pinned beside the page (regular width): how much width it takes.
+    let column: CGFloat
+    let pinned: Bool
+    let pinnedShown: Bool
+    /// The left edge opens the drawer.
+    let edge: Bool
+    @Binding var open: Bool
+    let drawer: Drawer
+    let page: Page
+
+    /// A finger is on the drawer's edge.
+    @State private var edgeTouched = false
+    /// The finger's pull on the drawer while a drag runs. It springs back to
+    /// zero with the drawer when the drag ends or the system cancels it.
+    @GestureState(resetTransaction: Transaction(animation: MainShell.drawerSpring))
+    private var drag = DrawerDrag()
+    /// The axis the running drag locked on its first movement, for `onEnded`,
+    /// which gets only the final translation.
+    @State private var dragAxis: DragAxis?
+
+    /// Built here, once per shell update, never per drag tick.
+    init(
+        width: CGFloat, column: CGFloat, pinned: Bool, pinnedShown: Bool, edge: Bool, open: Binding<Bool>,
+        @ViewBuilder drawer: () -> Drawer, @ViewBuilder page: () -> Page
+    ) {
+        self.width = width
+        self.column = column
+        self.pinned = pinned
+        self.pinnedShown = pinnedShown
+        self.edge = edge
+        _open = open
+        self.drawer = drawer()
+        self.page = page()
+    }
+
+    var body: some View {
+        let progress = pinned ? 0 : dragProgress
+        ZStack(alignment: .topLeading) {
+            Palette.drawer.ignoresSafeArea()
+
+            drawer
+                // Pinned, it slides in from the left edge as the page makes room.
+                .offset(x: pinned ? column - width : (progress - 1) * 36)
+                // Closed, it is not drawn: under a page still fading in (the
+                // opening screen's hand-off) its rows showed through.
+                .opacity(pinned ? (pinnedShown ? 1 : 0) : (progress > 0 ? 0.4 + 0.6 * progress : 0))
+                .allowsHitTesting(pinned ? pinnedShown : open)
+
+            page
+                // Pushed aside, the page becomes a card of its own color, following the drag.
+                .environment(\.pageBackground, Palette.blend(Palette.bg, Palette.drawerPage, progress))
+                .clipShape(RoundedRectangle(cornerRadius: 44 * progress, style: .continuous))
+                .overlay {
+                    if progress > 0 {
+                        RoundedRectangle(cornerRadius: 44 * progress, style: .continuous)
+                            .fill(Color.clear)
+                            .contentShape(Rectangle())
+                            .onTapGesture { close() }
+                    }
+                }
+                .shadow(color: .black.opacity(0.12 * progress), radius: 15, x: -8, y: 0)
+                .offset(x: column + width * progress)
+                .ignoresSafeArea()
+                .overlay(alignment: .leading) {
+                    if edge {
+                        Color.clear
+                            .frame(width: 22)
+                            .contentShape(Rectangle())
+                            .gesture(drawerDrag)
+                            // The edge sits above the list, which never feels this
+                            // touch: stop its glide on touch-down, as the list would.
+                            .simultaneousGesture(
+                                DragGesture(minimumDistance: 0)
+                                    .onChanged { _ in if !edgeTouched { edgeTouched = true; Scrolling.stopGlides() } }
+                                    .onEnded { _ in edgeTouched = false }
+                            )
+                    }
+                }
+        }
+        // While the drawer is open, a sideways drag anywhere, on the drawer or
+        // the uncovered chat, pulls it closed.
+        .gesture(drawerDrag, including: open ? .all : .subviews)
+    }
+
+    /// A drag's direction is fixed by its first movement, so a vertical scroll
+    /// never moves the drawer.
+    struct DrawerDrag {
+        var horizontal: Bool?
+        var offset: CGFloat = 0
+    }
+
+    struct DragAxis {
+        let start: CGPoint
+        let horizontal: Bool
+    }
+
+    /// How far the drawer is out, 0 to 1, the finger's pull included.
+    private var dragProgress: CGFloat {
+        let base: CGFloat = open ? 1 : 0
+        return min(1, max(0, base + drag.offset / width))
+    }
+
+    private func close() {
+        withAnimation(MainShell.drawerSpring) { open = false }
+    }
 
     /// Opens from the left edge or closes from anywhere, following the finger.
     /// The translation is read in screen space: the chat moves under the finger,
     /// and reading it in the chat's own space would feed the motion back into itself.
-    private func drawerDrag(width: CGFloat) -> some Gesture {
+    private var drawerDrag: some Gesture {
         DragGesture(minimumDistance: 10, coordinateSpace: .global)
             .updating($drag) { value, state, _ in
                 let move = value.translation
                 if state.horizontal == nil { state.horizontal = abs(move.width) > abs(move.height) }
                 guard state.horizontal == true else { return }
-                state.offset = drawerOpen ? min(0, move.width) : max(0, move.width)
+                state.offset = open ? min(0, move.width) : max(0, move.width)
             }
             .onChanged { value in
                 // A new start point is a new drag, also after a cancelled one.
@@ -552,10 +608,10 @@ struct MainShell: View {
             .onEnded { value in
                 defer { dragAxis = nil }
                 guard let axis = dragAxis, axis.start == value.startLocation, axis.horizontal else { return }
-                let travel = drawerOpen ? -value.translation.width : value.translation.width
-                let flung = drawerOpen ? -value.predictedEndTranslation.width : value.predictedEndTranslation.width
+                let travel = open ? -value.translation.width : value.translation.width
+                let flung = open ? -value.predictedEndTranslation.width : value.predictedEndTranslation.width
                 let toggle = travel > width * 0.35 || flung > width * 0.5
-                if toggle { withAnimation(Self.drawerSpring) { drawerOpen.toggle() } }
+                if toggle { withAnimation(MainShell.drawerSpring) { open.toggle() } }
             }
     }
 }

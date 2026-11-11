@@ -9,10 +9,11 @@ import { CONCIERGE_CHAT_ID, type ConciergeChatRef } from "@rome/api-types/concie
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
-import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../connections/send.js";
+import type { Body, SendResult } from "../chats/send.js";
+import { DASHBOARD_PLATFORM } from "../webchat/dashboard-account.js";
 import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import type { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { SkillCatalog } from "../agent/index.js";
 import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
@@ -38,26 +39,19 @@ import type { ConciergeTasks } from "./tasks.js";
 import type { ConciergeTaskRow } from "../db/repositories/concierge-tasks.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
-import {
-  type ConciergeOwner,
-  GUARDIAN_OWNER,
-  MAIN_CHAT_NAME,
-  mainChatIdOf,
-  ownerOf,
-  storedChatId,
-} from "./owner.js";
+import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../webchat/owner.js";
+import { isMainConciergeChat, MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
 import {
   CONCIERGE_AGENT_ID,
   canOpenChat,
   isConciergeAgent,
   isConciergeChat,
-  isMainConciergeChat,
   privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
-} from "./privacy.js";
+} from "../webchat/privacy.js";
 import { ALL_OWNERS_SERVED, type ConciergeOwners, type OwnerProfile } from "./owners.js";
 
-import { ambiguousQuota, type FailoverReason } from "./failover-reason.js";
+import { ambiguousQuota, type FailoverReason } from "../agent/index.js";
 
 const log = createLogger("concierge");
 
@@ -142,7 +136,7 @@ export interface TaskChats {
  *  Concierge, so it is attached once that layer is up. */
 export interface ConciergeDashboard {
   chats: TaskChats;
-  /** The ordinary send into a chat (connections/send.ts), with the dashboard able to take it. */
+  /** The ordinary send into a chat (chats/send.ts), with the dashboard able to take it. */
   send(place: Place, body: Body, as: Account): Promise<SendResult>;
 }
 

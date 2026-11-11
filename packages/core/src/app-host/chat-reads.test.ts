@@ -3,9 +3,10 @@
 
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import { sql } from "drizzle-orm";
+import type { SessionActor } from "../access/session-actor.js";
 import type { ChatReads } from "@rome-os/app-runtime/chats";
 import type { ChatRef } from "../chats/storage/place.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { channels, connectedAccounts, connections, romeAgentMessages } from "../db/schema.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/db.js";
@@ -264,5 +265,40 @@ describe("appChatReads", () => {
     it("is empty for a session with no traces", async () => {
       expect(await reads.traces("nobody")).toEqual([]);
     });
+  });
+  // Automation records its input under a provenance address, and an app reads
+  // it as Automation, never as a person's account.
+  it("names dashboard automation as Automation, never as a person", async () => {
+    await repo.createSession("automation-chat", "Automation");
+    const guardian: SessionActor = { kind: "guardian", userId: "seat", via: "cookie" };
+    for (const [id, source, actor] of [
+      ["app", "automated::1::app:daily-report", guardian],
+      ["routine", "automated::0::routine:Morning briefing", guardian],
+      ["concierge", "core:concierge", guardian],
+      ["subagent", "coding:coding", undefined],
+    ] as const) {
+      await repo.recordUserInput(
+        id,
+        "automation-chat",
+        JSON.stringify([{ type: "text", content: `Status ${id}` }]),
+        actor,
+        { platform: "webchat", id: source },
+      );
+    }
+    await repo.recordUserInput("visitor", "automation-chat", "[]", {
+      kind: "visitor",
+      accountId: "alex",
+      email: "alex@example.com",
+    });
+    const lines = await reads.transcript("automation-chat");
+    for (const line of lines.filter((line) => line.key !== "visitor")) {
+      expect(line).toMatchObject({ role: "user", senderId: null, senderName: "Automation" });
+    }
+    expect(lines.find((line) => line.key === "visitor")).toMatchObject({
+      senderId: "visitor:alex",
+      senderName: "alex@example.com",
+    });
+    expect(JSON.stringify(lines)).not.toContain("automated::");
+    expect(await reads.recentChats({ since: new Date(0), where: "dashboard" })).toHaveLength(1);
   });
 });

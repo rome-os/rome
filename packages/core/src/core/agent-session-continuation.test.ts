@@ -13,7 +13,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionEngine } from "../apps/actions/engine.js";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import {
   createEmptyLegacyArtifactBindings,
   type ArtifactIdentityContext,
@@ -219,7 +219,7 @@ describe("continuation notice through Sessions", () => {
     testDb = createTestDb();
     artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
     loader = new AgentLoader(artifactIdentity, ROME_AGENT_TRAITS);
-    sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
+    sessionRepository = new DrizzleSessionRepository(testDb.db);
     webchatRepo = new ChatsWebChatRepository(testDb.db);
     await webchatRepo.createSession(CHAT, "Continuation");
     openai = createProvider("openai");
@@ -395,7 +395,7 @@ describe("continuation notice through Sessions", () => {
     await chatTurn(session, "first");
     await first.shutdown();
 
-    const retired = (await sessionRepository.current(key.channelThreadKey, AGENT))!;
+    const retired = (await sessionRepository.current(key.channelThreadKey, `core:${AGENT}`))!;
     await sessionRepository.replace(retired, retired.replace());
     await chatTurn(await acquire(createManager(), "gpt-6-luna"), "after reset");
     expect(continuationOf(openai.calls[0]?.prompt)).toBeNull();

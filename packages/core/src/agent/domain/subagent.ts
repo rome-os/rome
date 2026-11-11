@@ -3,11 +3,11 @@
 
 import { createHash } from "node:crypto";
 import { isCoreMainAgentId, type StreamAgentEvent } from "@rome-os/app-runtime";
-import type { DashboardSession, NewSubagentSession } from "./dashboard-sessions.js";
+import type { RecordedSession, NewSubagentSession } from "./recorded-sessions.js";
 import type { ModelToolCallContext } from "./rome-tools.js";
 import type { AgentName, SessionId } from "./session.js";
 
-/** The id of a session's dashboard record (`rome_sessions.id`). For a
+/** The id of a session's record (`rome_sessions.id`). For a
  *  subagent's session it equals the agent session's id. For a dashboard
  *  chat's own session it does not. Like `SessionId`, the alias names the id
  *  for the reader, and the compiler does not tell the two apart. */
@@ -53,10 +53,10 @@ export function subagentRequest(input: unknown): SubagentRequest {
   };
 }
 
-/** A stored session's dashboard record, as a resume reads it. A null agent
+/** A stored session's record, as a resume reads it. A null agent
  *  name is the core main agent's, which reads as `main`. */
 export type StoredSubagentSession = Pick<
-  DashboardSession,
+  RecordedSession,
   "type" | "agentName" | "parentSessionId" | "projectPath"
 >;
 
@@ -103,13 +103,13 @@ export function storedAgentName(subagent: AgentName): AgentName | null {
   return isCoreMainAgentId(subagent) ? null : subagent;
 }
 
-/** A fresh subagent session as the dashboard adds it: named by
+/** A fresh subagent session as its record is added: named by
  *  `subagentSessionName`, its agent by `storedAgentName`, in its parent's
  *  project, under the calling turn. */
 export function newSubagentSession(
   id: SessionId,
   subagent: AgentName,
-  parent: Pick<DashboardSession, "name" | "projectName" | "projectPath"> | null,
+  parent: Pick<RecordedSession, "name" | "projectName" | "projectPath"> | null,
   from: { chat: SessionRecordId; turnId: string; agentName: AgentName },
 ): NewSubagentSession {
   return {

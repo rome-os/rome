@@ -37,11 +37,12 @@ struct ChatScreen: View {
         // The bar is clear: the transcript scrolls under its glass items.
         .floatingTopBar {
             VStack(spacing: 0) {
-                ChatHeader(name: workspace.mainChatTitle, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), announces: model.visibleChat == conciergeChatID, onMenu: {
+                ChatHeader(name: workspace.agentDisplayName, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), announces: model.visibleChat == conciergeChatID, onMenu: {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     onMenu()
                 }, onTasks: onTasks)
+                .shareModeHeader(store.share)
                 banners
             }
             .accessibilityHidden(store.thread != nil)
@@ -49,7 +50,7 @@ struct ChatScreen: View {
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.mainChatTitle, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID), onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
         // Reply brings the keyboard up; the replies line opens it for reading.
@@ -91,6 +92,7 @@ struct ChatScreen: View {
                         }
                     }
                 }
+                .shareModeComposer(store.share)
                 .animation(.easeOut(duration: 0.2), value: store.rows.isEmpty)
                 .animation(.easeOut(duration: 0.2), value: store.quote)
                 .padding(.horizontal, Metrics.pagePadding)
@@ -199,7 +201,7 @@ struct ChatScreen: View {
                     set: { workspace.focusMessageID = $0 }
                 ), latestRequest: workspace.latestRequest) { row, previous in
                     ConciergeRow(row: row, store: store, tasks: workspace.tasks, onOpenChat: onOpenChat)
-                        .padding(.top, TranscriptSpacing.top(row, after: previous))
+                        .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
                 }
                 .onTapGesture { composerFocused = false }
                 .onAppear { store.arrived() }
@@ -225,7 +227,9 @@ struct ConciergeRow: View {
         let onReply: (() -> Void)? = reply && !inThread
             ? row.messageId.map { id in { store.reply(to: id) } }
             : nil
-        return BubbleMenu(date: message?.date, onReply: onReply, inThread: inThread)
+        // Share opens share mode on the message's turn; a pending send has none.
+        let onShare: (() -> Void)? = message?.turnId == nil ? nil : { [row] in store.share.begin(fromRow: row.id) }
+        return BubbleMenu(date: message?.date, onReply: onReply, onShare: onShare, inThread: inThread)
     }
 
     var body: some View {
@@ -240,6 +244,9 @@ struct ConciergeRow: View {
             if !inThread {
                 ThreadRepliesLine(count: count, guardian: guardian) { store.openThread(at: messageId, toReply: false) }
             }
+        case .taskCard(_, let chatId, _, _) where tasks.isGone(chat: chatId):
+            // Archived or deleted from this app.
+            EmptyView()
         case .taskCard(_, let chatId, let title, let latest):
             let name = tasks.title(forChat: chatId, fallback: title)
             VStack(alignment: .leading, spacing: 8) {
@@ -276,7 +283,8 @@ private extension View {
 struct ChatHeader: View {
     /// The Concierge's name, in the main chat and in topic chats alike.
     let name: String
-    /// The chat's own title, for the "…" menu: the topic's name, or the name.
+    /// The chat's own title, atop the "…" menu: a topic chat's name. The
+    /// main Chat's menu has no title.
     var menuTitle: String? = nil
     /// What the Concierge is doing here; nil shows the name alone.
     var activity: ConciergeActivity? = nil
@@ -287,6 +295,7 @@ struct ChatHeader: View {
     /// A topic chat's options in the "…" menu, below Tasks.
     var onRename: (() -> Void)? = nil
     var onArchive: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
 
     var body: some View {
         // The row is as tall as the identity with its name alone, so the
@@ -297,7 +306,7 @@ struct ChatHeader: View {
                 MenuGlyph()
             }
             ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces) }
-            ChatMoreMenu(title: menuTitle ?? name, onTasks: onTasks, onRename: onRename, onArchive: onArchive)
+            ChatMoreMenu(title: menuTitle ?? "", onTasks: onTasks, onRename: onRename, onArchive: onArchive, onDelete: onDelete)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -434,13 +443,14 @@ struct ChatIdentity: View {
     }
 }
 
-/// The surface of the header's name tag and status capsule: frosted like
-/// the composer and solid enough that rows scrolling under never show.
+/// The surface of the header's name tag and status capsule: solid, like the
+/// avatar, so rows scrolling under never show through the text (DESIGN.md 1).
 private struct HeaderCapsule: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .background(Palette.headerPillTint, in: Capsule())
-            .glassSurface(Capsule(), frost: Frost.composer)
+            .background(Palette.elevated, in: Capsule())
+            .overlay(Capsule().strokeBorder(Palette.hair, lineWidth: 0.5))
+            .shadow(color: Palette.avatarShadow, radius: 4, x: 0, y: 1)
     }
 }
 
@@ -498,13 +508,15 @@ enum MenuTitle {
     }
 }
 
-/// A Concierge chat's "…" button: the chat's title in small grey text on
-/// top, then Tasks, then the chat's own options.
+/// A Concierge chat's "…" button: a topic chat's title in small grey text
+/// on top, then Tasks, the chat's own options, and Shared links.
 struct ChatMoreMenu: View {
     let title: String
     let onTasks: () -> Void
     var onRename: (() -> Void)? = nil
     var onArchive: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
+    @Environment(\.chatShare) private var share
 
     var body: some View {
         Menu {
@@ -515,8 +527,13 @@ struct ChatMoreMenu: View {
                     Button(action: onRename) { Label("Rename", systemImage: "pencil") }
                 }
                 if let onArchive {
-                    Button(role: .destructive, action: onArchive) { Label("Archive", systemImage: "archivebox") }
+                    // Not red: an archived chat can come back.
+                    Button(action: onArchive) { Label("Archive", systemImage: "archivebox") }
                 }
+                if let onDelete {
+                    Button(role: .destructive, action: onDelete) { Label("Delete", systemImage: "trash") }
+                }
+                ChatShareMenuItems(share: share)
             } header: {
                 // A system menu wraps its title whatever the line limit: it is cut here.
                 if !title.isEmpty { Text(verbatim: MenuTitle.oneLine(title)) }
@@ -681,39 +698,52 @@ struct TranscriptList<Row: View>: View {
     /// Once the stack has gone lazy it stays lazy, so it changes kind at
     /// most once.
     @State private var lazyLocked = false
+    /// How tall the rows are, without the space under short content.
+    @State private var rowsHeight: CGFloat = 0
+
+    /// Rows that do not reach well past the screen, with older pages behind
+    /// them: no scroll up will ever come near the top, so older pages load
+    /// now, one after another, until the screen is filled.
+    static func needsOlderToFill(hasOlder: Bool, rowsHeight: CGFloat, visibleHeight: CGFloat) -> Bool {
+        // Both measured: before that, a full screen reads as empty.
+        hasOlder && visibleHeight > 0 && rowsHeight > 0 && rowsHeight < visibleHeight * 1.5
+    }
 
     /// Up to this many rows a transcript is laid out all at once. A lazy
     /// stack guesses the height of rows it has not laid out, and a chat that
     /// mixes cards with short bubbles makes it guess wrong: the content then
     /// shrinks under the scroll as rows leave the screen, and the rows jump.
-    /// Past this many rows the lazy stack's memory saving wins.
-    static var eagerRowLimit: Int { 120 }
+    /// A launch holds at most the kept rows and the newest page (about 90
+    /// messages, well under this), so only paging far back reaches it.
+    /// Past it the lazy stack's memory saving wins.
+    static var eagerRowLimit: Int { 400 }
 
-    /// Lazy once older pages exist or the rows pass the limit. An eager
-    /// stack runs every row's onAppear at once, so with older pages to
-    /// fetch it would page through the whole history; eager, there is none.
-    static func isLazy(rows: Int, hasOlder: Bool, locked: Bool) -> Bool {
-        locked || hasOlder || rows > eagerRowLimit
+    /// Eager while the history held is short, older pages or not: they load
+    /// by the scroll's position near the top, never by rows appearing, so an
+    /// eager stack does not page through them. Past the limit the stack goes
+    /// lazy, but only away from the bottom and at rest: switching rebuilds
+    /// every row and leaves the new stack's guessed heights in the content
+    /// size, which under a list on the bottom showed as a gap under the last
+    /// message until the next touch. Once lazy, it stays lazy.
+    static func isLazy(rows: Int, locked: Bool, following: Bool, atRest: Bool) -> Bool {
+        locked || (rows > eagerRowLimit && !following && atRest)
     }
 
     var body: some View {
         let rows = store.rows
-        let lazy = Self.isLazy(rows: rows.count, hasOlder: store.hasOlder, locked: lazyLocked)
+        let lazy = Self.isLazy(rows: rows.count, locked: lazyLocked, following: following, atRest: atRest)
         ScrollViewReader { proxy in
             ScrollView {
                 TranscriptStack(lazy: lazy) {
+                    // Older pages load by the scroll's position near the top
+                    // (`DistanceFromBottom`, `LegacyContentMoves`): in an
+                    // eager stack every row's onAppear runs at once.
                     if store.hasOlder {
                         Spinner(size: 16, color: Palette.sub)
                             .padding(.vertical, 12)
-                            .onAppear { Task { await store.loadOlder() } }
-                            // A new spinner per page, so one still on screen asks again.
-                            .id(store.messages.first?.id)
                     }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
                         row(item, index > 0 ? rows[index - 1] : nil)
-                            // Before iOS 18, an early row coming into view asks for
-                            // the older page ahead of the top (iOS 18 reads the offset).
-                            .onAppear { if index < 6 { Task { await store.loadOlder() } } }
                             .background {
                                 if let highlighted, item.id.hasPrefix(highlighted + ":") {
                                     RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -736,6 +766,9 @@ struct TranscriptList<Row: View>: View {
                 }
                 .padding(.horizontal, Metrics.pagePadding)
                 .readableColumn()
+                .environment(\.shareTurns, store.share.isSelecting ? ShareTurns(messages: store.messages, rows: rows) : nil)
+                // The rows' own height, before the space below fills it out.
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
                 // Never shorter than the space between the bars. Content shorter
                 // than that is held at the bottom by a top inset the scroll view
                 // adds, and takes back a frame late once the rows outgrow the
@@ -743,7 +776,9 @@ struct TranscriptList<Row: View>: View {
                 // drop on every open. A list that fills its space needs no inset.
                 .frame(minHeight: visibleHeight, alignment: alignTop ? .top : .bottom)
                 .background(ScrollViewFinder(handle: scrollHandle))
-                .modifier(LegacyContentMoves(monitor: legacyScroll, space: Self.scrollSpace))
+                .modifier(LegacyContentMoves(monitor: legacyScroll, space: Self.scrollSpace, visibleHeight: visibleHeight) {
+                    Task { await store.loadOlder() }
+                })
             }
             .coordinateSpace(.named(Self.scrollSpace))
             .modifier(FollowBottom(following: $following, bottomVisible: bottomVisible, holdOlder: store.placingOlder, atRest: $atRest, jumping: $jumping, fingerDown: $fingerDown, legacy: legacyScroll, handle: scrollHandle))
@@ -767,6 +802,11 @@ struct TranscriptList<Row: View>: View {
             }
             .onChange(of: bottomVisible) { _, now in
                 transcriptScrollLog.notice("bottom visible \(now, privacy: .public), height \(visibleHeight, privacy: .public)")
+            }
+            .task(id: "\(Self.needsOlderToFill(hasOlder: store.hasOlder, rowsHeight: rowsHeight, visibleHeight: visibleHeight))|\(store.messages.count)") {
+                if Self.needsOlderToFill(hasOlder: store.hasOlder, rowsHeight: rowsHeight, visibleHeight: visibleHeight) {
+                    await store.loadOlder()
+                }
             }
             .onChange(of: lazy, initial: true) { _, now in
                 if now { lazyLocked = true }
@@ -1107,6 +1147,11 @@ private final class LegacyScrollMonitor {
 private struct LegacyContentMoves: ViewModifier {
     let monitor: LegacyScrollMonitor
     let space: String
+    /// The height between the bars.
+    let visibleHeight: CGFloat
+    /// Within 1.5 screens of the top of what is loaded: time to fetch the
+    /// older page, as iOS 18 reads it from the scroll's geometry.
+    var onNearTop: () -> Void = {}
 
     func body(content: Content) -> some View {
         if #available(iOS 18, *) {
@@ -1114,7 +1159,11 @@ private struct LegacyContentMoves: ViewModifier {
         } else {
             content.onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.frame(in: .named(space)).minY
-            } action: { _ in monitor.moved() }
+            } action: { minY in
+                monitor.moved()
+                // A load already on its way, or none left, makes this a no-op.
+                if visibleHeight > 0, -minY < visibleHeight * 1.5 { onNearTop() }
+            }
         }
     }
 }

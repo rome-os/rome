@@ -204,7 +204,7 @@
     "verbFailed": "That didn't go through — try again.",
     "remindLater": "Remind me later",
     "updatingTitle": "Updating Rome…",
-    "updatingBody": "Rome is restarting to finish the update. This takes a moment.",
+    "updatingBody": "Rome is restarting to finish the update.",
     "stalledTitle": "The update is taking longer than expected",
     "stalledBody": "Rome hasn't come back since the update started. It may still finish on its own — try reloading this page in a minute.",
     "dismiss": "Dismiss"

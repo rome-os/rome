@@ -6,14 +6,14 @@ import type {
   BackendTurnParams,
   ChatId,
 } from "@rome-os/app-runtime";
-import type { ChatThreadPlacement } from "../db/repositories/webchat.js";
+import type { ChatThreadPlacement } from "../webchat/repository.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { MessagePage } from "../chats/message-repository.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { Place } from "../chats/place.js";
-import type { Body, SendResult } from "../connections/send.js";
+import type { Body, SendResult } from "../chats/send.js";
 import type { SessionToolContext } from "../core/session-tools.js";
 import type { NotifyLevel, SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
 import type { ConciergeFollowing } from "./following.js";
@@ -23,12 +23,12 @@ import { placeIn } from "../chats/storage/place.js";
 import { chatKey } from "../connections/chat-ids.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { createTestDb, type TestDb } from "../test/db.js";
-import { readWebchatMessages } from "../chats/dashboard/webchat.js";
+import { readWebchatMessages } from "../webchat/adapter.js";
 import type { AgentTurnFailedBeforeStart, TurnLifecycleListener } from "../agent/index.js";
 import { startConciergeEvents } from "./events.js";
 import { RETRY_MS } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
-import { mainChatIdOf } from "./owner.js";
+import { mainChatIdOf } from "./main-chat.js";
 import { createConciergeOwners } from "./owners.js";
 import {
   CONCIERGE_ACCOUNT,

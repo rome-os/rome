@@ -595,5 +595,28 @@
       "daily": "每日重置",
       "working_dir": "工作目录不存在"
     }
+  },
+  "routineCard": {
+    "details": "详情",
+    "turnOn": "开启",
+    "turningOn": "正在开启…",
+    "turningOnLabel": "正在开启例程",
+    "createFailed": "开启失败（{{status}}）。",
+    "on": "已启用",
+    "paused": "已暂停",
+    "saving": "正在保存",
+    "running": "正在运行…",
+    "more": "更多",
+    "pause": "暂停",
+    "resume": "恢复",
+    "runNow": "立即运行",
+    "delete": "删除",
+    "deleting": "正在删除",
+    "deleteConfirm": "删除此例程？",
+    "cancel": "取消",
+    "then": "然后",
+    "channel": "渠道",
+    "sendMessage": "发送消息",
+    "action": "动作"
   }
 }

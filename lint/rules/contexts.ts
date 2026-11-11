@@ -15,21 +15,27 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
     "agent",
     "apps",
     "chats",
+    "concierge",
     "connections",
     "favors",
     "instance",
     "people",
+    "relay",
     "routines",
+    "webchat",
   ],
   apps: ["access", "instance"],
   chats: ["access", "agent", "apps", "connections", "participation", "people"],
+  concierge: ["access", "agent", "apps", "chats", "connections", "instance", "routines", "webchat"],
   connections: ["apps", "chats", "desktops", "instance", "participation", "people"],
   desktops: ["access", "instance"],
   favors: ["access", "apps", "instance"],
   instance: [],
   participation: [],
-  people: ["apps", "chats", "connections"],
+  people: ["apps", "chats", "connections", "instance"],
+  relay: ["apps", "instance"],
   routines: ["access", "agent", "apps"],
+  webchat: ["access", "agent", "apps", "chats", "participation"],
 };
 
 /** Why a context never imports another, where the model says more than the graph. */
@@ -48,6 +54,8 @@ const REASONS: Record<string, string> = {
     "A favor request never names a connection, so no file in favors/ imports connections/.",
   "favors-never-imports-people":
     "A favor request knows its visitor by their Rome Cloud account, not as a person, so no file in favors/ imports people/.",
+  "connections-never-imports-webchat":
+    "The dashboard is Rome's own chat, not a connection, so no file in connections/ imports webchat/.",
   "desktops-never-imports-agent":
     "Desktops says which machines Rome can reach and what it can do on them, whoever asks, so no file in desktops/ imports agent/.",
   "desktops-never-imports-chats":
@@ -118,70 +126,13 @@ export const contextRules: ImportRule[] = contexts.flatMap((from) =>
     }),
 );
 
-const SESSIONS_REPOSITORY = "agent/infrastructure/drizzle-session-repository";
-
-/** The apps/ files that give apps `ctx.favors` through Favors' `FavorService` type. */
-const APP_FAVOR_CAPABILITY = ["apps/context.ts"];
-
-/** One listed crossing for each `[from, to]` pair, all under one rule and ticket. */
-function crossingsOf(
-  rule: string,
-  ticket: string,
-  why: string,
-  pairs: ReadonlyArray<readonly [string, string]>,
-): ListedCrossing[] {
-  return pairs.map(([from, to]) => ({ rule, from, to, ticket, why }));
-}
-
 /** Crossings that remain until their ticket lands. */
 export const contextCrossings: ListedCrossing[] = [
-  ...[
-    [
-      "connections-never-imports-app-host",
-      "connections/kinds/email/email-delivery.test.ts",
-      "app-host/service-proxies.ts",
-    ],
-    ["people-never-imports-app-host", "people/account-directory.test.ts", "app-host/chat-reads.ts"],
-    [
-      "routines-never-imports-app-host",
-      "routines/routine-actor.test.ts",
-      "app-host/caller-notify.ts",
-    ],
-  ].map(([rule, from, to]) => ({
-    rule,
-    from,
-    to,
-    ticket: "ZHA-167",
-    why: "The test drives its scenario through App host code, until the scenario moves into an App host test.",
-  })),
-  ...crossingsOf(
-    "people-never-imports-routines",
-    "ZHA-166",
-    "The guardian profile saves the guardian's timezone through Routines, until People no longer writes a setting Routines owns.",
-    [
-      ["people/guardian-profile.ts", "routines/guardian-timezone.ts"],
-      ["people/guardian-profile.test.ts", "routines/guardian-timezone.ts"],
-    ],
-  ),
-  ...APP_FAVOR_CAPABILITY.map((from) => ({
-    rule: "apps-never-imports-favors",
-    from,
-    to: "favors/index.ts",
-    ticket: "ZHA-163",
-    why: "Apps offers `ctx.favors` by naming Favors' `FavorService` type, until Apps reaches favor requests without it.",
-  })),
   {
-    rule: "agent-never-imports-apps",
-    from: `${SESSIONS_REPOSITORY}.ts`,
-    to: "apps/artifact-id.ts",
-    ticket: "ZHA-161",
-    why: "The deprecated match of an agent under its legacy names, until agent names are canonical before they reach the sessions repository.",
-  },
-  {
-    rule: "agent-never-imports-apps",
-    from: `${SESSIONS_REPOSITORY}.test.ts`,
-    to: "apps/artifact-id.ts",
-    ticket: "ZHA-161",
-    why: "The tests of that legacy-name match.",
+    rule: "instance-never-imports-relay",
+    from: "instance/diagnostics.ts",
+    to: "relay/settings.ts",
+    ticket: "ZHA-169",
+    why: "The diagnostics report says whether the relay is set up, until the report gets each context's status from that context.",
   },
 ];

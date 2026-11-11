@@ -481,7 +481,7 @@ async function buildSessionManagerForHarness(harness: AppLifecycleHarness): Prom
   await agentLoader.loadAll(FIXTURES_AGENTS_DIR);
   const agentName = "test-all-actions";
 
-  const sessionRepository = new DrizzleSessionRepository(harness.db, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(harness.db);
   const systemPrompts = createTestSystemPrompts();
   const provider = new McpSessionModelProvider();
   const modelResolver = createModelResolver({

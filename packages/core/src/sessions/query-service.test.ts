@@ -4,7 +4,7 @@ import { buildAgent, createTestDb, type TestDb } from "../test/helpers.js";
 import type { Agent } from "../agent/index.js";
 import { channels, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { SessionQueryRepository } from "../db/repositories/session-query.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { SessionQueryService } from "./query-service.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { speakerFixture } from "../test/speakers.js";

@@ -1,3 +1,4 @@
+import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
@@ -86,9 +87,10 @@ export function SystemUpgradeSection() {
           </Alert>
         ) : (
           <Alert variant="info">
+            <Loader2 aria-hidden className="animate-spin" />
             <AlertTitle>{t("system.restartingTitle", { name })}</AlertTitle>
             <AlertDescription>
-              {t("system.restartingBody", { name, version: restartingTo })}
+              {t("system.restartingBody", { version: restartingTo })}
             </AlertDescription>
           </Alert>
         )}

@@ -1,16 +1,13 @@
 import type { ChannelMessage, ChatId, MessageReceipt } from "@rome-os/app-runtime";
-import type { OutgoingMessage } from "../../types.js";
-import type {
-  StoredWebchatHistoryMessage,
-  WebChatRepository,
-} from "../../db/repositories/webchat.js";
-import type { MessagePart } from "../../types.js";
+import type { OutgoingMessage } from "../types.js";
+import type { StoredWebchatHistoryMessage, WebChatRepository } from "./repository.js";
+import type { MessagePart } from "../types.js";
 import { v4 as uuid } from "uuid";
-import { createLogger } from "../../logger.js";
+import { createLogger } from "../logger.js";
 import { SendRefused } from "@rome-os/app-runtime";
-import { withoutHostOnlyParts } from "../host-only-parts.js";
-import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
-import { DEFAULT_BOT_DISPLAY_NAME } from "../../participation/mention-only.js";
+import { withoutHostOnlyParts } from "../chats/host-only-parts.js";
+import { artifactLocalName, isCoreMainAgentId } from "../apps/artifact-id.js";
+import { DEFAULT_BOT_DISPLAY_NAME } from "../participation/mention-only.js";
 
 const log = createLogger("webchat");
 export const WEBCHAT_GUARDIAN_USER_ID = "guardian";

@@ -10,7 +10,7 @@ import {
   type SubagentSessions,
   type SubagentTurnLog,
 } from "../agent/index.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import { createLogger } from "../logger.js";
 import type { AgentSession, SessionOpening, Sessions } from "../agent/index.js";
 import { AgentTraceRecorder, recordAgentTraceBestEffort } from "./agent-trace-recorder.js";
