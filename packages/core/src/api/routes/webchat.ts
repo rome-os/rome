@@ -30,11 +30,7 @@ import type {
   TraceSnapshot,
   TraceTokenUsage,
 } from "@rome/api-types/trace-segments";
-import {
-  type ChatShareSnapshot,
-  type ChatShareMessage,
-  shareCarriesTraces,
-} from "../share-snapshot.js";
+import type { ChatShareSnapshot, ChatShareMessage } from "../share-snapshot.js";
 import { createRegistryAppResolver } from "../registry-app-resolver.js";
 import {
   ensureWebchatProjectWorkspace,
@@ -2925,10 +2921,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "turnIds must be a non-empty array" }, 400);
     }
 
-    // A private chat's work (its tool calls, subagents and their traces) is
+    // A Concierge chat's work (its tool calls, subagents and their traces) is
     // its owner's alone, so its share carries the messages only.
     const snapshot = await buildChatShareSnapshot(sessionId, new Set(turnIds), {
-      withTraces: shareCarriesTraces(session),
+      withTraces: !isConciergeChat(session),
     });
     if (snapshot.messages.length === 0) {
       return c.json({ error: "No messages match the selected turns" }, 400);

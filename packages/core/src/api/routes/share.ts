@@ -17,7 +17,6 @@ import {
 import { createLogger } from "../../logger.js";
 import { SHARE_ROBOTS } from "../../lib/share-robots.js";
 import type { StoredSharedChat } from "../../db/repositories/webchat.js";
-import { type ChatShareSnapshot, shareCarriesTraces, withoutTraces } from "../share-snapshot.js";
 import type { ApiDeps } from "../deps.js";
 
 const log = createLogger("api:share");
@@ -45,19 +44,14 @@ export function shareRoutes(deps: ApiDeps): Hono {
     const share = await deps.webchatRepo.getSharedChat(token);
     if (!share) return c.json({ error: "Share not found" }, 404);
 
-    let snapshot: ChatShareSnapshot;
+    let snapshot: unknown;
     let layout: unknown;
     try {
-      snapshot = JSON.parse(share.snapshot) as ChatShareSnapshot;
+      snapshot = JSON.parse(share.snapshot);
       layout = JSON.parse(share.layout);
     } catch (err) {
       log.error("shared_chat_parse_failed", { token, error: String(err) });
       return c.json({ error: "Corrupt share" }, 500);
-    }
-    // A private chat's share serves no trace, even one stored before shares
-    // of it stopped freezing them.
-    if (!shareCarriesTraces(await deps.webchatRepo.getSession(share.sessionId))) {
-      snapshot = withoutTraces(snapshot);
     }
     return c.json({ id: share.id, title: share.title, snapshot, layout });
   });
