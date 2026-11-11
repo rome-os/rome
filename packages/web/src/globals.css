@@ -348,6 +348,24 @@
   }
 }
 
+/* Rich message (chat ChatBubble): text with a heading, a list, a table or a
+   code block reads as structured content, and gets more room inside its
+   bubble than a one-line reply does. Keyed on the rendered content, so every
+   bubble decides it the same way, wherever it renders. */
+[data-chat-bubble]:has(
+    .rome-markdown
+      :is(
+        [data-streamdown^="heading-"],
+        [data-streamdown="ordered-list"],
+        [data-streamdown="unordered-list"],
+        [data-streamdown="table-wrapper"],
+        [data-streamdown="code-block"],
+        [data-chat-code-block]
+      )
+  ) {
+  padding: var(--rome-space-4) var(--rome-space-5);
+}
+
 /* Sent bubble (chat ChatBubble): the content sits on the primary fill, so the
    color tokens markdown reads are re-mapped onto the primary foreground for
    the bubble's children. The bubble itself keeps the real `--primary` for its
