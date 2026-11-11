@@ -38,6 +38,7 @@ const GuardianBubble = memo(
             ? {
                 messageId: msg.id,
                 sessionId: msg.sessionId,
+                turnId: msg.turnId,
                 author: "guardian",
                 name: msg.sender?.name ?? undefined,
                 text,
@@ -102,6 +103,7 @@ const AgentEntry = memo(function AgentEntry({
   const replyTo = (text: string): ReplySource => ({
     messageId: message.id,
     sessionId: message.sessionId,
+    turnId: message.turnId,
     author: "agent",
     text,
     ...(bubbles > 1 ? { ownBubble: true } : {}),

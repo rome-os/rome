@@ -64,7 +64,10 @@ import {
   type AgentIdentity,
 } from "@/components/chat/chat-view";
 import { ShareBar } from "@/components/chat/ShareBar";
-import { MessageSharingContext } from "@/components/chat/ShareMessageButton";
+import {
+  MessageSharingContext,
+  type SharedMessageTurn,
+} from "@/components/chat/ShareMessageButton";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { useFreeCells } from "@/pages/free/use-free-cells";
 import { useToolTrace } from "@/pages/free/tool-trace";
@@ -796,10 +799,13 @@ export function Chat({
   // chat's own timeline, which the view covers.
   const { thread: openThreadId, closeThread } = replyDraft;
   const shareMessageTurn = useCallback(
-    (messageId: string) => {
+    (messageId: string, turn?: SharedMessageTurn) => {
       if (openThreadId) closeThread();
+      // The loaded timeline first; else the turn the message's own view knows,
+      // for an older thread message the timeline has not loaded.
       const turnId = mainSessionId
-        ? messagesRef.current.get(mainSessionId)?.find((m) => m.id === messageId)?.turnId
+        ? (messagesRef.current.get(mainSessionId)?.find((m) => m.id === messageId)?.turnId ??
+          (turn?.sessionId === mainSessionId ? turn.turnId : undefined))
         : undefined;
       setSelectedShareTurns(new Set(turnId ? [turnId] : []));
       setShareMode(true);
@@ -1945,8 +1951,20 @@ export function Chat({
     turnEnds,
   );
 
+  // Share mode hides the composer, so it takes no dropped file: the drop is
+  // refused rather than filed into a draft no one sees.
+  const sharingRef = useRef(false);
+  sharingRef.current = shareMode && Boolean(mainSessionId);
+  const refuseDrop = (event: React.DragEvent<HTMLDivElement>): boolean => {
+    if (!sharingRef.current) return false;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = "none";
+    return true;
+  };
+
   const handleDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     if (!dataTransferHasFiles(event.dataTransfer)) return;
+    if (refuseDrop(event)) return;
     event.preventDefault();
     dragDepthRef.current += 1;
     event.dataTransfer.dropEffect = "copy";
@@ -1955,6 +1973,7 @@ export function Chat({
 
   const handleDragOver = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     if (!dataTransferHasFiles(event.dataTransfer)) return;
+    if (refuseDrop(event)) return;
     event.preventDefault();
     event.dataTransfer.dropEffect = "copy";
   }, []);
@@ -1973,6 +1992,7 @@ export function Chat({
     event.stopPropagation();
     dragDepthRef.current = 0;
     setIsDraggingFiles(false);
+    if (sharingRef.current) return;
     const files = extractFilesFromDataTransfer(event.dataTransfer);
     if (files.length === 0) return;
     composerRef.current?.addFiles(files);

@@ -90,7 +90,7 @@ export const UserMessage = memo(
             }}
           />
         ) : null}
-        {isSettledUserMessage(msg) ? <ShareMessageButton messageId={msg.id} /> : null}
+        {isSettledUserMessage(msg) ? <ShareMessageButton messageId={msg.id} turn={msg} /> : null}
       </div>
     );
     const footer = (

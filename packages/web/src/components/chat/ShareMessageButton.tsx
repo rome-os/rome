@@ -4,12 +4,21 @@ import { useTranslation } from "react-i18next";
 import { IconButton } from "@/components/ui/icon-button";
 import { cn } from "@/lib/utils";
 
+/** A message's own turn, as the place that draws it knows it. */
+export interface SharedMessageTurn {
+  sessionId: string;
+  turnId?: string | null;
+}
+
 /**
  * Starts the chat's share mode with the turn of one message selected. The
  * live chat provides it; a shared chat and a read-only viewer leave it null,
- * so they show no Share.
+ * so they show no Share. `turn` names the message's turn where the chat's
+ * loaded timeline may not hold it, such as a thread view's older message.
  */
-export const MessageSharingContext = createContext<((messageId: string) => void) | null>(null);
+export const MessageSharingContext = createContext<
+  ((messageId: string, turn?: SharedMessageTurn) => void) | null
+>(null);
 
 /**
  * Share on a message: a shortcut into the chat's share mode, with this
@@ -18,10 +27,13 @@ export const MessageSharingContext = createContext<((messageId: string) => void)
  */
 export function ShareMessageButton({
   messageId,
+  turn,
   size = "sm",
   className,
 }: {
   messageId: string;
+  /** The message's turn, when the caller has it. */
+  turn?: SharedMessageTurn;
   size?: "xs" | "sm";
   className?: string;
 }) {
@@ -33,7 +45,7 @@ export function ShareMessageButton({
       size={size}
       label={t("message.share")}
       icon={<Share2 />}
-      onClick={() => startShare(messageId)}
+      onClick={() => startShare(messageId, turn)}
       className={cn("text-muted-foreground hover:text-foreground", className)}
     />
   );

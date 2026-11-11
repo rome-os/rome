@@ -49,6 +49,7 @@ const mockUseSessionIdentity = rs.hoisted(() => rs.fn());
 const appsPanel = rs.hoisted(() => ({ collapsed: true, setCollapsed: rs.fn() }));
 const mockUseChatTabStatus = rs.hoisted(() => rs.fn());
 const conciergeInsertText = rs.hoisted(() => rs.fn());
+const conciergeAddFiles = rs.hoisted(() => rs.fn());
 const toast = rs.hoisted(() => ({
   loading: rs.fn(() => "finding"),
   error: rs.fn(),
@@ -207,6 +208,13 @@ function ReplyJump() {
       >
         open thread
       </button>
+      {/* An older thread message the timeline has not loaded, as the thread view draws it. */}
+      <div data-testid="older-thread-message">
+        <ShareMessageButton
+          messageId="u-old"
+          turn={{ sessionId: "session-1", turnId: "turn-old" }}
+        />
+      </div>
     </>
   );
 }
@@ -384,7 +392,11 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
     },
     ref,
   ) {
-    useImperativeHandle(ref, () => ({ insertText: conciergeInsertText, focus: () => {} }));
+    useImperativeHandle(ref, () => ({
+      insertText: conciergeInsertText,
+      addFiles: conciergeAddFiles,
+      focus: () => {},
+    }));
     return (
       <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
         <button
@@ -2466,6 +2478,40 @@ describe("Chat Concierge empty state", () => {
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     await user.click(screen.getByRole("menuitem", { name: "share.title" }));
     expect((await screen.findByTestId("share-bar")).textContent).toBe("");
+  });
+
+  it("picks an older thread message's own turn, which the timeline has not loaded", async () => {
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    fireEvent.click(
+      within(screen.getByTestId("older-thread-message")).getByRole("button", {
+        name: "message.share",
+      }),
+    );
+    expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-old");
+  });
+
+  it("refuses a file dropped in share mode, and takes one again after it", async () => {
+    const user = userEvent.setup();
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" variant="concierge" conciergeMainChatId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    const drop = () => {
+      const file = new File(["x"], "plan.txt", { type: "text/plain" });
+      fireEvent.drop(screen.getByTestId("message-list").closest(".\\@container\\/chat")!, {
+        dataTransfer: { types: ["Files"], files: [file], items: [] },
+      });
+    };
+    await user.click(await screen.findByRole("button", { name: "navbar.more" }));
+    await user.click(screen.getByRole("menuitem", { name: "share.title" }));
+    await screen.findByTestId("share-bar");
+    drop();
+    expect(conciergeAddFiles).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("share-exit"));
+    await waitFor(() => expect(screen.queryByTestId("share-bar")).toBeNull());
+    drop();
+    expect(conciergeAddFiles).toHaveBeenCalledOnce();
   });
 
   it("keeps the composer, and its draft, through share mode", async () => {

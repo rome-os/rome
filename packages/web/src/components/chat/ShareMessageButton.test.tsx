@@ -40,7 +40,11 @@ describe("Share on a message", () => {
     const buttons = screen.getAllByRole("button", { name: "Share" });
     expect(buttons).toHaveLength(2);
     for (const button of buttons) fireEvent.click(button);
-    expect(startShare.mock.calls).toEqual([["m-1"], ["m-1"]]);
+    // Each names the message, and the turn the place that draws it knows.
+    expect(startShare.mock.calls).toEqual([
+      ["m-1", expect.objectContaining({ sessionId: "topic-1" })],
+      ["m-1", expect.objectContaining({ sessionId: "topic-1" })],
+    ]);
   });
 
   it("is not offered on a surface without share mode, such as a shared chat", () => {

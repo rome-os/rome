@@ -42,7 +42,7 @@ export const ConciergeMessageMeta = memo(function ConciergeMessageMeta({
       ) : null}
       {copyText ? <CopyMessageButton text={copyText} size={size} /> : null}
       {reply ? <ReplyButton source={reply} onReply={onReply} size={size} /> : null}
-      {reply ? <ShareMessageButton messageId={reply.messageId} size={size} /> : null}
+      {reply ? <ShareMessageButton messageId={reply.messageId} turn={reply} size={size} /> : null}
       {feedbackTurn ? (
         <TurnFeedbackButtons
           key={`${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}
