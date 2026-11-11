@@ -100,8 +100,12 @@ final class FakeBackend: RomeBackend {
     var revoked: [String] = []
     var revokeError: APIError?
 
+    /// Runs inside a share, after the instance took it.
+    var duringShare: (() async -> Void)?
+
     func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink {
         shareRequests.append((sessionId, turnIds, agentName))
+        await duringShare?()
         return try shareAnswer.get()
     }
 
@@ -230,7 +234,11 @@ final class FakeBackend: RomeBackend {
         return try (startResults.isEmpty ? .success(UpgradeStarted(status: "started", target: target)) : startResults.removeFirst()).get()
     }
 
+    /// Runs inside a version read, before it answers.
+    var duringBuildInfo: (() async -> Void)?
+
     func buildInfo() async throws -> BuildInfo {
+        await duringBuildInfo?()
         guard let buildVersion else { throw APIError.network }
         return BuildInfo(version: buildVersion)
     }

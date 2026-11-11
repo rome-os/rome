@@ -89,7 +89,12 @@ final class ShareLinkSource: NSObject, UIActivityItemSource {
 @MainActor
 final class ChatShareFlow {
     /// The turns picked; nil outside share mode.
-    private(set) var selection: Set<String>?
+    private(set) var selection: Set<String>? {
+        didSet { if selection != oldValue { round += 1 } }
+    }
+    /// Goes up with every change to share mode or its picks: a create that
+    /// finds it moved on stops, so Cancel never leaves a link behind.
+    @ObservationIgnored private var round = 0
     private(set) var creating = false
     /// A short line over Create link after a failure.
     private(set) var error: String?
@@ -119,10 +124,11 @@ final class ChatShareFlow {
         chat.map { ShareTurns(messages: $0.messages, rows: $0.rows) }
     }
 
-    /// Share mode, with `turn` picked. An open chat thread closes: share mode
-    /// works on the main timeline.
+    /// Share mode, with `turn` picked. An open chat thread leaves the screen:
+    /// share mode works on the main timeline. A quoted reply and its draft
+    /// stay as they are.
     func begin(turn: String?) {
-        chat?.closeThread()
+        if chat?.thread != nil { chat?.hideThread() }
         selection = turn.map { [$0] } ?? []
         error = nil
     }
@@ -169,13 +175,27 @@ final class ChatShareFlow {
     /// `agentName` is the Agent's name as the header shows it, nil when
     /// unknown. An instance before `ShareGate.minimumVersion` would publish
     /// the work behind the turns, so it gets the turns' text shared instead,
-    /// and nothing is sent to it.
+    /// and nothing is sent to it. A version that cannot be fetched is an
+    /// error, and share mode stays.
+    ///
+    /// Share mode may be cancelled, or its picks changed, while this waits.
+    /// Before the link is asked for, that stops it; after, the link it made
+    /// is revoked unseen.
     func create(agentName: String? = nil) async {
         guard let chat, let sessionId, let picked = selection, !picked.isEmpty, !creating else { return }
+        let started = round
+        var current: Bool { self.round == started }
         creating = true
         error = nil
         defer { creating = false }
-        let version = try? await backend.buildInfo().version
+        let version: String?
+        do {
+            version = try await backend.buildInfo().version
+        } catch {
+            if current { self.error = String(localized: "Couldn't create the link.") }
+            return
+        }
+        guard current else { return }
         let turns = ShareTurns(messages: chat.messages, rows: chat.rows)
         guard ShareGate.makesLinks(version: version) else {
             outgoing = ShareOutgoing(text: turns.text(of: picked, rows: chat.rows))
@@ -185,6 +205,11 @@ final class ChatShareFlow {
         let ordered = turns.order.filter(picked.contains)
         do {
             let link = try await backend.shareChat(sessionId: sessionId, turnIds: ordered, agentName: agentName)
+            guard current else {
+                // Cancelled while the link was made: it never opens.
+                try? await backend.revokeShare(id: link.id)
+                return
+            }
             guard let url = url(of: link) else {
                 error = String(localized: "Couldn't create the link.")
                 return
@@ -193,7 +218,7 @@ final class ChatShareFlow {
             links = links.map { [link] + $0 }
             selection = nil
         } catch {
-            self.error = String(localized: "Couldn't create the link.")
+            if current { self.error = String(localized: "Couldn't create the link.") }
         }
     }
 

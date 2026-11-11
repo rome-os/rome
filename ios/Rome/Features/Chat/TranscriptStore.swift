@@ -378,6 +378,13 @@ final class TranscriptStore {
         opened.start()
     }
 
+    /// Takes the open thread off the screen and nothing else: a quote or a
+    /// thread being looked up stays, for share mode to hand back.
+    func hideThread() {
+        thread?.stop()
+        thread = nil
+    }
+
     /// Closes the open thread, and drops a quote: both end with a send.
     func closeThread() {
         thread?.stop()
