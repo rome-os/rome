@@ -6,7 +6,7 @@ import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { RoutineDraftCard } from "./RoutineDraftCard";
 import { createRoutine, deleteRoutine, listRoutineRefs, setRoutineEnabled } from "@/lib/chat-api";
-import { useRunRoutineNow } from "@/hooks/use-routines";
+import { useRoutines, useRunRoutineNow } from "@/hooks/use-routines";
 import i18n from "@/i18n";
 import type { RoutineDraftSpec } from "@/lib/chat-types";
 
@@ -19,13 +19,21 @@ rs.mock("@/lib/chat-api", () => ({
   deleteRoutine: rs.fn(),
 }));
 // Run now goes through the Routines page's hook (it refreshes run history).
-rs.mock("@/hooks/use-routines", () => ({ useRunRoutineNow: rs.fn() }));
+rs.mock("@/hooks/use-routines", () => ({ useRunRoutineNow: rs.fn(), useRoutines: rs.fn() }));
 
 const mockCreate = rs.mocked(createRoutine);
 const mockList = rs.mocked(listRoutineRefs);
 const mockSetEnabled = rs.mocked(setRoutineEnabled);
 const mockDelete = rs.mocked(deleteRoutine);
 const mockRun = rs.fn();
+const mockRefetch = rs.fn();
+// The Routines page list, read only for whether a run is going.
+const routinesList = (routines: unknown[]) =>
+  rs
+    .mocked(useRoutines)
+    .mockReturnValue({ routines, refetch: mockRefetch } as unknown as ReturnType<
+      typeof useRoutines
+    >);
 
 // The saved state links into the router, so render inside one.
 const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
@@ -70,6 +78,7 @@ beforeEach(async () => {
   mockDelete.mockResolvedValue({ ok: true });
   mockRun.mockResolvedValue({ runId: "run-1", status: "success" });
   rs.mocked(useRunRoutineNow).mockReturnValue(mockRun);
+  routinesList([]);
 });
 
 afterEach(() => {
@@ -422,14 +431,9 @@ describe("RoutineDraftCard", () => {
   it("offers no Run now while the routine's latest run is still going", async () => {
     const user = userEvent.setup();
     mockList.mockResolvedValue([
-      {
-        id: "r-5",
-        name: "Landlord emails",
-        key: "chat-routine:card-5",
-        enabled: true,
-        running: true,
-      },
+      { id: "r-5", name: "Landlord emails", key: "chat-routine:card-5", enabled: true },
     ]);
+    routinesList([{ id: "r-5", lastRun: { status: "running", firedAt: "2026-11-10T00:00:00Z" } }]);
     render(
       <RoutineDraftCard
         draft={{ ...eventDraft, filterSummary: undefined, trigger: { type: "manual" } }}
@@ -437,54 +441,8 @@ describe("RoutineDraftCard", () => {
       />,
     );
     await openMenu(user);
-    expect(screen.queryByRole("menuitem", { name: "Run now" })).toBeNull();
-    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
-  });
-
-  it("keeps withholding Run now after resuming a routine whose run is still going", async () => {
-    const user = userEvent.setup();
-    mockList.mockResolvedValue([
-      {
-        id: "r-5",
-        name: "Landlord emails",
-        key: "chat-routine:card-5",
-        enabled: false,
-        running: true,
-      },
-    ]);
-    render(
-      <RoutineDraftCard
-        draft={{ ...eventDraft, filterSummary: undefined, trigger: { type: "manual" } }}
-        routineKey="chat-routine:card-5"
-      />,
-    );
-    await openMenu(user);
-    await user.click(screen.getByRole("menuitem", { name: "Resume" }));
-    await waitFor(() => expect(screen.queryByText("Paused")).toBeNull());
-    await openMenu(user);
-    expect(screen.queryByRole("menuitem", { name: "Run now" })).toBeNull();
-  });
-
-  it("withholds Run now when Turn it on finds the routine running", async () => {
-    const user = userEvent.setup();
-    mockList.mockResolvedValueOnce(null).mockResolvedValue([
-      {
-        id: "r-5",
-        name: "Landlord emails",
-        key: "chat-routine:card-5",
-        enabled: true,
-        running: true,
-      },
-    ]);
-    mockCreate.mockResolvedValue({ ok: true, status: 409, routineId: "r-5" });
-    render(
-      <RoutineDraftCard
-        draft={{ ...eventDraft, filterSummary: undefined, trigger: { type: "manual" } }}
-        routineKey="chat-routine:card-5"
-      />,
-    );
-    await user.click(await screen.findByRole("button", { name: /turn it on/i }));
-    await openMenu(user);
+    // Opening the menu re-reads the list, so a run that ended frees Run now.
+    expect(mockRefetch).toHaveBeenCalled();
     expect(screen.queryByRole("menuitem", { name: "Run now" })).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
   });

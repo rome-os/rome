@@ -21,7 +21,7 @@ import {
   type RoutineRef,
 } from "@/lib/chat-api";
 import type { RoutineDraftSpec } from "@/lib/chat-types";
-import { useRunRoutineNow } from "@/hooks/use-routines";
+import { useRoutines, useRunRoutineNow } from "@/hooks/use-routines";
 
 type CardState =
   // Until the first lookup settles, the card can't tell a draft from a routine
@@ -33,10 +33,7 @@ type CardState =
   // `owned`: this card provably made the routine (same key, or created here),
   // so it may pause or delete it; a legacy name match only links to it.
   // `enabled` is null when the routine exists but its state couldn't be read.
-  // `running`: its latest run was still going when the card looked it up. It
-  // only withholds Run now (the server doesn't serialize runs); it is a
-  // snapshot, so it isn't shown as a status that could go stale.
-  | { kind: "on"; routineId?: string; enabled: boolean | null; owned: boolean; running?: boolean }
+  | { kind: "on"; routineId?: string; enabled: boolean | null; owned: boolean }
   | { kind: "error"; message: string };
 
 type Busy = "toggle" | "delete" | "run" | null;
@@ -94,6 +91,9 @@ export function RoutineDraftCard({
   const [detailsOpen, setDetailsOpen] = useState(false);
   // The Routines page's own run path, so the routine's run history refreshes.
   const runRoutineNow = useRunRoutineNow();
+  // Whether a run is going, from the Routines page's list (which a run
+  // invalidates): the server doesn't serialize runs, so Run now waits.
+  const { routines, refetch: refetchRoutines } = useRoutines();
 
   useEffect(() => {
     let cancelled = false;
@@ -107,7 +107,6 @@ export function RoutineDraftCard({
               routineId: created.id,
               enabled: created.enabled,
               owned: !!routineKey?.startsWith(CHAT_ROUTINE_KEY_PREFIX),
-              running: created.running,
             }
           : { kind: "draft" },
       );
@@ -130,13 +129,11 @@ export function RoutineDraftCard({
       // 409: the keyed routine already existed and was left as it is — it may
       // be paused — so read its real state rather than assume On.
       let enabled: boolean | null = true;
-      let running = false;
       if (result.status === 409 && result.routineId) {
-        const ref = (await listRoutineRefs())?.find((r) => r.id === result.routineId);
-        enabled = ref?.enabled ?? null;
-        running = !!ref?.running;
+        const refs = await listRoutineRefs();
+        enabled = refs?.find((r) => r.id === result.routineId)?.enabled ?? null;
       }
-      setState({ kind: "on", routineId: result.routineId, enabled, owned: true, running });
+      setState({ kind: "on", routineId: result.routineId, enabled, owned: true });
     } else {
       setState({
         kind: "error",
@@ -150,8 +147,7 @@ export function RoutineDraftCard({
     const result = await setRoutineEnabled(id, enabled);
     setBusy(null);
     setActionError(result.ok ? null : (result.error ?? null));
-    // Pausing doesn't stop a run that is going, so `running` carries over.
-    if (result.ok) setState((prev) => (prev.kind === "on" ? { ...prev, enabled } : prev));
+    if (result.ok) setState({ kind: "on", routineId: id, enabled, owned: true });
   };
 
   // Deleting returns the card to its draft, so "Turn it on" undoes it.
@@ -177,7 +173,6 @@ export function RoutineDraftCard({
     }
     setBusy(null);
     setActionError(error);
-    setState((prev) => (prev.kind === "on" ? { ...prev, running: false } : prev));
   };
 
   const isSchedule = draft.trigger.type === "schedule";
@@ -185,6 +180,7 @@ export function RoutineDraftCard({
   const TriggerIcon = isManual ? Play : isSchedule ? CalendarClock : BellRing;
   const error = state.kind === "error" ? state.message : actionError;
   const saved = state.kind === "on" ? state : null;
+  const running = routines?.find((r) => r.id === saved?.routineId)?.lastRun?.status === "running";
   const isDraft = state.kind === "draft" || state.kind === "creating" || state.kind === "error";
 
   const title = (
@@ -270,8 +266,9 @@ export function RoutineDraftCard({
                     <SavedMenu
                       enabled={saved.enabled}
                       isManual={isManual}
-                      running={!!saved.running}
+                      running={running}
                       disabled={busy !== null}
+                      onOpen={() => void refetchRoutines()}
                       onToggle={() => toggle(saved.routineId!, !saved.enabled)}
                       onRun={() => runNow(saved.routineId!)}
                       onAskDelete={() => setConfirmingDelete(true)}
@@ -354,6 +351,7 @@ function SavedMenu({
   isManual,
   running,
   disabled,
+  onOpen,
   onToggle,
   onRun,
   onAskDelete,
@@ -362,6 +360,7 @@ function SavedMenu({
   isManual: boolean;
   running: boolean;
   disabled: boolean;
+  onOpen: () => void;
   onToggle: () => void;
   onRun: () => void;
   onAskDelete: () => void;
@@ -381,7 +380,8 @@ function SavedMenu({
       </DropdownMenuItem>
     ) : null;
   return (
-    <DropdownMenu>
+    // Re-read on open, so a run that ended since the card loaded frees Run now.
+    <DropdownMenu onOpenChange={(open) => open && onOpen()}>
       <DropdownMenuTrigger asChild>
         <IconButton
           size="xs"

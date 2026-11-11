@@ -2,7 +2,6 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useState } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import { ChatPendingCardJump } from "./ChatPendingCardJump";
 import { RoutineDraftCard } from "./entries/RoutineDraftCard";
@@ -15,9 +14,11 @@ rs.mock("@/lib/chat-api", () => ({
   createRoutine: rs.fn(),
   listRoutineRefs: rs.fn(),
 }));
-
-// The routine card runs routines through react-query's run hook.
-const queryClient = new QueryClient();
+// The routine card reads run state through the Routines page's hooks.
+rs.mock("@/hooks/use-routines", () => ({
+  useRoutines: () => ({ routines: [], refetch: () => Promise.resolve() }),
+  useRunRoutineNow: () => () => Promise.resolve({ runId: "run", status: "success" }),
+}));
 
 let cardTop = -200;
 const scrollTo = rs.fn();
@@ -38,52 +39,50 @@ function Harness({
   const [content, setContent] = useState<HTMLDivElement | null>(null);
   const [floor, setFloor] = useState<HTMLDivElement | null>(null);
   return (
-    <QueryClientProvider client={queryClient}>
-      <MemoryRouter>
-        <div ref={setScroller} data-testid="scroller">
-          <div ref={setContent}>
-            <div data-chat-card-message="message">
-              {kind === "approval" ? (
-                <div data-chat-pending-card="approval">Pending approval</div>
-              ) : kind === "app" ? (
-                <div data-chat-pending-card="">App form</div>
-              ) : kind === "ai" ? (
-                <AiToolsCard toolUseId="ai" result={aiResult} onSubmit={() => {}} />
-              ) : kind === "question" || questionResult ? (
-                <QuestionCard
-                  toolUseId="question"
-                  props={{ questions: [{ id: "q", question: "When?", type: "text" }] }}
-                  result={questionResult?.resolved as Record<string, unknown> | undefined}
-                  onSubmit={() => {}}
-                  onDismiss={() => {}}
-                />
-              ) : (
-                <RoutineDraftCard
-                  routineKey="chat-routine:test"
-                  draft={{
-                    name: "Weekly update",
-                    sentence: "Every Monday, remind me to send an update.",
-                    watchLabel: "Mondays",
-                    thenSummary: "Send a reminder",
-                    trigger: { type: "manual" },
-                    actionName: "summon",
-                    args: {},
-                  }}
-                />
-              )}
-            </div>
-          </div>
-          <div ref={setFloor} data-testid="floor">
-            <ChatPendingCardJump
-              scroller={scroller}
-              content={content}
-              floor={floor}
-              currentReplyMessageIds={currentReplyMessageIds}
-            />
+    <MemoryRouter>
+      <div ref={setScroller} data-testid="scroller">
+        <div ref={setContent}>
+          <div data-chat-card-message="message">
+            {kind === "approval" ? (
+              <div data-chat-pending-card="approval">Pending approval</div>
+            ) : kind === "app" ? (
+              <div data-chat-pending-card="">App form</div>
+            ) : kind === "ai" ? (
+              <AiToolsCard toolUseId="ai" result={aiResult} onSubmit={() => {}} />
+            ) : kind === "question" || questionResult ? (
+              <QuestionCard
+                toolUseId="question"
+                props={{ questions: [{ id: "q", question: "When?", type: "text" }] }}
+                result={questionResult?.resolved as Record<string, unknown> | undefined}
+                onSubmit={() => {}}
+                onDismiss={() => {}}
+              />
+            ) : (
+              <RoutineDraftCard
+                routineKey="chat-routine:test"
+                draft={{
+                  name: "Weekly update",
+                  sentence: "Every Monday, remind me to send an update.",
+                  watchLabel: "Mondays",
+                  thenSummary: "Send a reminder",
+                  trigger: { type: "manual" },
+                  actionName: "summon",
+                  args: {},
+                }}
+              />
+            )}
           </div>
         </div>
-      </MemoryRouter>
-    </QueryClientProvider>
+        <div ref={setFloor} data-testid="floor">
+          <ChatPendingCardJump
+            scroller={scroller}
+            content={content}
+            floor={floor}
+            currentReplyMessageIds={currentReplyMessageIds}
+          />
+        </div>
+      </div>
+    </MemoryRouter>
   );
 }
 
