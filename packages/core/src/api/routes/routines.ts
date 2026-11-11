@@ -7,7 +7,7 @@ import {
   parseDateAndLocalTime,
   resolveOneOffDate,
 } from "../../routines/schedule-trigger-provider.js";
-import { resolveGuardianTimezone } from "../../routines/guardian-timezone.js";
+import { resolveGuardianTimezone } from "../../instance/timezone.js";
 import type { ApiDeps } from "../deps.js";
 import { validateActionArgs } from "../../apps/actions/validate-action-args.js";
 import { CHAT_ROUTINE_KEY_PREFIX } from "../../routines/chat-routine-key.js";

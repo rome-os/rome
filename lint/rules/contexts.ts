@@ -28,7 +28,7 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
   favors: ["access", "apps", "instance"],
   instance: [],
   participation: [],
-  people: ["apps", "chats", "connections"],
+  people: ["apps", "chats", "connections", "instance"],
   routines: ["access", "agent", "apps"],
 };
 
@@ -120,27 +120,8 @@ export const contextRules: ImportRule[] = contexts.flatMap((from) =>
 
 const SESSIONS_REPOSITORY = "agent/infrastructure/drizzle-session-repository";
 
-/** One listed crossing for each `[from, to]` pair, all under one rule and ticket. */
-function crossingsOf(
-  rule: string,
-  ticket: string,
-  why: string,
-  pairs: ReadonlyArray<readonly [string, string]>,
-): ListedCrossing[] {
-  return pairs.map(([from, to]) => ({ rule, from, to, ticket, why }));
-}
-
 /** Crossings that remain until their ticket lands. */
 export const contextCrossings: ListedCrossing[] = [
-  ...crossingsOf(
-    "people-never-imports-routines",
-    "ZHA-166",
-    "The guardian profile saves the guardian's timezone through Routines, until People no longer writes a setting Routines owns.",
-    [
-      ["people/guardian-profile.ts", "routines/guardian-timezone.ts"],
-      ["people/guardian-profile.test.ts", "routines/guardian-timezone.ts"],
-    ],
-  ),
   {
     rule: "agent-never-imports-apps",
     from: `${SESSIONS_REPOSITORY}.ts`,

@@ -32,7 +32,7 @@ import type { ConciergeFollowItemsRepository } from "../db/repositories/concierg
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { RoutineEngine } from "../routines/engine.js";
-import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
+import { resolveGuardianTimezone } from "../instance/timezone.js";
 import { createLogger } from "../logger.js";
 import {
   FollowBatcher,
