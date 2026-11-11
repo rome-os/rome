@@ -71,7 +71,8 @@ describe("ProfileMenu", () => {
 
     await userEvent.click(screen.getByRole("button", { name: "Account" }));
     expect(await screen.findByText("Evan")).toBeTruthy();
-    expect(screen.getByText("Guardian")).toBeTruthy();
+    // The guardian's own row carries no role label.
+    expect(screen.queryByText("Guardian")).toBeNull();
     const menuItems = ["Settings", "Feedback", "Log out"].map((name) =>
       screen.getByRole("menuitem", { name }),
     );
@@ -88,13 +89,16 @@ describe("ProfileMenu", () => {
     expect(await screen.findByRole("textbox", { name: "Share feedback" })).toBeTruthy();
   });
 
-  it("falls back to the Guardian role label when no display name is set", async () => {
+  it("shows no role label and no header when the guardian has no display name", async () => {
     mockIdentity({ kind: "guardian", userId: "u1", displayName: null, avatarUrl: null });
     renderMenu();
 
-    await waitFor(() => expect(screen.getByText("G")).toBeTruthy());
-    await userEvent.click(screen.getByRole("button", { name: "Account" }));
-    expect(await screen.findByText("Guardian")).toBeTruthy();
+    const trigger = await screen.findByRole("button", { name: "Account" });
+    await waitFor(() => expect(trigger.getAttribute("title")).toBe("Account"));
+    expect(screen.queryByText("G")).toBeNull();
+    await userEvent.click(trigger);
+    expect(await screen.findByRole("menuitem", { name: "Settings" })).toBeTruthy();
+    expect(screen.queryByText("Guardian")).toBeNull();
   });
 
   it("shows a dashboard visitor's email", async () => {
