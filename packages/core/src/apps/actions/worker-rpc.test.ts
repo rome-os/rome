@@ -4,6 +4,7 @@ import { describe, it, expect, rs } from "@rstest/core";
 import { context, propagation, ROOT_CONTEXT, trace } from "@opentelemetry/api";
 import { runWithCurrentActionContext } from "@rome-os/app-runtime";
 import { WorkerRpcServer, type WorkerRpcServices } from "./worker-rpc.js";
+import { chatWorkerCalls } from "../../chats/for-apps.js";
 import { IpcRpc, type IpcMessage, type IpcTransport } from "./ipc.js";
 import { ActionEngine } from "./engine.js";
 import { replayContext, type ReplayStore } from "./replay.js";
@@ -123,16 +124,23 @@ function makeServer(
     validateActionArgs: overrides.validateActionArgs ?? rs.fn(() => null),
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },
-    channelsService: overrides.channelsService,
     connectionRegistry: overrides.connectionRegistry,
     channelOf: (connection: { service: string }) => connection.service,
-    agentNames: overrides.agentNames,
     appConnections: overrides.appConnections,
     appIdForAction: overrides.appIdForAction ?? (() => null),
     sendApprovalCard: overrides.sendApprovalCard ?? rs.fn(async () => {}),
   } as unknown as WorkerRpcServices;
   return {
-    server: new WorkerRpcServer(services),
+    // Chats' calls ride the same worker boundary, which is what captures
+    // the person a dashboard chat read or send stands for.
+    server: new WorkerRpcServer(
+      services,
+      chatWorkerCalls({
+        channelsService: overrides.channelsService as never,
+        chatSettings: {} as never,
+        agentNames: overrides.agentNames as never,
+      }),
+    ),
     services,
     eventBus,
     eventCatalog,
@@ -745,8 +753,8 @@ describe("WorkerRpcServer calls from other contexts", () => {
 
   it("refuses a call whose name a built-in method already takes", () => {
     const { services } = makeServer({});
-    expect(() => new WorkerRpcServer(services, { "channels.list": async () => [] })).toThrow(
-      "WorkerRPC: method channels.list is already served",
+    expect(() => new WorkerRpcServer(services, { "actions.has": async () => ({}) })).toThrow(
+      "WorkerRPC: method actions.has is already served",
     );
   });
 });
