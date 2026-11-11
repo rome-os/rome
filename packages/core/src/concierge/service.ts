@@ -35,6 +35,7 @@ import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
 import type { ConciergeTasks } from "./tasks.js";
+import type { ConciergeTaskRow } from "../db/repositories/concierge-tasks.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 import {
@@ -734,9 +735,36 @@ export class ConciergeService {
     return this.attachedFollowing;
   }
 
-  /** The id of the todo row that links a chat, or null. Read before the chat is deleted. */
-  async taskOfChat(chatId: string): Promise<string | null> {
-    return (await this.deps.tasks.repo.findBySession(chatId))?.id ?? null;
+  /**
+   * A task chat is being archived or deleted, so its row leaves the task list
+   * with it: the row is archived, and the Concierge stops tracking it. Call it
+   * before a delete, while the row still links the chat. Answers the row's id,
+   * or null when the chat links no row of its owner.
+   */
+  async retireTaskChat(chatId: string): Promise<string | null> {
+    const row = await this.taskRowOf(chatId);
+    if (!row) return null;
+    await this.deps.tasks.repo.upsertMany([{ id: row.id, archived: true }]);
+    return row.id;
+  }
+
+  /**
+   * An archived task chat is back, and so is its row, when the row was
+   * archived with the chat (`chatArchivedAt` or later). A row the Concierge
+   * archived before stays archived.
+   */
+  async restoreTaskChat(chatId: string, chatArchivedAt: Date): Promise<void> {
+    const row = await this.taskRowOf(chatId);
+    if (!row?.archivedAt || row.archivedAt.getTime() < chatArchivedAt.getTime()) return;
+    await this.deps.tasks.repo.upsertMany([{ id: row.id, archived: false }]);
+  }
+
+  /** The todo row that links a chat, when it is the row of the chat's own owner. */
+  private async taskRowOf(chatId: string): Promise<ConciergeTaskRow | null> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    if (!chat) return null;
+    const row = await this.deps.tasks.repo.findBySession(chatId);
+    return row && row.ownerKey === ownerOf(chat) ? row : null;
   }
 
   /** A task chat was deleted. Its row stays, unlinked; the Concierge hears of it quietly. */

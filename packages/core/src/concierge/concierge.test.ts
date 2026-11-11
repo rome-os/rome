@@ -2384,11 +2384,11 @@ describe("Concierge events", () => {
     expectFailedTurn(cold, second.chatId, second.taskId);
   });
 
-  it("tells the Concierge quietly that a task chat was deleted, and the row stays", async () => {
+  it("tells the Concierge quietly that a task chat was deleted, and its row stays archived", async () => {
     const s = setup();
     const { chatId, taskId } = await startTask(s);
     s.fakeTimers();
-    const linked = await s.service.taskOfChat(chatId);
+    const linked = await s.service.retireTaskChat(chatId);
     expect(linked).toBe(taskId);
     await s.storedChats.deleteSession(chatId);
     s.service.chatDeleted(taskId);
@@ -2398,7 +2398,11 @@ describe("Concierge events", () => {
     expect(s.backendTurns[0].prompt).toBe(
       `${MAIN_LINE}<task_events>\n<task id="${taskId}" title="Flights" state="doing" changes="chat_deleted" quiet="true">\nThe task chat was deleted.\n</task>\n</task_events>`,
     );
-    expect(await s.taskRepo.get(taskId)).toMatchObject({ sessionId: null, title: "Flights" });
+    expect(await s.taskRepo.get(taskId)).toMatchObject({
+      sessionId: null,
+      title: "Flights",
+      archivedAt: expect.any(Date),
+    });
   });
 
   it("after a restart, hands over rows whose chat was active since the row was written", async () => {

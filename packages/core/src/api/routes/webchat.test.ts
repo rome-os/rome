@@ -36,7 +36,14 @@ import type {
 } from "../../agent/index.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../agent/index.js";
-import { guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";
+import { conciergeTasks, guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";
+import { Hono } from "hono";
+import { COOKIE_NAME, createSession as signGuardianSession } from "../../access/auth.js";
+import { sessionActorMiddleware } from "../../access/session-actor.js";
+import { ConciergeTasks } from "../../concierge/tasks.js";
+import { TASK_CHAT_TRIGGER_KIND } from "../../concierge/service.js";
+import type { ApiDeps } from "../deps.js";
+import { conciergeRoutes } from "./concierge.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
@@ -6223,38 +6230,152 @@ describe("Webchat API", () => {
       await runtime.flushAll();
     });
 
-    it("keeps a deleted task chat's row on the Concierge's list and tells the Concierge", async () => {
-      const repo = new ConciergeTasksRepository(testDb.db);
-      const deleted: string[] = [];
-      deps.concierge = {
-        deps: { tasks: { repo } },
-        taskOfChat: async (chatId: string) => (await repo.findBySession(chatId))?.id ?? null,
-        chatDeleted: (taskId: string) => deleted.push(taskId),
-      } as never;
-      await deps.webchatRepo.createSession("task-chat", "Fix flaky test");
-      const [row] = await repo.upsertMany([
-        { title: "Fix flaky test", state: "doing", sessionId: "task-chat" },
-      ]);
-      await deps.webchatRepo.createSession("plain-chat", "Plain");
-      const app = createWebchatRuntime(deps).routes;
+    describe("a task chat's row", () => {
+      const guardianCookie = {
+        headers: { Cookie: `${COOKIE_NAME}=${signGuardianSession("guardian-1")}` },
+      };
+      let repo: ConciergeTasksRepository;
+      let deleted: string[];
+      let upserts: Array<{ id: string; archivedAt: number | null }>;
+      let app: ReturnType<typeof createWebchatRuntime>["routes"];
 
-      expect((await app.request("/chat/sessions/plain-chat", { method: "DELETE" })).status).toBe(
-        200,
-      );
-      expect(deleted).toEqual([]);
-      expect((await app.request("/chat/sessions/task-chat", { method: "DELETE" })).status).toBe(
-        200,
-      );
+      /** A chat the Concierge of `ownerKey` started, linked to a row of its own. */
+      const taskChat = async (id: string, ownerKey = "guardian") => {
+        await deps.webchatRepo.createSession(
+          id,
+          "Fix flaky test",
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          null,
+          "webchat",
+          null,
+          { ownerKey },
+        );
+        await deps.webchatRepo.setSessionTrigger(id, {
+          triggerKind: TASK_CHAT_TRIGGER_KIND,
+          triggerName: "Fix flaky test",
+        });
+        const [row] = await repo.upsertMany([
+          { title: `Task of ${id}`, state: "doing", sessionId: id },
+        ]);
+        return row;
+      };
+      const archive = (id: string, archived = true) =>
+        app.request(`/chat/sessions/${id}/archive`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ archived }),
+        });
+      const panel = async () => {
+        const tasksApp = new Hono().use("*", sessionActorMiddleware(testDb.db)).route(
+          "/",
+          conciergeRoutes({
+            concierge: deps.concierge,
+            webchatRepo: deps.webchatRepo,
+          } as unknown as ApiDeps),
+        );
+        const response = await tasksApp.request("/concierge/tasks", guardianCookie);
+        expect(response.status).toBe(200);
+        return ((await response.json()) as { tasks: Array<{ title: string }> }).tasks
+          .map((task) => task.title)
+          .sort();
+      };
 
-      expect(deleted).toEqual([row.id]);
-      expect(await repo.get(row.id)).toMatchObject({ state: "doing", sessionId: null });
+      beforeEach(() => {
+        rs.useFakeTimers({ toFake: ["Date"] });
+        rs.setSystemTime(new Date());
+        repo = new ConciergeTasksRepository(testDb.db);
+        const tasks = new ConciergeTasks(repo);
+        const service = new ConciergeService({
+          webchatRepo: deps.webchatRepo,
+          tasks,
+        } as unknown as ConciergeDeps);
+        deleted = [];
+        service.chatDeleted = (taskId: string) => void deleted.push(taskId);
+        deps.concierge = service;
+        upserts = [];
+        tasks.subscribe((event, payload) => {
+          if (event !== "task_upsert") return;
+          const { task } = payload as { task: { id: string; archivedAt: number | null } };
+          upserts.push({ id: task.id, archivedAt: task.archivedAt });
+        });
+        app = createWebchatRuntime(deps).routes;
+      });
+
+      it("leaves the task list with the chat when it is archived, and comes back with it", async () => {
+        const row = await taskChat("task-chat");
+        expect(await panel()).toEqual(["Task of task-chat"]);
+        upserts = [];
+
+        expect((await archive("task-chat")).status).toBe(200);
+        expect(await panel()).toEqual([]);
+        expect(upserts).toEqual([{ id: row.id, archivedAt: expect.any(Number) }]);
+        // A repeated archive keeps the chat's first archive time, so the row still comes back.
+        rs.setSystemTime(Date.now() + 5_000);
+        expect((await archive("task-chat")).status).toBe(200);
+
+        expect((await archive("task-chat", false)).status).toBe(200);
+        expect(await panel()).toEqual(["Task of task-chat"]);
+        expect(upserts.at(-1)).toEqual({ id: row.id, archivedAt: null });
+      });
+
+      it("keeps a row the Concierge archived before its chat was archived", async () => {
+        const row = await taskChat("task-chat");
+        await repo.upsertMany([{ id: row.id, archived: true }]);
+        rs.setSystemTime(Date.now() + 5_000);
+        expect((await archive("task-chat")).status).toBe(200);
+        expect((await archive("task-chat", false)).status).toBe(200);
+        expect((await repo.get(row.id))?.archivedAt).not.toBeNull();
+      });
+
+      it("leaves the task list for good when the chat is deleted, and tells the Concierge", async () => {
+        const row = await taskChat("task-chat");
+        upserts = [];
+        expect((await app.request("/chat/sessions/task-chat", { method: "DELETE" })).status).toBe(
+          200,
+        );
+        expect(await panel()).toEqual([]);
+        expect(upserts).toEqual([{ id: row.id, archivedAt: expect.any(Number) }]);
+        expect(deleted).toEqual([row.id]);
+        expect(await repo.get(row.id)).toMatchObject({ state: "doing", sessionId: null });
+        expect(await repo.get(row.id)).not.toMatchObject({ archivedAt: null });
+      });
+
+      it("leaves the rows alone when a common chat is archived or deleted", async () => {
+        await taskChat("task-chat");
+        await deps.webchatRepo.createSession("plain-chat", "Plain");
+        upserts = [];
+        expect((await archive("plain-chat")).status).toBe(200);
+        expect((await archive("plain-chat", false)).status).toBe(200);
+        expect((await app.request("/chat/sessions/plain-chat", { method: "DELETE" })).status).toBe(
+          200,
+        );
+        expect(await panel()).toEqual(["Task of task-chat"]);
+        expect(upserts).toEqual([]);
+        expect(deleted).toEqual([]);
+      });
+
+      it("never archives a row of another owner that links the chat", async () => {
+        const row = await taskChat("task-chat");
+        // A row that links the chat but is another owner's, as no write makes it.
+        testDb.db
+          .update(conciergeTasks)
+          .set({ ownerKey: "visitor:a" })
+          .where(eq(conciergeTasks.id, row.id))
+          .run();
+        expect((await archive("task-chat")).status).toBe(200);
+        expect((await repo.get(row.id))?.archivedAt).toBeNull();
+      });
     });
 
     it("keeps the main Concierge chat, retires a topic chat before deleting it, and tells the activity after", async () => {
       const retired: [string, string][] = [];
       const gone: [string, boolean][] = [];
       deps.concierge = {
-        taskOfChat: async () => null,
+        retireTaskChat: async () => null,
+        restoreTaskChat: async () => undefined,
         retireChat: async (chatId: string, how: string) => {
           retired.push([chatId, how]);
           return "concierge";

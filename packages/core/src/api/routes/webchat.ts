@@ -2712,9 +2712,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (sess) {
       await sess.close("user").catch(() => undefined);
     }
-    // The chat's row on the Concierge's todo list stays, unlinked, once the
-    // chat is gone; the Concierge hears of it quietly.
-    const taskId = (await deps.concierge?.taskOfChat(sessionId)) ?? null;
+    // A task chat's row is archived while it still links the chat, and stays
+    // archived once the chat is gone; the Concierge hears of it quietly.
+    const taskId = (await deps.concierge?.retireTaskChat(sessionId)) ?? null;
     await deps.webchatRepo.deleteSession(sessionId);
     // Told after the delete, as an archive is, so the activity reads the
     // chat's finished rows as the main chat's.
@@ -2748,11 +2748,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (body.archived && isMainConciergeChat(lookup.session)) {
       return c.json({ error: "The main Concierge chat cannot be archived" }, 409);
     }
-    if (body.archived) {
+    const archivedAt = lookup.session.archivedAt;
+    // A repeated archive keeps the first archive time, which tells a task
+    // chat's unarchive which archived row came with the chat.
+    if (body.archived && !archivedAt) {
       await deps.webchatRepo.archiveSession(sessionId);
       if (isConciergeChat(lookup.session)) await deps.concierge?.retireChat(sessionId, "archived");
-    } else {
+      else await deps.concierge?.retireTaskChat(sessionId);
+    } else if (!body.archived) {
       await deps.webchatRepo.unarchiveSession(sessionId);
+      if (archivedAt) await deps.concierge?.restoreTaskChat(sessionId, archivedAt);
     }
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
