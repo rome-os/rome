@@ -2,7 +2,7 @@ import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
-import { WebChatDashboardSessions } from "./webchat/webchat-dashboard-sessions.js";
+import { WebChatDashboardSessions } from "./sessions/dashboard-session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";

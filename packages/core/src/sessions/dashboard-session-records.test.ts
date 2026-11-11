@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { romeSessions } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/db.js";
-import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
-import { WebChatDashboardSessions } from "./webchat-dashboard-sessions.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { WebChatDashboardSessions } from "./dashboard-session-records.js";
 
 describe("WebChatDashboardSessions", () => {
   let testDb: TestDb;

@@ -1,6 +1,6 @@
 import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { appGuardianProfile } from "../app-host/guardian-profile.js";
-import { WebChatDashboardSessions } from "../webchat/webchat-dashboard-sessions.js";
+import { WebChatDashboardSessions } from "../sessions/dashboard-session-records.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";

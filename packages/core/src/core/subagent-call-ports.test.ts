@@ -1,5 +1,5 @@
 import { ROOT_CONTEXT } from "@opentelemetry/api";
-import { WebChatDashboardSessions } from "../webchat/webchat-dashboard-sessions.js";
+import { WebChatDashboardSessions } from "../sessions/dashboard-session-records.js";
 import { testReceipt, testTurnHandle } from "../test/turn-handle.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";

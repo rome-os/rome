@@ -1,6 +1,6 @@
 import { createBackendTurnRunner } from "../app-host/backend-turn.js";
 import { ChatSessionSettings } from "../webchat/chat-session-settings.js";
-import { WebChatDashboardSessions } from "../webchat/webchat-dashboard-sessions.js";
+import { WebChatDashboardSessions } from "../sessions/dashboard-session-records.js";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { romeToolPorts } from "./rome-tool-ports.js";
 import { startAfter, testReceipt, testTurnHandle } from "../test/turn-handle.js";
