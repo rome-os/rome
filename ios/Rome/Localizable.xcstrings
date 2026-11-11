@@ -101,6 +101,34 @@
         }
       }
     },
+    "%lld blocks" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld block"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld blocks"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 块"
+          }
+        }
+      }
+    },
     "%lld hours ago" : {
       "localizations" : {
         "en" : {
@@ -229,6 +257,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 条未读"
+          }
+        }
+      }
+    },
+    "5 actions → 1 skill" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5 个 action → 1 个 skill"
+          }
+        }
+      }
+    },
+    "5 skills → 1 app" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5 个 skill → 1 个 app"
           }
         }
       }
@@ -523,6 +571,36 @@
         }
       }
     },
+    "Back to chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回到 Chat"
+          }
+        }
+      }
+    },
+    "Back to update" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回到更新"
+          }
+        }
+      }
+    },
+    "Best %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最高 %lld"
+          }
+        }
+      }
+    },
     "Blood glucose" : {
       "localizations" : {
         "zh-Hans" : {
@@ -569,6 +647,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "读过的书、页数和笔记"
+          }
+        }
+      }
+    },
+    "Build Rome" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建造 Rome"
           }
         }
       }
@@ -1651,6 +1739,16 @@
         }
       }
     },
+    "New best" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新纪录"
+          }
+        }
+      }
+    },
     "New chat" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2081,6 +2179,26 @@
         }
       }
     },
+    "Perfect" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完美"
+          }
+        }
+      }
+    },
+    "Perfect ×%lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完美 ×%lld"
+          }
+        }
+      }
+    },
     "Photo" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2107,6 +2225,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "帮我规划锻炼，争取三月前减 3 公斤。"
+          }
+        }
+      }
+    },
+    "Play a game" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "玩个小游戏"
+          }
+        }
+      }
+    },
+    "Play again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再来一局"
           }
         }
       }
@@ -2461,6 +2599,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rome 绝不出售这些数据，也不会将其用于广告或训练 AI 模型。你的 AI 服务商收到的数据适用其自身条款。"
+          }
+        }
+      }
+    },
+    "Rome wasn't built in a day." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "罗马不是一天建成的。"
           }
         }
       }
@@ -3079,6 +3227,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "拍照"
+          }
+        }
+      }
+    },
+    "Tap me to start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点我开始"
+          }
+        }
+      }
+    },
+    "Tap to drop the block" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点一下放下方块"
           }
         }
       }
@@ -3867,6 +4035,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你的 Rome 还没有以 %@ 重新上线。请在 Rome Cloud 中查看，或重试。"
+          }
+        }
+      }
+    },
+    "Your Rome is on %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 已是 %@。"
           }
         }
       }

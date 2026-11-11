@@ -80,7 +80,7 @@ struct DrawerView: View {
             // The open Rome behind its latest release, for a guardian and a visitor alike.
             if model.update.offered != nil {
                 DrawerUpdateRow(agentName: workspace.agentName, action: onUpdate)
-                    .padding(.horizontal, 12)
+                    .padding(.horizontal, 10)
                     .padding(.top, 8)
             }
 
@@ -107,8 +107,8 @@ struct DrawerView: View {
                         .frame(width: 36, height: 36)
                         .background(Palette.drawerField, in: Circle())
                 }
-                .padding(.leading, 8)
-                .padding(.trailing, 10)
+                // Even sides, so the avatar and the gear sit as far from their edges.
+                .padding(.horizontal, 10)
                 .padding(.vertical, 8)
                 .frame(minHeight: 60)
                 .contentShape(RoundedRectangle(cornerRadius: 18, style: .continuous))

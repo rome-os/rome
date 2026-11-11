@@ -106,6 +106,13 @@ struct RootView: View {
                     .zIndex(1)
             }
         }
+        // Over the app, not the update page, so an upgrade that ends while
+        // the game is open leaves it open.
+        .fullScreenCover(item: Bindable(model).stackGame) { launch in
+            StackGameScreen(launch: launch) { model.stackGame = nil }
+                .environment(model)
+                .presentationBackground(Palette.bg)
+        }
         .animation(.easeInOut(duration: 0.3), value: model.update.blocking)
         .animation(.easeInOut(duration: 0.35), value: model.phase == .ready)
         .tint(Palette.primary)
