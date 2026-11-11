@@ -27,10 +27,26 @@ function relativeTime(value: string, locale: string): string {
   return formatter.format(Math.ceil(seconds / 86_400), "day");
 }
 
-/** One row with the OpenCLI status and how many browsers are connected. The
- *  per-browser list is rarely needed, so it opens in a side sheet, which also
- *  polls faster while it is open. */
+/** Computer Use under its own heading, for a page that shows it on its own. */
 export function ComputerUseSection() {
+  const { t } = useTranslation("settings");
+  return (
+    <Section>
+      <SectionHeader>
+        <SectionTitle>{t("advanced.computerUse.title")}</SectionTitle>
+      </SectionHeader>
+      <FormRows>
+        <ComputerUseRow />
+      </FormRows>
+    </Section>
+  );
+}
+
+/** One row with the OpenCLI status and how many browsers are connected, for a
+ *  `FormRows` group that already has a heading. The per-browser list is rarely
+ *  needed, so it opens in a side sheet, which also polls faster while it is
+ *  open. `label` names the row; it defaults to the daemon's name. */
+export function ComputerUseRow({ label = "OpenCLI" }: { label?: string }) {
   const { t, i18n } = useTranslation("settings");
   const [open, setOpen] = useState(false);
   const query = useQuery({
@@ -51,36 +67,31 @@ export function ComputerUseSection() {
     : (data?.connections.filter((connection) => connection.status === "connected").length ?? 0);
 
   return (
-    <Section>
-      <SectionHeader>
-        <SectionTitle>{t("advanced.computerUse.title")}</SectionTitle>
-      </SectionHeader>
-      <FormRows>
-        <FormRow>
-          <FormRowHeading>
-            <FormRowLabel>OpenCLI</FormRowLabel>
-            <FormRowDescription role={query.isError ? "alert" : undefined}>
-              {query.isPending
-                ? t("advanced.computerUse.loading")
-                : query.isError
-                  ? t("advanced.computerUse.loadFailed")
-                  : !daemonUp
-                    ? t("advanced.computerUse.daemonUnavailable")
-                    : t("advanced.computerUse.summary", { count: connected })}
-            </FormRowDescription>
-          </FormRowHeading>
-          <FormRowControl>
-            {data && (
-              <Badge variant={daemonUp ? "success" : "muted"}>
-                {t(`advanced.computerUse.daemon.${daemonUp ? "running" : "unavailable"}`)}
-              </Badge>
-            )}
-            <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
-              {t("advanced.computerUse.details")}
-            </Button>
-          </FormRowControl>
-        </FormRow>
-      </FormRows>
+    <>
+      <FormRow>
+        <FormRowHeading>
+          <FormRowLabel>{label}</FormRowLabel>
+          <FormRowDescription role={query.isError ? "alert" : undefined}>
+            {query.isPending
+              ? t("advanced.computerUse.loading")
+              : query.isError
+                ? t("advanced.computerUse.loadFailed")
+                : !daemonUp
+                  ? t("advanced.computerUse.daemonUnavailable")
+                  : t("advanced.computerUse.summary", { count: connected })}
+          </FormRowDescription>
+        </FormRowHeading>
+        <FormRowControl>
+          {data && (
+            <Badge variant={daemonUp ? "success" : "muted"}>
+              {t(`advanced.computerUse.daemon.${daemonUp ? "running" : "unavailable"}`)}
+            </Badge>
+          )}
+          <Button variant="outline" size="sm" onClick={() => setOpen(true)}>
+            {t("advanced.computerUse.details")}
+          </Button>
+        </FormRowControl>
+      </FormRow>
       <Sheet
         open={open}
         onClose={() => setOpen(false)}
@@ -188,6 +199,6 @@ export function ComputerUseSection() {
           </Button>
         </div>
       </Sheet>
-    </Section>
+    </>
   );
 }

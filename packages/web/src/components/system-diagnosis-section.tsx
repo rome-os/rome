@@ -63,9 +63,19 @@ const AUTH_BADGE: Record<AuthStatus, "success" | "warning" | "destructive" | "mu
 // `unconfigured` is a source build, so neither offers a reconnect.
 const NEEDS_RECONNECT: ReadonlySet<AuthStatus> = new Set(["revoked", "unknown", "no_token"]);
 
-/** One row with the overall health. The checks open in a side sheet, along
- *  with `details`, which mounts only while the sheet is open. */
+/** The diagnosis row in a surface of its own. */
 export function SystemDiagnosisSection({ details }: { details?: ReactNode }) {
+  return (
+    <FormRows>
+      <SystemDiagnosisRow details={details} />
+    </FormRows>
+  );
+}
+
+/** One row with the overall health, for a `FormRows` group. The checks open in
+ *  a side sheet, along with `details`, which mounts only while the sheet is
+ *  open. */
+export function SystemDiagnosisRow({ details }: { details?: ReactNode }) {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
   const [reconnecting, setReconnecting] = useState(false);
@@ -95,7 +105,7 @@ export function SystemDiagnosisSection({ details }: { details?: ReactNode }) {
   const d = query.data ?? null;
 
   return (
-    <FormRows>
+    <>
       <FormRow>
         <FormRowHeading>
           <FormRowLabel>{t("advanced.diagnosis.title")}</FormRowLabel>
@@ -270,7 +280,7 @@ export function SystemDiagnosisSection({ details }: { details?: ReactNode }) {
           {details}
         </div>
       </Sheet>
-    </FormRows>
+    </>
   );
 }
 

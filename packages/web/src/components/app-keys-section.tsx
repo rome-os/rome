@@ -47,6 +47,23 @@ type FormState = { mode: "add" } | { mode: "replace"; name: string; label: strin
  */
 export function AppKeysSection() {
   const { t } = useTranslation("settings");
+  return (
+    <Section>
+      <SectionHeader>
+        <SectionTitle>{t("appKeys.title")}</SectionTitle>
+      </SectionHeader>
+      <FormRows>
+        <AppKeysRow />
+      </FormRows>
+    </Section>
+  );
+}
+
+/** The app keys row and its sheet, for a `FormRows` group that already has a
+ * heading. With `titled`, the label names the setting and the count moves to
+ * the description, so the row reads among its neighbours. */
+export function AppKeysRow({ titled = false }: { titled?: boolean }) {
+  const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
   // Closing unmounts the form, so it waits for a save: a .env batch keeps its
   // failed entries in the form for a retry.
@@ -57,35 +74,35 @@ export function AppKeysSection() {
   const keysQuery = useQuery({ queryKey: APP_KEYS_QUERY_KEY, queryFn: fetchAppKeys });
   const count = keysQuery.data?.length;
 
+  const countLabel =
+    count === undefined
+      ? t("appKeys.title")
+      : count === 0
+        ? t("appKeys.noKeysYet")
+        : t("appKeys.keyCount", { count });
+
   return (
-    <Section>
-      <SectionHeader>
-        <SectionTitle>{t("appKeys.title")}</SectionTitle>
-      </SectionHeader>
-      <FormRows>
-        <FormRow>
-          <FormRowHeading>
-            <FormRowLabel>
-              {count === undefined
-                ? t("appKeys.title")
-                : count === 0
-                  ? t("appKeys.noKeysYet")
-                  : t("appKeys.keyCount", { count })}
-            </FormRowLabel>
-            <FormRowDescription>{t("appKeys.summary")}</FormRowDescription>
-          </FormRowHeading>
-          <FormRowControl>
-            <Button
-              variant="outline"
-              size="sm"
-              aria-label={t("appKeys.openLabel")}
-              onClick={() => setOpen(true)}
-            >
-              {t("appKeys.manage")}
-            </Button>
-          </FormRowControl>
-        </FormRow>
-      </FormRows>
+    <>
+      <FormRow>
+        <FormRowHeading>
+          <FormRowLabel>{titled ? t("appKeys.title") : countLabel}</FormRowLabel>
+          <FormRowDescription>
+            {titled && count !== undefined
+              ? `${countLabel} · ${t("appKeys.summary")}`
+              : t("appKeys.summary")}
+          </FormRowDescription>
+        </FormRowHeading>
+        <FormRowControl>
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label={t("appKeys.openLabel")}
+            onClick={() => setOpen(true)}
+          >
+            {t("appKeys.manage")}
+          </Button>
+        </FormRowControl>
+      </FormRow>
       <Sheet
         open={open}
         onClose={close}
@@ -95,7 +112,7 @@ export function AppKeysSection() {
         {/* Mounted only while open, so each opening starts on the list. */}
         <AppKeysManager onClose={close} onSavingChange={setSaving} />
       </Sheet>
-    </Section>
+    </>
   );
 }
 
