@@ -846,7 +846,7 @@ const session = (
 
 const chatSessions: ChatSession[] = [
   // The guardian's main chat, which Chat and `/` open at /message.
-  session(CONCIERGE_CHAT_ID, "Concierge", "default", CONCIERGE_AGENT_ID),
+  session(CONCIERGE_CHAT_ID, "Main chat", "default", CONCIERGE_AGENT_ID),
   ...curatedChats.map((chat) => session(chat.id, chat.name, chat.project)),
   // One chat per sidebar mark: running, failed, done with new replies, waiting.
   {

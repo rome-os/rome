@@ -687,13 +687,11 @@ describe("ConciergeTaskPanel", () => {
 
     server.messages = [consumed(posts[0].inputId)];
 
-    expect(
-      await screen.findByText("Concierge did not change it", {}, { timeout: 4_000 }),
-    ).toBeTruthy();
+    expect(await screen.findByText("Rome did not change it", {}, { timeout: 4_000 })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(posts).toHaveLength(2));
     expect(await screen.findByText("Stopping…")).toBeTruthy();
-    expect(screen.queryByText("Concierge did not change it")).toBeNull();
+    expect(screen.queryByText("Rome did not change it")).toBeNull();
   });
 
   it("with two presses pending, a turn that ended handling only the first leaves the second pending", async () => {
@@ -716,13 +714,9 @@ describe("ConciergeTaskPanel", () => {
     server.turns = [{ turnId: "turn-2", status: "queued" }];
 
     expect(
-      await within(li("First task")).findByText(
-        "Concierge did not change it",
-        {},
-        { timeout: 4_000 },
-      ),
+      await within(li("First task")).findByText("Rome did not change it", {}, { timeout: 4_000 }),
     ).toBeTruthy();
-    expect(within(li("Second task")).queryByText("Concierge did not change it")).toBeNull();
+    expect(within(li("Second task")).queryByText("Rome did not change it")).toBeNull();
     expect(within(li("Second task")).getByText("Stopping…")).toBeTruthy();
   });
 
@@ -740,11 +734,11 @@ describe("ConciergeTaskPanel", () => {
     act(() => {
       rs.advanceTimersByTime(PENDING_TIMEOUT_MS - 2_000);
     });
-    expect(screen.queryByText("Concierge has not handled this yet")).toBeNull();
+    expect(screen.queryByText("Rome has not handled this yet")).toBeNull();
     act(() => {
       rs.advanceTimersByTime(3_000);
     });
-    expect(await screen.findByText("Concierge has not handled this yet")).toBeTruthy();
+    expect(await screen.findByText("Rome has not handled this yet")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(posts).toHaveLength(2));
   });

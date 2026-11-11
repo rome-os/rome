@@ -2204,7 +2204,7 @@ describe("Chat Concierge empty state", () => {
     // The name tag takes the badge's row, and the buttons centre on it.
     const name = header.querySelector<HTMLElement>("[data-concierge-header-name]")!;
     expect(name.className).toContain("row-start-1");
-    expect(within(name).getByText("Concierge")).toBeTruthy();
+    expect(within(name).getByText("Rome")).toBeTruthy();
     expect(within(header).getByRole("button", { name: "navbar.more" })).toBeTruthy();
   });
 
@@ -2240,9 +2240,7 @@ describe("Chat Concierge empty state", () => {
     expect(badge.querySelector(".rome-mascot")).not.toBeNull();
     expect(badge.className).toContain("rounded-full");
     expect(
-      within(header.querySelector<HTMLElement>("[data-concierge-header-name]")!).getByText(
-        "Concierge",
-      ),
+      within(header.querySelector<HTMLElement>("[data-concierge-header-name]")!).getByText("Rome"),
     ).toBeTruthy();
     expect(
       within(header.querySelector<HTMLElement>("[data-concierge-header-activity]")!).getByText(
@@ -2322,9 +2320,7 @@ describe("Chat Concierge empty state", () => {
     });
     expect(badge.querySelector(".rome-mascot")).not.toBeNull();
     expect(
-      within(hang.querySelector<HTMLElement>("[data-concierge-header-name]")!).getByText(
-        "Concierge",
-      ),
+      within(hang.querySelector<HTMLElement>("[data-concierge-header-name]")!).getByText("Rome"),
     ).toBeTruthy();
     expect(
       within(hang.querySelector<HTMLElement>("[data-concierge-header-activity]")!).getByText(
@@ -2560,8 +2556,10 @@ describe("Chat Concierge empty state", () => {
       },
       archivedAt: null,
     });
-    const view = renderChat(<Chat sessionId="concierge" variant="concierge" />);
-    await screen.findByText("Concierge");
+    const view = renderChat(
+      <Chat sessionId="concierge" variant="concierge" conciergeName="Flint" />,
+    );
+    await screen.findByText("Flint");
     expect(screen.queryByText("Rome")).toBeNull();
     view.unmount();
 

@@ -2124,7 +2124,7 @@ export function Chat({
     : "text-muted-foreground hover:text-foreground";
   // The name the header shows for the Concierge, which a share of this chat
   // labels its turns by too.
-  const conciergeDisplayName = conciergeName || "Concierge";
+  const conciergeDisplayName = resolveMainAgentDisplayName(conciergeName);
   const conciergeStatus = concierge ? (
     <ConciergeHeaderStatus
       // Every Concierge chat, main or topic, goes by the Concierge's name

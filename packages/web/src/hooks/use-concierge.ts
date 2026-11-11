@@ -106,11 +106,11 @@ export function useConciergeChat(): ConciergeChat {
 
 /**
  * What the dashboard calls the Concierge: the name the guardian gave their
- * agent, else "Concierge". A main Concierge chat shows it in place of the
- * session name the server stores.
+ * agent, else the main agent's default name. A main Concierge chat shows it in
+ * place of the session name the server stores.
  */
 export function useConciergeName(): string {
-  return mainAgentDisplayName(useSettings().data?.agentName, "Concierge");
+  return mainAgentDisplayName(useSettings().data?.agentName);
 }
 
 /** The Concierge chat's id, or null while it is not loaded yet. */
