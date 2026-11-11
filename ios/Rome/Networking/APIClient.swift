@@ -36,9 +36,13 @@ final class APIClient: Sendable {
     private let cookieName: @Sendable () -> String
     private let session: URLSession
     private let onUnauthorized: @Sendable () -> Void
+    /// Renews the session after a 401, and says whether it worked; the
+    /// request then goes once more with the new session.
+    private let renew: (@Sendable () async -> Bool)?
 
     /// `configuration`: tests pass one with a stub protocol.
-    init(origin: URL, token: @escaping @Sendable () -> String?, cookieName: @escaping @Sendable () -> String = { InstanceSession.guardianCookie }, configuration: URLSessionConfiguration = .default, onUnauthorized: @escaping @Sendable () -> Void = {}) {
+    init(origin: URL, token: @escaping @Sendable () -> String?, cookieName: @escaping @Sendable () -> String = { InstanceSession.guardianCookie }, configuration: URLSessionConfiguration = .default, onUnauthorized: @escaping @Sendable () -> Void = {}, renew: (@Sendable () async -> Bool)? = nil) {
+        self.renew = renew
         self.origin = origin
         self.token = token
         self.cookieName = cookieName
@@ -264,7 +268,7 @@ final class APIClient: Sendable {
         return request
     }
 
-    private func send(_ request: URLRequest, reportsUnauthorized: Bool = true, limit: Int? = nil) async throws -> Data {
+    private func send(_ request: URLRequest, reportsUnauthorized: Bool = true, limit: Int? = nil, retried: Bool = false) async throws -> Data {
         let data: Data
         let response: URLResponse
         do {
@@ -288,6 +292,17 @@ final class APIClient: Sendable {
         case 200..<300:
             return data
         case 401:
+            // A session past its time (a cached launch's, say): renewed, the
+            // request goes once more, so a send or a read mark is never lost
+            // to a session that was about to be replaced.
+            if reportsUnauthorized, !retried, let renew {
+                if await renew() {
+                    var again = request
+                    signIn(&again)
+                    return try await send(again, reportsUnauthorized: reportsUnauthorized, limit: limit, retried: true)
+                }
+                throw APIError.unauthorized
+            }
             if reportsUnauthorized { onUnauthorized() }
             throw APIError.unauthorized
         case 404:

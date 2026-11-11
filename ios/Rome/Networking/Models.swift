@@ -38,6 +38,8 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     /// The instance sent `chatThreadId`, null included: it has chat threads.
     /// An older instance leaves the field out.
     var knowsThreads = false
+    /// Who said a guardian-side message, when it was not simply the guardian.
+    var sender: MessageSender? = nil
 
     var date: Date { RomeDate.parse(createdAt) ?? .distantPast }
 
@@ -46,9 +48,31 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     var isUser: Bool { role == "user" }
     var isTrace: Bool { role == "trace" }
 
-    private enum CodingKeys: String, CodingKey {
-        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId
+    /// Said in a task chat by the agent that started it, the Concierge: an
+    /// agent on no one's behalf, on the guardian's side of the chat.
+    var saidByAgent: Bool {
+        isUser && sender?.kind == "automated" && sender?.sourceType == "agent" && sender?.onBehalfOf == nil
     }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, sender
+    }
+}
+
+/// The sender the instance resolves for a message (`ChatMessageSender` on
+/// the wire). Only the fields the app reads; all optional.
+struct MessageSender: Codable, Hashable, Sendable {
+    struct OnBehalfOf: Codable, Hashable, Sendable {
+        var kind: String?
+        var name: String?
+    }
+
+    /// `automated`, `guardian` or `visitor`.
+    var kind: String?
+    /// For `automated`: `agent`, `app`, `routine` or null.
+    var sourceType: String?
+    var name: String?
+    var onBehalfOf: OnBehalfOf?
 }
 
 extension ChatMessage {
@@ -63,6 +87,8 @@ extension ChatMessage {
         traceSummary = try container.decodeIfPresent(TraceSummary.self, forKey: .traceSummary)
         chatThreadId = try container.decodeIfPresent(String.self, forKey: .chatThreadId)
         knowsThreads = container.contains(.chatThreadId)
+        // An unknown shape never costs the message itself.
+        sender = try? container.decodeIfPresent(MessageSender.self, forKey: .sender)
     }
 
     /// Writes `chatThreadId` as null when the instance sent it as null, so a
@@ -77,6 +103,7 @@ extension ChatMessage {
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(traceSummary, forKey: .traceSummary)
         if knowsThreads { try container.encode(chatThreadId, forKey: .chatThreadId) }
+        try container.encodeIfPresent(sender, forKey: .sender)
     }
 
     /// The chat thread it is in, by its first message: its own id when alone.
@@ -90,6 +117,12 @@ struct ThreadTarget: Codable, Hashable, Sendable {
     /// A message of the open thread.
     let messageId: String
     let instanceKnowsThreads: Bool
+    /// A reply to a message in no chat thread, quoted above the composer
+    /// instead of opened: sent, it starts that message's thread. Absent from
+    /// drafts written before quotes.
+    var quote: Bool? = nil
+
+    var isQuote: Bool { quote == true }
 
     var body: [String: JSONValue] {
         instanceKnowsThreads ? ["chatThread": .string(messageId)] : ["replyToMessageId": .string(messageId)]

@@ -7,7 +7,7 @@ import { pathToFileURL } from "node:url";
 import { z } from "zod";
 import { context } from "@opentelemetry/api";
 import { suppressTracing } from "@opentelemetry/core";
-import { createLogger } from "../logger.js";
+import { createLogger } from "../../logger.js";
 import {
   parseDaemonActionRequest,
   type DaemonActionRequest,
@@ -33,10 +33,10 @@ const START_HEALTH_POLL_MS = 250;
 // The telemetry module loads the OpenTelemetry SDK, which costs about a second
 // of CPU on a small VM. The daemon loads it only after spawning Rome, so Rome's
 // boot does not wait behind it.
-let telemetry: Promise<typeof import("../telemetry.js")> | undefined;
+let telemetry: Promise<typeof import("../../telemetry.js")> | undefined;
 
-function loadTelemetry(): Promise<typeof import("../telemetry.js")> {
-  telemetry ??= import("../telemetry.js").then((module) => {
+function loadTelemetry(): Promise<typeof import("../../telemetry.js")> {
+  telemetry ??= import("../../telemetry.js").then((module) => {
     module.initTelemetry();
     return module;
   });

@@ -94,13 +94,13 @@ enum UpdateGate {
 
     /// The update page's one status line while it waits, or nil when it
     /// does not wait.
-    static func statusLine(_ state: InstanceUpdater.State, progress: Progress) -> String? {
+    static func statusLine(_ state: InstanceUpdater.State, progress: Progress, agentName: String? = nil) -> String? {
         switch state {
         case .starting:
             return String(localized: "Asking Rome Cloud to start the update…")
         case .updating(let target, _):
             switch progress {
-            case .downloading: return String(localized: "Upgrading to \(target)…")
+            case .downloading: return String(localized: "\(UpdateCopy.agent(agentName)) is upgrading to \(target)…")
             case .restarting: return String(localized: "Restarting your Rome…")
             case .almostDone: return String(localized: "Almost done…")
             }
@@ -139,7 +139,7 @@ enum UpdateGate {
             case "unversioned_build":
                 return String(localized: "This Rome is a development build and cannot be updated.")
             default:
-                return String(localized: "Rome Cloud could not start the update. Try again in a moment.")
+                return String(localized: "Couldn't start the update. Try again in a moment.")
             }
         }
         return (error as? LocalizedError)?.errorDescription ?? String(localized: "Could not reach your Rome")
@@ -230,8 +230,13 @@ final class InstanceUpdater {
     private(set) var presented = false
     /// The release the guardian closed the banner for, on this instance.
     private(set) var dismissedVersion: String?
+    /// The release an upgrade from this device just reached, said once back
+    /// in the chat. It outlives the reopen that follows the upgrade.
+    private(set) var justUpdated: (instanceID: String, version: String)?
     /// The instance's release when the check last found it behind.
     private var behindOn: String?
+    /// The release the open instance runs, as its last check answered.
+    private(set) var runningVersion: String?
 
     var blocking: Bool {
         switch state {
@@ -297,9 +302,16 @@ final class InstanceUpdater {
     /// Probes since the last check while waiting; a check runs every few.
     private var probesSinceCheck = 0
 
-    init(store: PendingUpgradeStore = PendingUpgradeStore(), banners: UpdateBannerStore = UpdateBannerStore()) {
+    /// How long the poll waits between looks at an upgrading instance.
+    private let pollInterval: Duration
+    /// The time now; tests move it on instead of waiting.
+    private let now: () -> Date
+
+    init(store: PendingUpgradeStore = PendingUpgradeStore(), banners: UpdateBannerStore = UpdateBannerStore(), pollInterval: Duration = UpdateGate.pollInterval, now: @escaping () -> Date = { .now }) {
         self.store = store
         self.banners = banners
+        self.pollInterval = pollInterval
+        self.now = now
     }
 
     // MARK: Offering
@@ -321,6 +333,12 @@ final class InstanceUpdater {
         }
     }
 
+    /// The release reached, while it is still to be said.
+    var updatedTo: String? { justUpdated?.version }
+
+    /// The "updated" line was shown.
+    func clearUpdated() { justUpdated = nil }
+
     /// Closes the banner for this release; a newer one shows it again.
     func dismissBanner() {
         guard let offered, let instanceID else { return }
@@ -336,6 +354,7 @@ final class InstanceUpdater {
         self.backend = backend
         self.instanceID = instanceID
         dismissedVersion = banners.dismissed(instanceID)
+        if justUpdated?.instanceID != instanceID { justUpdated = nil }
         await check()
     }
 
@@ -371,6 +390,14 @@ final class InstanceUpdater {
         presented = false
         dismissedVersion = nil
         behindOn = nil
+        runningVersion = nil
+    }
+
+    /// Keeps the release a check that answered reports.
+    private func noteRunning(_ result: Result<UpgradeCheck, Error>) {
+        if case .success(let check) = result, let version = check.current?.version, !version.isEmpty {
+            runningVersion = version
+        }
     }
 
     // MARK: Checking
@@ -397,6 +424,7 @@ final class InstanceUpdater {
         let mine = generation
         let result: Result<UpgradeCheck, Error>
         do { result = .success(try await backend.upgradeCheck()) } catch { result = .failure(error) }
+        noteRunning(result)
         guard mine == generation else { return }
         apply(UpdateGate.verdict(result), latestChanged: false)
     }
@@ -407,6 +435,7 @@ final class InstanceUpdater {
         let mine = generation
         let result: Result<UpgradeCheck, Error>
         do { result = .success(try await backend.upgradeCheck()) } catch { result = .failure(error) }
+        noteRunning(result)
         guard mine == generation, case .updating = state else { return }
         switch UpdateGate.pending(target: pending.target, after: UpdateGate.verdict(result)) {
         case .keepWaiting:
@@ -446,7 +475,7 @@ final class InstanceUpdater {
         do {
             let started = try await backend.startUpgrade(target: latest)
             guard mine == generation else { return }
-            let pending = PendingUpgrade(target: started.target ?? latest, since: .now, from: current)
+            let pending = PendingUpgrade(target: started.target ?? latest, since: now(), from: current)
             store.save(pending, for: instanceID)
             startPolling(pending)
         } catch {
@@ -455,6 +484,7 @@ final class InstanceUpdater {
                 // A newer release came out: show it and let the guardian confirm again.
                 let result: Result<UpgradeCheck, Error>
                 do { result = .success(try await backend.upgradeCheck()) } catch { result = .failure(error) }
+                noteRunning(result)
                 guard mine == generation else { return }
                 apply(UpdateGate.verdict(result), latestChanged: true)
                 return
@@ -471,17 +501,18 @@ final class InstanceUpdater {
         poll = nil
         guard let backend, let instanceID else {
             if case .timedOut(let target) = failure, let instanceID {
-                startPolling(PendingUpgrade(target: target, since: .now))
-                store.save(PendingUpgrade(target: target, since: .now), for: instanceID)
+                startPolling(PendingUpgrade(target: target, since: now()))
+                store.save(PendingUpgrade(target: target, since: now()), for: instanceID)
             }
             return
         }
         store.clear(instanceID)
         let result: Result<UpgradeCheck, Error>
         do { result = .success(try await backend.upgradeCheck()) } catch { result = .failure(error) }
+        noteRunning(result)
         let verdict = UpdateGate.verdict(result)
         if case .unknown = verdict, case .timedOut(let target) = failure {
-            let pending = PendingUpgrade(target: target, since: .now)
+            let pending = PendingUpgrade(target: target, since: now())
             store.save(pending, for: instanceID)
             startPolling(pending)
             return
@@ -508,7 +539,7 @@ final class InstanceUpdater {
             while !Task.isCancelled {
                 guard let self, mine == self.generation else { return }
                 if await self.probe(pending) { return }
-                try? await Task.sleep(for: UpdateGate.pollInterval)
+                try? await Task.sleep(for: self.pollInterval)
             }
         }
     }
@@ -528,7 +559,7 @@ final class InstanceUpdater {
                 }
             }
             progress = .restarting
-            if UpdateGate.pollOutcome(version: nil, target: pending.target, from: pending.from, since: pending.since, now: .now) == .timedOut {
+            if UpdateGate.pollOutcome(version: nil, target: pending.target, from: pending.from, since: pending.since, now: now()) == .timedOut {
                 state = .failed(.timedOut(target: pending.target))
                 return true
             }
@@ -537,7 +568,7 @@ final class InstanceUpdater {
         let version = try? await backend.buildInfo().version
         guard mine == generation else { return true }
         progress = UpdateGate.progress(version: version, target: pending.target)
-        switch UpdateGate.pollOutcome(version: version, target: pending.target, from: pending.from, since: pending.since, now: .now) {
+        switch UpdateGate.pollOutcome(version: version, target: pending.target, from: pending.from, since: pending.since, now: now()) {
         case .done:
             // Long enough to read "Almost done…" before the app opens.
             try? await Task.sleep(for: .milliseconds(800))
@@ -569,7 +600,13 @@ final class InstanceUpdater {
     }
 
     private func finish() async {
-        if let instanceID { store.clear(instanceID) }
+        if let instanceID {
+            store.clear(instanceID)
+            switch state {
+            case .updating(let target, _), .failed(.timedOut(let target)): justUpdated = (instanceID, target)
+            default: break
+            }
+        }
         poll?.cancel()
         poll = nil
         presented = false
@@ -578,10 +615,15 @@ final class InstanceUpdater {
     }
 
     private func expired(_ pending: PendingUpgrade) -> Bool {
-        Date.now.timeIntervalSince(pending.since) >= UpdateGate.upgradeTimeout
+        now().timeIntervalSince(pending.since) >= UpdateGate.upgradeTimeout
     }
 
     #if DEBUG
+    /// Snapshot runs only: the line said after an upgrade.
+    func debugShowUpdated(_ version: String) {
+        if let instanceID { justUpdated = (instanceID, version) }
+    }
+
     /// Snapshot runs only: show a state without a server round trip.
     func debugShow(_ state: State, progress: UpdateGate.Progress = .downloading) {
         poll?.cancel()

@@ -77,9 +77,9 @@ struct DrawerView: View {
             .scrollBounceBehavior(.basedOnSize)
             .frame(maxHeight: .infinity)
 
-            // A guardian's Rome behind its latest release; a visitor's is never checked.
+            // The open Rome behind its latest release, for a guardian and a visitor alike.
             if model.update.offered != nil {
-                DrawerUpdateRow(instanceName: workspace.instanceName, action: onUpdate)
+                DrawerUpdateRow(agentName: workspace.agentName, action: onUpdate)
                     .padding(.horizontal, 12)
                     .padding(.top, 8)
             }

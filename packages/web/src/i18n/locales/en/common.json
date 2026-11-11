@@ -141,7 +141,6 @@
   },
   "profile": {
     "menuLabel": "Account",
-    "guardian": "Guardian",
     "visitor": "Visitor",
     "signOut": "Log out",
     "signOutError": "Couldn't log out. Please try again."

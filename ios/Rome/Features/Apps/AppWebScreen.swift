@@ -1,14 +1,17 @@
 import SwiftUI
 import WebKit
 
-/// One app full screen, or a dashboard page: the instance's own page, in a
-/// web view that holds only the instance's session and follows the app's
-/// look and language.
+/// One app full screen, or a dashboard page in a sheet: the instance's own
+/// page, in a web view that holds only the instance's session and follows
+/// the app's look and language.
 struct AppWebScreen: View {
     let workspace: Workspace
     let app: InstalledApp
     /// A page of the instance a chat linked to, shown in place of the app's own.
     var pageURL: URL? = nil
+
+    /// A page sits in a sheet with a close button; an app is pushed with a back one.
+    private var inSheet: Bool { pageURL != nil }
 
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -58,7 +61,7 @@ struct AppWebScreen: View {
         }
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
-        .background(SwipeBackEnabler())
+        .background { if !inSheet { SwipeBackEnabler() } }
         // Apps keeps the apps last opened from this phone at its top.
         .task(id: app.id) {
             guard pageURL == nil else { return }
@@ -68,8 +71,14 @@ struct AppWebScreen: View {
 
     private var header: some View {
         HStack {
-            GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {
-                Image(systemName: "chevron.left").romeFont(17, .semibold)
+            if inSheet {
+                GlassCircleButton(accessibilityLabel: "Close", action: { dismiss() }) {
+                    Image(systemName: "xmark").romeFont(15, .semibold)
+                }
+            } else {
+                GlassCircleButton(accessibilityLabel: "Back", action: { dismiss() }) {
+                    Image(systemName: "chevron.left").romeFont(17, .semibold)
+                }
             }
             PlainHeaderTitle(title: Text(verbatim: app.name))
             Menu {
@@ -91,8 +100,64 @@ struct AppWebScreen: View {
             .accessibilityLabel("More")
         }
         .padding(.horizontal, 12)
-        .padding(.top, 4)
+        // Below the sheet's grabber.
+        .padding(.top, inSheet ? 14 : 4)
         .padding(.bottom, 6)
+    }
+}
+
+/// A page of the instance, as its sheet shows it.
+struct InstancePageScreen: View {
+    let workspace: Workspace
+    let url: URL
+
+    var body: some View {
+        AppWebScreen(workspace: workspace, app: InstalledApp(id: url.absoluteString, displayName: workspace.instanceName), pageURL: url)
+            .id(url)
+    }
+}
+
+/// Opens the instance's pages from inside `content` in a sheet: the large
+/// detent only, since a web page is too cramped at half height, with the
+/// grabber. A drag down closes it once the page is scrolled to its top;
+/// before that it scrolls the page. On iPad it is the system's page sheet.
+private struct InstancePageSheet: ViewModifier {
+    let workspace: Workspace
+    @Binding var url: URL?
+
+    private struct Page: Identifiable {
+        let url: URL
+        var id: URL { url }
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.openInstancePage, OpenInstancePageAction { url = $0 })
+            .sheet(item: Binding(get: { url.map(Page.init) }, set: { url = $0?.url })) { page in
+                InstancePageScreen(workspace: workspace, url: page.url)
+                    .presentationDetents([.large])
+                    .presentationDragIndicator(.visible)
+                    .presentationBackground(Palette.bg)
+                    .modifier(PageSizing())
+            }
+    }
+}
+
+/// A page sheet on iPad, with room for the dashboard's layout.
+private struct PageSizing: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content.presentationSizing(.page)
+        } else {
+            content
+        }
+    }
+}
+
+extension View {
+    /// The instance's pages opened from inside this view rise in a sheet.
+    func instancePageSheet(workspace: Workspace, url: Binding<URL?>) -> some View {
+        modifier(InstancePageSheet(workspace: workspace, url: url))
     }
 }
 

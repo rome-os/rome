@@ -138,7 +138,7 @@ It asks for Health access in one system sheet (tap "Turn On All", then "Allow").
 
 ## Instance versions
 
-The app works with any instance at or above `UpdateGate.minimumInstanceVersion` (in `Rome/Features/Update/InstanceUpdater.swift`), the oldest release with every API the app calls. An instance below it gets the update page over the whole app, with no way past it but updating. An instance at or above it that is behind its latest release only gets an offer: a banner when the guardian opens it, which stays closed for that release once closed, and a line in the drawer until it is current. Visitors see neither.
+The app works with any instance at or above `UpdateGate.minimumInstanceVersion` (in `Rome/Features/Update/InstanceUpdater.swift`), the oldest release with every API the app calls. An instance below it gets the update page over the whole app, with no way past it but updating. An instance at or above it that is behind its latest release only gets an offer: a pill above Chat's composer, which stays closed for that release once closed, and a line in the drawer until it is current. Visitors get the same update flow as the guardian, the update itself included.
 
 Raise the minimum only when the app starts calling an API a newer release brought, to the first release tag (`v1.*`) that has it. Anything else the app reads from an older supported instance is optional and degrades quietly.
 

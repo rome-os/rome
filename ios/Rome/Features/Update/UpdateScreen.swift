@@ -12,7 +12,7 @@ struct UpdateScreen: View {
 
     private var updater: InstanceUpdater { model.update }
 
-    private var statusLine: String? { UpdateGate.statusLine(updater.state, progress: updater.progress) }
+    private var statusLine: String? { UpdateGate.statusLine(updater.state, progress: updater.progress, agentName: model.workspace?.agentName) }
 
     var body: some View {
         Group {
@@ -171,8 +171,8 @@ struct UpdateScreen: View {
             .transition(.opacity)
         default:
             VStack(spacing: 8) {
-                // The Rome by name, never read as an update to this app.
-                Text(verbatim: UpdateCopy.action(instanceName))
+                // Names Rome, so no one reads it as an update to this app.
+                Text("Update Rome")
                     .romeFont(28, .bold)
                     .lineLimit(1)
                     .tracking(-0.7)

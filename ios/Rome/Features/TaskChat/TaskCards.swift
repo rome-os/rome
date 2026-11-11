@@ -8,10 +8,10 @@ struct BriefCard: View {
         VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
                 Image(systemName: "bubble.left")
-                    .romeFont(11, .semibold)
+                    .romeFont(11)
                 Text("Task brief · From Chat")
             }
-            .romeFont(CardScale.label, .semibold)
+            .romeFont(CardScale.label)
             .foregroundStyle(Palette.sub)
             MarkdownText(source: text, fontSize: CardScale.body, lineSpacing: 7)
         }
@@ -62,7 +62,7 @@ struct ToolSummary: View {
                             Button { detail = call } label: {
                                 HStack(spacing: 10) {
                                     Text(call.name)
-                                        .romeFont(12, .semibold, design: .monospaced)
+                                        .romeFont(12, .medium, design: .monospaced)
                                         .foregroundStyle(Palette.fg)
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
@@ -230,14 +230,14 @@ struct ApprovalCardView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Image(systemName: "envelope")
-                    .romeFont(CardScale.iconGlyph, .medium)
-                    .foregroundStyle(Palette.warningText)
+                    .romeFont(CardScale.iconGlyph)
+                    .foregroundStyle(Palette.sub)
                     .frame(width: CardScale.iconBox, height: CardScale.iconBox)
-                    .background(Palette.warnSoft, in: RoundedRectangle(cornerRadius: CardScale.iconCorner, style: .continuous))
+                    .background(Palette.fill, in: RoundedRectangle(cornerRadius: CardScale.iconCorner, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
                     Text("Needs approval")
-                        .romeFont(CardScale.label, .semibold)
-                        .foregroundStyle(Palette.warningText)
+                        .romeFont(CardScale.label)
+                        .foregroundStyle(Palette.sub)
                     Text(title)
                         .romeFont(CardScale.title, .semibold)
                         .tracking(-0.3)
@@ -259,7 +259,7 @@ struct ApprovalCardView: View {
                                 .foregroundStyle(Palette.sub)
                                 .frame(width: 44, alignment: .leading)
                             Text(field.value)
-                                .romeFont(CardScale.body, .medium)
+                                .romeFont(CardScale.body)
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                         .padding(.vertical, CardScale.fieldRowPadding)
@@ -286,36 +286,38 @@ struct ApprovalCardView: View {
                 .background(Palette.dangerSoft, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
             }
             if canResolve {
-                HStack(spacing: 10) {
+                // Sized to their words at the card's foot: Approve the one
+                // accent button, Reject a quiet one beside it.
+                HStack(spacing: 6) {
+                    Spacer(minLength: 0)
                     Button { onResolve(false) } label: {
                         Group {
                             if submitting == false {
-                                Spinner(size: 18, lineWidth: 2.4, color: Palette.fg, trackOpacity: 0.2)
+                                Spinner(size: 16, lineWidth: 2.2, color: Palette.sub, trackOpacity: 0.2)
                             } else {
                                 Text("Reject")
                             }
                         }
-                        .romeFont(CardScale.buttonFont, .semibold)
-                        .foregroundStyle(Palette.fg)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: CardScale.buttonHeight)
-                        .background(Palette.fill, in: Capsule())
+                        .romeFont(CardScale.actionFont, .medium)
+                        .foregroundStyle(Palette.sub)
+                        .padding(.horizontal, 14)
+                        .frame(minWidth: 72, minHeight: CardScale.actionHeight)
+                        .contentShape(Capsule())
                     }
                     .opacity(submitting == true ? 0.45 : 1)
                     Button { onResolve(true) } label: {
                         Group {
                             if submitting == true {
-                                Spinner(size: 18, lineWidth: 2.4, color: .white, trackOpacity: 0.35)
+                                Spinner(size: 16, lineWidth: 2.2, color: .white, trackOpacity: 0.35)
                             } else {
                                 Text("Approve")
                             }
                         }
-                        .romeFont(CardScale.buttonFont, .semibold)
+                        .romeFont(CardScale.actionFont, .medium)
                         .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: CardScale.buttonHeight)
+                        .padding(.horizontal, 16)
+                        .frame(minWidth: 88, minHeight: CardScale.actionHeight)
                         .background(Palette.primary, in: Capsule())
-                        .shadow(color: Palette.primary.opacity(0.5), radius: 7, x: 0, y: 6)
                     }
                     .opacity(submitting == false ? 0.45 : 1)
                 }
@@ -331,8 +333,7 @@ struct ApprovalCardView: View {
         }
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous).strokeBorder(Palette.warnRing, lineWidth: 1))
-        .shadow(color: Palette.cardShadow, radius: 16, x: 0, y: 12)
+        .hairline(radius: Metrics.bigCardRadius)
         .padding(.top, 4)
     }
 
@@ -347,7 +348,7 @@ struct ApprovalCardView: View {
                         }
                     }
                 }
-            (Text(label).fontWeight(.semibold) + Text(verbatim: " · \(title)").foregroundStyle(Palette.sub))
+            (Text(label).fontWeight(.medium) + Text(verbatim: " · \(title)").foregroundStyle(Palette.sub))
                 .romeFont(15)
             Spacer(minLength: 0)
             if let resolvedAt {
@@ -421,8 +422,8 @@ struct QuestionCardView: View {
     private var pendingCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Waiting for your answer")
-                .romeFont(CardScale.label, .semibold)
-                .foregroundStyle(Palette.warningText)
+                .romeFont(CardScale.label)
+                .foregroundStyle(Palette.sub)
             ForEach(part.questions, id: \.id) { question in
                 VStack(alignment: .leading, spacing: 10) {
                     Text(question.text)
@@ -430,16 +431,23 @@ struct QuestionCardView: View {
                         .tracking(-0.4)
                         .lineSpacing(3)
                         .fixedSize(horizontal: false, vertical: true)
-                    VStack(spacing: 8) {
+                    // A plain list: options, then the row to type in, between thin rules.
+                    VStack(spacing: 0) {
                         ForEach(question.options, id: \.self) { option in
                             optionButton(question, option)
+                            OptionDivider()
                         }
-                        HStack(spacing: 8) {
+                        HStack(spacing: 12) {
+                            Image(systemName: "pencil")
+                                .romeFont(13)
+                                .foregroundStyle(Palette.sub)
+                                .frame(width: 18)
+                                .accessibilityHidden(true)
                             TextField(question.options.isEmpty ? "Type your answer…" : "Or type your own…", text: binding(question.id), axis: .vertical)
                                 .romeFont(CardScale.body)
                                 .lineLimit(1...4)
                                 .focused($focusedQuestion, equals: question.id)
-                                .padding(.vertical, 12)
+                                .padding(.vertical, 10)
                             if single, let answers = QuestionAnswers.inlineSend(question, choices: choices, typed: typed) {
                                 Button {
                                     focusedQuestion = nil
@@ -455,9 +463,7 @@ struct QuestionCardView: View {
                                 .transition(.scale.combined(with: .opacity))
                             }
                         }
-                        .padding(.horizontal, 14)
                         .frame(minHeight: CardScale.optionMinHeight)
-                        .overlay(RoundedRectangle(cornerRadius: CardScale.fieldCorner, style: .continuous).strokeBorder(Palette.hair, lineWidth: 1))
                         .animation(.spring(response: 0.3, dampingFraction: 0.8), value: typed[question.id]?.isEmpty ?? true)
                     }
                 }
@@ -468,8 +474,7 @@ struct QuestionCardView: View {
         }
         .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous).strokeBorder(Palette.warnRing, lineWidth: 1))
-        .shadow(color: Palette.cardShadow, radius: 16, x: 0, y: 12)
+        .hairline(radius: Metrics.bigCardRadius)
         .padding(.top, 4)
         .disabled(sending)
         .opacity(sending ? 0.7 : 1)
@@ -502,7 +507,7 @@ struct QuestionCardView: View {
                 .frame(width: 18, height: 18)
                 VStack(alignment: .leading, spacing: 2) {
                     Text(option)
-                        .romeFont(CardScale.body, .medium)
+                        .romeFont(CardScale.body)
                         .foregroundStyle(Palette.fg)
                         .multilineTextAlignment(.leading)
                     if let description {
@@ -516,16 +521,9 @@ struct QuestionCardView: View {
                 }
                 Spacer(minLength: 0)
             }
-            .padding(.horizontal, 14)
             .padding(.vertical, description == nil ? 0 : CardScale.fieldRowPadding)
             .frame(minHeight: CardScale.optionMinHeight)
-            .background(selected ? Palette.primarySoft : Palette.fill, in: RoundedRectangle(cornerRadius: CardScale.fieldCorner, style: .continuous))
-            .overlay {
-                if selected {
-                    RoundedRectangle(cornerRadius: CardScale.fieldCorner, style: .continuous).strokeBorder(Palette.primary, lineWidth: 1.5)
-                }
-            }
-            .contentShape(RoundedRectangle(cornerRadius: CardScale.fieldCorner, style: .continuous))
+            .contentShape(Rectangle())
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
         .sensoryFeedback(.selection, trigger: selected)
@@ -552,7 +550,7 @@ struct QuestionCardView: View {
     private var answeredCard: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("Answered")
-                .romeFont(CardScale.label, .semibold)
+                .romeFont(CardScale.label)
                 .foregroundStyle(Palette.sub)
             ForEach(part.questions, id: \.id) { question in
                 VStack(alignment: .leading, spacing: 10) {
@@ -562,36 +560,37 @@ struct QuestionCardView: View {
                         .lineSpacing(3)
                     let stored = QuestionAnswers.picked(answer(for: question), question: question)
                     let picked = stored.options
-                    ForEach(question.options, id: \.self) { option in
-                        if picked.contains(option) {
+                    let extra = stored.extra
+                    VStack(spacing: 0) {
+                        ForEach(Array(question.options.enumerated()), id: \.element) { index, option in
+                            if index > 0 { OptionDivider() }
                             HStack(spacing: 12) {
                                 ZStack {
-                                    Circle().fill(Palette.primary)
-                                    Image(systemName: "checkmark").romeFont(9, .heavy).foregroundStyle(.white)
+                                    if picked.contains(option) {
+                                        Circle().fill(Palette.primary)
+                                        Image(systemName: "checkmark").romeFont(9, .heavy).foregroundStyle(.white)
+                                    }
                                 }
                                 .frame(width: 18, height: 18)
-                                Text(option).romeFont(CardScale.body, .semibold)
+                                Text(option)
+                                    .romeFont(CardScale.body)
+                                    .foregroundStyle(picked.contains(option) ? Palette.fg : Palette.sub)
                             }
-                            .padding(.horizontal, 14)
                             .frame(maxWidth: .infinity, minHeight: CardScale.optionMinHeight, alignment: .leading)
-                            .background(Palette.primarySoft, in: RoundedRectangle(cornerRadius: CardScale.fieldCorner, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: CardScale.fieldCorner, style: .continuous).strokeBorder(Palette.primary, lineWidth: 1.5))
-                        } else {
-                            Text(option)
-                                .romeFont(CardScale.body)
-                                .foregroundStyle(Palette.sub)
-                                .padding(.leading, 44)
-                                .frame(maxWidth: .infinity, minHeight: CardScale.optionMinHeight, alignment: .leading)
                         }
-                    }
-                    let extra = stored.extra
-                    if !extra.isEmpty {
-                        Text(extra.joined(separator: QuestionAnswers.separator))
-                            .romeFont(CardScale.body, .semibold)
-                            .padding(.horizontal, 14)
+                        if !extra.isEmpty {
+                            if !question.options.isEmpty { OptionDivider() }
+                            HStack(spacing: 12) {
+                                Image(systemName: "pencil")
+                                    .romeFont(13)
+                                    .foregroundStyle(Palette.sub)
+                                    .frame(width: 18)
+                                Text(extra.joined(separator: QuestionAnswers.separator))
+                                    .romeFont(CardScale.body)
+                            }
+                            .padding(.vertical, 10)
                             .frame(maxWidth: .infinity, minHeight: CardScale.optionMinHeight, alignment: .leading)
-                            .background(Palette.primarySoft, in: RoundedRectangle(cornerRadius: CardScale.fieldCorner, style: .continuous))
-                            .overlay(RoundedRectangle(cornerRadius: CardScale.fieldCorner, style: .continuous).strokeBorder(Palette.primary, lineWidth: 1.5))
+                        }
                     }
                 }
             }
@@ -600,6 +599,13 @@ struct QuestionCardView: View {
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.bigCardRadius, style: .continuous))
         .hairline(radius: Metrics.bigCardRadius)
         .transition(.opacity)
+    }
+}
+
+/// The thin rule between a question's rows, from the option text's edge.
+struct OptionDivider: View {
+    var body: some View {
+        Rectangle().fill(Palette.hair).frame(height: 0.5).padding(.leading, 30)
     }
 }
 
@@ -640,7 +646,7 @@ struct WebOnlyCard: View {
                     openInstancePage(InstancePages.chat(origin: origin, sessionId: sessionId, mainChatServerID: model.workspace?.mainChatServerID))
                 }
             }
-            .romeFont(CardScale.actionFont, .semibold)
+            .romeFont(CardScale.actionFont, .medium)
             .foregroundStyle(Palette.fg)
             .padding(.horizontal, 13)
             .frame(height: CardScale.actionHeight)

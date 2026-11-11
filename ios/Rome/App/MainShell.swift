@@ -5,8 +5,6 @@ enum Route: Hashable {
     case taskChat(chatId: String, title: String)
     /// An app of the instance, full screen.
     case app(InstalledApp)
-    /// A page of the instance a chat linked to, in the app's web view.
-    case page(URL)
 }
 
 /// The pages the drawer switches between. Each is the root of the main stack,
@@ -64,10 +62,15 @@ struct MainShell: View {
     @State private var startedTopics: [String: UUID] = [:]
     @State private var showSettings = false
     @State private var settingsPath: [SettingsRoute] = []
+    /// A page of the instance, in a sheet over the main stack.
+    @State private var page: URL?
+    /// A page opened from Settings, in a sheet over that sheet.
+    @State private var settingsPage: URL?
     #if DEBUG
     @State private var sheetPreview = false
     @State private var settingsPreview = false
     @State private var photoViewerPreview = false
+    @State private var pagePreview: URL?
     #endif
 
     /// The drawer pinned beside the page rather than pushed aside.
@@ -127,7 +130,8 @@ struct MainShell: View {
                     }
                 }
                 .environment(\.chatLinkOpener, openChatLink)
-                .environment(\.openInstancePage, OpenInstancePageAction { url in path.append(.page(url)) })
+                .environment(\.visibleChat, visibleChat)
+                .instancePageSheet(workspace: workspace, url: $page)
                 .environment(\.isVisitor, workspace.isVisitor)
                 // Pushed aside, the page becomes a card of its own color, following the drag.
                 .environment(\.pageBackground, Palette.blend(Palette.bg, Palette.drawerPage, progress))
@@ -197,6 +201,16 @@ struct MainShell: View {
                 // Snapshot runs only: the viewer in place of its full-screen cover.
                 PhotoViewer(images: [.markdown(ImageSource(src: "/projects/demo/trip/hotel.jpg"), alt: "河原町酒店外观", src: "/projects/demo/trip/hotel.jpg", position: 0)], start: 0)
             }
+            if let pagePreview {
+                // Snapshot runs only, for the same reason.
+                ZStack(alignment: .bottom) {
+                    Color.black.ignoresSafeArea()
+                    InstancePageScreen(workspace: workspace, url: pagePreview)
+                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
+                        .padding(.top, 64)
+                }
+                .ignoresSafeArea()
+            }
             if settingsPreview {
                 // Snapshot runs only, for the same reason.
                 ZStack(alignment: .bottom) {
@@ -225,15 +239,17 @@ struct MainShell: View {
         .onChange(of: path) { Keyboard.dismiss() }
         .onChange(of: showTasks) { _, shown in if shown { Keyboard.dismiss() } }
         .onChange(of: showSettings) { _, shown in if shown { Keyboard.dismiss() } }
+        .onChange(of: page) { _, shown in if shown != nil { Keyboard.dismiss() } }
         // A tapped push for this instance: its chat in front, nothing over it.
         .onChange(of: model.chatRequest) { _, request in
             showTasks = false
             showSettings = false
+            page = nil
+            settingsPage = nil
             closeDrawer()
             show(request.topicId.map(MainSection.topic) ?? .chat)
         }
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.sessionExpired)
-        .animation(.spring(response: 0.4, dampingFraction: 0.86), value: model.update.showsBanner && !drawerOpen && !(usesSidebar && sidebarShown))
         // A window that turns wide pins the drawer; the one it pushed aside is closed.
         .onChange(of: usesSidebar) { drawerOpen = false }
         #if DEBUG
@@ -251,6 +267,8 @@ struct MainShell: View {
             case .settings(let routes):
                 settingsPath = routes ?? []
                 if SnapshotRunner.directory != nil { settingsPreview = routes != nil } else { showSettings = routes != nil }
+            case .page(let url):
+                if SnapshotRunner.directory != nil { pagePreview = url } else { page = url }
             case .photoViewer(let open):
                 photoViewerPreview = open
             case .composerPhotos, .appIdeas, nil: break
@@ -259,7 +277,7 @@ struct MainShell: View {
         #endif
     }
 
-    /// Session expired, or an update offered, at the top of the page's column.
+    /// Session expired, at the top of the page's column.
     @ViewBuilder
     private var banners: some View {
         if model.sessionExpired {
@@ -269,12 +287,6 @@ struct MainShell: View {
             .readableColumn()
             .padding(.top, 58)
             .transition(.move(edge: .top).combined(with: .opacity))
-        } else if model.update.showsBanner, !drawerOpen, !(usesSidebar && sidebarShown) {
-            // The drawer has its own line for it.
-            UpdateBanner(instanceName: workspace.instanceName, onUpdate: { model.update.openPage() }, onClose: { model.update.dismissBanner() })
-                .readableColumn()
-                .padding(.top, 58)
-                .transition(.move(edge: .top).combined(with: .opacity))
         }
     }
 
@@ -287,21 +299,19 @@ struct MainShell: View {
         case .app(let app):
             AppWebScreen(workspace: workspace, app: app)
                 .id(app.id)
-        case .page(let url):
-            AppWebScreen(workspace: workspace, app: InstalledApp(id: url.absoluteString, displayName: workspace.instanceName), pageURL: url)
-                .id(url)
         }
     }
 
     /// A link tapped in chat text: an app opens full screen, a page of the
-    /// instance in the app's web view, anything else as the system opens it.
+    /// instance in the app's web view in a sheet, anything else as the system
+    /// opens it.
     private func openChatLink(_ url: URL) -> OpenURLAction.Result {
         switch AppLinks.chatLink(url, origin: workspace.backend.origin, apps: workspace.apps) {
         case .app(let id, let page):
             Task { await openLinkedApp(id, page: page) }
             return .handled
-        case .page(let page):
-            path.append(.page(page))
+        case .page(let url):
+            page = url
             return .handled
         case .external, .system:
             return .systemAction
@@ -319,7 +329,7 @@ struct MainShell: View {
         if let app {
             path.append(.app(app))
         } else if let page {
-            path.append(.page(page))
+            self.page = page
         }
     }
 
@@ -335,7 +345,9 @@ struct MainShell: View {
                     showTasks = true
                 },
                 onOpenChat: { chatId, title in path.append(.taskChat(chatId: chatId, title: title)) },
-                visible: section == .chat && path.isEmpty
+                // The same answer the server watch and push banners go by: a
+                // sheet, the drawer or a pushed page over Chat hides it.
+                visible: visibleChat == conciergeChatID
             )
             .opacity(section == .chat ? 1 : 0)
             .allowsHitTesting(section == .chat)
@@ -433,13 +445,8 @@ struct MainShell: View {
                 }
             }
         }
-        // A dashboard page opens full screen on the main stack, not inside the
-        // sheet, with the drawer the sheet rose over closed under it.
-        .environment(\.openInstancePage, OpenInstancePageAction { url in
-            showSettings = false
-            closeDrawer()
-            path.append(.page(url))
-        })
+        // A dashboard page rises over Settings, which is still there when it closes.
+        .instancePageSheet(workspace: workspace, url: $settingsPage)
         .presentationBackground(Palette.bg)
     }
 
@@ -474,7 +481,15 @@ struct MainShell: View {
 
     /// The chat on screen, by its store's id.
     private var visibleChat: String? {
-        if drawerOpen || showTasks || showSettings { return nil }
+        Self.visibleChat(section: section, path: path, covered: drawerOpen || showTasks || showSettings || page != nil)
+    }
+
+    /// The chat on screen: none while something covers the page (the drawer,
+    /// the Tasks or Settings sheet, an instance page's sheet); a pushed task
+    /// chat; else the section's chat. Chat's read marks, the server's watch
+    /// and push banners all go by this one answer.
+    static func visibleChat(section: MainSection, path: [Route], covered: Bool) -> String? {
+        if covered { return nil }
         if let top = path.last {
             if case .taskChat(let chatId, _) = top { return chatId }
             return nil

@@ -1,7 +1,8 @@
 import SwiftUI
 
 /// A block of Markdown. The parser covers what agents write in chat: paragraphs,
-/// headings, bullet and numbered lists, quotes, fenced code, and rules.
+/// headings, bullet and numbered lists, quotes, fenced code, rules and
+/// GitHub-flavoured tables.
 enum MarkdownBlock: Hashable {
     case paragraph(String)
     case heading(level: Int, text: String)
@@ -11,6 +12,14 @@ enum MarkdownBlock: Hashable {
     case rule
     /// `![alt](src)`, lifted out of its paragraph to stand at its place.
     case image(alt: String, src: String)
+    /// A table: its header, how each column aligns, and its rows, each with
+    /// as many cells as the header. Cells keep their inline Markdown.
+    case table(header: [String], alignments: [TableAlignment], rows: [[String]])
+}
+
+/// How a table column aligns, from its delimiter cell.
+enum TableAlignment: Hashable {
+    case leading, center, trailing
 }
 
 enum MarkdownParser {
@@ -48,8 +57,11 @@ enum MarkdownParser {
             flushQuote()
         }
 
-        for rawLine in source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n") {
-            let line = rawLine
+        let lines = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
+        var next = 0
+        while next < lines.count {
+            let line = lines[next]
+            next += 1
             let trimmed = line.trimmingCharacters(in: .whitespaces)
 
             if var lines = code {
@@ -83,6 +95,24 @@ enum MarkdownParser {
                 flushAll()
                 blocks.append(.heading(level: heading.level, text: heading.text))
                 continue
+            }
+            // A table: a row of cells, then its delimiter row, then body rows
+            // up to a blank line or a line without a pipe.
+            if trimmed.contains("|"), next < lines.count, let alignments = delimiterRow(lines[next]) {
+                let header = tableCells(trimmed)
+                if header.count == alignments.count {
+                    flushAll()
+                    next += 1
+                    var rows: [[String]] = []
+                    while next < lines.count {
+                        let row = lines[next].trimmingCharacters(in: .whitespaces)
+                        guard !row.isEmpty, row.contains("|") else { break }
+                        rows.append(fitted(tableCells(row), to: header.count))
+                        next += 1
+                    }
+                    blocks.append(.table(header: header, alignments: alignments, rows: rows))
+                    continue
+                }
             }
             if trimmed.hasPrefix(">") {
                 flushParagraph()
@@ -145,6 +175,57 @@ enum MarkdownParser {
         return blocks
     }
 
+    /// A row's cells: split at each pipe not escaped with a backslash, the
+    /// outer pipes dropped, `\|` read as a pipe.
+    static func tableCells(_ line: String) -> [String] {
+        var row = line.trimmingCharacters(in: .whitespaces)
+        if row.hasPrefix("|") { row.removeFirst() }
+        if row.hasSuffix("|"), !row.hasSuffix("\\|") { row.removeLast() }
+        var cells: [String] = []
+        var cell = ""
+        var escaped = false
+        for character in row {
+            if escaped {
+                // Only a pipe loses its backslash; anything else keeps it for the inline pass.
+                if character != "|" { cell.append("\\") }
+                cell.append(character)
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else if character == "|" {
+                cells.append(cell.trimmingCharacters(in: .whitespaces))
+                cell = ""
+            } else {
+                cell.append(character)
+            }
+        }
+        if escaped { cell.append("\\") }
+        cells.append(cell.trimmingCharacters(in: .whitespaces))
+        return cells
+    }
+
+    /// A delimiter row's alignments, or nil when the line is not one: every
+    /// cell is dashes with an optional colon at either end.
+    static func delimiterRow(_ line: String) -> [TableAlignment]? {
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard trimmed.contains("-"), trimmed.contains("|") || trimmed.hasPrefix(":") || trimmed.hasPrefix("-") else { return nil }
+        var alignments: [TableAlignment] = []
+        for cell in tableCells(trimmed) {
+            let left = cell.hasPrefix(":"), right = cell.hasSuffix(":")
+            let dashes = cell.dropFirst(left ? 1 : 0).dropLast(right && cell.count > 1 ? 1 : 0)
+            guard !dashes.isEmpty, dashes.allSatisfy({ $0 == "-" }) else { return nil }
+            alignments.append(left && right ? .center : right ? .trailing : .leading)
+        }
+        // One cell needs its pipe, or "---" alone is a rule.
+        guard alignments.count > 1 || trimmed.contains("|") else { return nil }
+        return alignments
+    }
+
+    /// A body row padded with empty cells, or cut, to the header's width.
+    private static func fitted(_ cells: [String], to count: Int) -> [String] {
+        cells.count >= count ? Array(cells.prefix(count)) : cells + Array(repeating: "", count: count - cells.count)
+    }
+
     private static func headingLevel(_ line: String) -> (level: Int, text: String)? {
         var level = 0
         for character in line {
@@ -178,7 +259,9 @@ enum MarkdownParser {
             interpretedSyntax: .inlineOnlyPreservingWhitespace,
             failurePolicy: .returnPartiallyParsedIfPossible
         )
-        var result = (try? AttributedString(markdown: text, options: options)) ?? AttributedString(text)
+        let marked = CJKEmphasis.mark(text)
+        var result = (try? AttributedString(markdown: marked, options: options)) ?? AttributedString(marked)
+        CJKEmphasis.apply(&result)
         for run in result.runs {
             if run.link != nil {
                 result[run.range].foregroundColor = Palette.primaryText
@@ -195,6 +278,174 @@ enum MarkdownParser {
         String(inline(text).characters)
             .replacingOccurrences(of: "#", with: "")
             .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// Bold and italic next to Chinese and Japanese text. CommonMark's flanking
+/// rule only closes `**` before a space or punctuation, so
+/// `**防霜冻。**渭南` keeps its asterisks: the closer follows `。` and comes
+/// before a letter. Text with a `*` run beside a CJK character has its
+/// emphasis paired here instead: a run opens before any non-space and closes
+/// after any non-space, and pairs with the nearest open run of its length.
+/// The pairs go through the parser as private-use marks and become emphasis
+/// afterwards. Text without one is left to the parser as it is.
+enum CJKEmphasis {
+    private static let strongOpen: Character = "\u{E000}"
+    private static let strongClose: Character = "\u{E001}"
+    private static let emphasisOpen: Character = "\u{E002}"
+    private static let emphasisClose: Character = "\u{E003}"
+    private static let marks: Set<Character> = [strongOpen, strongClose, emphasisOpen, emphasisClose]
+
+    static func isCJK(_ character: Character?) -> Bool {
+        guard let value = character?.unicodeScalars.first?.value else { return false }
+        return (0x2E80...0x9FFF).contains(value)  // radicals, punctuation, kana, ideographs
+            || (0xAC00...0xD7AF).contains(value)  // Hangul
+            || (0xF900...0xFAFF).contains(value)  // compatibility ideographs
+            || (0xFF00...0xFFEF).contains(value)  // fullwidth forms
+            || (0x20000...0x3FFFF).contains(value)
+    }
+
+    private struct Run {
+        let start: Int
+        let length: Int
+        let before: Character?
+        let after: Character?
+    }
+
+    /// The text with its paired `*` runs replaced by marks, when a run sits
+    /// beside a CJK character.
+    static func mark(_ text: String) -> String {
+        guard text.contains("*") else { return text }
+        var chars = Array(text)
+        var runs: [Run] = []
+        var index = 0
+        while index < chars.count {
+            let character = chars[index]
+            if character == "\\" {
+                index += 2
+            } else if character == "`" {
+                // A code span keeps its asterisks.
+                var ticks = 0
+                while index + ticks < chars.count, chars[index + ticks] == "`" { ticks += 1 }
+                var close = index + ticks
+                var found: Int?
+                while close < chars.count {
+                    if chars[close] == "`" {
+                        var count = 0
+                        while close + count < chars.count, chars[close + count] == "`" { count += 1 }
+                        if count == ticks { found = close + count; break }
+                        close += count
+                    } else {
+                        close += 1
+                    }
+                }
+                index = found ?? index + ticks
+            } else if character == "]", index + 1 < chars.count, chars[index + 1] == "(" {
+                // A link's destination keeps its asterisks.
+                var depth = 0
+                var end = index + 1
+                while end < chars.count {
+                    if chars[end] == "(" { depth += 1 }
+                    if chars[end] == ")" { depth -= 1; if depth == 0 { break } }
+                    end += 1
+                }
+                index = end + 1
+            } else if character == "<", let close = chars[index...].firstIndex(where: { $0 == ">" || $0.isWhitespace }),
+                      chars[close] == ">", chars[index..<close].contains(where: { $0 == ":" || $0 == "@" }) {
+                // An autolink, `<https://…>`, keeps them too.
+                index = close + 1
+            } else if Self.startsURL(chars, at: index) {
+                // So does a bare URL, up to the next space.
+                while index < chars.count, !chars[index].isWhitespace { index += 1 }
+            } else if character == "*" {
+                var length = 0
+                while index + length < chars.count, chars[index + length] == "*" { length += 1 }
+                runs.append(Run(
+                    start: index,
+                    length: length,
+                    before: index > 0 ? chars[index - 1] : nil,
+                    after: index + length < chars.count ? chars[index + length] : nil))
+                index += length
+            } else {
+                index += 1
+            }
+        }
+        guard runs.contains(where: { isCJK($0.before) || isCJK($0.after) }) else { return text }
+
+        var open: [Run] = []
+        var pairs: [(Run, Run)] = []
+        for run in runs where run.length <= 3 {
+            let canClose = run.before.map { !$0.isWhitespace } ?? false
+            let canOpen = run.after.map { !$0.isWhitespace } ?? false
+            if canClose, let match = open.lastIndex(where: { $0.length == run.length }) {
+                pairs.append((open[match], run))
+                open.removeSubrange(match...)
+            } else if canOpen {
+                open.append(run)
+            }
+        }
+        // Only pairs beside CJK need the relaxed rule; the parser takes the rest.
+        pairs = pairs.filter { opener, closer in
+            isCJK(opener.before) || isCJK(opener.after) || isCJK(closer.before) || isCJK(closer.after)
+        }
+        guard !pairs.isEmpty else { return text }
+        // Right to left, so earlier offsets stay valid.
+        var edits: [(Run, [Character])] = []
+        for (opener, closer) in pairs {
+            switch opener.length {
+            case 1:
+                edits += [(opener, [emphasisOpen]), (closer, [emphasisClose])]
+            case 2:
+                edits += [(opener, [strongOpen]), (closer, [strongClose])]
+            default:
+                edits += [(opener, [strongOpen, emphasisOpen]), (closer, [emphasisClose, strongClose])]
+            }
+        }
+        for (run, replacement) in edits.sorted(by: { $0.0.start > $1.0.start }) {
+            chars.replaceSubrange(run.start..<run.start + run.length, with: replacement)
+        }
+        return String(chars)
+    }
+
+    /// Whether a bare URL starts at `index`.
+    private static func startsURL(_ chars: [Character], at index: Int) -> Bool {
+        guard index == 0 || chars[index - 1].isWhitespace || chars[index - 1] == "(" else { return false }
+        for scheme in ["https://", "http://", "www."] {
+            let prefix = Array(scheme)
+            if index + prefix.count <= chars.count, Array(chars[index..<index + prefix.count]) == prefix { return true }
+        }
+        return false
+    }
+
+    /// Turns the marks `mark` left into emphasis, and removes them.
+    static func apply(_ result: inout AttributedString) {
+        guard result.characters.contains(where: { marks.contains($0) }) else { return }
+        var spans: [(Range<AttributedString.Index>, InlinePresentationIntent)] = []
+        var strong: [AttributedString.Index] = []
+        var emphasis: [AttributedString.Index] = []
+        var index = result.startIndex
+        while index < result.endIndex {
+            let next = result.characters.index(after: index)
+            switch result.characters[index] {
+            case strongOpen: strong.append(next)
+            case emphasisOpen: emphasis.append(next)
+            case strongClose:
+                if let start = strong.popLast() { spans.append((start..<index, .stronglyEmphasized)) }
+            case emphasisClose:
+                if let start = emphasis.popLast() { spans.append((start..<index, .emphasized)) }
+            default: break
+            }
+            index = next
+        }
+        for (range, intent) in spans where !range.isEmpty {
+            let pieces = result[range].runs.map { ($0.range, $0.inlinePresentationIntent ?? []) }
+            for (piece, existing) in pieces {
+                result[piece].inlinePresentationIntent = existing.union(intent)
+            }
+        }
+        while let mark = result.characters.firstIndex(where: { marks.contains($0) }) {
+            result.removeSubrange(mark..<result.characters.index(after: mark))
+        }
     }
 }
 
@@ -291,6 +542,90 @@ struct MarkdownText: View {
                 viewerStart = gallery.firstIndex { $0.matches(position: position) } ?? 0
                 showViewer = true
             }
+        case .table(let header, let alignments, let rows):
+            MarkdownTable(header: header, alignments: alignments, rows: rows, fontSize: fontSize - 1)
         }
+    }
+}
+
+/// A Markdown table in the bubble: the header in medium weight, hairlines
+/// between rows, no borders or fills. Wider than the bubble, it scrolls
+/// sideways inside it; a cell wraps past `maxColumn`.
+struct MarkdownTable: View {
+    let header: [String]
+    let alignments: [TableAlignment]
+    let rows: [[String]]
+    var fontSize: CGFloat = 15
+
+    /// The widest a column grows before its cells wrap.
+    static let maxColumn: CGFloat = 220
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Grid(horizontalSpacing: 16, verticalSpacing: 0) {
+                GridRow(alignment: .firstTextBaseline) {
+                    ForEach(Array(header.enumerated()), id: \.offset) { column, cell in
+                        self.cell(cell, column: column, weight: .medium)
+                    }
+                }
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    Rectangle().fill(Palette.hair).frame(height: 0.5).gridCellUnsizedAxes(.horizontal)
+                    GridRow(alignment: .firstTextBaseline) {
+                        ForEach(Array(row.enumerated()), id: \.offset) { column, cell in
+                            self.cell(cell, column: column, weight: .regular)
+                        }
+                    }
+                }
+            }
+        }
+        .scrollBounceBehavior(.basedOnSize, axes: .horizontal)
+        // VoiceOver reads a row at a time, each cell under its header.
+        .accessibilityRepresentation {
+            VStack(alignment: .leading) {
+                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
+                    Text(verbatim: Self.spoken(row, header: header))
+                }
+            }
+        }
+    }
+
+    private func cell(_ text: String, column: Int, weight: Font.Weight) -> some View {
+        let alignment = column < alignments.count ? alignments[column] : .leading
+        let frame: Alignment = alignment == .center ? .center : alignment == .trailing ? .trailing : .leading
+        return CappedWidth(max: Self.maxColumn) {
+            Text(MarkdownParser.inline(text))
+                .romeFont(fontSize, weight)
+                .lineSpacing(3)
+                .multilineTextAlignment(alignment == .center ? .center : alignment == .trailing ? .trailing : .leading)
+        }
+        .frame(maxWidth: .infinity, alignment: frame)
+        .padding(.vertical, 7)
+    }
+
+    /// "Header: value, Header: value" for one row, as plain text.
+    nonisolated static func spoken(_ row: [String], header: [String]) -> String {
+        zip(header, row).map { name, value in
+            let name = MarkdownParser.plain(name), value = MarkdownParser.plain(value)
+            return name.isEmpty ? value : "\(name): \(value)"
+        }.joined(separator: ", ")
+    }
+}
+
+/// Its content at its natural width, up to `max`, past which it wraps or
+/// is cut: a short text hugs, a long one stops at the cap.
+struct CappedWidth: Layout {
+    let max: CGFloat
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        guard let child = subviews.first else { return .zero }
+        let ideal = child.sizeThatFits(.unspecified).width
+        // Never past the width offered: between the header's buttons at the
+        // largest text sizes, a name is cut there too.
+        let offered = proposal.width ?? .infinity
+        return child.sizeThatFits(ProposedViewSize(width: Swift.min(ideal, max, offered), height: nil))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        subviews.first?.place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: nil))
     }
 }

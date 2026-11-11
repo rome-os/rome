@@ -105,6 +105,7 @@ final class DemoBackend: RomeBackend {
                 let (main, seconds) = steps[step % steps.count]
                 self.bus.emit(LiveTopic.conciergeActivity, .conciergeActivity(chatId: conciergeChatID, activity: main))
                 self.bus.emit(LiveTopic.conciergeActivity, .conciergeActivity(chatId: "topic-trip", activity: steps[(step + 2) % steps.count].0))
+                self.bus.emit(LiveTopic.conciergeActivity, .conciergeActivity(chatId: "topic-books", activity: steps[(step + 3) % steps.count].0))
                 step += 1
                 try? await Task.sleep(for: .seconds(seconds))
             }
@@ -504,6 +505,13 @@ final class DemoBackend: RomeBackend {
         String(data: (try? JSONEncoder().encode(parts)) ?? Data(), encoding: .utf8) ?? "[]"
     }
 
+    /// A guardian-side message said by the Concierge, as the instance marks it.
+    private func saidByConcierge(_ message: ChatMessage) -> ChatMessage {
+        var message = message
+        message.sender = MessageSender(kind: "automated", sourceType: "agent", name: "Milo", onBehalfOf: nil)
+        return message
+    }
+
     /// The message, placed in the chat thread that starts at `root`.
     private func threaded(_ message: ChatMessage, _ root: String?) -> ChatMessage {
         var message = message
@@ -585,6 +593,7 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-mail", name: "每天的邮件摘要", main: false, unread: 0),
             ConciergeChat(id: "topic-mail-setup", name: "邮件摘要设置", main: false, unread: 0),
             ConciergeChat(id: "topic-routine", name: "每周读书提醒", main: false, unread: 0),
+            ConciergeChat(id: "topic-table", name: "耳机比价", main: false, unread: 0),
         ]
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false) -> ConciergeTask {
@@ -621,26 +630,30 @@ final class DemoBackend: RomeBackend {
             for row in 0..<3 { for column in 0..<5 { context.fill(CGRect(x: 200 + column * 85, y: 220 + row * 95, width: 50, height: 60)) } }
         }.jpegData(compressionQuality: 0.8)
         // A long chat, to scroll far from the bottom.
-        // The last two chapters are one long chat thread: four messages, so
-        // its answer carries the replies line.
+        // The last eight chapters are one long chat thread, taller than the
+        // screen: its root, chapter 17's question, carries the replies line.
         messages["topic-books"] = (0..<24).flatMap { index -> [ChatMessage] in
             let time = at(8, 0, daysAgo: 1).addingTimeInterval(Double(index) * 600)
-            let root: String? = index >= 22 ? "b22" : nil
+            let root: String? = index >= 16 ? "b16" : nil
             return [
                 threaded(user("b\(index)", "第 \(index + 1) 章讲了什么？", at: time, session: "topic-books"), root),
-                threaded(agent("第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"), root),
+                // The last answer opens with bold that closes after `。`.
+                threaded(agent(index == 23
+                    ? "**第 24 章的重点：先把大问题拆小。**每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。"
+                    : "第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"), root),
             ]
         }
-        // Two chat threads: the plan, interrupted by the weather, so both of
-        // its stretches carry the replies line; the weather's question and
-        // answer carry none.
+        // One chat thread among messages in none (rome-os/rome#1976): the
+        // plan's task came back into the thread of the message that started
+        // it, so its root carries "2 replies". The weather's question and
+        // answer, and the last word typed in the composer, are in no thread.
         messages["topic-trip"] = [
             threaded(user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"), "k1"),
             threaded(agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"), "k1"),
-            threaded(user("k4", "顺便看下四月京都的天气。", at: at(8, 58), session: "topic-trip"), "k4"),
-            threaded(agent("四月白天 15–20 度，早晚凉，带件外套。月初樱花还在。", at: at(8, 59), session: "topic-trip"), "k4"),
+            threaded(user("k4", "顺便看下四月京都的天气。", at: at(8, 58), session: "topic-trip"), nil),
+            threaded(agent("四月白天 15–20 度，早晚凉，带件外套。月初樱花还在。", at: at(8, 59), session: "topic-trip"), nil),
             threaded(agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/api/projects/asset/hotel.jpg?path=projects%2Fdemo%2Ftrip%2Fhotel.jpg)\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip"), "k1"),
-            threaded(user("k6", "就按它排。", at: at(9, 24), session: "topic-trip"), "k1"),
+            threaded(user("k6", "就按它排。", at: at(9, 24), session: "topic-trip"), nil),
         ]
         // A photo the guardian sent, stored the way the server stores it, and a long reply.
         let kitchen = "projects/demo/home/kitchen.jpg"
@@ -727,6 +740,28 @@ final class DemoBackend: RomeBackend {
             // The AI tools card was answered on the web: its row says Done.
             parts([.object(["type": .string("interaction_result"), "toolUseId": .string("ai-1"), "output": .object(["connected": .bool(true)])])], at: at(11, 3), session: routine, role: "user"),
         ]
+        // A narrow table, and one wider than the bubble that scrolls inside it.
+        messages["topic-table"] = [
+            user("tb1", "帮我比一下这三款降噪耳机。", at: at(12, 0), session: "topic-table"),
+            agent("""
+            三款的价格和续航：
+
+            | 型号 | 价格 | 续航 |
+            | :--- | ---: | :---: |
+            | Sony WH-1000XM6 | ¥2,499 | 30 h |
+            | Bose QC Ultra | ¥2,299 | 24 h |
+            | AirPods Max | ¥3,999 | 20 h |
+            """, at: at(12, 1), session: "topic-table"),
+            agent("""
+            细节对比：
+
+            | 型号 | 降噪 | 佩戴 | 通话 | 适合谁 |
+            | --- | --- | --- | --- | --- |
+            | **Sony WH-1000XM6** | 三款里最强，地铁和飞机上都很安静 | 偏紧，戴久了耳朵会热 | 清楚 | 经常出差、坐飞机的人 |
+            | Bose QC Ultra | 接近 Sony，人声压得更干净 | 最轻最松，适合长时间戴 | 一般 | 每天通勤、要戴一整天的人 |
+            | AirPods Max | 比前两款弱一些 | 重，但做工最好 | 很好 | 已经在用 `iPhone` 和 Mac 的人 |
+            """, at: at(12, 2), session: "topic-table"),
+        ]
         messages["topic-mail-setup"] = [
             user("ms1", "摘要按什么来整理？", at: at(10, 1), session: "topic-mail-setup"),
             parts([.object([
@@ -785,6 +820,10 @@ final class DemoBackend: RomeBackend {
 
             翻译稿会放在 `content/home.en.md`。
             """, at: at(9, 16), session: site, long: true),
+            // The Concierge relays what the guardian added in the main chat:
+            // drawn on the guardian's side, under its own name.
+            saidByConcierge(user("s2", "补充一下：英文版标题保持简短，不超过 8 个词。", at: at(9, 18), session: site)),
+            agent("好的，标题我会控制在 8 个词以内。", at: at(9, 19), session: site),
         ]
 
         // Task: Notion, failed.

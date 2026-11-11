@@ -16,7 +16,27 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "%@ 有新版本可以更新"
+            "value" : "%@ 有新版本了"
+          }
+        }
+      }
+    },
+    "%@ is upgrading to %@…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 正在升级到 %@…"
+          }
+        }
+      }
+    },
+    "%@ needs its guardian to update first" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 要等主人更新后才能继续"
           }
         }
       }
@@ -27,6 +47,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@的记录"
+          }
+        }
+      }
+    },
+    "%@ updated to %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 已升级到 %@"
           }
         }
       }
@@ -583,6 +613,16 @@
         }
       }
     },
+    "Cancel reply" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消回复"
+          }
+        }
+      }
+    },
     "Cannot be connected here" : {
       "localizations" : {
         "zh-Hans" : {
@@ -899,6 +939,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法记录活动"
+          }
+        }
+      }
+    },
+    "Couldn't start the update. Try again in a moment." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这次没能开始更新，稍后再试试吧。"
           }
         }
       }
@@ -1392,7 +1442,6 @@
       }
     },
     "Make a new app" : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -1932,16 +1981,6 @@
         }
       }
     },
-    "Opened “%@”. Switch instances in Settings." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "已打开「%@」。可以在设置里切换。"
-          }
-        }
-      }
-    },
     "Opening your Rome" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1997,7 +2036,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "其他回答…"
+            "value" : "或者自己写…"
           }
         }
       }
@@ -2367,7 +2406,6 @@
       }
     },
     "Rome" : {
-      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -2383,16 +2421,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法连接 Rome Cloud。请稍后再试。"
-          }
-        }
-      }
-    },
-    "Rome Cloud could not start the update. Try again in a moment." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rome Cloud 未能开始更新。请稍后再试。"
           }
         }
       }
@@ -3175,16 +3203,6 @@
         }
       }
     },
-    "This Rome needs an update from its owner" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "这个 Rome 需要所有者先更新"
-          }
-        }
-      }
-    },
     "This card was already answered. The task has been refreshed." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3455,12 +3473,12 @@
         }
       }
     },
-    "Update %@" : {
+    "Update Rome" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "更新 %@"
+            "value" : "更新 Rome"
           }
         }
       }
@@ -3481,16 +3499,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在更新任务"
-          }
-        }
-      }
-    },
-    "Upgrading to %@…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在升级到 %@…"
           }
         }
       }

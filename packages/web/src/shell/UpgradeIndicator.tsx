@@ -10,9 +10,10 @@ import { useSystemUpgrade } from "@/hooks/use-system-upgrade";
 import { useUpgradeAvailable } from "@/hooks/use-upgrade-available";
 
 /**
- * The sidebar's "upgrade available" arrow, beside the Rome logo. Shown to the
- * guardian whenever Rome Cloud offers a newer release; a click confirms and
- * runs the upgrade in a dialog.
+ * The sidebar's "upgrade available" arrow, beside the Rome logo. Shown to
+ * anyone signed in to the dashboard, the guardian or a visitor, whenever Rome
+ * Cloud offers a newer release; a click confirms and runs the upgrade in a
+ * dialog.
  *
  * `suppressed` hides the arrow while the nightly upgrade banner is up, so
  * there is one way in at a time. The dialog stays mounted through it: an
@@ -27,7 +28,10 @@ export function UpgradeIndicator({
 }) {
   const { t } = useTranslation("common");
   const identity = useDashboardIdentity();
-  const { latest, recheck, rechecking } = useUpgradeAvailable(identity.data?.kind === "guardian");
+  const kind = identity.data?.kind;
+  const { latest, recheck, rechecking } = useUpgradeAvailable(
+    kind === "guardian" || kind === "visitor",
+  );
   const upgrade = useSystemUpgrade(recheck);
   const [open, setOpen] = useState(false);
   const name = useConciergeName();

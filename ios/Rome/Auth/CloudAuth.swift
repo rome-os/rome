@@ -72,7 +72,7 @@ enum AuthError: Error, Equatable, LocalizedError {
         case .accessDenied: return String(localized: "No access to this Rome")
         case .accessRevoked: return String(localized: "You no longer have access to this Rome")
         case .notOwner: return String(localized: "Sign in to this Rome once in a browser, then try again")
-        case .instanceTooOld: return String(localized: "This Rome needs an update from its owner")
+        case .instanceTooOld: return String(localized: "\(UpdateCopy.agent(nil)) needs its guardian to update first")
         case .sessionRejected: return String(localized: "Sign-in did not finish")
         case .network: return String(localized: "Could not reach Rome Cloud")
         case .invalidResponse: return String(localized: "Invalid sign-in response")
@@ -246,6 +246,12 @@ final class CloudAuth {
     nonisolated static func opens(_ url: URL, cloudOrigin: URL) -> Bool {
         guard url.host() != nil, url.host() != cloudOrigin.host() else { return false }
         return url.scheme == "https" || (url.scheme == "http" && cloudOrigin.scheme == "http")
+    }
+
+    /// The session kept for `instance`, fresh or not: a cached launch opens
+    /// with it and refreshes it after.
+    func storedSession(for instance: CloudInstance) -> InstanceSession? {
+        store.value(InstanceSession.self, for: Key.session(for: instance))
     }
 
     /// A fresh session for `instance`: the stored one when it has time left, else a new one.

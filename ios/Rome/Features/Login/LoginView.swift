@@ -199,7 +199,7 @@ struct PrimaryButton: View {
                     Spinner(size: 18, lineWidth: 2.4, color: .white, trackOpacity: 0.35)
                 }
                 Text(loading ? (loadingTitle ?? title) : title)
-                    .romeFont(inCard ? CardScale.buttonFont : 17, .semibold)
+                    .romeFont(inCard ? CardScale.buttonFont : 17, inCard ? .medium : .semibold)
                     .tracking(-0.3)
             }
             .foregroundStyle(.white)

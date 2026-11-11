@@ -127,6 +127,108 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
     @Test func plainDropsMarks() {
         #expect(MarkdownParser.plain("**bold** and `code`") == "bold and code")
     }
+
+    @Test func aTableReadsItsAlignmentsAndRows() {
+        let blocks = MarkdownParser.parse("""
+        Prices:
+
+        | Model | Price | Hours |
+        | :--- | ---: | :---: |
+        | **Sony** | ¥2,499 | 30 |
+        | [Bose](https://bose.com) | `¥2,299` |
+        | Max | ¥3,999 | 20 | extra |
+
+        After.
+        """)
+        #expect(blocks == [
+            .paragraph("Prices:"),
+            .table(header: ["Model", "Price", "Hours"], alignments: [.leading, .trailing, .center], rows: [
+                ["**Sony**", "¥2,499", "30"],
+                // A short row is padded, a long one cut, to the header's width.
+                ["[Bose](https://bose.com)", "`¥2,299`", ""],
+                ["Max", "¥3,999", "20"],
+            ]),
+            .paragraph("After."),
+        ])
+        // Cells keep their inline marks.
+        #expect(String(MarkdownParser.inline("**Sony**").characters) == "Sony")
+    }
+
+    @Test func aTableWithoutOuterPipesAndWithEscapedPipes() {
+        #expect(MarkdownParser.parse("a | b\n--- | ---\nx \\| y | z") == [
+            .table(header: ["a", "b"], alignments: [.leading, .leading], rows: [["x | y", "z"]]),
+        ])
+        #expect(MarkdownParser.tableCells(#"| a \| b | c |"#) == ["a | b", "c"])
+    }
+
+    @Test func pipesWithoutADelimiterRowStayText() {
+        // No delimiter row: a paragraph.
+        #expect(MarkdownParser.parse("| a | b |\n| c | d |") == [.paragraph("| a | b |\n| c | d |")])
+        // A delimiter row with another number of cells than the header.
+        #expect(MarkdownParser.parse("| a | b |\n| --- |") == [.paragraph("| a | b |\n| --- |")])
+        // A rule is still a rule.
+        #expect(MarkdownParser.parse("a\n\n---\n\nb") == [.paragraph("a"), .rule, .paragraph("b")])
+        #expect(MarkdownParser.delimiterRow("|:-:|-x-|") == nil)
+    }
+
+    @Test func aTableRowIsSpokenWithItsHeaders() {
+        #expect(MarkdownTable.spoken(["**Sony**", "¥2,499"], header: ["Model", "Price"]) == "Model: Sony, Price: ¥2,499")
+    }
+
+    /// The ranges with an intent, as plain strings.
+    private func spans(_ text: String, _ intent: InlinePresentationIntent) -> [String] {
+        let result = MarkdownParser.inline(text)
+        return result.runs.compactMap { run in
+            run.inlinePresentationIntent?.contains(intent) == true ? String(result[run.range].characters) : nil
+        }
+    }
+
+    @Test func boldClosesAfterCJKPunctuation() {
+        let text = "**今晚要注意保暖、防霜冻。**渭南市…"
+        #expect(String(MarkdownParser.inline(text).characters) == "今晚要注意保暖、防霜冻。渭南市…")
+        #expect(spans(text, .stronglyEmphasized) == ["今晚要注意保暖、防霜冻。"])
+    }
+
+    @Test func boldOpensBeforeCJKPunctuation() {
+        let text = "明天：**「降温」**提醒"
+        #expect(String(MarkdownParser.inline(text).characters) == "明天：「降温」提醒")
+        #expect(spans(text, .stronglyEmphasized) == ["「降温」"])
+    }
+
+    @Test func italicAndBoldItalicBesideCJK() {
+        #expect(spans("注意*保暖。*今晚", .emphasized) == ["保暖。"])
+        let both = MarkdownParser.inline("***防霜冻。***渭南")
+        #expect(String(both.characters) == "防霜冻。渭南")
+        #expect(both.runs.first?.inlinePresentationIntent?.isSuperset(of: [.stronglyEmphasized, .emphasized]) == true)
+    }
+
+    @Test func cjkBoldKeepsCodeAndLinks() {
+        let result = MarkdownParser.inline("**提醒。**看 `a*b` 和 [链接](https://example.com)")
+        #expect(String(result.characters) == "提醒。看 a*b 和 链接")
+        #expect(result.runs.contains { $0.link != nil })
+    }
+
+    /// Asterisks in a link's destination, an autolink or a bare URL are the
+    /// URL's, never emphasis.
+    @Test func cjkBoldLeavesURLsAlone() {
+        let link = MarkdownParser.inline("**中文。** [link](https://example.com/a*b*c)")
+        #expect(String(link.characters) == "中文。 link")
+        #expect(link.runs.contains { $0.link?.absoluteString == "https://example.com/a*b*c" })
+        #expect(spans("**中文。** [link](https://example.com/a*b*c)", .stronglyEmphasized) == ["中文。"])
+        let bare = MarkdownParser.inline("**看这里。**https://example.com/x*y*z 好")
+        #expect(String(bare.characters).contains("https://example.com/x*y*z"))
+        let auto = MarkdownParser.inline("**看这里。**<https://example.com/x*y*z>")
+        #expect(String(auto.characters).contains("x*y*z"))
+        // A Latin pair beside a CJK one is left to the parser as it is.
+        #expect(spans("**粗体。**和 *italic* 字", .emphasized) == ["italic"])
+    }
+
+    @Test func latinEmphasisUnchanged() {
+        #expect(spans("Some **bold** and *italic* text", .stronglyEmphasized) == ["bold"])
+        #expect(spans("Some **bold** and *italic* text", .emphasized) == ["italic"])
+        #expect(String(MarkdownParser.inline("2 * 3 * 4 and a**b").characters) == "2 * 3 * 4 and a**b")
+        #expect(String(MarkdownParser.inline("**bold**word").characters) == "boldword")
+    }
 }
 
 @Suite struct AuthTests {
@@ -389,6 +491,21 @@ final class StubBackend: RomeBackend {
         #expect(gate.isInBackground)
         _ = gate.becameActive(at: .now)
         #expect(!gate.isInBackground)
+    }
+}
+
+/// The chat on screen, which Chat's read marks, the server's watch and push
+/// banners all go by.
+@MainActor
+@Suite struct VisibleChatTests {
+    @Test func aCoveringSheetHidesTheChat() {
+        #expect(MainShell.visibleChat(section: .chat, path: [], covered: false) == conciergeChatID)
+        // An instance page's sheet over Chat: nothing reads as seen.
+        // Fails before the change, which marked Chat read under the sheet.
+        #expect(MainShell.visibleChat(section: .chat, path: [], covered: true) == nil)
+        #expect(MainShell.visibleChat(section: .topic("t1"), path: [], covered: false) == "t1")
+        #expect(MainShell.visibleChat(section: .chat, path: [.taskChat(chatId: "c-1", title: "T")], covered: false) == "c-1")
+        #expect(MainShell.visibleChat(section: .apps, path: [], covered: false) == nil)
     }
 }
 

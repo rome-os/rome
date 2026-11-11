@@ -29,32 +29,44 @@ struct ThreadOverlay: View {
                 .ignoresSafeArea(.container, edges: [.top, .bottom])
                 .opacity(shown ? 1 : 0)
                 .onTapGesture { close() }
-            VStack(spacing: 0) {
-                // In place from the first frame: it stands for the header below.
-                header
-                ScrollView {
-                    VStack(spacing: 0) {
-                        ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                            ConciergeRow(row: row, store: chat, tasks: tasks, onOpenChat: onOpenChat, inThread: true)
-                                .padding(.top, TranscriptSpacing.top(row, after: index > 0 ? rows[index - 1] : nil))
-                        }
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
+                        ConciergeRow(row: row, store: chat, tasks: tasks, onOpenChat: onOpenChat, inThread: true)
+                            .padding(.top, TranscriptSpacing.top(row, after: index > 0 ? rows[index - 1] : nil))
                     }
-                    .padding(.horizontal, Metrics.pagePadding)
-                    .readableColumn()
-                    .padding(.vertical, 12)
-                    // At least as tall as the scroll, with the messages at its
-                    // foot: the space around them is the blurred chat, and a
-                    // tap there closes. A message keeps its own taps.
-                    .frame(maxWidth: .infinity, minHeight: visibleHeight, alignment: .bottom)
-                    .contentShape(Rectangle())
-                    .onTapGesture { close() }
                 }
-                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { visibleHeight = $0 }
-                .defaultScrollAnchor(.bottom)
-                .scrollDismissesKeyboard(.interactively)
-                .opacity(shown ? 1 : 0)
-                .offset(y: shown ? 0 : 36)
+                .padding(.horizontal, Metrics.pagePadding)
+                .readableColumn()
+                .padding(.vertical, 12)
+                // At least as tall as the scroll, with the messages at its
+                // foot: the space around them is the blurred chat, and a
+                // tap there closes. A message keeps its own taps.
+                .frame(maxWidth: .infinity, minHeight: visibleHeight, alignment: .bottom)
+                .contentShape(Rectangle())
+                .onTapGesture { close() }
             }
+            // The height between the header and the composer.
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { visibleHeight = $0 }
+            .modifier(StayAtBottom())
+            .scrollDismissesKeyboard(.interactively)
+            .opacity(shown ? 1 : 0)
+            .offset(y: shown ? 0 : 36)
+            // Rows end in a short fade just above the composer, never behind
+            // its glass. Upward the mask reaches past the header, where the
+            // rows fade under it instead.
+            .mask {
+                VStack(spacing: 0) {
+                    Rectangle()
+                    LinearGradient(colors: [.black, .clear], startPoint: .top, endPoint: .bottom)
+                        .frame(height: 14)
+                }
+                .ignoresSafeArea(.container, edges: .top)
+            }
+            .softTopScrollEdge()
+            // Above the rows, as the chat's own header is: they scroll under it.
+            // In place from the first frame: it stands for the header below.
+            .floatingTopBar { header }
         }
         .onAppear {
             withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { shown = true }
@@ -88,8 +100,66 @@ struct ThreadOverlay: View {
     }
 }
 
-/// Under the first message of a chat thread: how many replies it has. A
-/// tap opens the thread.
+/// Where the thread holds still: it opens on its last message, and the
+/// last message stays just above the composer as the keyboard comes up or
+/// the read brings older messages in above it.
+private struct StayAtBottom: ViewModifier {
+    func body(content: Content) -> some View {
+        if #available(iOS 18, *) {
+            content
+                .defaultScrollAnchor(.bottom, for: .sizeChanges)
+                .defaultScrollAnchor(.bottom)
+        } else {
+            content.defaultScrollAnchor(.bottom)
+        }
+    }
+}
+
+/// Above the composer while it replies to a message in no chat thread: a
+/// line of that message, and a cross that drops the reply.
+struct QuoteBar: View {
+    /// The quoted message; nil while it is not held.
+    let message: ChatMessage?
+    let onCancel: () -> Void
+
+    private var preview: String {
+        let text = message?.parts.compactMap { part -> String? in
+            if case .text(let text, _, _) = part { return text }
+            return nil
+        }.joined(separator: " ") ?? ""
+        return MarkdownParser.plain(text).split(whereSeparator: \.isNewline).joined(separator: " ")
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "arrowshape.turn.up.left")
+                .romeFont(12)
+                .foregroundStyle(Palette.sub)
+            Text(verbatim: preview.isEmpty ? String(localized: "Reply") : preview)
+                .romeFont(13)
+                .foregroundStyle(Palette.sub)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Button(action: onCancel) {
+                Image(systemName: "xmark")
+                    .romeFont(11, .semibold)
+                    .foregroundStyle(Palette.sub)
+                    .frame(width: 28, height: 28)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressScaleStyle())
+            .accessibilityLabel(Text("Cancel reply"))
+        }
+        .padding(.leading, 14)
+        .padding(.trailing, 4)
+        .frame(minHeight: 34)
+        .glassSurface(Capsule(), frost: Frost.composer)
+        .accessibilityElement(children: .contain)
+    }
+}
+
+/// Under the root of a chat thread: how many replies it has. A tap opens
+/// the thread.
 struct ThreadRepliesLine: View {
     let count: Int
     let guardian: Bool
@@ -101,10 +171,13 @@ struct ThreadRepliesLine: View {
                 .romeFont(13, .medium)
                 .foregroundStyle(Palette.sub)
                 .padding(.horizontal, 6)
-                .frame(minHeight: 28)
+                .padding(.vertical, 8)
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // Tight under its bubble: the tap area keeps its height, the line
+        // takes only its text's.
+        .padding(.vertical, -8)
         .frame(maxWidth: .infinity, alignment: guardian ? .trailing : .leading)
         .padding(.leading, guardian ? 0 : 8)
     }

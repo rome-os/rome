@@ -37,6 +37,12 @@ const REASONS: Record<string, string> = {
     "A connection that needs a screen, such as WeChat's own-account connection, asks Desktops for one. Desktops never names a connection, so no file in desktops/ imports connections/.",
   "desktops-never-imports-people":
     "Desktops never names a person or an account, so no file in desktops/ imports people/.",
+  "desktops-never-imports-apps":
+    "Desktops answers whichever app asks and never knows which one it is, so no file in desktops/ imports apps/.",
+  "desktops-never-imports-favors":
+    "Desktops never knows what a favor asked for, so no file in desktops/ imports favors/.",
+  "desktops-never-imports-participation":
+    "Desktops never knows what woke an agent or where it speaks, so no file in desktops/ imports participation/.",
   "instance-never-imports-agent":
     "Instance says which Rome this is and whether it is healthy, whoever runs on it, so no file in instance/ imports agent/.",
   "instance-never-imports-apps":

@@ -10,10 +10,11 @@ export interface SystemUpgradeRoutesDeps {
 }
 
 // Dashboard-facing forwarders for the Rome Cloud self-upgrade contract. Core
-// never decides upgrade policy itself: it relays the guardian's request to
-// Rome Cloud with the instance token and mirrors Rome Cloud's verdict
-// (status code + body) back to the dashboard unchanged, so the dashboard sees
-// one consistent contract regardless of which side rejected the request.
+// never decides upgrade policy itself: it relays the dashboard's request (from
+// the guardian or a dashboard visitor, who may upgrade too) to Rome Cloud with
+// the instance token and mirrors Rome Cloud's verdict (status code + body)
+// back to the dashboard unchanged, so the dashboard sees one consistent
+// contract regardless of which side rejected the request.
 //
 // The one local precondition besides Rome Cloud access: the running build must
 // have a release version. An unversioned build (source run, test image) has no

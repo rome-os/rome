@@ -19,13 +19,13 @@ struct RoutineDraftCardView: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 10) {
                 Image(systemName: RoutineCardText.symbol(part.trigger))
-                    .romeFont(CardScale.iconGlyph, .medium)
+                    .romeFont(CardScale.iconGlyph)
                     .foregroundStyle(Palette.primaryText)
                     .frame(width: CardScale.iconBox, height: CardScale.iconBox)
                     .background(Palette.primarySoft, in: RoundedRectangle(cornerRadius: CardScale.iconCorner, style: .continuous))
                 VStack(alignment: .leading, spacing: 1) {
                     Text(verbatim: RoutineCardText.kind(part.trigger))
-                        .romeFont(CardScale.label, .semibold)
+                        .romeFont(CardScale.label)
                         .foregroundStyle(Palette.sub)
                     Text(verbatim: part.name)
                         .romeFont(CardScale.title, .semibold)
@@ -35,7 +35,7 @@ struct RoutineDraftCardView: View {
                 Spacer(minLength: 0)
                 if let status {
                     Text(verbatim: RoutineCardText.status(status))
-                        .romeFont(CardScale.caption, .medium)
+                        .romeFont(CardScale.caption)
                         .foregroundStyle(Palette.sub)
                 }
             }
@@ -47,7 +47,7 @@ struct RoutineDraftCardView: View {
                             .foregroundStyle(Palette.sub)
                             .frame(width: 64, alignment: .leading)
                         Text(verbatim: row.value)
-                            .romeFont(CardScale.body, .medium)
+                            .romeFont(CardScale.body)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .fixedSize(horizontal: false, vertical: true)
                     }

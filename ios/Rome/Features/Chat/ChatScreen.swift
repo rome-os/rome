@@ -14,6 +14,13 @@ struct ChatScreen: View {
     var visible = true
 
     @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// How far the header's status capsule reaches below the header row.
+    private var statusOverhang: CGFloat {
+        let activity = workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID)
+        return activity?.statusLine == nil ? 0 : ChatIdentity.statusHeight(for: dynamicTypeSize)
+    }
     @State private var draft = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
@@ -48,6 +55,7 @@ struct ChatScreen: View {
         }
         // Reply brings the keyboard up; the replies line opens it for reading.
         .onChange(of: store.thread != nil) { _, open in if open, store.thread?.toReply == true { composerFocused = true } }
+        .onChange(of: store.quote) { _, quote in if quote != nil { composerFocused = true } }
         .pageBackground()
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
@@ -64,6 +72,12 @@ struct ChatScreen: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             if workspace.conciergeState == .ready {
                 VStack(spacing: 10) {
+                    // Inside the composer's inset, so the last message rests above it too.
+                    UpdatePill(agentName: workspace.agentName)
+                    if store.quote != nil {
+                        QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
+                            .transition(.move(edge: .bottom).combined(with: .opacity))
+                    }
                     if ConciergeStarters.visible(loaded: store.loaded, rows: store.rows) {
                         ConciergeStarters { store.send($0.text) }
                     }
@@ -80,6 +94,7 @@ struct ChatScreen: View {
                 }
                 .shareModeComposer(store.share)
                 .animation(.easeOut(duration: 0.2), value: store.rows.isEmpty)
+                .animation(.easeOut(duration: 0.2), value: store.quote)
                 .padding(.horizontal, Metrics.pagePadding)
                 .readableColumn()
                 .padding(.top, 6)
@@ -106,12 +121,12 @@ struct ChatScreen: View {
     @ViewBuilder
     private var banners: some View {
         VStack(spacing: 8) {
-            if let hint = model.autoOpenHint {
+            if let hint = model.accessNotice {
                 TopBanner(kind: .info, text: hint)
-                    .onTapGesture { model.autoOpenHint = nil }
+                    .onTapGesture { model.accessNotice = nil }
                     .task {
                         try? await Task.sleep(for: .seconds(5))
-                        withAnimation { model.autoOpenHint = nil }
+                        withAnimation { model.accessNotice = nil }
                     }
             }
             if store.loadError == .offline {
@@ -126,9 +141,10 @@ struct ChatScreen: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .padding(.top, model.autoOpenHint != nil || store.loadError == .offline || offersPush ? 10 : 0)
+        // Below the header's status capsule, which hangs under the header row.
+        .padding(.top, model.accessNotice != nil || store.loadError == .offline || offersPush ? 10 + statusOverhang : 0)
         .readableColumn()
-        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.autoOpenHint)
+        .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.accessNotice)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: offersPush)
     }
 
@@ -209,7 +225,7 @@ struct ConciergeRow: View {
     private func menu(reply: Bool) -> BubbleMenu {
         let message = row.messageId.flatMap(store.message)
         let onReply: (() -> Void)? = reply && !inThread
-            ? row.messageId.map { id in { store.openThread(at: id) } }
+            ? row.messageId.map { id in { store.reply(to: id) } }
             : nil
         // Share opens share mode on the message's turn; a pending send has none.
         let onShare: (() -> Void)? = message?.turnId == nil ? nil : { [row] in store.share.begin(fromRow: row.id) }
@@ -294,8 +310,9 @@ struct ChatHeader: View {
 }
 
 /// A Concierge chat's identity at the top: a round avatar with the mascot,
-/// overlapping a glass pill with the Concierge's name and, while it does
-/// something, a status line under it.
+/// a small name tag over its lower edge, and, while the Concierge does
+/// something, the status in a capsule of its own below. A short name never
+/// sits lost in a capsule stretched by a long status.
 struct ChatIdentity: View {
     let name: String
     /// Nil or idle: the name alone, and the pill shrinks back.
@@ -317,14 +334,25 @@ struct ChatIdentity: View {
     }
 
     static let avatarSize: CGFloat = 50
-    /// How far the avatar reaches down over the pill.
-    static let overlap: CGFloat = 8
+    /// How far the name tag reaches up over the avatar's lower edge.
+    static let overlap: CGFloat = 6
+    /// The name tag's padding around its text.
+    static let tagPadding = (horizontal: CGFloat(8), vertical: CGFloat(2.5))
+    /// The widest the name runs before it is cut: about eight CJK characters.
+    static func nameWidth(for size: DynamicTypeSize) -> CGFloat { ScaledFont.scaled(12, for: size) * 8.5 }
+    /// The widest the status capsule grows, on an iPad too.
+    static let statusWidth: CGFloat = 360
+    /// The status capsule's height with its gap: what it adds below the
+    /// header row, which banners under the header leave room for.
+    static func statusHeight(for size: DynamicTypeSize) -> CGFloat {
+        UIFont.systemFont(ofSize: ScaledFont.scaled(12, for: size), weight: .medium).lineHeight + 8 + 4
+    }
 
     /// The identity's height with the name alone, at the current text size:
     /// what the header row is laid out for.
     static func restingHeight(for size: DynamicTypeSize) -> CGFloat {
-        let name = UIFont.systemFont(ofSize: ScaledFont.scaled(14, for: size), weight: .semibold).lineHeight
-        return avatarSize - overlap + (overlap + 1) + name + 5
+        let name = UIFont.systemFont(ofSize: ScaledFont.scaled(12, for: size), weight: .medium).lineHeight
+        return avatarSize - overlap + name + tagPadding.vertical * 2
     }
 
     /// Holds the identity at the top of a fixed-height slot: the slot is the
@@ -344,48 +372,59 @@ struct ChatIdentity: View {
     private var status: String? { activity?.statusLine }
     private var busy: Bool { activity?.isBusy ?? false }
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
     var body: some View {
-        VStack(spacing: -Self.overlap) {
-            // A solid disc on the glass pill: two overlapping layers never
-            // share a color (DESIGN.md 1). Busy, the mascot bobs and glances;
-            // at rest it blinks; under Reduce Motion it stays still.
-            Mascot(alive: busy && !reduceMotion, blinks: !reduceMotion, pokes: pokes)
-                .frame(height: 28)
-                .frame(width: Self.avatarSize, height: Self.avatarSize)
-                .background(Palette.elevated, in: Circle())
-                .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
-                .shadow(color: Palette.avatarShadow, radius: 4, x: 0, y: 1)
-                // The avatar: a soft tap and a reaction, nothing else.
-                .contentShape(Circle())
-                .onTapGesture {
-                    guard !still else { return }
-                    haptic.impactOccurred()
-                    haptic.prepare()
-                    pokes += 1
+        VStack(spacing: 4) {
+            VStack(spacing: -Self.overlap) {
+                // A solid disc: two overlapping layers never share a color
+                // (DESIGN.md 1). Busy, the mascot bobs and glances; at rest it
+                // blinks; under Reduce Motion it stays still.
+                Mascot(alive: busy && !reduceMotion, blinks: !reduceMotion, pokes: pokes)
+                    .frame(height: 28)
+                    .frame(width: Self.avatarSize, height: Self.avatarSize)
+                    .background(Palette.elevated, in: Circle())
+                    .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
+                    .shadow(color: Palette.avatarShadow, radius: 4, x: 0, y: 1)
+                    // The avatar: a soft tap and a reaction, nothing else.
+                    .contentShape(Circle())
+                    .onTapGesture {
+                        guard !still else { return }
+                        haptic.impactOccurred()
+                        haptic.prepare()
+                        pokes += 1
+                    }
+                    .onAppear { if !still { haptic.prepare() } }
+                // The name tag, over the avatar's lower edge; wider than the
+                // avatar for a long name, cut at the end past about eight CJK
+                // characters.
+                CappedWidth(max: Self.nameWidth(for: dynamicTypeSize)) {
+                    Text(verbatim: name)
+                        .romeFont(12, .medium)
+                        .foregroundStyle(Palette.fg)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
-                .onAppear { if !still { haptic.prepare() } }
-                .zIndex(1)
-            VStack(spacing: 1) {
-                Text(verbatim: name)
-                    .romeFont(14, .semibold)
-                    .foregroundStyle(Palette.fg)
-                if let status {
-                    StatusLine(text: status, warning: activity == .needsYou, shimmers: busy && !reduceMotion)
-                }
+                .padding(.horizontal, Self.tagPadding.horizontal)
+                    .padding(.vertical, Self.tagPadding.vertical)
+                    .modifier(HeaderCapsule())
+                    .zIndex(1)
             }
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .padding(.horizontal, 12)
-            // Clear of the avatar's edge, which reaches `overlap` into the pill.
-            .padding(.top, Self.overlap + 1)
-            .padding(.bottom, 5)
-            .frame(minWidth: 72)
-            // Frosted like the composer, so what scrolls under blurs out.
-            .background(Palette.headerPillTint, in: Capsule())
-            .glassSurface(Capsule(), frost: Frost.composer)
-            // A new state switches at once: no resize or fade.
-            .transaction { $0.animation = nil }
+            if let status {
+                // The status in its own capsule: one muted line, cut at the end.
+                StatusLine(text: status, shimmers: busy && !reduceMotion)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .modifier(HeaderCapsule())
+                    .frame(maxWidth: Self.statusWidth)
+            }
         }
+        // A new status or name switches at once: no resize or fade. Only
+        // those changes: the mascot's blink, bob and reactions keep theirs.
+        .animation(nil, value: status)
+        .animation(nil, value: name)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: status.map { "\(name), \($0)" } ?? name))
         .accessibilityAddTraits(.isHeader)
@@ -399,18 +438,26 @@ struct ChatIdentity: View {
     }
 }
 
-/// The header's status line: small and muted, the warning colour while the
-/// Concierge waits on the guardian, and a faint left-to-right shimmer
-/// while it works.
+/// The surface of the header's name tag and status capsule: frosted like
+/// the composer and solid enough that rows scrolling under never show.
+private struct HeaderCapsule: ViewModifier {
+    func body(content: Content) -> some View {
+        content
+            .background(Palette.headerPillTint, in: Capsule())
+            .glassSurface(Capsule(), frost: Frost.composer)
+    }
+}
+
+/// The header's status line: small and muted in every state, with a faint
+/// left-to-right shimmer while the Concierge works.
 private struct StatusLine: View {
     let text: String
-    let warning: Bool
     let shimmers: Bool
 
     var body: some View {
         let line = Text(verbatim: text)
             .romeFont(12, .medium)
-            .foregroundStyle(warning ? Palette.warningText : Palette.sub)
+            .foregroundStyle(Palette.sub)
         if shimmers {
             line.overlay {
                 TimelineView(.animation) { context in
@@ -435,10 +482,12 @@ private struct StatusLine: View {
 /// A menu title cut to one line at the end. A system menu wraps a long
 /// title onto as many lines as it needs and ignores a line limit.
 enum MenuTitle {
-    /// The width a menu's section title gets on a phone, with room to spare.
-    static let width: CGFloat = 200
+    /// The width a menu's section title gets: a system menu is about 250 pt
+    /// wide on every phone and iPad and leaves about 190 pt for its title,
+    /// so this keeps a margin for heavier text settings.
+    static let width: CGFloat = 168
 
-    static func oneLine(_ title: String, width: CGFloat = width, font: UIFont = .preferredFont(forTextStyle: .footnote)) -> String {
+    static func oneLine(_ title: String, width: CGFloat = width, font: UIFont = .preferredFont(forTextStyle: .footnote, compatibleWith: UITraitCollection(legibilityWeight: .bold))) -> String {
         func fits(_ text: String) -> Bool {
             (text as NSString).size(withAttributes: [.font: font]).width <= width
         }
