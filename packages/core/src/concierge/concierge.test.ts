@@ -3918,6 +3918,19 @@ describe("Concierge status reactions", () => {
     expect(await reactionOf(s, "g1")).toBe(reaction);
   });
 
+  it("a turn a newer input supersedes keeps working, since its work carries into the next turn", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    // The `now` input's turn is already queued when the superseded one ends.
+    s.chats.activeTurns = () => ["superseding-turn"];
+    await finishTask(s, chatId, "interrupted");
+    expect(await reactionOf(s, "g1")).toBe("working");
+    s.chats.activeTurns = () => [];
+    await finishTask(s, chatId);
+    expect(await reactionOf(s, "g1")).toBe("done");
+  });
+
   it("a stopped task works again when it is given more words", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
