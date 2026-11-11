@@ -2,7 +2,8 @@ import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
-import { WebChatDashboardSessions } from "./sessions/dashboard-session-records.js";
+import { DashboardSessionRecords } from "./sessions/dashboard-session-records.js";
+import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
 import type { Admission } from "./chats/connected-accounts/admission.js";
@@ -209,7 +210,7 @@ import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
 import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
-import { privateOwnerOf } from "./webchat/privacy.js";
+import { privateChildren, privateOwnerOf } from "./webchat/privacy.js";
 import { ownerOfChat } from "./webchat/owner.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { continuationActor } from "./webchat/continuation-actor.js";
@@ -494,11 +495,15 @@ async function main() {
     channelsOn: (platform) => channelRecords.namesOn(platform),
   });
   const chatsEvents = new ChatsEvents();
-  // The dashboard's sessions, with each dashboard chat's lines in Chats.
+  // Every agent session's records, which the dashboard and the connections
+  // both write, with a private chat's children kept private to its owner.
+  const sessionRecords = new SessionRecords(db, privateChildren);
+  // The dashboard's sessions, with each dashboard chat's messages in Chats.
   const webchatRepo = new ChatsWebChatRepository(db, {
     chats: chatsWired.chats,
     lines: chatsWired.messages,
     links: chatsWired.links,
+    records: sessionRecords,
   });
   await webchatRepo.recoverInterruptedInputs();
   // Only turns within a day of the newest one, so the stopped process's turns
@@ -533,7 +538,7 @@ async function main() {
         adapters: chatsWired.adapters,
         // `builtChannels` is set further down, before any app runs.
         channel: (name) => builtChannels?.find((channel) => channel.name === name) ?? null,
-        open: (input) => openChannelChat({ webchatRepo, speakers: appSpeakers }, input),
+        open: (input) => openChannelChat({ records: sessionRecords, speakers: appSpeakers }, input),
       },
     },
     guardianProfile: appGuardianProfile({
@@ -1085,7 +1090,7 @@ async function main() {
 
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
   const chatTurns = createChatTurns();
-  const dashboardSessions = new WebChatDashboardSessions(webchatRepo);
+  const dashboardSessions = new DashboardSessionRecords(sessionRecords);
   const subagentCalls = createSubagentCalls({
     dashboard: dashboardSessions,
     turnLog: subagentTurnLog(webchatRepo),

@@ -1,6 +1,6 @@
 import { createBackendTurnRunner } from "../app-host/backend-turn.js";
 import { ChatSessionSettings } from "../webchat/chat-session-settings.js";
-import { WebChatDashboardSessions } from "../sessions/dashboard-session-records.js";
+import { DashboardSessionRecords } from "../sessions/dashboard-session-records.js";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { romeToolPorts } from "./rome-tool-ports.js";
 import { startAfter, testReceipt, testTurnHandle } from "../test/turn-handle.js";
@@ -2313,7 +2313,7 @@ describe("AgentRunner", () => {
   ) {
     const webchatRepo = new ChatsWebChatRepository(testDb.db);
     const subagentCalls = createSubagentCalls({
-      dashboard: new WebChatDashboardSessions(webchatRepo),
+      dashboard: new DashboardSessionRecords(webchatRepo),
       turnLog: subagentTurnLog(webchatRepo),
       liveTurns: subagentLiveTurns(createAgentTurnStreamRegistry()),
     });

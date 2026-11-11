@@ -1,6 +1,6 @@
 import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { appGuardianProfile } from "../app-host/guardian-profile.js";
-import { WebChatDashboardSessions } from "../sessions/dashboard-session-records.js";
+import { DashboardSessionRecords } from "../sessions/dashboard-session-records.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
@@ -670,7 +670,7 @@ export async function buildTestDeps(
   });
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
   const subagentCalls = createSubagentCalls({
-    dashboard: new WebChatDashboardSessions(webchatRepo),
+    dashboard: new DashboardSessionRecords(webchatRepo),
     turnLog: subagentTurnLog(webchatRepo),
     liveTurns: subagentLiveTurns(agentTurnStreamRegistry),
   });
@@ -714,7 +714,7 @@ export async function buildTestDeps(
       ensureChannelChat: (input) =>
         openChannelChat(
           {
-            webchatRepo,
+            records: webchatRepo,
             speakers: {
               chats: chatsWired.chats,
               adapters: chatsWired.adapters,

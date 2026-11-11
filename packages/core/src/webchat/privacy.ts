@@ -4,6 +4,7 @@
 
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import { type SQL, sql } from "drizzle-orm";
+import type { ChildSessionInheritance } from "../sessions/session-records.js";
 import { type ConciergeOwner, mainChatIdOf, ownerOf } from "./owner.js";
 
 /** The canonical id of the core agent behind the Concierge conversation. */
@@ -16,6 +17,12 @@ export const TASK_CHAT_TRIGGER_KIND = "concierge";
  * owner after the chat it came from is gone.
  */
 export const PRIVATE_CHILD_TRIGGER_KIND = "concierge_fork";
+
+/** A child session of a private chat is marked private to its owner. */
+export const privateChildren: ChildSessionInheritance = {
+  triggerKindUnder: (parent) =>
+    privateOwnerOf(parent) !== null ? PRIVATE_CHILD_TRIGGER_KIND : null,
+};
 
 export function isConciergeAgent(agentName: string | null | undefined): boolean {
   return agentName === CONCIERGE_AGENT_ID || agentName === "concierge";
