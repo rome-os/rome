@@ -10,6 +10,7 @@ import type {
 } from "../../../domain/model-port.js";
 import { createLogger } from "../../../../logger.js";
 import { AsyncMessageQueue } from "./async-message-queue.js";
+import { claudeStoppedTurnResult } from "./stop.js";
 
 const log = createLogger("anthropic-reopening-session");
 
@@ -22,6 +23,8 @@ export function createReopeningSession(args: {
   params: ModelSessionParams;
   first: ClaudeQuerySession;
   open(params: ModelSessionParams): Promise<ClaudeQuerySession>;
+  /** The provider id a stopped turn's result is accounted under. */
+  provider: string;
   reasoningEffort: string;
 }): ModelSession {
   const { params, open } = args;
@@ -33,12 +36,18 @@ export function createReopeningSession(args: {
   let reopening: Promise<void> | undefined;
   const outbox = new AsyncMessageQueue<ModelSessionEvent>();
 
-  /** The terminal of a turn whose query ended without giving one. */
+  /** The terminal of a turn whose query ended without giving one. A stop
+   *  Rome asked for ends as stopped, so its read inputs are handed on. */
   const lostTurnTerminal = (failure: unknown): ModelSessionEvent => {
     if (interrupted && failure === undefined) {
       return params.config.outputSchema
         ? { type: "error", error: "Claude structured-output turn was interrupted" }
-        : { type: "result", content: "", reasoningEffort: args.reasoningEffort };
+        : claudeStoppedTurnResult({
+            provider: args.provider,
+            model: params.config.model,
+            content: "",
+            reasoningEffort: args.reasoningEffort,
+          });
     }
     return {
       type: "error",
