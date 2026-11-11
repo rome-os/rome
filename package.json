@@ -34,6 +34,7 @@
     "lint:agents": "tsx lint/agents-symlinks.ts",
     "lint:imports": "tsx lint/import-rules.ts",
     "imports-of": "tsx scripts/imports-of.ts",
+    "preflight": "tsx scripts/preflight.ts",
     "lint:deadcode": "knip --no-config-hints",
     "lint:deadcode:report": "knip --no-exit-code",
     "typecheck:lint": "tsc -p lint",
