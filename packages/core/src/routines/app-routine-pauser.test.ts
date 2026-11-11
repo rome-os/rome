@@ -2,20 +2,21 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { createAppDomain, type AppDomain } from "./index.js";
+import { createAppDomain, type AppDomain } from "../apps/index.js";
 import {
   createEmptyLegacyArtifactBindings,
   formatArtifactId,
   type LegacyArtifactBindings,
-} from "./artifact-id.js";
-import { packArtifact } from "./packaging/index.js";
-import { installFirstPartyAppsAtBoot } from "./boot-upgrade.js";
-import { isResolvedApp } from "./state.js";
-import { ActionRegistryImpl } from "./actions/registry.js";
-import type { ActionEngine } from "./actions/engine.js";
+} from "../apps/artifact-id.js";
+import { packArtifact } from "../apps/packaging/index.js";
+import { installFirstPartyAppsAtBoot } from "../apps/boot-upgrade.js";
+import { isResolvedApp } from "../apps/state.js";
+import { ActionRegistryImpl } from "../apps/actions/registry.js";
+import type { ActionEngine } from "../apps/actions/engine.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
-import { RoutineEngine } from "../routines/engine.js";
+import { RoutineEngine } from "./engine.js";
+import { appRoutinePauser } from "./for-apps.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 
@@ -55,7 +56,7 @@ describe("AppManager routine lifecycle", () => {
     domain = createAppDomain({
       lockfilePath: join(root, "apps.lock.json"),
       installedRoot: join(root, "installed"),
-      routines: { legacyBindings, repository, engine },
+      pauseRoutines: appRoutinePauser({ legacyBindings, repository, engine }),
     });
     legacyBindings.action.legacy = formatArtifactId("app-a", "run");
     domain.catalog.subscribe((event) => {
@@ -178,7 +179,7 @@ describe("AppManager routine lifecycle", () => {
     const bootDomain = createAppDomain({
       lockfilePath: join(root, "apps.lock.json"),
       installedRoot: join(root, "installed"),
-      routines: {
+      pauseRoutines: appRoutinePauser({
         legacyBindings,
         repository,
         engine: {
@@ -186,7 +187,7 @@ describe("AppManager routine lifecycle", () => {
             await deactivateRoutine?.(id);
           },
         },
-      },
+      }),
     });
     await bootDomain.manager.boot();
     await bootDomain.manager.install({

@@ -21,7 +21,7 @@ import type { ActionResult } from "./actions/types.js";
 import type { DrizzleDb } from "../db/index.js";
 import { toRoutine } from "../db/repositories/routines.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
-import type { Routine } from "../routines/types.js";
+import type { Routine } from "@rome-os/app-runtime";
 import { createAppLogger, type Logger } from "../logger.js";
 import type { AppCatalog } from "./catalog.js";
 import type { ResolvedApp } from "./state.js";

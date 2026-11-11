@@ -234,7 +234,7 @@ import { EventSources } from "./events/event-sources.js";
 import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
-import { routineWorkerCalls } from "./routines/for-apps.js";
+import { appRoutinePauser, routineWorkerCalls } from "./routines/for-apps.js";
 import { instanceWorkerCalls } from "./instance/for-apps.js";
 import { agentWorkerCalls } from "./agent/index.js";
 import { chatWorkerCalls } from "./chats/for-apps.js";
@@ -710,7 +710,7 @@ async function main() {
     installedRoot: getProfileInstalledAppsDir(),
     bundleFetcher: appBundleFetcher,
     romeCloudListings,
-    routines: {
+    pauseRoutines: appRoutinePauser({
       repository: routinesRepo,
       legacyBindings: artifactIdentity.legacyBindings,
       engine: {
@@ -718,7 +718,7 @@ async function main() {
           await deactivateRoutine?.(id);
         },
       },
-    },
+    }),
   });
   const appStore = createAppStoreService({ appCatalog });
 
