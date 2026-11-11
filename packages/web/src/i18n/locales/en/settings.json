@@ -889,7 +889,7 @@
     "upgradeFailed": "Upgrade request failed: {{message}}",
     "upgradeFailedFallback": "Upgrade request failed.",
     "restartingTitle": "{{name}} is restarting",
-    "restartingBody": "Upgrading to {{version}}. This page will reload automatically when {{name}} is back online.",
+    "restartingBody": "Upgrading to {{version}}.",
     "restartTimeoutTitle": "The upgrade is taking longer than expected",
     "restartTimeoutBody": "{{name}} hasn't come back on {{version}} after {{minutes}} minutes. The upgrade may still be running, or it may have failed.",
     "restartTimeoutAction": "Check the instance status in Rome Cloud.",

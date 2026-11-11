@@ -2,6 +2,7 @@
 
 import { useRef, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
+import { RomeLogo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 
@@ -13,7 +14,7 @@ interface RomeConfirmDialogProps {
   confirmLabel: string;
   description?: string;
   destructive?: boolean;
-  // Overrides the default "R" brand badge above the title — e.g. a paired
+  // Overrides the default Rome logo above the title — e.g. a paired
   // Rome + integration lockup for a connect/disconnect dialog.
   icon?: ReactNode;
   onCancel: () => void;
@@ -51,11 +52,7 @@ export function RomeConfirmDialog({
     >
       <div>
         <div className="mb-2">
-          {icon ?? (
-            <div className="inline-flex h-8 w-8 items-center justify-center rounded-8 bg-primary text-badge text-primary-foreground">
-              R
-            </div>
-          )}
+          {icon ?? <RomeLogo className="block h-8 w-8 text-foreground" aria-hidden />}
         </div>
         <DialogTitle>{title}</DialogTitle>
         {description ? (
