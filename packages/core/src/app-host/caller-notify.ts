@@ -4,7 +4,8 @@
 // docs/architecture/notification-delivery.md.
 import type { SessionActor } from "../access/session-actor.js";
 import { WEBCHAT_CHANNEL } from "../webchat/dashboard-account.js";
-import { GUARDIAN_OWNER, recipientOf, type ConciergeOwner } from "../webchat/owner.js";
+import { recipientOf } from "../concierge/owners.js";
+import { GUARDIAN_OWNER, type ConciergeOwner } from "../webchat/owner.js";
 import type {
   NotifyContent,
   NotifyService,

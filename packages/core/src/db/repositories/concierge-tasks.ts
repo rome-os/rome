@@ -5,7 +5,8 @@ import { alias } from "drizzle-orm/sqlite-core";
 import type { DrizzleDb } from "../index.js";
 import type { ChatRef } from "../../chats/storage/place.js";
 import { MessageRepository } from "../../chats/storage/message-repository.js";
-import { GUARDIAN_OWNER, MAIN_CHAT_NAME, mainChatIdOf, ownerOf } from "../../webchat/owner.js";
+import { MAIN_CHAT_NAME, mainChatIdOf } from "../../concierge/main-chat.js";
+import { GUARDIAN_OWNER, ownerOf } from "../../webchat/owner.js";
 import { conciergeTasks, romeSessions } from "../schema.js";
 
 export type ConciergeTaskRow = typeof conciergeTasks.$inferSelect;

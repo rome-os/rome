@@ -38,20 +38,13 @@ import type { ConciergeActivityTracker } from "./activity.js";
 import type { ConciergeTasks } from "./tasks.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
-import {
-  type ConciergeOwner,
-  GUARDIAN_OWNER,
-  MAIN_CHAT_NAME,
-  mainChatIdOf,
-  ownerOf,
-  storedChatId,
-} from "../webchat/owner.js";
+import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../webchat/owner.js";
+import { isMainConciergeChat, MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
 import {
   CONCIERGE_AGENT_ID,
   canOpenChat,
   isConciergeAgent,
   isConciergeChat,
-  isMainConciergeChat,
   privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
 } from "../webchat/privacy.js";
