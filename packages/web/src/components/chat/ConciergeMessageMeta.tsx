@@ -5,6 +5,7 @@ import { TurnFeedbackButtons } from "@/components/chat/TurnFeedbackButtons";
 import { ReplyButton } from "@/components/chat/reply/ReplyButton";
 import type { ReplySource } from "@/components/chat/reply/reply-source";
 import { formatMessageTimestamp } from "@/lib/message-timestamp";
+import { useMessageActions } from "@/components/chat/message-actions";
 
 /**
  * A Concierge bubble's details: when it was sent, a copy button for its text,
@@ -31,7 +32,9 @@ export const ConciergeMessageMeta = memo(function ConciergeMessageMeta({
   onReply?: () => void;
   size?: "xs" | "sm";
 }) {
+  const showActions = useMessageActions();
   const timestamp = formatMessageTimestamp(createdAt);
+  if (!showActions) return null;
   if (!copyText && !feedbackTurn && !timestamp && !reply) return null;
   return (
     <div className="flex items-center">
