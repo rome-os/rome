@@ -1261,16 +1261,6 @@
         }
       }
     },
-    "Game over" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "游戏结束"
-          }
-        }
-      }
-    },
     "Get notified when Rome has something for you" : {
       "localizations" : {
         "zh-Hans" : {

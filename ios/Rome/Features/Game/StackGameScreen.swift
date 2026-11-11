@@ -58,7 +58,7 @@ struct StackGameScreen: View {
     static let dotSpacing: CGFloat = 24
     static let dotParallax: CGFloat = 0.35
     /// At the end: the mascot's tumble to the ground, the camera easing out
-    /// to the whole tower, and when "Game over" and then the bubble show.
+    /// to the whole tower, and when the end line and then the bubble show.
     static let tumbleTime: TimeInterval = 0.9
     static let fitDelay: TimeInterval = 0.5
     static let fitTime: TimeInterval = 0.9
@@ -72,8 +72,8 @@ struct StackGameScreen: View {
     /// Below the HUD: the fitted tower keeps under this share of the screen
     /// until the HUD has been measured.
     static let fitTopShare: CGFloat = 0.3
-    /// Between the HUD and the fitted tower: room for "Game over".
-    static let endLabelRoom: CGFloat = 52
+    /// Between the HUD and the fitted tower: room for the end line.
+    static let endLabelRoom: CGFloat = 60
 
     private var frozen: Bool { launch.sample != nil }
 
@@ -227,18 +227,11 @@ struct StackGameScreen: View {
                     slabLabel("skill").tag(StackGame.Tier.skill)
                     slabLabel("app").tag(StackGame.Tier.app)
                 }
-                // The ground: one line, then the Colosseum and a giant "Rome"
-                // under it, like a site footer's logo, dissolving into the ground.
+                // The ground: the Colosseum and a giant "Rome", like a site
+                // footer's logo, dissolving into the ground.
                 anchored(at: CGPoint(x: size.width / 2, y: layout.y(0)), alignment: .top) {
                     GroundArt(width: min(size.width, Metrics.readableWidth) - Metrics.pagePadding * 2)
                         .equatable()
-                }
-                anchored(at: CGPoint(x: size.width / 2, y: layout.y(0) + 18), alignment: .top) {
-                    Text("Rome wasn't built in a day.")
-                        .romeFont(13)
-                        .foregroundStyle(Palette.sub)
-                        .multilineTextAlignment(.center)
-                        .frame(width: min(fieldWidth - 48, 320))
                 }
                 if game.phase == .ready {
                     anchored(at: CGPoint(x: pose.center.x, y: pose.top - 6), alignment: .bottom) {
@@ -260,10 +253,14 @@ struct StackGameScreen: View {
                         // part of the frame worth a screenshot.
                         let towerTop = layout.y(CGFloat(game.tower.count) * StackGame.blockHeight)
                         let above = hudBottom ?? size.height * Self.fitTopShare - 24
-                        Text("Game over")
+                        // Two lines at most, centered, where a narrow window needs them.
+                        Text("Rome wasn't built in a day.")
                             .romeFont(18, .semibold)
                             .foregroundStyle(Palette.fg)
-                            .fixedSize()
+                            .multilineTextAlignment(.center)
+                            .lineLimit(2)
+                            .frame(maxWidth: min(size.width - 48, 360))
+                            .fixedSize(horizontal: false, vertical: true)
                             .position(x: size.width / 2, y: (above + towerTop) / 2)
                             .opacity(reduceMotion ? 1 : min((age - Self.toastFrom) / 0.3, 1))
                             .accessibilityHidden(true)
@@ -664,8 +661,8 @@ struct GroundArt: View, Equatable {
     /// The tall part of the Colosseum rises this many cap heights, when the
     /// ground has the room.
     static let wallHeight: CGFloat = 1.7
-    /// The letters' tops sit this far under the ground's edge, under its line.
-    static let letterTop: CGFloat = 60
+    /// The letters' tops sit this far under the ground's edge.
+    static let letterTop: CGFloat = 34
     /// The Colosseum stops this far under the ground's edge.
     static let wallTop: CGFloat = 6
 

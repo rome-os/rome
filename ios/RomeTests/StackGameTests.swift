@@ -1,6 +1,8 @@
 import CoreGraphics
 import Foundation
+import SwiftUI
 import Testing
+import UIKit
 @testable import Rome
 
 @Suite struct StackGameTests {
@@ -269,5 +271,34 @@ import Testing
         #expect(StackFace.glance(at: 0.2) == StackFace.glance(at: 1.7))
         #expect(StackFace.eyes(at: 3.65) < 1)
         #expect(StackFace.glance(at: 2) != StackFace.glance(at: 0))
+    }
+}
+
+/// A closed game costs the app nothing: its screen, with its timeline,
+/// haptic generators and drawing, goes when the cover goes.
+@MainActor
+@Suite struct StackGameLifecycleTests {
+    @Test func aClosedGameIsFreed() async throws {
+        weak var closedHost: UIViewController?
+        weak var closedView: UIView?
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        do {
+            let host = UIHostingController(rootView: StackGameScreen(launch: StackGameLaunch(), onClose: {}).environment(AppModel()))
+            let window = UIWindow(windowScene: scene)
+            window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+            window.rootViewController = host
+            window.isHidden = false
+            host.view.layoutIfNeeded()
+            // Open long enough for the timeline to run and the art to draw.
+            try await Task.sleep(for: .milliseconds(500))
+            closedHost = host
+            closedView = host.view
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+        }
+        try await Task.sleep(for: .milliseconds(500))
+        #expect(closedHost == nil)
+        #expect(closedView == nil)
     }
 }
