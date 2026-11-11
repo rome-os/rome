@@ -92,6 +92,11 @@ final class FakeBackend: RomeBackend {
         topicChats.removeAll { $0.id == id }
     }
 
+    func deleteChat(_ id: String) async throws {
+        calls.append("delete \(id)")
+        topicChats.removeAll { $0.id == id }
+    }
+
     /// Share links: what each create asked for, the answer it gets, the
     /// chat's links, and the revokes, in order.
     var shareRequests: [(sessionId: String, turnIds: [String], agentName: String?)] = []

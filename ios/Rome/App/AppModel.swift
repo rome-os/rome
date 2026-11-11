@@ -271,9 +271,47 @@ final class Workspace {
     @discardableResult
     func archiveTopic(_ chatId: String) async -> Bool {
         guard (try? await backend.archiveChat(chatId)) != nil else { return false }
+        dropTopic(chatId)
+        return true
+    }
+
+    /// Deletes a topic chat and drops it from the drawer. Returns whether the
+    /// server took it.
+    @discardableResult
+    func deleteTopic(_ chatId: String) async -> Bool {
+        guard (try? await backend.deleteChat(chatId)) != nil else { return false }
+        dropTopic(chatId)
+        // Its open tasks now belong to the main Chat.
+        tasks.resync()
+        return true
+    }
+
+    private func dropTopic(_ chatId: String) {
         topics.remove(chatId)
         topicStores.removeValue(forKey: chatId)?.stop()
+    }
+
+    /// Archives a task chat and drops it from the task list and the cards.
+    /// Returns whether the server took it.
+    @discardableResult
+    func archiveTaskChat(_ chatId: String) async -> Bool {
+        guard (try? await backend.archiveChat(chatId)) != nil else { return false }
+        dropTaskChat(chatId)
         return true
+    }
+
+    /// Deletes a task chat and drops it from the task list and the cards.
+    /// Returns whether the server took it.
+    @discardableResult
+    func deleteTaskChat(_ chatId: String) async -> Bool {
+        guard (try? await backend.deleteChat(chatId)) != nil else { return false }
+        dropTaskChat(chatId)
+        return true
+    }
+
+    private func dropTaskChat(_ chatId: String) {
+        tasks.forget(chat: chatId)
+        taskStores.removeValue(forKey: chatId)?.stop()
     }
 
     /// A tapped push for a topic chat: its newest rows, fetched again.

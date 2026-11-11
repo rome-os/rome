@@ -33,6 +33,8 @@ protocol RomeBackend: AnyObject, Sendable {
     func renameChat(_ id: String, to name: String) async throws
     /// Archives a chat; a Concierge topic chat retires with it.
     func archiveChat(_ id: String) async throws
+    /// Deletes a chat for good; a Concierge topic chat retires with it.
+    func deleteChat(_ id: String) async throws
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn
     /// A send from a chat thread: it lands in that thread.
@@ -131,6 +133,10 @@ final class LiveBackend: RomeBackend {
 
     func archiveChat(_ id: String) async throws {
         try await client.patch("/chat/sessions/\(escape(id))/archive", json: .object(["archived": .bool(true)]))
+    }
+
+    func deleteChat(_ id: String) async throws {
+        try await client.delete("/chat/sessions/\(escape(id))")
     }
 
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {

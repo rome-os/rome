@@ -783,16 +783,6 @@
         }
       }
     },
-    "Copy link" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "复制链接"
-          }
-        }
-      }
-    },
     "Could not check the connection" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1019,6 +1009,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "调试"
+          }
+        }
+      }
+    },
+    "Delete" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除"
+          }
+        }
+      }
+    },
+    "Delete this chat?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除这个聊天？"
           }
         }
       }
@@ -1967,16 +1977,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开导航"
-          }
-        }
-      }
-    },
-    "Open on the web" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 Web 中打开"
           }
         }
       }
@@ -3199,6 +3199,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这个 Rome 还没准备好"
+          }
+        }
+      }
+    },
+    "This can't be undone." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此操作无法撤销。"
           }
         }
       }

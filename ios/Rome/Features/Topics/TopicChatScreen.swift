@@ -11,7 +11,7 @@ struct TopicChatScreen: View {
     let onMenu: () -> Void
     let onTasks: (String?) -> Void
     let onOpenChat: (String, String) -> Void
-    /// The chat was archived: the shell shows the main Chat.
+    /// The chat was archived or deleted: the shell shows the main Chat.
     let onArchived: () -> Void
     let onCreated: (String) -> Void
 
@@ -22,6 +22,7 @@ struct TopicChatScreen: View {
     @State private var startFailed = false
     @State private var startingImages: [ComposerImage] = []
     @State private var renaming = false
+    @State private var confirmDelete = false
     @State private var newName = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
@@ -59,12 +60,13 @@ struct TopicChatScreen: View {
                     onMenu()
                 },
                 onTasks: { onTasks(chatId) },
-                // A blank chat has nothing to rename or archive yet.
+                // A blank chat has nothing to rename, archive or delete yet.
                 onRename: chatId == nil ? nil : {
                     newName = title
                     renaming = true
                 },
-                onArchive: chatId.map { id in { archive(id) } }
+                onArchive: chatId.map { id in { archive(id) } },
+                onDelete: chatId == nil ? nil : { confirmDelete = true }
             )
             .shareModeHeader(store?.share)
             .accessibilityHidden(store?.thread != nil)
@@ -86,6 +88,10 @@ struct TopicChatScreen: View {
                 let name = newName
                 Task { await workspace.renameTopic(chatId, to: name) }
             }
+        }
+        .deleteChatAlert(isPresented: $confirmDelete) {
+            guard let chatId else { return }
+            Task { if await workspace.deleteTopic(chatId) { onArchived() } }
         }
         .pageBackground()
         .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onThread: { store?.reopenThread($0) })

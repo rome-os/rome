@@ -244,6 +244,9 @@ struct ConciergeRow: View {
             if !inThread {
                 ThreadRepliesLine(count: count, guardian: guardian) { store.openThread(at: messageId, toReply: false) }
             }
+        case .taskCard(_, let chatId, _, _) where tasks.isGone(chat: chatId):
+            // Archived or deleted from this app.
+            EmptyView()
         case .taskCard(_, let chatId, let title, let latest):
             let name = tasks.title(forChat: chatId, fallback: title)
             VStack(alignment: .leading, spacing: 8) {
@@ -292,6 +295,7 @@ struct ChatHeader: View {
     /// A topic chat's options in the "…" menu, below Tasks.
     var onRename: (() -> Void)? = nil
     var onArchive: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
 
     var body: some View {
         // The row is as tall as the identity with its name alone, so the
@@ -302,7 +306,7 @@ struct ChatHeader: View {
                 MenuGlyph()
             }
             ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces) }
-            ChatMoreMenu(title: menuTitle ?? "", onTasks: onTasks, onRename: onRename, onArchive: onArchive)
+            ChatMoreMenu(title: menuTitle ?? "", onTasks: onTasks, onRename: onRename, onArchive: onArchive, onDelete: onDelete)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -510,6 +514,7 @@ struct ChatMoreMenu: View {
     let onTasks: () -> Void
     var onRename: (() -> Void)? = nil
     var onArchive: (() -> Void)? = nil
+    var onDelete: (() -> Void)? = nil
     @Environment(\.chatShare) private var share
 
     var body: some View {
@@ -523,6 +528,9 @@ struct ChatMoreMenu: View {
                 if let onArchive {
                     // Not red: an archived chat can come back.
                     Button(action: onArchive) { Label("Archive", systemImage: "archivebox") }
+                }
+                if let onDelete {
+                    Button(role: .destructive, action: onDelete) { Label("Delete", systemImage: "trash") }
                 }
                 ChatShareMenuItems(share: share)
             } header: {

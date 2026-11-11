@@ -166,6 +166,10 @@ final class DemoBackend: RomeBackend {
         topicChats.removeAll { $0.id == id }
     }
 
+    func deleteChat(_ id: String) async throws {
+        try await archiveChat(id)
+    }
+
     func messages(sessionId: String, before: String?, limit: Int) async throws -> MessagePage {
         try await pause(0.3)
         // Pages from the newest back, as the server does; the cursor is the

@@ -9,13 +9,13 @@ struct TaskChatScreen: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var model
-    @Environment(\.openInstancePage) private var openInstancePage
     /// Kept on the workspace, so a failed send's bubble and Retry are still
     /// there when the guardian comes back, and the draft waits for it to load.
     private var store: TranscriptStore { workspace.taskStore(chatId) }
     @State private var draft = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
+    @State private var confirmDelete = false
 
     private var title: String { workspace.tasks.title(forChat: chatId, fallback: initialTitle) }
 
@@ -71,6 +71,13 @@ struct TaskChatScreen: View {
         }
         // Keep the swipe-back gesture with a hidden navigation bar.
         .background(SwipeBackEnabler())
+        .deleteChatAlert(isPresented: $confirmDelete) {
+            Task { if await workspace.deleteTaskChat(chatId) { dismiss() } }
+        }
+    }
+
+    private func archive() {
+        Task { if await workspace.archiveTaskChat(chatId) { dismiss() } }
     }
 
     private var header: some View {
@@ -95,15 +102,9 @@ struct TaskChatScreen: View {
             .frame(maxWidth: .infinity)
             .animation(.easeInOut(duration: 0.25), value: spinning)
             Menu {
-                Button {
-                    if let origin = model.webURL { openInstancePage(InstancePages.chat(origin: origin, sessionId: chatId)) }
-                } label: {
-                    Label("Open on the web", systemImage: "globe")
-                }
-                Button {
-                    UIPasteboard.general.url = model.webURL.map { InstancePages.chat(origin: $0, sessionId: chatId) }
-                } label: {
-                    Label("Copy link", systemImage: "link")
+                Button(action: archive) { Label("Archive", systemImage: "archivebox") }
+                Button(role: .destructive) { confirmDelete = true } label: {
+                    Label("Delete", systemImage: "trash")
                 }
                 ChatShareMenuItems(share: store.share)
             } label: {

@@ -53,6 +53,9 @@ final class TasksStore {
     private var refreshingChats = false
     private var resyncWork: Task<Void, Never>?
     private var resyncAgain = false
+    /// Task chats archived or deleted from this app. Their rows stay on the
+    /// server, so a refetch would bring them back; they stay out of the list.
+    private var goneChats: Set<String> = []
 
     init(backend: RomeBackend) {
         self.backend = backend
@@ -84,7 +87,7 @@ final class TasksStore {
     func refresh() async {
         async let taskList = try? backend.tasks()
         async let sessionList = try? backend.sessions()
-        if let list = await taskList { tasks = list }
+        if let list = await taskList { tasks = list.filter { !isGone($0) } }
         if let list = await sessionList {
             chats = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         }
@@ -141,7 +144,20 @@ final class TasksStore {
     func apply(_ task: ConciergeTask) {
         if let held = tasks.first(where: { $0.id == task.id }), held.updatedAt > task.updatedAt { return }
         tasks.removeAll { $0.id == task.id }
-        if task.archivedAt == nil { tasks.append(task) }
+        if task.archivedAt == nil, !isGone(task) { tasks.append(task) }
+    }
+
+    /// A task chat archived or deleted here: its row and its cards leave.
+    func forget(chat chatId: String) {
+        goneChats.insert(chatId)
+        tasks.removeAll { $0.chat?.id == chatId }
+    }
+
+    /// Whether task chat `chatId` was archived or deleted here.
+    func isGone(chat chatId: String) -> Bool { goneChats.contains(chatId) }
+
+    private func isGone(_ task: ConciergeTask) -> Bool {
+        task.chat.map { goneChats.contains($0.id) } ?? false
     }
 
     /// The groups, in order, without empty ones. Finished rows older than seven
