@@ -171,20 +171,31 @@ describe("Markdown semantic tokens", () => {
     }
   });
 
-  it("sets message prose with small headings, a lighter bold and a tighter rhythm", () => {
+  it("sets message prose with small headings, a loose line and a block gap on the grid", () => {
     const message = declarations(markdownCss, ".rome-markdown-message");
+    expectToken(message, "body-line-height", "var(--rome-line-height-175)");
     expectToken(message, "heading-1-font-size", "var(--rome-font-size-17)");
-    expectToken(message, "heading-2-font-size", "var(--rome-font-size-16)");
+    expectToken(message, "heading-2-font-size", "var(--rome-font-size-17)");
     expectToken(message, "heading-3-font-size", "var(--rome-font-size-16)");
-    expectToken(message, "strong-font-weight", "500");
-    expectToken(message, "body-line-height", "var(--rome-line-height-140)");
-    expectToken(message, "block-space-between", "var(--rome-space-3)");
-    // The body keeps its size: a message reads at the same size as other prose.
+    expectToken(message, "block-space-between", "var(--rome-space-4)");
+    expectToken(message, "heading-2-space-before", "var(--rome-space-6)");
+    expectToken(message, "heading-2-space-after", "var(--rome-space-2)");
+    expectToken(message, "heading-3-space-before", "var(--rome-space-5)");
+    expectToken(message, "list-item-gap", "var(--rome-space-1)");
+    // The body keeps its size, and bold keeps the heading weight.
     expect(message).not.toContain("--markdown-body-font-size");
+    expect(message).not.toContain("--markdown-strong-font-weight");
     expectToken(normal, "strong-font-weight", "600");
+    expectToken(normal, "list-item-gap", "var(--rome-space-0)");
     expect(
-      declarations(markdownCss, '.rome-markdown :is(strong, [data-streamdown="strong"])'),
+      declarations(markdownCss, '.rome-markdown :is(strong, b, [data-streamdown="strong"])'),
     ).toContain("font-weight: var(--markdown-strong-font-weight);");
+    expect(
+      declarations(
+        markdownCss,
+        '.rome-markdown [data-streamdown="list-item"] + [data-streamdown="list-item"]',
+      ),
+    ).toContain("margin-block-start: var(--markdown-list-item-gap);");
   });
 
   it("rebinds the same tokens for compact mode", () => {
