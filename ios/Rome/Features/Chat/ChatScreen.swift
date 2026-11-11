@@ -8,7 +8,8 @@ let transcriptScrollLog = Logger(subsystem: "cc.romeos.mobile", category: "Trans
 struct ChatScreen: View {
     let workspace: Workspace
     let onMenu: () -> Void
-    let onTasks: () -> Void
+    /// The header's mascot was tapped: the Agent page.
+    let onAgent: () -> Void
     let onOpenChat: (String, String) -> Void
     /// Chat is the page in front, with nothing pushed over it.
     var visible = true
@@ -41,7 +42,7 @@ struct ChatScreen: View {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     onMenu()
-                }, onTasks: onTasks)
+                }, onAgent: onAgent, zoomSource: AgentZoom.source(conciergeChatID))
                 .shareModeHeader(store.share)
                 banners
             }
@@ -60,8 +61,8 @@ struct ChatScreen: View {
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
         .composerDraft(workspace.drafts, chat: workspace.concierge.sessionId, text: $draft, attachments: attachments, transcript: workspace.concierge, onThread: { store.reopenThread($0) }, prefill: Binding(
-            get: { workspace.composerPrefill },
-            set: { workspace.composerPrefill = $0 }
+            get: { workspace.composerPrefills[conciergeChatID] },
+            set: { workspace.composerPrefills[conciergeChatID] = $0 }
         )) { composerFocused = true }
         .toolbar(.hidden, for: .navigationBar)
         #if DEBUG
@@ -291,8 +292,11 @@ struct ChatHeader: View {
     /// The chat is the one on screen: its status changes are read out.
     var announces = false
     let onMenu: () -> Void
-    let onTasks: () -> Void
-    /// A topic chat's options in the "…" menu, below Tasks.
+    /// The mascot was tapped: the Agent page.
+    let onAgent: () -> Void
+    /// The avatar the Agent page zooms out of.
+    var zoomSource: String? = nil
+    /// A topic chat's options in the "…" menu.
     var onRename: (() -> Void)? = nil
     var onArchive: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
@@ -305,8 +309,8 @@ struct ChatHeader: View {
             GlassCircleButton(accessibilityLabel: "Open navigation", action: onMenu) {
                 MenuGlyph()
             }
-            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces) }
-            ChatMoreMenu(title: menuTitle ?? "", onTasks: onTasks, onRename: onRename, onArchive: onArchive, onDelete: onDelete)
+            ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces, zoomSource: zoomSource, onTap: onAgent) }
+            ChatMoreMenu(title: menuTitle ?? "", onRename: onRename, onArchive: onArchive, onDelete: onDelete)
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -328,11 +332,15 @@ struct ChatIdentity: View {
     /// (the header below a thread does it, not the copy over it).
     var announces = false
 
+    /// The avatar the Agent page zooms out of.
+    var zoomSource: String? = nil
+    /// After the poke: the Agent page.
+    var onTap: (() -> Void)? = nil
+
     @State private var pokes = 0
-    @State private var streak = TapStreak()
     @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(AppModel.self) private var model
+    @Environment(\.agentZoom) private var agentZoom
 
     /// What VoiceOver reads when the status changes: nothing for a chat
     /// that is not the one on screen.
@@ -393,17 +401,16 @@ struct ChatIdentity: View {
                     .background(Palette.elevated, in: Circle())
                     .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
                     .shadow(color: Palette.avatarShadow, radius: 4, x: 0, y: 1)
-                    // The avatar: a soft tap and a reaction, nothing else.
+                    // The Agent page grows out of the avatar.
+                    .agentZoomSource(still ? nil : zoomSource, in: agentZoom)
+                    // The avatar: a soft tap, a reaction, then the Agent page.
                     .contentShape(Circle())
                     .onTapGesture {
                         guard !still else { return }
                         haptic.impactOccurred()
                         haptic.prepare()
                         pokes += 1
-                        // Ten quick taps in a row open the stacking game.
-                        if streak.tap(at: CACurrentMediaTime()) {
-                            model.stackGame = StackGameLaunch()
-                        }
+                        onTap?()
                     }
                     .onAppear { if !still { haptic.prepare() } }
                 // The name tag, over the avatar's lower edge; wider than the
@@ -438,7 +445,8 @@ struct ChatIdentity: View {
         .animation(nil, value: name)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: status.map { "\(name), \($0)" } ?? name))
-        .accessibilityAddTraits(.isHeader)
+        .accessibilityAddTraits(still || onTap == nil ? .isHeader : [.isHeader, .isButton])
+        .accessibilityAction { if !still { onTap?() } }
         .onChange(of: status) { _, line in
             // Read out politely, as the web's live region is.
             guard let line = Self.announcement(line, announces: announces) else { return }
@@ -515,10 +523,10 @@ enum MenuTitle {
 }
 
 /// A Concierge chat's "…" button: a topic chat's title in small grey text
-/// on top, then Tasks, the chat's own options, and Shared links.
+/// on top, then the chat's own options and Shared links. Tasks are on the
+/// Agent page, from the mascot.
 struct ChatMoreMenu: View {
     let title: String
-    let onTasks: () -> Void
     var onRename: (() -> Void)? = nil
     var onArchive: (() -> Void)? = nil
     var onDelete: (() -> Void)? = nil
@@ -527,8 +535,6 @@ struct ChatMoreMenu: View {
     var body: some View {
         Menu {
             Section {
-                // No count: task progress is not reported accurately enough to badge.
-                Button(action: onTasks) { Label("Tasks", systemImage: "checklist") }
                 if let onRename {
                     Button(action: onRename) { Label("Rename", systemImage: "pencil") }
                 }

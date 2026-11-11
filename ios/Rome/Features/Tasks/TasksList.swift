@@ -1,33 +1,17 @@
 import SwiftUI
 
-/// Board 5: the Concierge's tasks, grouped by what they need from the guardian.
-struct TasksSheet: View {
+/// Board 5: the Concierge's tasks in one chat, grouped by what they need
+/// from the guardian. The Agent page's Tasks tab.
+struct TasksList: View {
     let store: TasksStore
     /// The Concierge chat whose tasks it lists: the main chat or a topic chat.
     let chatId: String
     let onOpen: (ConciergeTask) -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @State private var showAllDone = false
 
     var body: some View {
         VStack(spacing: 0) {
-            Capsule()
-                .fill(Palette.grabber)
-                .frame(width: 36, height: 5)
-                .padding(.top, 7)
-            HStack {
-                Text("Tasks")
-                    .romeFont(24, .bold)
-                    .tracking(-0.6)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
-                SheetCloseButton { dismiss() }
-            }
-            .padding(.leading, 20)
-            .padding(.trailing, 12)
-            .frame(height: 54)
-
             let groups = store.groups(inChat: chatId, showAllDone: showAllDone)
             if !store.loaded {
                 Spacer()
@@ -51,7 +35,7 @@ struct TasksSheet: View {
                 .scrollIndicators(.hidden)
             }
         }
-        .background(Palette.sheet.ignoresSafeArea())
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { await store.refresh() }
     }
 

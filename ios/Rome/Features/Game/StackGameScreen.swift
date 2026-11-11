@@ -2,12 +2,14 @@ import SwiftUI
 import UIKit
 
 /// How the game was opened: from the update page, which keeps its status
-/// in a strip at the top, or from the chat header's mascot.
+/// in a strip at the top, or from the Agent page's mascot.
 struct StackGameLaunch: Identifiable, Equatable {
     enum Sample: Equatable { case start, playing, over }
 
     let id = UUID()
     var fromUpdate = false
+    /// Opened from the Agent page: its name, which the way back names.
+    var backTo: String? = nil
     /// A fixed game for the snapshot runner: nothing moves and the best
     /// score on this device is neither read nor written.
     var sample: Sample? = nil
@@ -604,9 +606,11 @@ struct StackGameScreen: View {
     // MARK: Over the field
 
     /// Where closing goes: the update page while it still covers the app,
-    /// else the chat.
+    /// the Agent page it was opened from, else the chat.
     private var backTitle: LocalizedStringKey {
-        launch.fromUpdate && model.update.blocking ? "Back to update" : "Back to chat"
+        if launch.fromUpdate && model.update.blocking { return "Back to update" }
+        if let backTo = launch.backTo { return "Back to \(backTo)" }
+        return "Back to chat"
     }
 
     private var topBar: some View {

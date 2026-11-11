@@ -153,9 +153,10 @@ final class Workspace {
     }
     /// A Chat message to scroll to and highlight, set from the Tasks sheet.
     var focusMessageID: String?
-    /// A prompt for the main Chat's composer, unsent; Chat takes it once its
-    /// draft is restored, and clears it.
-    var composerPrefill: String?
+    /// Prompts for chats' composers, unsent, by the chat's draft key (the
+    /// main Chat's is `conciergeChatID`); a chat takes its own once its draft
+    /// is restored, and clears it.
+    var composerPrefills: [String: String] = [:]
     /// Goes up when Chat must show its newest rows: a tapped push.
     private(set) var latestRequest = 0
 

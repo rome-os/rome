@@ -46,9 +46,12 @@ struct MainShell: View {
     @State private var drawerOpen = false
     /// Marks this view as the one that set the chat on screen.
     @State private var screenID = UUID()
-    @State private var showTasks = false
-    /// The Concierge chat whose tasks the sheet lists.
-    @State private var tasksChatId = conciergeChatID
+    /// The Agent page, opened from a chat header's mascot.
+    @State private var agentPage: AgentRoute?
+    /// The Agent page's last tab, kept while the instance is open.
+    @State private var agentTab: AgentTab = .uses
+    /// Where the Agent page finds the avatar it zooms out of.
+    @Namespace private var agentZoom
     /// A blank topic chat that started its chat keeps its view under the new id.
     @State private var startedTopics: [String: UUID] = [:]
     @State private var showSettings = false
@@ -58,7 +61,6 @@ struct MainShell: View {
     /// A page opened from Settings, in a sheet over that sheet.
     @State private var settingsPage: URL?
     #if DEBUG
-    @State private var sheetPreview = false
     @State private var settingsPreview = false
     @State private var photoViewerPreview = false
     @State private var pagePreview: URL?
@@ -119,6 +121,7 @@ struct MainShell: View {
                     }
                 }
                 .environment(\.chatLinkOpener, openChatLink)
+                .environment(\.agentZoom, agentZoom)
                 .environment(\.visibleChat, visibleChat)
                 .instancePageSheet(workspace: workspace, url: $page)
                 .environment(\.isVisitor, workspace.isVisitor)
@@ -129,32 +132,21 @@ struct MainShell: View {
                 .frame(width: geometry.size.width - column, height: geometry.size.height + geometry.safeAreaInsets.top + geometry.safeAreaInsets.bottom)
             }
         }
-        .sheet(isPresented: $showTasks) {
-            TasksSheet(store: workspace.tasks, chatId: tasksChatId) { task in
-                openTask(task)
-            }
-            .presentationDetents([.medium, .large])
-            .presentationDragIndicator(.hidden)
-            .presentationCornerRadius(22)
-            .presentationBackground(Palette.sheet)
+        .fullScreenCover(item: $agentPage) { route in
+            AgentPage(workspace: workspace, route: route, tab: $agentTab, onUse: { prompt in
+                // Into this chat's composer, unsent, as the page closes.
+                agentPage = nil
+                workspace.composerPrefills[route.composerKey] = prompt
+            }, onOpenTask: openTask, onClose: { agentPage = nil })
+            .environment(model)
+            .presentationBackground(Palette.bg)
+            .agentZoomTransition(route.zoomSource, in: agentZoom)
         }
         .sheet(isPresented: $showSettings) {
             settingsSheet
         }
         #if DEBUG
         .overlay {
-            if sheetPreview {
-                // Snapshot runs only: the system sheet cannot be captured on Mac Catalyst,
-                // so show its content in the same frame a large-detent sheet has.
-                ZStack(alignment: .bottom) {
-                    Color.black.ignoresSafeArea()
-                    TasksSheet(store: workspace.tasks, chatId: tasksChatId) { _ in }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity)
-                        .clipShape(UnevenRoundedRectangle(topLeadingRadius: 22, topTrailingRadius: 22, style: .continuous))
-                        .padding(.top, 64)
-                }
-                .ignoresSafeArea()
-            }
             if photoViewerPreview {
                 // Snapshot runs only: the viewer in place of its full-screen cover.
                 PhotoViewer(images: [.markdown(ImageSource(src: "/projects/demo/trip/hotel.jpg"), alt: "河原町酒店外观", src: "/projects/demo/trip/hotel.jpg", position: 0)], start: 0)
@@ -195,12 +187,14 @@ struct MainShell: View {
         // Whatever covers or replaces the chat takes the keyboard with it;
         // the composer keeps its text.
         .onChange(of: path) { Keyboard.dismiss() }
-        .onChange(of: showTasks) { _, shown in if shown { Keyboard.dismiss() } }
+        .onChange(of: agentPage) { _, shown in if shown != nil { Keyboard.dismiss() } }
+        // The banner that offers a sign-in must not be covered.
+        .onChange(of: model.sessionExpired) { _, expired in if expired { agentPage = nil } }
         .onChange(of: showSettings) { _, shown in if shown { Keyboard.dismiss() } }
         .onChange(of: page) { _, shown in if shown != nil { Keyboard.dismiss() } }
         // A tapped push for this instance: its chat in front, nothing over it.
         .onChange(of: model.chatRequest) { _, request in
-            showTasks = false
+            agentPage = nil
             showSettings = false
             page = nil
             settingsPage = nil
@@ -216,8 +210,9 @@ struct MainShell: View {
             case .drawer(let open):
                 // Pinned, the drawer stays on screen in every capture.
                 if !usesSidebar { open ? openDrawer() : closeDrawer() }
-            case .tasks(let show):
-                if SnapshotRunner.directory != nil { sheetPreview = show } else { showTasks = show }
+            case .agent(let tab):
+                if let tab { agentTab = tab }
+                agentPage = tab == nil ? nil : AgentRoute(tasksChatId: conciergeChatID, composerKey: conciergeChatID)
             case .route(let routes):
                 show(.chat)
                 path = routes
@@ -298,10 +293,7 @@ struct MainShell: View {
             ChatScreen(
                 workspace: workspace,
                 onMenu: { toggleNavigation() },
-                onTasks: {
-                    tasksChatId = conciergeChatID
-                    showTasks = true
-                },
+                onAgent: { agentPage = AgentRoute(tasksChatId: conciergeChatID, composerKey: conciergeChatID) },
                 onOpenChat: { chatId, title in path.append(.taskChat(chatId: chatId, title: title)) },
                 // The same answer the server watch and push banners go by: a
                 // sheet, the drawer or a pushed page over Chat hides it.
@@ -325,7 +317,7 @@ struct MainShell: View {
                 }, onStart: { prompt in
                     // The main Chat, with the prompt in its composer to edit.
                     show(.chat)
-                    workspace.composerPrefill = prompt
+                    workspace.composerPrefills[conciergeChatID] = prompt
                 })
             case .search:
                 SearchScreen(workspace: workspace, onMenu: { toggleNavigation() }) { hit in
@@ -347,10 +339,9 @@ struct MainShell: View {
             chatId: chatId,
             draftKey: draftKey,
             onMenu: { toggleNavigation() },
-            onTasks: { id in
-                // A blank chat has no tasks yet; its sheet shows the empty state.
-                tasksChatId = id ?? ""
-                showTasks = true
+            onAgent: { id in
+                // A blank chat has no tasks yet; its Tasks tab shows the empty state.
+                agentPage = AgentRoute(tasksChatId: id ?? "", composerKey: id ?? draftKey)
             },
             onOpenChat: { id, title in path.append(.taskChat(chatId: id, title: title)) },
             onArchived: { show(.chat) },
@@ -409,7 +400,7 @@ struct MainShell: View {
     }
 
     private func openTask(_ task: ConciergeTask) {
-        showTasks = false
+        agentPage = nil
         Task {
             try? await Task.sleep(for: .milliseconds(250))
             if let chat = task.chat {
@@ -427,7 +418,7 @@ struct MainShell: View {
 
     /// The chat on screen, by its store's id.
     private var visibleChat: String? {
-        Self.visibleChat(section: section, path: path, covered: drawerOpen || showTasks || showSettings || page != nil || workspace.sharingCoversChat)
+        Self.visibleChat(section: section, path: path, covered: drawerOpen || agentPage != nil || showSettings || page != nil || workspace.sharingCoversChat)
     }
 
     /// The chat on screen: none while something covers the page (the drawer,

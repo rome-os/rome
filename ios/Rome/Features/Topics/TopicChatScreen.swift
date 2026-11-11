@@ -9,7 +9,8 @@ struct TopicChatScreen: View {
     /// Whose draft the composer keeps: the chat, or the blank chat until it exists.
     let draftKey: String
     let onMenu: () -> Void
-    let onTasks: (String?) -> Void
+    /// The header's mascot was tapped: the Agent page, for this chat.
+    let onAgent: (String?) -> Void
     let onOpenChat: (String, String) -> Void
     /// The chat was archived or deleted: the shell shows the main Chat.
     let onArchived: () -> Void
@@ -59,7 +60,8 @@ struct TopicChatScreen: View {
                     composerFocused = false
                     onMenu()
                 },
-                onTasks: { onTasks(chatId) },
+                onAgent: { onAgent(chatId) },
+                zoomSource: AgentZoom.source(chatId ?? draftKey),
                 // A blank chat has nothing to rename, archive or delete yet.
                 onRename: chatId == nil ? nil : {
                     newName = title
@@ -94,7 +96,10 @@ struct TopicChatScreen: View {
             Task { if await workspace.deleteTopic(chatId) { onArchived() } }
         }
         .pageBackground()
-        .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onThread: { store?.reopenThread($0) })
+        .composerDraft(workspace.drafts, chat: chatId ?? draftKey, text: $draft, attachments: attachments, transcript: store, onThread: { store?.reopenThread($0) }, prefill: Binding(
+            get: { workspace.composerPrefills[chatId ?? draftKey] },
+            set: { workspace.composerPrefills[chatId ?? draftKey] = $0 }
+        )) { composerFocused = true }
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 10) {

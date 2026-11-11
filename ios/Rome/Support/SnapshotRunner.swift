@@ -5,7 +5,8 @@ import UIKit
 /// A screen change the snapshot runner asks the shell for.
 enum DebugCommand: Equatable {
     case drawer(Bool)
-    case tasks(Bool)
+    /// The Agent page on a tab, opened from the main Chat; nil closes it.
+    case agent(AgentTab?)
     case route([Route])
     /// One of the drawer's pages as the root, with nothing pushed.
     case section(MainSection)
@@ -104,8 +105,10 @@ enum SnapshotRunner {
             await capture("05-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)
             try? await Task.sleep(for: .seconds(0.8))
-            await capture("06-tasks", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .tasks(true) }
-            model.debugCommand = .tasks(false)
+            await capture("06-tasks", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.tasks) }
+            await capture("57-agent-uses", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .agent(.uses) }
+            model.debugCommand = .agent(nil)
+            try? await Task.sleep(for: .seconds(0.8))
             try? await Task.sleep(for: .seconds(0.8))
             await capture("07-task-approval", style: styleName, in: directory, wait: 2) {
                 model.debugCommand = .route([.taskChat(chatId: "chat-price", title: "价格追踪：发提醒邮件")])
@@ -325,10 +328,10 @@ enum SnapshotRunner {
                 model.openDemo(.empty)
                 Task {
                     try? await Task.sleep(for: .seconds(0.8))
-                    model.debugCommand = .tasks(true)
+                    model.debugCommand = .agent(.tasks)
                 }
             }
-            model.debugCommand = .tasks(false)
+            model.debugCommand = .agent(nil)
             try? await Task.sleep(for: .seconds(0.6))
             model.dynamicTypeOverride = .xxLarge
             await capture("19-chat-xxl", style: styleName, in: directory, wait: 2) { model.openDemo() }
@@ -426,8 +429,8 @@ enum SnapshotRunner {
             }
             try? await Task.sleep(for: .seconds(4))
             await capture("live-04-replied", style: "live", in: directory) {}
-            await capture("live-05-tasks", style: "live", in: directory, wait: 2) { model.debugCommand = .tasks(true) }
-            model.debugCommand = .tasks(false)
+            await capture("live-05-tasks", style: "live", in: directory, wait: 2) { model.debugCommand = .agent(.tasks) }
+            model.debugCommand = .agent(nil)
             try? await Task.sleep(for: .seconds(0.8))
             if let task = workspace.tasks.tasks.first(where: { $0.chat != nil }), let chat = task.chat {
                 await capture("live-06-task", style: "live", in: directory, wait: 3) {
