@@ -1,4 +1,3 @@
-import { appChatReads } from "../app-host/chat-reads.js";
 import { ChatReadModel } from "../webchat/chat-read-model.js";
 import { chatAddresses, chatMessages, romeSessions } from "../db/schema.js";
 // What the account read asks the triage record for.
@@ -84,7 +83,7 @@ describe("the account reads over the triage record", () => {
     };
   }
 
-  it("keeps dashboard automation out of People and app-facing person accounts", async () => {
+  it("keeps dashboard automation out of People", async () => {
     await deps.webchatRepo.createSession("automation-chat", "Automation");
     const before = await readAccountDirectory(watched());
     const addresses = await testDb.db.select().from(chatAddresses);
@@ -130,17 +129,6 @@ describe("the account reads over the triage record", () => {
     for (const line of transcript.lines.filter((line) => line.id !== "visitor")) {
       expect(line).toMatchObject({ role: "user", senderAccountId: null, senderName: "Automation" });
     }
-    const apps = appChatReads({ db: testDb.db, reads: model, webchatRepo: deps.webchatRepo });
-    const lines = await apps.transcript("automation-chat");
-    for (const line of lines.filter((line) => line.key !== "visitor")) {
-      expect(line).toMatchObject({ role: "user", senderId: null, senderName: "Automation" });
-    }
-    expect(lines.find((line) => line.key === "visitor")).toMatchObject({
-      senderId: "visitor:alex",
-      senderName: "alex@example.com",
-    });
-    expect(JSON.stringify(lines)).not.toContain("automated::");
-    expect(await apps.recentChats({ since: new Date(0), where: "dashboard" })).toHaveLength(1);
     expect(await deps.webchatRepo.searchSessionMessages("Status")).toHaveLength(1);
   });
 

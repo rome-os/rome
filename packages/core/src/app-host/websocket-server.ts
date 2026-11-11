@@ -24,7 +24,7 @@ import {
   type SessionActor,
 } from "../access/session-actor.js";
 import type { RomeAppViewer } from "../access/visitor-session.js";
-import type { FavorService } from "../favors/index.js";
+import type { AppFavorRequests } from "../apps/app-favors-port.js";
 import type { AppConnectionsContextFactory } from "../apps/app-connections-port.js";
 
 const log = createLogger("app-websocket");
@@ -52,7 +52,7 @@ export interface AppWebSocketDeps {
   actionEngine: ActionEngine;
   routinesRepo?: RoutinesRepository;
   appRuntimeRepositories: AppRuntimeRepositories;
-  favorService?: FavorService;
+  favorService?: AppFavorRequests;
   appConnections?: AppConnectionsContextFactory;
 }
 

@@ -64,7 +64,7 @@ import {
   parseLegacyArtifactBindings,
 } from "../apps/artifact-id.js";
 import { createArtifactReferenceResolver } from "../apps/artifact-reference.js";
-import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
+import { resolveGuardianTimezone } from "../instance/timezone.js";
 import { resolveOneOffDate } from "../routines/schedule-trigger-provider.js";
 import type { Trigger } from "../routines/types.js";
 import { legacyChatIdChannelsService, legacyChatIdSettings } from "../apps/legacy-chat-id.js";
