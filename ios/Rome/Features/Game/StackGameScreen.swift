@@ -616,22 +616,40 @@ struct StackGameScreen: View {
     }
 }
 
-/// "Rome" across the ground, in the opening screen's wordmark style, as
-/// wide as the page allows; a shade off the ground, gone by two-thirds
-/// of its height. Decoration only.
+/// "Rome" across the ground, in the opening screen's wordmark family at a
+/// heavy weight, as wide as the page allows: its upper letters read
+/// clearly, and from their middle they dissolve into the ground by the
+/// baseline. Decoration only.
 private struct GroundWordmark: View {
     let width: CGFloat
 
+    /// Tight, as the opening screen's wordmark sets it.
+    static let tracking: CGFloat = -0.02
+
+    /// The point size at which the word spans `width`, measured, since a
+    /// shrink-to-fit misjudges the tight tracking and cuts the last letter.
+    static func size(for width: CGFloat) -> CGFloat {
+        let probe: CGFloat = 100
+        let font = UIFont.systemFont(ofSize: probe, weight: .heavy)
+        let measured = NSAttributedString(string: "Rome", attributes: [.font: font, .kern: probe * tracking]).size().width
+        return (probe * width / measured).rounded(.down)
+    }
+
     var body: some View {
+        let size = Self.size(for: width)
+        // A fixed size, not romeFont: the word is fitted to the page as a
+        // shape, and Dynamic Type would push it past the edges.
         Text(verbatim: "Rome")
-            .romeFont(320, .medium)
-            .tracking(-6)
+            .font(.system(size: size, weight: .heavy))
+            .tracking(size * Self.tracking)
             .lineLimit(1)
-            .minimumScaleFactor(0.05)
+            .fixedSize()
             .foregroundStyle(Palette.stackWordmark)
             .frame(width: width)
             .mask {
-                LinearGradient(stops: [.init(color: .black, location: 0.2), .init(color: .clear, location: 0.67)], startPoint: .top, endPoint: .bottom)
+                // In the text's frame the letters run from about 0.22 (cap
+                // top) to 0.78 (baseline).
+                LinearGradient(stops: [.init(color: .black, location: 0.48), .init(color: .clear, location: 0.82)], startPoint: .top, endPoint: .bottom)
             }
             .allowsHitTesting(false)
             .accessibilityHidden(true)
