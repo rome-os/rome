@@ -13,6 +13,9 @@ extension EnvironmentValues {
     @Entry var chatLinkOpener: (@MainActor (URL) -> OpenURLAction.Result)? = nil
     /// An allow-listed visitor, not the guardian: approvals are not theirs to answer.
     @Entry var isVisitor = false
+    /// The chat on screen, by its store's id: nil under a sheet, the drawer
+    /// or a pushed page. A chat marks what arrives as read only while it is.
+    @Entry var visibleChat: String? = nil
 }
 
 /// The guardian's bubble: coral, right-aligned, fully round. Photos sent with

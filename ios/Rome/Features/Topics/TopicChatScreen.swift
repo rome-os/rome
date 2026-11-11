@@ -16,6 +16,7 @@ struct TopicChatScreen: View {
     let onCreated: (String) -> Void
 
     @Environment(AppModel.self) private var model
+    @Environment(\.visibleChat) private var visibleChat
     @State private var draft = ""
     @State private var starting: String?
     @State private var startFailed = false
@@ -126,7 +127,10 @@ struct TopicChatScreen: View {
         }
     }
 
+    /// Read only while it is the chat on screen: never under an instance
+    /// page's sheet, the Tasks sheet or the drawer.
     private func markRead(_ store: TranscriptStore) {
+        guard visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId) else { return }
         store.markRead()
         workspace.topics.markRead(store.sessionId)
     }
@@ -141,6 +145,8 @@ struct TopicChatScreen: View {
             .onTapGesture { composerFocused = false }
             .onAppear { markRead(store) }
             .onChange(of: store.arrivals) { markRead(store) }
+            // Back from under a sheet: what arrived meanwhile is read now.
+            .onChange(of: visibleChat) { markRead(store) }
         } else if let starting {
             // The chat is being started: the message waits as a pending bubble.
             ScrollView {

@@ -14,6 +14,13 @@ struct ChatScreen: View {
     var visible = true
 
     @Environment(AppModel.self) private var model
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// How far the header's status capsule reaches below the header row.
+    private var statusOverhang: CGFloat {
+        let activity = workspace.topics.activity(for: workspace.mainChatServerID ?? conciergeChatID)
+        return activity?.statusLine == nil ? 0 : ChatIdentity.statusHeight(for: dynamicTypeSize)
+    }
     @State private var draft = ""
     @State private var composerFocused = false
     @State private var attachments = ComposerAttachments()
@@ -132,7 +139,8 @@ struct ChatScreen: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .padding(.top, model.accessNotice != nil || store.loadError == .offline || offersPush ? 10 : 0)
+        // Below the header's status capsule, which hangs under the header row.
+        .padding(.top, model.accessNotice != nil || store.loadError == .offline || offersPush ? 10 + statusOverhang : 0)
         .readableColumn()
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: model.accessNotice)
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: offersPush)
@@ -330,6 +338,11 @@ struct ChatIdentity: View {
     static func nameWidth(for size: DynamicTypeSize) -> CGFloat { ScaledFont.scaled(12, for: size) * 8.5 }
     /// The widest the status capsule grows, on an iPad too.
     static let statusWidth: CGFloat = 360
+    /// The status capsule's height with its gap: what it adds below the
+    /// header row, which banners under the header leave room for.
+    static func statusHeight(for size: DynamicTypeSize) -> CGFloat {
+        UIFont.systemFont(ofSize: ScaledFont.scaled(12, for: size), weight: .medium).lineHeight + 8 + 4
+    }
 
     /// The identity's height with the name alone, at the current text size:
     /// what the header row is laid out for.
@@ -404,8 +417,10 @@ struct ChatIdentity: View {
                     .frame(maxWidth: Self.statusWidth)
             }
         }
-        // A new state switches at once: no resize or fade.
-        .transaction { $0.animation = nil }
+        // A new status or name switches at once: no resize or fade. Only
+        // those changes: the mascot's blink, bob and reactions keep theirs.
+        .animation(nil, value: status)
+        .animation(nil, value: name)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(Text(verbatim: status.map { "\(name), \($0)" } ?? name))
         .accessibilityAddTraits(.isHeader)
