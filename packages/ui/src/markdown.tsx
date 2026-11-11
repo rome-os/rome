@@ -32,11 +32,13 @@ export type { Components, MermaidOptions, StreamdownProps };
 export { defaultUrlTransform } from "streamdown";
 
 /**
- * A prose link leads by color alone, and takes its underline on hover and on
- * keyboard focus, which also keeps the browser's focus outline.
+ * A prose link keeps a faint underline at rest, because on a theme whose
+ * `--primary` is near-black the color alone does not mark it, and touch has no
+ * hover. The underline goes to full strength on hover and on keyboard focus,
+ * which also keeps the browser's focus outline.
  */
 export const MARKDOWN_LINK_CLASS =
-  "wrap-anywhere text-primary no-underline hover:underline focus-visible:underline";
+  "wrap-anywhere text-primary underline decoration-1 decoration-primary/40 underline-offset-2 hover:decoration-primary focus-visible:decoration-primary";
 
 // A commit SHA or a similar digest: hex, with both a letter and a digit.
 const HASH_LABEL = /^(?=.*[a-f])(?=.*\d)[0-9a-f]{12,64}$/i;

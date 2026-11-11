@@ -380,9 +380,11 @@
 }
 
 /* The remap gives a link the text's own color on the primary fill, so there
-   the underline is what marks it, at rest too. */
+   the underline is what marks it, at full strength in the text's color rather
+   than the faint prose-link underline. */
 .rome-bubble-on-primary a {
   text-decoration-line: underline;
+  text-decoration-color: currentColor;
 }
 
 /* A fenced block inside the sent bubble keeps the page's light `--surface` for
