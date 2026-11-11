@@ -5,7 +5,7 @@
 
 import { AsyncLocalStorage } from "node:async_hooks";
 import { actionExecutionContext } from "../apps/actions/context.js";
-import { canOpenChat, privateOwnerOf } from "../concierge/privacy.js";
+import { canOpenChat, privateOwnerOf } from "./privacy.js";
 import { type SessionActor, sessionOwnerKey } from "../access/session-actor.js";
 import type { ChannelSurface } from "../core/session-opening.js";
 import type { WebChatRepository } from "./repository.js";

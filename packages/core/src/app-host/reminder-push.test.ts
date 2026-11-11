@@ -8,7 +8,8 @@ import { runWithSessionActor } from "../access/session-actor.js";
 import type { ActionEngine, ActionRunContext } from "../apps/actions/engine.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import { sendForCaller } from "./caller-notify.js";
-import { privateOwnerOf } from "../concierge/privacy.js";
+import { privateOwnerOf } from "../webchat/privacy.js";
+import { ownerOfChat } from "../webchat/owner.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { guardianAuth, routines as routinesTable, visitorProfiles } from "../db/schema.js";
@@ -84,7 +85,11 @@ describe("a reminder's push", () => {
       actionEngine,
       0,
       systemClock,
-      (routine) => legacyRoutineActor(routine, { db: testDb.db, webchatRepo }),
+      (routine) =>
+        legacyRoutineActor(routine, {
+          db: testDb.db,
+          ownerOfChat: (chatId) => ownerOfChat((id) => webchatRepo.getSession(id), chatId),
+        }),
     );
   });
 

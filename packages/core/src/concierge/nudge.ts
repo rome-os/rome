@@ -1,4 +1,4 @@
-import type { FailoverReason } from "../webchat/failover-reason.js";
+import type { FailoverReason } from "../agent/index.js";
 import type { AgentTurnStatus } from "@rome-os/app-runtime";
 
 /**

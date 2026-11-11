@@ -266,3 +266,8 @@ export {
 } from "./infrastructure/model/anthropic/claude-login-code.js";
 export { createClaudeLoginWatcher } from "./infrastructure/model/anthropic/claude-login-watch.js";
 export { fetchRomeCredits } from "./infrastructure/model/codex/rome-credits.js";
+export {
+  ambiguousQuota,
+  failoverReason,
+  type FailoverReason,
+} from "./domain/failover-reason.js";

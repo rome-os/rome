@@ -5,7 +5,7 @@
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { VisitorProfilesRepository } from "../access/visitor-profiles.js";
 import type { DashboardAccessState } from "../access/dashboard-access-state.js";
-import { type ConciergeOwner, GUARDIAN_OWNER } from "./owner.js";
+import { type ConciergeOwner, GUARDIAN_OWNER } from "../webchat/owner.js";
 
 const VISITOR_PREFIX = "visitor:";
 

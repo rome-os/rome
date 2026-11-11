@@ -17,10 +17,10 @@ import {
 import { hasText, latestSaid, taskChatPlace } from "./task-chat.js";
 import { type DirtyTask, TaskEventCoalescer, type TaskEventDelivery } from "./task-events.js";
 import { ConciergeActivityTracker } from "./activity.js";
-import { isConciergeChat } from "./privacy.js";
+import { isConciergeChat } from "../webchat/privacy.js";
 import { openQuestion } from "./transcript.js";
 
-import { failoverReason } from "../webchat/failover-reason.js";
+import { failoverReason } from "../agent/index.js";
 
 const log = createLogger("concierge-events");
 

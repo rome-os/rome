@@ -53,7 +53,7 @@ import {
   MAIN_CHAT_NAME,
   mainChatIdOf,
   storedChatId,
-} from "./owner.js";
+} from "../webchat/owner.js";
 import {
   type FollowEvent,
   MAX_EVENTS_PER_TRIAGE,

@@ -4,7 +4,6 @@
 
 import { actorOfOwner } from "../access/owner-actor.js";
 import type { SessionActor } from "../access/session-actor.js";
-import { ownerOf } from "../concierge/owner.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { Routine } from "./types.js";
 
@@ -17,14 +16,14 @@ export async function legacyRoutineActor(
   routine: Pick<Routine, "args">,
   deps: {
     db: DrizzleDb;
-    webchatRepo: { getSession(id: string): Promise<{ ownerKey?: string | null } | null> };
+    /** The owner of a dashboard chat, or null when there is no such chat. */
+    ownerOfChat: (chatId: string) => Promise<string | null>;
   },
 ): Promise<SessionActor | undefined> {
   const { args } = routine;
   let owner: string | null = typeof args.ownerKey === "string" ? args.ownerKey : null;
   if (!owner && args.channel === "webchat" && typeof args.threadId === "string") {
-    const chat = await deps.webchatRepo.getSession(args.threadId);
-    owner = chat ? ownerOf(chat) : null;
+    owner = await deps.ownerOfChat(args.threadId);
   }
   return owner ? actorOfOwner(deps.db, owner) : undefined;
 }

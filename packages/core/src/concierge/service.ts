@@ -44,7 +44,7 @@ import {
   mainChatIdOf,
   ownerOf,
   storedChatId,
-} from "./owner.js";
+} from "../webchat/owner.js";
 import {
   CONCIERGE_AGENT_ID,
   canOpenChat,
@@ -53,10 +53,10 @@ import {
   isMainConciergeChat,
   privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
-} from "./privacy.js";
+} from "../webchat/privacy.js";
 import { ALL_OWNERS_SERVED, type ConciergeOwners, type OwnerProfile } from "./owners.js";
 
-import { ambiguousQuota, type FailoverReason } from "../webchat/failover-reason.js";
+import { ambiguousQuota, type FailoverReason } from "../agent/index.js";
 
 const log = createLogger("concierge");
 

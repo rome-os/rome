@@ -209,7 +209,8 @@ import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
 import { VisitorProfilesRepository } from "./access/visitor-profiles.js";
 import { createConciergeOwners } from "./concierge/owners.js";
-import { privateOwnerOf } from "./concierge/privacy.js";
+import { privateOwnerOf } from "./webchat/privacy.js";
+import { ownerOfChat } from "./webchat/owner.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { continuationActor } from "./webchat/continuation-actor.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
@@ -998,7 +999,11 @@ async function main() {
     systemClock,
     // A routine from before routines recorded their creator acts for its
     // chat's owner, as its fires did then.
-    (routine) => legacyRoutineActor(routine, { db, webchatRepo }),
+    (routine) =>
+      legacyRoutineActor(routine, {
+        db,
+        ownerOfChat: (chatId) => ownerOfChat((id) => webchatRepo.getSession(id), chatId),
+      }),
   );
   deactivateRoutine = (id) => routineEngine.deactivate(id);
   const scheduleTriggerProvider = new ScheduleTriggerProvider(routinesRepo, () =>

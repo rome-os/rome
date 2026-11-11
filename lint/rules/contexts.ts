@@ -127,34 +127,6 @@ export const contextRules: ImportRule[] = contexts.flatMap((from) =>
 /** Crossings that remain until their ticket lands. */
 export const contextCrossings: ListedCrossing[] = [
   {
-    rule: "webchat-never-imports-concierge",
-    from: "webchat/chat-read-model.ts",
-    to: "concierge/privacy.ts",
-    ticket: "ZHA-168",
-    why: "Which dashboard chats are private, and to whom, is decided in Concierge, until that rule has its home.",
-  },
-  {
-    rule: "webchat-never-imports-concierge",
-    from: "webchat/dashboard-account.ts",
-    to: "concierge/privacy.ts",
-    ticket: "ZHA-168",
-    why: "Which dashboard chats are private, and to whom, is decided in Concierge, until that rule has its home.",
-  },
-  {
-    rule: "webchat-never-imports-concierge",
-    from: "webchat/repository.ts",
-    to: "concierge/privacy.ts",
-    ticket: "ZHA-168",
-    why: "Which dashboard chats are private, and to whom, is decided in Concierge, until that rule has its home.",
-  },
-  {
-    rule: "routines-never-imports-concierge",
-    from: "routines/legacy-actor.ts",
-    to: "concierge/owner.ts",
-    ticket: "ZHA-168",
-    why: "A legacy routine acts for its chat's owner, read through Concierge, until a chat's owner has its home.",
-  },
-  {
     rule: "instance-never-imports-relay",
     from: "instance/diagnostics.ts",
     to: "relay/settings.ts",

@@ -28,7 +28,7 @@ import type { AgentTurnFailedBeforeStart, TurnLifecycleListener } from "../agent
 import { startConciergeEvents } from "./events.js";
 import { RETRY_MS } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
-import { mainChatIdOf } from "./owner.js";
+import { mainChatIdOf } from "../webchat/owner.js";
 import { createConciergeOwners } from "./owners.js";
 import {
   CONCIERGE_ACCOUNT,

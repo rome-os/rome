@@ -5,7 +5,7 @@ import {
   type ModelAccounts,
   type ProviderId,
 } from "../agent/index.js";
-import { failoverReason } from "./failover-reason.js";
+import { failoverReason } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import type { ChatsWebChatRepository, ErroredTurn } from "./chats-webchat-repository.js";
 import {

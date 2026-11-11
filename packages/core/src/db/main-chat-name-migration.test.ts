@@ -3,7 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "@rstest/core";
-import { mainChatIdOf } from "../concierge/owner.js";
+import { mainChatIdOf } from "../webchat/owner.js";
 
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system");
 const TAG = "0126_main_chat_name";

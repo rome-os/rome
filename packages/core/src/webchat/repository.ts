@@ -1,6 +1,6 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type { TranscriptPart } from "@rome/api-types/chat";
-import { canOpenSql, PRIVATE_CHILD_TRIGGER_KIND, privateOwnerOf } from "../concierge/privacy.js";
+import { canOpenSql, PRIVATE_CHILD_TRIGGER_KIND, privateOwnerOf } from "./privacy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {

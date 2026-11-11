@@ -13,7 +13,7 @@ import type { AgentSession, SessionOpening, Sessions, AgentTurnHandle } from "..
 import type { ChatResetPolicy } from "./chat-reset-policy.js";
 import type { SessionOpeningFor } from "./session-opening.js";
 import { AgentSessionBridge } from "./agent-session-bridge.js";
-import { canOpen } from "../concierge/privacy.js";
+import { canOpen } from "../webchat/privacy.js";
 import { IpcRpc, createChildProcessTransport } from "../apps/actions/ipc.js";
 import { WebChatRepository } from "../webchat/repository.js";
 import { createTestDb } from "../test/db.js";

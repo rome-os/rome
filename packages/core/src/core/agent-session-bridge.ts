@@ -3,7 +3,7 @@
 // workers over IpcRpc. Workers call `agent.session.runTurn` and consume the
 // returned `agent.turn:<turnId>` stream.
 
-import { canOpen } from "../concierge/privacy.js";
+import { canOpen } from "../webchat/privacy.js";
 import { readerOwner } from "../webchat/dashboard-account.js";
 import type { ChildProcess } from "node:child_process";
 import type { IpcCallContext, IpcRpc } from "../apps/actions/ipc.js";

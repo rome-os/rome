@@ -85,7 +85,7 @@ import { ConnectedAccountsRepository } from "../db/repositories/connected-accoun
 import { accountLinkOf, connectionKindOf } from "../chats/connected-accounts/account-links.js";
 import { byChannel, readAccountAgent } from "../chats/connected-accounts/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
-import { canOpenChat } from "../concierge/privacy.js";
+import { canOpenChat } from "../webchat/privacy.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
 const log = createLogger("api");

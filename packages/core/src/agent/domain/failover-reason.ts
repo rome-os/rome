@@ -1,6 +1,6 @@
 import type { AgentTurnFailure } from "@rome-os/app-runtime";
 import type { QuotaSwitchPart } from "@rome/api-types/chat";
-import { providerAuthorized, type ModelAccountReports } from "../agent/index.js";
+import { providerAuthorized, type ModelAccountReports } from "./model-account-report.js";
 
 export type FailoverReason = NonNullable<QuotaSwitchPart["reason"]>;
 

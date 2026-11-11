@@ -32,11 +32,12 @@ import type {
   BackendEmitOptions,
   BackendSessionTask,
   BackendTurnOptions,
+  BackendTurnOutcome,
 } from "../apps/actions/session-runner.js";
 
 const log = createLogger("backend-turn");
 
-export type { BackendEmitOptions, BackendSessionTask, BackendTurnOptions };
+export type { BackendEmitOptions, BackendSessionTask, BackendTurnOptions, BackendTurnOutcome };
 
 /**
  * Minimal structural view of `WebchatRuntime` this orchestrator needs.
@@ -56,10 +57,6 @@ export interface WebchatSessionStreamHost {
  * timers) and exposes the lower-level `runBackendSessionTask` for callers that
  * need to run more than a plain turn in the session (e.g. the approval handler,
  * which prepends the approved action's trace before the continuation). */
-/** How a backend turn ended: `stopped` when a Stop request cut it short,
- *  `interrupted` when something else did, such as a newer input, and
- *  `failed` when it errored or never ran. */
-export type BackendTurnOutcome = "completed" | "stopped" | "interrupted" | "failed";
 
 const endOutcome = (status: string): BackendTurnOutcome =>
   status === "completed" ? "completed" : status === "interrupted" ? "interrupted" : "failed";

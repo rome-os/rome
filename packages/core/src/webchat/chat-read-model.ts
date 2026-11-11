@@ -20,7 +20,7 @@
 // Nothing reads through it yet: the dashboard still reads its legacy tables
 // until the Chats switch moves it here.
 
-import { canOpenSql } from "../concierge/privacy.js";
+import { canOpenSql } from "./privacy.js";
 import { sql } from "drizzle-orm";
 import { automatedSource } from "./automated-source.js";
 import type { AgentInputState, ChatId } from "@rome-os/app-runtime";

@@ -1,6 +1,6 @@
 import type { SessionActor } from "../access/session-actor.js";
 import type { BackendTurnParams } from "@rome-os/app-runtime";
-import type { BackendTurnOptions } from "../apps/actions/session-runner.js";
+import type { BackendTurnOptions, BackendTurnOutcome } from "../apps/actions/session-runner.js";
 import type { InterruptedTurn } from "./repository.js";
 import { createLogger } from "../logger.js";
 import type { ChatsWebChatRepository } from "./chats-webchat-repository.js";
@@ -17,12 +17,12 @@ export const RESTART_CONTINUATION_PROMPT =
   "If a side-effecting action cannot be confirmed, ask the guardian rather than redo it. " +
   "</restart_recovery>";
 
-/** Runs a continuation's turn in its chat. `failed` means the turn errored or never ran. */
+/** What a continuation asks of whatever runs backend turns: run this turn in its chat and say how it ended. */
 export interface ContinuationRunner {
   runAndReport(
     params: BackendTurnParams,
     options?: BackendTurnOptions,
-  ): Promise<"completed" | "stopped" | "interrupted" | "failed">;
+  ): Promise<BackendTurnOutcome>;
 }
 
 /** Whether a turn's last timestamped activity is less than a day before `now`. */
