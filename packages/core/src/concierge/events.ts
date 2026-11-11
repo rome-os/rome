@@ -224,6 +224,29 @@ export function startConciergeEvents(
 
   const activity = startActivity(service, coalescer);
 
+  // The owner's messages a Concierge turn took settle once the chat runs no
+  // turn that carries them: done when it completed, failed when it failed or
+  // was abandoned, and stopped, which clears them, when it was stopped. A
+  // turn a newer input superseded hands its work on, so its messages stay
+  // working until the turn that took it over ends.
+  const settleTurnMarks = async (
+    chatId: string,
+    ended: string,
+    status: AgentTurnFinishedEvent["status"],
+  ) => {
+    // The ended turn's stream may still be draining, so it is left out.
+    const running = service.dashboard.chats.activeTurns(chatId).filter((id) => id !== ended);
+    if (status === "interrupted" && running.length > 0) return;
+    await tasks.repo
+      .settleTurnReactions(chatId, reactionEndOf(status), running)
+      .catch((error: unknown) =>
+        log.warn("failed to settle turn status reactions", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+  };
+
   const onConciergeTurn = async (event: AgentTurnFinishedEvent, chatId: string) => {
     // Read before any await: the reminder's own finish event fires while the
     // reminder still runs, and the flag clears as soon as it returns.
@@ -235,9 +258,11 @@ export function startConciergeEvents(
       active.finished = event;
       return;
     }
+    const failure = event.status === "error" ? event.output.failure : undefined;
+    const reason = failure ? failoverReason(failure, service.deps.accounts.read()) : null;
+    // A failed turn that a recovery takes over stays working until it ends.
+    if (!reason) await settleTurnMarks(chatId, event.turn.turnId, event.status);
     if (event.status === "error") {
-      const failure = event.output.failure;
-      const reason = failoverReason(failure, service.deps.accounts.read());
       if (!reason || !failure) return;
       const chain: { finished?: AgentTurnFinishedEvent } = {};
       recoveriesRunning.set(chatId, chain);
@@ -276,6 +301,11 @@ export function startConciergeEvents(
         if (moved) await recover(next.output.failure, second, false);
       } finally {
         recoveriesRunning.delete(chatId);
+        await settleTurnMarks(
+          chatId,
+          chain.finished?.turn.turnId ?? event.turn.turnId,
+          chain.finished?.status ?? "error",
+        );
       }
       return;
     }

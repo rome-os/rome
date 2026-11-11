@@ -3802,7 +3802,7 @@ describe("Concierge status reactions", () => {
     expect((await s.taskRepo.getWithChat(taskId))?.sourceMessageId).toBe("g1");
   });
 
-  it("puts no reaction on a message answered in the same turn with no task", async () => {
+  it("starts no task mark for a message answered in the same turn with no task", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
     await s.tool("say", { text: "Sunny, 24°" });
@@ -3959,6 +3959,104 @@ describe("Concierge status reactions", () => {
     const { taskId } = await started(s);
     await s.taskRepo.upsertMany([{ id: taskId, state: "dropped" }]);
     expect(await reactionOf(s, "g1")).toBeNull();
+  });
+
+  describe("from the turn that takes the message", () => {
+    // The send route marks a message once a Concierge turn takes it.
+    const taken = (s: ReturnType<typeof setup>, key: string, turnId = "concierge-turn-1") =>
+      s.taskRepo.markTurnWorking(turnId, { chatId: CONCIERGE_CHAT, messageKey: key });
+    const conciergeEnds = (
+      s: ReturnType<typeof setup>,
+      status?: AgentTurnFinishedEvent["status"],
+      turnId = "concierge-turn-1",
+    ) =>
+      s.finish({ turnId, agentName: "core:concierge", chatId: CONCIERGE_CHAT, status, text: "ok" });
+
+    it("is working while a direct answer's turn runs, and goes away when it completes", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const seen = watch(s);
+      await taken(s, "g1");
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await s.tool("say", { text: "Sunny, 24°" });
+      await conciergeEnds(s);
+      expect(await reactionOf(s, "g1")).toBeNull();
+      expect(seen).toEqual([
+        ["g1", "working"],
+        ["g1", null],
+      ]);
+    });
+
+    it("stays working through the task the turn starts, until the task is done", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      const { chatId } = await started(s);
+      await conciergeEnds(s);
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await finishTask(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("settles even while the ended turn's own stream still drains", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      s.chats.activeTurns = () => ["concierge-turn-1"];
+      await conciergeEnds(s);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("goes away when the owner stops the turn", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await conciergeEnds(s, "interrupted");
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("stays working when a newer input supersedes the turn, until the turn that took over ends", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      s.chats.activeTurns = () => ["concierge-turn-2"];
+      await conciergeEnds(s, "interrupted");
+      expect(await reactionOf(s, "g1")).toBe("working");
+      guardianSays(s, "g2", "concierge-turn-2");
+      await taken(s, "g2", "concierge-turn-2");
+      s.chats.activeTurns = () => [];
+      await conciergeEnds(s, "completed", "concierge-turn-2");
+      expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, null]);
+    });
+
+    it.each(["error", "stopped"] as const)("fails when the turn ends %s", async (status) => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await conciergeEnds(s, status);
+      expect(await reactionOf(s, "g1")).toBe("failed");
+    });
+
+    it("marks each message a turn takes, and settles them together", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "a");
+      guardianSays(s, "b");
+      await taken(s, "a");
+      await taken(s, "b");
+      expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual(["working", "working"]);
+      await conciergeEnds(s);
+      expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, null]);
+    });
+
+    it("leaves a task chat's turn alone", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      const { chatId } = await started(s);
+      await finishTask(s, chatId);
+      // The task is done; the Concierge's own turn still runs.
+      expect(await reactionOf(s, "g1")).toBe("working");
+    });
   });
 
   it("never pushes a reaction to the phone", async () => {

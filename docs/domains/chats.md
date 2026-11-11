@@ -101,17 +101,23 @@ A chat forked from one turn of another chat, carrying that chat's history up to 
 A mark Rome puts on its owner's message in a [Concierge chat](#concierge-chat) to show how the work it asked for stands: working, or failed. Work that finished shows none, since the reply says so. It takes the place of an acknowledgement from the Concierge.
 
 - Rome sets it, never the Concierge. A message has at most one, and a newer state replaces the older one.
-- A message gets one when the Concierge starts a task for it, or passes its words on to a task: working. The mark goes away when that task finishes, and turns failed only when the task fails. A failed mark stays, since a crash may leave no reply. A task that asks its owner a question is still working.
-- How a task's end sets the reaction:
+- A message gets one as soon as a Concierge turn takes it in: working, before the Concierge says or starts anything. Each message a turn takes gets its own.
+- The message's work is that turn and every task the Concierge starts for it or passes its words on to. The mark stays working while any of them works, and goes away once all are done. It turns failed only when one fails, and a failed mark stays, since a crash may leave no reply. A task that asks its owner a question is still working.
+- How the turn's end sets the reaction:
+  - It completes: done, which shows no mark once its tasks are done too.
+  - It fails with an error, or ends with no end of its own, as when the process dies: failed.
+  - Its owner stops it: stopped, which counts toward no reaction.
+  - A newer input supersedes it and the work carries into the next turn: still working, until that turn ends.
+- How a task's end sets the reaction, the same way:
   - It finishes, or the Concierge marks it done: done, which shows no mark.
   - It fails with an error, or its turn ends with no end of its own, as when the process dies: failed.
   - Its owner stops it, or the Concierge drops it: stopped. A stopped task counts toward no reaction, so a message whose only task was stopped has none, and the mark goes away.
   - A newer input supersedes its turn and the work carries into the next turn: still working, until that turn ends.
 - A stopped task that is resumed or given more words is working again.
-- A message that started or reached several tasks counts only the ones not stopped: working while any of them works, then failed if any failed, else none. When every one was stopped, it has none too.
-- A message the Concierge answers in the same turn, with no task, gets none: the answer says it was heard.
+- A message counts only the work not stopped: working while any of it works, then failed if any failed, else none. When all of it was stopped, it has none too.
+- A message the Concierge answers in the same turn, with no task, is working while that turn runs, and the mark goes away when the turn completes.
 - It is not a message. It never reaches the phone as a push, and it does nothing when pressed.
-- A common chat has none.
+- A common chat has none, and neither does a task chat.
 
 ## Concierge chat
 

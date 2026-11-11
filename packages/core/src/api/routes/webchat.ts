@@ -4467,6 +4467,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       romeSessionId: sessionId,
       onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusEvent) => {
         await deps.webchatRepo.updateUserInput(sessionId, status);
+        // A Concierge turn that takes its owner's message marks it working at
+        // once, before the Concierge says or starts anything
+        // (docs/domains/chats.md#status-reaction).
+        if (status.state === "consumed" && status.turnId && isConciergeChat(session)) {
+          await deps.concierge?.deps.tasks.repo
+            .markTurnWorking(status.turnId, { chatId: sessionId, messageKey: status.inputId })
+            .catch((error: unknown) =>
+              log.warn("failed to mark a status reaction", {
+                sessionId,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+        }
         const stream = status.turnId ? streamsByTurnId.get(status.turnId) : undefined;
         if (stream) emitToStream(stream, "input_status", status, `input:${status.inputId}`);
       },

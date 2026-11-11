@@ -725,6 +725,111 @@ describe("Webchat API", () => {
     }
   });
 
+  it("marks the owner's messages working as soon as a Concierge turn takes them", async () => {
+    let finish!: () => void;
+    const terminal = new Promise<void>((resolve) => {
+      finish = resolve;
+    });
+    const steerUserInput = rs.fn().mockResolvedValue("accepted" as const);
+    const start = rs.fn(
+      (): AgentTurnHandle =>
+        testTurnHandle({
+          turnId: "concierge-turn",
+          turnContext: otelContext.active(),
+          events: (async function* () {
+            await terminal;
+            yield { type: "result" as const, content: "" };
+          })(),
+        }),
+    );
+    const queue = new AgentInputQueue(
+      start,
+      () => ({ steerUserInput }),
+      (error) => {
+        throw error;
+      },
+    );
+    const agent: AgentSession = {
+      selectModel: () => {},
+      release: () => {},
+      key: { agentName: "core:concierge", channelThreadKey: "webchat:topic" },
+      sessionId: "agent-session",
+      status: "running",
+      runningTurn: testTurnHandle({ turnId: "concierge-turn", events: (async function* () {})() }),
+      submit: (input, { priority, ...options } = {}) => {
+        if (!input.inputId || priority === "after")
+          throw new Error("a chat sends only queue inputs");
+        return queue.submit({ ...input, inputId: input.inputId }, { ...options, priority });
+      },
+      fork: () => {
+        throw new Error("not forked");
+      },
+      onStatusChange: () => () => {},
+      stop: async () => {},
+      close: async () => {},
+    };
+    deps.agentSessionManager = {
+      open: rs.fn(async () => agent),
+      resume: rs.fn(async () => agent),
+      find: () => agent,
+      findWorkingDirBySessionId: () => undefined,
+      turn: () => undefined,
+      shutdown: async () => {},
+    };
+    const repo = new ConciergeTasksRepository(testDb.db);
+    deps.concierge = {
+      deps: { tasks: { repo } },
+      conciergeChat: async () => null,
+      switchIfExhausted: async () => {},
+    } as never;
+    rs.spyOn(deps.agentLoader, "find").mockImplementation((name) =>
+      name === "core:concierge" ? buildAgent(name) : undefined,
+    );
+    await deps.webchatRepo.createSession(
+      "topic",
+      "Topic",
+      undefined,
+      undefined,
+      null,
+      undefined,
+      "core:concierge",
+    );
+    const app = createWebchatRuntime(deps).routes;
+    const post = (inputId: string, text: string) =>
+      runWithSessionActor({ kind: "guardian", userId: "seat", via: "cookie" }, () =>
+        app.request("/chat/sessions/topic/turns", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ inputId, text }),
+        }),
+      );
+    const reaction = async (key: string) =>
+      (await repo.reactionsOf("topic", [key])).get(key) ?? null;
+    const a = "00000000-0000-4000-8000-00000000000a";
+    const b = "00000000-0000-4000-8000-00000000000b";
+    try {
+      expect((await post(a, "Weather?")).status).toBe(200);
+      // Queued or sent is not taken: no mark yet.
+      expect(await reaction(a)).toBeNull();
+      await queue.observe(
+        { type: "input_status", inputId: a, state: "consumed" },
+        "concierge-turn",
+      );
+      expect(await reaction(a)).toBe("working");
+      // A second message the same turn takes gets its own mark.
+      queue.ready("concierge-turn");
+      await post(b, "And tomorrow?");
+      await rs.waitFor(() => expect(steerUserInput).toHaveBeenCalledOnce());
+      await queue.observe(
+        { type: "input_status", inputId: b, state: "consumed" },
+        "concierge-turn",
+      );
+      expect([await reaction(a), await reaction(b)]).toEqual(["working", "working"]);
+    } finally {
+      finish();
+    }
+  });
+
   it("stops a queued turn by its own stop, leaving the active turn running", async () => {
     const finishers: (() => void)[] = [];
     let sequence = 0;

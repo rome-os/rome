@@ -789,6 +789,33 @@ export const conciergeTaskReactions = sqliteTable(
 );
 
 /**
+ * Which guardian messages each Concierge turn took as input, and how that
+ * turn ended: one row per message a turn took. The message shows working
+ * from the moment the turn takes it, before the Concierge starts any task,
+ * and its status reaction (docs/domains/chats.md#status-reaction) is read
+ * from these rows together with its task rows.
+ */
+export const conciergeTurnReactions = sqliteTable(
+  "concierge_turn_reactions",
+  {
+    /** The Concierge chat's turn that took the message. */
+    turnId: text("turn_id").notNull(),
+    /** The Concierge chat the message is in. */
+    chatId: text("chat_id").notNull(),
+    /** The message's key in that chat, as the dashboard names it. */
+    messageKey: text("message_key").notNull(),
+    /** `stopped`: the turn was stopped and counts toward no reaction. */
+    state: text("state", { enum: ["working", "done", "failed", "stopped"] }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.turnId, table.chatId, table.messageKey] }),
+    index("idx_concierge_turn_reactions_message").on(table.chatId, table.messageKey),
+    index("idx_concierge_turn_reactions_chat_state").on(table.chatId, table.state),
+  ],
+);
+
+/**
  * Events from what the Concierge follows that its triage kept. An `important`
  * one goes to the Concierge after its batch, and every one, important or not,
  * goes into the next digest. Only the triage's one-line description is kept,

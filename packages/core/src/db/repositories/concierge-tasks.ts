@@ -1,6 +1,19 @@
 import { randomUUID } from "node:crypto";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
-import { and, asc, desc, eq, gte, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNull,
+  ne,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import type { DrizzleDb } from "../index.js";
 import type { ChatRef } from "../../chats/storage/place.js";
@@ -9,7 +22,12 @@ import { MAIN_CHAT_NAME, mainChatIdOf } from "../../concierge/main-chat.js";
 import { GUARDIAN_OWNER, ownerOf } from "../../webchat/owner.js";
 import type { ConciergeStatusReaction } from "@rome/api-types/concierge";
 import { createLogger } from "../../logger.js";
-import { conciergeTaskReactions, conciergeTasks, romeSessions } from "../schema.js";
+import {
+  conciergeTaskReactions,
+  conciergeTasks,
+  conciergeTurnReactions,
+  romeSessions,
+} from "../schema.js";
 
 const log = createLogger("concierge-tasks");
 
@@ -82,8 +100,8 @@ export type ReactionListener = (
 ) => void;
 
 /**
- * One reaction for a message from the work of every task it started or was
- * passed on to that was not stopped: working while any of them works, then
+ * One reaction for a message from its work that was not stopped: the turn
+ * that took it, and every task it started or was passed on to: working while any of them works, then
  * failed when any failed. None once all of them are done, since the reply
  * says so, nor when every one was stopped.
  */
@@ -466,6 +484,56 @@ export class ConciergeTasksRepository {
     return changed.length;
   }
 
+  /**
+   * Marks guardian message `target` as taken by Concierge turn `turnId`: it
+   * works from now, before the Concierge starts any task for it.
+   */
+  async markTurnWorking(turnId: string, target: ReactionTarget, now = new Date()): Promise<void> {
+    await this.db
+      .insert(conciergeTurnReactions)
+      .values({ turnId, ...target, state: "working", updatedAt: now })
+      .onConflictDoUpdate({
+        target: [
+          conciergeTurnReactions.turnId,
+          conciergeTurnReactions.chatId,
+          conciergeTurnReactions.messageKey,
+        ],
+        set: { state: "working", updatedAt: now },
+      });
+    await this.announceReaction(target);
+  }
+
+  /**
+   * Settles the messages of Concierge chat `chatId` still working for a turn
+   * that no longer runs: every turn but `running`. A turn's work carried into
+   * the next turn stays working until that one ends, since the carried turn
+   * is settled only then. Answers how many changed.
+   */
+  async settleTurnReactions(
+    chatId: string,
+    state: TaskReactionEnd,
+    running: readonly string[],
+    now = new Date(),
+  ): Promise<number> {
+    const changed = await this.db
+      .update(conciergeTurnReactions)
+      .set({ state, updatedAt: now })
+      .where(
+        and(
+          eq(conciergeTurnReactions.chatId, chatId),
+          eq(conciergeTurnReactions.state, "working"),
+          running.length > 0 ? notInArray(conciergeTurnReactions.turnId, [...running]) : undefined,
+        ),
+      )
+      .returning({
+        chatId: conciergeTurnReactions.chatId,
+        messageKey: conciergeTurnReactions.messageKey,
+      });
+    const targets = new Map(changed.map((target) => [target.messageKey, target]));
+    for (const target of targets.values()) await this.announceReaction(target);
+    return changed.length;
+  }
+
   /** The status reaction of each of `messageKeys` in Concierge chat `chatId` that has one. */
   async reactionsOf(
     chatId: string,
@@ -473,7 +541,9 @@ export class ConciergeTasksRepository {
   ): Promise<Map<string, ConciergeStatusReaction>> {
     const out = new Map<string, ConciergeStatusReaction>();
     if (messageKeys.length === 0) return out;
-    const rows = await this.db
+    const keys = [...new Set(messageKeys)];
+    // A message's work is the turn that took it and every task it reached.
+    const taskRows = await this.db
       .select({
         messageKey: conciergeTaskReactions.messageKey,
         state: conciergeTaskReactions.state,
@@ -482,9 +552,22 @@ export class ConciergeTasksRepository {
       .where(
         and(
           eq(conciergeTaskReactions.chatId, chatId),
-          inArray(conciergeTaskReactions.messageKey, [...new Set(messageKeys)]),
+          inArray(conciergeTaskReactions.messageKey, keys),
         ),
       );
+    const turnRows = await this.db
+      .select({
+        messageKey: conciergeTurnReactions.messageKey,
+        state: conciergeTurnReactions.state,
+      })
+      .from(conciergeTurnReactions)
+      .where(
+        and(
+          eq(conciergeTurnReactions.chatId, chatId),
+          inArray(conciergeTurnReactions.messageKey, keys),
+        ),
+      );
+    const rows = [...taskRows, ...turnRows];
     const states = new Map<string, TaskReactionState[]>();
     for (const row of rows) {
       states.set(row.messageKey, [...(states.get(row.messageKey) ?? []), row.state]);
