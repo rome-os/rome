@@ -9,6 +9,11 @@ import { type ConciergeOwner, GUARDIAN_OWNER } from "../webchat/owner.js";
 
 const VISITOR_PREFIX = "visitor:";
 
+/** The Rome Cloud account a push for `owner` names: a visitor's, or undefined for the guardian. */
+export function recipientOf(owner: ConciergeOwner): string | undefined {
+  return owner.startsWith(VISITOR_PREFIX) ? owner.slice(VISITOR_PREFIX.length) : undefined;
+}
+
 /** An owner as their Concierge's turns name them. */
 export interface OwnerProfile {
   role: "guardian" | "visitor";

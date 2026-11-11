@@ -159,7 +159,7 @@ export async function createWorkerActionEngine(): Promise<ActionEngine> {
         adapters: chatsWired.adapters,
         // `channelsService` is built further down; an action sends after boot.
         channel: (name) => mainChannel(name, channelsService),
-        open: (input) => openChannelChat({ webchatRepo, speakers: appSpeakers }, input),
+        open: (input) => openChannelChat({ records: webchatRepo, speakers: appSpeakers }, input),
       },
     },
   });

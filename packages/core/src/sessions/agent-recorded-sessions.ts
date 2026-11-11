@@ -1,19 +1,18 @@
-// The dashboard's sessions (`rome_sessions`), read and written through the
-// web chat repository, behind the DashboardSessions port in
-// ../agent/domain/dashboard-sessions.ts.
+// The agent context's view of the session records, behind the RecordedSessions
+// port in ../agent/domain/recorded-sessions.ts.
 
-import type { WebChatRepository } from "./repository.js";
+import type { SessionRecords } from "./session-records.js";
 import { createLogger } from "../logger.js";
-import type { DashboardSession, DashboardSessions, NewSubagentSession } from "../agent/index.js";
+import type { RecordedSession, RecordedSessions, NewSubagentSession } from "../agent/index.js";
 import { parentTurnSession } from "../agent/index.js";
 import type { SessionRecordId } from "../agent/index.js";
 
-const log = createLogger("dashboard-sessions");
+const log = createLogger("recorded-sessions");
 
-export class WebChatDashboardSessions implements DashboardSessions {
+export class AgentRecordedSessions implements RecordedSessions {
   constructor(
-    private readonly webchat: Pick<
-      WebChatRepository,
+    private readonly records: Pick<
+      SessionRecords,
       "getSession" | "ensureRomeSession" | "recordSessionInChat"
     >,
   ) {}
@@ -24,8 +23,8 @@ export class WebChatDashboardSessions implements DashboardSessions {
     return parentTurnSession(session.type, session.parentSessionId);
   }
 
-  async get(id: SessionRecordId): Promise<DashboardSession | null> {
-    const row = await this.webchat.getSession(id);
+  async get(id: SessionRecordId): Promise<RecordedSession | null> {
+    const row = await this.records.getSession(id);
     if (!row) return null;
     return {
       type: row.type,
@@ -38,7 +37,7 @@ export class WebChatDashboardSessions implements DashboardSessions {
   }
 
   async addSubagentSession(session: NewSubagentSession): Promise<void> {
-    await this.webchat.ensureRomeSession({
+    await this.records.ensureRomeSession({
       id: session.id,
       type: "subagent",
       name: session.name,
@@ -50,7 +49,7 @@ export class WebChatDashboardSessions implements DashboardSessions {
     });
     // A subagent's chat is minted under its own session id.
     try {
-      await this.webchat.recordSessionInChat(session.id, session.id);
+      await this.records.recordSessionInChat(session.id, session.id);
     } catch (err) {
       log.warn("failed to record the chat that has the subagent's session", {
         agentName: session.agentName ?? "main",
