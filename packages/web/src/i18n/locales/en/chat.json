@@ -595,5 +595,28 @@
       "daily": "daily reset",
       "working_dir": "working folder gone"
     }
+  },
+  "routineCard": {
+    "details": "Details",
+    "turnOn": "Turn it on",
+    "turningOn": "Turning it on…",
+    "turningOnLabel": "Turning on routine",
+    "createFailed": "Couldn't turn it on ({{status}}).",
+    "on": "On",
+    "paused": "Paused",
+    "saving": "Saving",
+    "running": "Running…",
+    "more": "More",
+    "pause": "Pause",
+    "resume": "Resume",
+    "runNow": "Run now",
+    "delete": "Delete",
+    "deleting": "Deleting",
+    "deleteConfirm": "Delete this routine?",
+    "cancel": "Cancel",
+    "then": "Then",
+    "channel": "Channel",
+    "sendMessage": "Send a message",
+    "action": "Action"
   }
 }

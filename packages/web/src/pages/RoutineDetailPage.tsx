@@ -56,6 +56,7 @@ export default function RoutineDetailPage() {
         ) : (
           <>
             <RoutineHeader routine={routine} t={t} />
+            <WhatItRuns routine={routine} t={t} />
             <section className="space-y-3">
               <h2 className="text-section text-foreground">{t("detail.runHistory")}</h2>
               <RunHistoryList routineId={routine.id} />
@@ -102,6 +103,54 @@ function RoutineHeader({ routine, t }: { routine: Routine; t: TFunction }) {
         </span>
       }
     />
+  );
+}
+
+// What the routine runs: the bound action id and each top-level argument (an
+// agent prompt, a message), as written. The chat card that created it shows
+// only its sentence, so this is where the guardian reads the rest.
+function WhatItRuns({ routine, t }: { routine: Routine; t: TFunction }) {
+  return (
+    <section className="space-y-3">
+      <h2 className="text-section text-foreground">{t("detail.whatItRuns")}</h2>
+      <dl className="space-y-2 text-aux">
+        <ArgRow label={t("detail.action")} value={routine.actionName} mono />
+        {Object.entries(routine.args).map(([key, value]) => (
+          <ArgRow
+            key={key}
+            label={argLabel(key)}
+            value={typeof value === "string" ? value : JSON.stringify(value, null, 2)}
+            mono={typeof value !== "string"}
+          />
+        ))}
+      </dl>
+    </section>
+  );
+}
+
+// "agentName" -> "Agent name": readable without a per-action label table.
+function argLabel(key: string): string {
+  const words = key
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .replace(/[._-]+/g, " ")
+    .toLowerCase();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
+function ArgRow({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
+  return (
+    <div className="flex gap-3">
+      <dt className="w-24 shrink-0 text-subtle-foreground wrap-anywhere">{label}</dt>
+      <dd
+        className={
+          mono
+            ? "min-w-0 whitespace-pre-wrap break-all font-mono text-foreground"
+            : "min-w-0 max-w-prose whitespace-pre-wrap text-foreground wrap-anywhere"
+        }
+      >
+        {value}
+      </dd>
+    </div>
   );
 }
 

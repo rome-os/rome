@@ -248,7 +248,8 @@ describe("ChatPendingCardJump", () => {
       { id: "routine", key: "chat-routine:test", name: "Weekly update", enabled: true },
     ]);
     render(<Harness />);
-    await screen.findByText("On");
+    // The saved card is one row whose title links to the routine.
+    await screen.findByRole("link", { name: "Every Monday, remind me to send an update." });
     expect(screen.queryByRole("button", { name: "Needs you: jump to waiting card" })).toBeNull();
   });
 

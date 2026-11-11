@@ -272,6 +272,8 @@
     "trace": "执行追踪",
     "traceLoading": "正在加载追踪…",
     "traceError": "无法加载执行追踪。",
-    "noTrace": "此次运行未记录执行。"
+    "noTrace": "此次运行未记录执行。",
+    "whatItRuns": "运行内容",
+    "action": "动作"
   }
 }
