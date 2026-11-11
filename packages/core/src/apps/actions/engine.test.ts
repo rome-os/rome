@@ -61,24 +61,24 @@ describe("ActionEngine", () => {
     it("uses the TypeScript worker beside the source engine", () => {
       expect(
         resolveActionWorkerEntryPath("file:///app/packages/core/src/apps/actions/engine.ts"),
-      ).toBe("/app/packages/core/src/apps/actions/worker-bootstrap.ts");
+      ).toBe("/app/packages/core/src/app-host/worker-bootstrap.ts");
     });
 
     it("uses the JavaScript worker beside the compiled engine", () => {
       expect(
         resolveActionWorkerEntryPath("file:///app/packages/core/dist/apps/actions/engine.js"),
-      ).toBe("/app/packages/core/dist/apps/actions/worker-bootstrap.js");
+      ).toBe("/app/packages/core/dist/app-host/worker-bootstrap.js");
     });
 
     it("uses the compiled worker from a bundled root entrypoint", () => {
       expect(resolveActionWorkerEntryPath("file:///app/packages/core/dist/index.js")).toBe(
-        "/app/packages/core/dist/apps/actions/worker-bootstrap.js",
+        "/app/packages/core/dist/app-host/worker-bootstrap.js",
       );
     });
 
     it("uses the compiled worker from a bundled daemon entrypoint", () => {
       expect(resolveActionWorkerEntryPath("file:///app/packages/core/dist/daemon/index.js")).toBe(
-        "/app/packages/core/dist/apps/actions/worker-bootstrap.js",
+        "/app/packages/core/dist/app-host/worker-bootstrap.js",
       );
     });
   });

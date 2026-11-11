@@ -5,7 +5,7 @@ import type { ActionResult } from "./types.js";
 import type { AgentRunnerInterface, ThreadContext } from "../../core/types.js";
 import type { AgentEvent } from "../../types.js";
 import type { JournalEntry } from "./replay.js";
-import type { MainBackendTurnRunner } from "./backend-turn.js";
+import type { ApprovalSessionRunner } from "./session-runner.js";
 import { createLogger } from "../../logger.js";
 import { withoutSessionActor, type SessionActor } from "../../access/session-actor.js";
 
@@ -64,7 +64,7 @@ export class ApprovalHandler {
      * execution + trace and the session continuation run inside one of its
      * backend session tasks, so webchat renders the deferred tool call live and
      * the continuation reply rides the SSE push — the same seam defer uses. */
-    private backendTurnRunner: MainBackendTurnRunner,
+    private backendTurnRunner: ApprovalSessionRunner,
     /** Resolve the continued session's project working dir from its (channel,
      * thread). An approval resume — like defer — runs the SDK turn on a fresh
      * stack that never carried the dir, so without this it falls back to the

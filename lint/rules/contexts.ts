@@ -10,9 +10,20 @@ import type { ImportRule, ListedCrossing } from "../import-rules.js";
 const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
   access: ["instance"],
   agent: ["instance"],
-  apps: ["access", "agent", "chats", "connections", "instance", "people", "routines"],
-  chats: ["access", "agent", "connections", "participation", "people"],
-  connections: ["chats", "desktops", "instance", "participation", "people"],
+  "app-host": [
+    "access",
+    "agent",
+    "apps",
+    "chats",
+    "connections",
+    "favors",
+    "instance",
+    "people",
+    "routines",
+  ],
+  apps: ["access", "instance"],
+  chats: ["access", "agent", "apps", "connections", "participation", "people"],
+  connections: ["apps", "chats", "desktops", "instance", "participation", "people"],
   desktops: ["access", "instance"],
   favors: ["access", "apps", "instance"],
   instance: [],
@@ -101,13 +112,7 @@ export const contextRules: ImportRule[] = contexts.flatMap((from) =>
 const SESSIONS_REPOSITORY = "agent/infrastructure/drizzle-session-repository";
 
 /** The apps/ files that give apps `ctx.favors` through Favors' `FavorService` type. */
-const APP_FAVOR_CAPABILITY = [
-  "apps/context.ts",
-  "apps/context.test.ts",
-  "apps/api.ts",
-  "apps/websocket-server.ts",
-  "apps/actions/app-actions-wiring.ts",
-];
+const APP_FAVOR_CAPABILITY = ["apps/context.ts"];
 
 /** One listed crossing for each `[from, to]` pair, all under one rule and ticket. */
 function crossingsOf(
@@ -121,45 +126,25 @@ function crossingsOf(
 
 /** Crossings that remain until their ticket lands. */
 export const contextCrossings: ListedCrossing[] = [
-  ...crossingsOf(
-    "chats-never-imports-apps",
-    "ZHA-164",
-    "Chats matches agents under their legacy app names and reads an app's action context, until it reaches neither through Apps.",
+  ...[
     [
-      ["chats/connected-accounts/account-agents.ts", "apps/artifact-id.ts"],
-      ["chats/connected-accounts/account-agents.ts", "apps/rome-accounts.ts"],
-      ["chats/dashboard/dashboard-account.ts", "apps/actions/context.ts"],
-      ["chats/dashboard/webchat.ts", "apps/artifact-id.ts"],
+      "connections-never-imports-app-host",
+      "connections/kinds/email/email-delivery.test.ts",
+      "app-host/service-proxies.ts",
     ],
-  ),
-  ...crossingsOf(
-    "connections-never-imports-apps",
-    "ZHA-165",
-    "App connections drive the app action engine from connections/, and Discord reads Apps' platform requests, until that code moves into Apps.",
+    ["people-never-imports-app-host", "people/account-directory.test.ts", "app-host/chat-reads.ts"],
     [
-      ["connections/app-connections.ts", "apps/actions/context.ts"],
-      ["connections/app-connections.ts", "apps/actions/engine.ts"],
-      ["connections/app-connections.ts", "apps/actions/registry.ts"],
-      ["connections/app-connections.ts", "apps/state.ts"],
-      ["connections/app-connections.test.ts", "apps/actions/approval-card.ts"],
-      ["connections/app-connections.test.ts", "apps/actions/approval-handler.ts"],
-      ["connections/app-connections.test.ts", "apps/actions/backend-turn.ts"],
-      ["connections/app-connections.test.ts", "apps/actions/engine.ts"],
-      ["connections/app-connections.test.ts", "apps/actions/registry.ts"],
-      ["connections/app-connections.test.ts", "apps/catalog.ts"],
-      ["connections/app-connections.test.ts", "apps/context.ts"],
-      ["connections/app-connections.test.ts", "apps/state.ts"],
-      ["connections/integrations/discord.ts", "apps/platform-requests.ts"],
-      ["connections/integrations/discord.test.ts", "apps/platform-requests.ts"],
-      ["connections/integrations/email-setup.test.ts", "apps/repositories/approvals.ts"],
-      ["connections/kinds/discord/discord.ts", "apps/artifact-id.ts"],
-      ["connections/kinds/discord/discord.ts", "apps/platform-requests.ts"],
-      ["connections/kinds/discord/discord-rest.test.ts", "apps/platform-requests.ts"],
-      ["connections/kinds/email/email-delivery.test.ts", "apps/actions/ipc.ts"],
-      ["connections/kinds/email/email-delivery.test.ts", "apps/actions/service-proxies.ts"],
-      ["connections/kinds/email/email-delivery.test.ts", "apps/actions/worker-rpc-client.ts"],
+      "routines-never-imports-app-host",
+      "routines/routine-actor.test.ts",
+      "app-host/caller-notify.ts",
     ],
-  ),
+  ].map(([rule, from, to]) => ({
+    rule,
+    from,
+    to,
+    ticket: "ZHA-167",
+    why: "The test drives its scenario through App host code, until the scenario moves into an App host test.",
+  })),
   ...crossingsOf(
     "people-never-imports-routines",
     "ZHA-166",

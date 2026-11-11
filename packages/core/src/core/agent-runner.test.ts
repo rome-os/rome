@@ -1,4 +1,4 @@
-import { createBackendTurnRunner } from "../apps/actions/backend-turn.js";
+import { createBackendTurnRunner } from "../app-host/backend-turn.js";
 import { ChatSessionSettings } from "../webchat/chat-session-settings.js";
 import { WebChatDashboardSessions } from "../webchat/webchat-dashboard-sessions.js";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
@@ -10,7 +10,7 @@ import { chatPromptFacts } from "./chat-prompt-facts.js";
 import type { PromptFacts } from "../agent/index.js";
 import type { AgentDefinition } from "../agent/index.js";
 import { claudeStoppedTurnResult, readAnswerShape, romeSessionTracing } from "../agent/index.js";
-import { TurnUsageReporter } from "../apps/turn-usage-reporter.js";
+import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { canOpenChat } from "../concierge/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
@@ -18,7 +18,7 @@ import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";
 import { runDefer } from "../routines/defer.js";
 import { createSubagentCalls } from "../agent/index.js";
-import { AgentLoader } from "../apps/agent-loader.js";
+import { AgentLoader } from "../app-host/agent-loader.js";
 import { DrizzleSessionRepository, Session, type SessionRepository } from "../agent/index.js";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { ActionEngine } from "../apps/actions/engine.js";
@@ -104,10 +104,10 @@ import {
   type Sessions,
   type AgentTurnHandle,
 } from "../agent/index.js";
-import { SkillLoader } from "../apps/skill-loader.js";
+import { SkillLoader } from "../app-host/skill-loader.js";
 import { TurnListeners, type TurnLifecycle, type TurnMiddleware } from "../agent/index.js";
-import { AppTurnHooks } from "../apps/app-turn-hooks.js";
-import { AppTurnMiddleware } from "../apps/app-turn-middleware.js";
+import { AppTurnHooks } from "../app-host/app-turn-hooks.js";
+import { AppTurnMiddleware } from "../app-host/app-turn-middleware.js";
 import type {
   AgentTurnFinishedEvent,
   AgentTurnStartedEvent,

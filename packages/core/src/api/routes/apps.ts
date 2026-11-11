@@ -504,7 +504,7 @@ export function appsRoutes(deps: ApiDeps): Hono {
       guardianAccessAllowed ||
       dashboardAccessAllowed ||
       (viewer !== null && permission.listedEmails.has(viewer.email.toLowerCase()));
-    // Client-side mirror of the server-side `request.caller` (apps/api.ts):
+    // Client-side mirror of the server-side `request.caller` (app-host/api.ts):
     // resolved here, per manifest fetch, and delivered on the bootstrap so the
     // app UI can gate owner-only affordances without probing a route. Advisory
     // only — enforcement stays in the app's API handler.

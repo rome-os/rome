@@ -15,7 +15,7 @@ import { attachTerminalServer } from "../terminal-server.js";
 import { attachLiveEventsServer } from "../live-events-server.js";
 import { attachNodeConsoleServer } from "../desktops/node-console-server.js";
 import { attachDesktopProxy } from "../desktops/desktop-proxy-server.js";
-import { attachAppWebSocket } from "../apps/websocket-server.js";
+import { attachAppWebSocket } from "../app-host/websocket-server.js";
 import { errorHandler } from "./middleware/error-handler.js";
 import { computerUseRoutes } from "./routes/computer-use.js";
 import { wechatAppRoutes } from "./routes/wechat-app.js";

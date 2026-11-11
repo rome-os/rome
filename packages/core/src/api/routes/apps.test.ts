@@ -16,7 +16,7 @@ import type {
 } from "../../apps/state.js";
 import { ActionLoader } from "../../apps/actions/loader.js";
 import { createEmptyLegacyArtifactBindings } from "../../apps/artifact-id.js";
-import { AgentLoader } from "../../apps/agent-loader.js";
+import { AgentLoader } from "../../app-host/agent-loader.js";
 import { COOKIE_NAME, createSession } from "../../access/auth.js";
 import { buildTestDeps, createTestDb } from "../../test/helpers.js";
 

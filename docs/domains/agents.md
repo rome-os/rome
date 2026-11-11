@@ -15,7 +15,7 @@ A named Rome agent, such as main, sales or support. Its definition, model select
 
 What an agent declares about itself in its file, in core or in an app. The fields are in [`concepts/agents.md`](../concepts/agents.md). Rome reads a definition and never stores or edits it. A session keeps the definition it opened with, which is why an agent's [policy](#agent-policy) is the same for every session of it.
 
-- In code it is `AgentDefinition` in [`packages/core/src/agent/domain/agent-definition.ts`](../../packages/core/src/agent/domain/agent-definition.ts). The Apps context's `AgentLoader` in [`packages/core/src/apps/agent-loader.ts`](../../packages/core/src/apps/agent-loader.ts) reads the files when apps change and fills the `AgentCatalog` port.
+- In code it is `AgentDefinition` in [`packages/core/src/agent/domain/agent-definition.ts`](../../packages/core/src/agent/domain/agent-definition.ts). The Apps context's `AgentLoader` in [`packages/core/src/app-host/agent-loader.ts`](../../packages/core/src/app-host/agent-loader.ts) reads the files when apps change and fills the `AgentCatalog` port.
 - One trait comes from Rome, not the file: whether a chat's saved model outranks the session's [model pin](../concepts/sessions.md#model-pin) on a cold resume (`savedSelectionOutranksPin`). Rome names the agents that have it when it loads the catalog, and the rule that reads it is `restoresSavedSelection`. The agent context never names a particular agent.
 
 ## Agent policy
@@ -29,7 +29,7 @@ How a chat treats one agent's turns: whether the agent's text reaches the chat, 
 
 Know-how an agent reads and follows. An agent has the skills its installed apps offer, and a slash command invokes one for a turn. What a skill is, is in [`concepts/skills.md`](../concepts/skills.md).
 
-- In code, `Skill` and the `SkillCatalog` port are in [`packages/core/src/agent/domain/skill.ts`](../../packages/core/src/agent/domain/skill.ts). The Apps context's `SkillLoader` in [`packages/core/src/apps/skill-loader.ts`](../../packages/core/src/apps/skill-loader.ts) fills it from the installed apps.
+- In code, `Skill` and the `SkillCatalog` port are in [`packages/core/src/agent/domain/skill.ts`](../../packages/core/src/agent/domain/skill.ts). The Apps context's `SkillLoader` in [`packages/core/src/app-host/skill-loader.ts`](../../packages/core/src/app-host/skill-loader.ts) fills it from the installed apps.
 
 ## Rome tools
 
@@ -48,7 +48,7 @@ The tools a session carries beyond the ones every session of its agent has, such
 
 What an installed app puts around producing a turn's reply. A middleware may rewrite the turn's prompt, answer the turn itself, or let the model answer. The model's reply is innermost and runs only when every middleware continues. Apps declare it as a `turn-middleware` hook, and an agent whose turns always come from one is code-backed.
 
-- In code, the `TurnMiddleware` port is in [`packages/core/src/agent/domain/turn-middleware.ts`](../../packages/core/src/agent/domain/turn-middleware.ts), and the Apps context's `AppTurnMiddleware` in [`packages/core/src/apps/app-turn-middleware.ts`](../../packages/core/src/apps/app-turn-middleware.ts) runs the apps' hooks behind it.
+- In code, the `TurnMiddleware` port is in [`packages/core/src/agent/domain/turn-middleware.ts`](../../packages/core/src/agent/domain/turn-middleware.ts), and the Apps context's `AppTurnMiddleware` in [`packages/core/src/app-host/app-turn-middleware.ts`](../../packages/core/src/app-host/app-turn-middleware.ts) runs the apps' hooks behind it.
 
 ## Subagent
 

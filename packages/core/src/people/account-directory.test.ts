@@ -1,4 +1,4 @@
-import { appChatReads } from "../apps/chat-reads.js";
+import { appChatReads } from "../app-host/chat-reads.js";
 import { ChatReadModel } from "../webchat/chat-read-model.js";
 import { chatAddresses, chatMessages, romeSessions } from "../db/schema.js";
 // What the account read asks the triage record for.

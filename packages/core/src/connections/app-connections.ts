@@ -16,6 +16,7 @@ import type { ActionEngine, ActionRunContext } from "../apps/actions/engine.js";
 import type { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { CatalogEvent } from "../apps/state.js";
+import type { AppConnectionsContextFactory } from "../apps/app-connections-port.js";
 import type {
   AppConnectionAccessRecord,
   AppConnectionAccessRepository,
@@ -77,10 +78,6 @@ export interface AppConnectionBrokerPort {
     },
     context?: AppConnectionInvocationContext,
   ): Promise<AppConnectionBrokerResult<AppConnectionInvokeResult>>;
-}
-
-export interface AppConnectionsContextFactory {
-  forApp(appId: string): AppConnectionsCapability;
 }
 
 function failure(
@@ -157,29 +154,6 @@ export class BoundAppConnections implements AppConnectionsCapability {
     requestId?: string;
   }): Promise<AppConnectionInvokeResult<T>> {
     return expose(await this.broker.invoke(this.appId, input)) as AppConnectionInvokeResult<T>;
-  }
-}
-
-export class DeniedAppConnections implements AppConnectionsCapability {
-  private denied(): never {
-    throw new AppConnectionError({
-      code: "access_denied",
-      message: "This App has no connection access.",
-      retryable: false,
-    });
-  }
-
-  async list(): Promise<AppConnectionPage> {
-    return this.denied();
-  }
-  async describe(): Promise<AppConnectionDescription> {
-    return this.denied();
-  }
-  async operations(): Promise<AppConnectionOperationsPage> {
-    return this.denied();
-  }
-  async invoke<T = unknown>(): Promise<AppConnectionInvokeResult<T>> {
-    return this.denied();
   }
 }
 

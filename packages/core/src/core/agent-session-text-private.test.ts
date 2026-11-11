@@ -2,7 +2,7 @@ import { romeToolPorts } from "./rome-tool-ports.js";
 import { ChatSessionSettings } from "../webchat/chat-session-settings.js";
 import { createLogger } from "../logger.js";
 import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
-import { TurnUsageReporter } from "../apps/turn-usage-reporter.js";
+import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -14,8 +14,8 @@ import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
 import { DrizzleSessionRepository } from "../agent/index.js";
 import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
 import { TurnListeners } from "../agent/index.js";
-import { AppTurnHooks } from "../apps/app-turn-hooks.js";
-import { AgentLoader } from "../apps/agent-loader.js";
+import { AppTurnHooks } from "../app-host/app-turn-hooks.js";
+import { AgentLoader } from "../app-host/agent-loader.js";
 import {
   createSessionFromRun,
   type ModelProvider,
@@ -24,7 +24,7 @@ import {
 import { createSessions, type Sessions } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
-import { SkillLoader } from "../apps/skill-loader.js";
+import { SkillLoader } from "../app-host/skill-loader.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { reportOf, fakeAccounts } from "../test/kit/model-accounts.js";
 

@@ -76,7 +76,7 @@ export interface AppDomain {
 
 export interface CreateAppDomainOptions {
   lockfilePath: string;
-  routines?: AppManagerOptions["routines"];
+  pauseRoutines?: AppManagerOptions["pauseRoutines"];
   installedRoot?: string;
   bundleFetcher?: BundleFetcher;
   /** Used by the installer to resolve omitted `AppstoreSource.contentHash`. */
@@ -97,7 +97,7 @@ export function createAppDomain(opts: CreateAppDomainOptions): AppDomain {
   const manager = new AppManager({
     lockfilePath: opts.lockfilePath,
     installer,
-    routines: opts.routines,
+    pauseRoutines: opts.pauseRoutines,
   });
   const catalog = new AppCatalog({
     installer,

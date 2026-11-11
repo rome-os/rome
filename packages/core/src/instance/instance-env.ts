@@ -41,7 +41,7 @@
  *     after a turn only shows once the cache is dropped.
  *   - Action workers: the adopt route calls `restartWorkerWarmPool()`, so new
  *     workers fork with the updated env and run `loadConfig()` themselves
- *     (apps/actions/engine.ts `createWorkerProcess`, apps/actions/worker-runtime.ts).
+ *     (apps/actions/engine.ts `createWorkerProcess`, app-host/worker-runtime.ts).
  *     Workers that are mid-run retire after their run.
  *
  * Deliberately still captured at boot:

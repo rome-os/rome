@@ -1,7 +1,7 @@
 import { romeToolPorts } from "./rome-tool-ports.js";
 import { createLogger } from "../logger.js";
 import { readAnswerShape, romeSessionTracing } from "../agent/index.js";
-import { TurnUsageReporter } from "../apps/turn-usage-reporter.js";
+import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -11,13 +11,13 @@ import { ActionEngine } from "../apps/actions/engine.js";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/db.js";
 import type { AgentEvent } from "../types.js";
-import { AgentLoader } from "../apps/agent-loader.js";
+import { AgentLoader } from "../app-host/agent-loader.js";
 import {
   TurnListeners,
   type AgentTurnFailedBeforeStart,
   type TurnLifecycle,
 } from "../agent/index.js";
-import { AppTurnHooks } from "../apps/app-turn-hooks.js";
+import { AppTurnHooks } from "../app-host/app-turn-hooks.js";
 import {
   createSessionFromRun,
   type ModelProvider,
@@ -29,7 +29,7 @@ import { createSessions, type Sessions } from "../agent/index.js";
 import { createModelResolver } from "../agent/index.js";
 import { createTestSystemPrompts } from "../test/system-prompts.js";
 import { DrizzleSessionRepository, type SessionRepository } from "../agent/index.js";
-import { SkillLoader } from "../apps/skill-loader.js";
+import { SkillLoader } from "../app-host/skill-loader.js";
 import {
   createEmptyLegacyArtifactBindings,
   type ArtifactIdentityContext,
