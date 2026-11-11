@@ -225,8 +225,8 @@ private struct ShareModeHost: View {
 }
 
 /// Entering and leaving share mode leaves every row where it was, the
-/// tapped turn included: no row changes size, and the space under the
-/// transcript stays the same.
+/// tapped turn included: no row changes width or height, so text wraps
+/// the same, and the space under the transcript stays the same.
 @MainActor
 @Suite struct ShareModeLayoutTests {
     @Test func rowsHoldStillAsShareModeComesAndGoes() async throws {
@@ -274,13 +274,15 @@ private struct ShareModeHost: View {
             let now = try #require(selecting[id])
             #expect(abs(now.minY - frame.minY) < 0.5, "\(id) moved from \(frame.minY) to \(now.minY)")
             #expect(abs(now.height - frame.height) < 0.5, "\(id) changed height from \(frame.height) to \(now.height)")
+            // The same width, so the same line breaks.
+            #expect(abs(now.width - frame.width) < 0.5, "\(id) changed width from \(frame.width) to \(now.width)")
         }
 
         store.share.cancel()
         try await Task.sleep(for: .milliseconds(600))
         for (id, frame) in before {
             let now = try #require(log.frames[id])
-            #expect(abs(now.minY - frame.minY) < 0.5 && abs(now.height - frame.height) < 0.5, "\(id) did not come back")
+            #expect(abs(now.minY - frame.minY) < 0.5 && abs(now.height - frame.height) < 0.5 && abs(now.width - frame.width) < 0.5, "\(id) did not come back")
         }
     }
 }
