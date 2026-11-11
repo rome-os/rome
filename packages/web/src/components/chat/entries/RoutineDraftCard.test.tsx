@@ -402,7 +402,7 @@ describe("RoutineDraftCard", () => {
     });
   });
 
-  it("shows a paused manual routine as Paused and offers no Run now", async () => {
+  it("shows a paused manual routine as Paused and offers Resume, not Run now", async () => {
     const user = userEvent.setup();
     mockList.mockResolvedValue([
       { id: "r-5", name: "Landlord emails", key: "chat-routine:card-5", enabled: false },
@@ -414,6 +414,29 @@ describe("RoutineDraftCard", () => {
       />,
     );
     expect(await screen.findByText("Paused")).toBeTruthy();
+    await openMenu(user);
+    expect(screen.queryByRole("menuitem", { name: "Run now" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Resume" })).toBeTruthy();
+  });
+
+  it("offers no Run now while the routine's latest run is still going", async () => {
+    const user = userEvent.setup();
+    mockList.mockResolvedValue([
+      {
+        id: "r-5",
+        name: "Landlord emails",
+        key: "chat-routine:card-5",
+        enabled: true,
+        running: true,
+      },
+    ]);
+    render(
+      <RoutineDraftCard
+        draft={{ ...eventDraft, filterSummary: undefined, trigger: { type: "manual" } }}
+        routineKey="chat-routine:card-5"
+      />,
+    );
+    expect(await screen.findByText("Running…")).toBeTruthy();
     await openMenu(user);
     expect(screen.queryByRole("menuitem", { name: "Run now" })).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();

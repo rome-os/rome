@@ -33,7 +33,8 @@ type CardState =
   // `owned`: this card provably made the routine (same key, or created here),
   // so it may pause or delete it; a legacy name match only links to it.
   // `enabled` is null when the routine exists but its state couldn't be read.
-  | { kind: "on"; routineId?: string; enabled: boolean | null; owned: boolean }
+  // `running`: its latest run was still going when the card looked it up.
+  | { kind: "on"; routineId?: string; enabled: boolean | null; owned: boolean; running?: boolean }
   | { kind: "error"; message: string };
 
 type Busy = "toggle" | "delete" | "run" | null;
@@ -104,6 +105,7 @@ export function RoutineDraftCard({
               routineId: created.id,
               enabled: created.enabled,
               owned: !!routineKey?.startsWith(CHAT_ROUTINE_KEY_PREFIX),
+              running: created.running,
             }
           : { kind: "draft" },
       );
@@ -170,6 +172,7 @@ export function RoutineDraftCard({
     }
     setBusy(null);
     setActionError(error);
+    setState((prev) => (prev.kind === "on" ? { ...prev, running: false } : prev));
   };
 
   const isSchedule = draft.trigger.type === "schedule";
@@ -184,7 +187,7 @@ export function RoutineDraftCard({
       <span className="flex h-5 shrink-0 items-center">
         <TriggerIcon className="size-4 text-subtle-foreground" aria-hidden />
       </span>
-      <span className="min-w-0 text-section text-foreground wrap-anywhere group-hover:underline">
+      <span className="min-w-0 text-section text-foreground wrap-anywhere group-hover/title:underline">
         {draft.sentence}
       </span>
     </span>
@@ -208,7 +211,7 @@ export function RoutineDraftCard({
         {saved?.routineId ? (
           <Link
             to={`/routines/${encodeURIComponent(saved.routineId)}`}
-            className="group min-w-0 flex-1 basis-56 rounded-8 outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
+            className="group/title min-w-0 flex-1 basis-56 rounded-8 outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
           >
             {title}
           </Link>
@@ -250,13 +253,19 @@ export function RoutineDraftCard({
                 />
               ) : (
                 <>
-                  <SavedStatus enabled={saved.enabled} isManual={isManual} busy={busy} />
+                  <SavedStatus
+                    enabled={saved.enabled}
+                    isManual={isManual}
+                    running={busy === "run" || !!saved.running}
+                    busy={busy}
+                  />
                   {/* A name-only match on an old card may be an unrelated
                       routine: it links, but is never paused or deleted here. */}
                   {saved.owned && saved.routineId && (
                     <SavedMenu
                       enabled={saved.enabled}
                       isManual={isManual}
+                      running={!!saved.running}
                       disabled={busy !== null}
                       onToggle={() => toggle(saved.routineId!, !saved.enabled)}
                       onRun={() => runNow(saved.routineId!)}
@@ -300,14 +309,16 @@ export function RoutineDraftCard({
 function SavedStatus({
   enabled,
   isManual,
+  running,
   busy,
 }: {
   enabled: boolean | null;
   isManual: boolean;
+  running: boolean;
   busy: Busy;
 }) {
   const { t } = useTranslation("chat");
-  if (busy === "run") {
+  if (running) {
     return (
       <span className="flex h-5 items-center gap-2 text-aux text-muted-foreground">
         <Spinner size="sm" label={t("routineCard.running")} />
@@ -336,6 +347,7 @@ function SavedStatus({
 function SavedMenu({
   enabled,
   isManual,
+  running,
   disabled,
   onToggle,
   onRun,
@@ -343,24 +355,26 @@ function SavedMenu({
 }: {
   enabled: boolean | null;
   isManual: boolean;
+  running: boolean;
   disabled: boolean;
   onToggle: () => void;
   onRun: () => void;
   onAskDelete: () => void;
 }) {
   const { t } = useTranslation("chat");
-  // A manual routine offers Run now instead of Pause, and only while enabled,
-  // as on the Routines page. With an unknown state there's no honest
-  // Pause/Resume to offer.
-  const first = isManual ? (
-    enabled === true && (
-      <DropdownMenuItem onSelect={onRun}>{t("routineCard.runNow")}</DropdownMenuItem>
-    )
-  ) : enabled !== null ? (
-    <DropdownMenuItem onSelect={onToggle}>
-      {enabled ? t("routineCard.pause") : t("routineCard.resume")}
-    </DropdownMenuItem>
-  ) : null;
+  // An enabled manual routine offers Run now instead of Pause, but not while a
+  // run is still going (as on the Routines page; the server doesn't serialize
+  // runs). Anything else with a known state offers Pause / Resume.
+  const first =
+    isManual && enabled ? (
+      running ? null : (
+        <DropdownMenuItem onSelect={onRun}>{t("routineCard.runNow")}</DropdownMenuItem>
+      )
+    ) : enabled !== null ? (
+      <DropdownMenuItem onSelect={onToggle}>
+        {enabled ? t("routineCard.pause") : t("routineCard.resume")}
+      </DropdownMenuItem>
+    ) : null;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>

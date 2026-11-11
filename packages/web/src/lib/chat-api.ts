@@ -714,6 +714,8 @@ export interface RoutineRef {
   name: string;
   key: string | null;
   enabled: boolean;
+  /** Its latest run is still going, so the card must not start another. */
+  running?: boolean;
 }
 
 /** Null when the list can't be loaded, so a failed fetch never reads as "the
@@ -721,11 +723,21 @@ export interface RoutineRef {
 export async function listRoutineRefs(): Promise<RoutineRef[] | null> {
   const res = await fetch("/api/routines", { credentials: "include" }).catch(() => null);
   if (!res?.ok) return null;
-  const rows = (await res.json().catch(() => null)) as Array<Partial<RoutineRef>> | null;
+  const rows = (await res.json().catch(() => null)) as Array<
+    Partial<RoutineRef> & { lastRun?: { status?: string } | null }
+  > | null;
   if (!Array.isArray(rows)) return null;
   return rows.flatMap((r) =>
     typeof r.id === "string"
-      ? [{ id: r.id, name: r.name ?? "", key: r.key ?? null, enabled: r.enabled !== false }]
+      ? [
+          {
+            id: r.id,
+            name: r.name ?? "",
+            key: r.key ?? null,
+            enabled: r.enabled !== false,
+            running: r.lastRun?.status === "running",
+          },
+        ]
       : [],
   );
 }
