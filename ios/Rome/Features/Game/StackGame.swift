@@ -47,8 +47,9 @@ struct StackGame: Equatable {
     static let skillEvery = 5
     static let appEvery = 25
 
-    let fieldWidth: CGFloat
-    let baseWidth: CGFloat
+    /// The width the blocks travel; it follows the window (`resize`).
+    private(set) var fieldWidth: CGFloat
+    private(set) var baseWidth: CGFloat
     /// The base first; every placed block after it.
     private(set) var tower: [Block]
     private(set) var phase: Phase = .ready
@@ -71,11 +72,40 @@ struct StackGame: Equatable {
 
     init(fieldWidth: CGFloat, best: Int = 0) {
         self.fieldWidth = fieldWidth
-        let base = min((fieldWidth * Self.baseShare).rounded(), Self.maxBaseWidth)
+        let base = Self.baseWidth(for: fieldWidth)
         baseWidth = base
         tower = [Block(x: ((fieldWidth - base) / 2).rounded(), width: base)]
         self.best = best
         slide = Slide(width: base, fromLeft: true, speed: Self.startSpeed, startedAt: 0)
+    }
+
+    static func baseWidth(for fieldWidth: CGFloat) -> CGFloat {
+        min((fieldWidth * baseShare).rounded(), maxBaseWidth)
+    }
+
+    /// The window changed width (Split View, Stage Manager, rotation).
+    /// Before the first tap the game starts over at the new width. A game
+    /// under way or just ended keeps its tower: every block scales by how
+    /// the base's width changed, around the field's middle, so the tower
+    /// stays centered and the slider within the field.
+    mutating func resize(to width: CGFloat) {
+        guard width > 0, width != fieldWidth else { return }
+        if phase == .ready {
+            self = StackGame(fieldWidth: width, best: best)
+            return
+        }
+        let newBase = Self.baseWidth(for: width)
+        let scale = newBase / baseWidth
+        let (oldMiddle, newMiddle) = (fieldWidth / 2, width / 2)
+        for index in tower.indices {
+            let block = tower[index]
+            let middle = newMiddle + (block.x + block.width / 2 - oldMiddle) * scale
+            tower[index].width = block.width * scale
+            tower[index].x = middle - tower[index].width / 2
+        }
+        slide.width = min(slide.width * scale, width)
+        fieldWidth = width
+        baseWidth = newBase
     }
 
     /// Blocks placed on the base.

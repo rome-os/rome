@@ -66,6 +66,9 @@ struct StackGameScreen: View {
     static let toastTime: TimeInterval = 1.2
     /// After the toast, the mascot offers another game.
     static var againAfter: TimeInterval { toastFrom + toastTime }
+    /// How long after the end something still moves: the tumble, the camera
+    /// easing out, the label fading in, then the bubble appearing.
+    static var endLife: TimeInterval { max(tumbleTime, fitDelay + fitTime, toastFrom + 0.3, againAfter) + 0.05 }
     /// Below the HUD: the fitted tower keeps under this share of the screen
     /// until the HUD has been measured.
     static let fitTopShare: CGFloat = 0.3
@@ -93,6 +96,13 @@ struct StackGameScreen: View {
                     game = first
                     dropHaptic.prepare()
                 }
+                // A window resized or turned: the game follows its width.
+                .onChange(of: fieldWidth) { _, width in
+                    guard var next = game else { return }
+                    next.resize(to: width)
+                    if next.phase == .ready { effects = StackEffects() }
+                    game = next
+                }
             }
             .ignoresSafeArea()
             if let game {
@@ -100,6 +110,15 @@ struct StackGameScreen: View {
             }
         }
         .overlay(alignment: .top) { topBar }
+        // A run left part way still counts toward the best: closed, or the
+        // app sent to the background.
+        .onDisappear(perform: saveBest)
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didEnterBackgroundNotification)) { _ in saveBest() }
+    }
+
+    private func saveBest() {
+        guard !frozen, let game, game.phase != .ready else { return }
+        StackGameBest.save(game.score)
     }
 
     // MARK: Playing
@@ -189,7 +208,14 @@ struct StackGameScreen: View {
 
     private func field(_ game: StackGame, size: CGSize, fieldWidth: CGFloat) -> some View {
         let left = (size.width - fieldWidth) / 2
-        return TimelineView(.animation(minimumInterval: 1.0 / 60, paused: frozen)) { context in
+        // Frames only while something moves; then only when the idle face
+        // changes, and with Reduce Motion or in a snapshot, none at all.
+        let schedule = StackSchedule(
+            epoch: epoch,
+            busyUntil: frozen ? -.infinity : effects.busyUntil(playing: game.phase == .playing, endLife: Self.endLife),
+            idleFace: !reduceMotion && !frozen
+        )
+        return TimelineView(schedule) { context in
             let now = clock(context.date)
             let shown = effects.shownLevel(at: now, reduceMotion: reduceMotion)
             let layout = layout(game, size: size, fieldWidth: fieldWidth, shown: shown, now: now)
@@ -464,10 +490,9 @@ struct StackGameScreen: View {
         let moves = !reduceMotion && !frozen
         var face = MascotPose.rest
         if moves {
-            let alive = MascotPose(time: now + 1)
-            face.eyeScale = alive.eyeScale
+            face.eyeScale = StackFace.eyes(at: now)
             // Waiting for a tap, it looks about too.
-            if game.phase != .playing { face.glance = alive.glance }
+            if game.phase != .playing { face.glance = StackFace.glance(at: now) }
         }
         let top = game.top
         let standing = CGPoint(x: top.x + top.width / 2, y: (shown + 1) * StackGame.blockHeight)
@@ -860,6 +885,20 @@ struct StackEffects {
         floats.append(Float(text: text, level: level, row: row, emphasis: false, start: time + 0.12))
     }
 
+    /// When the last effect still running ends, in the game's clock: never
+    /// while playing (the block slides), minus infinity when nothing ran.
+    /// `endLife` is how long the end keeps moving after a miss.
+    func busyUntil(playing: Bool, endLife: TimeInterval) -> TimeInterval {
+        if playing { return .infinity }
+        var ends: [TimeInterval] = falling.map { $0.start + Self.fallLife }
+        ends += floats.map { $0.start + Self.floatLife }
+        if let ring { ends.append(ring.start + Self.ringLife) }
+        if let flash { ends.append(flash.start + Self.flashLife) }
+        if let ended { ends.append(ended + endLife) }
+        if rise.to != rise.from { ends.append(rise.start + Self.riseTime) }
+        return ends.max() ?? -.infinity
+    }
+
     /// How far the last placed block still is above its slot, 1 to 0.
     func landing(at time: TimeInterval, reduceMotion: Bool) -> CGFloat {
         guard !reduceMotion, rise.to > rise.from else { return 0 }
@@ -873,5 +912,62 @@ struct StackEffects {
         let progress = reduceMotion ? 1 : min(max((time - rise.start) / Self.riseTime, 0), 1)
         let eased = 1 - pow(1 - progress, 3)
         return rise.from + (rise.to - rise.from) * CGFloat(eased)
+    }
+}
+
+/// The mascot's face while it waits: a blink every few seconds and a glance
+/// that steps left and right. It changes only at known moments, so a still
+/// screen draws a frame at each and none between.
+enum StackFace {
+    static let blinkEvery: TimeInterval = 3.6
+    static let blinkLength: TimeInterval = 0.15
+    static let glanceEvery: TimeInterval = 1.8
+    static let glances: [CGFloat] = [0, -1.6, 0, 1.6]
+
+    static func eyes(at time: TimeInterval) -> CGFloat {
+        time.truncatingRemainder(dividingBy: blinkEvery) < blinkLength ? 0.08 : 1
+    }
+
+    static func glance(at time: TimeInterval) -> CGFloat {
+        let step = Int((time / glanceEvery).rounded(.down))
+        return glances[((step % glances.count) + glances.count) % glances.count]
+    }
+
+    /// The next moment after `time` when the face changes: a glance step,
+    /// or a blink's end (a blink starts on a glance step).
+    static func nextChange(after time: TimeInterval) -> TimeInterval {
+        let after = time + 0.001
+        let step = ((after / glanceEvery).rounded(.down) + 1) * glanceEvery
+        var blinkEnd = (after / blinkEvery).rounded(.down) * blinkEvery + blinkLength
+        if blinkEnd <= after { blinkEnd += blinkEvery }
+        return min(step, blinkEnd)
+    }
+}
+
+/// The game's frames: every display frame until `busyUntil` (in the game's
+/// clock, from `epoch`), then one at each change of the idle face, or with
+/// `idleFace` off a single last frame and none after.
+struct StackSchedule: TimelineSchedule {
+    let epoch: Date
+    let busyUntil: TimeInterval
+    let idleFace: Bool
+
+    func entries(from start: Date, mode: TimelineScheduleMode) -> AnySequence<Date> {
+        let epoch = epoch, busyUntil = busyUntil, idleFace = idleFace
+        return AnySequence { () -> AnyIterator<Date> in
+            var next: Date? = start
+            return AnyIterator {
+                guard let now = next else { return nil }
+                let time = now.timeIntervalSince(epoch)
+                if time < busyUntil {
+                    next = now.addingTimeInterval(1.0 / 60)
+                } else if idleFace {
+                    next = epoch.addingTimeInterval(StackFace.nextChange(after: time))
+                } else {
+                    next = nil
+                }
+                return now
+            }
+        }
     }
 }

@@ -205,4 +205,69 @@ import Testing
         let opened = streak.tap(at: 4.7 + 9 * 0.55)
         #expect(opened)
     }
+
+    @Test func aNarrowerWindowScalesTheTowerAroundTheMiddle() {
+        var game = playing()
+        game.drop(x: 108, at: 1)
+        // 400 → 300: the base goes from 224 to 168, a scale of 0.75.
+        game.resize(to: 300)
+        #expect(game.fieldWidth == 300)
+        #expect(game.baseWidth == 168)
+        #expect(game.tower[0] == StackGame.Block(x: 66, width: 168))
+        // The placed block kept its offset from the middle, scaled: 210 → 157.5.
+        #expect(abs(game.top.x + game.top.width / 2 - 157.5) < 0.001)
+        #expect(abs(game.top.width - 153) < 0.001)
+        #expect(abs(game.slide.width - 153) < 0.001)
+        // The slider stays within the field.
+        for step in 0..<40 {
+            let x = game.movingX(at: 1 + Double(step) * 0.13)
+            #expect(x >= 0 && x + game.slide.width <= 300 + 0.001)
+        }
+        // A new game starts at the new width.
+        game.drop(x: 0, at: 9)
+        game.restart()
+        #expect(game.fieldWidth == 300 && game.baseWidth == 168)
+    }
+
+    @Test func beforeTheFirstTapAResizeStartsOver() {
+        var game = StackGame(fieldWidth: 400, best: 7)
+        game.resize(to: 1000)
+        #expect(game == StackGame(fieldWidth: 1000, best: 7))
+        // An ended game keeps its tower and result.
+        var lost = playing()
+        lost.drop(x: 88, at: 1)
+        lost.drop(x: 400, at: 2)
+        lost.resize(to: 600)
+        #expect(lost.phase == .over && lost.placed == 1 && lost.score == 2)
+        #expect(lost.baseWidth == StackGame.maxBaseWidth)
+    }
+
+    @Test func nothingRedrawsOnceTheEffectsEnd() {
+        var effects = StackEffects()
+        #expect(effects.busyUntil(playing: false, endLife: 1.5) == -.infinity)
+        #expect(effects.busyUntil(playing: true, endLife: 1.5) == .infinity)
+        // A cut at 2 s: the falling piece is the last thing moving.
+        var game = playing()
+        let level = game.tower.count
+        let drop = game.drop(x: 108, at: 2)
+        effects.record(drop, level: level, game: game, at: 2)
+        #expect(effects.busyUntil(playing: false, endLife: 1.5) == 2 + StackEffects.fallLife)
+        // A miss at 5 s: the end's motion runs past it.
+        let missLevel = game.tower.count
+        let miss = game.drop(x: 400, at: 5)
+        effects.record(miss, level: missLevel, game: game, at: 5)
+        #expect(effects.busyUntil(playing: false, endLife: 1.5) == 5 + max(1.5, StackEffects.fallLife))
+    }
+
+    @Test func theIdleFaceChangesOnlyAtItsSteps() {
+        #expect(abs(StackFace.nextChange(after: 0) - 0.15) < 0.0001)
+        #expect(abs(StackFace.nextChange(after: 0.15) - 1.8) < 0.0001)
+        #expect(abs(StackFace.nextChange(after: 1.8) - 3.6) < 0.0001)
+        #expect(abs(StackFace.nextChange(after: 3.6) - 3.75) < 0.0001)
+        // Between two steps the face is the same.
+        #expect(StackFace.eyes(at: 0.2) == StackFace.eyes(at: 1.7))
+        #expect(StackFace.glance(at: 0.2) == StackFace.glance(at: 1.7))
+        #expect(StackFace.eyes(at: 3.65) < 1)
+        #expect(StackFace.glance(at: 2) != StackFace.glance(at: 0))
+    }
 }
