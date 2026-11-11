@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
@@ -258,11 +258,19 @@ describe("SystemUpgradeSection", () => {
     // The confirmation states the consequences before anything is sent.
     expect(await screen.findByText(/Rome restarts to apply the upgrade/)).toBeTruthy();
     expect(backend.upgradeRequests).toHaveLength(0);
+    // The confirmation carries the Rome logo, not a lettered placeholder tile.
+    const dialog = screen.getByRole("dialog");
+    expect(dialog.querySelector("svg[viewBox='0 0 51 48']")).toBeTruthy();
+    expect(within(dialog).queryByText("R")).toBeNull();
 
     await user.click(screen.getByRole("button", { name: "Upgrade and restart" }));
 
-    expect(await screen.findByText("Rome is restarting")).toBeTruthy();
+    const title = await screen.findByText("Rome is restarting");
     expect(backend.upgradeRequests).toEqual([{ target: "1.2.0" }]);
+    // The spinner sits before the title; the body is just the version.
+    expect(title.previousElementSibling?.getAttribute("class")).toContain("animate-spin");
+    expect(screen.getByText("Upgrading to 1.2.0.")).toBeTruthy();
+    expect(screen.queryByText(/reload automatically/)).toBeNull();
   });
 
   it("reloads only once the backend reports the target version", async () => {

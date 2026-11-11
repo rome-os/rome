@@ -1,4 +1,4 @@
-import { X } from "lucide-react";
+import { Loader2, X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, AlertDescription, AlertTitle } from "./ui/alert";
@@ -59,10 +59,15 @@ export function UpgradeCountdownBanner({
         className="pointer-events-auto flex w-full items-start gap-3 px-3 py-2 shadow-1"
       >
         {state.phase === "updating" && (
-          <div className="flex-1">
-            <AlertTitle>{t("upgradeBanner.updatingTitle")}</AlertTitle>
-            <AlertDescription className="mt-1">{t("upgradeBanner.updatingBody")}</AlertDescription>
-          </div>
+          <>
+            <Loader2 aria-hidden className="animate-spin" />
+            <div className="flex-1">
+              <AlertTitle>{t("upgradeBanner.updatingTitle")}</AlertTitle>
+              <AlertDescription className="mt-1">
+                {t("upgradeBanner.updatingBody")}
+              </AlertDescription>
+            </div>
+          </>
         )}
         {state.phase === "stalled" && (
           <>
