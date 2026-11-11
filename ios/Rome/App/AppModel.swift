@@ -489,8 +489,12 @@ final class AppModel {
 
     private(set) var phase: Phase = .launching {
         // Every path to the sign-in screen disconnects the device, and every
-        // path back connects it again.
-        didSet { if phase.isSignedIn != oldValue.isSignedIn { node.setSignedIn(phase.isSignedIn) } }
+        // path back connects it again. The game closes, so it never covers
+        // the sign-in screen.
+        didSet {
+            if phase.isSignedIn != oldValue.isSignedIn { node.setSignedIn(phase.isSignedIn) }
+            if !phase.isSignedIn { stackGame = nil }
+        }
     }
     private(set) var workspace: Workspace? {
         // Pictures belong to the workspace that loaded them.
@@ -502,11 +506,15 @@ final class AppModel {
     /// The instance to sign in to once from a browser before the phone can,
     /// set with its error.
     private(set) var browserSignIn: URL?
-    private(set) var sessionExpired = false
+    /// The game closes, so it never covers the banner that offers a sign-in.
+    private(set) var sessionExpired = false {
+        didSet { if sessionExpired { stackGame = nil } }
+    }
     /// Said once when this account was taken off the open Rome's allow-list
     /// and another Rome opened in its place.
     var accessNotice: String?
-    /// The stacking game, open over everything; it outlives the update page.
+    /// The stacking game, open over everything. It outlives the update page,
+    /// but not a sign-out, an expired session or a tapped push.
     var stackGame: StackGameLaunch?
     /// Goes up when a tapped push asks the shell to show Chat.
     private(set) var chatRequest = ChatRequest(serial: 0, topicId: nil)
@@ -1264,6 +1272,8 @@ final class AppModel {
     /// A tapped push: its instance, then its Concierge. It waits while no
     /// instance is open, through a cold launch or a sign-in.
     func openFromPush(_ target: PushTarget) async {
+        // The tapped chat shows, not the game over it.
+        stackGame = nil
         pendingPush = target
         // The stopped page waits on this instance's upgrade: the wait reopens
         // it, and the push routes then. Opening it now would end the wait.
