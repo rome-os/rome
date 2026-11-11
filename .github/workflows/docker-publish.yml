@@ -263,3 +263,79 @@ jobs:
           done
 
           docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
+
+  github-release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs:
+      - release
+      - publish
+    env:
+      RELEASE_TAG: ${{ needs.release.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The notes walk history back to the previous release's tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Find the previous release
+        id: previous
+        run: |
+          set -euo pipefail
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::A release for ${RELEASE_TAG} already exists"
+            exit 1
+          fi
+
+          # The highest stable version below this one on Docker Hub. Published
+          # images, not git tags: a tag whose build never shipped must not
+          # swallow its changes. A prerelease counts from the stable before it.
+          version="${RELEASE_TAG#v}"
+          url="https://hub.docker.com/v2/repositories/${IMAGE_NAME}/tags?page_size=100"
+          existing=""
+          while [[ -n "$url" && "$url" != "null" ]]; do
+            page=$(curl -fsSL "$url")
+            existing+=$(jq -r '.results[].name' <<< "$page")$'\n'
+            url=$(jq -r '.next' <<< "$page")
+          done
+          stable='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          base="${version%%-*}"
+          previous=$({ grep -E "$stable" <<< "$existing" || true; } \
+            | { cat; printf '%s\n' "$base"; } \
+            | sort -u -V \
+            | awk -v v="$base" '$0 == v { print p } { p = $0 }')
+          if [[ -n "$previous" ]] && ! git rev-parse --verify --quiet "refs/tags/v${previous}" >/dev/null; then
+            echo "::warning::Docker Hub has ${previous}, but no v${previous} tag exists; the notes list no changes."
+            previous=""
+          fi
+          echo "tag=${previous:+v${previous}}" >> "$GITHUB_OUTPUT"
+
+      - name: Write release notes
+        env:
+          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
+        run: |
+          node scripts/docker/release-notes.mjs "$RELEASE_TAG" "$PREVIOUS_TAG" > release-notes.md
+          cat release-notes.md
+
+      - name: Create release
+        run: |
+          set -euo pipefail
+
+          # Not Latest: that badge stays with the package releases, which
+          # release-please would take it back for anyway.
+          prerelease=false
+          [[ "$RELEASE_TAG" == *-* ]] && prerelease=true
+          gh release create "$RELEASE_TAG" \
+            --verify-tag \
+            --latest=false \
+            --prerelease="$prerelease" \
+            --title "Rome ${RELEASE_TAG}" \
+            --notes-file release-notes.md
