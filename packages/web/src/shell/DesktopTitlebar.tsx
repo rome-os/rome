@@ -102,8 +102,10 @@ export function DesktopTitlebar({
         />
         {/* Not clipped, so the mascot reaches below the bar. Its top is level
             with the traffic lights' (trafficLightPosition y in packages/desktop
-            window.ts). */}
+            window.ts). It spans the page's bar, so it must not drag the window
+            itself (see globals.css): only the badge does. */}
         <div
+          data-titlebar-mascot
           className="pointer-events-none absolute right-0 top-[18px]"
           style={{ left: leadingWidth }}
         >
