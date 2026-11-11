@@ -1,3 +1,4 @@
+import { createContext, useContext } from "react";
 import type { ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
@@ -21,6 +22,20 @@ import { ToolCallView, type ToolCallStatus } from "./ToolCallView";
 import { ToolUseBlock } from "./ToolUseBlock";
 import { TurnRecapView } from "./TurnRecapView";
 import { UsageSummaryView } from "./UsageSummaryView";
+
+/** Latest parsed task_chat block per task in the Concierge transcript. */
+export const LatestTaskChatsContext = createContext<ReadonlyMap<string, ChatEntry> | null>(null);
+
+function TaskChatEntry({ block }: { block: Extract<ChatEntry, { type: "task_chat" }> }) {
+  const latest = useContext(LatestTaskChatsContext);
+  return (
+    <TaskChatCard
+      chatId={block.chatId}
+      title={block.title}
+      isLatestForChat={!latest || latest.get(block.chatId) === block}
+    />
+  );
+}
 
 export interface RenderEntryOptions {
   onApprovalResolved?: () => void;
@@ -237,7 +252,7 @@ export function renderSingleEntry(
         />
       );
     case "task_chat":
-      return <TaskChatCard key={key} chatId={block.chatId} title={block.title} />;
+      return <TaskChatEntry key={key} block={block} />;
     case "connect_card":
       return (
         <ConnectCard

@@ -1,6 +1,16 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
+    "%@ +%lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 等 +%lld"
+          }
+        }
+      }
+    },
     "%@ has an update" : {
       "localizations" : {
         "zh-Hans" : {
@@ -11,12 +21,32 @@
         }
       }
     },
+    "%@ records" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@的记录"
+          }
+        }
+      }
+    },
     "%@ usage" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@ 用量"
+          }
+        }
+      }
+    },
+    "%@, %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@、%@"
           }
         }
       }
@@ -97,12 +127,98 @@
         }
       }
     },
+    "%lld records" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld record"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld records"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 条记录"
+          }
+        }
+      }
+    },
+    "%lld replies" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld reply"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld replies"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 条回复"
+          }
+        }
+      }
+    },
     "%lld unread" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%lld 条未读"
+          }
+        }
+      }
+    },
+    "A card" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "一张卡片"
+          }
+        }
+      }
+    },
+    "A card from %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "来自 %@ 的卡片"
+          }
+        }
+      }
+    },
+    "A card to connect a service" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接服务的卡片"
           }
         }
       }
@@ -117,12 +233,42 @@
         }
       }
     },
+    "A sign-in card" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "登录卡片"
+          }
+        }
+      }
+    },
+    "A turn summary" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本轮小结"
+          }
+        }
+      }
+    },
     "AI tool usage" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "AI 工具用量"
+          }
+        }
+      }
+    },
+    "Active energy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "活动能量"
           }
         }
       }
@@ -137,12 +283,32 @@
         }
       }
     },
+    "Allow Rome to read Health" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许 Rome 读取健康数据"
+          }
+        }
+      }
+    },
     "Almost done…" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "马上好了…"
+          }
+        }
+      }
+    },
+    "An app card" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用卡片"
           }
         }
       }
@@ -173,6 +339,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "外观"
+          }
+        }
+      }
+    },
+    "Apple Health" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 健康"
+          }
+        }
+      }
+    },
+    "Apple Health is off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 健康已关闭"
           }
         }
       }
@@ -212,7 +398,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "已批准，但%@没有完成。"
+            "value" : "已批准，但%@没有完成"
           }
         }
       }
@@ -277,6 +463,16 @@
         }
       }
     },
+    "BMI" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "体质指数"
+          }
+        }
+      }
+    },
     "Back" : {
       "localizations" : {
         "zh-Hans" : {
@@ -287,12 +483,72 @@
         }
       }
     },
+    "Blood glucose" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "血糖"
+          }
+        }
+      }
+    },
+    "Blood oxygen" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "血氧"
+          }
+        }
+      }
+    },
+    "Body fat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "体脂率"
+          }
+        }
+      }
+    },
+    "Body temperature" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "体温"
+          }
+        }
+      }
+    },
     "Books, pages and notes" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "读过的书、页数和笔记"
+          }
+        }
+      }
+    },
+    "Can Rome use this iPad" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许 Rome 使用这台 iPad"
+          }
+        }
+      }
+    },
+    "Can Rome use this iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许 Rome 使用这台 iPhone"
           }
         }
       }
@@ -372,7 +628,17 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "检查网络后再试一次。"
+            "value" : "检查网络后再试一次"
+          }
+        }
+      }
+    },
+    "Checking what you follow" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查看你的关注"
           }
         }
       }
@@ -413,6 +679,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "连接"
+          }
+        }
+      }
+    },
+    "Connect Claude or ChatGPT" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接 Claude 或 ChatGPT"
           }
         }
       }
@@ -502,7 +778,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "连接不上 Rome Cloud。"
+            "value" : "连接不上 Rome Cloud"
           }
         }
       }
@@ -512,7 +788,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "连接不上本地 Rome。"
+            "value" : "连接不上本地 Rome"
           }
         }
       }
@@ -532,7 +808,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "收到的数据无法读取。"
+            "value" : "收到的数据无法读取"
           }
         }
       }
@@ -572,7 +848,27 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "没有提交成功。"
+            "value" : "没有提交成功"
+          }
+        }
+      }
+    },
+    "Couldn't read Health" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取健康数据"
+          }
+        }
+      }
+    },
+    "Couldn't record activity" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法记录活动"
           }
         }
       }
@@ -583,6 +879,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 Rome Cloud 创建一个后再打开。"
+          }
+        }
+      }
+    },
+    "Cycling distance" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "骑行距离"
           }
         }
       }
@@ -617,12 +923,32 @@
         }
       }
     },
+    "Diastolic blood pressure" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "舒张压"
+          }
+        }
+      }
+    },
     "Didn't finish" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "未完成"
+          }
+        }
+      }
+    },
+    "Dietary energy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "膳食能量"
           }
         }
       }
@@ -637,16 +963,6 @@
         }
       }
     },
-    "Downloading %@…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "正在下载 %@…"
-          }
-        }
-      }
-    },
     "Due now" : {
       "localizations" : {
         "zh-Hans" : {
@@ -657,12 +973,52 @@
         }
       }
     },
+    "Event routine" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "事件例程"
+          }
+        }
+      }
+    },
+    "Exercise minutes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "锻炼分钟数"
+          }
+        }
+      }
+    },
     "Failed" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "失败"
+          }
+        }
+      }
+    },
+    "Flights climbed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "爬楼层数"
+          }
+        }
+      }
+    },
+    "For everyday wellness, not medical advice." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅用于日常健康管理，不构成医疗建议。"
           }
         }
       }
@@ -703,6 +1059,86 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "习惯打卡"
+          }
+        }
+      }
+    },
+    "Has my resting heart rate changed this month?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我这个月的静息心率有变化吗？"
+          }
+        }
+      }
+    },
+    "Health isn't available" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "健康数据不可用"
+          }
+        }
+      }
+    },
+    "Health request" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "健康数据请求"
+          }
+        }
+      }
+    },
+    "Health unavailable while locked" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "锁屏时无法读取健康数据"
+          }
+        }
+      }
+    },
+    "Heart rate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "心率"
+          }
+        }
+      }
+    },
+    "Heart rate variability" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "心率变异性"
+          }
+        }
+      }
+    },
+    "Height" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "身高"
+          }
+        }
+      }
+    },
+    "I looked at your steps, workouts, resting heart rate and weight. Here's a 12-week plan." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我查看了你的步数、体能训练、静息心率和体重。这是一份 12 周计划。"
           }
         }
       }
@@ -785,12 +1221,42 @@
         }
       }
     },
+    "Interrupted" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已中断"
+          }
+        }
+      }
+    },
+    "Invalid request" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请求无效"
+          }
+        }
+      }
+    },
     "Invalid sign-in response" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "收到的登录信息无效。"
+            "value" : "收到的登录信息无效"
+          }
+        }
+      }
+    },
+    "It's 4 bpm higher than last month, mostly on days you slept under 6 hours." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "比上个月高了 4 次/分钟，主要出现在睡眠不足 6 小时的日子。"
           }
         }
       }
@@ -925,12 +1391,32 @@
         }
       }
     },
+    "Manual routine" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手动例程"
+          }
+        }
+      }
+    },
     "Message" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "发消息"
+          }
+        }
+      }
+    },
+    "Mindful minutes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正念时间"
           }
         }
       }
@@ -1060,7 +1546,17 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "你没有这个 Rome 的访问权限。"
+            "value" : "你没有这个 Rome 的访问权限"
+          }
+        }
+      }
+    },
+    "No activity yet" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有活动"
           }
         }
       }
@@ -1080,7 +1576,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "没有网络连接。"
+            "value" : "没有网络连接"
           }
         }
       }
@@ -1115,6 +1611,16 @@
         }
       }
     },
+    "Not a supported type" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不支持的数据类型"
+          }
+        }
+      }
+    },
     "Not connected yet" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1130,7 +1636,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "没有找到。"
+            "value" : "没有找到"
           }
         }
       }
@@ -1141,6 +1647,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "以后再说"
+          }
+        }
+      }
+    },
+    "Not on" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未开启"
           }
         }
       }
@@ -1175,6 +1691,26 @@
         }
       }
     },
+    "Not supported" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不支持"
+          }
+        }
+      }
+    },
+    "Notice heart trends" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "留意心率趋势"
+          }
+        }
+      }
+    },
     "Notifications" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1185,12 +1721,52 @@
         }
       }
     },
+    "Off" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已关闭"
+          }
+        }
+      }
+    },
+    "On" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已开启"
+          }
+        }
+      }
+    },
+    "Online" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在线"
+          }
+        }
+      }
+    },
     "Only the owner of this Rome can approve this" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "只有这个 Rome 的所有者能批准"
+          }
+        }
+      }
+    },
+    "Only when" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅当"
           }
         }
       }
@@ -1221,6 +1797,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开演示数据"
+          }
+        }
+      }
+    },
+    "Open in Routines" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在「例程」中打开"
+          }
+        }
+      }
+    },
+    "Open in Safari" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Safari 中打开"
           }
         }
       }
@@ -1335,12 +1931,82 @@
         }
       }
     },
+    "Paused" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已暂停"
+          }
+        }
+      }
+    },
     "Photo" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "照片"
+          }
+        }
+      }
+    },
+    "Plan fat-loss workouts" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "规划减脂锻炼"
+          }
+        }
+      }
+    },
+    "Plan my workouts so I lose 3 kg by March." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮我规划锻炼，争取三月前减 3 公斤。"
+          }
+        }
+      }
+    },
+    "Privacy Policy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐私政策"
+          }
+        }
+      }
+    },
+    "Read only when your Rome asks. Never changed." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只在你的 Rome 请求时读取，从不修改。"
+          }
+        }
+      }
+    },
+    "Reading a chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查看对话"
+          }
+        }
+      }
+    },
+    "Reading a page" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在阅读网页"
           }
         }
       }
@@ -1361,6 +2027,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "最近使用"
+          }
+        }
+      }
+    },
+    "Recent activity" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最近活动"
           }
         }
       }
@@ -1421,6 +2097,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "重命名聊天"
+          }
+        }
+      }
+    },
+    "Replaced" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已被替换"
+          }
+        }
+      }
+    },
+    "Reply" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回复"
           }
         }
       }
@@ -1529,12 +2225,62 @@
         }
       }
     },
+    "Respiratory rate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "呼吸频率"
+          }
+        }
+      }
+    },
     "Restarting your Rome…" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在重启你的 Rome…"
+          }
+        }
+      }
+    },
+    "Resting energy" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "静息能量"
+          }
+        }
+      }
+    },
+    "Resting heart rate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "静息心率"
+          }
+        }
+      }
+    },
+    "Results can stay in your Rome's chats and memory." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "结果可能保留在你的 Rome 的聊天和记忆中。"
+          }
+        }
+      }
+    },
+    "Revoked" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已撤销"
           }
         }
       }
@@ -1574,7 +2320,17 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Rome Cloud 登录已过期。"
+            "value" : "Rome Cloud 登录已过期"
+          }
+        }
+      }
+    },
+    "Rome never sells it, uses it for ads, or uses it to train AI models. Your AI provider's terms apply to what it receives." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rome 绝不出售这些数据，也不会将其用于广告或训练 AI 模型。你的 AI 服务商收到的数据适用其自身条款。"
           }
         }
       }
@@ -1605,6 +2361,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "运行中…"
+          }
+        }
+      }
+    },
+    "Runs" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行"
+          }
+        }
+      }
+    },
+    "Scheduled routine" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "定时例程"
           }
         }
       }
@@ -1649,12 +2425,32 @@
         }
       }
     },
+    "Searching the web" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在搜索网页"
+          }
+        }
+      }
+    },
     "Send" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "发送"
+          }
+        }
+      }
+    },
+    "Send a message" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "发送消息"
           }
         }
       }
@@ -1694,7 +2490,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "服务器出错了。"
+            "value" : "服务器出错了"
           }
         }
       }
@@ -1704,7 +2500,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "会话已过期。"
+            "value" : "会话已过期"
           }
         }
       }
@@ -1862,7 +2658,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "登录已取消。"
+            "value" : "登录已取消"
           }
         }
       }
@@ -1872,7 +2668,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "登录未完成。"
+            "value" : "登录未完成"
           }
         }
       }
@@ -1917,12 +2713,82 @@
         }
       }
     },
+    "Sleep" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "睡眠"
+          }
+        }
+      }
+    },
+    "Something went wrong" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "出了点问题"
+          }
+        }
+      }
+    },
+    "Stand time" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "站立时间"
+          }
+        }
+      }
+    },
     "Start it in Rome Cloud, then open it here." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 Rome Cloud 启动后再打开。"
+          }
+        }
+      }
+    },
+    "Starting a task" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在开始任务"
+          }
+        }
+      }
+    },
+    "Starting a topic chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在开启话题对话"
+          }
+        }
+      }
+    },
+    "Status" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "状态"
+          }
+        }
+      }
+    },
+    "Steps" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "步数"
           }
         }
       }
@@ -1943,6 +2809,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已停止"
+          }
+        }
+      }
+    },
+    "Stopping a task" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在停止任务"
           }
         }
       }
@@ -1987,12 +2863,32 @@
         }
       }
     },
+    "Switched to %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已切换到 %@"
+          }
+        }
+      }
+    },
     "Switches instances." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "切换实例"
+          }
+        }
+      }
+    },
+    "Systolic blood pressure" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "收缩压"
           }
         }
       }
@@ -2107,6 +3003,16 @@
         }
       }
     },
+    "Then" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "然后"
+          }
+        }
+      }
+    },
     "This Rome is a development build and cannot be updated." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2132,7 +3038,7 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这个 Rome 还没准备好。"
+            "value" : "这个 Rome 还没准备好"
           }
         }
       }
@@ -2147,12 +3053,12 @@
         }
       }
     },
-    "This can take a few minutes. You can leave the app; it picks up where it left off." : {
+    "This card was already answered. The task has been refreshed." : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这可能需要几分钟。你可以先离开 App，回来后会接着等待。"
+            "value" : "这张卡片已经回答过，任务已刷新。"
           }
         }
       }
@@ -2163,6 +3069,56 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法在这里开始连接"
+          }
+        }
+      }
+    },
+    "This iPad" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPad"
+          }
+        }
+      }
+    },
+    "This iPad, your Rome, your AI model provider" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPad、你的 Rome、你的 AI 模型服务商"
+          }
+        }
+      }
+    },
+    "This iPhone" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone"
+          }
+        }
+      }
+    },
+    "This iPhone, your Rome, your AI model provider" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这台 iPhone、你的 Rome、你的 AI 模型服务商"
+          }
+        }
+      }
+    },
+    "This runs on your Rome's server, not on this phone, and can take a few minutes. You can leave the app and come back." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "升级在你的 Rome 服务器上进行，不在这台手机上，可能需要几分钟。你可以先离开 App，稍后再回来。"
           }
         }
       }
@@ -2182,7 +3138,17 @@
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "这一轮没有完成。"
+            "value" : "这一轮没有完成"
+          }
+        }
+      }
+    },
+    "Today" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "今天"
           }
         }
       }
@@ -2257,6 +3223,16 @@
         }
       }
     },
+    "Turn it on on the web" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Web 上开启"
+          }
+        }
+      }
+    },
     "Turn it on to chat here." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2317,6 +3293,26 @@
         }
       }
     },
+    "Understand your sleep" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "了解你的睡眠"
+          }
+        }
+      }
+    },
+    "Unsupported request" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不支持的请求"
+          }
+        }
+      }
+    },
     "Update" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2343,6 +3339,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "立即更新"
+          }
+        }
+      }
+    },
+    "Updating tasks" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在更新任务"
+          }
+        }
+      }
+    },
+    "Upgrading to %@…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在升级到 %@…"
           }
         }
       }
@@ -2381,6 +3397,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用了 %lld 个工具"
+          }
+        }
+      }
+    },
+    "VO₂ max" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最大摄氧量"
           }
         }
       }
@@ -2425,12 +3451,62 @@
         }
       }
     },
+    "Walking + running distance" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "步行 + 跑步距离"
+          }
+        }
+      }
+    },
+    "Walking heart rate" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "步行心率"
+          }
+        }
+      }
+    },
     "Watch my Gmail inbox for me" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "帮我订阅 Gmail 邮件"
+          }
+        }
+      }
+    },
+    "Watches" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "监听"
+          }
+        }
+      }
+    },
+    "Water" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "饮水量"
+          }
+        }
+      }
+    },
+    "Weight" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "体重"
           }
         }
       }
@@ -2475,12 +3551,92 @@
         }
       }
     },
+    "What your Rome can do" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 能做什么"
+          }
+        }
+      }
+    },
+    "When you run it" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "手动运行时"
+          }
+        }
+      }
+    },
+    "Where your data goes" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的数据去向"
+          }
+        }
+      }
+    },
+    "Why have I felt so tired lately?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我最近为什么总是很累？"
+          }
+        }
+      }
+    },
     "Working" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "进行中"
+          }
+        }
+      }
+    },
+    "Working on it" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在处理"
+          }
+        }
+      }
+    },
+    "Workouts" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "体能训练"
+          }
+        }
+      }
+    },
+    "Writing to a task chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在给任务对话发消息"
+          }
+        }
+      }
+    },
+    "Yesterday" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "昨天"
           }
         }
       }
@@ -2501,6 +3657,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "你已经不能访问这个 Rome 了"
+          }
+        }
+      }
+    },
+    "Your AI model provider" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 AI 模型服务商"
+          }
+        }
+      }
+    },
+    "Your Rome" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome"
+          }
+        }
+      }
+    },
+    "Your Rome can use your health data to plan and explain things for you." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 可以借助健康数据，为你规划和解释各种事情。"
           }
         }
       }
@@ -2545,12 +3731,108 @@
         }
       }
     },
+    "Your deep sleep dropped over the last two weeks, and your HRV fell with it." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "过去两周你的深度睡眠减少了，心率变异性也随之下降。"
+          }
+        }
+      }
+    },
     "Your own idea…" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "自己的想法…"
+          }
+        }
+      }
+    },
+    "by day" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按天"
+          }
+        }
+      }
+    },
+    "by hour" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按小时"
+          }
+        }
+      }
+    },
+    "by month" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按月"
+          }
+        }
+      }
+    },
+    "by week" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按周"
+          }
+        }
+      }
+    },
+    "iPad use" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPad 使用"
+          }
+        }
+      }
+    },
+    "iPhone use" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "iPhone 使用"
+          }
+        }
+      }
+    },
+    "next page" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "下一页"
+          }
+        }
+      }
+    },
+    "status.needsYou" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for your answer"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "等你回复"
           }
         }
       }

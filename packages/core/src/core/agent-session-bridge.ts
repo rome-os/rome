@@ -208,6 +208,9 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
         log.info("agent.session.manager.acquire started", baseLogFields);
 
         let session: AgentSession;
+        // Held from the acquire until the turn is submitted; a failure before
+        // that lets it go (docs/concepts/sessions.md#session-in-use).
+        let acquired: AgentSession | undefined;
         try {
           const openedKey = req.sessionId
             ? await this.webchatRepo?.continuityKeyOfSession(req.sessionId)
@@ -234,6 +237,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
                   }),
                 },
               );
+          acquired = session;
           noteOpenerChat(session, namedChat);
           // A session resumed by its id runs in its own chats, so the caller
           // must be one who may open them, as on the dashboard's routes.
@@ -244,6 +248,7 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           // move one, and only once the check above has passed.
           await openedInChat(this.webchatRepo, session, namedChat, { replace: false });
         } catch (err) {
+          acquired?.release();
           log.warn("agent.session.manager.acquire failed", {
             ...baseLogFields,
             durationMs: Date.now() - acquireStartedAt,
@@ -258,35 +263,46 @@ export class AgentSessionBridge implements AgentSessionChildBridge {
           durationMs: Date.now() - acquireStartedAt,
         });
 
-        const conversation = resolveTurnConversation({
-          agentName: req.key.agentName,
-          agentSessionId: session.sessionId,
-          romeSessionId: namedChat,
-          openerChat: openerChat(session),
-          sessionChat:
-            (openerChat(session) ?? namedChat)
-              ? undefined
-              : await findSessionChat(this.webchatRepo, session.sessionId),
-          channelThreadKey: req.key.channelThreadKey,
-          threadContext: req.init?.threadContext,
-          actionContext: req.actionContext,
-        });
-        const { romeSessionId, romeSessionType } = conversation;
-        const romeSession: RomeSessionRef = {
-          _romeSessionId: romeSessionId,
-          _type: romeSessionType,
-        };
+        const prepared = await (async () => {
+          const conversation = resolveTurnConversation({
+            agentName: req.key.agentName,
+            agentSessionId: session.sessionId,
+            romeSessionId: namedChat,
+            openerChat: openerChat(session),
+            sessionChat:
+              (openerChat(session) ?? namedChat)
+                ? undefined
+                : await findSessionChat(this.webchatRepo, session.sessionId),
+            channelThreadKey: req.key.channelThreadKey,
+            threadContext: req.init?.threadContext,
+            actionContext: req.actionContext,
+          });
+          const { romeSessionId, romeSessionType } = conversation;
+          const romeSession: RomeSessionRef = {
+            _romeSessionId: romeSessionId,
+            _type: romeSessionType,
+          };
 
-        // The line the run names by its platform id, which the turn answers,
-        // and the one its reply quotes, as Chats holds them.
-        const lines = this.runLineDeps
-          ? await runLines(this.runLineDeps.lines, romeSessionId, req)
-          : null;
+          // The line the run names by its platform id, which the turn answers,
+          // and the one its reply quotes, as Chats holds them.
+          const lines = this.runLineDeps
+            ? await runLines(this.runLineDeps.lines, romeSessionId, req)
+            : null;
+          return { conversation, romeSessionId, romeSession, lines };
+        })().catch((err: unknown) => {
+          session.release();
+          throw err;
+        });
+        const { conversation, romeSessionId, romeSession, lines } = prepared;
 
         // An app's turn waits behind the running one; its events drain in the
         // background as it runs.
+        // The person the calling action acts for, as the IPC boundary captured
+        // it: the turn's tool calls act for them too.
+        const actor = ctx.callerActionContext?.actor;
         const handle = await session.submit(req.input, {
           priority: "after",
+          ...(actor ? { actor } : {}),
           threadContext: req.init?.threadContext,
           sharedContext: req.init?.sharedContext,
           romeSessionId,

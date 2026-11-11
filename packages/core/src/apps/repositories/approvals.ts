@@ -1,16 +1,24 @@
-import { and, eq, or, desc } from "drizzle-orm";
+import { and, eq, or, desc, gte, inArray, sql } from "drizzle-orm";
 import { v4 as uuid } from "uuid";
 import { approvals } from "../../db/schema.js";
 import type { DrizzleDb } from "../../db/index.js";
 import { APPROVAL_TYPES, type ApprovalStatus, type ApprovalType } from "@rome/api-types/approvals";
 
-type ApprovalRow = typeof approvals.$inferSelect;
+export type ApprovalRow = typeof approvals.$inferSelect;
 type ResolveAction = "approve" | "reject";
 
 export type ResolvePendingResult =
   | { outcome: "resolved"; approval: ApprovalRow }
   | { outcome: "not_found" }
   | { outcome: "already_resolved"; approval: ApprovalRow };
+
+/**
+ * How long an approval holds the session it would resume: a pending one from
+ * when it was asked for, an executing one from when it was approved. Past
+ * it, a reset may replace the session, and the approval, once answered,
+ * resumes the chat's current session with the continuation notice.
+ */
+export const APPROVAL_HOLDS_SESSION_MS = 24 * 60 * 60 * 1000;
 
 export type RetryExecutionResult =
   | { outcome: "queued"; approval: ApprovalRow }
@@ -45,9 +53,11 @@ export interface CreatedApproval {
 }
 
 export type ApprovalCreatedListener = (approval: CreatedApproval) => void;
+export type ApprovalResolvedListener = (approval: ApprovalRow) => void;
 
 export class ApprovalsRepository {
   private createdListeners = new Set<ApprovalCreatedListener>();
+  private resolvedListeners = new Set<ApprovalResolvedListener>();
 
   constructor(private db: DrizzleDb) {}
 
@@ -112,6 +122,47 @@ export class ApprovalsRepository {
     };
   }
 
+  /**
+   * Tells `listener` about every pending approval approved or rejected from
+   * now on, with the row as it was resolved. Returns the unsubscribe.
+   */
+  onResolved(listener: ApprovalResolvedListener): () => void {
+    this.resolvedListeners.add(listener);
+    return () => {
+      this.resolvedListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Whether an approval waits to resume runtime session `sessionId` in the
+   * middle of a turn, as of `now`: one still pending that was asked for
+   * within {@link APPROVAL_HOLDS_SESSION_MS}, or one approved within it and
+   * queued or running. An older one holds nothing, so a request never
+   * answered, or an execution a crash left running, cannot keep a chat on
+   * one session for good. docs/concepts/sessions.md#continuity-key
+   */
+  async holdsSession(sessionId: string, now = new Date()): Promise<boolean> {
+    const since = new Date(now.getTime() - APPROVAL_HOLDS_SESSION_MS);
+    const rows = await this.db
+      .select({ id: approvals.id })
+      .from(approvals)
+      .where(
+        and(
+          sql`json_extract(${approvals.payload}, '$.sessionId') = ${sessionId}`,
+          or(
+            and(eq(approvals.status, "pending"), gte(approvals.createdAt, since)),
+            and(
+              inArray(approvals.executionState, ["queued", "running"]),
+              // Timestamps are stored in seconds.
+              sql`coalesce(${approvals.resolvedAt}, ${approvals.createdAt}) >= ${Math.floor(since.getTime() / 1000)}`,
+            ),
+          ),
+        ),
+      )
+      .limit(1);
+    return rows.length > 0;
+  }
+
   async findPending() {
     return this.db.select().from(approvals).where(eq(approvals.status, "pending"));
   }
@@ -157,6 +208,7 @@ export class ApprovalsRepository {
       };
     }
 
+    for (const listener of this.resolvedListeners) listener(updated[0]);
     return { outcome: "resolved", approval: updated[0] };
   }
 

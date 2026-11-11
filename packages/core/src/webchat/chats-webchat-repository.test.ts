@@ -59,7 +59,8 @@ describe("ChatsWebChatRepository", () => {
     backfillLegacyChats(testDb.db);
     const deps = {
       db: testDb.db,
-      settingsRepo: { get: async () => "Ray" },
+      // No agent name set: the Concierge keeps its role label.
+      settingsRepo: { get: async (key: string) => (key === "agentName" ? null : "Ray") },
       agentLoader: { list: () => [buildAgent("core:concierge")] },
       appCatalog: { get: () => undefined },
     } as never;
@@ -111,7 +112,7 @@ describe("ChatsWebChatRepository", () => {
     const deps = {
       db: testDb.db,
       webchatRepo: repo,
-      settingsRepo: { get: async () => "Ray" },
+      settingsRepo: { get: async (key: string) => (key === "agentName" ? "Milo" : "Ray") },
       agentLoader: { list: () => [buildAgent("core:concierge")] },
       appCatalog: { get: () => undefined },
     } as never;
@@ -122,7 +123,7 @@ describe("ChatsWebChatRepository", () => {
     );
     expect(senders.get("concierge-input")).toMatchObject({
       kind: "automated",
-      name: "Concierge",
+      name: "Milo",
       onBehalfOf: { kind: "guardian", name: "Ray" },
     });
     await repo.recordUserInput(
@@ -137,8 +138,8 @@ describe("ChatsWebChatRepository", () => {
       messageId: "concierge-quote",
       ownRowOnly: true,
     });
-    expect(quote).toMatchObject({ ok: true, part: { author: "automated", name: "Concierge" } });
-    if (quote.ok) expect(quote.promptLine).toContain("Concierge: Status?");
+    expect(quote).toMatchObject({ ok: true, part: { author: "automated", name: "Milo" } });
+    if (quote.ok) expect(quote.promptLine).toContain("Milo: Status?");
   });
 
   it.each([
@@ -673,7 +674,13 @@ describe("ChatsWebChatRepository", () => {
       state: "accepted",
     });
     expect(await repo.getTurnChatMessages("chat-1", "turn-1")).toEqual([
-      { id: "in-1", role: "user", content: text("Status?"), senderId: "concierge" },
+      {
+        id: "in-1",
+        role: "user",
+        content: text("Status?"),
+        senderId: "concierge",
+        inputState: "accepted",
+      },
     ]);
   });
 

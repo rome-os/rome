@@ -83,5 +83,6 @@ export function useConciergeTasks(options: { enabled?: boolean; allDone?: boolea
     // Events missed while disconnected are gone, so read the list again.
     { enabled, onReconnect: () => void refetch() },
   );
-  return { tasks: query.data ?? [], loaded: query.isSuccess };
+  // A failed refetch keeps the last list, which is still the one to show.
+  return { tasks: query.data ?? [], loaded: query.data !== undefined };
 }

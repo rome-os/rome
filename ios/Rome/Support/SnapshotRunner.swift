@@ -53,6 +53,17 @@ enum SnapshotRunner {
             model.openDemo()
             try? await Task.sleep(for: .seconds(2))
             await capture("04-chat", style: styleName, in: directory) {}
+            // The header's status line in each state, then back to the name alone.
+            let states: [(String, ConciergeActivity)] = [
+                ("working", .working), ("tool", .tool(.searchingWeb)), ("tasks", .tasks(title: "整理本周会议纪要", more: 1)),
+                ("needs-you", .needsYou), ("idle", .idle),
+            ]
+            for (name, state) in states {
+                await capture("60-status-\(name)", style: styleName, in: directory, wait: 0.8) {
+                    model.workspace?.topics.setActivity(state, for: conciergeChatID)
+                }
+            }
+            model.workspace?.topics.setActivity(nil, for: conciergeChatID)
             await capture("30-composer-photos", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .composerPhotos(2) }
             model.debugCommand = .composerPhotos(0)
             try? await Task.sleep(for: .seconds(0.4))
@@ -89,6 +100,17 @@ enum SnapshotRunner {
             model.push.debugSet(permission: .notSet, dismissedAt: .now)
             await capture("12-instances", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .settings([.instances]) }
             model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("13-node-requests", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.requests]) }
+            model.debugCommand = .settings(nil)
+            try? await Task.sleep(for: .seconds(0.6))
+            // The Apple Health page is longer than a screen: its top, the data flow, and its end.
+            model.debugHealthScroll = nil
+            await capture("14-health-access", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([.health]) }
+            await capture("15-health-access-data", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "where" }
+            await capture("16-health-access-end", style: styleName, in: directory, wait: 1) { model.debugHealthScroll = "end" }
+            model.debugHealthScroll = nil
+            model.debugCommand = .settings(nil)
             // A second command in the same pass would hide this one from the shell.
             try? await Task.sleep(for: .seconds(0.6))
             // On Mac Catalyst a pushed task chat does not pop for these runs
@@ -102,6 +124,21 @@ enum SnapshotRunner {
             await capture("43-connect-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail")) }
             TranscriptStore.previewPhases = [:]
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
+            // Chat threads: the replies lines, then one thread open over its chat.
+            await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
+            // A long chat thread: its last answer carries the replies line.
+            await capture("53-topic-long-thread", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-books")) }
+            // A long topic name: cut at the end inside the header's pill.
+            await capture("52-topic-long-name", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
+            model.debugCommand = .section(.topic("topic-trip"))
+            try? await Task.sleep(for: .seconds(1.5))
+            await capture("51-thread-open", style: styleName, in: directory, wait: 1.5) {
+                model.workspace?.topicStore("topic-trip").openThread(at: "k1")
+            }
+            model.workspace?.topicStore("topic-trip").closeThread()
+            try? await Task.sleep(for: .seconds(0.4))
+            // Routine cards with their state, and the rows for cards only the web draws.
+            await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }
             // The drawer over a topic chat: its row selected.
             await capture("05b-drawer-topic", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)
@@ -125,6 +162,12 @@ enum SnapshotRunner {
             await capture("37-apps", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .section(.apps) }
             await capture("39-app-open", style: styleName, in: directory, wait: 2.5) {
                 model.debugCommand = .route([.app(InstalledApp(id: "habits", displayName: "习惯打卡", fullHref: "/full/apps/habits", origin: "local"))])
+            }
+            model.debugCommand = .route([])
+            try? await Task.sleep(for: .seconds(0.6))
+            // A dashboard page a card opened, in the app's web view.
+            await capture("49-dashboard-page", style: styleName, in: directory, wait: 2.5) {
+                model.debugCommand = .route([.page(URL(string: "https://me.romeos.cc/routines")!)])
             }
             model.debugCommand = .route([])
             try? await Task.sleep(for: .seconds(0.6))

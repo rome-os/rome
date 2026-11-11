@@ -29,7 +29,15 @@ export function isElectronShell(): boolean {
 /** This computer as a device of the signed-in account, as the Mac app reports it. */
 export type DesktopDeviceStatus =
   | { state: "off" }
-  | { state: "disabled" | "connecting" | "connected" | "offline"; deviceId: string; name: string };
+  | {
+      /** `disabled` while Computer use is off, whatever the connection is. */
+      state: "disabled" | "connecting" | "connected" | "offline";
+      deviceId: string;
+      name: string;
+      /** The app's Gateway connection. Only an app that always connects reports these three. */
+      connection?: "connecting" | "connected" | "offline";
+      computerUse?: boolean;
+    };
 
 /** The Mac app's device controls, which it offers only to the Rome it opened. */
 export interface DesktopDeviceBridge {

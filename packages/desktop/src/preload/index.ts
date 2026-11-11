@@ -165,7 +165,14 @@ interface RuntimeTarget {
 
 type DeviceStatus =
   | { state: "off" }
-  | { state: "disabled" | "connecting" | "connected" | "offline"; deviceId: string; name: string };
+  | {
+      /** `disabled` while Computer use is off, whatever the connection is. */
+      state: "disabled" | "connecting" | "connected" | "offline";
+      deviceId: string;
+      name: string;
+      connection: "connecting" | "connected" | "offline";
+      computerUse: boolean;
+    };
 
 interface CloudState {
   signedIn: boolean;

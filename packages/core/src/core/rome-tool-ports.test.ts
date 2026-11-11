@@ -2,6 +2,7 @@ import { describe, expect, it, rs } from "@rstest/core";
 import type { TurnFacts } from "../agent/index.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
 import type { Action, ActionRegistry } from "../apps/actions/types.js";
+import { currentSessionActor, runWithSessionActor } from "../access/session-actor.js";
 import { romeToolPorts } from "./rome-tool-ports.js";
 
 function action(name: string): Action {
@@ -35,6 +36,8 @@ function turn(overrides: Partial<TurnFacts> = {}): TurnFacts {
     threadContext: () => ({ channel: "webchat", threadId: "chat-1" }),
     sharedContext: () => undefined,
     pushLevel: () => undefined,
+    actor: () => undefined,
+    reportedTask: () => undefined,
     inTurn: (fn) => fn(),
     ...overrides,
   };
@@ -79,10 +82,68 @@ describe("romeToolPorts actions", () => {
   });
 });
 
+describe("romeToolPorts actions run as the turn's actor", () => {
+  const visitor = { kind: "visitor" as const, accountId: "acct-v", email: "v@example.com" };
+  const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+
+  it("runs a callback that arrives in another person's scope as the turn's actor", async () => {
+    const { actions, run } = ports();
+    const ambient: unknown[] = [];
+    run.mockImplementation(async () => {
+      ambient.push(await currentSessionActor());
+      return { status: "ok" as const, data: { routineId: "r1" } };
+    });
+    // The model's callback lands in the guardian's scope, for the visitor's turn.
+    await runWithSessionActor(guardian, () =>
+      actions.run(turn({ actor: () => visitor }), "send_message", { text: "hi" }),
+    );
+    expect(run).toHaveBeenCalledWith(
+      "send_message",
+      { text: "hi" },
+      expect.objectContaining({ actor: visitor }),
+    );
+    expect(ambient).toEqual([undefined]);
+  });
+
+  it("runs a turn no person started as no one, whatever scope its callback lands in", async () => {
+    const { actions, run } = ports();
+    const ambient: unknown[] = [];
+    run.mockImplementation(async () => {
+      ambient.push(await currentSessionActor());
+      return { status: "ok" as const, data: { routineId: "r1" } };
+    });
+    await runWithSessionActor(visitor, () => actions.run(turn(), "send_message", { text: "hi" }));
+    expect((run.mock.calls[0] as unknown[])[2]).not.toHaveProperty("actor");
+    expect(ambient).toEqual([undefined]);
+  });
+
+  it("schedules a defer's wake as the turn's actor", async () => {
+    const { defer, run } = ports();
+    await runWithSessionActor(guardian, () =>
+      defer.schedule(turn({ actor: () => visitor }), {
+        kind: "time",
+        name: "check CI",
+        note: "Check CI.",
+        fireAtMs: Date.now() + 60_000,
+      }),
+    );
+    expect(run).toHaveBeenCalledWith(
+      "create_routine",
+      expect.anything(),
+      expect.objectContaining({ actor: visitor }),
+    );
+  });
+});
+
 describe("romeToolPorts defer", () => {
   it("creates the wake through create_routine, owned by the dashboard chat's owner", async () => {
     const { defer, run, getSession } = ports();
-    await defer.schedule(turn(), { kind: "time", name: "check CI", fireAtMs: Date.now() + 60_000 });
+    await defer.schedule(turn(), {
+      kind: "time",
+      name: "check CI",
+      note: "Check the run and tell the guardian.",
+      fireAtMs: Date.now() + 60_000,
+    });
     expect(getSession).toHaveBeenCalledWith("chat-1");
     expect(run).toHaveBeenCalledWith(
       "create_routine",

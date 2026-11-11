@@ -30,6 +30,7 @@
       "blocked": "Pop-up blocked",
       "checkFailed": "Could not check the connection"
     },
+    "taskCardAlreadyAnswered": "This card was already answered. The task has been refreshed.",
     "openTaskChat": "Open",
     "tasks": {
       "title": "Tasks",
@@ -68,13 +69,6 @@
       "replyText": {
         "done": "I've done this"
       },
-      "pill": {
-        "needsYou_one": "Tasks, {{count}} needs you",
-        "needsYou_other": "Tasks, {{count}} need you",
-        "doing_one": "Tasks, {{count}} in progress",
-        "doing_other": "Tasks, {{count}} in progress",
-        "idle": "Tasks"
-      },
       "emptyTitle": "No tasks yet",
       "emptyDescription": "Tasks {{name}} is working on, planning, or watching appear here."
     },
@@ -102,12 +96,31 @@
       },
       "justAsk": "Just asking a question?",
       "backToMain": "Ask in the main chat →"
+    },
+    "activity": {
+      "idle": "Idle",
+      "needsYou": "Waiting for your answer",
+      "working": "Working on it",
+      "tasks": "{{title}}",
+      "tasksMore": "{{title}} +{{count}}",
+      "tool": {
+        "startingTask": "Starting a task",
+        "messagingTask": "Writing to a task chat",
+        "readingChat": "Reading a chat",
+        "stoppingTask": "Stopping a task",
+        "updatingTasks": "Updating tasks",
+        "startingTopic": "Starting a topic chat",
+        "checkingFollows": "Checking what you follow",
+        "searchingWeb": "Searching the web",
+        "readingPage": "Reading a page"
+      }
     }
   },
   "reply": {
     "action": "Reply",
     "dismiss": "Cancel reply",
-    "jump": "Go to the original message"
+    "jump": "Go to the original message",
+    "openThread": "Open the chat thread"
   },
   "senderGuardian": "Guardian",
   "inputState": {
@@ -129,8 +142,6 @@
     "sessionModel": "Session model: {{model}}",
     "sessionModelWithEffort": "Session model: {{model}}, reasoning effort: {{effort}}",
     "more": "More actions",
-    "pin": "Pin chat",
-    "unpin": "Unpin chat",
     "archive": "Archive",
     "unarchive": "Unarchive chat",
     "delete": "Delete",
@@ -186,8 +197,8 @@
       "recorded": "Feedback recorded"
     },
     "branch": {
-      "open": "Start a side chat from this turn",
-      "title": "Branch into a side chat",
+      "open": "Fork a chat from this turn",
+      "title": "Fork into a new chat",
       "description": "Ask a follow-up without changing this chat.",
       "suggestionsLabel": "Suggested prompts",
       "suggestions": {
@@ -196,10 +207,10 @@
         "example": "Give me a concrete example"
       },
       "promptPlaceholder": "Ask a question about this response…",
-      "submit": "Start side chat",
-      "submitting": "Starting…",
-      "submitFailed": "Couldn't start the side chat",
-      "notBranchable": "This answer can't be branched. Send a follow-up and branch from the new answer."
+      "submit": "Fork chat",
+      "submitting": "Forking…",
+      "submitFailed": "Couldn't fork the chat",
+      "notBranchable": "This answer can't be forked. Send a follow-up and fork from the new answer."
     }
   },
   "blocks": {
@@ -564,6 +575,23 @@
     "morningBrief": {
       "label": "Morning brief",
       "prompt": "Build a morning brief app with frontend design to read my Gmail from the last 24 hours and my upcoming Google Calendar events. Update the dashboard every day at 8:00 AM with the latest priorities, urgent emails, key meetings, deadlines, and recommended next actions. Identify what needs my attention most and send me a short summary on Telegram after each daily update."
+    }
+  },
+  "thread": {
+    "title": "Chat thread",
+    "close": "Close chat thread",
+    "loadFailed": "Couldn't load this chat thread.",
+    "replies_one": "{{count}} reply",
+    "replies_other": "{{count}} replies",
+    "replyPlaceholder": "Reply"
+  },
+  "sessionRenewal": {
+    "notice": "New session · {{reason}}",
+    "reasons": {
+      "setup": "setup changed",
+      "idle": "after a quiet period",
+      "daily": "daily reset",
+      "working_dir": "working folder gone"
     }
   }
 }

@@ -4,6 +4,7 @@
 // one reminder turn.
 
 import type { AgentTurnFailure, AgentTurnFinishedEvent } from "@rome-os/app-runtime";
+import { CONCIERGE_DONE_DAYS } from "@rome/api-types/concierge";
 import type { AgentTurnFailedBeforeStart, TurnListeners } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
@@ -15,6 +16,8 @@ import {
 } from "./service.js";
 import { hasText, latestSaid, taskChatPlace } from "./task-chat.js";
 import { type DirtyTask, TaskEventCoalescer, type TaskEventDelivery } from "./task-events.js";
+import { ConciergeActivityTracker } from "./activity.js";
+import { isConciergeChat } from "./privacy.js";
 import { openQuestion } from "./transcript.js";
 
 import { failoverReason } from "./failover-reason.js";
@@ -65,6 +68,26 @@ function replyExcerpt(text: string): string {
 }
 
 /** The text of a stored user message, for the guardian's words in a task event. */
+/**
+ * Whether the line answers a card: it carries an `interaction_result` that is
+ * not a dismissal. A typed reply dismisses the open cards it passes, which
+ * still makes it the guardian's own words.
+ */
+function answersCard(content: string): boolean {
+  try {
+    const parts: unknown = JSON.parse(content);
+    if (!Array.isArray(parts)) return false;
+    return parts.some((part) => {
+      if (!part || typeof part !== "object") return false;
+      const { type, output } = part as { type?: unknown; output?: unknown };
+      if (type !== "interaction_result") return false;
+      return !(output && typeof output === "object" && "dismissed" in output && output.dismissed);
+    });
+  } catch {
+    return false;
+  }
+}
+
 function userText(content: string): string {
   try {
     const parts: unknown = JSON.parse(content);
@@ -190,6 +213,8 @@ export function startConciergeEvents(
   });
   service.attachTaskEvents(coalescer);
 
+  const activity = startActivity(service, coalescer);
+
   const onConciergeTurn = async (event: AgentTurnFinishedEvent, chatId: string) => {
     // Read before any await: the reminder's own finish event fires while the
     // reminder still runs, and the flag clears as soon as it returns.
@@ -267,7 +292,20 @@ export function startConciergeEvents(
     return (await tasks.repo.findBySession(chatId))?.id ?? null;
   };
 
+  // When the guardian last answered an approval in each chat. The turn that
+  // carries on from it is the first to start after.
+  const approvalAnswered = new Map<string, number>();
+  const onApprovalResolved = (approval: { payload: unknown }) => {
+    const context = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
+      ?.channelContext;
+    if (typeof context?.threadId === "string") approvalAnswered.set(context.threadId, Date.now());
+  };
+
   const onTaskChatTurn = async (event: AgentTurnFinishedEvent, chatId: string) => {
+    const answeredAt = approvalAnswered.get(chatId);
+    const carriesApproval =
+      answeredAt !== undefined && Date.parse(event.timing.startedAt) >= answeredAt;
+    if (carriesApproval) approvalAnswered.delete(chatId);
     const taskId = await taskOf(chatId);
     if (!taskId) return;
     await waitForTurnStream(service, chatId, event.turn.turnId);
@@ -275,8 +313,12 @@ export function startConciergeEvents(
     const userRows = rows.filter((row) => row.role === "user");
     // A follow-up the task chat queued or deferred sits under the turn that
     // answered it, so the turn is Concierge's when any of its inputs was said
-    // as Concierge's account.
-    const started = userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id);
+    // as Concierge's account. The guardian answering the task's own card or
+    // approval carries on what the Concierge started, so it counts as the
+    // Concierge's too. Only the guardian's typed words are their own turn.
+    const started =
+      carriesApproval ||
+      userRows.some((row) => row.senderId === CONCIERGE_ACCOUNT.id || answersCard(row.content));
     const by = started ? "concierge" : userRows.length > 0 ? "guardian" : "system";
     // The guardian's own words reach the chat through the user-input path, which
     // announces nothing, so they are read from the rows of the turn they started.
@@ -381,12 +423,147 @@ export function startConciergeEvents(
       if (change === "write") coalescer.settle(row.id);
     }),
     approvals.onCreated((approval) => void guard("approval event", onApproval(approval))),
+    approvals.onResolved(onApprovalResolved),
   ];
 
   return () => {
     for (const unsubscribe of unsubscribers) unsubscribe();
+    activity();
     coalescer.stop();
     service.attachTaskEvents(null);
     service.attachFailedBeforeStart(null);
+  };
+}
+
+/** How many sessions the activity remembers the Concierge chat of before it forgets them all. */
+const MOVED_BY_CACHE_LIMIT = 5_000;
+
+/**
+ * Starts telling each Concierge chat's activity (activity.ts): its own turn
+ * and the tool it is in, cards and approvals, its task chats, and the results
+ * the coalescer is about to report. Returns the stop.
+ */
+function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer): () => void {
+  const { tasks, webchatRepo, approvals } = service.deps;
+  const running = (chatId: string): boolean => {
+    try {
+      return service.dashboard.chats.isRunning(chatId);
+    } catch {
+      return false;
+    }
+  };
+
+  // Which Concierge chat each session moves. A task chat's row can be written
+  // after the chat starts, so a row write forgets its session's answer.
+  const movedBy = new Map<string, string[]>();
+  const chatOfTask = async (taskId: string): Promise<string | null> =>
+    (await tasks.repo.getWithChat(taskId))?.conciergeChat.id ?? null;
+
+  const tracker = new ConciergeActivityTracker({
+    now: () => Date.now(),
+    isRunning: running,
+    isBusy: (chatId) => {
+      try {
+        return service.dashboard.chats.isBusy(chatId);
+      } catch {
+        return false;
+      }
+    },
+    openTool: (chatId) => {
+      try {
+        return service.dashboard.chats.openTool(chatId);
+      } catch {
+        return null;
+      }
+    },
+    awaitingGuardianSince: (chatIds) => webchatRepo.awaitingGuardianSince(chatIds),
+    ownerSpokeAt: (chatId) => webchatRepo.ownerSpokeAt(chatId),
+    tasksOf: async (chatId) => {
+      const owner = await service.ownerOfChat(chatId);
+      if (!owner) return [];
+      const since = new Date(Date.now() - CONCIERGE_DONE_DAYS * 24 * 60 * 60 * 1000);
+      return (await tasks.repo.listForConciergeChat(chatId, owner, since)).map((task) => ({
+        id: task.row.id,
+        title: task.row.title,
+        chatId: task.chat?.id ?? null,
+        updatedAt: task.row.updatedAt.getTime(),
+      }));
+    },
+    reportPending: () => coalescer.awaitingReport,
+    ownerOf: async (chatId) =>
+      (await service.conciergeChat(chatId)) ? await service.ownerOfChat(chatId) : null,
+    chatsOf: async (owner) => (await service.listChats(owner)).map((chat) => chat.id),
+    chatsMovedBy: async (sessionId) => {
+      const known = movedBy.get(sessionId);
+      if (known) return known;
+      const chat = await webchatRepo.getSession(sessionId);
+      if (!chat) return [];
+      let moved: string[] = [];
+      if (isConciergeChat(chat)) {
+        moved = [chat.id];
+      } else if (chat.triggerKind === TASK_CHAT_TRIGGER_KIND) {
+        const row = await tasks.repo.findBySession(sessionId);
+        const target = row ? await chatOfTask(row.id) : null;
+        if (target) moved = [target];
+      }
+      if (movedBy.size >= MOVED_BY_CACHE_LIMIT) movedBy.clear();
+      movedBy.set(sessionId, moved);
+      return moved;
+    },
+    forgetChatsMovedTo: (chatId) => {
+      for (const [sessionId, moved] of movedBy) {
+        if (moved.includes(chatId)) movedBy.delete(sessionId);
+      }
+    },
+  });
+  service.attachActivity(tracker);
+
+  const guard = (work: Promise<void>) =>
+    work.catch((error: unknown) =>
+      log.warn("concierge activity update failed", {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  const sessionChanged = (sessionId: string, change: { toolOnly?: boolean } = {}) =>
+    void guard(tracker.sessionChanged(sessionId, change));
+  const approvalChanged = (approval: { payload: unknown }) => {
+    const threadId = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
+      ?.channelContext?.threadId;
+    if (typeof threadId === "string") sessionChanged(threadId);
+  };
+
+  // The rows about to be reported, so a row that stops being one moves its chat too.
+  let reporting = new Set<string>();
+  const reportChanged = () => {
+    const now = new Set(coalescer.awaitingReport);
+    const changed = [...new Set([...reporting, ...now])].filter(
+      (taskId) => reporting.has(taskId) !== now.has(taskId),
+    );
+    reporting = now;
+    for (const taskId of changed) {
+      void guard(
+        chatOfTask(taskId).then((chatId) => (chatId ? tracker.refresh(chatId) : undefined)),
+      );
+    }
+  };
+
+  const unsubscribers = [
+    service.watchTurns(sessionChanged),
+    webchatRepo.onMessageInserted((message) => sessionChanged(message.sessionId)),
+    approvals.onCreated(approvalChanged),
+    approvals.onResolved(approvalChanged),
+    // A write can move the row to another Concierge chat (a new source
+    // message, a forward): its task chat's answer is read again, and both
+    // chats are refreshed.
+    tasks.repo.onChange(({ row, conciergeChat }) => {
+      if (row.sessionId) movedBy.delete(row.sessionId);
+      void guard(tracker.taskChanged(row.id, conciergeChat.id));
+    }),
+    coalescer.onChange(reportChanged),
+  ];
+  return () => {
+    for (const unsubscribe of unsubscribers) unsubscribe();
+    tracker.stop();
+    service.attachActivity(null);
   };
 }

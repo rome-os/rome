@@ -27,11 +27,15 @@ final class LocalEventBus: LiveEventSource {
 /// sign-in screen, so every state can be reviewed without a server.
 @MainActor
 final class DemoBackend: RomeBackend {
-    static let instances = [
-        CloudInstance(id: "demo-1", name: "我的 Rome", slug: "me", origin: "https://me.romeos.cc", status: "running"),
-        CloudInstance(id: "demo-2", name: "团队 Rome", slug: "team", origin: "https://team.romeos.cc", status: "running", role: "visitor", ownerName: "Dev User"),
-        CloudInstance(id: "demo-3", name: "测试实例", slug: "staging", origin: "https://staging.romeos.cc", status: "stopped"),
-    ]
+    /// Named in the app's language, so an English screen shows no Chinese names.
+    static var instances: [CloudInstance] {
+        let chinese = Bundle.main.preferredLocalizations.first?.hasPrefix("zh") == true
+        return [
+            CloudInstance(id: "demo-1", name: chinese ? "我的 Rome" : "My Rome", slug: "me", origin: "https://me.romeos.cc", status: "running"),
+            CloudInstance(id: "demo-2", name: chinese ? "团队 Rome" : "Team Rome", slug: "team", origin: "https://team.romeos.cc", status: "running", role: "visitor", ownerName: "Dev User"),
+            CloudInstance(id: "demo-3", name: chinese ? "测试实例" : "Staging", slug: "staging", origin: "https://staging.romeos.cc", status: "stopped"),
+        ]
+    }
 
     let displayOrigin = "me.romeos.cc"
     private let bus = LocalEventBus()
@@ -77,7 +81,32 @@ final class DemoBackend: RomeBackend {
     func conciergeChats() async throws -> [ConciergeChat] {
         try await pause(0.2)
         if variant == .conciergeOff { throw APIError.conciergeOff }
-        return [ConciergeChat(id: conciergeChatID, name: "Concierge", main: true, unread: 0)] + topicChats
+        startActivityCycle()
+        return [ConciergeChat(id: conciergeChatID, name: "Concierge", main: true, unread: 0, activity: .working)] + topicChats
+    }
+
+    /// The header's states, in turn, so each can be seen on a phone: working,
+    /// a tool, running tasks, waiting on the guardian, then idle. The main
+    /// chat and the trip topic run it two steps apart. Snapshot runs set
+    /// their states themselves.
+    private var activityCycle: Task<Void, Never>?
+
+    private func startActivityCycle() {
+        guard activityCycle == nil, SnapshotRunner.directory == nil else { return }
+        let steps: [(ConciergeActivity, Double)] = [
+            (.working, 3), (.tool(.searchingWeb), 3), (.tasks(title: "整理本周会议纪要", more: 1), 4), (.needsYou, 4), (.idle, 4),
+        ]
+        activityCycle = Task { [weak self] in
+            var step = 0
+            while !Task.isCancelled {
+                guard let self else { return }
+                let (main, seconds) = steps[step % steps.count]
+                self.bus.emit(LiveTopic.conciergeActivity, .conciergeActivity(chatId: conciergeChatID, activity: main))
+                self.bus.emit(LiveTopic.conciergeActivity, .conciergeActivity(chatId: "topic-trip", activity: steps[(step + 2) % steps.count].0))
+                step += 1
+                try? await Task.sleep(for: .seconds(seconds))
+            }
+        }
     }
 
     func startTopicChat() async throws -> ConciergeChat {
@@ -126,12 +155,31 @@ final class DemoBackend: RomeBackend {
         let all = messages[sessionId] ?? []
         let end = before.flatMap { cursor in all.firstIndex { $0.id == cursor } } ?? all.count
         let start = max(0, end - limit)
-        return MessagePage(messages: Array(all[start..<end]), nextCursor: start > 0 ? all[start].id : nil)
+        return MessagePage(messages: Array(all[start..<end]).map(Self.withThreads), nextCursor: start > 0 ? all[start].id : nil)
+    }
+
+    /// The demo is an instance with chat threads: every message says its thread.
+    private static func withThreads(_ message: ChatMessage) -> ChatMessage {
+        var message = message
+        message.knowsThreads = true
+        return message
+    }
+
+    func thread(sessionId: String, messageId: String) async throws -> [ChatMessage] {
+        try await pause(0.25)
+        let all = messages[sessionId] ?? []
+        guard let anchor = all.first(where: { $0.id == messageId }) else { throw APIError.notFound }
+        let root = anchor.chatThreadId ?? anchor.id
+        return all.filter { !$0.isTrace && ($0.chatThreadId == root || $0.id == anchor.id) }.map(Self.withThreads)
     }
 
     func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority) async throws -> CreatedTurn {
+        try await send(sessionId: sessionId, text: text, files: files, inputId: inputId, priority: priority, thread: nil)
+    }
+
+    func send(sessionId: String, text: String, files: [OutgoingFile], inputId: String, priority: InputPriority, thread target: ThreadTarget?) async throws -> CreatedTurn {
         try await pause(0.35)
-        if text.contains("失败") { throw APIError.network }
+        if text.contains("失败") || text.lowercased().contains("fail") { throw APIError.network }
         // Stored the way the server stores it: a line per file after the text.
         let lines = files.enumerated().map { index, file in
             let path = "projects/demo/\(inputId)/\(file.name)"
@@ -139,7 +187,15 @@ final class DemoBackend: RomeBackend {
             return "- File \(index + 1): [\(file.name)](</\(path)>)"
         }
         let stored = ([text] + (lines.isEmpty ? [] : [lines.joined(separator: "\n")])).filter { !$0.isEmpty }.joined(separator: "\n\n")
-        insert(sessionId, user(inputId, stored, at: .now, session: sessionId))
+        // A send from a chat thread lands in it, and so does the answer.
+        let thread = target.flatMap { target in (messages[sessionId] ?? []).first { $0.id == target.messageId } }.map { $0.chatThreadId ?? $0.id }
+        if let thread, let index = messages[sessionId]?.firstIndex(where: { $0.id == thread }), messages[sessionId]?[index].chatThreadId == nil {
+            // A message alone starts the thread the reply opens.
+            messages[sessionId]?[index].chatThreadId = thread
+            bus.emit(LiveTopic.chat(sessionId), .messageThread(sessionId: sessionId, messageId: thread, chatThreadId: thread))
+        }
+        insert(sessionId, threaded(user(inputId, stored, at: .now, session: sessionId), thread))
+        if let thread { bus.emit(LiveTopic.chat(sessionId), .messageThread(sessionId: sessionId, messageId: inputId, chatThreadId: thread)) }
         let turnId = "turn-\(nextID())"
         setRunning(sessionId, turnId)
         let topic = topicChats.firstIndex { $0.id == sessionId }
@@ -147,9 +203,9 @@ final class DemoBackend: RomeBackend {
         Task {
             try? await pause(concierge ? 1.8 : 3.5)
             if concierge {
-                insert(sessionId, agent("好，我记下了。", at: .now, session: sessionId))
+                insert(sessionId, threaded(agent("好，我记下了。", at: .now, session: sessionId), thread))
                 try? await pause(0.7)
-                insert(sessionId, agent("需要开任务的话，我会把它放进任务里，做完告诉你。", at: .now, session: sessionId))
+                insert(sessionId, threaded(agent("需要开任务的话，我会把它放进任务里，做完告诉你。", at: .now, session: sessionId), thread))
                 // An untitled topic chat is named from its first message.
                 if let topic, topicChats[topic].name.isEmpty {
                     let name = String(text.prefix(16))
@@ -213,6 +269,21 @@ final class DemoBackend: RomeBackend {
         return approvals[id] ?? ApprovalRecord(id: id, status: "pending")
     }
 
+    /// Approvals still pending, from the cards the demo's chats hold.
+    func pendingApprovals() async throws -> [PendingApproval] {
+        try await pause(0.2)
+        return messages.flatMap { chatId, list in
+            list.flatMap { message in
+                message.parts.compactMap { part -> PendingApproval? in
+                    guard case .approval(let approval) = part,
+                          ApprovalStatus.derive(stored: "pending", record: approvals[approval.approvalId]) == .pending
+                    else { return nil }
+                    return PendingApproval(id: approval.approvalId, chatId: chatId, part: approval, createdAt: message.date)
+                }
+            }
+        }
+    }
+
     func resolveApproval(id: String, approve: Bool) async throws {
         try await pause(0.9)
         approvals[id] = ApprovalRecord(id: id, status: approve ? "approved" : "rejected", executionState: approve ? "running" : nil, resolvedAt: RomeDate.string(.now))
@@ -263,6 +334,9 @@ final class DemoBackend: RomeBackend {
         return hits.sorted { $0.message.createdAt > $1.message.createdAt }
     }
 
+    /// The demo's Concierge goes by a name of its own.
+    func agentName() async -> String? { "Milo" }
+
     func me() async throws -> AccountIdentity? { AccountIdentity(name: "Lin", isGuardian: variant != .visitor) }
 
     func isGuardian() async -> Bool { variant != .visitor }
@@ -301,6 +375,11 @@ final class DemoBackend: RomeBackend {
     /// Services connected so far; GitHub is from the start.
     private var connected: [String: String] = ["github": "lin-dev"]
 
+    func routines() async throws -> [RoutineRef] {
+        if variant == .visitor { throw APIError.server(status: 403, message: nil) }
+        return [RoutineRef(id: "r-books", name: "每周读书小结", key: "chat-routine:books", enabled: true)]
+    }
+
     func connectors() async throws -> [ConnectorState] {
         try await pause(0.2)
         return ["gmail", "github", "notion", "linear", "slack"].map { service in
@@ -330,7 +409,7 @@ final class DemoBackend: RomeBackend {
     static let releasedVersion = "1.1.190"
     /// Below the app's minimum, and between it and the latest.
     static let tooOldVersion = "1.1.120"
-    static let offeredFromVersion = "1.1.186"
+    static let offeredFromVersion = "1.1.189"
     private lazy var runningVersion = switch variant {
     case .updateRequired: Self.tooOldVersion
     case .updateOffered: Self.offeredFromVersion
@@ -374,6 +453,7 @@ final class DemoBackend: RomeBackend {
     }
 
     private func insert(_ sessionId: String, _ message: ChatMessage) {
+        let message = Self.withThreads(message)
         messages[sessionId, default: []].append(message)
         bus.emit(LiveTopic.chat(sessionId), .messageInsert(message))
     }
@@ -388,6 +468,14 @@ final class DemoBackend: RomeBackend {
 
     private func json(_ parts: [JSONValue]) -> String {
         String(data: (try? JSONEncoder().encode(parts)) ?? Data(), encoding: .utf8) ?? "[]"
+    }
+
+    /// The message, placed in the chat thread that starts at `root`.
+    private func threaded(_ message: ChatMessage, _ root: String?) -> ChatMessage {
+        var message = message
+        message.chatThreadId = root
+        message.knowsThreads = true
+        return message
     }
 
     private func user(_ id: String, _ text: String, at date: Date, session: String = conciergeChatID) -> ChatMessage {
@@ -458,6 +546,7 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-books", name: "读书笔记", main: false, unread: 0),
             ConciergeChat(id: "topic-mail", name: "每天的邮件摘要", main: false, unread: 0),
             ConciergeChat(id: "topic-mail-setup", name: "邮件摘要设置", main: false, unread: 0),
+            ConciergeChat(id: "topic-routine", name: "每周读书提醒", main: false, unread: 0),
         ]
 
         func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false) -> ConciergeTask {
@@ -494,17 +583,26 @@ final class DemoBackend: RomeBackend {
             for row in 0..<3 { for column in 0..<5 { context.fill(CGRect(x: 200 + column * 85, y: 220 + row * 95, width: 50, height: 60)) } }
         }.jpegData(compressionQuality: 0.8)
         // A long chat, to scroll far from the bottom.
+        // The last two chapters are one long chat thread: four messages, so
+        // its answer carries the replies line.
         messages["topic-books"] = (0..<24).flatMap { index -> [ChatMessage] in
             let time = at(8, 0, daysAgo: 1).addingTimeInterval(Double(index) * 600)
+            let root: String? = index >= 22 ? "b22" : nil
             return [
-                user("b\(index)", "第 \(index + 1) 章讲了什么？", at: time, session: "topic-books"),
-                agent("第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"),
+                threaded(user("b\(index)", "第 \(index + 1) 章讲了什么？", at: time, session: "topic-books"), root),
+                threaded(agent("第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"), root),
             ]
         }
+        // Two chat threads: the plan, interrupted by the weather, so both of
+        // its stretches carry the replies line; the weather's question and
+        // answer carry none.
         messages["topic-trip"] = [
-            user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"),
-            agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"),
-            agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/api/projects/asset/hotel.jpg?path=projects%2Fdemo%2Ftrip%2Fhotel.jpg)\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip"),
+            threaded(user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"), "k1"),
+            threaded(agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"), "k1"),
+            threaded(user("k4", "顺便看下四月京都的天气。", at: at(8, 58), session: "topic-trip"), "k4"),
+            threaded(agent("四月白天 15–20 度，早晚凉，带件外套。月初樱花还在。", at: at(8, 59), session: "topic-trip"), "k4"),
+            threaded(agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/api/projects/asset/hotel.jpg?path=projects%2Fdemo%2Ftrip%2Fhotel.jpg)\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip"), "k1"),
+            threaded(user("k6", "就按它排。", at: at(9, 24), session: "topic-trip"), "k1"),
         ]
         // A photo the guardian sent, stored the way the server stores it, and a long reply.
         let kitchen = "projects/demo/home/kitchen.jpg"
@@ -528,6 +626,7 @@ final class DemoBackend: RomeBackend {
             agent("降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。", at: at(9, 40)),
             parts([.object(["type": .string("task_chat"), "chatId": .string("chat-price"), "title": .string("价格追踪：发提醒邮件")])], at: at(9, 40).addingTimeInterval(1), session: conciergeChatID),
             agent("竞品调研想确认一下范围，你看下。", at: at(9, 40).addingTimeInterval(2)),
+            parts([.object(["type": .string("task_chat"), "chatId": .string("chat-research"), "title": .string("竞品定价调研")])], at: at(9, 40).addingTimeInterval(3), session: conciergeChatID),
             // The Concierge asks and waits for an approval in the main chat too.
             user("c3", "海口明天怎么样？", at: at(9, 52), session: conciergeChatID),
             parts([.object([
@@ -564,6 +663,31 @@ final class DemoBackend: RomeBackend {
                 card("linear", "Linear", "glyph:linear", composio("linear")),
                 card("slack", "Slack", "brand:slack", .object(["kind": .string("rome_oauth"), "url": .null, "available": .bool(false), "unavailableReason": .string("Rome Cloud 还不能连接 Slack")])),
             ], at: at(10, 3).addingTimeInterval(5), session: mail),
+        ]
+        // Routine cards (one on, one not yet), and cards only the web draws.
+        let routine = "topic-routine"
+        func routineCard(_ key: String, name: String, trigger: String, watch: String, then: String) -> JSONValue {
+            .object([
+                "type": .string("routine_draft_card"), "toolUseId": .string("tu-\(key)"), "routineKey": .string("chat-routine:\(key)"),
+                "draft": .object([
+                    "name": .string(name), "sentence": .string(""), "watchLabel": .string(watch), "thenSummary": .string(then),
+                    "trigger": .object(["type": .string(trigger)]), "actionName": .string("concierge:run_prompt"), "args": .object([:]),
+                ]),
+            ])
+        }
+        messages[routine] = [
+            user("rt1", "每周五早上提醒我这周读了多少，有新邮件来自出版社也告诉我。", at: at(11, 0), session: routine),
+            parts([
+                routineCard("books", name: "每周读书小结", trigger: "schedule", watch: "每周五 09:00", then: "汇总这周的读书笔记，在 Chat 里告诉你"),
+                routineCard("publisher", name: "出版社来信提醒", trigger: "event_bus", watch: "Gmail · 新邮件", then: "用一句话总结并提醒你"),
+            ], at: at(11, 1), session: routine),
+            parts([
+                .object(["type": .string("pending_interaction"), "toolUseId": .string("ai-1"), "appId": .string("rome"), "render": .object(["componentId": .string("ai-tools-card"), "builtin": .bool(true)])]),
+                .object(["type": .string("quota_switch"), "from": .string("claude"), "to": .string("codex"), "model": .string("GPT-5")]),
+                .object(["type": .string("poll_card"), "question": .string("?")]),
+            ], at: at(11, 2), session: routine),
+            // The AI tools card was answered on the web: its row says Done.
+            parts([.object(["type": .string("interaction_result"), "toolUseId": .string("ai-1"), "output": .object(["connected": .bool(true)])])], at: at(11, 3), session: routine, role: "user"),
         ]
         messages["topic-mail-setup"] = [
             user("ms1", "摘要按什么来整理？", at: at(10, 1), session: "topic-mail-setup"),

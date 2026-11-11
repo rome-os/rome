@@ -72,7 +72,7 @@ describe("AgentLoader", () => {
       await loader.loadAll(FIXTURES_DIR);
       const agents = byId(loader);
 
-      expect(agents.size).toBe(7);
+      expect(agents.size).toBe(8);
       expect(agents.has("core:test-all-actions")).toBe(true);
       expect(agents.has("core:test-main")).toBe(true);
       expect(agents.has("core:test-sentinel")).toBe(true);
@@ -350,7 +350,7 @@ describe("AgentLoader", () => {
     it("returns a copy of all loaded agents", async () => {
       await loader.loadAll(FIXTURES_DIR);
       const all = loader.list();
-      expect(all).toHaveLength(7);
+      expect(all).toHaveLength(8);
       expect(all).not.toBe(loader.list());
     });
   });

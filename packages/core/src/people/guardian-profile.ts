@@ -1,0 +1,328 @@
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { eq } from "drizzle-orm";
+import { v4 as uuidv4 } from "uuid";
+import type { DrizzleDb } from "../db/index.js";
+import { guardianAuth, persons } from "../db/schema.js";
+import { pickRandomAgentPreset } from "../lib/agent-presets.js";
+import { generatePersonSlug } from "@rome/api-types/persons";
+import type { SettingsRepository } from "../db/repositories/settings.js";
+import { createLogger } from "../logger.js";
+import {
+  ensureProfileMemoryInitialized,
+  getGuardianProfileFile,
+  getRelationshipDir,
+  GUARDIAN_PROFILE_PATH,
+} from "../profile-memory.js";
+import { applyGuardianTimezoneWrite } from "../routines/guardian-timezone.js";
+
+const log = createLogger("guardian-profile");
+
+/** The guardian and agent identity every setup path writes. Only the fields
+ *  present are written; an absent field keeps its stored value. */
+export interface GuardianProfileInput {
+  guardianName?: string;
+  agentName?: string;
+  agentPurpose?: string;
+  guardianTimezone?: string;
+  guardianX?: string;
+  guardianLinkedin?: string;
+  interests?: string[];
+}
+
+export interface GuardianProfileDeps {
+  db: DrizzleDb;
+  settingsRepo: Pick<SettingsRepository, "get" | "set" | "delete">;
+  /** Reschedule floating routines after a timezone change. */
+  reactivateFloating: () => Promise<void>;
+}
+
+export type GuardianProfileResult =
+  | { ok: true; guardianName: string; personId: string }
+  | { ok: false; error: "guardian_name_required" };
+
+/**
+ * The single write path for the guardian profile: the guardian person row, the
+ * profile memory notes, and the profile settings. Every setup path (the
+ * onboarding page, the cloud sign-in callback, the profile settings) goes
+ * through here so they write the same fields.
+ *
+ * A blank `guardianName` with nothing stored fails before any write, so a
+ * placeholder such as the cloud account id never becomes the display name.
+ * A rename keeps the existing guardian person row and its id. An invalid
+ * timezone is skipped, not an error.
+ */
+export async function applyGuardianProfile(
+  input: GuardianProfileInput,
+  deps: GuardianProfileDeps,
+): Promise<GuardianProfileResult> {
+  const stored = await readStoredProfile(deps.settingsRepo);
+  const guardianName = input.guardianName?.trim() || stored.guardianName?.trim() || "";
+  if (!guardianName) {
+    return { ok: false, error: "guardian_name_required" };
+  }
+
+  const personId = await upsertGuardianPerson(deps.db, guardianName);
+
+  const merged: GuardianProfileInput = {
+    ...stored,
+    ...definedFields(input),
+    guardianName,
+  };
+  writeProfileNotes(merged);
+
+  const settingsWrites: Record<string, unknown> = {
+    ...definedFields(input),
+    guardianName,
+  };
+  delete settingsWrites.guardianTimezone;
+  for (const [key, value] of Object.entries(settingsWrites)) {
+    await deps.settingsRepo.set(key, value);
+  }
+
+  // guardianTimezone is scheduler input, so it goes through the shared write
+  // helper, which also reschedules floating routines created before setup.
+  if (input.guardianTimezone !== undefined) {
+    const result = await applyGuardianTimezoneWrite(input.guardianTimezone, {
+      settingsRepo: deps.settingsRepo,
+      reactivateFloating: deps.reactivateFloating,
+    });
+    if (result.status === "invalid") {
+      log.warn("ignoring invalid guardianTimezone during setup", {
+        value: input.guardianTimezone,
+      });
+    }
+  }
+
+  return { ok: true, guardianName, personId };
+}
+
+/**
+ * Finish a fresh seat's setup: write the display name the caller derived from
+ * its identity source, give the agent a name, and mark onboarding complete.
+ * Both seat origins call this — the cloud sign-in callback with the identity
+ * assertion's name, the local create-account route with the chosen username —
+ * so every fresh instance starts with both names already set and no setup form
+ * left to fill.
+ *
+ * The agent gets a random preset's name and purpose, unless the caller brings
+ * the name the guardian chose: then that name is written alone, since a
+ * preset's purpose describes its own name.
+ *
+ * Call once, after the guardian row exists. A blank `guardianName` leaves the
+ * profile unwritten but still completes setup, so a caller with no usable name
+ * is never stranded mid-onboarding.
+ */
+export async function applySetupDefaults(
+  guardianName: string,
+  deps: GuardianProfileDeps,
+  chosen: { agentName?: string } = {},
+): Promise<void> {
+  const agentName = chosen.agentName?.trim();
+  if (agentName) {
+    await applyGuardianProfile({ guardianName, agentName }, deps);
+  } else {
+    const preset = pickRandomAgentPreset();
+    await applyGuardianProfile(
+      { guardianName, agentName: preset.name, agentPurpose: preset.purpose },
+      deps,
+    );
+  }
+  await deps.db.update(guardianAuth).set({ onboardingComplete: true });
+}
+
+/**
+ * Rename the agent: the `Agent Name` line in `IDENTITY.md`, then the `agentName`
+ * setting, and nothing else. Unlike `applyGuardianProfile`, it does not replay
+ * the stored profile, so the rest of the agent's evolved memory stays as it is.
+ * The file is written first and a failure throws, so a rename that could not
+ * reach memory leaves the setting unchanged.
+ */
+export async function applyAgentName(
+  agentName: string,
+  settingsRepo: Pick<SettingsRepository, "set">,
+): Promise<void> {
+  const profileMemoryDir = ensureProfileMemoryInitialized();
+  updateNotes(join(profileMemoryDir, "IDENTITY.md"), "# Identity", (lines) => {
+    upsertLabel(lines, "Agent Name", agentName);
+  });
+  await settingsRepo.set("agentName", agentName);
+}
+
+const BACKGROUND_HEADING = "## Background";
+
+/**
+ * Write what the guardian told Rome about themselves into GUARDIAN.md, once: a
+ * `## Background` section, left alone when the file already has one, so a
+ * second call (or a note the guardian or an agent has since edited) is never
+ * overwritten or duplicated. Failure is logged and swallowed; it is context,
+ * not setup.
+ */
+export function writeGuardianBackground(body: string): void {
+  try {
+    ensureProfileMemoryInitialized();
+    mkdirSync(getRelationshipDir(), { recursive: true });
+    updateNotes(getGuardianProfileFile(), "# Guardian Profile", (lines) => {
+      if (lines.includes(BACKGROUND_HEADING)) return;
+      upsertSection(lines, BACKGROUND_HEADING, body);
+    });
+  } catch (err) {
+    log.error("failed to write the guardian background", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** The guardian name a cloud sign-in starts with: the identity assertion's
+ *  `name` claim, else the local part of its email, else "Guardian". */
+export function defaultGuardianName(claims: { name?: string; email?: string }): string {
+  const name = claims.name?.trim();
+  if (name) return name;
+  const local = claims.email?.split("@")[0]?.trim();
+  if (local) return local;
+  return "Guardian";
+}
+
+const PROFILE_SETTING_KEYS = [
+  "guardianName",
+  "agentName",
+  "agentPurpose",
+  "guardianTimezone",
+  "guardianX",
+  "guardianLinkedin",
+  "interests",
+] as const;
+
+async function readStoredProfile(
+  settingsRepo: Pick<SettingsRepository, "get">,
+): Promise<GuardianProfileInput> {
+  const stored: Record<string, unknown> = {};
+  for (const key of PROFILE_SETTING_KEYS) {
+    const value = await settingsRepo.get(key);
+    if (value !== null && value !== undefined) stored[key] = value;
+  }
+  return stored as GuardianProfileInput;
+}
+
+// Only the profile's own keys are written. The input can be an app-supplied
+// object through the SDK repository, so an unfiltered spread would let an app
+// write any settings key it likes.
+function definedFields(input: GuardianProfileInput): GuardianProfileInput {
+  const owned = new Set<string>(PROFILE_SETTING_KEYS);
+  return Object.fromEntries(
+    Object.entries(input).filter(
+      ([key, value]) => owned.has(key) && value !== undefined && value !== null,
+    ),
+  ) as GuardianProfileInput;
+}
+
+async function upsertGuardianPerson(db: DrizzleDb, guardianName: string): Promise<string> {
+  const [guardian] = await db
+    .select({ id: persons.id, displayName: persons.displayName })
+    .from(persons)
+    .where(eq(persons.bondLevel, "guardian"))
+    .limit(1);
+  if (guardian) {
+    if (guardian.displayName !== guardianName) {
+      await db
+        .update(persons)
+        .set({ displayName: guardianName })
+        .where(eq(persons.id, guardian.id));
+    }
+    return guardian.id;
+  }
+
+  // The slug is the readable id, unless a contact already holds it.
+  const slug = generatePersonSlug(guardianName);
+  const [taken] = slug
+    ? await db.select({ id: persons.id }).from(persons).where(eq(persons.id, slug)).limit(1)
+    : [];
+  const id = slug && !taken ? slug : uuidv4();
+  await db.insert(persons).values({
+    id,
+    displayName: guardianName,
+    bondLevel: "guardian",
+    profilePath: GUARDIAN_PROFILE_PATH,
+    createdAt: new Date(),
+  });
+  return id;
+}
+
+/**
+ * Write the fields this module owns into the profile notes, in place.
+ *
+ * `GUARDIAN.md` and `IDENTITY.md` are living memory: the Concierge and `dream`
+ * edit both. Setup is not the only caller — the profile settings write through
+ * here on every save — so a write that rendered the whole file from settings
+ * would delete everything the agents learned. Each owned field is upserted instead: its line or section is
+ * replaced where it exists and inserted where it does not, and every other line
+ * in the file is left alone. A file that does not exist yet is created from the
+ * owned fields alone.
+ */
+function writeProfileNotes(profile: GuardianProfileInput): void {
+  try {
+    const profileMemoryDir = ensureProfileMemoryInitialized();
+    mkdirSync(getRelationshipDir(), { recursive: true });
+
+    updateNotes(getGuardianProfileFile(), "# Guardian Profile", (lines) => {
+      upsertLabel(lines, "Name", profile.guardianName ?? "");
+      if (profile.guardianTimezone) {
+        upsertLabel(lines, "Timezone", profile.guardianTimezone);
+      }
+      if (profile.guardianX) {
+        upsertLabel(lines, "X (Twitter)", `https://x.com/${profile.guardianX.replace(/^@/, "")}`);
+      }
+      if (profile.guardianLinkedin) {
+        const handle = profile.guardianLinkedin.replace(/^\/in\//, "");
+        upsertLabel(lines, "LinkedIn", `https://www.linkedin.com/in/${handle}`);
+      }
+      if (profile.interests && profile.interests.length > 0) {
+        upsertSection(lines, "## Interests", profile.interests.join(", "));
+      }
+    });
+
+    if (profile.agentName || profile.agentPurpose) {
+      updateNotes(join(profileMemoryDir, "IDENTITY.md"), "# Identity", (lines) => {
+        if (profile.agentName) upsertLabel(lines, "Agent Name", profile.agentName);
+        if (profile.agentPurpose) upsertSection(lines, "## Purpose", profile.agentPurpose);
+      });
+    }
+  } catch (err) {
+    log.error("failed to write profile notes", {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
+/** Read a notes file (or start one at `title`), apply `edit`, write it back. */
+function updateNotes(path: string, title: string, edit: (lines: string[]) => void): void {
+  const existing = existsSync(path) ? readFileSync(path, "utf-8") : "";
+  const lines = existing ? existing.split("\n") : [title, ""];
+  edit(lines);
+  writeFileSync(path, lines.join("\n"));
+}
+
+/** Set a `**Label:** value` line. A file without one takes it after the title,
+ *  ahead of the first `## ` section. */
+function upsertLabel(lines: string[], label: string, value: string): void {
+  const prefix = `**${label}:**`;
+  const at = lines.findIndex((line) => line.startsWith(prefix));
+  if (at !== -1) {
+    lines[at] = `${prefix} ${value}`;
+    return;
+  }
+  const firstSection = lines.findIndex((line, i) => i > 0 && line.startsWith("## "));
+  lines.splice(firstSection === -1 ? lines.length : firstSection, 0, `${prefix} ${value}`, "");
+}
+
+/** Set the body of a `## Heading` section, keeping the sections around it. */
+function upsertSection(lines: string[], heading: string, body: string): void {
+  const at = lines.indexOf(heading);
+  if (at === -1) {
+    lines.push(heading, "", body, "");
+    return;
+  }
+  let end = at + 1;
+  while (end < lines.length && !lines[end].startsWith("## ")) end++;
+  lines.splice(at, end - at, heading, "", body, "");
+}

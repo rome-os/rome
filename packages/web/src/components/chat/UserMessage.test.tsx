@@ -7,6 +7,7 @@ import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { UserMessage } from "./UserMessage";
 import enChat from "@/i18n/locales/en/chat.json";
 import { ReplyDraftProvider, type ReplyDraft } from "./reply/reply-draft";
+import { TaskChatContext } from "./task-chat";
 
 const viewer = rs.hoisted(() => ({
   current: { kind: "guardian", userId: "seat", displayName: "Ray", avatarUrl: null } as
@@ -164,6 +165,35 @@ describe("UserMessage sender", () => {
     expect(screen.getByTitle("ada@example.com").textContent).toBe("A");
     expect(screen.getByText("ada@example.com", { selector: "span" })).toBeTruthy();
     expect(side(container)).toBe("left");
+  });
+
+  it("puts the Concierge's message in a task chat on the owner's side, under its name and mascot", () => {
+    const concierge = {
+      kind: "automated",
+      sourceType: "agent",
+      name: "Flint",
+      iconUrl: null,
+    } as const;
+    const { container } = render(
+      <ThemeProvider>
+        <TaskChatContext.Provider value={true}>
+          <UserMessage msg={{ ...message, sender: concierge }} />
+        </TaskChatContext.Provider>
+      </ThemeProvider>,
+    );
+    expect(container.querySelector("[data-concierge-message]")).toBeTruthy();
+    expect(side(container)).toBe("right");
+    expect(screen.getByText("Flint", { selector: "span" })).toBeTruthy();
+    expect(container.querySelector(".rome-mascot")).toBeTruthy();
+    // Not the Automated label of another agent, nor the owner's own bubble tone.
+    expect(screen.queryByText("senderAutomated")).toBeNull();
+    cleanup();
+
+    // The same agent elsewhere is any other agent: on the left, marked automated.
+    const elsewhere = render(withSender(concierge));
+    expect(elsewhere.container.querySelector("[data-concierge-message]")).toBeNull();
+    expect(side(elsewhere.container)).toBe("left");
+    expect(screen.getByText("senderAutomated")).toBeTruthy();
   });
 
   it("tells a visitor's own message from another visitor's by account", () => {

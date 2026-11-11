@@ -1,6 +1,6 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ConciergeTaskDto, ConciergeTaskState } from "@rome/api-types/concierge";
-import { applyTaskUpsert, formatTaskTime, groupTasks, pillState, taskTime } from "./tasks";
+import { applyTaskUpsert, formatTaskTime, groupTasks, taskTime } from "./tasks";
 
 const NOW = Date.UTC(2026, 9, 29, 12);
 const DAY = 86_400_000;
@@ -105,25 +105,6 @@ describe("groupTasks", () => {
 
   it("never lists an archived row", () => {
     expect(groupTasks([task("doing", { archivedAt: NOW })], { now: NOW })).toEqual([]);
-  });
-});
-
-describe("pillState", () => {
-  it("counts Needs you first, then Doing, else idles", () => {
-    expect(pillState([task("needs_user"), task("needs_user"), task("doing")])).toEqual({
-      kind: "needsYou",
-      count: 2,
-    });
-    expect(pillState([task("doing"), task("doing"), task("next"), task("watching")])).toEqual({
-      kind: "doing",
-      count: 2,
-    });
-    expect(pillState([task("next"), task("watching"), task("done")])).toEqual({ kind: "idle" });
-    expect(pillState([])).toEqual({ kind: "idle" });
-  });
-
-  it("does not count archived rows", () => {
-    expect(pillState([task("needs_user", { archivedAt: NOW })])).toEqual({ kind: "idle" });
   });
 });
 

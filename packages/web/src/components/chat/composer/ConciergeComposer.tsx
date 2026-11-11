@@ -197,6 +197,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         replyTo?: ReplyTarget,
         pickedFolder: FolderSelection | null = null,
         skillName?: string,
+        chatThread?: string,
       ): ChatComposerSnapshot => ({
         text: appendFolderLine(text, pickedFolder),
         uploads,
@@ -206,6 +207,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
         inputId,
         replyTo,
         skillName,
+        ...(chatThread ? { chatThread } : {}),
       }),
       [reasoningEffort],
     );
@@ -231,15 +233,23 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
       // the text on screen until the server accepts the upload.
       const clearsOptimistically = uploads.length === 0;
       const replyTo = replyDraft?.target ?? undefined;
+      const chatThread = replyDraft?.thread ?? undefined;
+      // The draft's change count once this send cleared it: a failed send
+      // puts its reply back only if the guardian changed nothing since.
+      let clearedAt: number | undefined;
       if (clearsOptimistically) {
         setInputText("");
         setPendingUploads([]);
         setFolder(null);
         setDraftSkill(null);
-        replyDraft?.clear();
+        // A send closes the reply bar and, with it, the thread view; the
+        // message keeps the thread it was sent into.
+        clearedAt = replyDraft?.clear();
       }
       try {
-        await invokeOnSend(snapshotOf(text, uploads, inputId, replyTo, pickedFolder, skill?.name));
+        await invokeOnSend(
+          snapshotOf(text, uploads, inputId, replyTo, pickedFolder, skill?.name, chatThread),
+        );
         failedSendRef.current = null;
         if (!clearsOptimistically) {
           replyDraft?.clear();
@@ -256,7 +266,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           setPendingUploads(uploads);
           setFolder(pickedFolder);
           setDraftSkill(skill);
-          if (replyTo) replyDraft?.restore(replyTo);
+          if (replyTo) replyDraft?.restore(replyTo, clearedAt);
         }
       }
     }, [inputText, pendingUploads, folder, draftSkill, invokeOnSend, snapshotOf, replyDraft]);
@@ -579,7 +589,9 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                     placeholder={
                       pendingUploads.length > 0
                         ? t("composer.placeholderWithUploads")
-                        : t("concierge.placeholder")
+                        : replyDraft?.thread
+                          ? t("thread.replyPlaceholder")
+                          : t("concierge.placeholder")
                     }
                     rows={1}
                     className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none"

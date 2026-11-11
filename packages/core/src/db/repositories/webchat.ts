@@ -22,6 +22,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 import {
+  approvals,
   sharedChats,
   webchatProjects,
   romeSessions,
@@ -56,7 +57,7 @@ import type { Account, RomeSessionType } from "@rome-os/app-runtime";
 import type { MessagePart } from "../../types.js";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { agentMessageOutbound } from "../../chats/history/messages-agent.js";
-import { sessionOwnerKey, type SessionActor } from "../../lib/session-actor.js";
+import { sessionOwnerKey, type SessionActor } from "../../access/session-actor.js";
 import type { ChatRef } from "../../chats/storage/place.js";
 
 export interface StoredTurnFeedback {
@@ -77,7 +78,27 @@ export interface StoredWebchatMessage {
   senderName?: string | null;
   replyToPlatformMessageId?: string | null;
   contextInjectedTurnId?: string | null;
+  /** The chat thread the message is in (docs/domains/chats.md#chat-thread),
+   *  or null when it is in none. */
+  chatThreadId?: string | null;
   createdAt: Date;
+}
+
+/**
+ * Where a message goes among its chat's chat threads: into the thread of
+ * the message `in` names, or into a thread of its own. With `settle` it
+ * stays there for good: its sender chose the thread, or a task's thread took
+ * it. A settled message is never moved.
+ */
+export type ChatThreadPlacement = ({ in: string } | { starts: true }) & {
+  settle?: boolean;
+};
+
+/** A message was placed in a chat thread. */
+export interface ChatThreadPlaced {
+  sessionId: string;
+  messageId: string;
+  chatThreadId: string;
 }
 
 export interface StoredSharedChat {
@@ -256,7 +277,7 @@ export interface EnsureRomeSessionInput {
   agentName: string | null;
   projectName?: string;
   projectPath?: string | null;
-  /** A side chat keeps the folder of the chat it branched from. */
+  /** A fork chat keeps the folder of the chat it branched from. */
   deviceFolder?: DeviceFolder | null;
   sourceChannel?: string | null;
   sourceThreadId?: string | null;
@@ -307,6 +328,7 @@ export interface TraceBatch {
 }
 
 export type WebchatMessageInsertedListener = (message: StoredWebchatMessage) => void;
+export type ChatThreadPlacedListener = (event: ChatThreadPlaced) => void;
 export type WebchatSessionNameChangedListener = (event: {
   sessionId: string;
   name: string;
@@ -438,6 +460,24 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
   where a."status" = 'pending'
   and json_extract(a."payload", '$.channelContext.threadId') is not null
 ))`.mapWith(Boolean);
+// When the session's newest open card was said, unix seconds, or null: the
+// newest card of those `sessionAwaitingGuardian` counts open. Pending
+// approvals are read apart, once per call, by `awaitingGuardianSince`.
+export const sessionAwaitingCardSince = sql<number | null>`(
+    select max(cast(m."created_at" as integer)) from "rome_agent_messages" m, json_each(m."content") part
+    where m."session_id" = "rome_sessions"."id" and m."role" = 'assistant'
+    and json_valid(m."content")
+    and m."rowid" > coalesce((
+      select max(u."rowid") from "rome_agent_messages" u
+      where u."session_id" = "rome_sessions"."id" and u."role" = 'user'
+    ), 0)
+    and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
+)`;
+// When the guardian last said something in the session, unix seconds, or null.
+export const sessionOwnerSpokeAt = sql<number | null>`(
+  select max(cast(u."created_at" as integer)) from "rome_agent_messages" u
+  where u."session_id" = "rome_sessions"."id" and u."role" = 'user'
+)`;
 const SESSION_DELETE_CHUNK_SIZE = 500;
 const SQL_LIKE_ESCAPE = "\\";
 
@@ -772,6 +812,11 @@ export class WebChatRepository {
   /** Whether a listed session waits on the guardian, as a column of its row. */
   protected readonly awaitingGuardianColumn: SQL<boolean> = sessionAwaitingGuardian;
 
+  /** When a session's newest open card was said, unix seconds, or null. */
+  protected readonly awaitingCardSinceColumn: SQL<number | null> = sessionAwaitingCardSince;
+  /** When the session's owner last said something in it, unix seconds, or null. */
+  protected readonly ownerSpokeAtColumn: SQL<number | null> = sessionOwnerSpokeAt;
+
   /** The columns a listed session is read with. */
   protected sessionFields() {
     return { ...sessionSelectFields, messageCount: this.messageCountColumn };
@@ -788,6 +833,57 @@ export class WebChatRepository {
     for (const listener of this.messageInsertedListeners) {
       listener(message);
     }
+  }
+
+  private chatThreadPlacedListeners = new Set<ChatThreadPlacedListener>();
+
+  /** Told when a message is placed in a chat thread after it was said. */
+  onChatThreadPlaced(listener: ChatThreadPlacedListener): () => void {
+    this.chatThreadPlacedListeners.add(listener);
+    return () => {
+      this.chatThreadPlacedListeners.delete(listener);
+    };
+  }
+
+  protected emitChatThreadPlaced(event: ChatThreadPlaced): void {
+    for (const listener of this.chatThreadPlacedListeners) listener(event);
+  }
+
+  /**
+   * Places message `messageId` of chat `sessionId` in a chat thread. A
+   * message whose sender chose its thread is never moved. Answers the
+   * thread the message is in after, or null when the chat holds no such
+   * message or keeps no chat threads. Chat threads live in Chats, so this
+   * repository keeps none.
+   */
+  async placeInChatThread(
+    _sessionId: string,
+    _messageId: string,
+    _placement: ChatThreadPlacement,
+  ): Promise<string | null> {
+    return null;
+  }
+
+  /** The chat thread message `messageId` of chat `sessionId` is in, else the
+   *  one it would start, or null when the chat holds no such message. */
+  async chatThreadOf(_sessionId: string, _messageId: string): Promise<string | null> {
+    return null;
+  }
+
+  /**
+   * The messages of the chat thread that message `messageId` of chat
+   * `sessionId` is in, in the order they were said. A message in no chat
+   * thread is alone in its own. Empty when the chat holds no such message.
+   */
+  async getChatThreadMessages(
+    _sessionId: string,
+    _messageId: string,
+  ): Promise<
+    Array<
+      StoredWebchatMessage & { inputState: import("@rome-os/app-runtime").AgentInputState | null }
+    >
+  > {
+    return [];
   }
 
   onSessionNameChanged(listener: WebchatSessionNameChangedListener): () => void {
@@ -1443,6 +1539,60 @@ export class WebChatRepository {
     });
   }
 
+  /**
+   * Which of `sessionIds` wait on the guardian, by the same rule as the
+   * `awaitingGuardian` of a listed chat: a card after the last prompt, or a
+   * pending approval in the chat. Ids that name no chat are left out.
+   */
+  async awaitingGuardianOf(sessionIds: readonly string[]): Promise<Set<string>> {
+    if (sessionIds.length === 0) return new Set();
+    const rows = await this.db
+      .select({ id: romeSessions.id, awaiting: this.awaitingGuardianColumn })
+      .from(romeSessions)
+      .where(inArray(romeSessions.id, [...sessionIds]));
+    return new Set(rows.filter((row) => row.awaiting).map((row) => row.id));
+  }
+
+  /**
+   * When each of `sessionIds` that waits on the guardian began its newest
+   * wait, epoch milliseconds: its newest open card or newest pending
+   * approval. Sessions that wait on nothing, or name no chat, are left out.
+   */
+  async awaitingGuardianSince(sessionIds: readonly string[]): Promise<Map<string, number>> {
+    if (sessionIds.length === 0) return new Map();
+    const ids = [...sessionIds];
+    const cards = await this.db
+      .select({ id: romeSessions.id, since: this.awaitingCardSinceColumn })
+      .from(romeSessions)
+      .where(inArray(romeSessions.id, ids));
+    // The pending approvals are read once for all the chats, as
+    // `sessionAwaitingGuardian` does, rather than once per chat: the
+    // approvals table keeps every resolved row and has no index to find a
+    // chat's.
+    const threadId = sql<string>`json_extract(${approvals.payload}, '$.channelContext.threadId')`;
+    const pending = await this.db
+      .select({ id: threadId, since: sql<number>`max(cast(${approvals.createdAt} as integer))` })
+      .from(approvals)
+      .where(and(eq(approvals.status, "pending"), inArray(threadId, ids)))
+      .groupBy(threadId);
+    const since = new Map<string, number>();
+    for (const row of [...cards, ...pending]) {
+      if (row.since === null) continue;
+      const at = Number(row.since) * 1000;
+      since.set(row.id, Math.max(at, since.get(row.id) ?? at));
+    }
+    return since;
+  }
+
+  /** When the session's owner last said something in it, epoch milliseconds, or null. */
+  async ownerSpokeAt(sessionId: string): Promise<number | null> {
+    const [row] = await this.db
+      .select({ at: this.ownerSpokeAtColumn })
+      .from(romeSessions)
+      .where(eq(romeSessions.id, sessionId));
+    return row?.at == null ? null : Number(row.at) * 1000;
+  }
+
   /** Omit ownerKey to list all owners. NULL matches none, and the guardian includes NULL-owned sessions. */
   /** `visibleTo` keeps only the chats that owner may open. */
   async listSessions(
@@ -1886,6 +2036,7 @@ export class WebChatRepository {
     content: string,
     actor?: SessionActor,
     saidBy?: Account,
+    _chatThread?: ChatThreadPlacement,
   ): Promise<boolean> {
     return this.db.transaction((tx) => {
       const createdAt = new Date();
@@ -2134,6 +2285,7 @@ export class WebChatRepository {
     role: string,
     parts: TranscriptPart[],
     id: string = randomUUID(),
+    _chatThread?: ChatThreadPlacement,
   ): Promise<StoredWebchatMessage> {
     const message = await this.db.transaction((tx) => {
       const createdAt = new Date();
@@ -2243,8 +2395,16 @@ export class WebChatRepository {
     sessionId: string,
     turnId: string,
     parts: TranscriptPart[],
+    options: { chatThread?: ChatThreadPlacement } = {},
   ): Promise<StoredWebchatMessage> {
-    return this.insertBackendMessage(sessionId, turnId, "assistant", parts);
+    return this.insertBackendMessage(
+      sessionId,
+      turnId,
+      "assistant",
+      parts,
+      undefined,
+      options.chatThread,
+    );
   }
 
   /**
@@ -2990,6 +3150,9 @@ export class WebChatRepository {
         role: romeAgentMessages.role,
         content: romeAgentMessages.content,
         senderId: romeAgentMessages.senderId,
+        // `queued` for an input linked to the turn that has not reached it:
+        // a later turn takes it.
+        inputState: romeAgentMessages.inputState,
       })
       .from(romeAgentMessages)
       .where(

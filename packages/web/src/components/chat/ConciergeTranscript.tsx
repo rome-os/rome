@@ -4,9 +4,13 @@ import { ChatBubble } from "@/components/chat/ChatBubble";
 import { ConciergeGroup } from "@/components/chat/ConciergeGroup";
 import { ConciergeTimeSeparator } from "@/components/chat/ConciergeTimeSeparator";
 import type { BlockActions, LivePreview } from "@/components/chat/MessageList";
+import { LatestTaskChatsContext } from "@/components/chat/entries/render";
+import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
+import type { ChatEntry } from "@/lib/chat-types";
 import { ModelSwitchNotice } from "@/components/chat/ModelSwitchNotice";
+import { SessionRenewalNotice } from "./SessionRenewalNotice";
 import type { ChatRow } from "@/components/chat/chat-view";
-import { buildConciergeItems, turnHasSpoken } from "@/components/chat/concierge-groups";
+import { buildConciergeItems, showsTyping } from "@/components/chat/concierge-groups";
 import { useBubbleArrivals } from "@/components/chat/use-bubble-arrivals";
 
 function TypingBubble() {
@@ -50,54 +54,69 @@ export function ConciergeTranscript({
   feedback?: boolean;
 }) {
   const runningTurnId = live.isStreaming ? live.runningTurnId : null;
-  // A quiet turn (the agent updating its own list) shows no typing dots until
-  // it says something.
-  const typing = live.isStreaming && (!live.quiet || turnHasSpoken(rows, live.runningTurnId));
+  const typing = showsTyping(rows, live);
   const items = useMemo(() => buildConciergeItems(rows, { typing }), [rows, typing]);
   const messageIds = useMemo(
     () =>
       items.flatMap((item) => (item.kind === "group" ? item.entries.map((e) => e.message.id) : [])),
     [items],
   );
+  const latestTaskChats = useMemo(() => {
+    const latestTaskChats = new Map<string, ChatEntry>();
+    for (const item of items) {
+      if (item.kind !== "group") continue;
+      for (const entry of item.entries) {
+        if (entry.message.role !== "assistant") continue;
+        for (const part of parseMessageEntries(entry.message)) {
+          if (part.type === "task_chat") latestTaskChats.set(part.chatId, part);
+        }
+      }
+    }
+    return latestTaskChats;
+  }, [items]);
   const arrival = useBubbleArrivals(messageIds);
   return (
     // Padding outside, width cap inside: the composer floor's geometry, so the
     // messages and the composer share both edges at every width.
-    <div className="flex-1 px-3 pt-4 md:px-6">
-      <div
-        ref={contentRef}
-        data-chat-transcript
-        data-concierge-transcript
-        className="@container mx-auto flex max-w-5xl flex-col gap-4 pb-4"
-        role="log"
-        aria-relevant="additions"
-        aria-busy={typing || undefined}
-      >
-        {items.map((item) => {
-          if (item.kind === "separator")
-            return <ConciergeTimeSeparator key={item.key} at={item.at} />;
-          if (item.kind === "notice")
+    <LatestTaskChatsContext.Provider value={latestTaskChats}>
+      <div className="flex-1 px-3 pt-4 md:px-6">
+        <div
+          ref={contentRef}
+          data-chat-transcript
+          data-concierge-transcript
+          className="@container mx-auto flex max-w-5xl flex-col gap-4 pb-4"
+          role="log"
+          aria-relevant="additions"
+          aria-busy={typing || undefined}
+        >
+          {items.map((item) => {
+            if (item.kind === "separator")
+              return <ConciergeTimeSeparator key={item.key} at={item.at} />;
+            if (item.kind === "renewal")
+              return <SessionRenewalNotice key={item.key} reason={item.reason} className="mb-0" />;
+            if (item.kind === "notice")
+              return (
+                <ModelSwitchNotice
+                  key={item.key}
+                  model={item.model}
+                  quota={item.quota}
+                  className="mb-0"
+                />
+              );
             return (
-              <ModelSwitchNotice
+              <ConciergeGroup
                 key={item.key}
-                model={item.model}
-                quota={item.quota}
-                className="mb-0"
+                group={item}
+                actions={actions}
+                runningTurnId={runningTurnId}
+                feedback={feedback}
+                arrival={arrival}
+                typing={TYPING_BUBBLE}
               />
             );
-          return (
-            <ConciergeGroup
-              key={item.key}
-              group={item}
-              actions={actions}
-              runningTurnId={runningTurnId}
-              feedback={feedback}
-              arrival={arrival}
-              typing={TYPING_BUBBLE}
-            />
-          );
-        })}
+          })}
+        </div>
       </div>
-    </div>
+    </LatestTaskChatsContext.Provider>
   );
 }

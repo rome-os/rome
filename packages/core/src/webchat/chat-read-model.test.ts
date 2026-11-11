@@ -553,6 +553,108 @@ describe("ChatReadModel", () => {
     });
   });
 
+  describe("awaitingGuardianSince and ownerSpokeAt", () => {
+    const card = [{ type: "pending_interaction", interaction: { kind: "question" } }];
+
+    it("tells when the newest open card or pending approval began, and when the owner last spoke", async () => {
+      const chat = dashboardChat("chat-1");
+      dashboardChat("quiet");
+      links.prompt(
+        fixture.say({ id: "q", chat, from: "guardian", at: new Date(10_000) }),
+        "chat-1",
+        "t1",
+      );
+      // An app speaking for the guardian is not the owner speaking.
+      fixture.say({
+        id: "app",
+        chat,
+        from: "automated::1::app:inbox",
+        at: new Date(15_000),
+      });
+      fixture.say({
+        id: "c1",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(20_000),
+        parts: card,
+      });
+      fixture.say({
+        id: "c2",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(30_000),
+        parts: card,
+      });
+
+      expect(await repo.awaitingGuardianSince(["chat-1", "quiet", "missing"])).toEqual(
+        new Map([["chat-1", 30_000]]),
+      );
+      expect(await repo.ownerSpokeAt("chat-1")).toBe(10_000);
+      expect(await repo.ownerSpokeAt("quiet")).toBeNull();
+
+      // A newer pending approval is the newest wait.
+      await testDb.db.insert(approvals).values({
+        id: "approval-1",
+        type: "action_execution",
+        status: "pending",
+        executionState: "idle",
+        requestedBy: "main",
+        description: "approve",
+        payload: { channelContext: { threadId: "chat-1" } },
+        createdAt: new Date(40_000),
+      });
+      expect(await repo.awaitingGuardianSince(["chat-1"])).toEqual(new Map([["chat-1", 40_000]]));
+    });
+
+    it("reads the pending approvals once for every chat asked, with the same answer per chat", async () => {
+      const chat = dashboardChat("chat-1");
+      dashboardChat("chat-2");
+      dashboardChat("chat-3");
+      fixture.say({
+        id: "c1",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(50_000),
+        parts: card,
+      });
+      const approval = (id: string, threadId: string, status: "pending" | "approved", at: number) =>
+        testDb.db.insert(approvals).values({
+          id,
+          type: "action_execution",
+          status,
+          executionState: "idle",
+          requestedBy: "main",
+          description: "approve",
+          payload: { channelContext: { threadId } },
+          createdAt: new Date(at),
+        });
+      // chat-1: its card is newer than its pending approval.
+      await approval("a1", "chat-1", "pending", 20_000);
+      // chat-2: only approvals; a resolved one never waits, however new.
+      await approval("a2", "chat-2", "pending", 30_000);
+      await approval("a3", "chat-2", "pending", 35_000);
+      await approval("a4", "chat-2", "approved", 90_000);
+      // chat-3: only a resolved approval. other: pending, but not asked for.
+      await approval("a5", "chat-3", "approved", 60_000);
+      await approval("a6", "other", "pending", 70_000);
+
+      const all = await repo.awaitingGuardianSince(["chat-1", "chat-2", "chat-3"]);
+      expect(all).toEqual(
+        new Map([
+          ["chat-1", 50_000],
+          ["chat-2", 35_000],
+        ]),
+      );
+      // Asking for one chat at a time gives each the same answer.
+      for (const id of ["chat-1", "chat-2", "chat-3"]) {
+        expect((await repo.awaitingGuardianSince([id])).get(id)).toBe(all.get(id));
+      }
+    });
+  });
+
   describe("unreadCount", () => {
     it("counts lines from Rome after the read mark, up to the cap", async () => {
       const chat = dashboardChat("chat-1");

@@ -8,7 +8,7 @@ import {
 } from "./schedule-trigger-provider.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
-import type { SessionActor } from "../lib/session-actor.js";
+import type { SessionActor } from "../access/session-actor.js";
 import type { Routine, Trigger } from "./types.js";
 
 // Reach into the provider's private `jobs` map to invoke `Cron.trigger()`
@@ -575,7 +575,7 @@ describe("ScheduleTriggerProvider", () => {
     // through that same fresh module — not this file's top-level import.
     const capturedAtConstruction: Promise<SessionActor | undefined>[] = [];
     rs.resetModules();
-    const freshSessionActor = await import("../lib/session-actor.js");
+    const freshSessionActor = await import("../access/session-actor.js");
     rs.doMock("croner", () => ({
       Cron: class {
         constructor() {

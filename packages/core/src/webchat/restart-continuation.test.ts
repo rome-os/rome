@@ -6,6 +6,9 @@ import { romeAgentMessages, romeSessions, sessions } from "../db/schema.js";
 import { createMockAgentRunner, createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 import { continueInterruptedTurns, RESTART_CONTINUATION_PROMPT } from "./restart-continuation.js";
+import { continuationActor } from "./continuation-actor.js";
+import { sendForCaller } from "../apps/actions/caller-notify.js";
+import { guardianAuth } from "../db/schema.js";
 
 const DAY = 24 * 60 * 60 * 1000;
 
@@ -101,6 +104,60 @@ describe("startup restart continuation", () => {
     expect(agent.calls).toHaveLength(1);
     expect(RESTART_CONTINUATION_PROMPT).toContain("Do only what remains");
     expect(RESTART_CONTINUATION_PROMPT).toContain("ask the guardian rather than redo it");
+  });
+
+  it("continues as the person whose turn it was, so send_notification rings them in a shared chat", async () => {
+    await db.db
+      .insert(guardianAuth)
+      .values({ id: "auth-1", userId: "seat-1", passwordHash: "x", createdAt: new Date() });
+    await interrupted();
+    const turns = await repo.endInterruptedTurns(DAY);
+    const { agent, runner } = backend();
+    await continueInterruptedTurns(turns, repo, runner, Date.now(), (turn) =>
+      continuationActor(db.db, repo, turn),
+    );
+    const actor = agent.calls[0]?.actor as { kind: string } | undefined;
+    expect(actor).toEqual({ kind: "guardian", userId: "seat-1", via: "loopback" });
+    // The continued turn's send_notification in this shared chat.
+    const pushes: unknown[] = [];
+    const outcome = await sendForCaller(
+      {
+        send: async (content) => (
+          pushes.push(content), { kind: "ok", attempted: 1, sent: 1, failed: 0 }
+        ),
+      },
+      async () => null,
+      { actor: actor as never, chatId: "chat" },
+      { body: "Done" },
+    );
+    expect(outcome.kind).toBe("ok");
+    expect(pushes).toEqual([{ body: "Done" }]);
+  });
+
+  it("names one person for a turn written by one, and no one for a turn holding two people's input", async () => {
+    await interrupted();
+    expect(repo.getTurnPromptSenders({ sessionId: "chat", turnId: "chat-turn" })).toEqual([
+      "guardian",
+    ]);
+    await repo.recordUserInput(
+      "chat-visitor-input",
+      "chat",
+      JSON.stringify([{ type: "text", content: "Me too" }]),
+      { kind: "visitor", accountId: "acct-v", email: "v@example.com" },
+    );
+    await repo.updateUserInput("chat", {
+      type: "input_status",
+      inputId: "chat-visitor-input",
+      turnId: "chat-turn",
+      state: "consumed",
+    });
+    expect(repo.getTurnPromptSenders({ sessionId: "chat", turnId: "chat-turn" }).sort()).toEqual([
+      "guardian",
+      "visitor:acct-v",
+    ]);
+    expect(
+      await continuationActor(db.db, repo, { sessionId: "chat", turnId: "chat-turn" }),
+    ).toBeUndefined();
   });
 
   async function withActivity(startedAt: number, lastActivityAt: number, now: number) {

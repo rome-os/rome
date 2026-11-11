@@ -30,7 +30,11 @@ rs.mock("./use-chat-peek", () => ({
   useChatPeek: () => ({ tile: undefined, open: false, onEnter: () => {}, onLeave: () => {} }),
 }));
 rs.mock("../components/upgrade-countdown-banner", () => ({ UpgradeCountdownBanner: () => null }));
-rs.mock("@/hooks/use-settings", () => ({ useSettings: () => ({ data: {} }) }));
+rs.mock("./UpgradeIndicator", () => ({ UpgradeIndicator: () => null }));
+rs.mock("@/hooks/use-settings", () => ({
+  useSettings: () => ({ data: {} }),
+  useInvalidateSettings: () => () => Promise.resolve(),
+}));
 rs.mock("@/hooks/use-desktop", () => ({ useDesktop: () => true }));
 
 import { SlotProvider } from "../components/slot";

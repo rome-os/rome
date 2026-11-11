@@ -42,6 +42,9 @@ export interface ConciergeTaskWrite {
   /** A message of the row's Concierge chat, by its key there; the caller has
    *  checked it. */
   sourceMessageId?: string | null;
+  /** The key of the message that names the row's chat thread. Written only
+   *  while the row has none; a move to another Concierge chat clears it. */
+  threadRoot?: string | null;
   archived?: boolean;
 }
 
@@ -75,9 +78,15 @@ export class ConciergeTasksRepository {
    * Moves the unfinished rows of Concierge chat `from` to its owner's main
    * chat `to` (null for the guardian's), as when that chat is archived or
    * deleted. Finished rows keep their chat, and every row keeps its owner.
-   * Answers how many moved.
+   * Every row of the chat loses its chat thread. Answers how many moved.
    */
   async moveToMainChat(from: string, to: string | null = null): Promise<number> {
+    // Every row of the chat is its main chat's from now on, the finished ones
+    // too, and a chat thread stays in the chat it is in.
+    await this.db
+      .update(conciergeTasks)
+      .set({ threadRoot: null })
+      .where(eq(conciergeTasks.chatId, from));
     const moved = await this.db
       .update(conciergeTasks)
       .set({ chatId: to })
@@ -123,14 +132,35 @@ export class ConciergeTasksRepository {
    * The caller has checked that the message belongs to `chatId`.
    */
   async setSourceMessage(id: string, chatId: string, messageId: string): Promise<void> {
+    const stored = chatId === CONCIERGE_CHAT_ID ? null : chatId;
+    const existing = await this.get(id);
     await this.db
       .update(conciergeTasks)
       .set({
-        chatId: chatId === CONCIERGE_CHAT_ID ? null : chatId,
+        chatId: stored,
         sourceMessageId: this.sources.idOf(chatId, messageId),
+        // A chat thread stays in its chat: a row moved to another has none.
+        ...(existing && existing.chatId !== stored ? { threadRoot: null } : {}),
       })
       .where(eq(conciergeTasks.id, id));
     await this.announce(id, "refresh");
+  }
+
+  /** The key of the message that names the row's chat thread, or null. */
+  async threadRoot(id: string): Promise<string | null> {
+    return (await this.get(id))?.threadRoot ?? null;
+  }
+
+  /**
+   * Names the row's chat thread by message `root`, unless it already has
+   * one: a root is written once. Answers the row's root after.
+   */
+  async setThreadRoot(id: string, root: string): Promise<string | null> {
+    await this.db
+      .update(conciergeTasks)
+      .set({ threadRoot: root })
+      .where(and(eq(conciergeTasks.id, id), isNull(conciergeTasks.threadRoot)));
+    return this.threadRoot(id);
   }
 
   /**
@@ -150,6 +180,38 @@ export class ConciergeTasksRepository {
         ),
       ),
     );
+  }
+
+  /**
+   * One Concierge chat's rows that can still be doing something: not
+   * archived, and either still open or finished with a task chat that was
+   * active at or after `activeSince`. A finished row's chat that is resumed
+   * counts, however long ago the row finished, while a finished row whose
+   * chat went quiet does not, so the read stays bounded. A chat is narrowed
+   * to in the query: a topic chat by the rows that name it, the main chat by
+   * its owner's rows. Which chat a row belongs to is then read as the panel
+   * reads it, so a row whose topic chat is archived or gone is its main chat's.
+   */
+  async listForConciergeChat(
+    conciergeChatId: string,
+    owner: string,
+    activeSince: Date,
+  ): Promise<ConciergeTaskWithChat[]> {
+    const ofChat =
+      conciergeChatId === mainChatIdOf(owner)
+        ? eq(conciergeTasks.ownerKey, owner)
+        : eq(conciergeTasks.chatId, conciergeChatId);
+    const rows = await this.withChat(
+      and(
+        ofChat,
+        isNull(conciergeTasks.archivedAt),
+        or(
+          and(ne(conciergeTasks.state, "done"), ne(conciergeTasks.state, "dropped")),
+          gte(romeSessions.activityAt, activeSince),
+        ),
+      ),
+    );
+    return rows.filter((task) => task.conciergeChat.id === conciergeChatId);
   }
 
   /** The Concierge's own view: not archived, finished rows only on request. */
@@ -224,6 +286,11 @@ export class ConciergeTasksRepository {
           sessionId:
             write.sessionId !== undefined ? write.sessionId : (existing?.sessionId ?? null),
           chatId: chatId === CONCIERGE_CHAT_ID ? null : chatId,
+          // Written once; a row moved to another Concierge chat has none.
+          threadRoot:
+            existing && (existing.chatId ?? null) !== (chatId === CONCIERGE_CHAT_ID ? null : chatId)
+              ? null
+              : (existing?.threadRoot ?? write.threadRoot ?? null),
           sourceMessageId:
             write.sourceMessageId !== undefined
               ? write.sourceMessageId === null

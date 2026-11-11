@@ -79,7 +79,6 @@ async function rpc(
 // AppManager was driven) rather than on the handler internals.
 function makeServer(
   overrides: {
-    routinesRepo?: unknown;
     eventBus?: EventBus;
     eventCatalog?: EventCatalog;
     eventService?: EventService;
@@ -114,10 +113,7 @@ function makeServer(
       body: { available: true, browseOrigin: "https://store.example" },
     })),
   };
-  const routineEngine = { activate: rs.fn(async () => {}), deactivate: rs.fn() };
   const services = {
-    routineEngine,
-    routinesRepo: overrides.routinesRepo,
     eventService: overrides.eventService ?? new EventService(eventBus, eventCatalog),
     // catalog/db are only touched by uninstall --purge, which these tests don't
     // exercise, so stub them.
@@ -147,7 +143,6 @@ function makeServer(
     eventCatalog,
     appManager,
     appStore,
-    routineEngine,
   };
 }
 
@@ -608,7 +603,33 @@ describe("WorkerRpcServer param validation", () => {
 
     expect(response.error).toBeUndefined();
     expect(response.result).toEqual({ ok: true });
-    expect(services.backendTurnRunner.runAndDeliver).toHaveBeenCalledWith(params);
+    expect(services.backendTurnRunner.runAndDeliver).toHaveBeenCalledWith(params, undefined);
+  });
+
+  it("wakes the turn for the person of the action that woke it, such as a reminder's creator", async () => {
+    const { server, services } = makeServer({});
+    const worker = connect(server);
+    const visitor = { kind: "visitor", accountId: "acct-v", email: "v@example.com" } as const;
+    const params = {
+      agentName: "main",
+      sessionId: "agent-session-1",
+      channel: "webchat",
+      threadId: "sess-1",
+      prompt: "remind",
+    };
+    await actionExecutionContext.run(
+      {
+        actionName: "system:resume_session",
+        executionId: "e-1",
+        rootExecutionId: "e-1",
+        initiator: "routine:remind me",
+        actor: visitor,
+      },
+      () => worker.call("session.continue", params),
+    );
+    expect(services.backendTurnRunner.runAndDeliver).toHaveBeenCalledWith(params, {
+      actor: visitor,
+    });
   });
 
   it("rejects session.continue without the exact AgentSession identity", async () => {
@@ -712,94 +733,26 @@ describe("WorkerRpcServer param validation", () => {
     expect(response.error).toContain("appStore.listListings: invalid params");
     expect(appStore.listListings).not.toHaveBeenCalled();
   });
-
-  it("rejects routines.cancel with an empty routineId without deactivating anything", async () => {
-    const { server, services } = makeServer({});
-    const fake = connect(server);
-
-    const response = await rpc(fake, "routines.cancel", { routineId: "" });
-
-    expect(response.error).toContain("routines.cancel: invalid params");
-    expect(services.routineEngine.deactivate).not.toHaveBeenCalled();
-  });
-
-  it("deactivates a routine when routineId is valid", async () => {
-    const { server, services } = makeServer({});
-    const fake = connect(server);
-
-    const response = await rpc(fake, "routines.cancel", { routineId: "r-42" });
-
-    expect(response.error).toBeUndefined();
-    expect(response.result).toEqual({ ok: true });
-    expect(services.routineEngine.deactivate).toHaveBeenCalledWith("r-42");
-  });
 });
 
-describe("WorkerRpcServer routines.schedule", () => {
-  const baseRow = {
-    id: "r-7",
-    name: "daily-check",
-    enabled: true,
-    trigger: { type: "schedule", tzid: "UTC", localTime: "09:00", rrule: "FREQ=DAILY" },
-    actionName: "do_thing",
-    args: {},
-    createdAt: new Date(),
-    lastFiredAt: null,
-    nextRunAt: null,
-  };
-
-  it("activates an enabled routine and acks", async () => {
-    const { server, services } = makeServer({
-      routinesRepo: { findById: rs.fn(async () => baseRow) },
+describe("WorkerRpcServer calls from other contexts", () => {
+  it("serves a call another context passes in", async () => {
+    const { services } = makeServer({});
+    const server = new WorkerRpcServer(services, {
+      "probe.echo": async (params) => ({ echoed: params }),
     });
     const fake = connect(server);
 
-    const response = await rpc(fake, "routines.schedule", { routineId: "r-7" });
+    const response = await rpc(fake, "probe.echo", { n: 1 });
 
-    expect(response.error).toBeUndefined();
-    expect(response.result).toEqual({ ok: true });
-    expect(services.routineEngine.activate).toHaveBeenCalledTimes(1);
-    expect(services.routineEngine.deactivate).not.toHaveBeenCalled();
+    expect(response.result).toEqual({ echoed: { n: 1 } });
   });
 
-  it("deactivates a disabled routine instead of activating it", async () => {
-    const { server, services } = makeServer({
-      routinesRepo: { findById: rs.fn(async () => ({ ...baseRow, enabled: false })) },
-    });
-    const fake = connect(server);
-
-    const response = await rpc(fake, "routines.schedule", { routineId: "r-7" });
-
-    expect(response.result).toEqual({ ok: true });
-    expect(services.routineEngine.deactivate).toHaveBeenCalledWith("r-7");
-    expect(services.routineEngine.activate).not.toHaveBeenCalled();
-  });
-
-  it("errors when the routine is not found and touches neither engine path", async () => {
-    const { server, services } = makeServer({
-      routinesRepo: { findById: rs.fn(async () => undefined) },
-    });
-    const fake = connect(server);
-
-    const response = await rpc(fake, "routines.schedule", { routineId: "ghost" });
-
-    expect(response.result).toBeUndefined();
-    expect(response.error).toContain("Routine not found");
-    expect(services.routineEngine.activate).not.toHaveBeenCalled();
-    expect(services.routineEngine.deactivate).not.toHaveBeenCalled();
-  });
-
-  it("rejects routines.schedule with an empty routineId without reading the repo", async () => {
-    const findById = rs.fn();
-    const { server } = makeServer({
-      routinesRepo: { findById },
-    });
-    const fake = connect(server);
-
-    const response = await rpc(fake, "routines.schedule", { routineId: "" });
-
-    expect(response.error).toContain("routines.schedule: invalid params");
-    expect(findById).not.toHaveBeenCalled();
+  it("refuses a call whose name a built-in method already takes", () => {
+    const { services } = makeServer({});
+    expect(() => new WorkerRpcServer(services, { "channels.list": async () => [] })).toThrow(
+      "WorkerRPC: method channels.list is already served",
+    );
   });
 });
 
@@ -1201,6 +1154,44 @@ describe("notify.send dispatch", () => {
 
     expect(response.error).toBeUndefined();
     expect(send).toHaveBeenCalledWith(expectedArg);
+  });
+
+  it("rings the visitor who acted in a shared chat, never the chat's owner, over IPC", async () => {
+    const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
+    const { server, services } = makeServer({ notify: { send } });
+    // A shared chat, private to no one.
+    const privateOwnerOf = rs.fn(async () => null);
+    (services as unknown as { privateOwnerOf: unknown }).privateOwnerOf = privateOwnerOf;
+    const worker = connect(server);
+    const store = {
+      actionName: "system:send_notification",
+      executionId: "execution-1",
+      rootExecutionId: "execution-1",
+      initiator: "agent",
+      actor: { kind: "visitor", accountId: "acct-v", email: "v@example.com" } as const,
+      channelContext: { channel: "webchat", threadId: "guardian-chat", channelUserId: "v" },
+    };
+    await actionExecutionContext.run(store, () => worker.call("notify.send", { body: "hi" }));
+    expect(send).toHaveBeenCalledWith({ body: "hi", recipient: "acct-v" });
+  });
+
+  it("refuses a call over IPC from a shared chat with no one person, sending nothing", async () => {
+    const send = rs.fn(async () => ({ kind: "ok", attempted: 1, sent: 1, failed: 0 }));
+    const { server, services } = makeServer({ notify: { send } });
+    (services as unknown as { privateOwnerOf: unknown }).privateOwnerOf = async () => null;
+    const worker = connect(server);
+    const store = {
+      actionName: "system:send_notification",
+      executionId: "execution-2",
+      rootExecutionId: "execution-2",
+      initiator: "agent",
+      channelContext: { channel: "webchat", threadId: "shared-chat", channelUserId: "x" },
+    };
+    const result = await actionExecutionContext.run(store, () =>
+      worker.call("notify.send", { body: "hi" }),
+    );
+    expect(result).toEqual({ kind: "recipient_unknown" });
+    expect(send).not.toHaveBeenCalled();
   });
 
   it("rejects a non-string body without calling the notify service", async () => {

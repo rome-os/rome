@@ -1,5 +1,5 @@
-// The Concierge's task list as the panel and the header pill read it. All
-// pure, so the grouping and the pill's states are tested without a DOM.
+// The Concierge's task list as the panel reads it. All pure, so the grouping
+// is tested without a DOM.
 
 import type { ConciergeTaskDto, ConciergeTaskState } from "@rome/api-types/concierge";
 import { CONCIERGE_DONE_DAYS } from "@rome/api-types/concierge";
@@ -70,24 +70,7 @@ export function groupTasks(
   });
 }
 
-export type PillState =
-  | { kind: "needsYou"; count: number }
-  | { kind: "doing"; count: number }
-  | { kind: "idle" };
-
-const countOf = (tasks: readonly ConciergeTaskDto[], state: ConciergeTaskState) =>
-  tasks.filter((task) => task.state === state && task.archivedAt === null).length;
-
-/** What the header pill shows: the Needs you count, else the Doing count, else a quiet icon. */
-export function pillState(tasks: readonly ConciergeTaskDto[]): PillState {
-  const needsYou = countOf(tasks, "needs_user");
-  if (needsYou > 0) return { kind: "needsYou", count: needsYou };
-  const doing = countOf(tasks, "doing");
-  if (doing > 0) return { kind: "doing", count: doing };
-  return { kind: "idle" };
-}
-
-/** The rows of one Concierge chat: the panel and its pill show only the chat they are opened in. */
+/** The rows of one Concierge chat: the panel and the header show only the chat they are opened in. */
 export const tasksOfChat = (tasks: readonly ConciergeTaskDto[], chatId: string | null) =>
   tasks.filter((task) => task.conciergeChat.id === chatId);
 

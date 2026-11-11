@@ -1,3 +1,4 @@
+import type { AgentNameEvents } from "../people/agent-name.js";
 import type { GuardianLinkCodes } from "../people/guardian-link-code.js";
 import type { SessionOpeningFor } from "../core/session-opening.js";
 import type { LoginUsageSink } from "../usage/recorder.js";
@@ -50,11 +51,12 @@ import type { Sessions } from "../agent/index.js";
 import type { AgentTurnStreamRegistry } from "../core/agent-turn-stream-registry.js";
 import type { Hono } from "hono";
 import type { ClaudeLogins, CodexLogins, ModelAccount, ModelAccounts } from "../agent/index.js";
-import type { PublicAccessState } from "../lib/public-access-state.js";
-import type { DashboardAccessState } from "../lib/dashboard-access-state.js";
-import type { DashboardAccessStore } from "../lib/dashboard-access-store.js";
-import type { VisitorAllowListSync } from "../lib/visitor-allowlist-sync.js";
+import type { Permissions } from "../access/permissions.js";
+import type { DashboardAccessState } from "../access/dashboard-access-state.js";
+import type { DashboardAccessStore } from "../access/dashboard-access-store.js";
+import type { VisitorAllowListSync } from "../access/visitor-allowlist-sync.js";
 import type { PhoneWatching } from "../lib/phone-watching.js";
+import type { DashboardActivity } from "../lib/dashboard-activity.js";
 import type { RelayDrainer } from "../relay/drainer.js";
 import type { BootVersionReport } from "../instance/boot-version-report.js";
 import type { SystemUpgradeService } from "../instance/system-upgrade/service.js";
@@ -91,6 +93,7 @@ export interface ApiConfig {
  * exception is `appsRoot`, a genuine config override rather than a service.
  */
 export interface ApiDeps {
+  agentNameEvents?: AgentNameEvents;
   /** The Concierge feature. Absent ⇒ its routes answer 404. */
   concierge?: ConciergeService;
   /** The channels this Rome has, by name. */
@@ -218,7 +221,7 @@ export interface ApiDeps {
    * In-memory snapshot of app access policy, read by `/api/auth/verify` on
    * every proxied request. Kept in sync by the `/api/public-access` PUT handler.
    */
-  publicAccessState: PublicAccessState;
+  permissions: Permissions;
   /**
    * In-memory snapshot of shared dashboard access policy, read by
    * `/api/auth/verify` on every proxied request. Kept in sync by
@@ -231,6 +234,8 @@ export interface ApiDeps {
   visitorAllowListSync: VisitorAllowListSync;
   /** The chats the guardian's phone app holds open on the live-events socket. */
   phoneWatching?: PhoneWatching;
+  /** Whether the guardian is at a web dashboard, from its signals on the live-events socket. */
+  dashboardActivity?: DashboardActivity;
   /** Webhook relay drainer — present so the Integrations settings route can
    * hot-reload the live connection when the guardian edits relay credentials. */
   relayDrainer: RelayDrainer;

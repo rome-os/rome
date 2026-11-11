@@ -20,12 +20,65 @@ const actionName = (action: string) =>
   ).name;
 
 describe("the Concierge agent", () => {
+  it("renames through the core action instead of editing the setting-owned identity line", () => {
+    expect(concierge.actions).toContain("core:set_agent_name");
+    for (const prompt of [
+      concierge.systemPromptPrefix,
+      (
+        parseYaml(readFileSync(resolve(here, "../../agents/main.yaml"), "utf8")) as {
+          systemPromptPrefix: string;
+        }
+      ).systemPromptPrefix,
+    ]) {
+      expect(prompt).toContain("`core:set_agent_name` with `execute_action`");
+      expect(prompt).toContain("Do not edit the `Agent Name` line");
+    }
+  });
+
+  it("shows task questions and approvals as live cards without relaying card answers", () => {
+    const rule = concierge.systemPromptPrefix
+      .split("\n")
+      .find((line) => line.startsWith("- `task_needs_input`"));
+    for (const text of [
+      "turn_end:completed question",
+      "`approval`",
+      "`chat_card`",
+      "Do not restate the question, options or approval",
+      "`messageId` returned by `chat_card` as the `needs_user` row anchor",
+      "do not relay that answer",
+      "instead type an answer in this chat",
+      "pass it on with `chat_send`",
+      "turn_end ... by=guardian",
+      "update the row out of `needs_user`",
+      "even when you stay silent",
+    ])
+      expect(rule).toContain(text);
+    const taskListRule = concierge.systemPromptPrefix
+      .split("# Task list\n")[1]
+      .split("\n")
+      .find((line) => line.startsWith("- A delivered result"));
+    expect(taskListRule).toContain(
+      "`chat_card` first for task question cards or pending approvals",
+    );
+    expect(taskListRule).toContain("otherwise `say` or `chat_forward`");
+    expect(taskListRule).toContain("then write the row with the `messageId` it returned");
+  });
+
   it("can find and delete the routine that watches a task row", () => {
     expect(concierge.actions).toContain("system:search_routine");
     expect(concierge.actions).toContain("system:delete_routine");
     // The names are the system app's own actions, not a guess at them.
     expect(actionName("search-routine")).toBe("search_routine");
     expect(actionName("delete-routine")).toBe("delete_routine");
+  });
+
+  it("tells dream to preserve the setting-owned agent name", () => {
+    const dream = parseYaml(
+      readFileSync(resolve(here, "../../../../rome_apps/dream/src/agents/dream.yaml"), "utf8"),
+    ) as { systemPromptPrefix: string };
+    expect(dream.systemPromptPrefix).toContain(
+      "Preserve the `Agent Name` line in `memory/IDENTITY.md` unchanged",
+    );
   });
 
   it("preserves saved follow settings before applying the requested changes", () => {
@@ -74,18 +127,18 @@ describe("the Concierge agent", () => {
       expect(prompt).toContain(text);
   });
 
-  it("keeps secrets out of a turn's first message, which can reach the lock screen", () => {
+  it("marks a secret private, since every message can reach the lock screen, and sends fewer messages", () => {
     const section = concierge.systemPromptPrefix.slice(
       concierge.systemPromptPrefix.indexOf("# How you speak"),
       concierge.systemPromptPrefix.indexOf("# What you do yourself"),
     );
     for (const text of [
+      "Every message you send also goes to their phone",
       "in your reply to a message they sent",
       "lock screen",
-      "before any `chat_forward` or card",
-      "Never put a code, password, token or other secret in it",
-      "even one they asked for",
-      "give the secret in a later message",
+      "code, password, token or other secret, even one they asked for",
+      "`private: true`",
+      "send fewer of them",
     ])
       expect(section).toContain(text);
   });

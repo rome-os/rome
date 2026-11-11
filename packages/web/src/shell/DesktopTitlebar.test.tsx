@@ -5,6 +5,7 @@ import userEvent from "@testing-library/user-event";
 import { BrowserRouter, Link, useLocation } from "react-router-dom";
 import i18n from "@/i18n";
 import { SlotContent, SlotProvider } from "@/components/slot";
+import { CONCIERGE_TITLEBAR_SLOT } from "@/components/concierge/ConciergeHeaderStatus";
 import { DesktopTitlebar, TITLEBAR_END_SLOT, TITLEBAR_SLOT } from "./DesktopTitlebar";
 
 function Where() {
@@ -54,6 +55,30 @@ describe("DesktopTitlebar", () => {
     expect(bar).not.toBeNull();
     expect(within(bar!).getByRole("heading", { name: "Apps" })).toBeTruthy();
     expect(within(bar!).getByText("Browser tab")).toBeTruthy();
+  });
+
+  it("hangs a Concierge chat's mascot from the bar, outside the page bar's clip", () => {
+    const bar = renderBar(
+      <>
+        <SlotContent name={TITLEBAR_SLOT}>
+          <button type="button">More</button>
+        </SlotContent>
+        <SlotContent name={CONCIERGE_TITLEBAR_SLOT}>
+          <div data-testid="mascot" />
+        </SlotContent>
+      </>,
+    );
+
+    const mascot = within(bar!).getByTestId("mascot");
+    const pageBar = within(bar!).getByRole("button", { name: "More" }).parentElement!;
+    expect(pageBar.className).toContain("overflow-hidden");
+    expect(pageBar.contains(mascot)).toBe(false);
+    // Over the page, level with the traffic lights, and painted above it.
+    const layer = mascot.parentElement!.parentElement!;
+    expect(layer.className).toContain("absolute");
+    expect(layer.className).toContain("top-[18px]");
+    expect(layer.style.left).toBe("4rem");
+    expect(bar!.className).toContain("z-30");
   });
 
   it("keeps back and forward shut until there is somewhere to go", async () => {

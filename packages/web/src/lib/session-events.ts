@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef } from "react";
-import { archiveSession, pinSession } from "@/lib/chat-api";
+import { archiveSession } from "@/lib/chat-api";
 
 /**
  * Fired whenever the set of webchat sessions changes — created, renamed, moved,
@@ -46,14 +46,6 @@ export function useSessionsChanged(handler: () => void): void {
 export function useArchiveSession(): (id: string, archived: boolean) => Promise<void> {
   return useCallback(async (id: string, archived: boolean) => {
     await archiveSession(id, archived);
-    emitSessionsChanged();
-  }, []);
-}
-
-/** The server-backed pin/unpin mutation path plus the shared refetch event. */
-export function usePinSession(): (id: string, pinned: boolean) => Promise<void> {
-  return useCallback(async (id: string, pinned: boolean) => {
-    await pinSession(id, pinned);
     emitSessionsChanged();
   }, []);
 }

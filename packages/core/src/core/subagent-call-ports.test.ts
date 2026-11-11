@@ -28,6 +28,7 @@ function fakeChildSession(sessionId: string, turnIds: string[]) {
   });
   const session: AgentSession = {
     selectModel: () => {},
+    release: () => {},
     key: { agentName: "researcher", channelThreadKey: `subagent:${sessionId}` },
     sessionId,
     status: "idle",
@@ -91,6 +92,7 @@ describe("subagent calls through the run's ports", () => {
         parentChannelThreadKey: string;
         childManager: Sessions;
         workingDir: string;
+        actor?: { kind: string };
       },
     ) {
       return calls.call(name, subagentRequest(input), {
@@ -104,6 +106,7 @@ describe("subagent calls through the run's ports", () => {
         agentSessionId: context.parentAgentSessionId,
         sessions: subagentSessions(context.childManager, context.parentChannelThreadKey, repo),
         at: { workingDir: context.workingDir },
+        ...(context.actor ? { actor: context.actor } : {}),
       });
     },
   });
@@ -135,6 +138,32 @@ describe("subagent calls through the run's ports", () => {
   });
 
   afterEach(() => db.close());
+
+  it("runs a guardian-delegated subagent's turn as the guardian", async () => {
+    const child = fakeChildSession("child-1", ["child-turn-1"]);
+    const childManager = {
+      open: rs.fn(async () => child.session),
+      find: rs.fn(),
+      shutdown: rs.fn(async () => undefined),
+    } as unknown as Sessions;
+    const guardian = { kind: "guardian", userId: "seat", via: "cookie" };
+    await createService().startSubagent(
+      "researcher",
+      { prompt: "one" },
+      {
+        parentSessionId: "parent-1",
+        parentAgentSessionId: "parent-runtime-1",
+        parentTurnId: "parent-turn-1",
+        parentToolUseId: "tool-1",
+        parentAgentName: "main",
+        parentChannelThreadKey: "webchat:parent-1",
+        childManager,
+        workingDir: "/tmp/project-a",
+        actor: guardian,
+      },
+    );
+    expect(child.calls[0].options?.actor).toBe(guardian);
+  });
 
   it("returns stable IDs before completion, creates fresh sessions, and persists Child-owned text", async () => {
     const first = fakeChildSession("child-1", ["child-turn-1"]);

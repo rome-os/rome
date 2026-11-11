@@ -18,12 +18,12 @@ import {
   Archive,
   ArchiveRestore,
   ArrowDown,
+  ListChecks,
   MoreHorizontal,
-  Pin,
-  PinOff,
   PanelRightOpen,
   Share2,
   Trash2,
+  X,
 } from "lucide-react";
 import { z } from "zod";
 import {
@@ -35,7 +35,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { IconButton } from "@/components/ui/icon-button";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
-import { SlotContent } from "@/components/slot";
+import { SlotContent, SlotOutlet } from "@/components/slot";
 import "react-medium-image-zoom/dist/styles.css";
 import { cn } from "@/lib/utils";
 import { usePresentationMode } from "@/lib/presentation-mode";
@@ -47,6 +47,7 @@ import { SessionLoadingTitle } from "@/components/chat/SessionLoadingTitle";
 import { senderFromIdentity } from "@/components/chat/SenderAvatar";
 import { useDashboardIdentity } from "@/hooks/use-dashboard-identity";
 import { useSessionIdentity } from "@/components/chat/use-session-identity";
+import { TaskChatContext } from "@/components/chat/task-chat";
 import {
   prettyAgentName,
   mainAgentDisplayName as resolveMainAgentDisplayName,
@@ -55,6 +56,7 @@ import { artifactLocalName } from "@/lib/artifact-name";
 import {
   buildChatView,
   buildRows,
+  threadInteractionResults,
   currentReplyMessages,
   isAwaitingGuardian,
   isLockedByCard,
@@ -99,12 +101,29 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
+import { ChatThreadView } from "@/components/chat/ChatThreadView";
+import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
+import {
+  ChatThreadsProvider,
+  placeLive,
+  type ThreadPlacement,
+  placed,
+  useChatThreadsValue,
+} from "@/components/chat/reply/chat-threads";
 import {
   ConciergeEmptyState,
   ConciergeTopicEmptyState,
 } from "@/components/chat/ConciergeEmptyState";
 import { onConciergeJump } from "@/components/concierge/concierge-jump";
-import { ConciergeTasksPill } from "@/components/concierge/ConciergeTasksPill";
+import {
+  CONCIERGE_LEADING_SLOT,
+  CONCIERGE_TITLEBAR_SLOT,
+  ConciergeHeaderStatus,
+  FLOATING_SURFACE,
+} from "@/components/concierge/ConciergeHeaderStatus";
+import { useConciergeTaskList } from "@/components/concierge/ConciergeTaskList";
+import { useToolTasks } from "@/pages/free/tool-tasks";
+import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
 import type {
   AgentMention,
@@ -141,7 +160,8 @@ import {
   type PostTurnResult,
   updateSessionModel,
 } from "@/lib/chat-api";
-import { useArchiveSession, usePinSession } from "@/lib/session-events";
+import { useArchiveSession } from "@/lib/session-events";
+import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import {
   snapshotWorkspaceForSend,
   useWorkspaceContextRegistry,
@@ -201,6 +221,7 @@ const traceSummarySchema: z.ZodType<TraceSummary> = z.lazy(() =>
     terminalError: z.string().optional(),
     plan: agentPlanSchema.optional(),
     model: z.string().optional(),
+    sessionRenewal: z.object({ reason: z.string(), sessionId: z.string() }).optional(),
   }),
 );
 
@@ -212,6 +233,7 @@ const chatMessageSchema: z.ZodType<ChatMessage> = z.object({
   content: z.string(),
   createdAt: z.string(),
   traceSummary: traceSummarySchema.nullable().optional(),
+  chatThreadId: z.string().nullable().optional(),
 });
 
 const sessionNameSchema = z.object({
@@ -221,9 +243,17 @@ const sessionNameSchema = z.object({
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
 
+const messageChatThreadSchema = z.object({
+  sessionId: z.string(),
+  messageId: z.string(),
+  chatThreadId: z.string(),
+});
+
 interface ChatSessionEventsProps {
   sessionId: string;
   onMessageInsert: (sessionId: string, message: ChatMessage) => void;
+  /** The Concierge placed a message of the chat in a chat thread. */
+  onMessageChatThread?: (event: z.infer<typeof messageChatThreadSchema>) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
   onSessionRunning: (event: z.infer<typeof sessionRunningSchema>) => void;
   onReconnect: (sessionId: string) => void;
@@ -232,6 +262,7 @@ interface ChatSessionEventsProps {
 function ChatSessionEvents({
   sessionId,
   onMessageInsert,
+  onMessageChatThread,
   onSessionName,
   onSessionRunning,
   onReconnect,
@@ -246,6 +277,12 @@ function ChatSessionEvents({
       session_name: {
         schema: sessionNameSchema,
         fn: (event) => onSessionName(sessionId, event),
+      },
+      message_chat_thread: {
+        schema: messageChatThreadSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onMessageChatThread?.(event);
+        },
       },
       session_running: {
         schema: sessionRunningSchema,
@@ -339,7 +376,7 @@ export interface ChatProps {
   variant?: ChatVariant;
   /** The signed-in person's main Concierge chat, which shows the starters a topic chat does not. The guardian's by default. */
   conciergeMainChatId?: string;
-  /** What the main Concierge chat is called in its title, in place of the session name the server stores. */
+  /** The Concierge's name, which every Concierge chat's header shows in place of the chat's own name. */
   conciergeName?: string;
 }
 
@@ -444,6 +481,19 @@ export function Chat({
   const [isDraggingFiles, setIsDraggingFiles] = useState(false);
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  // Where live `message_chat_thread` events placed messages since they loaded,
+  // for the "N replies" lines, each with the thread the loaded message had
+  // then. `loadedThreads` is that loaded value, kept current every render, so
+  // a placement after a reload builds on what the reload said.
+  const [rethreaded, setRethreaded] = useState<ReadonlyMap<string, ThreadPlacement>>(new Map());
+  const loadedThreads = useRef<ReadonlyMap<string, string | null>>(new Map());
+  const handleMessageChatThread = useCallback(
+    ({ messageId, chatThreadId }: { messageId: string; chatThreadId: string }) =>
+      setRethreaded((prev) =>
+        placeLive(prev, messageId, chatThreadId, loadedThreads.current.get(messageId) ?? null),
+      ),
+    [],
+  );
   // Inline share flow: pick turns directly on the transcript.
   const [shareMode, setShareMode] = useState(false);
   const [selectedShareTurns, setSelectedShareTurns] = useState<Set<string>>(new Set());
@@ -456,12 +506,15 @@ export function Chat({
     sessionName,
     model,
     largeModelSelection: storedModelSelection,
-    isSideChat,
+    isForkChat,
     reasoningEffort,
     pinnedAgentMention: identityAgentMention,
     archivedAt,
-    pinnedAt,
+    forkable,
+    isTaskChat,
   } = useSessionIdentity(mainSessionId);
+  // The main chat is never archived or deleted, so its menu offers neither.
+  const isMainChat = concierge && mainSessionId === conciergeMainChatId;
   // The open chat's model pick, shown as soon as the guardian makes it. It is
   // stored on the chat and the next turn runs on it.
   const [pickedModel, setPickedModel] = useState<{ sessionId: string; value: string } | null>(null);
@@ -491,7 +544,6 @@ export function Chat({
   const [archivedOverride, setArchivedOverride] = useState<boolean | undefined>(undefined);
   const isArchived = archivedOverride ?? archivedAt != null;
   const setArchived = useArchiveSession();
-  const setPinned = usePinSession();
   // The override is only a momentary optimistic flip for the navbar handlers.
   // Once the session read reflects the server's archived state (including an
   // archive/unarchive triggered from the sidebar, which refetches via the
@@ -590,9 +642,9 @@ export function Chat({
   // The main session's id, empty while a draft has none. Keys the running turn
   // and live stream (send, stop, reattach, live trace, onSessionMessage).
   const activeSessionId = mainSessionId ?? "";
-  // A side chat promoted to a chat still runs on its branch (#1384), whose
+  // A fork chat promoted to a chat still runs on its branch (#1384), whose
   // model the picker does not hold.
-  const chatModelPickable = !!mainSessionId && !isSideChat;
+  const chatModelPickable = !!mainSessionId && !isForkChat;
 
   // Ordered, unique turn ids of the main session — the selectable share unit.
   const mainTurnIds = useMemo(() => {
@@ -639,7 +691,14 @@ export function Chat({
       // that window, so the hook releases the pin for us. A smooth scroll's
       // later frames fall outside it. Instant also reads better here: you land
       // and start reading rather than watching half a second of blur.
-      scroller.scrollTo({ top: Math.max(top - TIMELINE_JUMP_OFFSET_PX, 0), behavior: "auto" });
+      // The scroller's own scroll padding keeps it clear of what floats over
+      // the messages, such as a Concierge chat's header; a manual scroll does
+      // not apply it, so it is added here.
+      const clear = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
+      scroller.scrollTo({
+        top: Math.max(top - clear - TIMELINE_JUMP_OFFSET_PX, 0),
+        behavior: "auto",
+      });
 
       // Every user bubble is the same tint, so without this you cannot tell
       // whether the jump landed on the question you picked.
@@ -705,6 +764,7 @@ export function Chat({
     return onConciergeJump((messageId) => void showSourceMessage(messageId));
   }, [concierge, showSourceMessage]);
 
+  const threadedRef = useRef<ReadonlySet<string>>(new Set());
   const displayedMessageIds = useMemo(
     () => new Set(displayMessages.map((message) => message.id)),
     [displayMessages],
@@ -715,6 +775,10 @@ export function Chat({
     messageIds: displayedMessageIds,
     jump: jumpToMessage,
     focusComposer: () => composerRef.current?.focus(),
+    // A Concierge chat keeps chat threads: Reply on a message in one, and a
+    // quote, open the thread view.
+    threads: concierge,
+    inThread: (messageId) => threadedRef.current.has(messageId),
   });
 
   const enterShareMode = useCallback(() => {
@@ -888,7 +952,7 @@ export function Chat({
       // best-effort — the list refresh below reconciles either way
     }
     notifySessionsChanged();
-    navigate("/chat");
+    navigate(MAIN_CHAT_PATH);
   }, [mainSessionId, notifySessionsChanged, navigate]);
 
   // Archive (read-only soft-hide) or restore the current chat. Archiving does
@@ -914,15 +978,6 @@ export function Chat({
       setArchivedOverride(true);
     }
   }, [mainSessionId, setArchived]);
-
-  const handlePin = useCallback(async () => {
-    if (!mainSessionId) return;
-    try {
-      await setPinned(mainSessionId, !pinnedAt);
-    } catch {
-      // Server truth remains unchanged; the next sessions event reconciles.
-    }
-  }, [mainSessionId, pinnedAt, setPinned]);
 
   useEffect(() => {
     onSessionMessageRef.current?.({ sessionId: activeSessionId, turnId: activeStreamTurnId });
@@ -1719,6 +1774,7 @@ export function Chat({
               formData.set(name, value);
             }
           }
+          if (snapshot.chatThread) formData.set("chatThread", snapshot.chatThread);
           for (const upload of snapshot.uploads) {
             formData.append("files", upload.file);
           }
@@ -2037,58 +2093,77 @@ export function Chat({
 
   const untitledEmptyChat = !mainSessionId && !pinnedAgentMention;
 
-  const navbar = (
+  const conciergeActivity = useConciergeActivity(concierge ? (mainSessionId ?? null) : null);
+  const conciergeTaskList = useConciergeTaskList(concierge ? (mainSessionId ?? null) : null);
+  // A Concierge chat's header buttons sit on round badges like its pill, except
+  // in the Mac app's title bar, where they are any chat's.
+  const floating = concierge && !navbarSlot;
+  const actionBadge = floating
+    ? cn("rounded-full text-foreground", FLOATING_SURFACE)
+    : "text-muted-foreground hover:text-foreground";
+  const conciergeStatus = concierge ? (
+    <ConciergeHeaderStatus
+      // Every Concierge chat, main or topic, goes by the Concierge's name
+      // here; a topic chat's own name is in the chat list.
+      name={conciergeName || "Concierge"}
+      activity={conciergeActivity}
+      // A chat with no messages yet draws its own large mascot.
+      badge={!conciergeEmpty}
+    />
+  ) : null;
+
+  const navbarTitle = (
+    <div className="flex min-w-0 flex-1 items-center gap-2">
+      {untitledEmptyChat ? null : (
+        <>
+          <SessionAvatar
+            iconUrl={pinnedAgentMention?.iconUrl}
+            label={pinnedAgentMention?.appLabel}
+            model={model}
+            reasoningEffort={reasoningEffort}
+          />
+          {sessionLoading ? (
+            <SessionLoadingTitle />
+          ) : (
+            <span className="truncate text-ui text-foreground">
+              {sessionName?.trim() || pinnedAgentMention?.appLabel || t("sidebar.newChat")}
+            </span>
+          )}
+          {/* The agent's app beside a titled chat. */}
+          {sessionName?.trim() && pinnedAgentMention && (
+            <span className="shrink-0 truncate text-aux text-muted-foreground">
+              {pinnedAgentMention.appLabel}
+            </span>
+          )}
+        </>
+      )}
+    </div>
+  );
+
+  const navbarActions = (
     <>
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        {untitledEmptyChat ? null : (
-          <>
-            <SessionAvatar
-              iconUrl={pinnedAgentMention?.iconUrl}
-              label={pinnedAgentMention?.appLabel}
-              model={model}
-              reasoningEffort={reasoningEffort}
-            />
-            {sessionLoading ? (
-              <SessionLoadingTitle />
-            ) : (
-              <span className={cn("truncate text-ui text-foreground", concierge && "shrink-0")}>
-                {(concierge && mainSessionId === conciergeMainChatId && conciergeName) ||
-                  sessionName?.trim() ||
-                  pinnedAgentMention?.appLabel ||
-                  t("sidebar.newChat")}
-              </span>
-            )}
-            {concierge ? <ConciergeTasksPill chatId={mainSessionId ?? null} /> : null}
-            {/* The agent's app beside a titled chat. The Concierge's is always
-                Rome, so it shows none. */}
-            {!concierge && sessionName?.trim() && pinnedAgentMention && (
-              <span className="shrink-0 truncate text-aux text-muted-foreground">
-                {pinnedAgentMention.appLabel}
-              </span>
-            )}
-          </>
-        )}
-      </div>
       {mainSessionId && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <IconButton
-              size="sm"
+              size={floating ? "md" : "sm"}
               label={t("navbar.more")}
               icon={<MoreHorizontal />}
-              className="text-muted-foreground hover:text-foreground"
+              className={actionBadge}
             />
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end">
-            <DropdownMenuItem onSelect={() => void handlePin()}>
-              {pinnedAt ? <PinOff className="size-4" /> : <Pin className="size-4" />}
-              {pinnedAt ? t("navbar.unpin") : t("navbar.pin")}
-            </DropdownMenuItem>
+            {concierge ? (
+              <DropdownMenuItem onSelect={conciergeTaskList.open}>
+                <ListChecks className="size-4" />
+                {t("concierge.tasks.title")}
+              </DropdownMenuItem>
+            ) : null}
             <DropdownMenuItem onSelect={() => enterShareMode()}>
               <Share2 className="size-4" />
               {t("share.title", "Share chat")}
             </DropdownMenuItem>
-            {isArchived ? (
+            {isMainChat ? null : isArchived ? (
               <DropdownMenuItem onSelect={() => void handleUnarchive()}>
                 <ArchiveRestore className="size-4" />
                 {t("navbar.unarchive")}
@@ -2099,16 +2174,19 @@ export function Chat({
                 {t("navbar.archive")}
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem variant="destructive" onSelect={() => setDeleteConfirmOpen(true)}>
-              <Trash2 className="size-4" />
-              {t("navbar.delete")}
-            </DropdownMenuItem>
+            {isMainChat ? null : (
+              <DropdownMenuItem variant="destructive" onSelect={() => setDeleteConfirmOpen(true)}>
+                <Trash2 className="size-4" />
+                {t("navbar.delete")}
+              </DropdownMenuItem>
+            )}
           </DropdownMenuContent>
         </DropdownMenu>
       )}
       {!toolTrace.paneOpen && (
         <IconButton
-          size="sm"
+          size={floating ? "md" : "sm"}
+          className={floating ? actionBadge : undefined}
           data-coach="add-widget"
           aria-expanded={false}
           onClick={() => toolTrace.setPaneCollapsed(false)}
@@ -2129,6 +2207,78 @@ export function Chat({
     </>
   );
 
+  // A Concierge chat's header floats over its messages: no bar, just the
+  // mascot's badge with the name pill under it in the middle, and round
+  // buttons either side, centred on the badge. The equal side columns keep the
+  // middle centred over the chat. Only its pieces take the pointer, so the
+  // messages under the gaps stay reachable. The thread view floats the same
+  // header with its close button on the right.
+  // A narrow workspace shows the open tool pane in place of the chat.
+  const toolTasksHost = useToolTasks();
+  const paneCoversChat = toolTrace.paneOpen && Boolean(toolTasksHost?.compact);
+  const floatingHeader = (trailing: ReactNode) => (
+    <div
+      data-concierge-header
+      className="pointer-events-none absolute inset-x-0 top-0 z-20 grid grid-cols-[1fr_minmax(0,max-content)_1fr] items-center gap-x-2 px-2 pt-2 max-md:pt-[calc(var(--rome-safe-area-top)+0.5rem)] md:px-3"
+    >
+      {/* The phone shell's back and menu buttons move in here, and its bar
+          steps aside. Not while the tool pane covers the chat: the shell's
+          bar is then the only way back from the pane. */}
+      {paneCoversChat ? null : (
+        <SlotOutlet
+          name={CONCIERGE_LEADING_SLOT}
+          className="pointer-events-auto col-start-1 row-start-1 flex items-center gap-1 justify-self-start md:hidden"
+        />
+      )}
+      {conciergeStatus}
+      <div className="pointer-events-auto col-start-3 row-start-1 flex items-center gap-1 justify-self-end">
+        {trailing}
+      </div>
+    </div>
+  );
+  // In the Mac app the title bar takes the header apart: the buttons go into
+  // the bar like any chat's, and the badge and pill hang from its lower edge.
+  // Not while the tool pane covers the chat, whose mascot it would be.
+  const conciergeHeaderWith = navbarSlot
+    ? (trailing: ReactNode) => (
+        <>
+          <SlotContent name={navbarSlot}>
+            <div className="min-w-0 flex-1" />
+            {trailing}
+          </SlotContent>
+          {paneCoversChat ? null : (
+            <SlotContent name={CONCIERGE_TITLEBAR_SLOT}>{conciergeStatus}</SlotContent>
+          )}
+        </>
+      )
+    : floatingHeader;
+  const threadOpen = concierge && Boolean(mainSessionId) && replyDraft.thread !== null;
+  // The thread view's transcript feeds none of the chat's scroll measures.
+  const ignoreThreadContent = useCallback(() => {}, []);
+  loadedThreads.current = new Map(
+    displayMessages.map((message) => [message.id, message.chatThreadId ?? null]),
+  );
+  const chatThreads = useChatThreadsValue(displayMessages, rethreaded);
+  // Every message in a chat thread, roots included, as the timeline shows them now.
+  threadedRef.current = new Set(
+    placed(displayMessages, rethreaded).flatMap((message) =>
+      message.chatThreadId ? [message.id, message.chatThreadId] : [],
+    ),
+  );
+  const conciergeHeader = concierge ? (
+    <>
+      {threadOpen ? null : conciergeHeaderWith(navbarActions)}
+      {conciergeTaskList.sheet}
+    </>
+  ) : null;
+
+  const navbar = (
+    <>
+      {navbarTitle}
+      {navbarActions}
+    </>
+  );
+
   const page = (
     <TooltipProvider delayDuration={150}>
       {sessionEventIds.map((sid) => (
@@ -2136,6 +2286,7 @@ export function Chat({
           key={sid}
           sessionId={sid}
           onMessageInsert={handleMessageInsert}
+          onMessageChatThread={handleMessageChatThread}
           onSessionName={handleSessionName}
           onSessionRunning={handleSessionRunning}
           onReconnect={handleSessionEventsReconnect}
@@ -2161,7 +2312,9 @@ export function Chat({
               says it already, so the bar keeps only its height and controls
               and the page does not move when the first message starts the
               session. */}
-          {navbarSlot ? (
+          {concierge ? (
+            conciergeHeader
+          ) : navbarSlot ? (
             <SlotContent name={navbarSlot}>{navbar}</SlotContent>
           ) : (
             <div className="z-20 flex h-12 shrink-0 items-center gap-1 bg-chat-canvas/80 pl-4 pr-2 backdrop-blur-md supports-[backdrop-filter]:bg-chat-canvas/65 max-md:hidden">
@@ -2189,8 +2342,10 @@ export function Chat({
               ref={attachScroller}
               className={cn(
                 "relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
-                // Concierge has no timeline rail, so no lane for it.
-                !concierge && "@min-[48rem]/transcript:pl-8",
+                // Concierge has no timeline rail, so no lane for it. Its
+                // header floats over the messages, so the first one starts
+                // below it, and a jump to a message stops below it too.
+                concierge ? "concierge-header-clear" : "@min-[48rem]/transcript:pl-8",
               )}
             >
               {conciergeEmpty ? (
@@ -2209,37 +2364,42 @@ export function Chat({
                   {hasOlder(mainSessionId) ? (
                     <div ref={olderSentinelRef} aria-hidden className="h-px shrink-0" />
                   ) : null}
-                  <MessageList
-                    rows={rows}
-                    live={{
-                      isStreaming: displayedStreaming,
-                      runningTurnId,
-                      quiet: activeSessionStream?.quiet,
-                      snapshot: currentSnapshot,
-                      textStore: liveTextStore,
-                      blockIx: activeSessionStream?.assistantBlockIx,
-                      textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
-                      identity: mainIdentity,
-                    }}
-                    selection={
-                      shareMode
-                        ? {
-                            selectedTurns: selectedShareTurns,
-                            selectableSessionId: mainSessionId,
-                            onToggleTurn: toggleShareTurn,
-                          }
-                        : undefined
-                    }
-                    contentRef={attachContent}
-                    onOpenLiveTrace={openLiveTraceDrawer}
-                    onOpenStoredTrace={openStoredTraceDrawer}
-                    onOpenSubagentTrace={openSubagentTraceDrawer}
-                    activeTraceTarget={traceDrawerTarget}
-                    subagentIconByName={subagentIconByName}
-                    actions={blockActions}
-                    feedback
-                    variant={variant}
-                  />
+                  <ChatThreadsProvider value={chatThreads}>
+                    <TaskChatContext.Provider value={isTaskChat}>
+                      <MessageList
+                        rows={rows}
+                        live={{
+                          isStreaming: displayedStreaming,
+                          runningTurnId,
+                          quiet: activeSessionStream?.quiet,
+                          snapshot: currentSnapshot,
+                          textStore: liveTextStore,
+                          blockIx: activeSessionStream?.assistantBlockIx,
+                          textThroughOrdinal: activeSessionStream?.textThroughOrdinal,
+                          identity: mainIdentity,
+                        }}
+                        selection={
+                          shareMode
+                            ? {
+                                selectedTurns: selectedShareTurns,
+                                selectableSessionId: mainSessionId,
+                                onToggleTurn: toggleShareTurn,
+                              }
+                            : undefined
+                        }
+                        contentRef={attachContent}
+                        onOpenLiveTrace={openLiveTraceDrawer}
+                        onOpenStoredTrace={openStoredTraceDrawer}
+                        onOpenSubagentTrace={openSubagentTraceDrawer}
+                        activeTraceTarget={traceDrawerTarget}
+                        subagentIconByName={subagentIconByName}
+                        actions={blockActions}
+                        feedback
+                        fork={forkable}
+                        variant={variant}
+                      />
+                    </TaskChatContext.Provider>
+                  </ChatThreadsProvider>
                 </>
               ) : (
                 emptyState
@@ -2262,7 +2422,9 @@ export function Chat({
                 ref={setFloorEl}
                 data-chat-floor
                 className={cn(
-                  "pointer-events-none sticky bottom-0 z-10 px-3 max-md:pointer-events-auto max-md:bg-chat-canvas md:px-6",
+                  "pointer-events-none sticky bottom-0 px-3 max-md:pointer-events-auto md:px-6",
+                  // Over the thread view, whose blur runs down behind it.
+                  threadOpen ? "z-30" : "z-10 max-md:bg-chat-canvas",
                   // Presentation mode gives the draft's bottom gap 5x its normal
                   // size so a recording framed on the empty state keeps the
                   // composer clear of the capture's lower edge.
@@ -2303,13 +2465,15 @@ export function Chat({
                     // rail, has no width gate: it is reachable on a phone, where
                     // the 36px step is under the 44px floor.
                     "touch-target pointer-events-auto absolute bottom-full left-1/2 mb-3 -translate-x-1/2 rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 backdrop-blur-md transition-[opacity,visibility] duration-150 ease-out supports-[backdrop-filter]:bg-surface/80 hover:text-foreground motion-reduce:transition-none",
-                    !mainSessionId || isAtBottom ? "invisible opacity-0" : "visible opacity-100",
+                    !mainSessionId || isAtBottom || threadOpen
+                      ? "invisible opacity-0"
+                      : "visible opacity-100",
                   )}
                 />
                 <div className="pointer-events-auto relative mx-auto max-w-5xl">
                   {/* Sits on the composer's top-right corner, clear of the
                       centered jump to latest. */}
-                  {mainSessionId && (
+                  {mainSessionId && !threadOpen && (
                     <div className="pointer-events-none absolute right-0 bottom-full mb-2">
                       <ChatPendingCardJump
                         scroller={scrollerEl}
@@ -2400,6 +2564,47 @@ export function Chat({
                 onJump={jumpToMessage}
               />
             )}
+            {threadOpen && mainSessionId && replyDraft.thread ? (
+              <ChatThreadView
+                key={replyDraft.thread}
+                sessionId={mainSessionId}
+                messageId={replyDraft.thread}
+                onClose={replyDraft.closeThread}
+                floor={floorEl}
+                header={conciergeHeaderWith(
+                  <IconButton
+                    size={floating ? "md" : "sm"}
+                    label={t("thread.close")}
+                    icon={<X />}
+                    onClick={replyDraft.closeThread}
+                    className={actionBadge}
+                  />,
+                )}
+                renderMessages={(threadMessages) => (
+                  <ConciergeTranscript
+                    rows={buildRows(threadMessages, identityBySession, mainIdentity, {
+                      runningTurnId: null,
+                      isStreaming: false,
+                    })}
+                    live={{
+                      isStreaming: false,
+                      runningTurnId: null,
+                      snapshot: null,
+                      textStore: liveTextStore,
+                      identity: mainIdentity,
+                    }}
+                    actions={{
+                      ...blockActions,
+                      interactionResults: threadInteractionResults(threadMessages, {
+                        messages: displayMessages,
+                        results: blockActions.interactionResults,
+                      }),
+                    }}
+                    contentRef={ignoreThreadContent}
+                  />
+                )}
+              />
+            ) : null}
           </div>
         </div>
         <TraceDrawer

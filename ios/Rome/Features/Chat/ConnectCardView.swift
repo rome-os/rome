@@ -8,7 +8,7 @@ struct ConnectCardView: View {
     let onConnect: () -> Void
 
     @Environment(AppModel.self) private var model
-    @Environment(\.openURL) private var openURL
+    @Environment(\.openInstancePage) private var openInstancePage
 
     /// Rome Cloud cannot connect it from here: say why, and point to Settings on the web.
     private var unavailable: String? {
@@ -20,15 +20,15 @@ struct ConnectCardView: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ConnectorMark(icon: part.icon, label: part.label)
+            ConnectorMark(icon: part.icon, label: part.label, size: CardScale.connectMark)
             VStack(alignment: .leading, spacing: 2) {
                 Text(verbatim: part.label)
-                    .romeFont(16, .medium)
+                    .romeFont(CardScale.title, .medium)
                     .foregroundStyle(Palette.fg)
                     .lineLimit(1)
                 if let line = subline {
                     Text(verbatim: line.text)
-                        .romeFont(13)
+                        .romeFont(CardScale.caption)
                         .foregroundStyle(line.error ? Palette.destructive : Palette.sub)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -36,8 +36,7 @@ struct ConnectCardView: View {
             Spacer(minLength: 8)
             trailing
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .cardPadding()
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         .hairline(radius: Metrics.cardRadius)
         .padding(.top, 4)
@@ -58,28 +57,28 @@ struct ConnectCardView: View {
         switch phase {
         case .connected:
             Label("Connected", systemImage: "checkmark")
-                .romeFont(15)
+                .romeFont(CardScale.body)
                 .foregroundStyle(Palette.sub)
         case .connecting:
             HStack(spacing: 8) {
                 Spinner(size: 14, color: Palette.sub)
                 Text("Connecting…")
-                    .romeFont(15)
+                    .romeFont(CardScale.body)
                     .foregroundStyle(Palette.sub)
             }
         case .idle, .failed:
             if unavailable != nil {
                 Button("Settings") { openSettings() }
-                    .romeFont(15, .medium)
+                    .romeFont(CardScale.body, .medium)
                     .foregroundStyle(Palette.primaryText)
                     .buttonStyle(PressScaleStyle())
             } else {
                 Button(action: onConnect) {
                     Text(phase == .idle ? "Connect" : "Try again")
-                        .romeFont(15, .semibold)
+                        .romeFont(CardScale.actionFont, .semibold)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14)
-                        .frame(minHeight: 34)
+                        .frame(minHeight: CardScale.actionHeight)
                         .background(Palette.primary, in: Capsule())
                 }
                 .buttonStyle(PressScaleStyle())
@@ -89,7 +88,7 @@ struct ConnectCardView: View {
 
     private func openSettings() {
         guard let web = model.webURL else { return }
-        openURL(web.appending(path: String(ConnectRunner.settingsConnectionsPath.dropFirst())))
+        openInstancePage(InstancePages.connections(origin: web))
     }
 }
 

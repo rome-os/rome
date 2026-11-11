@@ -30,6 +30,7 @@
       "blocked": "弹窗被拦截",
       "checkFailed": "无法检查连接状态"
     },
+    "taskCardAlreadyAnswered": "这张卡片已在别处回复，任务状态已刷新。",
     "openTaskChat": "打开",
     "tasks": {
       "title": "任务",
@@ -68,13 +69,6 @@
       "replyText": {
         "done": "我已经完成了"
       },
-      "pill": {
-        "needsYou_one": "任务，{{count}} 项等你处理",
-        "needsYou_other": "任务，{{count}} 项等你处理",
-        "doing_one": "任务，{{count}} 项进行中",
-        "doing_other": "任务，{{count}} 项进行中",
-        "idle": "任务"
-      },
       "emptyTitle": "还没有任务",
       "emptyDescription": "{{name}} 正在做、计划做或盯着的任务会显示在这里。"
     },
@@ -102,12 +96,31 @@
       },
       "justAsk": "只是问个问题？",
       "backToMain": "回主对话问 →"
+    },
+    "activity": {
+      "idle": "空闲",
+      "needsYou": "等你回复",
+      "working": "正在处理",
+      "tasks": "{{title}}",
+      "tasksMore": "{{title}} +{{count}}",
+      "tool": {
+        "startingTask": "正在开始任务",
+        "messagingTask": "正在给任务对话发消息",
+        "readingChat": "正在查看对话",
+        "stoppingTask": "正在停止任务",
+        "updatingTasks": "正在更新任务",
+        "startingTopic": "正在开启话题对话",
+        "checkingFollows": "正在查看你的关注",
+        "searchingWeb": "正在搜索网页",
+        "readingPage": "正在阅读网页"
+      }
     }
   },
   "reply": {
     "action": "回复",
     "dismiss": "取消回复",
-    "jump": "跳到原消息"
+    "jump": "跳到原消息",
+    "openThread": "打开对话串"
   },
   "senderGuardian": "守护者",
   "inputState": {
@@ -129,8 +142,6 @@
     "sessionModel": "会话模型：{{model}}",
     "sessionModelWithEffort": "会话模型：{{model}}，推理强度：{{effort}}",
     "more": "更多操作",
-    "pin": "置顶对话",
-    "unpin": "取消置顶",
     "archive": "归档对话",
     "unarchive": "取消归档",
     "delete": "删除对话",
@@ -186,8 +197,8 @@
       "recorded": "反馈已记录"
     },
     "branch": {
-      "open": "从此回复发起侧边对话",
-      "title": "创建侧边对话",
+      "open": "从此回复分叉出新对话",
+      "title": "分叉为新对话",
       "description": "继续追问，同时不改变当前聊天。",
       "suggestionsLabel": "推荐提示词",
       "suggestions": {
@@ -196,10 +207,10 @@
         "example": "给我一个具体示例"
       },
       "promptPlaceholder": "针对这条回复提问…",
-      "submit": "发起侧边对话",
-      "submitting": "正在创建…",
-      "submitFailed": "无法创建侧边对话",
-      "notBranchable": "无法从这条回复创建侧边对话。发送一条追问，再从新的回复创建即可。"
+      "submit": "分叉对话",
+      "submitting": "正在分叉…",
+      "submitFailed": "无法分叉对话",
+      "notBranchable": "无法从这条回复分叉对话。发送一条追问，再从新的回复分叉即可。"
     }
   },
   "blocks": {
@@ -564,6 +575,23 @@
     "morningBrief": {
       "label": "早间简报",
       "prompt": "构建一个带前端设计的早间简报应用,读取我过去 24 小时的 Gmail 邮件和即将到来的 Google 日历事件。每天上午 8:00 更新仪表盘,展示最新的优先事项、紧急邮件、重要会议、截止日期和推荐的后续行动。识别最需要我关注的事项,并在每次每日更新后通过 Telegram 给我发送简短摘要。"
+    }
+  },
+  "thread": {
+    "title": "对话串",
+    "close": "关闭对话串",
+    "loadFailed": "无法加载这个对话串。",
+    "replies_one": "{{count}} 条回复",
+    "replies_other": "{{count}} 条回复",
+    "replyPlaceholder": "回复"
+  },
+  "sessionRenewal": {
+    "notice": "新会话 · {{reason}}",
+    "reasons": {
+      "setup": "设定已变",
+      "idle": "闲置后",
+      "daily": "每日重置",
+      "working_dir": "工作目录不存在"
     }
   }
 }

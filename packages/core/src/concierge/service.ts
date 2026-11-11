@@ -4,6 +4,7 @@
 // docs/adrs/one-concierge-with-several-chats.md). Design: rome-os/rome#1344.
 
 import type { PhoneWatching } from "../lib/phone-watching.js";
+import type { DashboardActivity } from "../lib/dashboard-activity.js";
 import { CONCIERGE_CHAT_ID, type ConciergeChatRef } from "@rome/api-types/concierge";
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
@@ -32,10 +33,9 @@ import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
 import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
+import type { ConciergeActivityTracker } from "./activity.js";
 import type { ConciergeTasks } from "./tasks.js";
 import type { NotifyLevel } from "../lib/notify-client.js";
-import { resolveGuardianTimezone } from "../routines/guardian-timezone.js";
-import { quietWindowEnd } from "./alerts.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 import {
   type ConciergeOwner,
@@ -119,6 +119,16 @@ export interface TaskChats {
    */
   openSession(chatId: string): Promise<string>;
   isRunning(chatId: string): boolean;
+  /** Whether the chat runs a turn its owner sees: any but a quiet one that has said nothing yet. */
+  isBusy(chatId: string): boolean;
+  /** The tool the chat's running turn is in now, as the trace names it, or null. */
+  openTool(chatId: string): string | null;
+  /**
+   * Calls `listener` with the chat's id whenever it starts or stops running
+   * a turn, or its running turn enters or leaves a tool; the latter alone
+   * comes with `toolOnly`. Returns the unsubscribe.
+   */
+  onTurnChange(listener: (chatId: string, change: { toolOnly?: boolean }) => void): () => void;
   /** Sends `text` into the chat as the guardian's own message, the way their composer does. */
   sendAsGuardian(chatId: string, text: string): Promise<void>;
   /** Ids of the chat's turns whose streams have not ended, running or queued. */
@@ -149,12 +159,16 @@ export interface ConciergeDeps {
     | "getTurnChatMessages"
     | "getReplyTarget"
     | "addBackendMessage"
+    | "placeInChatThread"
     | "setSessionTrigger"
     | "listProjects"
+    | "onMessageInserted"
+    | "awaitingGuardianSince"
+    | "ownerSpokeAt"
   >;
   /** The todo list. */
   tasks: ConciergeTasks;
-  approvals: Pick<ApprovalsRepository, "onCreated">;
+  approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved">;
   messages: Pick<MessageRepository, "recent" | "before">;
   sessionRepository: Pick<SessionRepository, "current">;
   accounts: Pick<ModelAccounts, "read">;
@@ -166,17 +180,22 @@ export interface ConciergeDeps {
     params: BackendTurnParams,
     options?: SystemTurnOptions,
   ) => Promise<"completed" | "stopped" | "interrupted" | "failed" | void>;
-  /** Asks Rome Cloud to push to the guardian's phone. Absent, nothing is pushed. */
+  /** Asks Rome Cloud to push to a person's phone. Absent, nothing is pushed. */
   notify?: ConciergePushDeps["notify"];
-  /** The chats the guardian's phone app holds open; nothing said there is pushed. */
-  phoneWatching?: Pick<PhoneWatching, "isWatching">;
+  /** The chats each person's phone app holds open; nothing said there is pushed to them. */
+  phoneWatching?: Pick<PhoneWatching, "watchersOf">;
+  /** Whether each person is at a web dashboard; while they are, nothing is pushed to them. */
+  dashboardActivity?: Pick<DashboardActivity, "activeOwners">;
 }
+
+/** A backend turn where it runs, with the message it answers when it reports on a task. */
+export type ResolvedTurn = BackendTurnParams & { reportedTask?: string };
 
 export interface SystemTurnOptions {
   quiet?: boolean;
   inputLabel?: string;
-  /** The first message the Concierge says in the turn goes to the guardian's
-   *  phone at this level. A reminder, a recovery or a notice has none. */
+  /** Each message the Concierge says in the turn goes to the phone of the
+   *  person the chat serves at this level. A reminder, a recovery or a notice has none. */
   pushLevel?: NotifyLevel;
 }
 
@@ -194,9 +213,12 @@ export class ConciergeService {
     this.push = deps.notify
       ? new ConciergePush({
           notify: deps.notify,
-          quietUntil: (at) => this.quietUntil(at),
-          pushesFor: async (chatId) => (await this.ownerOfChat(chatId)) === GUARDIAN_OWNER,
-          watching: (chatId) => deps.phoneWatching?.isWatching(chatId) ?? false,
+          ownerOf: (chatId) => this.ownerOfChat(chatId),
+          quietUntil: async (at, owner) =>
+            (await this.attachedFollowing?.quietUntil(at, owner)) ?? null,
+          watchersOf: (chatId) => deps.phoneWatching?.watchersOf(chatId) ?? new Set(),
+          activeOwners: () => deps.dashboardActivity?.activeOwners() ?? new Set(),
+          // A visitor has no language setting of their own; the dashboard's is the guardian's.
           language: async () => {
             const stored = await this.deps.settingsRepo.get(GUARDIAN_LANGUAGE_SETTING_KEY);
             return typeof stored === "string" ? stored : null;
@@ -206,24 +228,52 @@ export class ConciergeService {
   }
 
   /**
-   * The Concierge said something in a chat. The first message of a turn with a
-   * push level in one of the guardian's chats also goes to the guardian's
-   * phone, outside quiet hours. A visitor's Concierge never pushes: Rome Cloud
-   * delivers only to the guardian's devices.
+   * The Concierge said something in a chat. A message of a turn with a push
+   * level also goes to the phone of the person the chat serves, the guardian
+   * or a visitor, by the rules of {@link ConciergePush}.
    */
   said(said: SaidInTurn): void {
     this.push?.said(said);
   }
 
-  /** When the guardian's quiet window `at` falls in ends, or null outside it. */
-  private async quietUntil(at: number): Promise<number | null> {
-    const quietHours = (await this.attachedFollowing?.rules(GUARDIAN_OWNER))?.quietHours;
-    if (!quietHours) return null;
-    return quietWindowEnd(at, quietHours, await resolveGuardianTimezone(this.deps.settingsRepo));
-  }
-
   attachDashboard(dashboard: ConciergeDashboard): void {
     this.attached = dashboard;
+    for (const watcher of this.turnWatchers) {
+      watcher.stop = dashboard.chats.onTurnChange(watcher.listener);
+    }
+  }
+
+  private turnWatchers = new Set<{
+    listener: (chatId: string, change: { toolOnly?: boolean }) => void;
+    stop: (() => void) | null;
+  }>();
+
+  /**
+   * Calls `listener` whenever a chat's turn changes, as
+   * `TaskChats.onTurnChange` says, from when the dashboard is attached, which
+   * may be after this call. Returns the unsubscribe.
+   */
+  watchTurns(listener: (chatId: string, change: { toolOnly?: boolean }) => void): () => void {
+    const watcher = {
+      listener,
+      stop: this.attached ? this.attached.chats.onTurnChange(listener) : null,
+    };
+    this.turnWatchers.add(watcher);
+    return () => {
+      watcher.stop?.();
+      this.turnWatchers.delete(watcher);
+    };
+  }
+
+  private attachedActivity: ConciergeActivityTracker | null = null;
+
+  /** What each Concierge chat is doing, for its header; null until the events are started. */
+  get activity(): ConciergeActivityTracker | null {
+    return this.attachedActivity;
+  }
+
+  attachActivity(activity: ConciergeActivityTracker | null): void {
+    this.attachedActivity = activity;
   }
 
   /** The dashboard. Throws before the API layer has attached it, which no
@@ -419,24 +469,43 @@ export class ConciergeService {
    * A Concierge chat is being archived or deleted. Its follows, its unfinished
    * tasks and the events owed to it move to its owner's main chat, and the
    * Concierge says so there. A main chat is never retired: this throws for one.
+   * Answers the main chat the chat's work moved to, or null when it is no
+   * Concierge chat. After a delete, call `chatGone` once the chat is gone.
    */
-  async retireChat(chatId: string, how: RetiredHow): Promise<void> {
+  async retireChat(chatId: string, how: RetiredHow): Promise<string | null> {
     const chat = await this.deps.webchatRepo.getSession(chatId);
     if (chatId === CONCIERGE_CHAT_ID || (chat && this.isMainChat(chat)))
       throw new Error("The main Concierge chat cannot be archived or deleted");
-    if (!chat || !isConciergeChat(chat)) return;
+    if (!chat || !isConciergeChat(chat)) return null;
     const owner = ownerOf(chat);
     const main = await this.ensureChatId(owner);
     const follows = (await this.attachedFollowing?.moveToMainChat(chatId, storedChatId(main))) ?? 0;
     const tasks = await this.deps.tasks.repo.moveToMainChat(chatId, storedChatId(main));
     log.info("concierge chat retired", { chatId, how, follows, tasks });
-    if (follows === 0 && tasks === 0) return;
+    // A deleted chat is still there now: its caller tells the activity once
+    // it is gone, so finished rows read as the main chat's by then.
+    if (how === "archived") await this.chatGone(chatId, main);
+    if (follows === 0 && tasks === 0) return main;
     void this.runSystemTurn(
       main,
       `<concierge_chat_retired name="${attr(chat.name)}" how="${how}" follows="${follows}" tasks="${tasks}"/>`,
       { quiet: true, inputLabel: "Concierge chat retired" },
     ).catch((error: unknown) =>
       log.warn("retired chat notice failed", {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+    return main;
+  }
+
+  /**
+   * A retired Concierge chat is archived or deleted now, and its tasks are
+   * `mainChatId`'s. Finished rows stay on the retired chat, so no row write
+   * tells the activity that their task chats now move the main chat.
+   */
+  async chatGone(chatId: string, mainChatId: string): Promise<void> {
+    await this.activity?.retired(chatId, mainChatId).catch((error: unknown) =>
+      log.warn("concierge activity retire failed", {
         error: error instanceof Error ? error.message : String(error),
       }),
     );
@@ -555,7 +624,7 @@ export class ConciergeService {
    * passes here (alerts, digests, task events, recoveries and the wake-ups of
    * `defer`), so a turn never lands in a chat the guardian closed.
    */
-  async resolveTurn(params: BackendTurnParams): Promise<BackendTurnParams> {
+  async resolveTurn(params: BackendTurnParams): Promise<ResolvedTurn> {
     if (params.channel !== "webchat" || !isConciergeAgent(params.agentName)) return params;
     // The owner a wake-up recorded when it was scheduled, else its chat's.
     // With neither, its chat is gone and nothing says whose it was: it is
@@ -577,7 +646,33 @@ export class ConciergeService {
       chat && !params.prompt.startsWith("<concierge_chat ")
         ? `${await this.turnHeader(chat)}\n\n${params.prompt}`
         : params.prompt;
-    return { ...params, threadId: chatId, sessionId, prompt };
+    const reportedTask = await this.reportedTaskOf(params.prompt, chatId);
+    return {
+      ...params,
+      threadId: chatId,
+      sessionId,
+      prompt,
+      ...(reportedTask ? { reportedTask } : {}),
+    };
+  }
+
+  /**
+   * The one task row a turn reports on: the row its prompt names, when it is
+   * `chatId`'s. A turn naming several rows reports on none that a line can be
+   * filed under. A task event names a row as `<task id="…">`, and a wake-up
+   * of `defer` names it in its name as `task:<id>`, as the Concierge's
+   * instructions ask.
+   */
+  private async reportedTaskOf(prompt: string, chatId: string): Promise<string | undefined> {
+    const ids = [...prompt.matchAll(/<task id="([^"]+)"|\btask:([\w-]+)/g)].map(
+      (match) => match[1] ?? match[2],
+    );
+    // Which of several tasks a line reports on is not ours to guess.
+    const named = new Set(ids.filter(Boolean));
+    if (named.size !== 1) return undefined;
+    const [id] = named;
+    const found = id ? await this.deps.tasks.repo.getWithChat(id) : null;
+    return found && found.conciergeChat.id === chatId ? found.row.id : undefined;
   }
 
   /**

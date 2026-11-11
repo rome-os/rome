@@ -1,7 +1,7 @@
 import SwiftUI
 import WebKit
 
-/// One app full screen: the instance's own full-screen page for it, in a
+/// One app full screen, or a dashboard page: the instance's own page, in a
 /// web view that holds only the instance's session and follows the app's
 /// look and language.
 struct AppWebScreen: View {
@@ -25,7 +25,8 @@ struct AppWebScreen: View {
             header
             ZStack(alignment: .top) {
                 AppWebView(
-                    url: pageURL ?? origin.flatMap { AppLinks.fullURL(origin: $0, app: app) },
+                    url: origin.flatMap { pageURL ?? AppLinks.fullURL(origin: $0, app: app) },
+                    demoHTML: pageURL == nil ? DemoApp.html : DemoApp.dashboardHTML,
                     origin: origin,
                     cookie: workspace.backend.webSessionCookie(),
                     theme: AppWebView.themeValue(model.appearance.current),
@@ -77,7 +78,7 @@ struct AppWebScreen: View {
                 }
                 if let web = model.webURL, let url = pageURL ?? AppLinks.fullURL(origin: web, app: app) {
                     Button { openURL(url) } label: {
-                        Label("Open on the web", systemImage: "safari")
+                        Label("Open in Safari", systemImage: "safari")
                     }
                 }
             } label: {
@@ -99,7 +100,9 @@ struct AppWebScreen: View {
 /// the instance's session cookie and nothing else; a link to any other site
 /// opens in Safari.
 struct AppWebView: UIViewRepresentable {
+    /// Nil for demo data, which shows `demoHTML` instead.
     let url: URL?
+    var demoHTML = DemoApp.html
     let origin: URL?
     let cookie: HTTPCookie?
     /// `light`, `dark` or `system`, as the dashboard stores it.
@@ -134,6 +137,10 @@ struct AppWebView: UIViewRepresentable {
     func makeUIView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
         configuration.websiteDataStore = .nonPersistent()
+        configuration.applicationNameForUserAgent = InstancePages.applicationName(
+            webKitDefault: configuration.applicationNameForUserAgent,
+            version: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+        )
         configuration.userContentController.addUserScript(WKUserScript(
             source: Self.settingsScript(theme: theme, language: language),
             injectionTime: .atDocumentStart,
@@ -163,7 +170,7 @@ struct AppWebView: UIViewRepresentable {
 
     private func load(_ view: WKWebView) {
         guard let url else {
-            view.loadHTMLString(DemoApp.html, baseURL: nil)
+            view.loadHTMLString(demoHTML, baseURL: nil)
             return
         }
         var request = URLRequest(url: url)
@@ -249,6 +256,21 @@ enum DemoApp {
     <div class="row done"><div class="dot"></div>Read 20 pages<span class="days">5 days</span></div>
     <div class="row done"><div class="dot"></div>Walk 6,000 steps<span class="days">3 days</span></div>
     <div class="row"><div class="dot"></div>No phone after 23:00<span class="days">1 day</span></div>
+    </body></html>
+    """
+
+    /// Demo data's stand-in for a dashboard page.
+    static let dashboardHTML = """
+    <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>
+    :root { color-scheme: light dark; --bg:#F4F3EF; --card:#fff; --fg:#1A130F; --sub:#7A6857; }
+    @media (prefers-color-scheme: dark) { :root { --bg:#0B0907; --card:#191513; --fg:#F4F3EF; --sub:#B0A294; } }
+    body { margin:0; padding:20px; background:var(--bg); color:var(--fg); font:16px -apple-system, system-ui; }
+    h1 { font-size:24px; margin:8px 0 4px; } p { color:var(--sub); margin:0 0 18px; }
+    .card { background:var(--card); border-radius:14px; padding:14px 16px; margin-bottom:10px; }
+    </style></head><body>
+    <h1>Rome</h1><p>The dashboard opens here, signed in.</p>
+    <div class="card">Chat</div><div class="card">Routines</div><div class="card">Connections</div>
     </body></html>
     """
 }

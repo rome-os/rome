@@ -42,6 +42,8 @@ export function useThisDevice(onChange?: () => void): NodeThisDevice | null | un
     name: status.name,
     platform: "macos",
     state: status.state,
+    connection: status.connection,
+    computerUse: status.computerUse,
     busy,
     removeUrl: `${import.meta.env.ROME_CLOUD_ORIGIN}/dashboard/settings`,
     // The app opens its own window; the log never reaches this page.

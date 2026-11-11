@@ -2,6 +2,7 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { type ReactNode, useEffect } from "react";
 import { useTranslation } from "react-i18next";
 import { SlotOutlet } from "../components/slot";
+import { CONCIERGE_TITLEBAR_SLOT } from "../components/concierge/ConciergeHeaderStatus";
 import { IconButton } from "../components/ui/icon-button";
 import { useHistoryNav } from "./use-history-nav";
 import { isApplePlatform } from "@/lib/platform";
@@ -22,7 +23,9 @@ export const TITLEBAR_END_SLOT = "titlebarEnd";
  *
  * The bar draws no line of its own: the content box under it carries the
  * edge. The leading group is at least as wide as the sidebar, so the page's
- * bar starts over the page and not over the chat list. Back and forward lead it
+ * bar starts over the page and not over the chat list. A Concierge chat's
+ * mascot hangs from the bar over the middle of the chat, its top level with the
+ * traffic lights'. Back and forward lead it
  * because they are always there; the toggle follows them, since only Chat has
  * a list to collapse, and leading with it would shift both arrows on every
  * other page.
@@ -61,39 +64,55 @@ export function DesktopTitlebar({
   }, [apple, back, canGoBack, canGoForward, forward]);
 
   return (
-    <div data-app-titlebar="bar" className="flex h-12 shrink-0 items-center">
-      {/* The traffic lights sit in the first 5rem on a Mac; the window
-          positions them, so this only keeps the buttons clear of them. */}
-      <div
-        className={`flex shrink-0 items-center gap-1 ${apple ? "pl-20" : "pl-3"}`}
-        style={{ minWidth: leadingWidth }}
-      >
-        <IconButton
-          size="sm"
-          label={t("nav.back")}
-          title={t("nav.backShortcut", { shortcut: backShortcut })}
-          icon={<ChevronLeft aria-hidden />}
-          onClick={back}
-          disabled={!canGoBack}
-          className="text-subtle-foreground hover:text-foreground disabled:hover:bg-transparent"
+    <div data-app-titlebar="bar" className="relative z-30 flex h-12 shrink-0 items-center">
+      {/* Everything left of the panel's header, so the mascot's layer can
+          span the chat: from where the page starts to where the panel does. */}
+      <div className="relative flex h-full min-w-0 flex-1 items-center">
+        {/* The traffic lights sit in the first 5rem on a Mac; the window
+            positions them, so this only keeps the buttons clear of them. */}
+        <div
+          className={`flex shrink-0 items-center gap-1 ${apple ? "pl-20" : "pl-3"}`}
+          style={{ minWidth: leadingWidth }}
+        >
+          <IconButton
+            size="sm"
+            label={t("nav.back")}
+            title={t("nav.backShortcut", { shortcut: backShortcut })}
+            icon={<ChevronLeft aria-hidden />}
+            onClick={back}
+            disabled={!canGoBack}
+            className="text-subtle-foreground hover:text-foreground disabled:hover:bg-transparent"
+          />
+          <IconButton
+            size="sm"
+            label={t("nav.forward")}
+            title={t("nav.forwardShortcut", { shortcut: forwardShortcut })}
+            icon={<ChevronRight aria-hidden />}
+            onClick={forward}
+            disabled={!canGoForward}
+            className="text-subtle-foreground hover:text-foreground disabled:hover:bg-transparent"
+          />
+          {sidebarToggle}
+        </div>
+        {/* Clipped, because a page can leave its bar no room: a panel at full
+            width takes the whole row while the chat it covers stays mounted. */}
+        <SlotOutlet
+          name={TITLEBAR_SLOT}
+          className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-hidden pl-4 pr-2"
         />
-        <IconButton
-          size="sm"
-          label={t("nav.forward")}
-          title={t("nav.forwardShortcut", { shortcut: forwardShortcut })}
-          icon={<ChevronRight aria-hidden />}
-          onClick={forward}
-          disabled={!canGoForward}
-          className="text-subtle-foreground hover:text-foreground disabled:hover:bg-transparent"
-        />
-        {sidebarToggle}
+        {/* Not clipped, so the mascot reaches below the bar. Its top is level
+            with the traffic lights' (trafficLightPosition y in packages/desktop
+            window.ts). */}
+        <div
+          className="pointer-events-none absolute right-0 top-[18px]"
+          style={{ left: leadingWidth }}
+        >
+          <SlotOutlet
+            name={CONCIERGE_TITLEBAR_SLOT}
+            className="grid grid-cols-[1fr_minmax(0,max-content)_1fr] px-3"
+          />
+        </div>
       </div>
-      {/* Clipped, because a page can leave its bar no room: a panel at full
-          width takes the whole row while the chat it covers stays mounted. */}
-      <SlotOutlet
-        name={TITLEBAR_SLOT}
-        className="flex h-full min-w-0 flex-1 items-center gap-1 overflow-hidden pl-4 pr-2"
-      />
       <SlotOutlet name={TITLEBAR_END_SLOT} className="flex h-full shrink-0" />
     </div>
   );

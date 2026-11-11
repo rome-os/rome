@@ -26,6 +26,8 @@ struct LoginView: View {
                 .background(Palette.bg.ignoresSafeArea())
                 .safeAreaInset(edge: .bottom, spacing: 0) {
                     bottom
+                        .frame(maxWidth: Metrics.buttonWidth)
+                        .frame(maxWidth: .infinity)
                         .padding(.horizontal, 20)
                         .padding(.top, 12)
                         .padding(.bottom, 18)
@@ -47,6 +49,8 @@ struct LoginView: View {
                 .ignoresSafeArea()
                 .overlay(alignment: .bottom) {
                     bottom
+                        .frame(maxWidth: Metrics.buttonWidth)
+                        .frame(maxWidth: .infinity)
                         .padding(.horizontal, 20)
                         .padding(.bottom, 18)
                 }
@@ -184,6 +188,8 @@ struct PrimaryButton: View {
     var loadingTitle: LocalizedStringKey? = nil
     var loading = false
     var disabled = false
+    /// Inside a card: the card scale's button, not the page's.
+    var inCard = false
     let action: () -> Void
 
     var body: some View {
@@ -193,12 +199,12 @@ struct PrimaryButton: View {
                     Spinner(size: 18, lineWidth: 2.4, color: .white, trackOpacity: 0.35)
                 }
                 Text(loading ? (loadingTitle ?? title) : title)
-                    .romeFont(17, .semibold)
+                    .romeFont(inCard ? CardScale.buttonFont : 17, .semibold)
                     .tracking(-0.3)
             }
             .foregroundStyle(.white)
             .frame(maxWidth: .infinity)
-            .frame(height: 54)
+            .frame(height: inCard ? CardScale.buttonHeight : 54)
             .background(Palette.primary, in: Capsule())
             .overlay(Capsule().strokeBorder(.white.opacity(0.18), lineWidth: 0.5).blendMode(.overlay))
             .shadow(color: Palette.primary.opacity(0.45), radius: 10, x: 0, y: 6)

@@ -131,6 +131,39 @@ export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (
   and json_extract(a."payload", '$.channelContext.threadId') is not null
 ))`.mapWith(Boolean);
 
+/**
+ * When the session's newest open card was said, unix seconds, or null: the
+ * newest card of those {@link chatsSessionAwaitingGuardian} counts open.
+ * Pending approvals are read apart, once per call, by the repository's
+ * `awaitingGuardianSince`. The Chats version of the legacy
+ * `sessionAwaitingCardSince`.
+ */
+export const chatsSessionAwaitingCardSince = sql<number | null>`(
+  select max(m."said_at") from (
+    select coalesce(max(u."seq"), 0) as "cut" from ${CHAT_MESSAGES} u
+    where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
+    and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')
+  ) last
+  cross join ${CHAT_MESSAGES} m
+  cross join json_each(m."parts") part
+  where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
+  and m."seq" > last."cut"
+  and m."sender_agent" is not null and json_valid(m."parts")
+  and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
+)`;
+
+/**
+ * When the session's owner last said something in it, unix seconds, or null:
+ * the newest line said by a person, not by Rome's agents or on an app's,
+ * routine's or agent's behalf.
+ */
+export const chatsSessionOwnerSpokeAt = sql<number | null>`(
+  select max(m."said_at") from ${CHAT_MESSAGES} m
+  where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
+  and m."sender_agent" is null
+  and coalesce(m."sender_account_id", '') not like 'automated::%'
+)`;
+
 const SEARCH_SCAN_LIMIT = 400;
 const SNIPPET_CONTEXT = 40;
 const SNIPPET_LENGTH = 160;

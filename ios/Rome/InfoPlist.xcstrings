@@ -19,6 +19,24 @@
         }
       }
     },
+    "NSHealthShareUsageDescription" : {
+      "comment" : "Asked before the first Apple Health read an instance requests",
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "When your Rome asks, Rome sends the Health data you allow to your Rome and its AI model. Rome never changes your Health data."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当你的 Rome 提出请求时，Rome 会把你允许的健康数据发送给你的 Rome 及其 AI 模型。Rome 不会更改你的健康数据。"
+          }
+        }
+      }
+    },
     "NSPhotoLibraryAddUsageDescription" : {
       "comment" : "Asked before saving a photo from the viewer",
       "extractionState" : "manual",

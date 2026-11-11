@@ -17,6 +17,9 @@ export interface SessionToolContext {
   /** The level the running turn pushes its first said message at, or
    *  undefined when it pushes nothing. */
   getTurnPushLevel(): NotifyLevel | undefined;
+  /** The id of the one Concierge task the running turn reports on, or
+   *  undefined when it reports on none or on several. */
+  getTurnReportedTask(): string | undefined;
 }
 
 /**

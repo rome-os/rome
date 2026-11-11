@@ -5,11 +5,11 @@ import { describe, expect, it } from "@rstest/core";
 import { attachDesktopProxy } from "./desktops/desktop-proxy-server.js";
 import { attachLiveEventsServer, type LiveEventSources } from "./live-events-server.js";
 import { attachNodeConsoleServer } from "./desktops/node-console-server.js";
-import { DashboardAccessState } from "./lib/dashboard-access-state.js";
+import { DashboardAccessState } from "./access/dashboard-access-state.js";
 import { attachTerminalServer } from "./terminal-server.js";
 import { guardianAuth } from "./db/schema.js";
 import { createTestDb, type TestDb } from "./test/db.js";
-import { createSession } from "./lib/auth.js";
+import { createSession } from "./access/auth.js";
 import { createNodeConfig } from "@rome-os/node-core/client";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -30,6 +30,7 @@ const noSources: LiveEventSources = {
   subscribeChatSession: () => () => {},
   subscribeAppCatalog: () => () => {},
   subscribeConciergeTasks: () => () => {},
+  subscribeConciergeActivity: () => () => {},
 };
 
 function attachAll(server: ReturnType<typeof createServer>, db: TestDb["db"]) {

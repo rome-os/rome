@@ -38,7 +38,7 @@ import { PeopleRepository } from "../../db/repositories/people.js";
 import { PoliciesRepository } from "../../db/repositories/policies.js";
 import { ActionRegistryImpl } from "../../apps/actions/registry.js";
 import { ActionEngine, type ApprovalCreatedEvent } from "../../apps/actions/engine.js";
-import { ApprovalHandler } from "../../apps/actions/approval-handler.js";
+import { ApprovalHandler, executionRequester } from "../../apps/actions/approval-handler.js";
 import { createBackendTurnRunner } from "../../apps/actions/backend-turn.js";
 import { chatsWiring } from "../../chats-wiring.js";
 import { openChannelChat } from "../../connections/open-chat.js";
@@ -362,6 +362,9 @@ async function buildHarness(
     actionEngine,
     agentRunner,
     backendTurnRunner,
+    undefined,
+    undefined,
+    executionRequester(repos.actionExecutions),
   );
 
   let cleaned = false;

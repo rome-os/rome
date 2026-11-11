@@ -3,7 +3,7 @@ import { ChatComponent } from "@/components/chat/ChatComponent";
 import { useFreeCells } from "./use-free-cells";
 
 /**
- * A chat card pinned to one session — the side-chat surface. Unlike the main
+ * A chat card pinned to one session — the fork-chat surface. Unlike the main
  * pane's ChatWidget it carries no workspace-store enrichment: the pinned
  * conversation follows no files and installs nothing.
  */

@@ -33,6 +33,8 @@ export const TEST_TURN: TurnFacts = {
   threadContext: () => undefined,
   sharedContext: () => undefined,
   pushLevel: () => undefined,
+  actor: () => undefined,
+  reportedTask: () => undefined,
   inTurn: (fn) => fn(),
 };
 

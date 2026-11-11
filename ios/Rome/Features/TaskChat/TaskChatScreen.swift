@@ -9,7 +9,7 @@ struct TaskChatScreen: View {
 
     @Environment(\.dismiss) private var dismiss
     @Environment(AppModel.self) private var model
-    @Environment(\.openURL) private var openURL
+    @Environment(\.openInstancePage) private var openInstancePage
     /// Kept on the workspace, so a failed send's bubble and Retry are still
     /// there when the guardian comes back, and the draft waits for it to load.
     private var store: TranscriptStore { workspace.taskStore(chatId) }
@@ -56,6 +56,7 @@ struct TaskChatScreen: View {
                 onStop: { store.stopTurn() }
             )
             .padding(.horizontal, Metrics.pagePadding)
+            .readableColumn()
             .padding(.top, 6)
             .padding(.bottom, 8)
         }
@@ -94,12 +95,12 @@ struct TaskChatScreen: View {
             .animation(.easeInOut(duration: 0.25), value: spinning)
             Menu {
                 Button {
-                    if let url = model.webURL?.appending(path: "chat/\(chatId)") { openURL(url) }
+                    if let origin = model.webURL { openInstancePage(InstancePages.chat(origin: origin, sessionId: chatId)) }
                 } label: {
-                    Label("Open on the web", systemImage: "safari")
+                    Label("Open on the web", systemImage: "globe")
                 }
                 Button {
-                    UIPasteboard.general.url = model.webURL?.appending(path: "chat/\(chatId)")
+                    UIPasteboard.general.url = model.webURL.map { InstancePages.chat(origin: $0, sessionId: chatId) }
                 } label: {
                     Label("Copy link", systemImage: "link")
                 }
@@ -160,19 +161,27 @@ struct TaskChatScreen: View {
             if let briefID, id.hasPrefix(briefID + ":") {
                 BriefCard(text: text)
             } else {
-                UserBubble(text: text, images: images, pending: pending) { store.retry(id) }
+                UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, menu: menu(row))
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position)
-        case .tools, .approval, .question, .webOnly, .connect:
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, menu: menu(row))
+        case .tools, .approval, .question, .webOnly, .routineDraft, .connect:
             InteractionRow(row: row, store: store)
         case .error(_, let text):
             ErrorLine(text: text)
-        case .taskCard(_, let id, let title):
+        case .taskCard(_, let id, let title, _):
             TaskCard(title: title) {}
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
+        case .threadReplies:
+            // Task chats have no chat threads.
+            EmptyView()
         }
+    }
+
+    /// A task chat's bubbles: the time, Copy and Share; no threads to reply in.
+    private func menu(_ row: TranscriptRow) -> BubbleMenu {
+        BubbleMenu(date: row.messageId.flatMap(store.message)?.date)
     }
 
     /// Task chats space every block by 12 pt, as on the board; bubbles in a run keep 3 pt.

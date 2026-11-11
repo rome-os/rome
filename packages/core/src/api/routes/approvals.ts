@@ -1,7 +1,7 @@
 import type { Context } from "hono";
 import { Hono } from "hono";
 import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
-import { currentSessionActor } from "../../lib/session-actor.js";
+import { currentSessionActor } from "../../access/session-actor.js";
 import { createLogger } from "../../logger.js";
 import type { ApiDeps } from "../deps.js";
 

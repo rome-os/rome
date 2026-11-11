@@ -48,7 +48,7 @@ test("the daemon bundle loads the OpenTelemetry SDK only from its telemetry chun
   const outdir = await mkdtemp(join(tmpdir(), "rome-compiled-daemon-"));
   t.after(() => rm(outdir, { recursive: true, force: true }));
   await build({
-    ...splitBundleOptions(join(root, "packages/core/src/daemon/index.ts"), outdir),
+    ...splitBundleOptions(join(root, "packages/core/src/instance/daemon/index.ts"), outdir),
     logLevel: "silent",
   });
 

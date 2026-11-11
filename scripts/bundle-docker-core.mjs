@@ -121,7 +121,7 @@ const entrypoints = [
 // bundle, including those of dynamically imported modules. The daemon loads
 // telemetry after it spawns Rome, so its bundle splits that import into a chunk.
 export const splitEntrypoints = [
-  ["packages/core/src/daemon/index.ts", "packages/core/dist/daemon"],
+  ["packages/core/src/instance/daemon/index.ts", "packages/core/dist/daemon"],
 ];
 
 async function main() {

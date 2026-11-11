@@ -209,6 +209,16 @@ describe("ConciergeTaskPanel", () => {
     expect(screen.getByText("Working")).toBeTruthy();
   });
 
+  it("keeps a long title inside the row: its button takes the column's width and the title truncates", async () => {
+    server.recent = [row("next", { title: "Address requested changes on rome-os/rome PR #1714" })];
+    mockServer();
+    renderPanel();
+    const title = await screen.findByText("Address requested changes on rome-os/rome PR #1714");
+    // A button sizes to its content even as a block; full width keeps it in its column.
+    expect(title.closest("button")!.className).toContain("w-full");
+    expect(title.closest("button")!.className).toContain("min-w-0");
+  });
+
   it("explains an empty list", async () => {
     mockServer();
     renderPanel();

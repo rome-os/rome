@@ -41,6 +41,10 @@
     "allChats": "所有聊天",
     "title": "最近对话",
     "newChat": "新对话",
+    "mainChat": "主对话",
+    "conciergeSection": "主对话和话题对话",
+    "moreTopicChats": "还有 {{count}} 个",
+    "mainChatUnavailable": "无法加载主对话",
     "conciergeUnread_one": "{{name}}，{{label}} 条未读消息",
     "conciergeUnread_other": "{{name}}，{{label}} 条未读消息",
     "conciergeUnreadBadge_one": "{{label}} 条未读消息",
@@ -51,8 +55,6 @@
     "topicChatUnread_other": "{{name}}，{{label}} 条未读消息",
     "topicChatDeleteConfirm": "永久删除这个话题对话？它的关注和未完成的任务会转到 {{name}} 主对话。",
     "topicChatRetireFailed": "没能修改这个话题对话。",
-    "startedByConcierge": "由 {{name}} 发起",
-    "empty": "还没有对话",
     "rowStatus": {
       "waiting": "等你处理",
       "running": "正在回复",
@@ -120,16 +122,7 @@
     "agentRemove": "移除 {{agent}}",
     "agentPickHint": "选择",
     "agentSendHint": "发送",
-    "projectActions": "项目操作",
-    "pinned": "已置顶",
     "sectionProjects": "项目",
-    "pin": "置顶",
-    "unpin": "取消置顶",
-    "pinChat": "置顶对话",
-    "unpinChat": "取消置顶对话",
-    "groupBy": "分组方式",
-    "groupByDate": "按日期",
-    "groupByProjects": "按项目",
     "status": "状态",
     "statusAll": "全部",
     "statusActive": "活跃",
@@ -140,7 +133,8 @@
       "previous7Days": "过去 7 天",
       "previous30Days": "过去 30 天",
       "older": "更早"
-    }
+    },
+    "startedByConcierge": "由 {{name}} 发起"
   },
   "language": {
     "label": "语言"
@@ -153,19 +147,18 @@
     "signOutError": "退出登录失败，请重试。"
   },
   "thisComputer": {
-    "label": "允许 Rome 操作这台电脑",
-    "auditLog": "查看操作记录",
+    "label": "电脑操作",
+    "auditLog": "电脑操作记录",
     "tooltip": {
       "connected": "Rome 可以操作这台电脑",
       "connecting": "正在连接…",
       "offline": "Rome 暂时无法连接这台电脑",
-      "disabled": "Rome 不能操作这台电脑"
-    },
-    "state": {
-      "connected": "已连接",
-      "connecting": "正在连接…",
-      "offline": "离线",
-      "disabled": "已关闭"
+      "disabled": "Rome 不能操作这台电脑",
+      "limited": {
+        "connected": "已连接 · 电脑操作已关闭",
+        "connecting": "正在连接… · 电脑操作已关闭",
+        "offline": "离线 · 电脑操作已关闭"
+      }
     }
   },
   "terminal": {
@@ -200,6 +193,9 @@
       "preparingUrl": "正在准备 Claude 登录链接",
       "submittingCode": "正在提交 Claude 登录代码"
     }
+  },
+  "upgradeIndicator": {
+    "tooltip": "{{name}} 可以升级"
   },
   "upgradeBanner": {
     "countdownTitle": "Rome {{version}} 更新已就绪",

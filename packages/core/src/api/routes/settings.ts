@@ -10,17 +10,17 @@ import {
   GUARDIAN_TIMEZONE_SETTING_KEY,
   applyGuardianTimezoneWrite,
 } from "../../routines/guardian-timezone.js";
-import { resolveGuardianSession } from "../../lib/guardian-session.js";
+import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { parseTimeZone } from "../../lib/timezone.js";
-import { PUBLIC_ACCESS_SETTING_KEY } from "../../apps/public-access-config.js";
-import { DASHBOARD_ACCESS_SETTING_KEY } from "../../lib/dashboard-access-config.js";
+import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";
+import { DASHBOARD_ACCESS_SETTING_KEY } from "../../access/dashboard-access-config.js";
 import { CONCIERGE_FOLLOWING_SETTING_KEY } from "../../concierge/following.js";
 
 // Keys enforced from an in-memory snapshot that only their dedicated route
 // refreshes. Persisting one here would leave the stored and enforced policies
 // disagreeing until restart.
 const DEDICATED_ROUTE_KEYS: Record<string, string> = {
-  [PUBLIC_ACCESS_SETTING_KEY]: "/api/public-access",
+  [APP_PERMISSIONS_SETTING_KEY]: "/api/public-access",
   [DASHBOARD_ACCESS_SETTING_KEY]: "/api/dashboard-access",
 };
 

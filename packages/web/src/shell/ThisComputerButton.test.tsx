@@ -23,6 +23,18 @@ const status = (state: DeviceState): DesktopDeviceStatus => ({
   name: "Macbook",
 });
 
+/** What an app that always connects reports: the connection apart from Computer use. */
+const split = (
+  connection: "connected" | "connecting" | "offline",
+  computerUse: boolean,
+): DesktopDeviceStatus => ({
+  state: computerUse ? connection : "disabled",
+  deviceId: "d1",
+  name: "Macbook",
+  connection,
+  computerUse,
+});
+
 function installBridge(initial: DesktopDeviceStatus, { auditLog = true } = {}) {
   let listener: ((next: DesktopDeviceStatus) => void) | null = null;
   const bridge = {
@@ -150,14 +162,13 @@ describe("ThisComputerButton", () => {
     ).toBeTruthy();
   });
 
-  it("shows the switch and state line, and turns the computer off", async () => {
+  it("shows the switch and turns the computer off", async () => {
     const { bridge } = installBridge(status("connected"));
     render(<ThisComputerButton />);
     await userEvent.click(
       await screen.findByRole("button", { name: "Rome can use this computer" }),
     );
-    expect(await screen.findByText("Connected")).toBeTruthy();
-    const toggle = screen.getByRole("switch", { name: "Let Rome use this computer" });
+    const toggle = await screen.findByRole("switch", { name: "Computer use" });
     expect(toggle.getAttribute("aria-checked")).toBe("true");
     await userEvent.click(toggle);
     expect(bridge.setEnabled).toHaveBeenCalledWith(false);
@@ -170,11 +181,21 @@ describe("ThisComputerButton", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: "Rome can't use this computer" }),
     );
-    expect(await screen.findByText("Turned off")).toBeTruthy();
-    const toggle = screen.getByRole("switch", { name: "Let Rome use this computer" });
+    const toggle = await screen.findByRole("switch", { name: "Computer use" });
     expect(toggle.getAttribute("aria-checked")).toBe("false");
     await userEvent.click(toggle);
     expect(bridge.setEnabled).toHaveBeenCalledWith(true);
+  });
+
+  it("does not toggle when the title is clicked", async () => {
+    const { bridge } = installBridge(status("connected"));
+    render(<ThisComputerButton />);
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Rome can use this computer" }),
+    );
+    await userEvent.click(await screen.findByText("Computer use"));
+    expect(bridge.setEnabled).not.toHaveBeenCalled();
+    expect(screen.getByRole("switch").getAttribute("aria-checked")).toBe("true");
   });
 
   it("disables the switch while a change is applied", async () => {
@@ -185,7 +206,7 @@ describe("ThisComputerButton", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: "Rome can use this computer" }),
     );
-    const toggle = await screen.findByRole("switch", { name: "Let Rome use this computer" });
+    const toggle = await screen.findByRole("switch", { name: "Computer use" });
     await userEvent.click(toggle);
     await waitFor(() => expect(toggle.hasAttribute("disabled")).toBe(true));
     act(() => finish(status("disabled")));
@@ -198,7 +219,7 @@ describe("ThisComputerButton", () => {
     await userEvent.click(
       await screen.findByRole("button", { name: "Rome can use this computer" }),
     );
-    await userEvent.click(await screen.findByRole("button", { name: "View audit log" }));
+    await userEvent.click(await screen.findByRole("button", { name: "Computer use log" }));
     expect(bridge.openAuditLog).toHaveBeenCalledTimes(1);
     await waitFor(() => expect(screen.queryByRole("switch")).toBeNull());
   });
@@ -210,7 +231,7 @@ describe("ThisComputerButton", () => {
       await screen.findByRole("button", { name: "Rome can use this computer" }),
     );
     await screen.findByRole("switch");
-    expect(screen.queryByText("View audit log")).toBeNull();
+    expect(screen.queryByText("Computer use log")).toBeNull();
   });
 
   it("speaks Chinese", async () => {
@@ -221,11 +242,67 @@ describe("ThisComputerButton", () => {
       await userEvent.click(
         await screen.findByRole("button", { name: "Rome 暂时无法连接这台电脑" }),
       );
-      expect(await screen.findByRole("switch", { name: "允许 Rome 操作这台电脑" })).toBeTruthy();
-      expect(screen.getByText("离线")).toBeTruthy();
-      expect(screen.getByText("查看操作记录")).toBeTruthy();
+      expect(await screen.findByRole("switch", { name: "电脑操作" })).toBeTruthy();
+      expect(screen.getByText("电脑操作记录")).toBeTruthy();
     } finally {
       await i18n.changeLanguage("en");
     }
+  });
+
+  describe("with an app that always connects", () => {
+    it("says the connection and that Computer use is off", async () => {
+      installBridge(split("connected", false));
+      render(<ThisComputerButton />);
+      const button = await screen.findByRole("button", {
+        name: "Connected · Computer use off",
+      });
+      // The icon keeps the look of a turned-off computer.
+      expect(button).toBeTruthy();
+      expect(dot()).toBeNull();
+    });
+
+    it.each([
+      ["connecting", "Connecting… · Computer use off"],
+      ["offline", "Offline · Computer use off"],
+    ] as const)("labels a limited %s connection", async (connection, label) => {
+      installBridge(split(connection, false));
+      render(<ThisComputerButton />);
+      expect(await screen.findByRole("button", { name: label })).toBeTruthy();
+    });
+
+    it("keeps the old labels while Computer use is on", async () => {
+      installBridge(split("connected", true));
+      render(<ThisComputerButton />);
+      expect(
+        await screen.findByRole("button", { name: "Rome can use this computer" }),
+      ).toBeTruthy();
+    });
+
+    it("offers only the Computer use switch: notifications are the app's own setting", async () => {
+      // An app that still reports the choice, or can change it, gets no switch for it here.
+      const { bridge } = installBridge({
+        ...split("connected", false),
+        notifications: true,
+      } as never);
+      Object.assign(bridge, { setNotificationsEnabled: rs.fn() });
+      render(<ThisComputerButton />);
+      await userEvent.click(await screen.findByRole("button", { name: /Computer use off/ }));
+      expect(await screen.findAllByRole("switch")).toHaveLength(1);
+      expect(screen.queryByText("Notifications")).toBeNull();
+    });
+
+    it("speaks Chinese", async () => {
+      await i18n.changeLanguage("zh-CN");
+      try {
+        installBridge(split("connected", false));
+        render(<ThisComputerButton />);
+        await userEvent.click(
+          await screen.findByRole("button", { name: "已连接 · 电脑操作已关闭" }),
+        );
+        expect(await screen.findByRole("switch", { name: "电脑操作" })).toBeTruthy();
+      } finally {
+        await i18n.changeLanguage("en");
+      }
+    });
   });
 });

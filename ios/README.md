@@ -34,6 +34,10 @@ Installing works on a locked phone, but launching does not: it fails with "Locke
 
 A phone keeps an installed app's team. A build signed by another team is refused with "MismatchedApplicationIdentifierEntitlement", so delete the app from the phone first; that also deletes its sign-in. The first launch right after installing from a new team can fail with "Application failed preflight checks"; launch again.
 
+### On an iPad
+
+The app runs on iPhone and iPad. A phone stays in portrait; an iPad turns to every orientation and works in Split View, Slide Over and Stage Manager windows. Layout goes by width, never by device: on a regular width the drawer is pinned beside the page, and the header's drawer button slides it away and back; on a compact width, such as a narrow iPad window, the drawer slides out as on a phone. Both are one view tree in `MainShell` that only changes frames and offsets, so a window resized across the two keeps the open page and its state. Conversations keep one centered column of `Metrics.readableWidth` (720 pt) at most. Check a screen change on an iPad simulator too, for example `name=iPad Pro 13-inch (M5)`.
+
 ## Release to TestFlight
 
 Release builds are the TestFlight app: bundle id `cc.romeos.mobile`, name "Rome", HTTPS to `https://romeos.cc` only, and no demo data, snapshot runner, debug environment variables or Mac Catalyst. Debug builds are `cc.romeos.mobile.dev`, named "Rome Dev", so both can sit on one phone. `MARKETING_VERSION` is in `Config/Base.xcconfig`.
@@ -117,6 +121,20 @@ xcodebuild -project Rome.xcodeproj -scheme Rome -destination 'platform=iOS Simul
 ```
 
 Debug allows plain HTTP to names under `localhost`. The app opens an `http://` instance only while Rome Cloud itself is on `http://`, which is only ever a Cloud on this Mac: Release always signs in with `https://romeos.cc`.
+
+## Apple Health (this iPhone as a device)
+
+Signed in to Rome Cloud, with Settings → iPhone use → Can Rome use this iPhone turned on (it is off by default), the app also connects the phone as a rome-node device, so an agent can read Apple Health with `health.stats` and `health.samples`. The wire protocol, arguments and audit log are in [`docs/rome-node.md`](../docs/rome-node.md#iphone). The code is in `Rome/Node` and the switches, status and recent activity are in Settings → iPhone use.
+
+The device is online only while the app is in front and past the sign-in screen. HealthKit needs the `com.apple.developer.healthkit` entitlement in `Config/Rome.entitlements` and `NSHealthShareUsageDescription` in both Info plists. The text says the Health data you allow goes to your Rome and its AI model. The Apple Health row in Settings → iPhone use opens a page (`Features/Settings/HealthAccessScreen.swift`) that explains what Rome does with Health and where the data goes, and holds the switch. The switch is off until the user turns it on, and a request meets `health_off` until then. Both builds read only. `NSHealthUpdateUsageDescription` is in `Config/Info-Debug.plist` alone, for the Debug seeding below. A build on a physical iPhone or TestFlight also needs the HealthKit capability on the App ID `cc.romeos.mobile` (and `.dev`) in the Apple Developer portal, and the App Store privacy answers need Health and Fitness data (the privacy manifest lists both).
+
+The Simulator's Health is empty. Launch a Debug build with the argument `-RomeSeedHealth` and it writes a week of steps, heart rate, sleep (with overlapping records) and three runs, once per install:
+
+```bash
+xcrun simctl launch booted cc.romeos.mobile.dev -RomeSeedHealth
+```
+
+It asks for Health access in one system sheet (tap "Turn On All", then "Allow"). To try the actions, sign in on the Simulator, then from a Rome with rome-node run `rome-node device describe <iphone>` and `rome-node device run <iphone> health.stats --args '{"type":"stepCount","interval":"day","start":"2026-11-03","end":"2026-11-09"}'`. The phone must be unlocked and the app in front.
 
 ## Instance versions
 

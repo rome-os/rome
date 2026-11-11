@@ -3,6 +3,8 @@ import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { userMessageText } from "@/components/chat/chat-view";
 import type { ChatRow } from "@/components/chat/chat-view";
 import type { ChatMessage } from "@/lib/chat-types";
+import type { TraceSnapshot } from "@rome/api-types/trace-segments";
+import type { LivePreview } from "@/components/chat/MessageList";
 
 /** Messages from the same sender closer than this share one group. */
 const GROUP_GAP_MS = 5 * 60_000;
@@ -24,6 +26,8 @@ export type ConciergeItem =
   /** Centered time line before `at`, an ISO timestamp. */
   | { kind: "separator"; key: string; at: string }
   | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
+  /** Faint line where the chat's agent session was renewed, for `reason`. */
+  | { kind: "renewal"; key: string; reason: string }
   /**
    * Consecutive messages from one sender. Agent messages of separate turns share a
    * group when they are close enough in time. `typing` adds the typing bubble to
@@ -64,6 +68,58 @@ export function turnHasSpoken(rows: ChatRow[], turnId: string | null): boolean {
   );
 }
 
+// The tools whose call is itself a message the chat draws: once one lands,
+// nothing is left to type for it.
+const MESSAGE_TOOLS = new Set(["say", "chat_forward"]);
+
+/** A tool's name without its provider or group prefix (`mcp__rome__say`, `core:say`). */
+function bareTool(tool: string): string {
+  const afterMcp = tool.includes("__") ? tool.slice(tool.lastIndexOf("__") + 2) : tool;
+  return (
+    afterMcp.includes(":") ? afterMcp.slice(afterMcp.lastIndexOf(":") + 1) : afterMcp
+  ).toLowerCase();
+}
+
+/**
+ * Whether the live trace has a call open, other than one that says a message:
+ * the turn is working on something the chat does not show yet.
+ */
+export function hasOpenWorkCall(snapshot: TraceSnapshot | null): boolean {
+  if (!snapshot) return false;
+  const blocks = [...snapshot.segments]
+    .sort((a, b) => a.ordinal - b.ordinal)
+    .flatMap((segment) => (segment.kind === "run" ? segment.blocks : [segment.block]));
+  const open = new Map<string, string>();
+  let anon = 0;
+  for (const block of blocks) {
+    if (block.type === "tool_use") open.set(block.id ?? `anon:${anon++}`, block.tool);
+    else if (block.type === "tool_result") {
+      if (block.toolUseId) open.delete(block.toolUseId);
+      else {
+        const last = [...open.keys()].reverse().find((key) => key.startsWith("anon:"));
+        if (last) open.delete(last);
+      }
+    }
+  }
+  return [...open.values()].some((tool) => !MESSAGE_TOOLS.has(bareTool(tool)));
+}
+
+/**
+ * Whether the Concierge chat shows its typing dots. Until the running turn
+ * says its first message they show, unless the turn is quiet. Once it has
+ * said one they show only while it is in a call other than one that says a
+ * message, so a turn that only closes off after its last message (writing
+ * its private `done`) shows none.
+ */
+export function showsTyping(
+  rows: ChatRow[],
+  live: Pick<LivePreview, "isStreaming" | "runningTurnId" | "quiet" | "snapshot">,
+): boolean {
+  if (!live.isStreaming) return false;
+  if (!turnHasSpoken(rows, live.runningTurnId)) return !live.quiet;
+  return hasOpenWorkCall(live.snapshot);
+}
+
 // What the last build made, keyed by the message each piece starts from. A
 // build gives back the same entry and item objects for messages it has seen,
 // so the memoized rows that draw them skip a render when a message arrives.
@@ -90,6 +146,7 @@ function itemFor(anchor: ChatMessage, next: ConciergeItem): ConciergeItem {
 
 function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
   if (a.kind === "separator") return b.kind === "separator" && a.key === b.key && a.at === b.at;
+  if (a.kind === "renewal") return b.kind === "renewal" && a.key === b.key && a.reason === b.reason;
   if (a.kind === "notice")
     return (
       b.kind === "notice" &&
@@ -127,6 +184,7 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
     | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
+    | { kind: "renewal"; key: string; reason: string }
     | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
   const slots: Slot[] = [];
   let group: Extract<Slot, { kind: "group" }> | null = null;
@@ -172,6 +230,9 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
           group = null;
         } else if (isRenderable(message)) add(message, "agent");
       }
+    } else if (row.kind === "session_renewal") {
+      slots.push({ kind: "renewal", key: row.key, reason: row.reason });
+      group = null;
     } else if (row.kind === "model_switch") {
       if (row.model === automaticModel) {
         automaticModel = undefined;
@@ -197,7 +258,7 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
   for (const slot of slots) {
     if (slot.kind === "separator") {
       items.push(itemFor(slot.anchor, { kind: "separator", key: slot.key, at: slot.at }));
-    } else if (slot.kind === "notice") {
+    } else if (slot.kind === "notice" || slot.kind === "renewal") {
       items.push(slot);
     } else {
       const entries = slot.messages.map((message) =>

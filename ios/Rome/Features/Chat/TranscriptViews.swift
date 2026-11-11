@@ -17,11 +17,55 @@ extension EnvironmentValues {
 
 /// The guardian's bubble: coral, right-aligned, fully round. Photos sent with
 /// it sit above the text.
+/// The long-press menu of a message bubble: its time on top, then Reply
+/// where a thread can open, Copy and Share.
+struct BubbleMenu {
+    /// When the message was written; nil leaves the title out.
+    var date: Date? = nil
+    /// Opens the message's chat thread; nil where there are none.
+    var onReply: (() -> Void)? = nil
+    /// Inside a thread: the text is selectable instead, and there is no menu.
+    var inThread = false
+}
+
+/// The menu's items, shared by both bubbles.
+private struct BubbleMenuItems: View {
+    let text: String
+    let menu: BubbleMenu
+
+    var body: some View {
+        Section {
+            if let onReply = menu.onReply {
+                Button(action: onReply) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
+            }
+            CopyButton(text: text)
+            ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
+        } header: {
+            if let date = menu.date { Text(verbatim: RelativeTime.separator(date)) }
+        }
+    }
+}
+
+private extension View {
+    /// The bubble lifts under the finger with the system's menu; inside a
+    /// thread its text is selected the system's way instead.
+    @ViewBuilder
+    func bubbleMenu(text: String, menu: BubbleMenu) -> some View {
+        if menu.inThread {
+            // Its own tap, so one on the message never closes the thread.
+            self.textSelection(.enabled).onTapGesture {}
+        } else {
+            self.contextMenu { BubbleMenuItems(text: text, menu: menu) }
+        }
+    }
+}
+
 struct UserBubble: View {
     let text: String
     var images: [UserImage] = []
     let pending: PendingSend.State?
     var onRetry: () -> Void = {}
+    var menu = BubbleMenu()
 
     var body: some View {
         VStack(alignment: .trailing, spacing: 6) {
@@ -43,7 +87,8 @@ struct UserBubble: View {
                             .padding(.horizontal, 14)
                             .padding(.vertical, 10)
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                            .contextMenu { CopyButton(text: text) }
+                            .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
+                            .bubbleMenu(text: text, menu: menu)
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)
@@ -143,8 +188,8 @@ private struct UserImageTile: View {
 
     private func load(_ upload: UploadLines.Upload) async {
         guard let assetLoader else { return }
-        let key = StoredImageCache.key(upload.assetPath)
-        if let cached = StoredImageCache.image(key) {
+        let key = StoredImageCache.shared.key(upload.assetPath)
+        if let cached = StoredImageCache.shared.image(key) {
             loaded = cached
             return
         }
@@ -155,7 +200,7 @@ private struct UserImageTile: View {
                 ImageCompressor.thumbnail(from: data, maxPixel: ComposerImage.thumbnailPixels)
             }.value
             guard let thumbnail else { throw APIError.network }
-            StoredImageCache.store(thumbnail, for: key)
+            StoredImageCache.shared.store(thumbnail, for: key)
             loaded = thumbnail
         } catch is CancellationError {
             // Scrolled away mid-load: the next appear loads it.
@@ -179,15 +224,18 @@ private struct UserImageTile: View {
 }
 
 /// Stored photos already loaded, so scrolling back does not fetch them again.
-/// It holds at most 64 MB of decoded pixels.
+/// It holds at most 64 MB of decoded pixels. The app uses `shared`; a test
+/// makes its own, so it never sees another test's pictures or resets.
 @MainActor
-enum StoredImageCache {
+final class StoredImageCache {
+    static let shared = StoredImageCache()
+
     private final class Box {
         let image: CGImage
         init(_ image: CGImage) { self.image = image }
     }
 
-    private static let cache: NSCache<NSString, Box> = {
+    private let cache: NSCache<NSString, Box> = {
         let cache = NSCache<NSString, Box>()
         cache.totalCostLimit = 64 * 1024 * 1024
         return cache
@@ -195,23 +243,23 @@ enum StoredImageCache {
 
     /// The open workspace's: keys carry it, so a picture loaded for one
     /// instance or account never shows in another.
-    @MainActor private static var scope = UUID()
+    private var scope = UUID()
 
     /// The key for a path in the open workspace. Taken before a load starts,
     /// so a load that ends after a switch lands under the old scope.
-    @MainActor static func key(_ path: String) -> String { "\(scope.uuidString)|\(path)" }
+    func key(_ path: String) -> String { "\(scope.uuidString)|\(path)" }
 
     /// A workspace opened or closed, or a sign-out: nothing cached carries over.
-    @MainActor static func reset() {
+    func reset() {
         scope = UUID()
         cache.removeAllObjects()
     }
 
-    static func image(_ path: String) -> CGImage? {
+    func image(_ path: String) -> CGImage? {
         cache.object(forKey: path as NSString)?.image
     }
 
-    static func store(_ image: CGImage, for path: String) {
+    func store(_ image: CGImage, for path: String) {
         cache.setObject(Box(image), forKey: path as NSString, cost: image.bytesPerRow * image.height)
     }
 }
@@ -225,6 +273,7 @@ struct AgentBubble: View {
     let forwardedFrom: MessagePart.ForwardedFrom?
     let position: BubblePosition
     var onOpenChat: (String, String) -> Void = { _, _ in }
+    var menu = BubbleMenu()
     @State private var expanded = false
     /// The reply's laid-out height, measured: Chinese fits far fewer
     /// characters on a line than English, so characters cannot tell.
@@ -258,6 +307,16 @@ struct AgentBubble: View {
     }
 
     private var folds: Bool { Self.folds(height: fullHeight, size: dynamicTypeSize) }
+    /// Held to the folded height until it is measured, so a long reply is
+    /// folded from its first frame. Unfolded first, it shrank by hundreds of
+    /// points after the list had placed its bottom.
+    private var capped: Bool { Self.capped(measured: fullHeight, expanded: expanded, size: dynamicTypeSize) }
+
+    /// Whether the text is held to the folded height: until it is measured
+    /// (`measured` is 0), and while a long one is folded.
+    nonisolated static func capped(measured: CGFloat, expanded: Bool, size: DynamicTypeSize) -> Bool {
+        !expanded && (measured == 0 || folds(height: measured, size: size))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -277,7 +336,7 @@ struct AgentBubble: View {
             MarkdownText(source: text)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { fullHeight = $0 }
-                .frame(maxHeight: folds && !expanded ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
+                .frame(maxHeight: capped ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
                 .clipped()
                 .overlay(alignment: .bottom) {
                     if folds && !expanded {
@@ -296,7 +355,8 @@ struct AgentBubble: View {
                 Capsule().fill(Palette.sub.opacity(0.55)).frame(width: 3).padding(.vertical, 10).padding(.leading, 5)
             }
         }
-        .contextMenu { CopyButton(text: text) }
+        .contentShape(.contextMenuPreview, shape)
+        .bubbleMenu(text: text, menu: menu)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.trailing, forwardedFrom == nil ? 64 : 32)
     }
@@ -333,11 +393,11 @@ struct TaskCard: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Task")
-                    .romeFont(12, .semibold)
+                    .romeFont(CardScale.label, .semibold)
                     .foregroundStyle(Palette.sub)
                 HStack(spacing: 8) {
                     Text(title)
-                        .romeFont(16, .semibold)
+                        .romeFont(CardScale.title, .semibold)
                         .tracking(-0.3)
                         .foregroundStyle(Palette.fg)
                         .multilineTextAlignment(.leading)
@@ -347,15 +407,13 @@ struct TaskCard: View {
                         .foregroundStyle(Palette.sub)
                 }
             }
-            .padding(.horizontal, 14)
-            .padding(.top, 12)
-            .padding(.bottom, 13)
+            .cardPadding()
             .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
             .softElevation(radius: Metrics.cardRadius)
             .contentShape(RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         }
         .buttonStyle(PressScaleStyle(scale: 0.98))
-        .containerRelativeFrame(.horizontal) { width, _ in (width - 32) * 0.82 }
+        .containerRelativeFrame(.horizontal) { width, _ in (Metrics.column(width) - 32) * 0.82 }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityLabel("Task, \(title)")
     }
@@ -381,6 +439,8 @@ enum TranscriptSpacing {
         if case .separator = row { return 20 }
         if case .separator = previous { return 14 }
         if case .typing = row { return 14 }
+        // Right under the message whose thread it counts.
+        if case .threadReplies = row { return 4 }
         if row.isGuardian != previous.isGuardian { return 18 }
         if row.isGuardian { return 6 }
         switch (row, previous) {
@@ -403,11 +463,17 @@ struct Composer: View {
     let onSend: () -> Void
     var onStop: () -> Void = {}
 
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var choosingPhotos = false
     @State private var takingPhoto = false
     @State private var picked: [PhotosPickerItem] = []
     /// The text without what an input method is still composing (pinyin).
     @State private var committedText = ""
+
+    /// The + and Send sit on the text's last line, 36 pt tall.
+    private var controlPadding: CGFloat {
+        ComposerTextView.controlBottomPadding(height: 36, size: dynamicTypeSize)
+    }
 
     private var hasPhotos: Bool { !(attachments?.images.isEmpty ?? true) }
     private var canSend: Bool {
@@ -426,7 +492,7 @@ struct Composer: View {
             HStack(alignment: .bottom, spacing: 8) {
                 if let attachments {
                     plusMenu(attachments)
-                        .padding(.bottom, 7)
+                        .padding(.bottom, controlPadding)
                 }
                 ComposerTextView(
                     text: $text,
@@ -465,12 +531,12 @@ struct Composer: View {
                     }
                 }
                 .buttonStyle(PressScaleStyle(scale: 0.9))
-                .padding(.bottom, 7)
+                .padding(.bottom, controlPadding)
             }
             .padding(.leading, attachments == nil ? 18 : 7)
             .padding(.trailing, 7)
         }
-        .frame(minHeight: 50)
+        .frame(minHeight: ComposerTextView.minHeight)
         // Frosted glass: the transcript behind blurs out so the placeholder
         // reads. In light the glass alone barely parts from the page, so it
         // keeps an edge.

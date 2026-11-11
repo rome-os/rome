@@ -90,6 +90,8 @@ export interface ChatComposerSnapshot {
   // The message this turn replies to, sent as `replyToMessageId` (and
   // `replyQuote` for a selection).
   replyTo?: ReplyTarget;
+  // A message of the chat thread the thread view has open, sent as `chatThread`.
+  chatThread?: string;
 }
 
 export interface ChatComposerSendControls {

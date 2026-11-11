@@ -4,6 +4,7 @@ import {
   Check,
   Folder,
   MessageSquare,
+  Plus,
   SearchX,
   SendHorizontal,
   X,
@@ -484,6 +485,16 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
     () => matchingPages(APP_NAV, (page) => t(page.labelKey), normalizedQuery),
     [normalizedQuery, t],
   );
+  // New chat is offered when the query names it, as a command beside the
+  // pages. It is the palette's way to a common chat, besides Cmd+Shift+O.
+  const newChatLabel = t("recentChats.newChat");
+  const newChatMatches = useMemo(
+    () =>
+      [newChatLabel, "new chat"].some((name) =>
+        normalizeSearchText(name).includes(normalizedQuery),
+      ),
+    [newChatLabel, normalizedQuery],
+  );
   const matchingApps = useMemo(
     () => matchingOpenableApps(apps ?? [], normalizedQuery),
     [apps, normalizedQuery],
@@ -689,7 +700,12 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
   const isSearching = normalizedQuery.length > 0;
   const chatLoading = sessions === null && !loadError;
   const contentPending = isSearching && contentSearchQuery !== trimmedQuery;
-  const resultCount = matchingPageEntries.length + matchingApps.length + visibleEntries.length;
+  const showNewChatResult = isSearching && newChatMatches;
+  const resultCount =
+    Number(showNewChatResult) +
+    matchingPageEntries.length +
+    matchingApps.length +
+    visibleEntries.length;
   const relevantLoading = isSearching
     ? chatLoading || appsLoading || contentLoading || contentPending
     : chatLoading;
@@ -776,6 +792,22 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
         </span>
       </CommandItem>
     ) : null;
+
+  const newChatItem = (
+    <CommandItem
+      key="command:new-chat"
+      value="command:new-chat"
+      aria-label={newChatLabel}
+      onSelect={() => openHref("/chat")}
+      data-new-chat-command
+      className="group min-h-14 gap-3 rounded-8 px-2 py-2 text-left data-[selected=true]:bg-surface-hover data-[selected=true]:text-inherit"
+    >
+      <SearchPageIcon Icon={Plus} />
+      <span className="min-w-0 flex-1 truncate text-ui text-foreground">
+        <HighlightedText text={newChatLabel} terms={queryTerms} />
+      </span>
+    </CommandItem>
+  );
 
   const pageItems = matchingPageEntries.map(({ page, label }) => (
     <CommandItem
@@ -1126,8 +1158,11 @@ export function ChatSearchDialog({ open, onOpenChange }: ChatSearchDialogProps) 
             {messagingAgent ? sendItem : null}
             {!pickingAgent && !messagingAgent ? (
               <>
-                {hasResults && isSearching && matchingPageEntries.length > 0 ? (
+                {hasResults &&
+                isSearching &&
+                (showNewChatResult || matchingPageEntries.length > 0) ? (
                   <CommandGroup heading={t("recentChats.searchPagesGroup")}>
+                    {showNewChatResult ? newChatItem : null}
                     {pageItems}
                   </CommandGroup>
                 ) : null}

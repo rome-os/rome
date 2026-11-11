@@ -1,10 +1,4 @@
 import {
-  ChatBubbleIcon,
-  ChevronDownIcon,
-  ChevronRightIcon,
-  Pencil2Icon,
-} from "@radix-ui/react-icons";
-import {
   Archive,
   ArchiveRestore,
   Check,
@@ -14,12 +8,20 @@ import {
   FolderOpen,
   Laptop,
   Pencil,
-  Pin,
-  PinOff,
+  Plus,
   Trash2,
 } from "lucide-react";
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  type MouseEvent as ReactMouseEvent,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
+import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
@@ -38,19 +40,17 @@ import { deleteSession, renameSession, type SessionScope } from "@/lib/chat-api"
 import { DEFAULT_PROJECT_NAME } from "@/lib/chat-constants";
 import type { ChatSession } from "@/lib/chat-types";
 import { deviceFolderName, pathSegments } from "@/lib/device-folder";
-import { activeSessionFromPath, sessionActivityTime } from "@/lib/chat-session";
-import { useChatSessions } from "@/hooks/use-chat-sessions";
 import {
-  CONCIERGE_AGENT_ID,
-  TASK_CHAT_TRIGGER_KIND,
-  useConciergeChatId,
-  useConciergeName,
-} from "@/hooks/use-concierge";
-import { usePinnedProjects } from "@/hooks/use-pinned-projects";
+  activeSessionFromPath,
+  chatKind,
+  MAIN_CHAT_PATH,
+  sessionActivityTime,
+} from "@/lib/chat-session";
+import { useChatSessions } from "@/hooks/use-chat-sessions";
+import { useConciergeChatId, useConciergeName, useRefreshTopicChats } from "@/hooks/use-concierge";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
-import { ACTIVE_CLASS, IDLE_CLASS, LINK_CLASS } from "./sidebar-shared";
 import { ConciergeChats } from "./ConciergeEntry";
-import { emitSessionsChanged, useArchiveSession, usePinSession } from "@/lib/session-events";
+import { emitSessionsChanged, useArchiveSession } from "@/lib/session-events";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
  *  so they show even while it is open; done means unseen replies, so the open
@@ -147,7 +147,6 @@ function ChatStatusGlyph({ status }: { status: ChatRowStatus }) {
   );
 }
 
-type GroupMode = "project" | "date";
 type LoadPhase = "loading" | "ready" | "error";
 type StatusFilter = "all" | "active" | "archived";
 
@@ -161,30 +160,13 @@ interface SessionGroup {
   deviceFolder?: NonNullable<ChatSession["deviceFolder"]>;
 }
 
-const GROUP_MODE_STORAGE_KEY = "rome-recent-chats-group-mode";
 const SCOPE_STORAGE_KEY = "rome-recent-chats-scope";
 const STATUS_FILTER_STORAGE_KEY = "rome-recent-chats-status-filter";
 const COLLAPSED_GROUPS_STORAGE_KEY = "rome-recent-chats-collapsed-groups";
 
-const DATE_BUCKETS = [
-  { id: "today", tKey: "recentChats.groups.today" },
-  { id: "yesterday", tKey: "recentChats.groups.yesterday" },
-  { id: "previous7Days", tKey: "recentChats.groups.previous7Days" },
-  { id: "previous30Days", tKey: "recentChats.groups.previous30Days" },
-  { id: "older", tKey: "recentChats.groups.older" },
-] as const;
-
-type DateBucketId = (typeof DATE_BUCKETS)[number]["id"];
-
 function readScope(): SessionScope {
   if (typeof window === "undefined") return "mine";
   return window.localStorage.getItem(SCOPE_STORAGE_KEY) === "all" ? "all" : "mine";
-}
-
-function readGroupMode(): GroupMode {
-  if (typeof window === "undefined") return "project";
-  const raw = window.localStorage.getItem(GROUP_MODE_STORAGE_KEY);
-  return raw === "date" ? "date" : "project";
 }
 
 function readStatusFilter(): StatusFilter {
@@ -208,18 +190,6 @@ function readStringSetFromStorage(storageKey: string): Set<string> {
   return new Set();
 }
 
-function dateBucketFor(createdAt: string, now: number): DateBucketId {
-  const startOfToday = new Date(now);
-  startOfToday.setHours(0, 0, 0, 0);
-  const today = startOfToday.getTime();
-  const t = new Date(createdAt).getTime();
-  if (t >= today) return "today";
-  if (t >= today - 86_400_000) return "yesterday";
-  if (t >= today - 7 * 86_400_000) return "previous7Days";
-  if (t >= today - 30 * 86_400_000) return "previous30Days";
-  return "older";
-}
-
 function projectNameFromPath(projectPath: string): string {
   return projectPath.split(/[\\/]/).filter(Boolean).at(-1) ?? projectPath;
 }
@@ -232,16 +202,9 @@ function isDefaultProjectChat(session: ChatSession): boolean {
   );
 }
 
-/** The pin key of a device-folder group. The `device:` prefix and the device id keep it apart from project paths. */
+/** The group key of a device-folder group. The `device:` prefix and the device id keep it apart from project paths. */
 function deviceFolderKey(folder: NonNullable<ChatSession["deviceFolder"]>): string {
   return `device:${folder.deviceId}:${folder.path}`;
-}
-
-/** What groups a chat in the sidebar, and what its group is pinned by. */
-function groupKeyForSession(session: ChatSession): string {
-  return session.deviceFolder
-    ? deviceFolderKey(session.deviceFolder)
-    : projectPathForSession(session);
 }
 
 /** A device-folder chat belongs to no project: its group is its folder. */
@@ -335,16 +298,13 @@ export function RecentChats({
   belowTitlebar = false,
 }: RecentChatsProps) {
   const { t } = useTranslation("common");
-  const conciergeName = useConciergeName();
   const navigate = useNavigate();
   const location = useLocation();
-  const [groupMode, setGroupMode] = useState<GroupMode>(() => readGroupMode());
   const [scope, setScope] = useState<SessionScope>(() => readScope());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => readStatusFilter());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() =>
     readStringSetFromStorage(COLLAPSED_GROUPS_STORAGE_KEY),
   );
-  const { pinnedProjectPaths, togglePinnedProject } = usePinnedProjects();
   const [visibleGroupCounts, setVisibleGroupCounts] = useState<Record<string, number>>({});
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editingValue, setEditingValue] = useState("");
@@ -357,7 +317,6 @@ export function RecentChats({
     sessions: cachedSessions,
     isError,
     refetch,
-    invalidate,
     update: updateSessions,
   } = useChatSessions(statusFilter, scope);
   // Cached rows show at once and a failed refetch keeps them, so the skeleton
@@ -369,21 +328,49 @@ export function RecentChats({
   // while it was in flight. Per mount, since events stop while unmounted; the
   // remount's refetch reconciles whatever was missed.
   const liveRunning = useRef(new Map<string, boolean>());
-  // The Concierge chats have their own entries above the list. An archived
-  // topic chat has none there, so it stays in the list with the other
-  // archived chats, where it can be found and unarchived.
   const sessions = useMemo(
     () =>
       (cachedSessions ?? [])
-        .filter((s) => s.agentName !== CONCIERGE_AGENT_ID || s.archivedAt)
+        // Concierge chats have their own rows above; every other chat,
+        // task chats included, sits under its project.
+        .filter((s) => chatKind(s) !== "topic")
         .map((s) => withLiveRunning(s, liveRunning.current)),
     [cachedSessions],
   );
   const conciergeChatId = useConciergeChatId();
-  const activeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
-  // A blank topic chat opened from the Concierge entry is not New chat.
-  const isTopicDraft =
-    (location.state as { conciergeTopic?: unknown } | null)?.conciergeTopic === true;
+  const conciergeName = useConciergeName();
+  // Refetches the chat list and the Concierge's list together.
+  const refreshTopicChats = useRefreshTopicChats();
+  // The Concierge section draws its topic chats from these: an archived one
+  // is only here, and an active one takes its place in the order from here.
+  const conciergeTopicSessions = useMemo(
+    () => (cachedSessions ?? []).filter((s) => chatKind(s, conciergeChatId) === "topic"),
+    [cachedSessions, conciergeChatId],
+  );
+  const routeSessionId = activeSessionFromPath(location.pathname, conciergeChatId);
+  // The router renders a navigation as a transition, so the location stays
+  // on the old chat until the new one has rendered, which takes a moment
+  // when the old one is long. The row a click opens is marked at once, as an
+  // urgent update, and gives way when the location arrives.
+  const [openingSessionId, setOpeningSessionId] = useState<string | null>(null);
+  useEffect(() => setOpeningSessionId(null), [routeSessionId]);
+  const activeSessionId = openingSessionId ?? routeSessionId;
+  const markOpening = useCallback(
+    (event: ReactMouseEvent<HTMLElement>) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) {
+        return;
+      }
+      const link = (event.target as Element).closest("a[href]");
+      if (!link || link.getAttribute("target")) return;
+      const opened = activeSessionFromPath(
+        new URL(link.getAttribute("href") ?? "", window.location.origin).pathname,
+        conciergeChatId,
+      );
+      // A click back on the chat already open cancels a mark still waiting.
+      if (opened) setOpeningSessionId(opened === routeSessionId ? null : opened);
+    },
+    [conciergeChatId, routeSessionId],
+  );
 
   // A chat that starts running before the list has it, such as a task chat
   // Concierge just started, would show only when its first turn ends. The
@@ -424,7 +411,9 @@ export function RecentChats({
           updateSessions((prev) =>
             prev.map((s) => (s.id === sessionId ? withLiveRunning(s, liveRunning.current) : s)),
           );
-          if (!running) void invalidate();
+          // A turn's end can change any chat's unread state, a topic chat's
+          // included, whether or not its row is shown.
+          if (!running) refreshTopicChats();
           else refetchForUnknown(sessionId);
         },
       },
@@ -434,15 +423,10 @@ export function RecentChats({
       // and the snapshot the new connection sends.
       onReconnect: () => {
         liveRunning.current.clear();
-        void invalidate();
+        refreshTopicChats();
       },
     },
   );
-
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    window.localStorage.setItem(GROUP_MODE_STORAGE_KEY, groupMode);
-  }, [groupMode]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -462,50 +446,6 @@ export function RecentChats({
     window.localStorage.setItem(SCOPE_STORAGE_KEY, scope);
   }, [scope]);
 
-  const pinnedChats = useMemo(
-    () =>
-      sessions
-        .filter((session) => session.pinnedAt)
-        .sort((a, b) => new Date(b.pinnedAt ?? 0).getTime() - new Date(a.pinnedAt ?? 0).getTime()),
-    [sessions],
-  );
-
-  const pinnedProjects = useMemo(() => {
-    const groups = new Map<
-      string,
-      { name: string; deviceFolder?: SessionGroup["deviceFolder"]; items: ChatSession[] }
-    >();
-    for (const session of sessions) {
-      const key = groupKeyForSession(session);
-      if (!key) continue;
-      const group = groups.get(key) ?? {
-        name: session.deviceFolder
-          ? deviceFolderName(session.deviceFolder.path)
-          : session.projectName || projectNameFromPath(key),
-        deviceFolder: session.deviceFolder ?? undefined,
-        items: [],
-      };
-      if (!session.pinnedAt) group.items.push(session);
-      groups.set(key, group);
-    }
-    return Array.from(pinnedProjectPaths).flatMap((pinKey) => {
-      const group = groups.get(pinKey);
-      // A pinned folder with no chat left has nothing to name its device by.
-      if (!group && pinKey.startsWith("device:")) return [];
-      return [
-        {
-          pinKey,
-          projectPath: group?.deviceFolder ? "" : pinKey,
-          name: group?.name ?? projectNameFromPath(pinKey),
-          deviceFolder: group?.deviceFolder,
-          items: (group?.items ?? []).sort(
-            (a, b) => sessionActivityTime(b) - sessionActivityTime(a),
-          ),
-        },
-      ];
-    });
-  }, [pinnedProjectPaths, sessions]);
-
   // Projects mark their location only once some chat lives on a device;
   // until then the list stays as it was.
   const hasDeviceFolders = useMemo(
@@ -513,14 +453,9 @@ export function RecentChats({
     [sessions],
   );
 
-  const regularSessions = useMemo(
-    () =>
-      sessions
-        .filter(
-          (session) => !session.pinnedAt && !pinnedProjectPaths.has(groupKeyForSession(session)),
-        )
-        .sort((a, b) => sessionActivityTime(b) - sessionActivityTime(a)),
-    [pinnedProjectPaths, sessions],
+  const sortedSessions = useMemo(
+    () => [...sessions].sort((a, b) => sessionActivityTime(b) - sessionActivityTime(a)),
+    [sessions],
   );
 
   const projectGroups = useMemo<SessionGroup[]>(() => {
@@ -533,7 +468,7 @@ export function RecentChats({
         deviceFolder?: SessionGroup["deviceFolder"];
       }
     >();
-    for (const session of regularSessions) {
+    for (const session of sortedSessions) {
       const folder = session.deviceFolder;
       if (folder) {
         const rawKey = deviceFolderKey(folder);
@@ -559,41 +494,33 @@ export function RecentChats({
       bucket.items.push(session);
       buckets.set(rawKey, bucket);
     }
-    return Array.from(buckets.entries())
-      .map(([rawKey, { label, items, projectPath, deviceFolder }]) => ({
-        key: `project:${rawKey}`,
-        label,
-        items,
-        latest: sessionActivityTime(items[0]),
-        projectPath,
-        deviceFolder,
-      }))
-      .sort((a, b) => b.latest - a.latest);
-  }, [regularSessions]);
-
-  const dateGroups = useMemo<SessionGroup[]>(() => {
-    const now = Date.now();
-    const buckets = new Map<DateBucketId, ChatSession[]>();
-    for (const session of regularSessions) {
-      const id = dateBucketFor(session.activityAt, now);
-      const existing = buckets.get(id);
-      if (existing) existing.push(session);
-      else buckets.set(id, [session]);
+    // The default project always has a row, chats or not, since its plus is
+    // where a common chat usually starts.
+    if (!buckets.has(DEFAULT_PROJECT_NAME)) {
+      buckets.set(DEFAULT_PROJECT_NAME, {
+        label: DEFAULT_PROJECT_NAME,
+        items: [],
+        projectPath: DEFAULT_PROJECT_NAME,
+      });
     }
-    return DATE_BUCKETS.flatMap((bucket) => {
-      const items = buckets.get(bucket.id);
-      if (!items || items.length === 0) return [];
-      return [
-        {
-          key: `date:${bucket.id}`,
-          label: t(bucket.tKey),
+    return (
+      Array.from(buckets.entries())
+        .map(([rawKey, { label, items, projectPath, deviceFolder }]) => ({
+          key: `project:${rawKey}`,
+          label,
           items,
-          latest: sessionActivityTime(items[0]),
-          projectPath: "",
-        },
-      ];
-    });
-  }, [regularSessions, t]);
+          latest: items[0] ? sessionActivityTime(items[0]) : 0,
+          projectPath,
+          deviceFolder,
+        }))
+        // The default project leads, whatever moved last.
+        .sort(
+          (a, b) =>
+            Number(b.projectPath === DEFAULT_PROJECT_NAME) -
+              Number(a.projectPath === DEFAULT_PROJECT_NAME) || b.latest - a.latest,
+        )
+    );
+  }, [sortedSessions]);
 
   const toggleGroup = useCallback((key: string) => {
     setCollapsedGroups((prev) => {
@@ -612,7 +539,6 @@ export function RecentChats({
   }, []);
 
   const archiveMutation = useArchiveSession();
-  const pinMutation = usePinSession();
   const setArchived = useCallback(
     async (id: string, archived: boolean) => {
       try {
@@ -645,24 +571,6 @@ export function RecentChats({
     [setArchived],
   );
 
-  const setPinned = useCallback(
-    async (id: string, pinned: boolean) => {
-      try {
-        await pinMutation(id, pinned);
-      } catch {
-        return;
-      }
-      updateSessions((prev) =>
-        prev.map((session) =>
-          session.id === id
-            ? { ...session, pinnedAt: pinned ? new Date().toISOString() : null }
-            : session,
-        ),
-      );
-    },
-    [pinMutation, updateSessions],
-  );
-
   const handleDelete = useCallback(
     async (id: string) => {
       try {
@@ -673,7 +581,7 @@ export function RecentChats({
       updateSessions((prev) => prev.filter((s) => s.id !== id));
       emitSessionsChanged();
       if (activeSessionId === id) {
-        navigate("/chat");
+        navigate(MAIN_CHAT_PATH);
       }
     },
     [activeSessionId, navigate, updateSessions],
@@ -730,13 +638,11 @@ export function RecentChats({
     const status = chatRowStatus(session, isActive);
     const statusLabel = status ? t(`recentChats.rowStatus.${status}`) : null;
     const isEditing = editingId === session.id;
-    const togglePin = () => void setPinned(session.id, !session.pinnedAt);
     const beginRename = () => startRename(session);
     const toggleArchive = session.archivedAt
       ? () => void handleUnarchive(session.id)
       : () => void setArchived(session.id, true);
     const shortcuts: Record<string, () => void> = {
-      p: togglePin,
       r: beginRename,
       a: toggleArchive,
     };
@@ -780,7 +686,7 @@ export function RecentChats({
             name={session.name}
             nested={nested}
             marker={
-              session.triggerKind === TASK_CHAT_TRIGGER_KIND
+              chatKind(session) === "task"
                 ? t("recentChats.startedByConcierge", { name: conciergeName })
                 : undefined
             }
@@ -840,15 +746,6 @@ export function RecentChats({
                 setOpenMenuId(null);
               }}
             >
-              <DropdownMenuItem aria-keyshortcuts="P" onSelect={togglePin}>
-                {session.pinnedAt ? (
-                  <PinOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                ) : (
-                  <Pin className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                )}
-                {session.pinnedAt ? t("recentChats.unpinChat") : t("recentChats.pinChat")}
-                <DropdownMenuShortcut aria-hidden>P</DropdownMenuShortcut>
-              </DropdownMenuItem>
               <DropdownMenuItem aria-keyshortcuts="R" onSelect={beginRename}>
                 <Pencil className="h-3.5 w-3.5 shrink-0" aria-hidden />
                 {t("recentChats.rename")}
@@ -881,24 +778,10 @@ export function RecentChats({
     );
   };
 
-  const renderProjectGroup = ({
-    key,
-    label,
-    items,
-    projectPath,
-    pinned,
-    deviceFolder,
-  }: {
-    key: string;
-    label: string;
-    items: ChatSession[];
-    projectPath: string;
-    pinned: boolean;
-    deviceFolder?: SessionGroup["deviceFolder"];
-  }) => {
-    // Projects pin by path, device folders by their folder key.
-    const pinKey = deviceFolder ? deviceFolderKey(deviceFolder) : projectPath;
-    const collapsed = collapsedGroups.has(key);
+  const renderProjectGroup = ({ key, label, items, projectPath, deviceFolder }: SessionGroup) => {
+    // An empty group is just its row: nothing to expand or collapse.
+    const empty = items.length === 0;
+    const collapsed = empty || collapsedGroups.has(key);
     const visibleCount = visibleGroupCounts[key] ?? PROJECT_DEFAULT_VISIBLE;
     const visibleItems = items.slice(0, visibleCount);
     const remainingCount = Math.max(items.length - visibleCount, 0);
@@ -912,7 +795,7 @@ export function RecentChats({
         <span className="truncate">{label}</span>
         {/* Where the group works: another computer, or Rome Cloud once any
             chat lives on a device. Only the icon opens the tooltip: on the
-            whole row it would cover the row's New chat button. */}
+            whole row it would cover the row's new chat button. */}
         {deviceFolder ? (
           <Tooltip disableHoverableContent>
             <TooltipTrigger asChild>
@@ -956,8 +839,8 @@ export function RecentChats({
     const groupButton = (
       <button
         type="button"
-        onClick={() => toggleGroup(key)}
-        aria-expanded={!collapsed}
+        onClick={empty ? undefined : () => toggleGroup(key)}
+        aria-expanded={empty ? undefined : !collapsed}
         aria-label={
           deviceFolder
             ? t("recentChats.folderOnDevice", { folder: label, device: deviceFolder.deviceName })
@@ -970,7 +853,7 @@ export function RecentChats({
       </button>
     );
     return (
-      <div key={key} className="mb-1" data-pinned-project-row={pinned || undefined}>
+      <div key={key} className="mb-1" data-project-group={key}>
         <div className="group/project flex h-8 items-center min-h-[var(--control-min-h)] gap-1 rounded-8 text-ui text-foreground transition hover:bg-surface-hover dark:hover:bg-surface">
           {groupButton}
           {deviceFolder ? (
@@ -990,9 +873,9 @@ export function RecentChats({
               }
               aria-label={t("recentChats.newChatInFolder")}
               title={t("recentChats.newChatInFolder")}
-              className="touch-show shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
+              className="touch-show mr-1 shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
             >
-              <Pencil2Icon className="h-3.5 w-3.5" aria-hidden />
+              <Plus className="h-3.5 w-3.5" aria-hidden />
             </button>
           ) : null}
           {projectPath ? (
@@ -1005,36 +888,10 @@ export function RecentChats({
               }
               aria-label={t("recentChats.newChatInProject")}
               title={t("recentChats.newChatInProject")}
-              className="touch-show shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
+              className="touch-show mr-1 shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
             >
-              <Pencil2Icon className="h-3.5 w-3.5" aria-hidden />
+              <Plus className="h-3.5 w-3.5" aria-hidden />
             </button>
-          ) : null}
-          {pinKey ? (
-            <span className="relative mr-2 flex h-4 w-4 shrink-0 items-center justify-center">
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label={t("recentChats.projectActions")}
-                    title={t("recentChats.projectActions")}
-                    className="absolute inset-0 flex items-center justify-center rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
-                  >
-                    <Ellipsis className="h-3 w-3" aria-hidden />
-                  </button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent side="bottom" align="end">
-                  <DropdownMenuItem onSelect={() => togglePinnedProject(pinKey)}>
-                    {pinned ? (
-                      <PinOff className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    ) : (
-                      <Pin className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                    )}
-                    {pinned ? t("recentChats.unpin") : t("recentChats.pin")}
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </span>
           ) : null}
         </div>
         {collapsed ? null : (
@@ -1054,9 +911,6 @@ export function RecentChats({
       </div>
     );
   };
-
-  const hasPinned = pinnedChats.length > 0 || pinnedProjects.length > 0;
-  const pinnedCollapsed = collapsedGroups.has("section:pinned");
 
   return (
     // skipDelayDuration 0 makes every row wait out the delay on its own:
@@ -1099,29 +953,6 @@ export function RecentChats({
                     ) : null}
                   </DropdownMenuItem>
                 ))}
-                <div className="px-2 pb-1 pt-1 text-aux text-subtle-foreground">
-                  {t("recentChats.groupBy")}
-                </div>
-                {[
-                  { mode: "date" as const, label: t("recentChats.groupByDate") },
-                  { mode: "project" as const, label: t("recentChats.groupByProjects") },
-                ].map(({ mode, label }) => {
-                  const selected = groupMode === mode;
-                  return (
-                    <DropdownMenuItem
-                      key={mode}
-                      onSelect={() => setGroupMode(mode)}
-                      className={
-                        selected ? "text-ui text-foreground" : "text-ui text-foreground/85"
-                      }
-                    >
-                      <span>{label}</span>
-                      {selected ? (
-                        <Check className="ml-auto h-3.5 w-3.5 text-subtle-foreground" aria-hidden />
-                      ) : null}
-                    </DropdownMenuItem>
-                  );
-                })}
                 <div className="px-2 pb-1 pt-2 text-aux text-subtle-foreground">
                   {t("recentChats.status")}
                 </div>
@@ -1151,148 +982,58 @@ export function RecentChats({
             {headerControls}
           </div>
         </div>
-        {/* Starts a fresh chat. It stays above the scrolling list, so it is
-            reachable however long the list grows. */}
-        <div className="shrink-0 px-3 pb-1">
-          <Link
-            to="/chat"
-            className={`${LINK_CLASS} ${location.pathname === "/chat" && !isTopicDraft ? ACTIVE_CLASS : IDLE_CLASS}`}
-          >
-            <span
-              className="rome-sidebar-icon flex h-4 w-4 shrink-0 items-center justify-center text-subtle-foreground"
-              data-motion="chat"
-              aria-hidden
-            >
-              <Pencil2Icon className="h-4 w-4 shrink-0" aria-hidden />
-            </span>
-            <span className="flex-1 truncate">{t("recentChats.newChat")}</span>
-          </Link>
+        <div
+          className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 scrollbar-idle-hidden"
+          onClickCapture={markOpening}
+        >
           {conciergeChatId ? (
-            <ConciergeChats mainChatId={conciergeChatId} activeSessionId={activeSessionId} />
+            <ConciergeChats
+              mainChatId={conciergeChatId}
+              activeSessionId={activeSessionId}
+              statusFilter={statusFilter}
+              topicSessions={conciergeTopicSessions}
+            />
           ) : null}
-        </div>
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 pb-3 pt-2 scrollbar-idle-hidden">
-          {hasPinned ? (
-            <section
-              aria-labelledby="recent-chats-pinned-heading"
-              className="mb-4"
-              data-pinned-section
+          <section aria-labelledby="recent-chats-projects-heading" data-projects-section>
+            {conciergeChatId ? (
+              <hr className="mx-2 my-4 border-0 border-t border-border" aria-hidden />
+            ) : null}
+            <h2
+              id="recent-chats-projects-heading"
+              className="flex h-8 min-h-[var(--control-min-h)] items-center px-2 text-aux text-subtle-foreground"
             >
-              <button
-                type="button"
-                id="recent-chats-pinned-heading"
-                onClick={() => toggleGroup("section:pinned")}
-                aria-expanded={!pinnedCollapsed}
-                className="flex items-center gap-2 rounded-4 border border-transparent px-2 pb-1 pt-3 text-aux text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
-              >
-                {t("recentChats.pinned")}
-                {pinnedCollapsed ? (
-                  <ChevronRightIcon className="h-3.5 w-3.5" aria-hidden />
-                ) : (
-                  <ChevronDownIcon className="h-3.5 w-3.5" aria-hidden />
-                )}
-              </button>
-              {pinnedCollapsed ? null : (
-                <div className="space-y-1">
-                  {pinnedChats.map((session) => renderChatRow(session))}
-                  {pinnedProjects.map(({ pinKey, projectPath, name, items, deviceFolder }) =>
-                    renderProjectGroup({
-                      key: `pinned-project:${pinKey}`,
-                      label: name,
-                      items,
-                      projectPath,
-                      pinned: true,
-                      deviceFolder,
-                    }),
-                  )}
-                </div>
-              )}
-            </section>
-          ) : null}
-          {phase === "loading" ? (
-            <div className="space-y-1 px-2 py-2" aria-hidden>
-              <Skeleton className="h-8 w-full" />
-              <Skeleton className="h-8 w-4/5" />
-              <Skeleton className="h-8 w-3/5" />
-            </div>
-          ) : !hasPinned && regularSessions.length === 0 ? (
-            // Only reachable with nothing to show: a refetch that fails while the
-            // list already has rows keeps the rows rather than blanking them.
-            phase === "error" ? (
-              <div className="px-3 py-8 text-center" role="alert">
-                <p className="text-aux text-subtle-foreground">
-                  {t("recentChats.searchLoadError")}
-                </p>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="mt-3"
-                  onClick={() => void refetch()}
-                >
-                  {t("recentChats.searchRetry")}
-                </Button>
+              {t("recentChats.sectionProjects")}
+            </h2>
+            {phase === "loading" ? (
+              <div className="space-y-1 px-2 py-2" aria-hidden>
+                <Skeleton className="h-8 w-full" />
+                <Skeleton className="h-8 w-4/5" />
+                <Skeleton className="h-8 w-3/5" />
               </div>
             ) : (
-              <div className="px-3 py-8 text-center text-aux text-subtle-foreground">
-                {t("recentChats.empty")}
-              </div>
-            )
-          ) : groupMode === "project" ? (
-            projectGroups.length > 0 ? (
-              <section
-                aria-label={hasPinned ? undefined : t("recentChats.sectionProjects")}
-                aria-labelledby={hasPinned ? "recent-chats-projects-heading" : undefined}
-              >
-                {hasPinned ? (
-                  <h2
-                    id="recent-chats-projects-heading"
-                    className="px-2 pb-1 pt-3 text-aux text-subtle-foreground"
-                  >
-                    {t("recentChats.sectionProjects")}
-                  </h2>
+              <div className="space-y-1">
+                {projectGroups.map(renderProjectGroup)}
+                {/* Only with nothing to show: a refetch that fails while the
+                    list already has rows keeps the rows rather than blanking them. */}
+                {phase === "error" && sessions.length === 0 ? (
+                  <div className="px-3 py-8 text-center" role="alert">
+                    <p className="text-aux text-subtle-foreground">
+                      {t("recentChats.searchLoadError")}
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => void refetch()}
+                    >
+                      {t("recentChats.searchRetry")}
+                    </Button>
+                  </div>
                 ) : null}
-                <div className="space-y-1">
-                  {projectGroups.map(({ key, label, items, projectPath, deviceFolder }) =>
-                    renderProjectGroup({
-                      key,
-                      label,
-                      items,
-                      projectPath,
-                      pinned: false,
-                      deviceFolder,
-                    }),
-                  )}
-                </div>
-              </section>
-            ) : null
-          ) : (
-            dateGroups.map(({ key, label, items }) => {
-              const collapsed = collapsedGroups.has(key);
-              return (
-                <section key={key} className="mb-4 last:mb-0">
-                  <button
-                    type="button"
-                    onClick={() => toggleGroup(key)}
-                    aria-expanded={!collapsed}
-                    className="flex items-center gap-2 rounded-4 border border-transparent px-2 pb-1 pt-3 text-aux text-subtle-foreground transition outline-none hover:text-foreground outline-1 outline-offset-0 outline-transparent focus-visible:outline-solid focus-visible:outline-ring/50"
-                  >
-                    <span>{label}</span>
-                    {collapsed ? (
-                      <ChevronRightIcon className="h-3.5 w-3.5" aria-hidden />
-                    ) : (
-                      <ChevronDownIcon className="h-3.5 w-3.5" aria-hidden />
-                    )}
-                  </button>
-                  {collapsed ? null : (
-                    <div className="space-y-1">
-                      {items.map((session) => renderChatRow(session))}
-                    </div>
-                  )}
-                </section>
-              );
-            })
-          )}
+              </div>
+            )}
+          </section>
         </div>
         <RomeConfirmDialog
           open={pendingDeleteId !== null}

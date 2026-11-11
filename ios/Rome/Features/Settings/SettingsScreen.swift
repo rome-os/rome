@@ -108,10 +108,13 @@ struct SettingsRow<Trailing: View>: View {
 struct SettingsScreen: View {
     let workspace: Workspace
     let onInstances: () -> Void
+    let onHealth: () -> Void
+    let onRequests: () -> Void
     let onClose: () -> Void
 
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
+    @Environment(\.openInstancePage) private var openInstancePage
     @State private var usage: AIToolsStatus?
     @State private var confirmSignOut = false
     @State private var showFeedback = false
@@ -131,6 +134,8 @@ struct SettingsScreen: View {
                     }
                     .padding(.horizontal, 16)
                 }
+                NodeSettingsGroup(onHealth: onHealth, onRequests: onRequests)
+                    .padding(.horizontal, 16)
                 SettingsGroup(header: "Other") {
                     SettingsRow(systemImage: "circle.lefthalf.filled", title: "Appearance") {
                         Menu {
@@ -194,10 +199,10 @@ struct SettingsScreen: View {
                         .transition(.opacity)
                     }
                     Button {
-                        if let url = model.webURL { openURL(url) }
+                        if let url = model.webURL { openInstancePage(url) }
                     } label: {
-                        SettingsRow(systemImage: "safari", title: "Manage on the web") {
-                            Image(systemName: "arrow.up.right")
+                        SettingsRow(systemImage: "macwindow", title: "Manage on the web") {
+                            Image(systemName: "chevron.right")
                                 .romeFont(13, .semibold)
                                 .foregroundStyle(Palette.sub)
                         }

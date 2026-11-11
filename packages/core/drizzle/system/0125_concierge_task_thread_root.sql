@@ -1,0 +1,1 @@
+ALTER TABLE `concierge_tasks` ADD `thread_root` text;

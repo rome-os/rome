@@ -108,8 +108,8 @@ struct AppsScreen: View {
 }
 
 /// The apps as a home screen: icons in rows of four, three at the largest
-/// text sizes, with "New app" as the last one.
-private struct AppGrid: View {
+/// text sizes, more on a wide page, with "New app" as the last one.
+struct AppGrid: View {
     /// A group's title; none when the page has one group.
     var title: LocalizedStringKey? = nil
     let apps: [InstalledApp]
@@ -123,7 +123,17 @@ private struct AppGrid: View {
 
     private static let padding: CGFloat = 20
     private static let spacing: CGFloat = 8
-    private var count: Int { typeSize.isAccessibilitySize ? 3 : 4 }
+    private var count: Int { Self.columns(width: width, accessibility: typeSize.isAccessibilitySize) }
+
+    /// Four columns on a phone, three at the largest text sizes. A wider
+    /// page, such as an iPad's, adds columns of about a phone's width
+    /// instead of spreading four apart.
+    static func columns(width: CGFloat, accessibility: Bool) -> Int {
+        let base = accessibility ? 3 : 4
+        let narrowest: CGFloat = accessibility ? 120 : 92
+        let fits = Int((width - padding * 2 + spacing) / (narrowest + spacing))
+        return max(base, fits)
+    }
 
     private var columns: [GridItem] {
         Array(repeating: GridItem(.flexible(), spacing: Self.spacing, alignment: .top), count: count)

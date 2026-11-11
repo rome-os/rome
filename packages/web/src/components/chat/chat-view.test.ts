@@ -8,6 +8,7 @@ import {
   isAwaitingGuardian,
   isLockedByCard,
   isLastTurnFailed,
+  threadInteractionResults,
   type AgentIdentity,
 } from "./chat-view";
 
@@ -70,6 +71,57 @@ describe("buildChatView", () => {
     expect(v.interactionResults.get("h1")).toBeUndefined();
   });
 
+  it("reads a thread's card results from its own history, outside the main timeline's page", () => {
+    // The question and its answer are older than the main timeline's page.
+    const oldCard = mk(MAIN, "assistant", "t1", [
+      { type: "pending_interaction", toolUseId: "old", appId: "x", render: {} },
+    ]);
+    const newCard = mk(MAIN, "assistant", "t3", [
+      { type: "pending_interaction", toolUseId: "new", appId: "x", render: {} },
+    ]);
+    const thread = [
+      oldCard,
+      mk(MAIN, "user", "t2", [
+        { type: "interaction_result", toolUseId: "old", output: { answer: "Friday" } },
+      ]),
+      newCard,
+    ];
+    const main = {
+      messages: [newCard],
+      results: new Map([[interactionResultKey(MAIN, "new"), { answer: "Yes" }]]),
+    };
+    const results = threadInteractionResults(thread, main);
+    expect(results.get(interactionResultKey(MAIN, "old"))).toEqual({ answer: "Friday" });
+    // A newer answer the main timeline holds for the same card still applies.
+    expect(results.get(interactionResultKey(MAIN, "new"))).toEqual({ answer: "Yes" });
+  });
+
+  it("keeps a thread card's own answer when a later card reuses its tool id", () => {
+    const card = (turnId: string) =>
+      mk(MAIN, "assistant", turnId, [
+        { type: "pending_interaction", toolUseId: "item_0", appId: "x", render: {} },
+      ]);
+    const answer = (turnId: string, value: string) =>
+      mk(MAIN, "user", turnId, [
+        { type: "interaction_result", toolUseId: "item_0", output: { answer: value } },
+      ]);
+    // The thread holds the first `item_0` and its answer.
+    const thread = [card("t1"), answer("t2", "Friday")];
+    // The main timeline holds a later card with the same id, answered differently.
+    const mainMessages = [card("t5"), answer("t6", "Monday")];
+    const main = {
+      messages: mainMessages,
+      results: buildChatView(new Map([[MAIN, mainMessages]]), MAIN, MAIN_IDENTITY)
+        .interactionResults,
+    };
+    const results = threadInteractionResults(thread, main);
+    expect(results.get(interactionResultKey(MAIN, "item_0"))).toEqual({ answer: "Friday" });
+
+    // Unanswered in the thread: the later card's answer still is not its own.
+    const open = threadInteractionResults([card("t1")], main);
+    expect(open.get(interactionResultKey(MAIN, "item_0"))).toBeUndefined();
+  });
+
   const questionCard = (toolUseId: string) => ({
     type: "pending_interaction",
     toolUseId,
@@ -80,6 +132,27 @@ describe("buildChatView", () => {
       builtin: true,
       props: { questions: [] },
     },
+  });
+
+  it("dismisses a thread's card by a typed reply placed in another thread, outside the main page", () => {
+    const at = (minute: number) => ({ createdAt: new Date(minute * 60_000).toISOString() });
+    // Thread A: the question, older than the main timeline's loaded page.
+    const thread = [
+      mk(MAIN, "user", "t1", [{ type: "text", content: "Plan the trip" }], at(1)),
+      mk(MAIN, "assistant", "t1", [questionCard("item_0")], at(2)),
+    ];
+    // The main page holds the typed reply, placed in thread B, but not the card.
+    const reply = mk(MAIN, "user", "t3", [{ type: "text", content: "Friday works" }], at(5));
+    const main = { messages: [reply], results: new Map() };
+    expect(
+      threadInteractionResults(thread, main).get(interactionResultKey(MAIN, "item_0")),
+    ).toEqual({ dismissed: true });
+
+    // A later card reusing the id, after that reply, stays open: the reply was before it.
+    const later = mk(MAIN, "assistant", "t4", [questionCard("item_0")], at(6));
+    expect(
+      threadInteractionResults([...thread, later], main).get(interactionResultKey(MAIN, "item_0")),
+    ).toBeUndefined();
   });
 
   it("auto-dismisses an open ask_question card when the guardian replies in chat", () => {
@@ -256,6 +329,43 @@ describe("buildRows model switch notice", () => {
   it("shows no notice for the first turn or the running turn", () => {
     const messages = [...turn(MAIN, "t1", "claude-sonnet-5-5"), ...turn(MAIN, "t2")];
     expect(rowsOf(messages, "t2").some((r) => r.kind === "model_switch")).toBe(false);
+  });
+});
+
+describe("buildRows session renewal notice", () => {
+  const idMap = new Map([[MAIN, MAIN_IDENTITY]]);
+  const turn = (turnId: string, renewal?: { reason: string; sessionId: string }) => [
+    mk(MAIN, "user", turnId, [{ type: "text", content: `ask ${turnId}` }]),
+    mk(MAIN, "trace", turnId, [], {
+      traceSummary: {
+        distinctApps: [],
+        totalSteps: 0,
+        invocationCounts: {},
+        ...(renewal ? { sessionRenewal: renewal } : {}),
+      },
+    }),
+    mk(MAIN, "assistant", turnId, [{ type: "text", content: `reply ${turnId}` }]),
+  ];
+
+  it("puts one faint line, with its reason, before the first turn of a renewed session", () => {
+    const renewal = { reason: "setup", sessionId: "runtime-2" };
+    const rows = buildRows(
+      [...turn("t1"), ...turn("t2", renewal), ...turn("t3", renewal)],
+      idMap,
+      MAIN_IDENTITY,
+      { runningTurnId: null, isStreaming: false },
+    );
+
+    expect(rows.map((r) => r.kind)).toEqual([
+      "user",
+      "agent",
+      "session_renewal",
+      "user",
+      "agent",
+      "user",
+      "agent",
+    ]);
+    expect(rows[2]).toMatchObject({ kind: "session_renewal", reason: "setup", turnId: "t2" });
   });
 });
 

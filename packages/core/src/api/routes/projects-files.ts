@@ -1,4 +1,4 @@
-import { currentChatOwner } from "../../lib/session-actor.js";
+import { currentChatOwner } from "../../access/session-actor.js";
 import { Hono } from "hono";
 import type {
   ProjectDashboardChat,
