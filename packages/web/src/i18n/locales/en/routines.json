@@ -272,6 +272,8 @@
     "trace": "Execution trace",
     "traceLoading": "Loading trace…",
     "traceError": "Couldn't load the execution trace.",
-    "noTrace": "No execution was recorded for this run."
+    "noTrace": "No execution was recorded for this run.",
+    "whatItRuns": "What it runs",
+    "action": "Action"
   }
 }
