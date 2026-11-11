@@ -31,6 +31,9 @@ export function ownerOf(chat: { ownerKey?: string | null }): ConciergeOwner {
  * may hold neither ":" (session keys are split on it) nor anything a live
  * topic name refuses.
  */
+/** The name a main chat is created with. A client labels it by `main: true`. */
+export const MAIN_CHAT_NAME = "Main chat";
+
 export function mainChatIdOf(owner: ConciergeOwner): string {
   if (owner === GUARDIAN_OWNER) return CONCIERGE_CHAT_ID;
   return `concierge-v-${createHash("sha256").update(owner).digest("hex").slice(0, 24)}`;

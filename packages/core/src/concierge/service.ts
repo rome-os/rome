@@ -40,6 +40,7 @@ import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.j
 import {
   type ConciergeOwner,
   GUARDIAN_OWNER,
+  MAIN_CHAT_NAME,
   mainChatIdOf,
   ownerOf,
   storedChatId,
@@ -319,7 +320,7 @@ export class ConciergeService {
     const id = mainChatIdOf(owner);
     await this.deps.webchatRepo.createSession(
       id,
-      "Concierge",
+      MAIN_CHAT_NAME,
       undefined,
       undefined,
       this.pickModel(),

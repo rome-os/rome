@@ -876,6 +876,13 @@
       "when": 1794348522408,
       "tag": "0125_concierge_task_thread_root",
       "breakpoints": true
+    },
+    {
+      "idx": 126,
+      "version": "6",
+      "when": 1794361546821,
+      "tag": "0126_main_chat_name",
+      "breakpoints": true
     }
   ]
 }

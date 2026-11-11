@@ -5,7 +5,7 @@ import { alias } from "drizzle-orm/sqlite-core";
 import type { DrizzleDb } from "../index.js";
 import type { ChatRef } from "../../chats/storage/place.js";
 import { MessageRepository } from "../../chats/storage/message-repository.js";
-import { GUARDIAN_OWNER, mainChatIdOf, ownerOf } from "../../concierge/owner.js";
+import { GUARDIAN_OWNER, MAIN_CHAT_NAME, mainChatIdOf, ownerOf } from "../../concierge/owner.js";
 import { conciergeTasks, romeSessions } from "../schema.js";
 
 export type ConciergeTaskRow = typeof conciergeTasks.$inferSelect;
@@ -383,7 +383,7 @@ export class ConciergeTasksRepository {
       const main = mainChatIdOf(owner);
       return task.chatId && origin.originName !== null && origin.originArchivedAt === null
         ? { id: task.chatId, name: origin.originName, main: task.chatId === main }
-        : { id: main, name: mainNames.get(main) ?? "Concierge", main: true };
+        : { id: main, name: mainNames.get(main) ?? MAIN_CHAT_NAME, main: true };
     };
     // Only a message the row's Concierge chat still holds counts as a source.
     const sources = this.sources.keysOf(
