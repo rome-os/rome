@@ -237,6 +237,7 @@ import { routineWorkerCalls } from "./routines/for-apps.js";
 import { instanceWorkerCalls } from "./instance/for-apps.js";
 import { agentWorkerCalls } from "./agent/index.js";
 import { chatWorkerCalls } from "./chats/for-apps.js";
+import { connectionWorkerCalls } from "./connections/index.js";
 import { EventCatalog } from "./event-catalog.js";
 import {
   resolveOneOffDate,
@@ -1949,8 +1950,6 @@ async function main() {
 
   const workerRpcServer = new WorkerRpcServer(
     {
-      connectionRegistry,
-      channelOf,
       eventService,
       appLifecycle,
       appStore,
@@ -1960,15 +1959,19 @@ async function main() {
       backendTurnRunner,
       notify: notifyClient,
       privateOwnerOf: privateOwnerOfChat,
-      appConnections,
-      appIdForAction: (actionName) => {
-        const metadata = actionRegistry.getMetadata(actionName);
-        return metadata?.ownerType === "app" ? metadata.ownerId : null;
-      },
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
     {
       ...routineWorkerCalls({ routinesRepo, routineEngine }),
+      ...connectionWorkerCalls({
+        appConnections,
+        appIdForAction: (actionName) => {
+          const metadata = actionRegistry.getMetadata(actionName);
+          return metadata?.ownerType === "app" ? metadata.ownerId : null;
+        },
+        connectionRegistry,
+        emailConnectionId: () => emailConnection(connectionRegistry, channelOf)?.id,
+      }),
       ...chatWorkerCalls({ channelsService, chatSettings, agentNames: agentNameResolver }),
       ...agentWorkerCalls({
         hasAgent: (name) => agentLoader.find(name) !== undefined,

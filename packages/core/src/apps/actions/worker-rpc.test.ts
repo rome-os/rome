@@ -5,6 +5,8 @@ import { context, propagation, ROOT_CONTEXT, trace } from "@opentelemetry/api";
 import { runWithCurrentActionContext } from "@rome-os/app-runtime";
 import { WorkerRpcServer, type WorkerRpcServices } from "./worker-rpc.js";
 import { chatWorkerCalls } from "../../chats/for-apps.js";
+import { connectionWorkerCalls } from "../../connections/index.js";
+import { emailConnection } from "../accounts-service.js";
 import { IpcRpc, type IpcMessage, type IpcTransport } from "./ipc.js";
 import { ActionEngine } from "./engine.js";
 import { replayContext, type ReplayStore } from "./replay.js";
@@ -124,23 +126,28 @@ function makeServer(
     validateActionArgs: overrides.validateActionArgs ?? rs.fn(() => null),
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },
-    connectionRegistry: overrides.connectionRegistry,
-    channelOf: (connection: { service: string }) => connection.service,
-    appConnections: overrides.appConnections,
-    appIdForAction: overrides.appIdForAction ?? (() => null),
     sendApprovalCard: overrides.sendApprovalCard ?? rs.fn(async () => {}),
   } as unknown as WorkerRpcServices;
   return {
-    // Chats' calls ride the same worker boundary, which is what captures
-    // the person a dashboard chat read or send stands for.
-    server: new WorkerRpcServer(
-      services,
-      chatWorkerCalls({
+    // Chats' and Connections' calls ride the same worker boundary, which is
+    // what captures the calling action and the person it stands for.
+    server: new WorkerRpcServer(services, {
+      ...chatWorkerCalls({
         channelsService: overrides.channelsService as never,
         chatSettings: {} as never,
         agentNames: overrides.agentNames as never,
       }),
-    ),
+      ...connectionWorkerCalls({
+        appConnections: overrides.appConnections as never,
+        appIdForAction: overrides.appIdForAction ?? (() => null),
+        connectionRegistry: overrides.connectionRegistry as never,
+        emailConnectionId: () =>
+          emailConnection(
+            overrides.connectionRegistry as never,
+            ((connection: { service: string }) => connection.service) as never,
+          )?.id,
+      }),
+    }),
     services,
     eventBus,
     eventCatalog,
