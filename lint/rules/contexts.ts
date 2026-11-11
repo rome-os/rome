@@ -118,22 +118,5 @@ export const contextRules: ImportRule[] = contexts.flatMap((from) =>
     }),
 );
 
-const SESSIONS_REPOSITORY = "agent/infrastructure/drizzle-session-repository";
-
 /** Crossings that remain until their ticket lands. */
-export const contextCrossings: ListedCrossing[] = [
-  {
-    rule: "agent-never-imports-apps",
-    from: `${SESSIONS_REPOSITORY}.ts`,
-    to: "apps/artifact-id.ts",
-    ticket: "ZHA-161",
-    why: "The deprecated match of an agent under its legacy names, until agent names are canonical before they reach the sessions repository.",
-  },
-  {
-    rule: "agent-never-imports-apps",
-    from: `${SESSIONS_REPOSITORY}.test.ts`,
-    to: "apps/artifact-id.ts",
-    ticket: "ZHA-161",
-    why: "The tests of that legacy-name match.",
-  },
-];
+export const contextCrossings: ListedCrossing[] = [];

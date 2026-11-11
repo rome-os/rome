@@ -2302,7 +2302,7 @@ describe("Webchat API", () => {
       const read = async () => (await app.request(`/chat/sessions/${session.id}`)).json();
       expect(await read()).toMatchObject({ model: null, reasoningEffort: null });
 
-      const runtime = Session.create("main", { continuityKey: `webchat:${session.id}` });
+      const runtime = Session.create("core:main", { continuityKey: `webchat:${session.id}` });
       runtime.recordTurn({
         provider: "codex",
         modelThreadId: "thread-1",

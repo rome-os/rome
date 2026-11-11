@@ -586,11 +586,12 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
 
   const acquireBySessionId = async (
     sessionId: string,
-    agentName: string,
+    requestedAgent: string,
     opening?: ResumeOpening,
   ): Promise<AgentSession> => {
+    const agentName = deps.agentLoader.find(requestedAgent)?.name;
     const named = await deps.sessionRepository.session(sessionId);
-    if (!named?.continuityKey || !deprecatedSameAgent(deps, named.agentName, agentName)) {
+    if (!agentName || !named?.continuityKey || named.agentName !== agentName) {
       throw new Error(`Agent session "${sessionId}" was not found or cannot be resumed`);
     }
     // A session a reset replaced is resumed as its chat's current session.
@@ -771,7 +772,7 @@ async function currentSuccessor(
     !!session &&
     session.status === "active" &&
     session.continuityKey !== null &&
-    deprecatedSameAgent(deps, session.agentName, agentName);
+    session.agentName === agentName;
   let named = await deps.sessionRepository.session(sessionId);
   for (let read = 0; read < SUCCESSOR_READS; read++) {
     if (!named) return undefined;
@@ -784,20 +785,6 @@ async function currentSuccessor(
     named = await deps.sessionRepository.session(named.supersededBy);
   }
   return undefined;
-}
-
-/** @deprecated Matches an agent under its legacy names, which a stored
- *  session can still carry. Goes when agent names are canonical before they
- *  reach Sessions, and this compares them as strings. */
-function deprecatedSameAgent(
-  deps: ManagerDeps,
-  storedName: string,
-  requestedName: string,
-): boolean {
-  if (storedName === requestedName) return true;
-  const stored = deps.agentLoader.find(storedName);
-  const requested = deps.agentLoader.find(requestedName);
-  return stored !== undefined && requested !== undefined && stored.name === requested.name;
 }
 
 /**

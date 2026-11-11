@@ -610,7 +610,7 @@ export async function buildTestDeps(
   // before startApi. Tests that exercise agent turns load fixture agents
   // explicitly (src/test/fixtures/agents/); a test that hits the default agent
   // path without doing so fails loudly with `Agent "main" not found`.
-  const sessionRepository = new DrizzleSessionRepository(db, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(db);
   const systemPrompts = createTestSystemPrompts({ apps: appCatalog });
   const codexAccountChangedListeners = new Set<() => void>();
   const codexAccountService: ModelAccount & CodexLogins = {

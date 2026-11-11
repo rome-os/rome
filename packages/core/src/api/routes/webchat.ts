@@ -109,6 +109,9 @@ import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import type { ChatThreadPlacement } from "../../db/repositories/webchat.js";
 import { messageContentText } from "../../chats/history/messages-agent.js";
 
+/** The agent of a chat that saved no agent, under the name its sessions are saved by. */
+const MAIN_AGENT = "core:main";
+
 const log = createLogger("api:webchat");
 
 const inputPrioritySchema = z.enum(["now", "next"]).optional();
@@ -1002,7 +1005,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (session.type !== "fork") return false;
     const stored = await deps.sessionRepository.current(
       webchatSessionKey(session.id),
-      session.agentName ?? "main",
+      session.agentName ?? MAIN_AGENT,
     );
     return !!stored?.modelThreadId;
   };
@@ -2681,7 +2684,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
     const runtimeSession = await deps.sessionRepository.current(
       webchatSessionKey(sessionId),
-      session.agentName ?? "main",
+      session.agentName ?? MAIN_AGENT,
     );
     return c.json({
       ...toWebchatSessionResponse(session, messageCount),
@@ -3580,7 +3583,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (session.parentSessionId !== null) {
       const branchThread = await deps.sessionRepository.current(
         webchatSessionKey(session.id),
-        session.agentName ?? "main",
+        session.agentName ?? MAIN_AGENT,
       );
       if (!branchThread?.modelThreadId) {
         return answer(

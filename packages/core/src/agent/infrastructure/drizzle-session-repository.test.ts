@@ -1,10 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
-import {
-  claimLegacyArtifactName,
-  createEmptyLegacyArtifactBindings,
-  formatArtifactId,
-} from "../../apps/artifact-id.js";
 import { sessions, sessionTurnCheckpoints } from "../../db/schema.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ActiveSessionExistsError } from "../domain/session-repository.js";
@@ -25,9 +20,7 @@ describe("DrizzleSessionRepository", () => {
 
   beforeEach(() => {
     testDb = createTestDb();
-    repo = new DrizzleSessionRepository(testDb.db, {
-      legacyBindings: createEmptyLegacyArtifactBindings(),
-    });
+    repo = new DrizzleSessionRepository(testDb.db);
   });
 
   afterEach(() => testDb.close());
@@ -108,21 +101,24 @@ describe("DrizzleSessionRepository", () => {
     expect(await repo.current("k", "main")).toBeNull();
   });
 
-  it("current() matches an agent under its legacy name without rewriting the row", async () => {
-    const bindings = createEmptyLegacyArtifactBindings();
-    claimLegacyArtifactName(
-      bindings,
-      "agent",
-      "reviewer",
-      formatArtifactId("code-review", "reviewer"),
-    );
-    repo = new DrizzleSessionRepository(testDb.db, { legacyBindings: bindings });
-    const legacy = Session.create("reviewer", { continuityKey: "webchat:review" });
-    await repo.add(legacy);
+  it("current() finds a session only under its agent's name as written", async () => {
+    const session = Session.create("code-review:reviewer", { continuityKey: "webchat:review" });
+    await repo.add(session);
 
-    const found = await repo.current("webchat:review", "code-review:reviewer");
-    expect(found?.id).toBe(legacy.id);
-    expect(found?.agentName).toBe("reviewer");
+    expect((await repo.current("webchat:review", "code-review:reviewer"))?.id).toBe(session.id);
+    expect(await repo.current("webchat:review", "reviewer")).toBeNull();
+  });
+
+  it("renames sessions saved under an agent's old name, and leaves the rest", async () => {
+    const old = Session.create("reviewer", { continuityKey: "webchat:review" });
+    const other = Session.create("main", { continuityKey: "webchat:other" });
+    await repo.add(old);
+    await repo.add(other);
+
+    expect(repo.deprecatedRenameAgents({ reviewer: "code-review:reviewer" })).toBe(1);
+    expect(repo.deprecatedRenameAgents({ reviewer: "code-review:reviewer" })).toBe(0);
+    expect((await repo.current("webchat:review", "code-review:reviewer"))?.id).toBe(old.id);
+    expect((await repo.session(other.id))?.agentName).toBe("main");
   });
 
   it("save() writes what a turn ran on, its checkpoint, and a move", async () => {

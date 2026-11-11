@@ -807,6 +807,25 @@ export class WebChatRepository {
 
   constructor(protected readonly db: DrizzleDb) {}
 
+  /**
+   * @deprecated Renames the agent of every chat saved under an agent's old
+   * bare name, such as `coding`, to its app-prefixed name, such as
+   * `coding:coding`. Goes once no instance has a chat saved under an old name.
+   */
+  deprecatedRenameAgents(newNameOf: Readonly<Record<string, string>>): number {
+    return this.db.transaction((tx) => {
+      let renamed = 0;
+      for (const [oldName, newName] of Object.entries(newNameOf)) {
+        renamed += tx
+          .update(romeSessions)
+          .set({ agentName: newName })
+          .where(eq(romeSessions.agentName, oldName))
+          .run().changes;
+      }
+      return renamed;
+    });
+  }
+
   /** How many lines a listed session holds, as a column of its row. */
   protected readonly messageCountColumn: SQL<number> = sessionSelectFields.messageCount;
   /** Whether a listed session waits on the guardian, as a column of its row. */

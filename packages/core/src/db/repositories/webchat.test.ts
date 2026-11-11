@@ -57,6 +57,16 @@ describe("WebChatRepository", () => {
     testDb.close();
   });
 
+  it("renames chats saved under an agent's old name, and leaves the rest", async () => {
+    await repo.createSession("old", "Old", undefined, undefined, null, undefined, "coding");
+    await repo.createSession("main", "Main");
+
+    expect(repo.deprecatedRenameAgents({ coding: "coding:coding" })).toBe(1);
+    expect(repo.deprecatedRenameAgents({ coding: "coding:coding" })).toBe(0);
+    expect((await repo.getSession("old"))?.agentName).toBe("coding:coding");
+    expect((await repo.getSession("main"))?.agentName).toBeNull();
+  });
+
   it("lists a turn's messages in the order they were stored, even inside one second", async () => {
     await repo.createSession("chat-1", "Chat");
     // Ids that sort against the insertion order, so only the order of storing can win.
