@@ -17,11 +17,11 @@ import {
   createRoutine,
   deleteRoutine,
   listRoutineRefs,
-  runRoutineNow,
   setRoutineEnabled,
   type RoutineRef,
 } from "@/lib/chat-api";
 import type { RoutineDraftSpec } from "@/lib/chat-types";
+import { useRunRoutineNow } from "@/hooks/use-routines";
 
 type CardState =
   // Until the first lookup settles, the card can't tell a draft from a routine
@@ -83,11 +83,14 @@ export function RoutineDraftCard({
   routineKey?: string;
 }) {
   const { t } = useTranslation("chat");
+  const { t: tRoutines } = useTranslation("routines");
   const [state, setState] = useState<CardState>({ kind: "checking" });
   const [busy, setBusy] = useState<Busy>(null);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [actionError, setActionError] = useState<string | null>(null);
   const [detailsOpen, setDetailsOpen] = useState(false);
+  // The Routines page's own run path, so the routine's run history refreshes.
+  const runRoutineNow = useRunRoutineNow();
 
   useEffect(() => {
     let cancelled = false;
@@ -154,11 +157,19 @@ export function RoutineDraftCard({
     if (result.ok) setState({ kind: "draft" });
   };
 
+  // A run that fails is not an HTTP error: the route answers with
+  // `status: "error"`, so that counts as a failure too.
   const runNow = async (id: string) => {
     setBusy("run");
-    const result = await runRoutineNow(id);
+    let error: string | null = null;
+    try {
+      const outcome = await runRoutineNow(id);
+      if (outcome.status === "error") error = outcome.error ?? tRoutines("errors.runFailed");
+    } catch (err) {
+      error = err instanceof Error ? err.message : tRoutines("errors.runFailed");
+    }
     setBusy(null);
-    setActionError(result.ok ? null : (result.error ?? null));
+    setActionError(error);
   };
 
   const isSchedule = draft.trigger.type === "schedule";
@@ -304,9 +315,9 @@ function SavedStatus({
       </span>
     );
   }
-  // A manual routine never fires on its own, so On / Paused says nothing; an
-  // unreadable state has no honest label either.
-  if (isManual || enabled === null) return null;
+  // A manual routine never fires on its own, so "On" says nothing; Paused still
+  // matters, since it can't be run. An unreadable state has no honest label.
+  if (enabled === null || (isManual && enabled)) return null;
   return (
     <span className="flex h-5 items-center gap-2 text-aux text-muted-foreground">
       {busy === "toggle" ? (
@@ -338,10 +349,13 @@ function SavedMenu({
   onAskDelete: () => void;
 }) {
   const { t } = useTranslation("chat");
-  // A manual routine has nothing to pause, so it offers Run now instead; with
-  // an unknown state there's no honest Pause/Resume to offer.
+  // A manual routine offers Run now instead of Pause, and only while enabled,
+  // as on the Routines page. With an unknown state there's no honest
+  // Pause/Resume to offer.
   const first = isManual ? (
-    <DropdownMenuItem onSelect={onRun}>{t("routineCard.runNow")}</DropdownMenuItem>
+    enabled === true && (
+      <DropdownMenuItem onSelect={onRun}>{t("routineCard.runNow")}</DropdownMenuItem>
+    )
   ) : enabled !== null ? (
     <DropdownMenuItem onSelect={onToggle}>
       {enabled ? t("routineCard.pause") : t("routineCard.resume")}

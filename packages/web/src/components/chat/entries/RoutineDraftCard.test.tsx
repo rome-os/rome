@@ -5,13 +5,8 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { MemoryRouter } from "react-router-dom";
 import { RoutineDraftCard } from "./RoutineDraftCard";
-import {
-  createRoutine,
-  deleteRoutine,
-  listRoutineRefs,
-  runRoutineNow,
-  setRoutineEnabled,
-} from "@/lib/chat-api";
+import { createRoutine, deleteRoutine, listRoutineRefs, setRoutineEnabled } from "@/lib/chat-api";
+import { useRunRoutineNow } from "@/hooks/use-routines";
 import i18n from "@/i18n";
 import type { RoutineDraftSpec } from "@/lib/chat-types";
 
@@ -22,14 +17,15 @@ rs.mock("@/lib/chat-api", () => ({
   listRoutineRefs: rs.fn(),
   setRoutineEnabled: rs.fn(),
   deleteRoutine: rs.fn(),
-  runRoutineNow: rs.fn(),
 }));
+// Run now goes through the Routines page's hook (it refreshes run history).
+rs.mock("@/hooks/use-routines", () => ({ useRunRoutineNow: rs.fn() }));
 
 const mockCreate = rs.mocked(createRoutine);
 const mockList = rs.mocked(listRoutineRefs);
 const mockSetEnabled = rs.mocked(setRoutineEnabled);
 const mockDelete = rs.mocked(deleteRoutine);
-const mockRun = rs.mocked(runRoutineNow);
+const mockRun = rs.fn();
 
 // The saved state links into the router, so render inside one.
 const render = (ui: ReactElement) => rtlRender(<MemoryRouter>{ui}</MemoryRouter>);
@@ -72,7 +68,8 @@ beforeEach(async () => {
   mockCreate.mockResolvedValue({ ok: true, status: 201, routineId: "r-1" });
   mockSetEnabled.mockResolvedValue({ ok: true });
   mockDelete.mockResolvedValue({ ok: true });
-  mockRun.mockResolvedValue({ ok: true });
+  mockRun.mockResolvedValue({ runId: "run-1", status: "success" });
+  rs.mocked(useRunRoutineNow).mockReturnValue(mockRun);
 });
 
 afterEach(() => {
@@ -393,12 +390,50 @@ describe("RoutineDraftCard", () => {
 
     it("surfaces a failed run", async () => {
       const user = userEvent.setup();
-      mockRun.mockResolvedValue({ ok: false, error: "gh: not authenticated" });
+      mockRun.mockResolvedValue({
+        runId: "run-1",
+        status: "error",
+        error: "gh: not authenticated",
+      });
       renderActivated({ ...eventDraft, filterSummary: undefined, trigger: { type: "manual" } });
       await openMenu(user);
       await user.click(screen.getByRole("menuitem", { name: "Run now" }));
       expect(await screen.findByText("gh: not authenticated")).toBeTruthy();
     });
+  });
+
+  it("shows a paused manual routine as Paused and offers no Run now", async () => {
+    const user = userEvent.setup();
+    mockList.mockResolvedValue([
+      { id: "r-5", name: "Landlord emails", key: "chat-routine:card-5", enabled: false },
+    ]);
+    render(
+      <RoutineDraftCard
+        draft={{ ...eventDraft, filterSummary: undefined, trigger: { type: "manual" } }}
+        routineKey="chat-routine:card-5"
+      />,
+    );
+    expect(await screen.findByText("Paused")).toBeTruthy();
+    await openMenu(user);
+    expect(screen.queryByRole("menuitem", { name: "Run now" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+  });
+
+  it("surfaces a run request that fails outright", async () => {
+    const user = userEvent.setup();
+    mockList.mockResolvedValue([
+      { id: "r-5", name: "Landlord emails", key: "chat-routine:card-5", enabled: true },
+    ]);
+    mockRun.mockRejectedValue(new Error("Routine not found"));
+    render(
+      <RoutineDraftCard
+        draft={{ ...eventDraft, filterSummary: undefined, trigger: { type: "manual" } }}
+        routineKey="chat-routine:card-5"
+      />,
+    );
+    await openMenu(user);
+    await user.click(screen.getByRole("menuitem", { name: "Run now" }));
+    expect(await screen.findByText("Routine not found")).toBeTruthy();
   });
 
   // Until the lookup settles the card can't tell a draft from a routine that

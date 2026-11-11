@@ -761,19 +761,6 @@ export function deleteRoutine(id: string): Promise<RoutineMutationResult> {
   return routineMutation(id, { method: "DELETE" }, "Couldn't delete the routine.");
 }
 
-/** Fires the routine's action now. A run that fails is not an HTTP error: the
- * route answers 200 with `status: "error"`, so that counts as a failure too. */
-export async function runRoutineNow(id: string): Promise<RoutineMutationResult> {
-  const fallback = "Couldn't run the routine.";
-  const res = await fetch(`/api/routines/${encodeURIComponent(id)}/run`, {
-    method: "POST",
-    credentials: "include",
-  }).catch(() => null);
-  const body = (await res?.json().catch(() => null)) as { status?: string; error?: string } | null;
-  if (res?.ok && body?.status !== "error") return { ok: true };
-  return { ok: false, error: body?.error ?? fallback };
-}
-
 export async function saveSetting(key: string, value: unknown): Promise<boolean> {
   const res = await fetch("/api/settings", {
     method: "PUT",
