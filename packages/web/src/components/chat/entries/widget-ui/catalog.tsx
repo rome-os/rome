@@ -44,11 +44,11 @@ const ProgressApi = {
 };
 
 const textClass: Record<string, string> = {
-  h1: "text-title font-semibold",
-  h2: "text-title font-semibold",
-  h3: "text-ui font-semibold",
-  h4: "text-ui font-semibold",
-  h5: "text-ui font-medium",
+  h1: "text-title",
+  h2: "text-title",
+  h3: "text-section",
+  h4: "text-section",
+  h5: "text-section",
   caption: "text-aux text-muted-foreground",
   body: "text-ui",
 };
@@ -93,10 +93,10 @@ const Text = createComponentImplementation(TextApi, ({ props }) => (
 const Stat = createComponentImplementation(StatApi, ({ props }) => (
   <div className="flex min-w-0 flex-col">
     <span className="text-aux text-muted-foreground">{shown(props.label)}</span>
-    <span className="text-title font-semibold text-foreground tabular-nums">
+    <span className="text-title text-foreground tabular-nums">
       {shown(props.value)}
       {props.unit ? (
-        <span className="ml-1 text-aux font-normal text-muted-foreground">{props.unit}</span>
+        <span className="ml-1 text-aux text-muted-foreground">{props.unit}</span>
       ) : null}
     </span>
     {props.caption ? <span className="text-aux text-muted-foreground">{props.caption}</span> : null}
