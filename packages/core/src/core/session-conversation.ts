@@ -1,5 +1,5 @@
 import type { RomeSessionRef, RomeSessionType } from "@rome-os/app-runtime";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import { createLogger } from "../logger.js";
 import { webchatConversationOfKey } from "./agent-session-key.js";
 

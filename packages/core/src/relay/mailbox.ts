@@ -1,13 +1,13 @@
-import type { AppCatalog } from "./catalog.js";
+import type { AppCatalog } from "../apps/catalog.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { RelayDrainer } from "../relay/drainer.js";
+import type { RelayDrainer } from "./drainer.js";
 import {
   RELAY_SETTING_KEY,
   deriveDepositUrl,
   resolveRelayDrains,
   sanitizeDrainUrl,
   type RelayDrainSetting,
-} from "../relay/settings.js";
+} from "./settings.js";
 import { cloudBearer } from "../instance/instance-identity.js";
 import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
 import { createLogger } from "../logger.js";

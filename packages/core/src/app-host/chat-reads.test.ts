@@ -6,7 +6,7 @@ import { sql } from "drizzle-orm";
 import type { SessionActor } from "../access/session-actor.js";
 import type { ChatReads } from "@rome-os/app-runtime/chats";
 import type { ChatRef } from "../chats/storage/place.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { channels, connectedAccounts, connections, romeAgentMessages } from "../db/schema.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/db.js";

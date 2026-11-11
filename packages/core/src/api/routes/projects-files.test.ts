@@ -17,7 +17,7 @@ import type {
   ProjectDashboardResponse,
 } from "@rome/api-types/projects";
 import { projectsFilesRoutes } from "./projects-files.js";
-import { WebChatRepository } from "../../db/repositories/webchat.js";
+import { WebChatRepository } from "../../webchat/repository.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { eq } from "drizzle-orm";

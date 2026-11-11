@@ -12,7 +12,7 @@ import type { AgentDefinition } from "../agent/index.js";
 import { claudeStoppedTurnResult, readAnswerShape, romeSessionTracing } from "../agent/index.js";
 import { TurnUsageReporter } from "../app-host/turn-usage-reporter.js";
 import { agentFolders } from "../paths.js";
-import { canOpenChat } from "../concierge/privacy.js";
+import { canOpenChat } from "../webchat/privacy.js";
 import { describe, it, expect, beforeEach, afterEach, rs } from "@rstest/core";
 import { version as uuidVersion } from "uuid";
 import { AgentRunner } from "./agent-runner.js";

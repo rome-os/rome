@@ -16,7 +16,7 @@ import { createWebchatRuntime, openToolOf } from "./webchat.js";
 import { Session } from "../../agent/index.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
-import { webchatChannel, webchatCaller } from "../../chats/dashboard/dashboard-account.js";
+import { webchatChannel, webchatCaller } from "../../webchat/dashboard-account.js";
 import {
   buildAgent,
   createTestDb,

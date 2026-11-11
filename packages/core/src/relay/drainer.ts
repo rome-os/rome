@@ -1,6 +1,6 @@
 import { WebSocket, type RawData } from "ws";
 import { createLogger } from "../logger.js";
-import type { RomeAppCaller } from "../app-host/api.js";
+import type { RomeAppCaller } from "@rome-os/app-runtime";
 import { RELAY_DRAINED_HEADER, stripInternalHeaders, type ServerFrame } from "./protocol.js";
 
 const log = createLogger("relay-drainer");

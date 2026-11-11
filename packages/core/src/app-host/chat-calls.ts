@@ -17,7 +17,7 @@ import { z } from "zod";
 import type { SessionActor } from "../access/session-actor.js";
 import { parseWorkerCallParams } from "../lib/worker-call-params.js";
 import type { AgentNamesService } from "../chats/accounts/agent-names.js";
-import { dashboardCallerOf, webchatCaller } from "../chats/dashboard/dashboard-account.js";
+import { dashboardCallerOf, webchatCaller } from "../webchat/dashboard-account.js";
 
 // An app names one of Rome's accounts, or a channel by its name.
 const AccountOrChannel = z.union([

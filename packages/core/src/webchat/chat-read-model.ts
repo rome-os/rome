@@ -20,7 +20,7 @@
 // Nothing reads through it yet: the dashboard still reads its legacy tables
 // until the Chats switch moves it here.
 
-import { canOpenSql } from "../concierge/privacy.js";
+import { canOpenSql } from "./privacy.js";
 import { sql } from "drizzle-orm";
 import { automatedSource } from "./automated-source.js";
 import type { AgentInputState, ChatId } from "@rome-os/app-runtime";
@@ -110,7 +110,7 @@ export interface ChatSearchHit {
  * per chat.
  * json_valid and the object check skip lines whose parts are not a block
  * array, which would otherwise fail the whole list. The Chats version of the
- * legacy `sessionAwaitingGuardian` (db/repositories/webchat.ts), for a
+ * legacy `sessionAwaitingGuardian` (webchat/repository.ts), for a
  * select over `rome_sessions`.
  */
 export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (

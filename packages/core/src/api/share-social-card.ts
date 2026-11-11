@@ -1,4 +1,4 @@
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import { getExternalRequestOrigin } from "../lib/request-origin.js";
 import type { SocialCard } from "../lib/social-meta.js";
 

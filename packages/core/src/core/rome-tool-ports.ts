@@ -15,7 +15,7 @@ import type {
 import type { ActionEngine } from "../apps/actions/engine.js";
 import type { Action, ActionRegistry, ActionResult } from "../apps/actions/types.js";
 import { validateActionArgs } from "../apps/actions/validate-action-args.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import type { EventSources } from "../events/event-sources.js";
 import { chatRoutineKeyForToolUse } from "../routines/chat-routine-key.js";
 import { runDefer } from "../routines/defer.js";

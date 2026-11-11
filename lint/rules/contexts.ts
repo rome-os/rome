@@ -15,21 +15,27 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
     "agent",
     "apps",
     "chats",
+    "concierge",
     "connections",
     "favors",
     "instance",
     "people",
+    "relay",
     "routines",
+    "webchat",
   ],
   apps: ["access", "instance"],
   chats: ["access", "agent", "apps", "connections", "participation", "people"],
+  concierge: ["access", "agent", "apps", "chats", "connections", "instance", "routines", "webchat"],
   connections: ["apps", "chats", "desktops", "instance", "participation", "people"],
   desktops: ["access", "instance"],
   favors: ["access", "apps", "instance"],
   instance: [],
   participation: [],
   people: ["apps", "chats", "connections", "instance"],
+  relay: ["apps", "instance"],
   routines: ["access", "agent", "apps"],
+  webchat: ["access", "agent", "apps", "chats", "participation"],
 };
 
 /** Why a context never imports another, where the model says more than the graph. */
@@ -48,6 +54,8 @@ const REASONS: Record<string, string> = {
     "A favor request never names a connection, so no file in favors/ imports connections/.",
   "favors-never-imports-people":
     "A favor request knows its visitor by their Rome Cloud account, not as a person, so no file in favors/ imports people/.",
+  "connections-never-imports-webchat":
+    "The dashboard is Rome's own chat, not a connection, so no file in connections/ imports webchat/.",
   "desktops-never-imports-agent":
     "Desktops says which machines Rome can reach and what it can do on them, whoever asks, so no file in desktops/ imports agent/.",
   "desktops-never-imports-chats":
@@ -119,4 +127,26 @@ export const contextRules: ImportRule[] = contexts.flatMap((from) =>
 );
 
 /** Crossings that remain until their ticket lands. */
-export const contextCrossings: ListedCrossing[] = [];
+export const contextCrossings: ListedCrossing[] = [
+  {
+    rule: "connections-never-imports-webchat",
+    from: "connections/open-chat.ts",
+    to: "webchat/repository.ts",
+    ticket: "ZHA-170",
+    why: "A chat on a connected platform gets its session record from the Webchat repository, until session records move to Sessions.",
+  },
+  {
+    rule: "connections-never-imports-webchat",
+    from: "connections/open-chat.test.ts",
+    to: "webchat/chats-webchat-repository.ts",
+    ticket: "ZHA-170",
+    why: "The test builds the same repository for session records, until they move to Sessions.",
+  },
+  {
+    rule: "instance-never-imports-relay",
+    from: "instance/diagnostics.ts",
+    to: "relay/settings.ts",
+    ticket: "ZHA-169",
+    why: "The diagnostics report says whether the relay is set up, until the report gets each context's status from that context.",
+  },
+];

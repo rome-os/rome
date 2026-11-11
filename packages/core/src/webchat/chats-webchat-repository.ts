@@ -37,7 +37,7 @@ import {
   type StoredWebchatMessage,
   type TraceBatch,
   WebChatRepository,
-} from "../db/repositories/webchat.js";
+} from "./repository.js";
 import {
   agentTurnMessages,
   romeAgentMessages,

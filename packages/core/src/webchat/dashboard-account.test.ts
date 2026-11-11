@@ -3,11 +3,11 @@
 
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
-import { WebChatRepository } from "../../db/repositories/webchat.js";
-import { createTestDb, type TestDb } from "../../test/db.js";
-import { channelMessageOrder } from "../history/messages.js";
+import { WebChatRepository } from "./repository.js";
+import { createTestDb, type TestDb } from "../test/db.js";
+import { channelMessageOrder } from "../chats/history/messages.js";
 import { WEBCHAT_SURFACE, webchatChannel } from "./dashboard-account.js";
-import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
+import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
 describe("webchat channel", () => {
   let testDb: TestDb;
