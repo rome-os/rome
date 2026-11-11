@@ -1,0 +1,62 @@
+import Foundation
+import Testing
+@testable import Rome
+
+/// A card an app described as data: parsed from its `widget` part and read
+/// from its data model as the dashboard reads it.
+@Suite struct WidgetUITests {
+    private let model: JSONValue = .object([
+        "today": .object([
+            "calories": .number(1240),
+            "meals": .array([.object(["name": .string("Oatmeal")]), .object(["name": .string("Ramen")])]),
+            "a/b": .string("slash"),
+        ]),
+    ])
+
+    @Test func aDescribedWidgetIsDrawnHereAndAComponentWidgetOpensTheWeb() {
+        let parsed = MessagePart.parse(#"""
+        [{"type":"widget","toolUseId":"w1","appId":"meals","text":"Today","ui":{"components":[{"id":"root","component":"Text","text":"Hi"}]},"bind":{"/today":"days/1"}},
+         {"type":"widget","toolUseId":"w2","appId":"meals","text":"Today","componentId":"today"}]
+        """#)
+        guard case .widgetUI(let card) = parsed.first else { Issue.record("not drawn natively"); return }
+        #expect(card.appId == "meals")
+        #expect(card.bind == ["/today": "days/1"])
+        #expect(card.components["root"]?.kind == .text)
+        #expect(parsed.last == .webOnly(.app("meals")))
+    }
+
+    @Test func aWidgetWithoutARootIsNotDrawn() {
+        let parsed = MessagePart.parse(#"[{"type":"widget","toolUseId":"w","appId":"a","text":"t","ui":{"components":[{"id":"x","component":"Text","text":"a"}]}}]"#)
+        #expect(parsed == [.webOnly(.app("a"))])
+    }
+
+    @Test func pathsReadTheModelAndListItemsReadTheirOwnItem() {
+        #expect(WidgetData.text(.object(["path": .string("/today/calories")]), in: model, scope: "") == 1240.formatted())
+        #expect(WidgetData.text(.string("plain"), in: model, scope: "") == "plain")
+        #expect(WidgetData.text(.object(["path": .string("/today/a~1b")]), in: model, scope: "") == "slash")
+
+        let list = WidgetComponent(id: "l", kind: .list, props: .object([
+            "children": .object(["componentId": .string("meal"), "path": .string("/today/meals")]),
+        ]))
+        let kids = list.children(in: model, scope: "")
+        #expect(kids.map(\.scope) == ["/today/meals/0", "/today/meals/1"])
+        #expect(WidgetData.text(.object(["path": .string("name")]), in: model, scope: kids[1].scope) == "Ramen")
+    }
+
+    @Test func aButtonPostsItsContextWithItsPathsRead() {
+        let context = WidgetData.context(.object(["kcal": .object(["path": .string("/today/calories")]), "date": .string("2026-11-11")]), in: model, scope: "")
+        #expect(context == .object(["kcal": .number(1240), "date": .string("2026-11-11")]))
+    }
+
+    @Test func aCardReachesOnlyItsOwnApp() {
+        #expect(WidgetData.isAppPath("days/2026-11-11"))
+        for path in ["/api/system", "../connector/x", "a/./b", "https://evil.example", "a?b=1", ""] {
+            #expect(!WidgetData.isAppPath(path))
+        }
+    }
+
+    @MainActor @Test func theDemoMealCardParses() {
+        guard case .widgetUI(let card) = MessagePart.parse(JSONValue.array([DemoBackend.mealCard]).prettyText).first else { Issue.record("demo card did not parse"); return }
+        #expect(card.components.count == 12)
+    }
+}

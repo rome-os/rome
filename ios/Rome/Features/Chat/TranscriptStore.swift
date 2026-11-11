@@ -683,6 +683,11 @@ final class TranscriptStore {
 
     /// A card for a service that already works shows Connected when it opens,
     /// and tells nobody: an old card must not wake Chat again.
+    /// A widget's call on its own app, with this chat's backend.
+    func appCall(appId: String, method: String, path: String, body: JSONValue?) async throws -> ConnectReply {
+        try await backend.appCall(appId: appId, method: method, path: path, body: body)
+    }
+
     func checkConnected(_ part: MessagePart.ConnectCardPart, rowId: String) async {
         guard connectPhases[rowId] == nil || connectPhases[rowId] == .idle else { return }
         guard let list = try? await backend.connectors(),

@@ -873,6 +873,16 @@
         }
       }
     },
+    "Could not read this card's data. %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法读取这张卡片的数据。%@"
+          }
+        }
+      }
+    },
     "Could not send. Please try again." : {
       "localizations" : {
         "zh-Hans" : {

@@ -452,6 +452,50 @@ final class DemoBackend: RomeBackend {
         return ConnectReply(ok: true, body: .object(["redirectUrl": .string("https://example.com/connect/\(provider)")]))
     }
 
+    /// The meal planner app's API, for its card in `topic-meals`.
+    func appCall(appId: String, method: String, path: String, body: JSONValue?) async throws -> ConnectReply {
+        try await pause(0.3)
+        guard appId == "meal-planner" else { return ConnectReply(ok: false, body: .object([:])) }
+        if method == "POST", path == "water" { glasses += 1 }
+        return ConnectReply(ok: true, body: .object([
+            "calories": .number(1240), "goal": .number(2000), "water": .number(Double(glasses)),
+            "meals": .array([
+                .object(["name": .string("燕麦粥和蓝莓"), "calories": .string("320 千卡")]),
+                .object(["name": .string("牛肉面"), "calories": .string("680 千卡")]),
+                .object(["name": .string("拿铁"), "calories": .string("240 千卡")]),
+            ]),
+        ]))
+    }
+
+    private var glasses = 3
+
+    static let mealCard: JSONValue = {
+        func c(_ id: String, _ kind: String, _ props: [String: JSONValue]) -> JSONValue {
+            .object(props.merging(["id": .string(id), "component": .string(kind)]) { a, _ in a })
+        }
+        let path = { (p: String) in JSONValue.object(["path": .string(p)]) }
+        let ids = { (list: [String]) in JSONValue.array(list.map(JSONValue.string)) }
+        return .object([
+            "type": .string("widget"), "toolUseId": .string("meal-1"), "appId": .string("meal-planner"),
+            "text": .string("今天的饮食记录"),
+            "bind": .object(["/today": .string("days/today")]),
+            "ui": .object(["components": .array([
+                c("root", "Column", ["children": ids(["title", "stats", "goal", "meals", "water"])]),
+                c("title", "Text", ["text": .string("今天的饮食"), "variant": .string("h3")]),
+                c("stats", "Row", ["children": ids(["kcal", "cups"]), "justify": .string("spaceBetween")]),
+                c("kcal", "Stat", ["label": .string("热量"), "value": path("/today/calories"), "unit": .string("千卡")]),
+                c("cups", "Stat", ["label": .string("喝水"), "value": path("/today/water"), "unit": .string("杯")]),
+                c("goal", "Progress", ["label": .string("每日目标 2,000 千卡"), "value": path("/today/calories"), "max": path("/today/goal")]),
+                c("meals", "List", ["children": .object(["componentId": .string("meal"), "path": .string("/today/meals")])]),
+                c("meal", "Row", ["children": ids(["meal-name", "meal-kcal"]), "justify": .string("spaceBetween")]),
+                c("meal-name", "Text", ["text": path("name")]),
+                c("meal-kcal", "Text", ["text": path("calories"), "variant": .string("caption")]),
+                c("water", "Button", ["child": .string("water-label"), "action": .object(["event": .object(["name": .string("water")])])]),
+                c("water-label", "Text", ["text": .string("喝了一杯水")]),
+            ])]),
+        ])
+    }()
+
     func sendFeedback(_ text: String) async throws {
         try await pause(0.8)
     }
@@ -608,6 +652,7 @@ final class DemoBackend: RomeBackend {
         topicChats = [
             ConciergeChat(id: "topic-trip", name: "京都旅行计划", main: false, unread: 2),
             ConciergeChat(id: "topic-home", name: "家里装修：厨房翻新、浴室防水和客厅灯具的预算与师傅安排", main: false, unread: 0),
+            ConciergeChat(id: "topic-meals", name: "今天吃了什么", main: false, unread: 0),
             ConciergeChat(id: "topic-books", name: "读书笔记", main: false, unread: 0),
             ConciergeChat(id: "topic-mail", name: "每天的邮件摘要", main: false, unread: 0),
             ConciergeChat(id: "topic-mail-setup", name: "邮件摘要设置", main: false, unread: 0),
@@ -685,6 +730,13 @@ final class DemoBackend: RomeBackend {
         messages["topic-home"] = [
             user("h1", "厨房翻新，记下要找的师傅。\n\n- File 1: [kitchen.jpg](</\(kitchen)>)", at: at(20, 10, daysAgo: 1), session: "topic-home"),
             agent((1...20).map { "\($0). 第 \($0) 步：量好尺寸，确认材料和师傅的时间。" }.joined(separator: "\n"), at: at(20, 11, daysAgo: 1), session: "topic-home"),
+        ]
+
+        // A card the meal planner app described as data, drawn natively.
+        messages["topic-meals"] = [
+            user("m1", "我今天吃了多少？", at: at(12, 40), session: "topic-meals"),
+            parts([Self.mealCard], at: at(12, 41), session: "topic-meals"),
+            agent("到现在 1,240 千卡，离目标还差 760。晚饭可以吃点蛋白质多的。", at: at(12, 41).addingTimeInterval(2), session: "topic-meals"),
         ]
 
         // Concierge, as on the design's Chat board.

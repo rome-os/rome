@@ -84,6 +84,10 @@ protocol RomeBackend: AnyObject, Sendable {
     /// `/api/…` path on the instance. Any status answers; only a dropped
     /// connection or a lost session throws.
     func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply
+    /// A widget's call on its own app: `path` is relative to
+    /// `/api/apps/<appId>/`. Any status answers; only a dropped connection or
+    /// a lost session throws.
+    func appCall(appId: String, method: String, path: String, body: JSONValue?) async throws -> ConnectReply
     /// `GET /api/concierge/connectors`: every service Chat can use, and its state.
     func connectors() async throws -> [ConnectorState]
     /// `GET /api/routines`: the guardian's routines. A visitor gets an error.
@@ -252,6 +256,13 @@ final class LiveBackend: RomeBackend {
         try await client.exchange(method: method, apiPath: apiPath, json: body)
     }
 
+    func appCall(appId: String, method: String, path: String, body: JSONValue?) async throws -> ConnectReply {
+        guard let app = appId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed), WidgetData.isAppPath(path) else {
+            throw APIError.notFound
+        }
+        return try await client.exchange(method: method, apiPath: "/api/apps/\(app)/\(path)", json: body)
+    }
+
     func connectors() async throws -> [ConnectorState] {
         let body: JSONValue = try await client.get("/concierge/connectors")
         return (body["connectors"]?.array ?? []).compactMap(ConnectorState.init(json:))
@@ -378,6 +389,7 @@ extension RomeBackend {
     var account: AccountStamp { .unchecked }
 
     func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply { throw APIError.notFound }
+    func appCall(appId: String, method: String, path: String, body: JSONValue?) async throws -> ConnectReply { throw APIError.notFound }
     func connectors() async throws -> [ConnectorState] { [] }
     func agentName() async -> String? { nil }
     func pendingApprovals() async throws -> [PendingApproval] { [] }
