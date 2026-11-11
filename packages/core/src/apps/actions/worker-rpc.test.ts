@@ -4,6 +4,7 @@ import { describe, it, expect, rs } from "@rstest/core";
 import { context, propagation, ROOT_CONTEXT, trace } from "@opentelemetry/api";
 import { runWithCurrentActionContext } from "@rome-os/app-runtime";
 import { WorkerRpcServer, type WorkerRpcServices } from "./worker-rpc.js";
+import { chatWorkerCalls } from "../../chats/for-apps.js";
 import { connectionWorkerCalls } from "../../connections/index.js";
 import { emailConnection } from "../accounts-service.js";
 import { IpcRpc, type IpcMessage, type IpcTransport } from "./ipc.js";
@@ -125,16 +126,18 @@ function makeServer(
     validateActionArgs: overrides.validateActionArgs ?? rs.fn(() => null),
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },
-    channelsService: overrides.channelsService,
-    agentNames: overrides.agentNames,
     sendApprovalCard: overrides.sendApprovalCard ?? rs.fn(async () => {}),
   } as unknown as WorkerRpcServices;
   return {
-    // Connections' calls ride the same worker boundary, which is what
-    // captures the calling action that app connections trust.
-    server: new WorkerRpcServer(
-      services,
-      connectionWorkerCalls({
+    // Chats' and Connections' calls ride the same worker boundary, which is
+    // what captures the calling action and the person it stands for.
+    server: new WorkerRpcServer(services, {
+      ...chatWorkerCalls({
+        channelsService: overrides.channelsService as never,
+        chatSettings: {} as never,
+        agentNames: overrides.agentNames as never,
+      }),
+      ...connectionWorkerCalls({
         appConnections: overrides.appConnections as never,
         appIdForAction: overrides.appIdForAction ?? (() => null),
         connectionRegistry: overrides.connectionRegistry as never,
@@ -144,7 +147,7 @@ function makeServer(
             ((connection: { service: string }) => connection.service) as never,
           )?.id,
       }),
-    ),
+    }),
     services,
     eventBus,
     eventCatalog,
@@ -757,8 +760,8 @@ describe("WorkerRpcServer calls from other contexts", () => {
 
   it("refuses a call whose name a built-in method already takes", () => {
     const { services } = makeServer({});
-    expect(() => new WorkerRpcServer(services, { "channels.list": async () => [] })).toThrow(
-      "WorkerRPC: method channels.list is already served",
+    expect(() => new WorkerRpcServer(services, { "actions.has": async () => ({}) })).toThrow(
+      "WorkerRPC: method actions.has is already served",
     );
   });
 });

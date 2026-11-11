@@ -1,28 +1,12 @@
-import { webchatCaller } from "../../chats/dashboard/dashboard-account.js";
 import type { IpcCallContext, IpcRpc } from "./ipc.js";
 import type { ApprovalCard } from "./approval-card.js";
 import { z } from "zod";
 import { parseWorkerCallParams } from "../../lib/worker-call-params.js";
 import { runWithHookInvocationContext } from "../../core/hook-recursion.js";
-import type {
-  BackendTurnRunner,
-  ChatId,
-  ChatRef,
-  ChatSettingsControl,
-  ChannelMessage,
-  OutgoingMessage,
-  ChannelsService,
-  MessageReceipt,
-  UpdateChatSettingsInput,
-  ResetChatSettingsInput,
-  ListChatSettingsInput,
-  PreviewPayload,
-  ThreadContext,
-} from "@rome-os/app-runtime";
+import type { BackendTurnRunner, PreviewPayload, ThreadContext } from "@rome-os/app-runtime";
 import type { EventService } from "../../events/event-service.js";
 import type { AppLifecycleService } from "../lifecycle-service.js";
 import type { AppStoreReader } from "../store-service.js";
-import type { AgentNamesService } from "../../chats/accounts/agent-names.js";
 import type { SendOutcome, SystemNotifyContent } from "../../lib/notify-client.js";
 import type { ConciergeOwner } from "../../concierge/owner.js";
 import { actionCaller, sendForCaller } from "./caller-notify.js";
@@ -31,12 +15,6 @@ import { SpecSourceSchema } from "../lockfile.js";
 import { parseRemixSource } from "../remix-source.js";
 
 const AppIdSchema = z.string().min(1);
-
-// An app names one of Rome's accounts, or a channel by its name.
-const AccountOrChannel = z.union([
-  z.string().min(1),
-  z.object({ platform: z.string().min(1), id: z.string().min(1) }).strict(),
-]);
 
 // An approval's card, which a worker asks main to put in the conversation the
 // approval came from, so it is recorded in that chat as main records it.
@@ -48,35 +26,6 @@ const ApprovalCardParams = z.object({
     .custom<ThreadContext>((val) => typeof val === "object" && val !== null)
     .optional(),
 });
-
-const ChannelsSendParams = z.object({
-  channel: AccountOrChannel,
-  chatId: z.string(),
-  message: z.custom<OutgoingMessage>((val) => typeof val === "object" && val !== null, {
-    message: "message must be an object",
-  }),
-});
-
-// `query` reads the channel's own `messages`, which names no Connection, so a
-// request naming one is refused rather than answered from another account.
-const ChannelsQueryParams = z
-  .object({
-    channel: AccountOrChannel,
-    chatId: z.string().optional(),
-    since: z.string().datetime().optional(),
-    after: z.string().optional(),
-    limit: z.number().int().positive().optional(),
-  })
-  .strict();
-
-const AgentNamesResolveParams = z.object({ name: z.string().min(1) }).strict();
-
-const ChatRefParams = z.object({
-  ref: z.object({ connectionId: z.string().min(1), chatId: z.string() }),
-});
-const ChatSettingsInput = z.custom<
-  UpdateChatSettingsInput | ResetChatSettingsInput | ListChatSettingsInput
->((value) => typeof value === "object" && value !== null);
 
 // An optional sender-supplied body. `{}` (the legacy no-arg call) is
 // valid; a present body must be a string. `.strict()` so an unknown key on this
@@ -176,9 +125,6 @@ const SessionContinueParams = z.object({
 });
 
 export interface WorkerRpcServices {
-  /** How a worker's actions send and read on channels (`channels.*`). */
-  channelsService: ChannelsService;
-  chatSettings: ChatSettingsControl;
   /** Event coordinator (bus + catalog). `events.publish` / `events.searchCatalog`
    * delegate the business logic here so it is shared with the main-process
    * action path; the handler only validates the wire params. */
@@ -209,8 +155,6 @@ export interface WorkerRpcServices {
   notify: { send(content?: SystemNotifyContent): Promise<SendOutcome> };
   /** The one person a dashboard chat is private to, or null for a shared chat: a push it calls for rings them. */
   privateOwnerOf: (chatId: string) => Promise<ConciergeOwner | null>;
-  /** System-only: how `system:send_message` turns an agent's name into its id. */
-  agentNames: AgentNamesService;
   /** Puts an approval's card in the conversation it came from, recorded in
    *  that chat (`approvals.sendCard`). */
   sendApprovalCard: (approval: ApprovalCard) => Promise<void>;
@@ -238,48 +182,9 @@ export class WorkerRpcServer {
   ) {
     this.handlers = new Map<string, WorkerRpcHandler>(
       Object.entries({
-        "channels.list": () => this.services.channelsService.list(),
-        "channels.send": (params, context) => this.handleChannelsSend(params, context),
         "approvals.sendCard": (params) =>
           this.services.sendApprovalCard(
             parseWorkerCallParams("approvals.sendCard", ApprovalCardParams, params),
-          ),
-        "channels.query": (params, context) => this.handleChannelsQuery(params, context),
-        "agentNames.resolve": (params) => {
-          const { name } = parseWorkerCallParams(
-            "agentNames.resolve",
-            AgentNamesResolveParams,
-            params,
-          );
-          return this.services.agentNames.resolve(name);
-        },
-        "chatSettings.list": (params) =>
-          this.services.chatSettings.list(
-            parseWorkerCallParams(
-              "chatSettings.list",
-              ChatSettingsInput,
-              params,
-            ) as ListChatSettingsInput,
-          ),
-        "chatSettings.get": (params) => {
-          const { ref } = parseWorkerCallParams("chatSettings.get", ChatRefParams, params);
-          return this.services.chatSettings.get(ref as ChatRef);
-        },
-        "chatSettings.update": (params) =>
-          this.services.chatSettings.update(
-            parseWorkerCallParams(
-              "chatSettings.update",
-              ChatSettingsInput,
-              params,
-            ) as UpdateChatSettingsInput,
-          ),
-        "chatSettings.reset": (params) =>
-          this.services.chatSettings.reset(
-            parseWorkerCallParams(
-              "chatSettings.reset",
-              ChatSettingsInput,
-              params,
-            ) as ResetChatSettingsInput,
           ),
         "actions.has": (params) => this.handleActionsHas(params),
         "actions.isExplicit": (params) => this.handleActionsIsExplicit(params),
@@ -407,42 +312,6 @@ export class WorkerRpcServer {
     const actor = context?.callerActionContext?.actor;
     await this.services.backendTurnRunner.runAndDeliver(turn, actor ? { actor } : undefined);
     return { ok: true };
-  }
-
-  private async handleChannelsSend(
-    params: unknown,
-    context?: IpcCallContext,
-  ): Promise<MessageReceipt> {
-    const { channel, chatId, message } = parseWorkerCallParams(
-      "channels.send",
-      ChannelsSendParams,
-      params,
-    );
-    // The dashboard chat writes only where the calling action's person may.
-    return await webchatCaller.run(callerOf(context), () =>
-      this.services.channelsService.send(channel, chatId as ChatId, message),
-    );
-  }
-
-  private async handleChannelsQuery(
-    params: unknown,
-    context?: IpcCallContext,
-  ): Promise<ChannelMessage[]> {
-    const { channel, chatId, since, after, limit } = parseWorkerCallParams(
-      "channels.query",
-      ChannelsQueryParams,
-      params,
-    );
-    // The dashboard chat reads as the person accountable for the calling
-    // action's turn, in the chat it runs in.
-    return await webchatCaller.run(callerOf(context), () =>
-      this.services.channelsService.query(channel, {
-        ...(chatId ? { chatId: chatId as ChatId } : {}),
-        ...(since ? { since: new Date(since) } : {}),
-        ...(after ? { after } : {}),
-        ...(limit ? { limit } : {}),
-      }),
-    );
   }
 
   /**

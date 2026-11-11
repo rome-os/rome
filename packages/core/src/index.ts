@@ -236,6 +236,7 @@ import { RoutineEngine } from "./routines/engine.js";
 import { routineWorkerCalls } from "./routines/for-apps.js";
 import { instanceWorkerCalls } from "./instance/for-apps.js";
 import { agentWorkerCalls } from "./agent/index.js";
+import { chatWorkerCalls } from "./chats/for-apps.js";
 import { connectionWorkerCalls } from "./connections/index.js";
 import { EventCatalog } from "./event-catalog.js";
 import {
@@ -1949,8 +1950,6 @@ async function main() {
 
   const workerRpcServer = new WorkerRpcServer(
     {
-      channelsService,
-      chatSettings,
       eventService,
       appLifecycle,
       appStore,
@@ -1960,7 +1959,6 @@ async function main() {
       backendTurnRunner,
       notify: notifyClient,
       privateOwnerOf: privateOwnerOfChat,
-      agentNames: agentNameResolver,
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
     {
@@ -1974,6 +1972,7 @@ async function main() {
         connectionRegistry,
         emailConnectionId: () => emailConnection(connectionRegistry, channelOf)?.id,
       }),
+      ...chatWorkerCalls({ channelsService, chatSettings, agentNames: agentNameResolver }),
       ...agentWorkerCalls({
         hasAgent: (name) => agentLoader.find(name) !== undefined,
         // Same allow-list resolution as the agent session's tool gate.
