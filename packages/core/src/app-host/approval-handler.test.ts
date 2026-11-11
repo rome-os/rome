@@ -53,7 +53,7 @@ describe("ApprovalHandler", () => {
 
   async function seedAgentSession(
     id: string,
-    agentName = "main",
+    agentName = "core:main",
     channelThreadKey = `approval:${id}`,
   ) {
     await rome.repos.sessions.add(
@@ -238,7 +238,7 @@ describe("ApprovalHandler", () => {
       if (recorded.status !== "pending_approval") throw new Error(recorded.status);
       const approvalId = recorded.approval.approvalId;
       await rome.repos.approvals.resolvePending(approvalId, "approve", "test-guardian");
-      await seedAgentSession("sess-1", "main", "telegram:t-1");
+      await seedAgentSession("sess-1", "core:main", "telegram:t-1");
       const run = rs.spyOn(rome.agentRunner, "run");
 
       await runWithSessionActor(guardian, () => rome.approvalHandler.onApproved(approvalId));
@@ -316,7 +316,7 @@ describe("ApprovalHandler", () => {
         },
       );
       if (recorded.status !== "pending_approval") throw new Error(recorded.status);
-      await seedAgentSession("sess-1", "main", "telegram:t-1");
+      await seedAgentSession("sess-1", "core:main", "telegram:t-1");
       const run = rs.spyOn(rome.agentRunner, "run");
       await runWithSessionActor({ kind: "guardian", userId: "seat", via: "cookie" }, () =>
         rome.approvalHandler.onRejected(recorded.approval.approvalId),
@@ -334,7 +334,7 @@ describe("ApprovalHandler", () => {
         channelThreadKey: "telegram:t-1",
         channelContext: { channel: "telegram", threadId: "t-1", threadType: "group" },
       });
-      await seedAgentSession("sess-1", "main", "telegram:t-1");
+      await seedAgentSession("sess-1", "core:main", "telegram:t-1");
 
       await rome.approvalHandler.onApproved(approvalId);
 
@@ -359,7 +359,7 @@ describe("ApprovalHandler", () => {
         channelThreadKey: "telegram:t-1",
         channelContext: { channel: "telegram", threadId: "t-1", threadType: "group" },
       });
-      await seedAgentSession("sess-1", "main", "telegram:t-1");
+      await seedAgentSession("sess-1", "core:main", "telegram:t-1");
 
       await rome.approvalHandler.onApproved(approvalId);
 
@@ -380,7 +380,7 @@ describe("ApprovalHandler", () => {
         channelThreadKey: "telegram:t-1",
         channelContext: { channel: "telegram", threadId: "t-1", threadType: "group" },
       });
-      await seedAgentSession("sess-1", "main", "telegram:t-1");
+      await seedAgentSession("sess-1", "core:main", "telegram:t-1");
 
       await rome.approvalHandler.onApproved(approvalId);
 
@@ -562,7 +562,7 @@ describe("ApprovalHandler", () => {
         agentName: "assistant",
         channelThreadKey: "telegram:t-1",
       });
-      await seedAgentSession("sess-1", "assistant", "telegram:t-1");
+      await seedAgentSession("sess-1", "core:assistant", "telegram:t-1");
 
       await rome.approvalHandler.onRejected(approvalId);
 
@@ -659,9 +659,9 @@ describe("ApprovalHandler", () => {
           channelThreadKey: "telegram:tC",
         }),
       };
-      await seedAgentSession("sess-A", "main", "telegram:tA");
-      await seedAgentSession("sess-B", "main", "telegram:tB");
-      await seedAgentSession("sess-C", "main", "telegram:tC");
+      await seedAgentSession("sess-A", "core:main", "telegram:tA");
+      await seedAgentSession("sess-B", "core:main", "telegram:tB");
+      await seedAgentSession("sess-C", "core:main", "telegram:tC");
 
       await rome.approvalHandler.onApproved(ids.C);
       await rome.approvalHandler.onApproved(ids.A);

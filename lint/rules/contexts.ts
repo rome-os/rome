@@ -118,8 +118,6 @@ export const contextRules: ImportRule[] = contexts.flatMap((from) =>
     }),
 );
 
-const SESSIONS_REPOSITORY = "agent/infrastructure/drizzle-session-repository";
-
 /** The apps/ files that give apps `ctx.favors` through Favors' `FavorService` type. */
 const APP_FAVOR_CAPABILITY = ["apps/context.ts"];
 
@@ -170,18 +168,4 @@ export const contextCrossings: ListedCrossing[] = [
     ticket: "ZHA-163",
     why: "Apps offers `ctx.favors` by naming Favors' `FavorService` type, until Apps reaches favor requests without it.",
   })),
-  {
-    rule: "agent-never-imports-apps",
-    from: `${SESSIONS_REPOSITORY}.ts`,
-    to: "apps/artifact-id.ts",
-    ticket: "ZHA-161",
-    why: "The deprecated match of an agent under its legacy names, until agent names are canonical before they reach the sessions repository.",
-  },
-  {
-    rule: "agent-never-imports-apps",
-    from: `${SESSIONS_REPOSITORY}.test.ts`,
-    to: "apps/artifact-id.ts",
-    ticket: "ZHA-161",
-    why: "The tests of that legacy-name match.",
-  },
 ];

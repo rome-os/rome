@@ -203,7 +203,7 @@ describe("AgentRunner", () => {
     agentLoader = new AgentLoader(artifactIdentity);
     await agentLoader.loadAll(FIXTURES_DIR);
 
-    sessionRepository = new DrizzleSessionRepository(testDb.db, artifactIdentity);
+    sessionRepository = new DrizzleSessionRepository(testDb.db);
     systemPrompts = createTestSystemPrompts();
     actionRegistry = new ActionRegistryImpl();
     actionEngine = new ActionEngine(actionRegistry, createActionEngineRepos(testDb.db));
@@ -274,7 +274,7 @@ describe("AgentRunner", () => {
     const manager = createSessions({
       ...managerDeps(modelResolver),
       agentLoader: namespacedLoader,
-      sessionRepository: new DrizzleSessionRepository(testDb.db, { legacyBindings }),
+      sessionRepository: new DrizzleSessionRepository(testDb.db),
     });
 
     const session = await manager.open({
@@ -1598,7 +1598,7 @@ describe("AgentRunner", () => {
       expect(openParams[0].config.model).toBe("claude-haiku-5-5");
       // Forks never write pins: the source session keeps the pin of
       // its own live model even after a tier-overridden forked turn ran.
-      const row = await sessionRepository.current("webchat:fork-1", "test-main");
+      const row = await sessionRepository.current("webchat:fork-1", "core:test-main");
       expect(row).toMatchObject({ model: "claude-opus-5-5[1m]" });
     });
 
@@ -1625,7 +1625,7 @@ describe("AgentRunner", () => {
       expect(forkLifetime).toBe("kept");
       const start = messages.find((m) => m.type === "turn_start") as { sessionId: string };
       await expect(
-        sessionRepository.current(`webchat:${start.sessionId}`, "test-main"),
+        sessionRepository.current(`webchat:${start.sessionId}`, "core:test-main"),
       ).resolves.toMatchObject({
         id: start.sessionId,
         provider: "mock",
@@ -1636,11 +1636,11 @@ describe("AgentRunner", () => {
         status: "active",
       });
       // A fork never rewrites its parent: the source keeps its own pin.
-      await expect(sessionRepository.current("webchat:fork-1", "test-main")).resolves.toMatchObject(
-        {
-          model: "claude-opus-5-5[1m]",
-        },
-      );
+      await expect(
+        sessionRepository.current("webchat:fork-1", "core:test-main"),
+      ).resolves.toMatchObject({
+        model: "claude-opus-5-5[1m]",
+      });
     });
 
     it("withholds defer from a continuable fork's own turn", async () => {
@@ -1692,7 +1692,7 @@ describe("AgentRunner", () => {
       const start = messages.find((m) => m.type === "turn_start") as { sessionId: string };
       // `current` answers null for a miss.
       await expect(
-        sessionRepository.current(`webchat:${start.sessionId}`, "test-main"),
+        sessionRepository.current(`webchat:${start.sessionId}`, "core:test-main"),
       ).resolves.toBeNull();
     });
 
@@ -1740,7 +1740,7 @@ describe("AgentRunner", () => {
       for (const messages of [noKey, noThread, failed]) {
         const start = messages.find((m) => m.type === "turn_start") as { sessionId: string };
         await expect(
-          sessionRepository.current(`webchat:${start.sessionId}`, "test-main"),
+          sessionRepository.current(`webchat:${start.sessionId}`, "core:test-main"),
         ).resolves.toBeNull();
       }
     });
@@ -3344,7 +3344,7 @@ describe("AgentRunner", () => {
     });
 
     it("reuses an active session for the same key", async () => {
-      const seeded = Session.create("test-main", { continuityKey: "telegram:thread-reuse" });
+      const seeded = Session.create("core:test-main", { continuityKey: "telegram:thread-reuse" });
       await sessionRepository.add(seeded);
       const existingId = seeded.id;
 
@@ -4287,7 +4287,7 @@ describe("AgentRunner", () => {
       const now = new Date();
       await testDb.db.insert(sessions).values({
         id: "sess-old",
-        agentName: "test-main",
+        agentName: "core:test-main",
         channelThreadKey: "telegram:t-1",
         status: "active",
         createdAt: now,
@@ -4557,7 +4557,9 @@ describe("AgentRunner", () => {
       await collectMessages(
         (await startAfter(session, { prompt: "Three", reasoningEffort: "low" })).events(),
       );
-      expect(await sessionRepository.current("webchat:effort-record", "test-main")).toMatchObject({
+      expect(
+        await sessionRepository.current("webchat:effort-record", "core:test-main"),
+      ).toMatchObject({
         model: "claude-opus-5-5[1m]",
         reasoningEffort: "low",
       });
@@ -5574,7 +5576,7 @@ describe("AgentRunner", () => {
 
     it("does not inject into a resumed session (the block is already in its history)", async () => {
       // A row whose model thread the provider resumes already holds the block.
-      const seeded = Session.create("test-main", { continuityKey: "webchat:tc-resumed" });
+      const seeded = Session.create("core:test-main", { continuityKey: "webchat:tc-resumed" });
       seeded.recordTurn({
         provider: "mock",
         modelThreadId: "mock-thread-1",
@@ -5599,7 +5601,7 @@ describe("AgentRunner", () => {
     it("injects into a session whose row never recorded a model thread", async () => {
       // The provider resumes only a recorded thread, so this one starts new
       // and has not seen the block.
-      const seeded = Session.create("test-main", { continuityKey: "webchat:tc-unthreaded" });
+      const seeded = Session.create("core:test-main", { continuityKey: "webchat:tc-unthreaded" });
       await sessionRepository.add(seeded);
       const runner = createRunner(alwaysResultProvider());
 
@@ -6620,7 +6622,7 @@ describe("AgentRunner", () => {
         providers: [codexProvider(opens)],
         accounts: fakeAccounts(() => state),
       });
-      const seeded = Session.create("test-main", { continuityKey: "telegram:legacy-row" });
+      const seeded = Session.create("core:test-main", { continuityKey: "telegram:legacy-row" });
       // A pre-cutover row: provider + thread persisted, model NULL.
       seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
       await sessionRepository.add(seeded);
@@ -6657,7 +6659,7 @@ describe("AgentRunner", () => {
         accounts: fakeAccounts(() => state),
       });
       // The main agent's session on this thread is pinned to Sol.
-      const seeded = Session.create("test-main", { continuityKey: "webchat:shared-thread" });
+      const seeded = Session.create("core:test-main", { continuityKey: "webchat:shared-thread" });
       seeded.recordTurn({
         provider: "openai",
         modelThreadId: "codex-thread",
@@ -6734,7 +6736,7 @@ describe("AgentRunner", () => {
       });
 
       // A session already pinned to Codex Terra.
-      const seeded = Session.create("test-main", { continuityKey: "webchat:override-pin" });
+      const seeded = Session.create("core:test-main", { continuityKey: "webchat:override-pin" });
       seeded.recordTurn({
         provider: "openai",
         modelThreadId: "codex-thread",
@@ -6781,7 +6783,7 @@ describe("AgentRunner", () => {
       });
 
       // A session pinned to Sol, whose access is now lost: the pin strands it.
-      const seeded = Session.create("test-main", { continuityKey: "webchat:rescue" });
+      const seeded = Session.create("core:test-main", { continuityKey: "webchat:rescue" });
       seeded.recordTurn({
         provider: "openai",
         modelThreadId: "codex-thread",
@@ -6850,7 +6852,7 @@ describe("AgentRunner", () => {
         undefined,
         "claude-opus",
       );
-      const seeded = Session.create("test-main", { continuityKey: "webchat:legacy-mismatch" });
+      const seeded = Session.create("core:test-main", { continuityKey: "webchat:legacy-mismatch" });
       seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
       await sessionRepository.add(seeded);
       const legacyId = seeded.id;
@@ -6907,7 +6909,9 @@ describe("AgentRunner", () => {
         undefined,
         "claude-opus",
       );
-      const seeded = Session.create("test-main", { continuityKey: "webchat:legacy-no-context" });
+      const seeded = Session.create("core:test-main", {
+        continuityKey: "webchat:legacy-no-context",
+      });
       seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });
       await sessionRepository.add(seeded);
       const legacyId = seeded.id;
@@ -6958,7 +6962,7 @@ describe("AgentRunner", () => {
         undefined,
         "claude-opus",
       );
-      const seeded = Session.create("test-main", {
+      const seeded = Session.create("core:test-main", {
         continuityKey: "webchat:legacy-parent:subagent:child-1",
       });
       seeded.recordTurn({ provider: "openai", modelThreadId: "codex-thread" });

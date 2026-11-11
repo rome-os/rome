@@ -149,7 +149,7 @@ describe("AgentSession turn usage", () => {
     manager = createSessions(
       {
         agentLoader: loader,
-        sessionRepository: new DrizzleSessionRepository(testDb.db, artifactIdentity),
+        sessionRepository: new DrizzleSessionRepository(testDb.db),
         systemPrompts,
         modelResolver: createModelResolver({
           providers: [provider],

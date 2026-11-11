@@ -222,7 +222,7 @@ async function buildHarness(
   const artifactIdentity = { legacyBindings: createEmptyLegacyArtifactBindings() };
   const people = new PeopleRepository(db);
   const repos: TestRomeRepos = {
-    sessions: new DrizzleSessionRepository(db, artifactIdentity),
+    sessions: new DrizzleSessionRepository(db),
     approvals: new ApprovalsRepository(db),
     executionJournal: new ExecutionJournalRepository(db),
     actionExecutions: new ActionExecutionsRepository(db),

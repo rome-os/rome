@@ -849,7 +849,16 @@ async function main() {
   });
   artifactLoadFailuresBooted = true;
   artifactLoadFailureReporter.report("boot");
-  const sessionRepository = new DrizzleSessionRepository(db, artifactIdentity);
+  const sessionRepository = new DrizzleSessionRepository(db);
+  // Sessions and chats saved before agent names carried their app are moved to
+  // the new names, so a session is found by its agent's name as written.
+  const renamedAgents = {
+    sessions: sessionRepository.deprecatedRenameAgents(artifactIdentity.legacyBindings.agent),
+    chats: webchatRepo.deprecatedRenameAgents(artifactIdentity.legacyBindings.agent),
+  };
+  if (renamedAgents.sessions + renamedAgents.chats > 0) {
+    appsLog.info("old agent names renamed", renamedAgents);
+  }
 
   // Set once the email adapter is created (further down). Lets the main-agent
   // runtime context surface Rome's own provisioned inbox address, which is read
