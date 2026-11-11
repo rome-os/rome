@@ -15,7 +15,8 @@ import {
   type WatchSource,
 } from "./following.js";
 import type { ConnectionView } from "../api/routes/connections.js";
-import { GUARDIAN_OWNER, mainChatIdOf } from "../webchat/owner.js";
+import { GUARDIAN_OWNER } from "../webchat/owner.js";
+import { mainChatIdOf } from "./main-chat.js";
 import type { ConciergeService } from "./service.js";
 
 const repoTrigger = (type: string) => ({

@@ -6,7 +6,7 @@ import { chatMessages, romeSessions } from "../schema.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
 import { ConciergeTasksRepository } from "./concierge-tasks.js";
 import { renderTaskEvents } from "../../concierge/events.js";
-import { mainChatIdOf } from "../../webchat/owner.js";
+import { mainChatIdOf } from "../../concierge/main-chat.js";
 import type { ConciergeService } from "../../concierge/service.js";
 
 const DAY = 86_400_000;
