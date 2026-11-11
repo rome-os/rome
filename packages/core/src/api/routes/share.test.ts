@@ -552,6 +552,37 @@ describe("Share chat", () => {
       expect((await shareRoutes(deps).request(`/share/${created.id}`)).status).toBe(404);
     });
 
+    it("keeps one live link per message, found again until it is revoked", async () => {
+      await seedConciergeChats();
+      const manage = createWebchatRuntime(deps).routes;
+      const path = "/chat/sessions/topic/messages/topic-a/share";
+      const lookup = async () =>
+        ((await (await manage.request(path)).json()) as { share: { id: string } | null }).share;
+
+      expect(await lookup()).toBeNull();
+      const first = await manage.request(path, { method: "POST" });
+      expect(first.status).toBe(201);
+      const created = (await first.json()) as { id: string; url: string };
+      const again = await manage.request(path, { method: "POST" });
+      expect(again.status).toBe(200);
+      expect(((await again.json()) as { id: string }).id).toBe(created.id);
+      expect(await lookup()).toMatchObject({ id: created.id, url: created.url });
+      // Another message of the chat has its own link.
+      expect(
+        (await manage.request("/chat/sessions/topic/messages/topic-u/share", { method: "POST" }))
+          .status,
+      ).toBe(201);
+
+      expect(
+        (await manage.request(`/chat/shares/${created.id}`, { method: "DELETE" })).status,
+      ).toBe(200);
+      expect(await lookup()).toBeNull();
+      const fresh = (await (await manage.request(path, { method: "POST" })).json()) as {
+        id: string;
+      };
+      expect(fresh.id).not.toBe(created.id);
+    });
+
     it("refuses a trace row, a message of another chat, and an unknown message", async () => {
       await seedConciergeChats();
       const manage = createWebchatRuntime(deps).routes;

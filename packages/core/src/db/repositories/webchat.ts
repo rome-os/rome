@@ -118,6 +118,15 @@ export interface StoredSharedChatSummary {
   createdAt: Date;
 }
 
+/** A chat's live share of one message: its snapshot names the message. */
+function liveMessageShare(sessionId: string, messageId: string) {
+  return and(
+    eq(sharedChats.sessionId, sessionId),
+    isNull(sharedChats.revokedAt),
+    sql`json_extract(${sharedChats.snapshot}, '$.messageId') = ${messageId}`,
+  );
+}
+
 export interface StoredWebchatHistoryMessage extends StoredWebchatMessage {
   sessionName: string;
   sessionAgentName: string | null;
@@ -3304,6 +3313,62 @@ export class WebChatRepository {
       .from(sharedChats)
       .where(and(eq(sharedChats.sessionId, sessionId), isNull(sharedChats.revokedAt)))
       .orderBy(desc(sharedChats.createdAt));
+  }
+
+  /**
+   * The live share of one message in a chat, found by the `messageId` its
+   * frozen snapshot carries. Null when the message has none, or only revoked
+   * ones.
+   */
+  async getLiveMessageShare(
+    sessionId: string,
+    messageId: string,
+  ): Promise<StoredSharedChatSummary | null> {
+    const rows = await this.db
+      .select({ id: sharedChats.id, title: sharedChats.title, createdAt: sharedChats.createdAt })
+      .from(sharedChats)
+      .where(liveMessageShare(sessionId, messageId))
+      .orderBy(desc(sharedChats.createdAt))
+      .limit(1);
+    return rows[0] ?? null;
+  }
+
+  /**
+   * One live share per message: returns the message's live share when it has
+   * one, else stores `input` as it. Check and insert run in one transaction,
+   * so two clicks at once still leave one link. `created` says which.
+   */
+  async getOrCreateMessageShare(input: {
+    id: string;
+    sessionId: string;
+    messageId: string;
+    title: string;
+    snapshot: string;
+  }): Promise<{ share: StoredSharedChatSummary; created: boolean }> {
+    return this.db.transaction((tx) => {
+      const existing = tx
+        .select({ id: sharedChats.id, title: sharedChats.title, createdAt: sharedChats.createdAt })
+        .from(sharedChats)
+        .where(liveMessageShare(input.sessionId, input.messageId))
+        .orderBy(desc(sharedChats.createdAt))
+        .limit(1)
+        .all()[0];
+      if (existing) return { share: existing, created: false };
+      const createdAt = new Date();
+      tx.insert(sharedChats)
+        .values({
+          id: input.id,
+          sessionId: input.sessionId,
+          title: input.title,
+          snapshot: input.snapshot,
+          layout: "[]",
+          projectPath: null,
+          createdAt,
+          revokedAt: null,
+        })
+        .run();
+      return { share: { id: input.id, title: input.title, createdAt }, created: true };
+    });
   }
 
   /** Soft-delete (revoke) a share. Returns true if a live row was revoked. */

@@ -2985,6 +2985,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   // message's text parts and nothing else: no other message, no trace, no
   // cards, no workspace tiles, and a title from the message itself rather
   // than the chat's name. It lists and revokes as the chat's other shares do.
+  // A message has at most one live link: sharing it again answers that link
+  // (200) instead of minting another (201).
   app.post("/chat/sessions/:id/messages/:messageId/share", async (c) => {
     const sessionId = c.req.param("id");
     const messageId = c.req.param("messageId");
@@ -3000,6 +3002,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     const snapshot: ChatShareSnapshot = {
       mainSessionId: sessionId,
+      messageId,
       messages: [
         {
           id: row.id,
@@ -3019,16 +3022,41 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       .trim()
       .slice(0, 120);
 
-    const id = generateShareToken();
-    await deps.webchatRepo.createSharedChat({
-      id,
+    const { share, created } = await deps.webchatRepo.getOrCreateMessageShare({
+      id: generateShareToken(),
       sessionId,
+      messageId,
       title,
       snapshot: JSON.stringify(snapshot),
-      layout: "[]",
-      projectPath: null,
     });
-    return c.json({ id, url: `/share/${id}`, title }, 201);
+    return c.json(
+      {
+        id: share.id,
+        url: `/share/${share.id}`,
+        title: share.title,
+        createdAt: share.createdAt.toISOString(),
+      },
+      created ? 201 : 200,
+    );
+  });
+
+  // The message's live link, so its share card opens on it. `share` is null
+  // when the message has none.
+  app.get("/chat/sessions/:id/messages/:messageId/share", async (c) => {
+    const sessionId = c.req.param("id");
+    const lookup = await getTopLevelWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    const share = await deps.webchatRepo.getLiveMessageShare(sessionId, c.req.param("messageId"));
+    return c.json({
+      share: share
+        ? {
+            id: share.id,
+            url: `/share/${share.id}`,
+            title: share.title,
+            createdAt: share.createdAt.toISOString(),
+          }
+        : null,
+    });
   });
 
   app.get("/chat/sessions/:id/shares", async (c) => {

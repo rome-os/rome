@@ -17,6 +17,9 @@ export interface ChatShareMessage {
 export interface ChatShareSnapshot {
   // The source session id — the chat-view root.
   mainSessionId: string;
+  // Set on a share of one message: the message it froze. It keeps a message
+  // to one live link, which a second Share finds again.
+  messageId?: string;
   messages: ChatShareMessage[];
   // Trace message id → prebuilt TraceSnapshot (summary + segments). Built at
   // share time with the guardian's app/agent resolver so the public read path
