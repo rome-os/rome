@@ -20,8 +20,10 @@ private let twoTurns = [
 /// Picking turns in share mode, and what the share sheet then offers.
 @MainActor
 @Suite struct ChatShareTests {
+    /// On an instance at the app's minimum version unless the test says otherwise.
     private func chat(_ backend: FakeBackend, _ messages: [ChatMessage], session: String = "chat-1") async -> TranscriptStore {
         backend.stored = messages
+        if backend.buildVersion == nil { backend.buildVersion = UpdateGate.minimumInstanceVersion }
         let store = TranscriptStore(sessionId: session, kind: .concierge, backend: backend)
         store.start()
         for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
@@ -167,6 +169,39 @@ private let twoTurns = [
         #expect(store.quote == quote)
         store.share.cancel()
         #expect(store.quote == quote && store.composerThread == quote)
+    }
+
+    /// Only an instance known to be at or above the app's minimum gets a
+    /// share: one whose version cannot be read, or reads below, gets nothing
+    /// sent, a short line, and share mode stays.
+    @Test func anUnknownOrOldVersionSendsNothing() async {
+        for version: String? in [nil, "dev", "1.1.100"] {
+            let backend = FakeBackend()
+            let store = await chat(backend, twoTurns)
+            backend.buildVersion = version
+            store.share.begin(turn: "t1")
+            await store.share.create()
+            #expect(backend.shareRequests.isEmpty, "\(version ?? "nil")")
+            #expect(store.share.outgoing == nil)
+            #expect(store.share.isSelecting && store.share.error != nil)
+        }
+        #expect(ChatShareFlow.sharesLinks(version: UpdateGate.minimumInstanceVersion))
+        #expect(!ChatShareFlow.sharesLinks(version: nil))
+    }
+
+    /// The Shared links sheet and the share sheet cover the chat: replies
+    /// behind them are not marked read.
+    @Test func shareSheetsCoverTheChat() async {
+        let workspace = Workspace(backend: FakeBackend(), instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-share-cover-\(UUID().uuidString)/Drafts"), instance: "t"))
+        defer { workspace.stop() }
+        #expect(!workspace.sharingCoversChat)
+        workspace.concierge.share.showsLinks = true
+        #expect(workspace.sharingCoversChat)
+        workspace.concierge.share.showsLinks = false
+        let topic = workspace.topicStore("topic-1")
+        topic.share.outgoing = ShareOutgoing(url: URL(string: "https://test/share/x")!)
+        #expect(workspace.sharingCoversChat)
+        #expect(MainShell.visibleChat(section: .topic("topic-1"), path: [], covered: workspace.sharingCoversChat) == nil)
     }
 
     /// A refused share is an error, never a text share in its place.
@@ -427,6 +462,7 @@ final class ShareRequestRecorder: URLProtocol, @unchecked Sendable {
     @Test func createLinkPassesTheAgentsName() async {
         let fake = FakeBackend()
         fake.stored = twoTurns
+        fake.buildVersion = UpdateGate.minimumInstanceVersion
         let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: fake)
         store.start()
         for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }

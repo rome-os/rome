@@ -482,11 +482,12 @@ struct MainShell: View {
 
     /// The chat on screen, by its store's id.
     private var visibleChat: String? {
-        Self.visibleChat(section: section, path: path, covered: drawerOpen || showTasks || showSettings || page != nil)
+        Self.visibleChat(section: section, path: path, covered: drawerOpen || showTasks || showSettings || page != nil || workspace.sharingCoversChat)
     }
 
     /// The chat on screen: none while something covers the page (the drawer,
-    /// the Tasks or Settings sheet, an instance page's sheet); a pushed task
+    /// the Tasks or Settings sheet, an instance page's sheet, a chat's share
+    /// sheets); a pushed task
     /// chat; else the section's chat. Chat's read marks, the server's watch
     /// and push banners all go by this one answer.
     static func visibleChat(section: MainSection, path: [Route], covered: Bool) -> String? {

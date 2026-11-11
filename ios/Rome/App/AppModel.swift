@@ -191,6 +191,11 @@ final class Workspace {
         topics = TopicChatsStore(backend: backend)
     }
 
+    /// A chat's Shared links sheet or share sheet is up: it covers the chat.
+    var sharingCoversChat: Bool {
+        ([concierge] + Array(topicStores.values) + Array(taskStores.values)).contains { $0.share.coversChat }
+    }
+
     func topicStore(_ chatId: String) -> TranscriptStore {
         if let store = topicStores[chatId] { return store }
         let store = TranscriptStore(sessionId: chatId, kind: .concierge, backend: backend)

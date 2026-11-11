@@ -697,6 +697,16 @@ struct TranscriptList<Row: View>: View {
     /// Once the stack has gone lazy it stays lazy, so it changes kind at
     /// most once.
     @State private var lazyLocked = false
+    /// How tall the rows are, without the space under short content.
+    @State private var rowsHeight: CGFloat = 0
+
+    /// Rows that do not reach well past the screen, with older pages behind
+    /// them: no scroll up will ever come near the top, so older pages load
+    /// now, one after another, until the screen is filled.
+    static func needsOlderToFill(hasOlder: Bool, rowsHeight: CGFloat, visibleHeight: CGFloat) -> Bool {
+        // Both measured: before that, a full screen reads as empty.
+        hasOlder && visibleHeight > 0 && rowsHeight > 0 && rowsHeight < visibleHeight * 1.5
+    }
 
     /// Up to this many rows a transcript is laid out all at once. A lazy
     /// stack guesses the height of rows it has not laid out, and a chat that
@@ -756,6 +766,8 @@ struct TranscriptList<Row: View>: View {
                 .padding(.horizontal, Metrics.pagePadding)
                 .readableColumn()
                 .environment(\.shareTurns, store.share.isSelecting ? ShareTurns(messages: store.messages, rows: rows) : nil)
+                // The rows' own height, before the space below fills it out.
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { rowsHeight = $0 }
                 // Never shorter than the space between the bars. Content shorter
                 // than that is held at the bottom by a top inset the scroll view
                 // adds, and takes back a frame late once the rows outgrow the
@@ -789,6 +801,11 @@ struct TranscriptList<Row: View>: View {
             }
             .onChange(of: bottomVisible) { _, now in
                 transcriptScrollLog.notice("bottom visible \(now, privacy: .public), height \(visibleHeight, privacy: .public)")
+            }
+            .task(id: "\(Self.needsOlderToFill(hasOlder: store.hasOlder, rowsHeight: rowsHeight, visibleHeight: visibleHeight))|\(store.messages.count)") {
+                if Self.needsOlderToFill(hasOlder: store.hasOlder, rowsHeight: rowsHeight, visibleHeight: visibleHeight) {
+                    await store.loadOlder()
+                }
             }
             .onChange(of: lazy, initial: true) { _, now in
                 if now { lazyLocked = true }

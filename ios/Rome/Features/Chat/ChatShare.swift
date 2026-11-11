@@ -153,12 +153,15 @@ final class ChatShareFlow {
 
     /// Makes the link of the picked turns and offers it in the share sheet.
     /// `agentName` is the Agent's name as the header shows it, nil when
-    /// unknown. Any failure is a short error, and share mode stays. The app
-    /// talks only to instances at or above its minimum version, which all
-    /// keep a share to the picked turns' messages.
+    /// unknown. Any failure is a short error, and share mode stays.
     ///
-    /// Share mode may be cancelled, or its picks changed, while the link is
-    /// made: the link is then revoked unseen.
+    /// Only an instance known to be at or above the app's minimum version
+    /// keeps a share to the picked turns' messages. Its version is read
+    /// first; one that cannot be read, or is below, gets nothing sent.
+    ///
+    /// Share mode may be cancelled, or its picks changed, while this waits:
+    /// before the link is asked for, that stops it; after, the link it made
+    /// is revoked unseen.
     func create(agentName: String? = nil) async {
         guard let chat, let sessionId, let picked = selection, !picked.isEmpty, !creating else { return }
         let started = round
@@ -166,6 +169,12 @@ final class ChatShareFlow {
         creating = true
         error = nil
         defer { creating = false }
+        let version = try? await backend.buildInfo().version
+        guard current else { return }
+        guard Self.sharesLinks(version: version) else {
+            error = String(localized: "Can't share right now. Try again.")
+            return
+        }
         let turns = ShareTurns(messages: chat.messages, rows: chat.rows)
         let ordered = turns.order.filter(picked.contains)
         do {
@@ -186,6 +195,15 @@ final class ChatShareFlow {
             if current { self.error = String(localized: "Couldn't create the link.") }
         }
     }
+
+    /// A version known to be at or above the app's minimum.
+    static func sharesLinks(version: String?) -> Bool {
+        guard let version, UpdateGate.isVersion(version) else { return false }
+        return UpdateGate.isSupported(version)
+    }
+
+    /// The Shared links sheet or the share sheet is up over the chat.
+    var coversChat: Bool { showsLinks || outgoing != nil }
 
     func openLinks() {
         showsLinks = true

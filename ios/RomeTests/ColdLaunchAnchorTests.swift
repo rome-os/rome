@@ -338,3 +338,49 @@ private struct AppearHost: View {
     }
 }
 
+/// A newest page that fits on one screen, with older pages behind it: no
+/// scroll up can come near the top, so older pages load until it is full.
+@MainActor
+@Suite(.serialized) struct ShortPageTests {
+    @Test func olderPagesFillAShortScreen() async throws {
+        func message(_ index: Int, role: String) -> ChatMessage {
+            ChatMessage(id: "m\(index)", sessionId: "chat-1", turnId: "t\(index)", role: role, content: role == "trace" ? "[]" : "Message \(index), a line or two of the bubble.", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + Double(index * 60))))
+        }
+        // Thirty older messages, then a newest page of traces (no rows in a
+        // Concierge chat) ending in two bubbles.
+        let older = (0..<30).map { message($0, role: $0.isMultiple(of: 2) ? "user" : "assistant") }
+        let newest = (30..<68).map { message($0, role: "trace") } + [message(68, role: "user"), message(69, role: "assistant")]
+        let backend = FakeBackend()
+        backend.stored = older + newest
+        let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<100 where !store.loaded { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.hasOlder && store.messages.count == TranscriptStore.pageSize)
+
+        let seen = Appearances()
+        let host = UIHostingController(rootView: AppearHost(store: store, seen: seen))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+            store.stop()
+        }
+        for _ in 0..<200 where store.messages.count == TranscriptStore.pageSize { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.messages.count > TranscriptStore.pageSize, "no older page loaded under a short screen")
+    }
+
+    @Test func onlyAShortScreenWithOlderPagesAsks() {
+        typealias List = TranscriptList<EmptyView>
+        #expect(List.needsOlderToFill(hasOlder: true, rowsHeight: 300, visibleHeight: 640))
+        #expect(!List.needsOlderToFill(hasOlder: false, rowsHeight: 300, visibleHeight: 640))
+        #expect(!List.needsOlderToFill(hasOlder: true, rowsHeight: 2000, visibleHeight: 640))
+        #expect(!List.needsOlderToFill(hasOlder: true, rowsHeight: 300, visibleHeight: 0))
+        #expect(!List.needsOlderToFill(hasOlder: true, rowsHeight: 0, visibleHeight: 640))
+    }
+}
+
