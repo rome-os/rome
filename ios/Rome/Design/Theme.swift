@@ -69,6 +69,8 @@ enum Palette {
     /// The giant "Rome" on the ground: a quiet neutral that reads clearly
     /// against the ground.
     static let stackWordmark = dynamic(0xD9D1C4, 0x28221E)
+    /// The Colosseum behind it: quieter still, between the ground and the word.
+    static let stackColosseum = dynamic(0xDFD8CC, 0x1F1A16)
 
     /// `from` blended toward `to` by `amount` (0…1), in each appearance.
     static func blend(_ from: Color, _ to: Color, _ amount: CGFloat) -> Color {
