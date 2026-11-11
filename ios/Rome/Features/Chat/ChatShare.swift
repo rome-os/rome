@@ -167,15 +167,22 @@ final class ChatShareFlow {
 
     /// Makes the link of the picked turns and offers it in the share sheet.
     /// `agentName` is the Agent's name as the header shows it, nil when
-    /// unknown. An instance that refuses this chat (404: older ones cannot
-    /// share a Concierge chat) gets the turns' text shared instead.
+    /// unknown. An instance before `ShareGate.minimumVersion` would publish
+    /// the work behind the turns, so it gets the turns' text shared instead,
+    /// and nothing is sent to it.
     func create(agentName: String? = nil) async {
         guard let chat, let sessionId, let picked = selection, !picked.isEmpty, !creating else { return }
-        let turns = ShareTurns(messages: chat.messages, rows: chat.rows)
-        let ordered = turns.order.filter(picked.contains)
         creating = true
         error = nil
         defer { creating = false }
+        let version = try? await backend.buildInfo().version
+        let turns = ShareTurns(messages: chat.messages, rows: chat.rows)
+        guard ShareGate.makesLinks(version: version) else {
+            outgoing = ShareOutgoing(text: turns.text(of: picked, rows: chat.rows))
+            selection = nil
+            return
+        }
+        let ordered = turns.order.filter(picked.contains)
         do {
             let link = try await backend.shareChat(sessionId: sessionId, turnIds: ordered, agentName: agentName)
             guard let url = url(of: link) else {
@@ -184,9 +191,6 @@ final class ChatShareFlow {
             }
             outgoing = ShareOutgoing(url: url, title: link.title)
             links = links.map { [link] + $0 }
-            selection = nil
-        } catch APIError.notFound {
-            outgoing = ShareOutgoing(text: turns.text(of: picked, rows: chat.rows))
             selection = nil
         } catch {
             self.error = String(localized: "Couldn't create the link.")
@@ -203,24 +207,50 @@ final class ChatShareFlow {
         linksFailed = false
         do {
             let loaded = try await backend.chatShares(sessionId: sessionId)
-            links = loaded.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
+            links = Self.newestFirst(loaded)
         } catch {
             if links == nil { linksFailed = true }
         }
     }
 
-    /// Stops a link from opening. It leaves the list at once and comes back
-    /// if the instance refuses.
+    /// Stops a link from opening. It leaves the list at once. If the
+    /// instance refuses, that link alone comes back, into the list as it is
+    /// by then; one the instance no longer knows was revoked already.
     func revoke(_ link: ChatShareLink) async {
-        let before = links
         links?.removeAll { $0.id == link.id }
         revokeFailed = false
         do {
             try await backend.revokeShare(id: link.id)
+        } catch APIError.notFound {
+            // Gone already: nothing to put back.
         } catch {
-            links = before
+            if let current = links, !current.contains(where: { $0.id == link.id }) {
+                links = Self.newestFirst(current + [link])
+            }
             revokeFailed = true
         }
+    }
+
+    private static func newestFirst(_ links: [ChatShareLink]) -> [ChatShareLink] {
+        links.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
+    }
+}
+
+/// Which instances get a link. Before #1983 a share's snapshot kept the
+/// chat's trace rows and summaries, so a link published the Agent's tool
+/// work; those instances get the turns' text instead.
+enum ShareGate {
+    /// The first instance release whose share snapshot carries only the
+    /// picked turns' messages (rome-os/rome#1983). PLACEHOLDER: the release
+    /// after v1.1.190, the latest tag when this was written. Set it to the
+    /// real release when #1983 ships.
+    static let minimumVersion = "1.1.191"
+
+    /// Only an instance known to be at or above it: an unknown or
+    /// unreadable version is held back, the safe side.
+    static func makesLinks(version: String?) -> Bool {
+        guard let version, UpdateGate.isVersion(version) else { return false }
+        return UpdateGate.isSupported(version, minimum: minimumVersion)
     }
 }
 
@@ -241,12 +271,12 @@ extension EnvironmentValues {
 ///
 /// Share mode never changes a row's layout: a narrower row would rewrap its
 /// text and grow taller, and the transcript would jump under the finger.
-/// The circle lies over the empty space left of the guardian's bubble; an
-/// Agent bubble that starts a turn moves right by drawing only.
+/// Where the circle goes depends on what starts the turn (`ShareCirclePlacement`).
 private struct ShareSelectable: ViewModifier {
     let row: TranscriptRow
     let share: ChatShareFlow
     let top: CGFloat
+    let placement: ShareCirclePlacement
     @Environment(\.shareTurns) private var turns
 
     static let circleSpace: CGFloat = 34
@@ -258,14 +288,16 @@ private struct ShareSelectable: ViewModifier {
         let picked = turn.map(share.isSelected) ?? false
         content
             .allowsHitTesting(!active)
-            .offset(x: active && lead && Self.startsAtLeft(row) ? Self.circleSpace : 0)
+            .offset(x: active && lead && placement == .shift ? Self.circleSpace : 0)
             // The first row's tint stops at its own top; later rows reach up
             // over the space above them, so a turn reads as one block.
             .background { if picked && lead { tint } }
-            .overlay(alignment: .leading) {
+            .overlay(alignment: placement == .corner ? .topLeading : .leading) {
                 if active, lead, let turn {
-                    ShareCheckCircle(on: picked)
-                        .padding(.leading, 2)
+                    ShareCheckCircle(on: picked, badge: placement == .corner)
+                        // On a card's corner, half out of it: the circle is
+                        // centred in a 30 × 44 tap frame.
+                        .offset(x: placement == .corner ? -12 : 2, y: placement == .corner ? -18 : 0)
                         .accessibilityHidden(true)
                         .onTapGesture { share.toggle(turn) }
                 }
@@ -288,13 +320,6 @@ private struct ShareSelectable: ViewModifier {
             .animation(.easeOut(duration: 0.2), value: active)
     }
 
-    /// An Agent bubble sits at the left edge, where the circle goes; it has
-    /// room to move right. The guardian's bubble leaves the left side empty.
-    static func startsAtLeft(_ row: TranscriptRow) -> Bool {
-        if case .agentText = row { return true }
-        return false
-    }
-
     private var tint: some View {
         Rectangle()
             .fill(Palette.primarySoft.opacity(0.6))
@@ -304,8 +329,11 @@ private struct ShareSelectable: ViewModifier {
 
 extension View {
     /// A transcript row that share mode can pick, with `top` space above it.
-    func shareSelectable(_ row: TranscriptRow, share: ChatShareFlow, top: CGFloat) -> some View {
-        modifier(ShareSelectable(row: row, share: share, top: top))
+    /// `placement` overrides where the row kind puts the circle, for a row
+    /// drawn unlike its kind (a task's brief is the guardian's message as a
+    /// card).
+    func shareSelectable(_ row: TranscriptRow, share: ChatShareFlow, top: CGFloat, placement: ShareCirclePlacement? = nil) -> some View {
+        modifier(ShareSelectable(row: row, share: share, top: top, placement: placement ?? .of(row)))
     }
 
     /// The chat's header, covered by Cancel and the count in share mode. The
@@ -343,15 +371,38 @@ struct ChatShareMenuItems: View {
     }
 }
 
-/// A turn's check circle: an empty ring, or filled coral with a check.
+/// Where a turn's check circle goes on the row that starts it, never taking
+/// space from the row.
+enum ShareCirclePlacement: Equatable {
+    /// In the empty space left of the guardian's bubble.
+    case gutter
+    /// An Agent bubble moves right by drawing only; it has room on its right.
+    case shift
+    /// A card or anything else that reaches the left edge: a badge on its
+    /// top-left corner.
+    case corner
+
+    static func of(_ row: TranscriptRow) -> ShareCirclePlacement {
+        switch row {
+        case .userText: return .gutter
+        case .agentText: return .shift
+        default: return .corner
+        }
+    }
+}
+
+/// A turn's check circle: an empty ring, or filled coral with a check. As a
+/// badge on a card it has a solid fill, so the card's edge does not show
+/// through.
 struct ShareCheckCircle: View {
     let on: Bool
+    var badge = false
 
     var body: some View {
         ZStack {
             Circle()
                 .strokeBorder(on ? Palette.primary : Palette.sub.opacity(0.55), lineWidth: 1.5)
-                .background(Circle().fill(on ? Palette.primary : .clear))
+                .background(Circle().fill(on ? Palette.primary : (badge ? Palette.bg : .clear)))
             if on {
                 Image(systemName: "checkmark")
                     .romeFont(11, .bold)

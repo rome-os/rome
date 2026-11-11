@@ -107,8 +107,12 @@ final class FakeBackend: RomeBackend {
 
     func chatShares(sessionId: String) async throws -> [ChatShareLink] { shareLinks }
 
+    /// Runs inside a revoke, before it answers.
+    var duringRevoke: (() async -> Void)?
+
     func revokeShare(id: String) async throws {
         revoked.append(id)
+        await duringRevoke?()
         if let revokeError { throw revokeError }
         shareLinks.removeAll { $0.id == id }
     }

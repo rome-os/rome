@@ -20,8 +20,10 @@ private let twoTurns = [
 /// Picking turns in share mode, and what the share sheet then offers.
 @MainActor
 @Suite struct ChatShareTests {
+    /// On an instance that makes links unless the test says otherwise.
     private func chat(_ backend: FakeBackend, _ messages: [ChatMessage], session: String = "chat-1") async -> TranscriptStore {
         backend.stored = messages
+        if backend.buildVersion == nil { backend.buildVersion = ShareGate.minimumVersion }
         let store = TranscriptStore(sessionId: session, kind: .concierge, backend: backend)
         store.start()
         for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
@@ -51,6 +53,18 @@ private let twoTurns = [
         let turns = ShareTurns(messages: messages, rows: rows)
         #expect(turns.order == ["t1", "t2"])
         #expect(turns.turnOfRow["old:0"] == nil && turns.turnOfRow["p1"] == nil)
+    }
+
+    /// The circle takes no space from the row that starts a turn: beside the
+    /// guardian's bubble, left of an Agent bubble that moves over, or on a
+    /// card's corner.
+    @Test func everyKindOfRowPlacesTheCircle() {
+        let rows = TranscriptBuilder.rows(messages: twoTurns, pending: [], answers: [:], options: .init())
+        #expect(rows.first { if case .userText = $0 { true } else { false } }.map(ShareCirclePlacement.of) == .gutter)
+        #expect(rows.first { if case .agentText = $0 { true } else { false } }.map(ShareCirclePlacement.of) == .shift)
+        #expect(ShareCirclePlacement.of(.taskCard(id: "m:0", chatId: "c", title: "T")) == .corner)
+        #expect(ShareCirclePlacement.of(.error(id: "m:0", text: "x")) == .corner)
+        #expect(ShareCirclePlacement.of(.tools(id: "tools-m", traceMessageId: "m", count: 2)) == .corner)
     }
 
     @Test func aRowIdNamesItsMessage() {
@@ -118,16 +132,40 @@ private let twoTurns = [
         #expect(ChatShareFlow.absoluteURL("/share/x", origin: nil) == nil)
     }
 
-    @Test func anInstanceThatCannotShareTheChatGetsTheTextShared() async {
+    /// An instance before the gate would publish the work behind the turns:
+    /// it is never asked for a link, and the turns' text is shared instead.
+    @Test func anInstanceBeforeTheGateGetsTheTextShared() async {
+        for version in ["1.1.190", "dev"] {
+            let backend = FakeBackend()
+            backend.buildVersion = version
+            let store = await chat(backend, twoTurns)
+            let share = store.share
+            share.begin(turn: "t2")
+            await share.create()
+            #expect(backend.shareRequests.isEmpty, "\(version)")
+            #expect(share.outgoing?.url == nil)
+            #expect(share.outgoing?.text == "Check the weather\n\nMild, bring a jacket")
+            #expect(!share.isSelecting && share.error == nil)
+        }
+    }
+
+    @Test func onlyAKnownVersionAtTheGateMakesLinks() {
+        #expect(!ShareGate.makesLinks(version: nil))
+        #expect(!ShareGate.makesLinks(version: "dev"))
+        #expect(!ShareGate.makesLinks(version: "1.1.190"))
+        #expect(ShareGate.makesLinks(version: ShareGate.minimumVersion))
+        #expect(ShareGate.makesLinks(version: "v1.2.0"))
+    }
+
+    /// Past the gate a refused share is an error, never a silent text share.
+    @Test func aNotFoundPastTheGateIsAnError() async {
         let backend = FakeBackend()
         backend.shareAnswer = .failure(.notFound)
         let store = await chat(backend, twoTurns)
-        let share = store.share
-        share.begin(turn: "t2")
-        await share.create()
-        #expect(share.outgoing?.url == nil)
-        #expect(share.outgoing?.text == "Check the weather\n\nMild, bring a jacket")
-        #expect(!share.isSelecting && share.error == nil)
+        store.share.begin(turn: "t1")
+        await store.share.create()
+        #expect(store.share.outgoing == nil)
+        #expect(store.share.isSelecting && store.share.error != nil)
     }
 
     @Test func aFailedCreateStaysInShareModeWithALine() async {
@@ -158,15 +196,36 @@ private let twoTurns = [
         #expect(share.links?.map(\.id) == ["old"])
     }
 
-    @Test func aRefusedRevokePutsTheLinkBack() async {
+    /// A refused revoke puts that link back into the list as it is by then,
+    /// not the list from before: a link made meanwhile stays.
+    @Test func aRefusedRevokePutsOnlyThatLinkBack() async {
         let backend = FakeBackend()
-        backend.shareLinks = [ChatShareLink(id: "a", url: "/share/a")]
+        let a = ChatShareLink(id: "a", url: "/share/a", createdAt: "2026-11-01T10:00:00Z")
+        let b = ChatShareLink(id: "b", url: "/share/b", createdAt: "2026-11-05T10:00:00Z")
+        let c = ChatShareLink(id: "c", url: "/share/c", createdAt: "2026-11-09T10:00:00Z")
+        backend.shareLinks = [a, b]
         backend.revokeError = .network
         let store = await chat(backend, twoTurns)
         await store.share.loadLinks()
-        await store.share.revoke(store.share.links![0])
-        #expect(store.share.links?.map(\.id) == ["a"])
+        backend.duringRevoke = {
+            backend.shareLinks = [c, b]
+            await store.share.loadLinks()
+        }
+        await store.share.revoke(a)
+        #expect(store.share.links?.map(\.id) == ["c", "b", "a"])
         #expect(store.share.revokeFailed)
+    }
+
+    /// A link the instance no longer knows was revoked already.
+    @Test func revokingAGoneLinkRemovesItQuietly() async {
+        let backend = FakeBackend()
+        backend.shareLinks = [ChatShareLink(id: "a", url: "/share/a")]
+        backend.revokeError = .notFound
+        let store = await chat(backend, twoTurns)
+        await store.share.loadLinks()
+        await store.share.revoke(store.share.links![0])
+        #expect(store.share.links?.isEmpty == true)
+        #expect(!store.share.revokeFailed)
     }
 
     @Test func aNewLinkJoinsTheLoadedList() async {
@@ -342,18 +401,21 @@ final class ShareRequestRecorder: URLProtocol, @unchecked Sendable {
         #expect(body["agentName"] as? String == "Milo")
         // The instance names the share after the first turn.
         #expect(body["title"] == nil)
+        // Turns only: never a chat's saved tiles, such as a project's files.
+        #expect((body["layout"] as? [Any])?.isEmpty == true)
     }
 
     @Test func anUnknownAgentNameIsLeftOut() async throws {
         ShareRequestRecorder.reset()
         _ = try await backend().shareChat(sessionId: "chat-1", turnIds: ["t1"], agentName: nil)
         let body = try lastBody()
-        #expect(body.keys.sorted() == ["turnIds"])
+        #expect(body.keys.sorted() == ["layout", "turnIds"])
     }
 
     @Test func createLinkPassesTheAgentsName() async {
         let fake = FakeBackend()
         fake.stored = twoTurns
+        fake.buildVersion = ShareGate.minimumVersion
         let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: fake)
         store.start()
         for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }

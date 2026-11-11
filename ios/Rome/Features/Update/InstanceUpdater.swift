@@ -21,6 +21,9 @@ enum UpdateGate {
         return true
     }
 
+    /// Whether `version` reads as a release number at all.
+    static func isVersion(_ version: String) -> Bool { numbers(version) != nil }
+
     /// "v1.1.185" or "1.1.185-rc.1" as [1, 1, 185]; nil when it is not a version.
     private static func numbers(_ version: String) -> [Int]? {
         var text = version.trimmingCharacters(in: .whitespaces)

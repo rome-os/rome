@@ -174,6 +174,18 @@ enum SnapshotRunner {
                 model.debugCommand = .section(.chat)
                 model.workspace?.concierge.share.openLinks()
             }
+            // A task chat: its brief, a card, starts the first turn.
+            await capture("64-share-task", style: styleName, in: directory, wait: 2.5) {
+                model.workspace?.concierge.share.showsLinks = false
+                model.debugCommand = .route([.taskChat(chatId: "chat-login", title: "修复登录页样式")])
+                Task {
+                    try? await Task.sleep(for: .seconds(1.5))
+                    guard let share = model.workspace?.taskStore("chat-login").share, let order = share.turns?.order else { return }
+                    share.begin(turn: order.first)
+                }
+            }
+            model.workspace?.taskStore("chat-login").share.cancel()
+            model.debugCommand = .route([])
             if let workspace = model.workspace {
                 workspace.topicStore("topic-trip").share.cancel()
                 workspace.topicStore("topic-trip").share.showsLinks = false

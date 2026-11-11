@@ -132,7 +132,7 @@ struct TaskChatScreen: View {
             footer: store.running && store.loaded ? AnyView(runningLine(store)) : nil
         ) { row, previous in
             taskRow(row, store: store, briefID: briefID)
-                .shareSelectable(row, share: store.share, top: spacing(row, after: previous))
+                .shareSelectable(row, share: store.share, top: spacing(row, after: previous), placement: isBrief(row, briefID) ? .corner : nil)
         }
         .onTapGesture { composerFocused = false }
     }
@@ -183,6 +183,12 @@ struct TaskChatScreen: View {
             // Task chats have no chat threads.
             EmptyView()
         }
+    }
+
+    /// The brief opens the chat as a card, though it is the guardian's message.
+    private func isBrief(_ row: TranscriptRow, _ briefID: String?) -> Bool {
+        guard let briefID, case .userText(let id, _, _, _) = row else { return false }
+        return id.hasPrefix(briefID + ":")
     }
 
     /// A task chat's bubbles: the time, Copy and Share; no threads to reply in.

@@ -303,9 +303,11 @@ final class LiveBackend: RomeBackend {
         try await client.post("/chat/sessions/\(escape(sessionId))/share", json: Self.shareBody(turnIds: turnIds, agentName: agentName), as: ChatShareLink.self)
     }
 
-    /// An older instance ignores `agentName`.
+    /// An older instance ignores `agentName`. `layout` is always empty: the
+    /// app shares turns only, so a chat's saved tiles (a project's files)
+    /// never ride along, as they would by default.
     static func shareBody(turnIds: [String], agentName: String?) -> JSONValue {
-        var body: [String: JSONValue] = ["turnIds": .array(turnIds.map(JSONValue.string))]
+        var body: [String: JSONValue] = ["turnIds": .array(turnIds.map(JSONValue.string)), "layout": .array([])]
         if let agentName { body["agentName"] = .string(agentName) }
         return .object(body)
     }
