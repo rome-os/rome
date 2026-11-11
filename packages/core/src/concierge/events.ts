@@ -264,6 +264,24 @@ export function startConciergeEvents(
     // Read before any await: the reminder's own finish event fires while the
     // reminder still runs, and the flag clears as soon as it returns.
     const reminderRunning = remindersRunning.has(chatId);
+    // A turn a newer input took over hands the guardian messages it took to
+    // the turn that takes over, which answers them too.
+    if (event.handedOn) {
+      void webchatRepo
+        .getTurnChatMessages(chatId, event.turn.turnId)
+        .then((rows) =>
+          service.handOnPrompts(
+            chatId,
+            rows.filter((row) => row.role === "user").map((row) => row.id),
+          ),
+        )
+        .catch((error: unknown) =>
+          log.warn("failed to hand on a turn's messages", {
+            chatId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+    }
     // The tasks whose result this turn said settle the messages they held.
     const relayed = service.takeRelayed(event.turn.turnId);
     if (relayed.length > 0) {

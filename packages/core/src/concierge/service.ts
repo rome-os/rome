@@ -202,6 +202,8 @@ export class ConciergeService {
   private taskEvents: TaskEventCoalescer | null = null;
   /** Per Concierge chat, the task whose report a newer input took over. */
   private readonly carriedReports = new Map<string, string>();
+  /** Per Concierge chat, the guardian messages superseded turns handed on. */
+  private readonly handedOnPrompts = new Map<string, string[]>();
   /** Per Concierge turn, the tasks whose result it said. */
   private readonly relayedInTurn = new Map<string, Set<string>>();
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
@@ -779,6 +781,22 @@ export class ConciergeService {
   /** A Concierge turn in `chatId` ended without handing its work on. */
   turnSettled(chatId: string): void {
     this.carriedReports.delete(chatId);
+    this.handedOnPrompts.delete(chatId);
+  }
+
+  /**
+   * A newer input took a Concierge turn in `chatId` over before it finished:
+   * the guardian messages it took are the next turn's too, until a turn there
+   * ends without handing its work on.
+   */
+  handOnPrompts(chatId: string, messageIds: readonly string[]): void {
+    const held = this.handedOnPrompts.get(chatId) ?? [];
+    this.handedOnPrompts.set(chatId, [...new Set([...held, ...messageIds])]);
+  }
+
+  /** The guardian messages earlier turns in `chatId` handed on to the running one. */
+  promptsHandedOn(chatId: string): readonly string[] {
+    return this.handedOnPrompts.get(chatId) ?? [];
   }
 
   /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */

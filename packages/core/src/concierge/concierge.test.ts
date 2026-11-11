@@ -4145,6 +4145,45 @@ describe("Concierge status reactions", () => {
       ]);
     });
 
+    it("marks the message a superseded turn handed on, when the turn that took over sends it to a task", async () => {
+      const s = setup({ said: false });
+      // A task from an earlier request, done and reported.
+      s.inTurn("t0");
+      guardianSays(s, "g0", "t0");
+      const { chatId } = await started(s);
+      await finishTask(s, chatId);
+      // "Make it 3 fruits" is cut short by "How are you" before it does anything.
+      guardianSays(s, "a", "turn-a");
+      await taken(s, "a", "turn-a");
+      await conciergeEnds(s, "interrupted", "turn-a", true);
+      s.inTurn("turn-b");
+      guardianSays(s, "b", "turn-b");
+      await taken(s, "b", "turn-b");
+      // The turn carries both: naming none, nothing is marked or moved.
+      await s.tool("chat_send", { chatId, text: "Make it 3 fruits" });
+      expect(await s.taskRepo.reactionsOf(CONCIERGE_CHAT, ["b"])).toEqual(
+        new Map([["b", "working"]]),
+      );
+      await s.tool("chat_send", { chatId, text: "Make it 3 fruits", answers: "a" });
+      await s.tool("say", { text: "I'm well, thanks.", answers: "b" });
+      await conciergeEnds(s, "completed", "turn-b");
+      // The fruits request works on with its task; the greeting was answered.
+      expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual(["working", null]);
+    });
+
+    it("starts no task on a guess when the turn carries several guardian messages and names none", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "a");
+      guardianSays(s, "b");
+      await taken(s, "a");
+      await taken(s, "b");
+      await s.tool("say", { text: "On it" });
+      const refused = await s.tool("chat_start", { title: "Weather", brief: "Check the weather" });
+      expect(refused).toMatchObject({ isError: true });
+      await conciergeEnds(s);
+      expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, null]);
+    });
+
     it.each(["error", "stopped"] as const)("fails when the turn ends %s", async (status) => {
       const s = setup({ said: false });
       guardianSays(s, "g1");

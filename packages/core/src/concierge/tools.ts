@@ -68,14 +68,14 @@ const TASK_PARAMETER = {
 const RELAYS_PARAMETER = {
   type: "string",
   description:
-    "The message_id of the guardian message whose words you send on to the task, from its <chat_thread> line. That message joins the task's chat thread. Give it when the guardian sent several messages in this turn; without it, only a turn's one message in no thread joins.",
+    "The message_id of the guardian message whose words you send on to the task, from its <chat_thread> line. That message joins the task's chat thread and shows the task working. Required when this turn carries several guardian messages, its own or ones an interrupted turn handed on; without it nothing joins and nothing is marked.",
 };
 
 /** The parameter that names the one guardian message an answer answers. */
 const ANSWERS_PARAMETER = {
   type: "string",
   description:
-    "The message_id of the guardian message this answers, from its <chat_thread> line. Give it when the turn holds several guardian messages, or a guardian message and another task's news, so the answer goes where that message is; without it such an answer goes in no thread.",
+    "The message_id of the guardian message this answers, from its <chat_thread> line. Required when the turn carries several guardian messages, its own or ones an interrupted turn handed on, or a guardian message and another task's news, so the answer goes where that message is; without it such an answer goes in no thread.",
 };
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -279,10 +279,17 @@ export async function buildConciergeTools(
     if (answers && (await webchatRepo.getReplyTarget(chatId, answers))?.role === "user") {
       return answers;
     }
+    // With several guardian messages, which one the task is for, or which
+    // one this turn's last line answered, is a guess.
+    const prompts = await turnPrompts();
+    if (prompts.length > 1) {
+      throw new Error(
+        "This turn carries several guardian messages. Pass answers: the message_id of the one this task is for.",
+      );
+    }
     const latest = await latestSaidThisTurn();
     if (latest) return latest;
-    const prompts = await turnPrompts();
-    const only = prompts.length === 1 ? prompts[0] : undefined;
+    const only = prompts[0];
     if (only && (await webchatRepo.getReplyTarget(chatId, only))?.role === "user") return only;
     throw new Error(NO_ROW_MESSAGE);
   };
@@ -412,11 +419,15 @@ export async function buildConciergeTools(
 
   // Only the guardian's messages this turn has taken: one still queued
   // behind it belongs to the turn that takes it.
+  // This turn's guardian messages: the ones it took, and the ones a turn a
+  // newer input superseded handed on to it, which it answers too.
   const turnPrompts = async () => {
     const { chatId, turnId } = currentTurn();
-    return (await webchatRepo.getTurnChatMessages(chatId, turnId))
+    const own = (await webchatRepo.getTurnChatMessages(chatId, turnId))
       .filter((row) => row.role === "user" && row.inputState !== "queued")
       .map((row) => row.id);
+    const handedOn = service.promptsHandedOn(chatId).filter((id) => !own.includes(id));
+    return [...handedOn, ...own];
   };
 
   /** This turn's guardian messages, once `answers`, when given, is one of them. */
@@ -465,7 +476,10 @@ export async function buildConciergeTools(
       const pointed = pointsTo ? await webchatRepo.getReplyTarget(chatId, pointsTo) : null;
       if (pointed?.role === "user") answered = pointed.id;
       else {
-        const prompts = await promptsOf(chatId, pointed?.turnId ?? turnId);
+        const prompts =
+          !pointed?.turnId || pointed.turnId === turnId
+            ? await turnPrompts()
+            : await promptsOf(chatId, pointed.turnId);
         answered = prompts.length === 1 ? prompts[0] : undefined;
       }
     }
@@ -895,7 +909,7 @@ export async function buildConciergeTools(
           answers: {
             type: "string",
             description:
-              "The message_id of the guardian message this task is for, from its <chat_thread> line, in this turn or an earlier one. Give it when the guardian sent several messages, or the task is for one from an earlier turn, so the task's results join that message's chat thread.",
+              "The message_id of the guardian message this task is for, from its <chat_thread> line, in this turn or an earlier one. Required when this turn carries several guardian messages, its own or ones an interrupted turn handed on, or the task is for one from an earlier turn: the task's results join that message's chat thread and it shows the task working. Without it, with several, nothing is marked.",
           },
           card: {
             type: "boolean",
