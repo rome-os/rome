@@ -565,6 +565,10 @@ struct SharedLinksSheet: View {
             }
         }
         .listStyle(.insetGrouped)
+        // Right under the title, as the Tasks sheet's list sits: the grouped
+        // list's own top margin is far taller.
+        .contentMargins(.top, 4, for: .scrollContent)
+        .listSectionSpacing(.compact)
         .scrollContentBackground(.hidden)
         .animation(.easeOut(duration: 0.2), value: links)
     }
