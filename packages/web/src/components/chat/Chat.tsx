@@ -2385,7 +2385,7 @@ export function Chat({
             <div
               ref={attachScroller}
               className={cn(
-                "relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
+                "scrollbar-idle-hidden relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain",
                 // Concierge has no timeline rail, so no lane for it. Its
                 // header floats over the messages, so the first one starts
                 // below it, and a jump to a message stops below it too.
