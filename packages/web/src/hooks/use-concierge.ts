@@ -91,9 +91,10 @@ export interface ConciergeChat {
 /**
  * The signed-in person's main Concierge chat. The server creates it on the
  * first request, and asks again on every mount, which recreates a deleted chat.
+ * With `enabled` false it only reads what is already loaded.
  */
-export function useConciergeChat(): ConciergeChat {
-  const { data, isPending, isError, refetch } = useConciergeSession();
+export function useConciergeChat(enabled = true): ConciergeChat {
+  const { data, isPending, isError, refetch } = useConciergeSession(enabled);
   // A failed refetch keeps the data it had, with an error status. The chat it
   // names still exists, so only a first load that failed counts as failed.
   return {

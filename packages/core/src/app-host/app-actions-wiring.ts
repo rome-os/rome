@@ -25,7 +25,7 @@ import {
   instantiateActionFromDirectory,
   resolveModuleEntryPath,
 } from "../apps/actions/module-loader.js";
-import type { FavorService } from "../favors/index.js";
+import type { AppFavorRequests } from "../apps/app-favors-port.js";
 import type { HostExecutionService } from "../apps/host-execution/service.js";
 import type { FeedbackService } from "../lib/feedback-client.js";
 import type { CloudProfileService } from "../instance/cloud-profile.js";
@@ -82,7 +82,7 @@ interface AppActionServices {
   actionEngine: ActionEngine;
   routinesRepo?: RoutinesRepository;
   repositories: AppRuntimeRepositories;
-  favorService?: FavorService;
+  favorService?: AppFavorRequests;
   appConnections?: AppConnectionsContextFactory;
   hostExecution?: HostExecutionService;
   /** System-only: reporter provenance must come from system:send_feedback. */

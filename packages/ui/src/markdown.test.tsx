@@ -157,14 +157,16 @@ describe("Markdown", () => {
     expect(external.rel).toContain("noopener");
   });
 
-  it("lets prose links lead by color alone, underlined on hover and focus, without added weight", () => {
+  it("underlines prose links faintly at rest and fully on hover and focus, without added weight", () => {
     renderMd("Read the [guide](./guide.md).");
 
     const classes = screen.getByRole("link", { name: "guide" }).className.split(/\s+/);
     expect(classes).toContain("text-primary");
-    expect(classes).toContain("no-underline");
-    expect(classes).toContain("hover:underline");
-    expect(classes).toContain("focus-visible:underline");
+    expect(classes).toContain("underline");
+    expect(classes).not.toContain("no-underline");
+    expect(classes).toContain("decoration-primary/40");
+    expect(classes).toContain("hover:decoration-primary");
+    expect(classes).toContain("focus-visible:decoration-primary");
     expect(classes).not.toContain("font-medium");
   });
 

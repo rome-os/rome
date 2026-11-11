@@ -69,6 +69,12 @@ enum SnapshotRunner {
                     workspace.topics.setActivity(.working, for: main)
                 }
                 workspace.debugSetAgentName("Milo")
+                // A chat thread open over a busy chat: its header carries the status too.
+                await capture("57e-header-thread-open", style: styleName, in: directory, wait: 1.5) {
+                    workspace.topics.setActivity(.tasks(title: "Mac app 右上角按钮点不到", more: 1), for: main)
+                    if let id = workspace.concierge.messages.last(where: { !$0.isUser })?.id { workspace.concierge.openThread(at: id) }
+                }
+                workspace.concierge.closeThread()
                 workspace.topics.setActivity(nil, for: main)
             }
             // Reply on an Agent message in no chat thread: quoted above the composer.
@@ -173,6 +179,14 @@ enum SnapshotRunner {
                 model.workspace?.topicStore("topic-books").openThread(at: "b23")
             }
             model.workspace?.topicStore("topic-books").closeThread()
+            try? await Task.sleep(for: .seconds(0.4))
+            // The same long thread while the chat runs a task: rows scroll under the status.
+            await capture("54b-long-thread-busy", style: styleName, in: directory, wait: 1.5) {
+                model.workspace?.topics.setActivity(.tasks(title: "Mac app 右上角按钮点不到", more: 1), for: "topic-books")
+                model.workspace?.topicStore("topic-books").openThread(at: "b23")
+            }
+            model.workspace?.topicStore("topic-books").closeThread()
+            model.workspace?.topics.setActivity(nil, for: "topic-books")
             try? await Task.sleep(for: .seconds(0.4))
             // Routine cards with their state, and the rows for cards only the web draws.
             await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }

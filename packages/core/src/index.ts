@@ -1,5 +1,5 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
-import { appGuardianProfile } from "./people/for-apps.js";
+import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { WebChatDashboardSessions } from "./webchat/webchat-dashboard-sessions.js";
@@ -247,7 +247,7 @@ import {
   ScheduleTriggerProvider,
 } from "./routines/schedule-trigger-provider.js";
 import type { Trigger } from "./routines/types.js";
-import { resolveGuardianTimezone } from "./routines/guardian-timezone.js";
+import { resolveGuardianTimezone } from "./instance/timezone.js";
 import { EventBusTriggerProvider } from "./routines/event-bus-trigger-provider.js";
 import { ManualTriggerProvider } from "./routines/manual-trigger-provider.js";
 import { linkGuardianToAccount } from "./people/guardian-mapping.js";

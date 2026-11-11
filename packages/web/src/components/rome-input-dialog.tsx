@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, type ReactNode } from "react";
 import { useForm } from "@tanstack/react-form";
 import { useTranslation } from "react-i18next";
+import { RomeLogo } from "@/components/logo";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogDescription, DialogTitle } from "@/components/ui/dialog";
 import { Field, FieldLabel } from "@/components/ui/field";
@@ -85,8 +86,8 @@ export function RomeInputDialog({
         }}
       >
         <div>
-          <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-8 bg-primary text-badge text-primary-foreground">
-            {icon ?? "R"}
+          <div className="mb-2">
+            {icon ?? <RomeLogo className="block h-8 w-8 text-foreground" aria-hidden />}
           </div>
           <DialogTitle>{title}</DialogTitle>
           {description ? (

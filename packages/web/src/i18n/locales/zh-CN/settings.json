@@ -889,7 +889,7 @@
     "upgradeFailed": "升级请求失败：{{message}}",
     "upgradeFailedFallback": "升级请求失败。",
     "restartingTitle": "{{name}} 正在重启",
-    "restartingBody": "正在升级到 {{version}}。{{name}} 恢复在线后此页面将自动刷新。",
+    "restartingBody": "正在升级到 {{version}}。",
     "restartTimeoutTitle": "升级耗时超出预期",
     "restartTimeoutBody": "{{name}} 在 {{minutes}} 分钟后仍未以 {{version}} 版本恢复。升级可能仍在进行，也可能已失败。",
     "restartTimeoutAction": "前往 Rome Cloud 查看实例状态。",

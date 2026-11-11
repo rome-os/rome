@@ -9,7 +9,7 @@ import { RELAY_SETTING_KEY, redactRelaySetting } from "../../relay/settings.js";
 import {
   GUARDIAN_TIMEZONE_SETTING_KEY,
   applyGuardianTimezoneWrite,
-} from "../../routines/guardian-timezone.js";
+} from "../../instance/timezone.js";
 import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { parseTimeZone } from "../../lib/timezone.js";
 import { APP_PERMISSIONS_SETTING_KEY } from "../../apps/app-permissions.js";

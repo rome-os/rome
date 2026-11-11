@@ -434,13 +434,14 @@ struct ChatIdentity: View {
     }
 }
 
-/// The surface of the header's name tag and status capsule: frosted like
-/// the composer and solid enough that rows scrolling under never show.
+/// The surface of the header's name tag and status capsule: solid, like the
+/// avatar, so rows scrolling under never show through the text (DESIGN.md 1).
 private struct HeaderCapsule: ViewModifier {
     func body(content: Content) -> some View {
         content
-            .background(Palette.headerPillTint, in: Capsule())
-            .glassSurface(Capsule(), frost: Frost.composer)
+            .background(Palette.elevated, in: Capsule())
+            .overlay(Capsule().strokeBorder(Palette.hair, lineWidth: 0.5))
+            .shadow(color: Palette.avatarShadow, radius: 4, x: 0, y: 1)
     }
 }
 
