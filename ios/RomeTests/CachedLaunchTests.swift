@@ -11,10 +11,13 @@ final class LaunchProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var refused: String?
     /// Instance requests that came with the refused token.
     nonisolated(unsafe) static var refusedPaths: [String] = []
+    /// Paths answered only after this long.
+    nonisolated(unsafe) static var slow: [String: Double] = [:]
 
     override class func canInit(with request: URLRequest) -> Bool { true }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
     override func startLoading() {
+        if let delay = Self.slow[request.url?.path() ?? ""] { Thread.sleep(forTimeInterval: delay) }
         if Self.offline {
             client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
             return
@@ -84,7 +87,9 @@ extension LastInstanceDefaults {
             LaunchProtocol.offline = false
             LaunchProtocol.refused = nil
             LaunchProtocol.refusedPaths = []
+            LaunchProtocol.slow = [:]
             await body()
+            LaunchProtocol.slow = [:]
             LaunchProtocol.answers = [:]
             LaunchProtocol.offline = false
             LaunchProtocol.refused = nil
@@ -150,6 +155,56 @@ extension LastInstanceDefaults {
                 )
                 await app.launch(skipSnapshot: true)
                 #expect(await eventually { app.currentInstanceID == "c" })
+            }
+        }
+
+        /// Signed out while Rome Cloud's list was on its way: the late answer
+        /// changes nothing.
+        @Test func aSignOutDuringTheCatchUpIsNotUndone() async {
+            await clean {
+                list("stopped")
+                LaunchProtocol.slow["/v1/instances"] = 0.3
+                let (app, _) = model(session: fresh)
+                await app.launch(skipSnapshot: true)
+                await app.signOut()
+                try? await Task.sleep(for: .milliseconds(600))
+                #expect(app.phase == .signedOut)
+            }
+        }
+
+        /// The instance refused the kept session and Rome Cloud says it moved:
+        /// it opens on its new origin, not the sign-in page.
+        @Test func aMovedInstanceOpensOnItsNewOrigin() async {
+            await clean {
+                LaunchProtocol.answers["/api/auth/cloud/native/start"] = (404, "{}")
+                LaunchProtocol.answers["/v1/instances"] = (200, #"{"items":[{"id":"b","name":"B","slug":"b","origin":"https://b2.example","status":"running"}]}"#)
+                let (app, _) = model(
+                    session: InstanceSession(token: "old", expiresAt: iso(-60), origin: "https://b.example"),
+                    others: [InstanceSession(token: "b2", expiresAt: iso(3600), origin: "https://b2.example")]
+                )
+                await app.launch(skipSnapshot: true)
+                #expect(await eventually { app.webURL?.host() == "b2.example" && app.workspace != nil })
+                #expect(await eventually { app.phase == .ready })
+            }
+        }
+
+        /// A request on a session the instance refuses is sent once more after
+        /// the renewal: a send is never left failed by a session about to change.
+        @Test func aRefusedRequestGoesAgainAfterRenewal() async {
+            await clean {
+                LaunchProtocol.refused = "old"
+                LaunchProtocol.answers["/api/concierge/session"] = (200, #"{"id":"main-1","unread":0}"#)
+                let box = TokenBox()
+                box.token = "old"
+                let configuration = URLSessionConfiguration.ephemeral
+                configuration.protocolClasses = [LaunchProtocol.self]
+                let client = APIClient(origin: URL(string: "https://b.example")!, token: { box.token }, configuration: configuration, renew: {
+                    box.token = "new"
+                    return true
+                })
+                let info: ConciergeSessionInfo? = try? await client.get("/concierge/session")
+                #expect(info?.id == "main-1")
+                #expect(LaunchProtocol.refusedPaths == ["/api/concierge/session"])
             }
         }
 
