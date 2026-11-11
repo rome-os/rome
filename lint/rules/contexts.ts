@@ -29,6 +29,14 @@ const REASONS: Record<string, string> = {
     "An agent never knows which connection carries its chat, so no file in agent/ imports connections/. What an agent needs from a chat reaches it through Chats.",
   "apps-never-imports-favors":
     "A favor request exists to run an app action, so Favors depends on Apps and no file in apps/ imports favors/.",
+  "favors-never-imports-agent":
+    "A favor request runs an app action for a visitor, and no agent takes part in it, so no file in favors/ imports agent/.",
+  "favors-never-imports-chats":
+    "A favor request never names a chat or an account, so no file in favors/ imports chats/.",
+  "favors-never-imports-connections":
+    "A favor request never names a connection, so no file in favors/ imports connections/.",
+  "favors-never-imports-people":
+    "A favor request knows its visitor by their Rome Cloud account, not as a person, so no file in favors/ imports people/.",
   "desktops-never-imports-agent":
     "Desktops says which machines Rome can reach and what it can do on them, whoever asks, so no file in desktops/ imports agent/.",
   "desktops-never-imports-chats":
