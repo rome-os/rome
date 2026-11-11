@@ -210,15 +210,20 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
     }
 }
 
-/// A short transcript is laid out at once; one with older pages never is.
+/// A transcript is laid out at once until a long history, paged in from
+/// the top, passes the limit; and it changes kind only away from the bottom.
 @Suite struct TranscriptStackTests {
-    @Test func eagerOnlyWhileTheWholeHistoryIsHeld() {
+    @Test func eagerUntilALongHistoryAwayFromTheBottom() {
         typealias List = TranscriptList<EmptyView>
-        #expect(!List.isLazy(rows: 12, hasOlder: false, locked: false))
-        // Older pages to fetch: an eager stack would page through all of them.
-        #expect(List.isLazy(rows: 12, hasOlder: true, locked: false))
-        #expect(List.isLazy(rows: List.eagerRowLimit + 1, hasOlder: false, locked: false))
+        let long = List.eagerRowLimit + 1
+        // A launch's rows, older pages or not, stay eager.
+        #expect(!List.isLazy(rows: 200, locked: false, following: true, atRest: true))
+        // Past the limit: still eager while on the bottom or moving.
+        #expect(!List.isLazy(rows: long, locked: false, following: true, atRest: true))
+        #expect(!List.isLazy(rows: long, locked: false, following: false, atRest: false))
+        // Away from the bottom and at rest, it goes lazy.
+        #expect(List.isLazy(rows: long, locked: false, following: false, atRest: true))
         // Once lazy, it stays lazy.
-        #expect(List.isLazy(rows: 12, hasOlder: false, locked: true))
+        #expect(List.isLazy(rows: 12, locked: true, following: true, atRest: true))
     }
 }

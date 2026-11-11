@@ -214,3 +214,127 @@ private struct ShrinkHost: View {
     }
 }
 
+
+@MainActor
+private final class Appearances {
+    var count: [String: Int] = [:]
+    var frames: [String: CGRect] = [:]
+}
+
+/// The transcript, counting how often each row comes on screen: a row the
+/// stack rebuilds comes on again.
+private struct AppearHost: View {
+    let store: TranscriptStore
+    let seen: Appearances
+
+    var body: some View {
+        TranscriptList(store: store) { row, previous in
+            Group {
+                switch row {
+                case .userText(_, let text, _, let pending): UserBubble(text: text, pending: pending)
+                case .agentText(_, let text, _, let forwarded, let position): AgentBubble(text: text, forwardedFrom: forwarded, position: position)
+                default: EmptyView()
+                }
+            }
+            .onAppear { seen.count[row.id, default: 0] += 1 }
+            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { seen.frames[row.id] = $0 }
+            .padding(.top, TranscriptSpacing.top(row, after: previous))
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: 66) }
+    }
+}
+
+/// A cold launch from kept rows, then the first fetch finding older pages:
+/// the stack keeps its kind while the list follows the bottom. Switching it
+/// rebuilt every row a moment after launch, and the new stack's guessed
+/// heights left a gap under the last message until the next touch.
+@MainActor
+@Suite(.serialized) struct LaunchStackTests {
+    @Test func theFetchDoesNotRebuildTheRows() async throws {
+        let messages = (0..<120).map { index in
+            ChatMessage(id: "m\(index)", sessionId: "chat-1", turnId: "t\(index / 2)", role: index.isMultiple(of: 2) ? "user" : "assistant", content: "Message \(index), long enough to fill a line or two of the bubble.", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + Double(index * 60))))
+        }
+        let root = FileManager.default.temporaryDirectory.appending(path: "rome-launch-stack-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let cache = TranscriptCache(root: root, instance: "t")
+        cache.save(chat: "chat-1", messages: messages)
+
+        let backend = FakeBackend()
+        backend.stored = messages
+        let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: backend)
+        store.cache = cache
+        store.showCached()
+        let seen = Appearances()
+        let host = UIHostingController(rootView: AppearHost(store: store, seen: seen))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+            store.stop()
+        }
+        try await Task.sleep(for: .milliseconds(800))
+        let last = "m119:0"
+        #expect(seen.count[last] == 1)
+
+        store.start()
+        for _ in 0..<100 where !store.hasOlder { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.hasOlder)
+        try await Task.sleep(for: .milliseconds(800))
+        #expect(seen.count[last] == 1, "the last message came on \(seen.count[last] ?? 0) times: the stack was rebuilt")
+        let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
+        let toEnd = scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height - scroll.contentOffset.y
+        #expect(abs(toEnd) < 1, "not at the bottom: \(toEnd)")
+    }
+}
+
+/// Paging up: an older page lands above the rows on screen, which stay
+/// where they are.
+@MainActor
+@Suite(.serialized) struct PagingUpTests {
+    @Test func anOlderPageLandsAboveWithoutMovingTheRowsInView() async throws {
+        let messages = (0..<160).map { index in
+            ChatMessage(id: "m\(index)", sessionId: "chat-1", turnId: "t\(index / 2)", role: index.isMultiple(of: 2) ? "user" : "assistant", content: "Message \(index), long enough to fill a line or two of the bubble.", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + Double(index * 60))))
+        }
+        let backend = FakeBackend()
+        backend.stored = messages
+        let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<100 where !store.loaded { try await Task.sleep(for: .milliseconds(10)) }
+        let seen = Appearances()
+        let host = UIHostingController(rootView: AppearHost(store: store, seen: seen))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+            store.stop()
+        }
+        try await Task.sleep(for: .milliseconds(800))
+        // On the bottom with older pages behind: nothing fetched yet.
+        let held = store.messages.count
+        #expect(store.hasOlder && held == TranscriptStore.pageSize)
+
+        // Up to the top of what is held.
+        let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
+        scroll.setContentOffset(CGPoint(x: 0, y: -scroll.adjustedContentInset.top), animated: false)
+        try await Task.sleep(for: .milliseconds(100))
+        let anchorId = try #require(seen.frames.filter { $0.value.minY > 200 && $0.value.minY < 600 }.min { $0.value.minY < $1.value.minY }?.key)
+        let before = try #require(seen.frames[anchorId]).minY
+
+        for _ in 0..<200 where store.messages.count == held { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.messages.count > held, "no older page came")
+        try await Task.sleep(for: .milliseconds(600))
+        let after = try #require(seen.frames[anchorId]).minY
+        #expect(abs(after - before) < 1, "\(anchorId) moved from \(before) to \(after)")
+    }
+}
+

@@ -694,34 +694,37 @@ struct TranscriptList<Row: View>: View {
     /// stack guesses the height of rows it has not laid out, and a chat that
     /// mixes cards with short bubbles makes it guess wrong: the content then
     /// shrinks under the scroll as rows leave the screen, and the rows jump.
-    /// Past this many rows the lazy stack's memory saving wins.
-    static var eagerRowLimit: Int { 120 }
+    /// A launch holds at most the kept rows and the newest page (about 90
+    /// messages, well under this), so only paging far back reaches it.
+    /// Past it the lazy stack's memory saving wins.
+    static var eagerRowLimit: Int { 400 }
 
-    /// Lazy once older pages exist or the rows pass the limit. An eager
-    /// stack runs every row's onAppear at once, so with older pages to
-    /// fetch it would page through the whole history; eager, there is none.
-    static func isLazy(rows: Int, hasOlder: Bool, locked: Bool) -> Bool {
-        locked || hasOlder || rows > eagerRowLimit
+    /// Eager while the history held is short, older pages or not: they load
+    /// by the scroll's position near the top, never by rows appearing, so an
+    /// eager stack does not page through them. Past the limit the stack goes
+    /// lazy, but only away from the bottom and at rest: switching rebuilds
+    /// every row and leaves the new stack's guessed heights in the content
+    /// size, which under a list on the bottom showed as a gap under the last
+    /// message until the next touch. Once lazy, it stays lazy.
+    static func isLazy(rows: Int, locked: Bool, following: Bool, atRest: Bool) -> Bool {
+        locked || (rows > eagerRowLimit && !following && atRest)
     }
 
     var body: some View {
         let rows = store.rows
-        let lazy = Self.isLazy(rows: rows.count, hasOlder: store.hasOlder, locked: lazyLocked)
+        let lazy = Self.isLazy(rows: rows.count, locked: lazyLocked, following: following, atRest: atRest)
         ScrollViewReader { proxy in
             ScrollView {
                 TranscriptStack(lazy: lazy) {
+                    // Older pages load by the scroll's position near the top
+                    // (`DistanceFromBottom`, `LegacyContentMoves`): in an
+                    // eager stack every row's onAppear runs at once.
                     if store.hasOlder {
                         Spinner(size: 16, color: Palette.sub)
                             .padding(.vertical, 12)
-                            .onAppear { Task { await store.loadOlder() } }
-                            // A new spinner per page, so one still on screen asks again.
-                            .id(store.messages.first?.id)
                     }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
                         row(item, index > 0 ? rows[index - 1] : nil)
-                            // Before iOS 18, an early row coming into view asks for
-                            // the older page ahead of the top (iOS 18 reads the offset).
-                            .onAppear { if index < 6 { Task { await store.loadOlder() } } }
                             .background {
                                 if let highlighted, item.id.hasPrefix(highlighted + ":") {
                                     RoundedRectangle(cornerRadius: 22, style: .continuous)
@@ -752,7 +755,9 @@ struct TranscriptList<Row: View>: View {
                 // drop on every open. A list that fills its space needs no inset.
                 .frame(minHeight: visibleHeight, alignment: alignTop ? .top : .bottom)
                 .background(ScrollViewFinder(handle: scrollHandle))
-                .modifier(LegacyContentMoves(monitor: legacyScroll, space: Self.scrollSpace))
+                .modifier(LegacyContentMoves(monitor: legacyScroll, space: Self.scrollSpace, visibleHeight: visibleHeight) {
+                    Task { await store.loadOlder() }
+                })
             }
             .coordinateSpace(.named(Self.scrollSpace))
             .modifier(FollowBottom(following: $following, bottomVisible: bottomVisible, holdOlder: store.placingOlder, atRest: $atRest, jumping: $jumping, fingerDown: $fingerDown, legacy: legacyScroll, handle: scrollHandle))
@@ -779,19 +784,6 @@ struct TranscriptList<Row: View>: View {
             }
             .onChange(of: lazy, initial: true) { _, now in
                 if now { lazyLocked = true }
-            }
-            // Rows that changed under a list at rest on the bottom: lay the
-            // scroll out again and bring an offset left past the end back,
-            // without waiting for a touch to do it.
-            .onChange(of: RowsShape(rows), initial: true) {
-                guard following, atRest else { return }
-                Task {
-                    for delay in [150, 500, 1200] {
-                        try? await Task.sleep(for: .milliseconds(delay))
-                        guard following, atRest else { return }
-                        scrollHandle.settleAtEnd()
-                    }
-                }
             }
             .onChange(of: rows.last?.id) {
                 // Before iOS 18 a list that follows also scrolls to a new last
@@ -907,17 +899,6 @@ struct TranscriptList<Row: View>: View {
 
 /// The transcript's stack: lazy for a long transcript, all at once for a
 /// short one (`TranscriptList.eagerRowLimit`).
-/// What a change of rows is, for re-settling the list: how many, and the last.
-private struct RowsShape: Equatable {
-    let count: Int
-    let last: String?
-
-    init(_ rows: [TranscriptRow]) {
-        count = rows.count
-        last = rows.last?.id
-    }
-}
-
 private struct TranscriptStack<Content: View>: View {
     let lazy: Bool
     @ViewBuilder var content: () -> Content
@@ -1012,15 +993,6 @@ final class ScrollHandle {
         guard let view else { return }
         view.contentOffset.y += dy
         transcriptScrollLog.notice("shifted by \(dy, privacy: .public) to \(view.contentOffset.y, privacy: .public)")
-    }
-
-    /// Lays the scroll out now, so its content size is the rows' own, then
-    /// clamps an offset past the end. A list at rest only.
-    func settleAtEnd() {
-        guard let view, !view.isDragging, !view.isDecelerating else { return }
-        view.setNeedsLayout()
-        view.layoutIfNeeded()
-        clampToEnd()
     }
 
     /// Moves an offset left past the end of the content back to the end. A
@@ -1149,6 +1121,11 @@ private final class LegacyScrollMonitor {
 private struct LegacyContentMoves: ViewModifier {
     let monitor: LegacyScrollMonitor
     let space: String
+    /// The height between the bars.
+    let visibleHeight: CGFloat
+    /// Within 1.5 screens of the top of what is loaded: time to fetch the
+    /// older page, as iOS 18 reads it from the scroll's geometry.
+    var onNearTop: () -> Void = {}
 
     func body(content: Content) -> some View {
         if #available(iOS 18, *) {
@@ -1156,7 +1133,11 @@ private struct LegacyContentMoves: ViewModifier {
         } else {
             content.onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.frame(in: .named(space)).minY
-            } action: { _ in monitor.moved() }
+            } action: { minY in
+                monitor.moved()
+                // A load already on its way, or none left, makes this a no-op.
+                if visibleHeight > 0, -minY < visibleHeight * 1.5 { onNearTop() }
+            }
         }
     }
 }
