@@ -893,15 +893,19 @@
    in the browser build (functions like a media query for "running inside
    the Mac app").
 
-   Drag-region model: `-webkit-app-region` resolves to a flat geometric
-   mask (drag minus no-drag), independent of z-index / paint order. So
-   any interactive element that lives inside a drag region would otherwise
-   be eaten by window-drag. We pre-emptively mark every interactive
-   primitive `no-drag` site-wide; the titlebar rule below then re-adds the
-   background of the title bar (shell/DesktopTitlebar.tsx) as drag, which
-   leaves clickable children punched out. `[data-no-drag]` is an escape
-   hatch for non-semantic clickable wrappers (e.g. Radix `asChild`
-   rendering a `<div>`). */
+   Drag-region model: `-webkit-app-region` is inherited (Chromium 152+,
+   Electron 44+), and every element whose value is not `none` adds its own
+   box to the window's drag mask, in document order, a later box winning
+   over an earlier one. z-index and pointer-events play no part. So any
+   interactive element that lives inside a drag region would otherwise be
+   eaten by window-drag. We pre-emptively mark every interactive primitive
+   `no-drag` site-wide; the titlebar rule below then makes the title bar
+   (shell/DesktopTitlebar.tsx) drag, which leaves clickable children punched
+   out. A layer placed over the bar after its buttons inherits drag and
+   covers them again, so it opts out with `initial`: an explicit `none`
+   acts as `no-drag` (a Chromium legacy quirk) and would cut the bar's drag
+   area instead. `[data-no-drag]` is an escape hatch for non-semantic
+   clickable wrappers (e.g. Radix `asChild` rendering a `<div>`). */
 html.is-electron
   :where(
     button,
@@ -926,8 +930,13 @@ html.is-electron [data-app-titlebar] {
   -webkit-app-region: drag;
 }
 /* A Concierge chat's mascot hangs from the title bar and drags the window like
-   it, below the bar too. Its messages start under the status capsule, which
-   reaches less far below the bar than the floating header does. */
+   it, below the bar too. The layer it hangs in spans the page's bar and comes
+   after its buttons, so it takes no part, or it would cover them; only the
+   badge drags. Its messages start under the status capsule, which reaches
+   less far below the bar than the floating header does. */
+html.is-electron [data-titlebar-mascot] {
+  -webkit-app-region: initial;
+}
 html.is-electron [data-app-titlebar] [data-concierge-header-badge] {
   -webkit-app-region: drag;
 }
