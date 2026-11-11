@@ -1074,6 +1074,12 @@ export function Chat({
       // Only mark loaded once we have data in hand. Marking before the await
       // permanently suppressed retries on any failure — the user would land in
       // a silently-empty chat with no recovery short of a page refresh.
+      // The local rows a fetch may stand in for are the ones sent before it
+      // asked. A row sent while it is on the way is newer than the page it
+      // brings, so it stays until a later fetch holds it.
+      const localBeforeFetch = options.dropLocalOptimistic
+        ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
+        : undefined;
       try {
         const fetchPage = () => listSessionMessagePage(id, { limit: pageTurns });
         let page = await fetchPage();
@@ -1094,9 +1100,7 @@ export function Chat({
         if (fetchedMessages.some((message) => message.traceArchived))
           traceArchivedSessionsRef.current.add(id);
         else traceArchivedSessionsRef.current.delete(id);
-        const dropMessageIds = options.dropLocalOptimistic
-          ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
-          : undefined;
+        const dropMessageIds = localBeforeFetch;
         const commitMessages = () =>
           setMessages((prev) => {
             const next = new Map(prev);
@@ -1124,8 +1128,10 @@ export function Chat({
         // A refetch of the newest page leaves older loaded pages, and the
         // cursor that reaches past them, as they are.
         if (!loadedSessionsRef.current.has(id) || restart) setOlderCursor(id, page.nextCursor);
-        if (options.dropLocalOptimistic) {
-          localOptimisticMessageIdsRef.current.delete(id);
+        if (localBeforeFetch) {
+          const local = localOptimisticMessageIdsRef.current.get(id);
+          for (const messageId of localBeforeFetch) local?.delete(messageId);
+          if (local?.size === 0) localOptimisticMessageIdsRef.current.delete(id);
         }
         loadedSessionsRef.current.add(id);
         if (isReadVisibleSession(id)) {

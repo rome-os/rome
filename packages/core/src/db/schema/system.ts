@@ -778,8 +778,14 @@ export const conciergeTaskReactions = sqliteTable(
     chatId: text("chat_id").notNull(),
     /** The message's key in that chat, as the dashboard names it. */
     messageKey: text("message_key").notNull(),
-    /** `stopped`: the task was stopped and counts toward no reaction. */
-    state: text("state", { enum: ["working", "done", "failed", "stopped"] }).notNull(),
+    /**
+     * `stopped`: the task was stopped and counts toward no reaction.
+     * `done_unsaid` / `failed_unsaid`: it ended, and its result is not said
+     * yet, so it still works.
+     */
+    state: text("state", {
+      enum: ["working", "done", "failed", "stopped", "done_unsaid", "failed_unsaid"],
+    }).notNull(),
     updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [

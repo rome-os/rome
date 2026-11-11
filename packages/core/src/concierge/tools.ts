@@ -662,6 +662,7 @@ export async function buildConciergeTools(
       [{ type: "text", content: text, ...(format === "long" ? { format } : {}) }],
       await placementFor(answers, { ...(thread ? { thread } : {}), ...(taskId ? { taskId } : {}) }),
     );
+    if (taskId) service.noteRelayed(turnId, taskId);
     noteAnswers(id, answers);
     said(chatId, turnId, text, isPrivate);
     return id;
@@ -672,6 +673,7 @@ export async function buildConciergeTools(
   const forward = async (text: string, from: ForwardedFrom, intro?: string, answers?: string) => {
     const { chatId, turnId } = currentTurn();
     const task = await tasks.repo.findBySession(from.chatId);
+    if (task) service.noteRelayed(turnId, task.id);
     const id = await addMessage(
       [
         ...(intro ? [{ type: "text" as const, content: intro }] : []),

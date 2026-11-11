@@ -417,9 +417,12 @@ function setup(
     status?: AgentTurnFinishedEvent["status"];
     failure?: AgentTurnFailure;
     startedAt?: string;
+    /** A newer input cut the turn short and took its work on. */
+    handedOn?: boolean;
   }) => {
     for (const listener of listeners) {
       listener({
+        ...(event.handedOn ? { handedOn: true } : {}),
         type: "agent-turn-finished",
         version: 1,
         turn: {
@@ -3833,12 +3836,36 @@ describe("Concierge status reactions", () => {
       (await s.tool("chat_start", { title: "Weather", brief: "Check the weather", ...args }))
         .content[0].text,
     ) as { chatId: string; taskId: string };
-  const finishTask = (
+  /** The Concierge's turn that reports task chat `chatId`'s news ends `outcome`. */
+  const reportEnds = async (
+    s: ReturnType<typeof setup>,
+    chatId: string,
+    outcome: "completed" | "failed" | "interrupted" | "stopped" = "completed",
+  ) => {
+    const task = await s.taskRepo.findBySession(chatId);
+    s.onBackendTurn(() => outcome);
+    await s.service.systemTurnOutcome(
+      CONCIERGE_CHAT,
+      `<task_events>\n<task id="${task!.id}" title="Weather">\n</task>\n</task_events>`,
+    );
+    s.onBackendTurn(() => "completed");
+  };
+  /** The task chat's turn ends `status`, and, unless it was stopped, the Concierge reports it. */
+  const finishTask = async (
     s: ReturnType<typeof setup>,
     chatId: string,
     status?: AgentTurnFinishedEvent["status"],
-  ) =>
-    s.finish({ turnId: `task-turn-${chatId}`, agentName: "core:main", chatId, status, text: "x" });
+    { reported = true }: { reported?: boolean } = {},
+  ) => {
+    await s.finish({
+      turnId: `task-turn-${chatId}`,
+      agentName: "core:main",
+      chatId,
+      status,
+      text: "x",
+    });
+    if (reported && status !== "interrupted") await reportEnds(s, chatId);
+  };
   /** Every reaction change the dashboard is told of, in order. */
   const watch = (s: ReturnType<typeof setup>) => {
     const seen: [string, string | null][] = [];
@@ -4024,8 +4051,16 @@ describe("Concierge status reactions", () => {
       s: ReturnType<typeof setup>,
       status?: AgentTurnFinishedEvent["status"],
       turnId = "concierge-turn-1",
+      handedOn = false,
     ) =>
-      s.finish({ turnId, agentName: "core:concierge", chatId: CONCIERGE_CHAT, status, text: "ok" });
+      s.finish({
+        turnId,
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        status,
+        text: "ok",
+        handedOn,
+      });
 
     it("is working while a direct answer's turn runs, and goes away when it completes", async () => {
       const s = setup({ said: false });
@@ -4084,6 +4119,32 @@ describe("Concierge status reactions", () => {
       expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, null]);
     });
 
+    it("stays working through quick sends that each take the work over, until the last turn ends", async () => {
+      const s = setup({ said: false });
+      // Each send supersedes the running turn before the next one starts, so
+      // no other turn runs yet when it ends.
+      for (const [key, turn] of [
+        ["g1", "turn-1"],
+        ["g2", "turn-2"],
+      ] as const) {
+        guardianSays(s, key, turn);
+        await taken(s, key, turn);
+        await conciergeEnds(s, "interrupted", turn, true);
+      }
+      expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([
+        "working",
+        "working",
+      ]);
+      guardianSays(s, "g3", "turn-3");
+      await taken(s, "g3", "turn-3");
+      await conciergeEnds(s, "completed", "turn-3");
+      expect(await Promise.all(["g1", "g2", "g3"].map((key) => reactionOf(s, key)))).toEqual([
+        null,
+        null,
+        null,
+      ]);
+    });
+
     it.each(["error", "stopped"] as const)("fails when the turn ends %s", async (status) => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
@@ -4111,6 +4172,66 @@ describe("Concierge status reactions", () => {
       await finishTask(s, chatId);
       // The task is done; the Concierge's own turn still runs.
       expect(await reactionOf(s, "g1")).toBe("working");
+    });
+  });
+
+  describe("until the Concierge says the result", () => {
+    it("stays working after the task ends, until the turn that reports it ends", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      await finishTask(s, chatId, "completed", { reported: false });
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("shows a failed task as failed once its report turn ends", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      await finishTask(s, chatId, "error", { reported: false });
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBe("failed");
+    });
+
+    it("waits for the report to be handed over again when its turn is cut short or fails", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      await finishTask(s, chatId, "completed", { reported: false });
+      await reportEnds(s, chatId, "interrupted");
+      await reportEnds(s, chatId, "failed");
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("settles when another turn says the result, naming the task", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      await finishTask(s, chatId, "completed", { reported: false });
+      s.inTurn("later");
+      guardianSays(s, "g2", "later");
+      await s.tool("say", { text: "Sunny all week", task: taskId });
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await s.finish({
+        turnId: "later",
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        text: "ok",
+      });
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("clears a stopped task at once, with nothing to report", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      await finishTask(s, chatId, "interrupted", { reported: false });
+      expect(await reactionOf(s, "g1")).toBeNull();
     });
   });
 

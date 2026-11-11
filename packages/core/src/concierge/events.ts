@@ -5,7 +5,7 @@
 
 import type { AgentTurnFailure, AgentTurnFinishedEvent } from "@rome-os/app-runtime";
 import { CONCIERGE_DONE_DAYS } from "@rome/api-types/concierge";
-import type { AgentTurnFailedBeforeStart, TurnListeners } from "../agent/index.js";
+import type { AgentTurnFailedBeforeStart, EndedAgentTurn, TurnListeners } from "../agent/index.js";
 import { createLogger } from "../logger.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt, shouldNudge } from "./nudge.js";
 import {
@@ -218,7 +218,16 @@ export function startConciergeEvents(
       if (!(await service.isServed(owner))) return "failed";
       return await service.systemTurnOutcome(chatId, prompt, { quiet, pushLevel: "active" });
     },
-    giveUp: (taskId) => tasks.markNotSynced(taskId),
+    giveUp: (taskId) => {
+      tasks.markNotSynced(taskId);
+      // Its result will not be said: the messages it held show it failed.
+      void tasks.repo.settleHeldReactions([taskId], true).catch((error: unknown) =>
+        log.warn("failed to settle held status reactions", {
+          taskId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    },
   });
   service.attachTaskEvents(coalescer);
 
@@ -233,10 +242,13 @@ export function startConciergeEvents(
     chatId: string,
     ended: string,
     status: AgentTurnFinishedEvent["status"],
+    handedOn = false,
   ) => {
     // The ended turn's stream may still be draining, so it is left out.
     const running = service.dashboard.chats.activeTurns(chatId).filter((id) => id !== ended);
-    if (status === "interrupted" && running.length > 0) return;
+    // The turn that takes the work over has not started yet when this one
+    // ends, so the session says whether a newer input took it over.
+    if (status === "interrupted" && (handedOn || running.length > 0)) return;
     service.turnSettled(chatId);
     await tasks.repo
       .settleTurnReactions(chatId, reactionEndOf(status), running)
@@ -248,10 +260,20 @@ export function startConciergeEvents(
       );
   };
 
-  const onConciergeTurn = async (event: AgentTurnFinishedEvent, chatId: string) => {
+  const onConciergeTurn = async (event: EndedAgentTurn, chatId: string) => {
     // Read before any await: the reminder's own finish event fires while the
     // reminder still runs, and the flag clears as soon as it returns.
     const reminderRunning = remindersRunning.has(chatId);
+    // The tasks whose result this turn said settle the messages they held.
+    const relayed = service.takeRelayed(event.turn.turnId);
+    if (relayed.length > 0) {
+      void tasks.repo.settleHeldReactions(relayed).catch((error: unknown) =>
+        log.warn("failed to settle held status reactions", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     // Finish callbacks run before the backend promise settles. Capture them
     // synchronously so a recovery cannot start a second chain or a reminder.
     const active = recoveriesRunning.get(chatId);
@@ -262,7 +284,7 @@ export function startConciergeEvents(
     const failure = event.status === "error" ? event.output.failure : undefined;
     const reason = failure ? failoverReason(failure, service.deps.accounts.read()) : null;
     // A failed turn that a recovery takes over stays working until it ends.
-    if (!reason) await settleTurnMarks(chatId, event.turn.turnId, event.status);
+    if (!reason) await settleTurnMarks(chatId, event.turn.turnId, event.status, event.handedOn);
     if (event.status === "error") {
       if (!reason || !failure) return;
       const chain: { finished?: AgentTurnFinishedEvent } = {};
@@ -376,18 +398,22 @@ export function startConciergeEvents(
       return;
     }
     // The guardian messages the task worked for settle once the task chat
-    // has nothing left to run: done when it completed, stopped when it was
-    // stopped, which clears their reaction, and failed when it failed or was
-    // abandoned. A task that asks a question is still working.
-    if (service.dashboard.chats.activeTurns(chatId).length === 0) {
-      await tasks.repo
-        .settleReactions(taskId, reactionEndOf(event.status))
-        .catch((error: unknown) =>
-          log.warn("failed to settle status reactions", {
-            taskId,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
+    // has nothing left to run. A stop clears their reaction at once. A task
+    // that completed or failed keeps them working until the Concierge's turn
+    // that reports it ends, since only that reply tells the guardian. A task
+    // that asks a question is still working.
+    const handedOn = (event as EndedAgentTurn).handedOn === true;
+    if (service.dashboard.chats.activeTurns(chatId).length === 0 && !handedOn) {
+      const end = reactionEndOf(event.status);
+      await (end === "stopped"
+        ? tasks.repo.settleReactions(taskId, "stopped")
+        : tasks.repo.holdReactions(taskId, end)
+      ).catch((error: unknown) =>
+        log.warn("failed to settle status reactions", {
+          taskId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
     }
     // A failed turn says why, so the Concierge can tell the guardian.
     const { failure, error } = event.output;

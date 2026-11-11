@@ -17,12 +17,19 @@ export interface AgentTurnFailedBeforeStart {
 }
 
 /**
+ * An ended turn as Rome hears it: the event apps hear, and whether a newer
+ * input cut the turn short and took its work on into the next turn, as
+ * opposed to its owner's Stop.
+ */
+export type EndedAgentTurn = AgentTurnFinishedEvent & { handedOn?: boolean };
+
+/**
  * Port. What the agent context tells Rome about each turn. A call never waits
  * on a listener and never fails the turn.
  */
 export interface TurnLifecycle {
   started(event: AgentTurnStartedEvent): void;
-  ended(event: AgentTurnFinishedEvent): void;
+  ended(event: EndedAgentTurn): void;
   /** No ended call follows, and app hooks never hear of it. */
   couldNotStart(event: AgentTurnFailedBeforeStart): void;
 }

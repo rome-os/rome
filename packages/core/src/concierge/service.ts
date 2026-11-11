@@ -202,6 +202,8 @@ export class ConciergeService {
   private taskEvents: TaskEventCoalescer | null = null;
   /** Per Concierge chat, the task whose report a newer input took over. */
   private readonly carriedReports = new Map<string, string>();
+  /** Per Concierge turn, the tasks whose result it said. */
+  private readonly relayedInTurn = new Map<string, Set<string>>();
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
   private readonly push: ConciergePush | null;
@@ -660,6 +662,21 @@ export class ConciergeService {
    * of `defer` names it in its name as `task:<id>`, as the Concierge's
    * instructions ask.
    */
+  /** Every task row of `chatId` a turn's prompt names, as {@link reportedTaskOf} reads them. */
+  private async reportedTasksOf(prompt: string, chatId: string): Promise<string[]> {
+    const ids = new Set(
+      [...prompt.matchAll(/<task id="([^"]+)"|\btask:([\w-]+)/g)]
+        .map((match) => match[1] ?? match[2])
+        .filter((id): id is string => Boolean(id)),
+    );
+    const own: string[] = [];
+    for (const id of ids) {
+      const found = await this.deps.tasks.repo.getWithChat(id);
+      if (found && found.conciergeChat.id === chatId) own.push(found.row.id);
+    }
+    return own;
+  }
+
   private async reportedTaskOf(prompt: string, chatId: string): Promise<string | undefined> {
     const ids = [...prompt.matchAll(/<task id="([^"]+)"|\btask:([\w-]+)/g)].map(
       (match) => match[1] ?? match[2],
@@ -718,7 +735,35 @@ export class ConciergeService {
     if (outcome === "interrupted" && params.reportedTask) {
       this.carriedReports.set(params.threadId, params.reportedTask);
     }
+    // The tasks this turn reported on have had their say: the messages they
+    // held working settle (docs/domains/chats.md#status-reaction). A turn
+    // cut short or failed is handed over again, so they wait for that one.
+    if (outcome === "completed" || outcome === "stopped") {
+      const reported = await this.reportedTasksOf(prompt, params.threadId);
+      if (reported.length > 0) {
+        await this.deps.tasks.repo.settleHeldReactions(reported).catch((error: unknown) =>
+          log.warn("failed to settle held status reactions", {
+            chatId: params.threadId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    }
     return outcome;
+  }
+
+  /** Task `taskId`'s result was said in Concierge turn `turnId`, as by `say` naming it. */
+  noteRelayed(turnId: string, taskId: string): void {
+    const tasks = this.relayedInTurn.get(turnId) ?? new Set<string>();
+    tasks.add(taskId);
+    this.relayedInTurn.set(turnId, tasks);
+  }
+
+  /** The tasks whose result Concierge turn `turnId` said, forgotten once read. */
+  takeRelayed(turnId: string): string[] {
+    const tasks = this.relayedInTurn.get(turnId);
+    this.relayedInTurn.delete(turnId);
+    return tasks ? [...tasks] : [];
   }
 
   /**

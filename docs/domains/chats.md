@@ -111,6 +111,7 @@ A mark Rome puts on its owner's message in a [Concierge chat](#concierge-chat) t
   - It fails with an error, or ends with no end of its own, as when the process dies: failed.
   - Its owner stops it: stopped, which counts toward no reaction.
   - A newer input supersedes it and the work carries into the next turn: still working, until that turn ends.
+- A task that ends keeps the message working until the Concierge says its result: until the turn that reports the task ends, or a turn that says the result naming the task ends. Only then does it settle as the task ended. Until then the reply has not told the owner anything. A report that never comes shows failed.
 - How a task's end sets the reaction, the same way:
   - It finishes, or the Concierge marks it done: done, which shows no mark.
   - It fails with an error, or its turn ends with no end of its own, as when the process dies: failed.

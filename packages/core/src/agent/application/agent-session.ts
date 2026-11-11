@@ -2768,6 +2768,8 @@ class AgentSessionImpl implements AgentSession {
         toolCallCount: this.currentTurnToolCallCount,
         skillWritten: this.currentTurnSkillWritten,
       },
+      // A `now` input stopped it, not its owner: the next turn carries its work.
+      ...(sink.lifecycleInterrupted && !sink.stoppedByGuardian ? { handedOn: true } : {}),
     });
   }
 

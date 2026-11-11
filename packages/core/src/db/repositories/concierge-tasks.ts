@@ -85,13 +85,19 @@ export interface ReactionTarget {
 }
 
 /**
+ * A task that ended, whose result the Concierge has not said yet: it still
+ * shows working, and turns done or failed once the turn that reports it ends.
+ */
+export type HeldTaskReaction = "done_unsaid" | "failed_unsaid";
+
+/**
  * How one task's work for a message stands. A stopped task counts toward no
  * reaction (docs/domains/chats.md#status-reaction).
  */
-export type TaskReactionState = ConciergeStatusReaction | "done" | "stopped";
+export type TaskReactionState = ConciergeStatusReaction | "done" | "stopped" | HeldTaskReaction;
 
-/** How a task's work for its messages ends. */
-export type TaskReactionEnd = Exclude<TaskReactionState, "working">;
+/** How a task's or a turn's work for its messages ends. */
+export type TaskReactionEnd = "done" | "failed" | "stopped";
 
 /** A message's status reaction changed; null when it has none now. */
 export type ReactionListener = (
@@ -107,7 +113,8 @@ export type ReactionListener = (
  */
 export function reactionOf(states: readonly TaskReactionState[]): ConciergeStatusReaction | null {
   const counted = states.filter((state) => state !== "stopped");
-  if (counted.includes("working")) return "working";
+  const unsaid = (state: TaskReactionState) => state === "done_unsaid" || state === "failed_unsaid";
+  if (counted.some((state) => state === "working" || unsaid(state))) return "working";
   return counted.includes("failed") ? "failed" : null;
 }
 
@@ -466,6 +473,55 @@ export class ConciergeTasksRepository {
         ),
       );
     await this.announceReaction(target);
+  }
+
+  /**
+   * Task `taskId` ended `outcome`, and its result is not said yet: the
+   * messages it works for stay working until {@link settleHeldReactions}.
+   */
+  async holdReactions(taskId: string, outcome: "done" | "failed", now = new Date()): Promise<void> {
+    await this.db
+      .update(conciergeTaskReactions)
+      .set({ state: outcome === "done" ? "done_unsaid" : "failed_unsaid", updatedAt: now })
+      .where(
+        and(eq(conciergeTaskReactions.taskId, taskId), eq(conciergeTaskReactions.state, "working")),
+      );
+  }
+
+  /**
+   * The result of each of `taskIds` was said, or its report turn ended: the
+   * messages they held settle as the tasks ended, or failed when the report
+   * itself failed. Answers how many changed.
+   */
+  async settleHeldReactions(
+    taskIds: readonly string[],
+    reportFailed = false,
+    now = new Date(),
+  ): Promise<number> {
+    if (taskIds.length === 0) return 0;
+    const changed: ReactionTarget[] = [];
+    for (const [from, to] of [
+      ["done_unsaid", reportFailed ? "failed" : "done"],
+      ["failed_unsaid", "failed"],
+    ] as const) {
+      changed.push(
+        ...(await this.db
+          .update(conciergeTaskReactions)
+          .set({ state: to, updatedAt: now })
+          .where(
+            and(
+              inArray(conciergeTaskReactions.taskId, [...taskIds]),
+              eq(conciergeTaskReactions.state, from),
+            ),
+          )
+          .returning({
+            chatId: conciergeTaskReactions.chatId,
+            messageKey: conciergeTaskReactions.messageKey,
+          })),
+      );
+    }
+    for (const target of changed) await this.announceReaction(target);
+    return changed.length;
   }
 
   /** Settles every message still working for task `taskId`. Answers how many changed. */
