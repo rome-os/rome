@@ -297,7 +297,11 @@ import UIKit
             window.rootViewController = nil
             window.windowScene = nil
         }
-        try await Task.sleep(for: .milliseconds(500))
+        // UIKit lets go on a later turn of the run loop, later still on a busy
+        // simulator: wait for it, up to a bound.
+        for _ in 0..<50 where closedHost != nil || closedView != nil {
+            try await Task.sleep(for: .milliseconds(100))
+        }
         #expect(closedHost == nil)
         #expect(closedView == nil)
     }
