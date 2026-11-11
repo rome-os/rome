@@ -4005,7 +4005,7 @@ describe("Webchat API", () => {
       });
       expect(sent.status).toBe(200);
       const prompt = turns.at(-1)?.prompt;
-      expect(prompt).toContain("Acknowledge with `say` first");
+      expect(prompt).toContain("Send no acknowledgement");
       expect(prompt).toContain("`chat_start`");
       expect(prompt).toContain('`agent: "main"`, `skill: "coding:app_creation"`');
       // Concierge writes the brief itself, so it can add conversation context.
@@ -6221,6 +6221,54 @@ describe("Webchat API", () => {
       finish();
       await task;
       await runtime.flushAll();
+    });
+
+    it("shows a status reaction on the guardian's message in a Concierge chat, and streams its changes", async () => {
+      const repo = new ConciergeTasksRepository(testDb.db);
+      deps.concierge = { deps: { tasks: { repo } } } as never;
+      await deps.webchatRepo.createSession(
+        "topic",
+        "Topic",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      await deps.webchatRepo.addMessage(
+        "g1",
+        "topic",
+        "user",
+        JSON.stringify([{ type: "text", content: "Weather?" }]),
+        "turn-1",
+      );
+      await deps.webchatRepo.addMessage(
+        "g2",
+        "topic",
+        "user",
+        JSON.stringify([{ type: "text", content: "Thanks" }]),
+        "turn-2",
+      );
+      const [task] = await repo.upsertMany([{ title: "Weather", state: "doing" }]);
+      const app = createWebchatRuntime(deps).routes;
+      const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
+      const working = readSseUntil(events, "event: message_status_reaction");
+      await repo.markWorking(task.id, { chatId: "topic", messageKey: "g1" });
+      expect(await working).toContain(
+        `data: ${JSON.stringify({ sessionId: "topic", messageId: "g1", statusReaction: "working" })}`,
+      );
+      const done = readSseUntil(events, '"statusReaction":"done"');
+      await repo.settleReactions(task.id, "done");
+      expect(await done).toContain('"messageId":"g1"');
+      await events.cancel();
+
+      const listed = (await (await app.request("/chat/sessions/topic/messages")).json()) as {
+        id: string;
+        statusReaction?: string;
+      }[];
+      // Only the message a task worked for has one; the other carries no field.
+      expect(listed.find((m) => m.id === "g1")?.statusReaction).toBe("done");
+      expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("statusReaction");
     });
 
     it("keeps a deleted task chat's row on the Concierge's list and tells the Concierge", async () => {

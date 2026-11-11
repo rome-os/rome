@@ -114,6 +114,11 @@
         "searchingWeb": "Searching the web",
         "readingPage": "Reading a page"
       }
+    },
+    "statusReaction": {
+      "working": "Working on it",
+      "done": "Done",
+      "failed": "Did not finish"
     }
   },
   "reply": {

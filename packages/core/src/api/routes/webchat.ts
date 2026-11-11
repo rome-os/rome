@@ -1,5 +1,9 @@
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
+import type {
+  ConciergeStatusReaction,
+  MessageStatusReactionEvent,
+} from "@rome/api-types/concierge";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import { existsSync, readFileSync } from "node:fs";
@@ -958,11 +962,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const unsubscribeChatThread = deps.webchatRepo.onChatThreadPlaced((event) => {
       if (event.sessionId === sessionId) emit("message_chat_thread", event);
     });
+    // A status reaction is no message, so it only changes the bubble and
+    // never pushes (docs/domains/chats.md#status-reaction).
+    const unsubscribeReaction = deps.concierge?.deps.tasks.repo.onReaction((target, reaction) => {
+      if (target.chatId !== sessionId) return;
+      const event: MessageStatusReactionEvent = {
+        sessionId,
+        messageId: target.messageKey,
+        statusReaction: reaction,
+      };
+      emit("message_status_reaction", event);
+    });
     return () => {
       runningListeners.delete(runningListener);
       unsubscribeMessages();
       unsubscribeSessionName();
       unsubscribeChatThread();
+      unsubscribeReaction?.();
     };
   };
 
@@ -1346,8 +1362,27 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : message;
     });
   };
+  // The status reaction on each guardian message that has one, which only a
+  // Concierge chat's can.
+  const attachStatusReactions = async <T extends StoredMessages[number]>(
+    sessionId: string,
+    messages: T[],
+  ): Promise<(T & { statusReaction?: ConciergeStatusReaction })[]> => {
+    const repo = deps.concierge?.deps.tasks.repo;
+    const asked = messages.filter((message) => message.role === "user").map((m) => m.id);
+    if (!repo || asked.length === 0) return messages;
+    const reactions = await repo.reactionsOf(sessionId, asked);
+    if (reactions.size === 0) return messages;
+    return messages.map((message) => {
+      const statusReaction = reactions.get(message.id);
+      return statusReaction ? { ...message, statusReaction } : message;
+    });
+  };
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
-    const withTraces = await attachTraceSummaries(sessionId, messages);
+    const withTraces = await attachStatusReactions(
+      sessionId,
+      await attachTraceSummaries(sessionId, messages),
+    );
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
     const shownIds = new Set(messages.map((m) => m.id));
     const actors = new Map([...allActors].filter(([id]) => shownIds.has(id)));

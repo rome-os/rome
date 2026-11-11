@@ -335,6 +335,19 @@ export function startConciergeEvents(
       });
       return;
     }
+    // The guardian messages the task worked for settle once the task chat
+    // has nothing left to run: done when it completed, failed when it failed
+    // or was stopped. A task that asks a question is still working.
+    if (service.dashboard.chats.activeTurns(chatId).length === 0) {
+      await tasks.repo
+        .settleReactions(taskId, event.status === "completed" ? "done" : "failed")
+        .catch((error: unknown) =>
+          log.warn("failed to settle status reactions", {
+            taskId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+    }
     // A failed turn says why, so the Concierge can tell the guardian.
     const { failure, error } = event.output;
     const cause = event.status === "error" ? (failure?.message ?? error) : undefined;

@@ -234,22 +234,76 @@ export async function buildConciergeTools(
     return messageId;
   };
 
+  // The latest thing the Concierge said this turn, or null.
+  const latestSaidThisTurn = async () => {
+    const { chatId, turnId } = currentTurn();
+    const said = (await webchatRepo.getTurnChatMessages(chatId, turnId)).filter(
+      (row) => row.role === "assistant",
+    );
+    return said[said.length - 1]?.id ?? null;
+  };
+
+  const NO_ROW_MESSAGE =
+    "A new row needs a message to point to. Call say first, then pass the messageId it returns.";
+
   // The message a new row points to: the one passed, else the latest thing
   // said this turn. The guardian's own words are no default, since a row
   // starts from what the Concierge told them.
   const sourceMessageForNewRow = async (explicit: string | undefined) => {
     if (explicit) return requireSourceMessage(explicit);
-    const { chatId, turnId } = currentTurn();
-    const said = (await webchatRepo.getTurnChatMessages(chatId, turnId)).filter(
-      (row) => row.role === "assistant",
-    );
-    const latest = said[said.length - 1];
-    if (!latest) {
-      throw new Error(
-        "A new row needs a message to point to. Call say first, then pass the messageId it returns.",
-      );
+    const latest = await latestSaidThisTurn();
+    if (!latest) throw new Error(NO_ROW_MESSAGE);
+    return latest;
+  };
+
+  // The message a new task's row points to. The Concierge sends no
+  // acknowledgement before a task, so with nothing said this turn it is the
+  // guardian message the task is for: the one `answers` names, or the turn's
+  // only one.
+  const sourceMessageForTask = async (
+    explicit: string | undefined,
+    answers: string | undefined,
+  ) => {
+    if (explicit) return requireSourceMessage(explicit);
+    const latest = await latestSaidThisTurn();
+    if (latest) return latest;
+    const prompts = await turnPrompts();
+    const asked = answers ?? (prompts.length === 1 ? prompts[0] : undefined);
+    const { chatId } = currentTurn();
+    if (asked && (await webchatRepo.getReplyTarget(chatId, asked))?.role === "user") return asked;
+    throw new Error(NO_ROW_MESSAGE);
+  };
+
+  // Rome's status reaction on the guardian message a task works for
+  // (docs/domains/chats.md#status-reaction). It only shows how the work
+  // stands, so failing to write it never fails the tool.
+  const writeReaction = async (label: string, write: () => Promise<void>) => {
+    try {
+      await write();
+    } catch (error) {
+      log.warn(`failed to ${label} a status reaction`, {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
-    return latest.id;
+  };
+
+  // Sends `send` on to task `taskId` with guardian message `messageKey`
+  // marked as being worked on: marked first, so a task that ends at once
+  // still settles it, and taken back when the task never hears it.
+  const sendMarked = async (
+    taskId: string,
+    messageKey: string | undefined,
+    send: () => Promise<void>,
+  ) => {
+    if (!messageKey) return send();
+    const target = { chatId: currentTurn().chatId, messageKey };
+    await writeReaction("mark", () => tasks.repo.markWorking(taskId, target));
+    try {
+      await send();
+    } catch (error) {
+      await writeReaction("take back", () => tasks.repo.unmark(taskId, target));
+      throw error;
+    }
   };
 
   const parseTaskWrite = async (
@@ -843,7 +897,7 @@ export async function buildConciergeTools(
             ? messageId
               ? await requireSourceMessage(messageId)
               : undefined
-            : await sourceMessageForNewRow(messageId);
+            : await sourceMessageForTask(messageId, optionalString(args, "answers"));
           // The guardian message the task is for, if one can tell. Checked
           // before anything starts; the root is set once the task runs.
           const start = await startingRoot(
@@ -885,7 +939,7 @@ export async function buildConciergeTools(
                   chatId: conciergeChatId,
                 },
           ]);
-          await sendInput(chatId, brief, skill?.name);
+          await sendMarked(task.id, start?.answered, () => sendInput(chatId, brief, skill?.name));
           if (start) await rootTaskAt(task.id, start);
           // Named after the first turn: the first message would rename it.
           if (conversationTitleLength(title) <= CONVERSATION_TITLE_MAX_LENGTH) {
@@ -925,9 +979,15 @@ export async function buildConciergeTools(
           const chat = await requireTaskChat(chatId);
           const answers = optionalString(args, "answers");
           // Checked before the task hears anything, so a retry never sends twice.
-          await requireTurnPrompt(answers);
+          const prompts = await requireTurnPrompt(answers);
           await ensureTaskRow(chat);
-          await sendInput(chatId, requireString(args, "text"));
+          const task = await tasks.repo.findBySession(chatId);
+          const text = requireString(args, "text");
+          // The guardian message whose words go on: the one named, or the
+          // turn's only one.
+          const relayed = answers ?? (prompts.length === 1 ? prompts[0] : undefined);
+          if (task) await sendMarked(task.id, relayed, () => sendInput(chatId, text));
+          else await sendInput(chatId, text);
           await relayToTaskThread(chatId, answers);
           return "Sent; the task chat takes it as input.";
         }),

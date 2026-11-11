@@ -95,6 +95,17 @@ A chat forked from one turn of another chat, carrying that chat's history up to 
 - It is a chat of its own once forked: what is said in it does not reach the chat it came from.
 - It keeps the folder of the chat it was forked from, and the model it was forked with.
 
+## Status reaction
+
+A mark Rome puts on its owner's message in a [Concierge chat](#concierge-chat) to show how the work it asked for stands: working, done or failed. It takes the place of an acknowledgement from the Concierge.
+
+- Rome sets it, never the Concierge. A message has at most one, and a newer state replaces the older one.
+- A message gets one when the Concierge starts a task for it, or passes its words on to a task: working. It turns done when that task finishes, and failed when the task fails or is stopped. A task that asks its owner a question is still working.
+- A message that started or reached several tasks is working while any of them works, then failed if any failed, else done.
+- A message the Concierge answers in the same turn, with no task, gets none: the answer says it was heard.
+- It is not a message. It never reaches the phone as a push, and it does nothing when pressed.
+- A common chat has none.
+
 ## Concierge chat
 
 A dashboard chat where its owner talks with their Concierge: a [main chat](#main-chat) or a [topic chat](#topic-chat). Every Concierge chat of one owner talks to the same Concierge, with one list of follows and one list of tasks. Memory is one for every owner.

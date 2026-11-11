@@ -8,6 +8,7 @@ import { CollapsibleBubbleContent } from "@/components/chat/CollapsibleBubbleCon
 import { ConciergeBubble } from "@/components/chat/ConciergeBubble";
 import { ForwardedChip } from "@/components/chat/ForwardedChip";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
+import { StatusReactionBadge, useStatusReaction } from "@/components/chat/status-reaction";
 import { renderFlatEntries } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { BlockActions, ShareSelection } from "@/components/chat/MessageList";
@@ -25,6 +26,7 @@ import { cn } from "@/lib/utils";
 const GuardianBubble = memo(
   function GuardianBubble({ msg, arrival }: { msg: ChatMessage; arrival?: number }) {
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
+    const reaction = useStatusReaction(msg);
     // The bubble is a direct child of the group, so its width cap is a share
     // of the column, as the agent's is.
     return (
@@ -49,6 +51,7 @@ const GuardianBubble = memo(
         arrival={arrival}
       >
         <UserMessageBubble msg={msg} text={text} own />
+        {reaction ? <StatusReactionBadge reaction={reaction} /> : null}
       </ConciergeBubble>
     );
   },
@@ -56,6 +59,7 @@ const GuardianBubble = memo(
     prev.msg.id === next.msg.id &&
     prev.msg.content === next.msg.content &&
     prev.msg.inputState === next.msg.inputState &&
+    prev.msg.statusReaction === next.msg.statusReaction &&
     prev.arrival === next.arrival,
 );
 

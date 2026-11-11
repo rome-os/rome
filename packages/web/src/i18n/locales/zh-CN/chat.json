@@ -114,6 +114,11 @@
         "searchingWeb": "正在搜索网页",
         "readingPage": "正在阅读网页"
       }
+    },
+    "statusReaction": {
+      "working": "正在处理",
+      "done": "已完成",
+      "failed": "未完成"
     }
   },
   "reply": {

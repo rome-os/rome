@@ -106,6 +106,11 @@ import {
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { ChatThreadView } from "@/components/chat/ChatThreadView";
+import {
+  type LiveStatusReactions,
+  LiveStatusReactionsProvider,
+  messageStatusReactionSchema,
+} from "@/components/chat/status-reaction";
 import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
 import {
   ChatThreadsProvider,
@@ -258,6 +263,8 @@ interface ChatSessionEventsProps {
   onMessageInsert: (sessionId: string, message: ChatMessage) => void;
   /** The Concierge placed a message of the chat in a chat thread. */
   onMessageChatThread?: (event: z.infer<typeof messageChatThreadSchema>) => void;
+  /** Rome changed the status reaction on a guardian message of a Concierge chat. */
+  onMessageStatusReaction?: (event: z.infer<typeof messageStatusReactionSchema>) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
   onSessionRunning: (event: z.infer<typeof sessionRunningSchema>) => void;
   onReconnect: (sessionId: string) => void;
@@ -267,6 +274,7 @@ function ChatSessionEvents({
   sessionId,
   onMessageInsert,
   onMessageChatThread,
+  onMessageStatusReaction,
   onSessionName,
   onSessionRunning,
   onReconnect,
@@ -286,6 +294,12 @@ function ChatSessionEvents({
         schema: messageChatThreadSchema,
         fn: (event) => {
           if (event.sessionId === sessionId) onMessageChatThread?.(event);
+        },
+      },
+      message_status_reaction: {
+        schema: messageStatusReactionSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onMessageStatusReaction?.(event);
         },
       },
       session_running: {
@@ -496,6 +510,14 @@ export function Chat({
       setRethreaded((prev) =>
         placeLive(prev, messageId, chatThreadId, loadedThreads.current.get(messageId) ?? null),
       ),
+    [],
+  );
+  // Status reactions live events changed since the messages loaded. A
+  // reconnect reloads the messages, which then say how each stands.
+  const [liveReactions, setLiveReactions] = useState<LiveStatusReactions>(new Map());
+  const handleMessageStatusReaction = useCallback(
+    ({ messageId, statusReaction }: z.infer<typeof messageStatusReactionSchema>) =>
+      setLiveReactions((prev) => new Map(prev).set(messageId, statusReaction)),
     [],
   );
   // Inline share flow: pick turns directly on the transcript.
@@ -1526,6 +1548,7 @@ export function Chat({
   // Events missed while the stream was down may include a turn's start.
   const handleSessionEventsReconnect = useCallback(
     (sid: string) => {
+      setLiveReactions(new Map());
       resyncSessionMessages(sid);
       if (sid === mainSessionIdRef.current) kickTurnPoll();
     },
@@ -2331,6 +2354,7 @@ export function Chat({
           sessionId={sid}
           onMessageInsert={handleMessageInsert}
           onMessageChatThread={handleMessageChatThread}
+          onMessageStatusReaction={handleMessageStatusReaction}
           onSessionName={handleSessionName}
           onSessionRunning={handleSessionRunning}
           onReconnect={handleSessionEventsReconnect}
@@ -2691,7 +2715,7 @@ export function Chat({
   return (
     <ReplyDraftProvider value={replyDraft}>
       <MessageSharingContext.Provider value={shareMessageTurn}>
-        {page}
+        <LiveStatusReactionsProvider value={liveReactions}>{page}</LiveStatusReactionsProvider>
       </MessageSharingContext.Provider>
     </ReplyDraftProvider>
   );

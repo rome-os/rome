@@ -3763,3 +3763,159 @@ describe("Concierge first sign-in and connection notices", () => {
     expect(s.turnOptions[0]).toEqual({ quiet: true, inputLabel: "Service connected" });
   });
 });
+
+describe("Concierge status reactions", () => {
+  /** A guardian message of the tools' turn. */
+  const guardianSays = (s: ReturnType<typeof setup>, id: string, turnId = "concierge-turn-1") => {
+    const list = s.messages.get(CONCIERGE_CHAT) ?? [];
+    list.push({ id, role: "user", content: "[]", turnId });
+    s.messages.set(CONCIERGE_CHAT, list);
+  };
+  const reactionOf = async (s: ReturnType<typeof setup>, messageKey: string) =>
+    (await s.taskRepo.reactionsOf(CONCIERGE_CHAT, [messageKey])).get(messageKey) ?? null;
+  const started = async (s: ReturnType<typeof setup>, args: Record<string, unknown> = {}) =>
+    JSON.parse(
+      (await s.tool("chat_start", { title: "Weather", brief: "Check the weather", ...args }))
+        .content[0].text,
+    ) as { chatId: string; taskId: string };
+  const finishTask = (
+    s: ReturnType<typeof setup>,
+    chatId: string,
+    status?: AgentTurnFinishedEvent["status"],
+  ) =>
+    s.finish({ turnId: `task-turn-${chatId}`, agentName: "core:main", chatId, status, text: "x" });
+  /** Every reaction change the dashboard is told of, in order. */
+  const watch = (s: ReturnType<typeof setup>) => {
+    const seen: [string, string | null][] = [];
+    s.taskRepo.onReaction((target, reaction) => seen.push([target.messageKey, reaction]));
+    return seen;
+  };
+
+  it("marks the guardian message a task starts for as working, with no acknowledgement first", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const seen = watch(s);
+    const { taskId } = await started(s);
+    expect(await reactionOf(s, "g1")).toBe("working");
+    expect(seen).toEqual([["g1", "working"]]);
+    // With nothing said, the row points at the guardian's message.
+    expect((await s.taskRepo.getWithChat(taskId))?.sourceMessageId).toBe("g1");
+  });
+
+  it("puts no reaction on a message answered in the same turn with no task", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    await s.tool("say", { text: "Sunny, 24°" });
+    expect(await reactionOf(s, "g1")).toBeNull();
+  });
+
+  it.each([
+    ["completed", "done"],
+    ["error", "failed"],
+    ["interrupted", "failed"],
+    ["stopped", "failed"],
+  ] as const)("a task turn that ends %s makes the reaction %s", async (status, reaction) => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    await finishTask(s, chatId, status);
+    expect(await reactionOf(s, "g1")).toBe(reaction);
+  });
+
+  it("fails the reaction when the guardian calls the task off", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    s.chats.activeTurns = () => ["task-turn-1"];
+    s.inTurn("call-off");
+    guardianSays(s, "g2", "call-off");
+    await s.tool("chat_stop", { chatId });
+    s.chats.activeTurns = () => [];
+    await finishTask(s, chatId, "interrupted");
+    expect(await reactionOf(s, "g1")).toBe("failed");
+    // The call-off is answered in its own turn and gets none.
+    expect(await reactionOf(s, "g2")).toBeNull();
+  });
+
+  it("waits while the task chat still runs a turn, then settles", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    s.chats.activeTurns = () => ["queued-follow-up"];
+    await finishTask(s, chatId);
+    expect(await reactionOf(s, "g1")).toBe("working");
+    s.chats.activeTurns = () => [];
+    await finishTask(s, chatId);
+    expect(await reactionOf(s, "g1")).toBe("done");
+  });
+
+  it("marks a message passed on to a task, and settles only the work still open", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    await finishTask(s, chatId);
+
+    s.inTurn("follow-up");
+    guardianSays(s, "g2", "follow-up");
+    const seen = watch(s);
+    await s.tool("chat_send", { chatId, text: "And tomorrow?" });
+    expect(await reactionOf(s, "g2")).toBe("working");
+    expect(seen).toEqual([["g2", "working"]]);
+
+    await finishTask(s, chatId, "error");
+    expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual(["done", "failed"]);
+  });
+
+  it("marks only the message chat_send names when the guardian sent several", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    s.inTurn("two");
+    guardianSays(s, "a", "two");
+    guardianSays(s, "b", "two");
+    await s.tool("chat_send", { chatId, text: "x" });
+    expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, null]);
+    await s.tool("chat_send", { chatId, text: "x", answers: "b" });
+    expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, "working"]);
+  });
+
+  it("takes the mark back when the task never hears the words", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    await finishTask(s, chatId);
+    s.inTurn("follow-up");
+    guardianSays(s, "g2", "follow-up");
+    s.refuseSends({ ok: false, invalid: "busy" });
+    expect((await s.tool("chat_send", { chatId, text: "x" })).isError).toBe(true);
+    expect(await reactionOf(s, "g2")).toBeNull();
+  });
+
+  it("a message that started two tasks works until both end, and fails if either failed", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const first = await started(s, { title: "Weather" });
+    const second = await started(s, { title: "Traffic" });
+    await finishTask(s, first.chatId);
+    expect(await reactionOf(s, "g1")).toBe("working");
+    await finishTask(s, second.chatId, "error");
+    expect(await reactionOf(s, "g1")).toBe("failed");
+  });
+
+  it("settles when the Concierge closes the row, as after a question the guardian answered", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { taskId } = await started(s);
+    await s.taskRepo.upsertMany([{ id: taskId, state: "dropped" }]);
+    expect(await reactionOf(s, "g1")).toBe("failed");
+  });
+
+  it("never pushes a reaction to the phone", async () => {
+    const s = setup({ said: false, startEvents: false });
+    guardianSays(s, "g1");
+    const { taskId } = await started(s);
+    await s.taskRepo.settleReactions(taskId, "done");
+    expect(await reactionOf(s, "g1")).toBe("done");
+    expect(s.pushes).toEqual([]);
+  });
+});
