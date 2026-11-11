@@ -81,6 +81,7 @@
     "gc:worktrees": "tsx scripts/gc-worktrees.ts",
     "move-files": "tsx scripts/move-files.ts",
     "move-symbol": "tsx scripts/move-symbol.ts",
+    "rename-symbol": "tsx scripts/rename-symbol.ts",
     "remove-unused-imports": "tsx scripts/remove-unused-imports.ts"
   },
   "devDependencies": {

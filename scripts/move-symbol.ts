@@ -72,7 +72,7 @@ export interface SymbolPlan {
 const SCRIPTS = ["*.ts", "*.tsx", "*.mts", "*.cts", "*.mjs", "*.cjs", "*.js"];
 
 /** The names a top-level statement declares. */
-function declaredNames(stmt: ts.Statement): ts.Identifier[] {
+export function declaredNames(stmt: ts.Statement): ts.Identifier[] {
   if (
     (ts.isFunctionDeclaration(stmt) ||
       ts.isClassDeclaration(stmt) ||
@@ -160,7 +160,7 @@ function namedList(names: string[], isType: (name: string) => boolean): string {
   return `{ ${names.map((n) => (isType(n) ? `type ${n}` : n)).join(", ")} }`;
 }
 
-const lineOf = (sf: ts.SourceFile, pos: number): string => {
+export const lineOf = (sf: ts.SourceFile, pos: number): string => {
   const { line } = sf.getLineAndCharacterOfPosition(pos);
   return `${line + 1}: ${sf.text.split("\n")[line].trim()}`;
 };
