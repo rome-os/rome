@@ -168,8 +168,6 @@ final class Workspace {
     let drafts: DraftStore
     /// The newest messages of the main Chat and topic chats, on this phone.
     let transcripts: TranscriptCache
-    /// Shares one message as a link.
-    let sharer: MessageSharer
 
     init(backend: RomeBackend, instanceName: String, host: String, accountLabel: String, drafts: DraftStore? = nil) {
         self.backend = backend
@@ -181,7 +179,6 @@ final class Workspace {
         // Beside the drafts: a test's drafts in a temporary folder bring their transcripts along.
         transcripts = TranscriptCache(root: self.drafts.root.deletingLastPathComponent().appending(path: "Transcripts", directoryHint: .isDirectory), instance: self.drafts.instance, account: backend.account)
         tasks = TasksStore(backend: backend)
-        sharer = MessageSharer(backend: backend, origin: backend.origin)
         // The main chat's id from last time, else the guardian's until the
         // server names this person's. Its kept rows show before any fetch.
         let mainId = transcripts.mainChat() ?? conciergeChatID

@@ -161,14 +161,6 @@ struct BuildInfo: Codable, Hashable, Sendable {
     var sha: String?
 }
 
-/// `POST /chat/sessions/:id/messages/:messageId/share`: the link to one
-/// message's snapshot, as a path on the instance.
-struct SharedMessage: Codable, Sendable {
-    var id: String
-    var url: String
-    var title: String?
-}
-
 /// `GET /chat/sessions/:id/messages?limit=&before=`.
 struct MessagePage: Codable, Sendable {
     var messages: [ChatMessage]

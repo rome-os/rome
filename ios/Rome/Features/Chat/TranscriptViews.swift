@@ -13,137 +13,6 @@ extension EnvironmentValues {
     @Entry var chatLinkOpener: (@MainActor (URL) -> OpenURLAction.Result)? = nil
     /// An allow-listed visitor, not the guardian: approvals are not theirs to answer.
     @Entry var isVisitor = false
-    /// Shares one message as a link; the shell sets it from the open instance.
-    @Entry var messageSharer: MessageSharer? = nil
-}
-
-/// Shares one message as a link to a snapshot of its text, as the web does
-/// (rome-os/rome#1983): the instance makes the link, and the system's share
-/// sheet offers it. An instance without the route shares the text instead.
-@MainActor
-@Observable
-final class MessageSharer {
-    enum State: Equatable {
-        case idle
-        case creating
-        case failed
-    }
-
-    /// What a share request came to.
-    enum Outcome: Equatable {
-        case link(URL, title: String?)
-        /// An instance before message links: the text, as before.
-        case text
-        case failed
-    }
-
-    private(set) var state: State = .idle
-    @ObservationIgnored private let backend: RomeBackend
-    @ObservationIgnored private let origin: URL?
-    /// Opens the share sheet; the app's, or a test's.
-    @ObservationIgnored var present: @MainActor ([Any]) -> Void = MessageSharer.presentSheet
-
-    init(backend: RomeBackend, origin: URL?) {
-        self.backend = backend
-        self.origin = origin
-    }
-
-    func share(sessionId: String, messageId: String, text: String) async {
-        guard state != .creating else { return }
-        state = .creating
-        let result: Result<SharedMessage, Error>
-        do { result = .success(try await backend.shareMessage(sessionId: sessionId, messageId: messageId)) } catch { result = .failure(error) }
-        switch Self.outcome(result, origin: origin) {
-        case .link(let url, let title):
-            state = .idle
-            present([ShareSubject(url: url, subject: title)])
-        case .text:
-            state = .idle
-            present([text])
-        case .failed:
-            state = .failed
-            Task {
-                try? await Task.sleep(for: .seconds(3))
-                if state == .failed { state = .idle }
-            }
-        }
-    }
-
-    /// The link on the instance's origin; the text where the instance has
-    /// no such route (a 405, or a 404 that is not the route's own); else a failure.
-    nonisolated static func outcome(_ result: Result<SharedMessage, Error>, origin: URL?) -> Outcome {
-        switch result {
-        case .success(let shared):
-            guard let origin, let url = URL(string: shared.url, relativeTo: origin)?.absoluteURL else { return .failed }
-            return .link(url, title: shared.title)
-        case .failure(APIError.server(405, _)):
-            return .text
-        case .failure(APIError.server(404, let message)) where message == nil:
-            return .text
-        case .failure:
-            return .failed
-        }
-    }
-
-    private static func presentSheet(_ items: [Any]) {
-        guard let scene = UIApplication.shared.connectedScenes.compactMap({ $0 as? UIWindowScene }).first(where: { $0.activationState == .foregroundActive }),
-              var top = scene.keyWindow?.rootViewController
-        else { return }
-        while let presented = top.presentedViewController { top = presented }
-        let sheet = UIActivityViewController(activityItems: items, applicationActivities: nil)
-        sheet.popoverPresentationController?.sourceView = top.view
-        sheet.popoverPresentationController?.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
-        sheet.popoverPresentationController?.permittedArrowDirections = []
-        top.present(sheet, animated: true)
-    }
-}
-
-/// A shared link with its title as the subject, for mail and the like.
-final class ShareSubject: NSObject, UIActivityItemSource {
-    let url: URL
-    let subject: String?
-
-    init(url: URL, subject: String?) {
-        self.url = url
-        self.subject = subject
-    }
-
-    func activityViewControllerPlaceholderItem(_ activityViewController: UIActivityViewController) -> Any { url }
-    func activityViewController(_ activityViewController: UIActivityViewController, itemForActivityType activityType: UIActivity.ActivityType?) -> Any? { url }
-    func activityViewController(_ activityViewController: UIActivityViewController, subjectForActivityType activityType: UIActivity.ActivityType?) -> String { subject ?? "" }
-}
-
-/// While a message's link is made, and if it could not be: a small capsule
-/// at the top that never holds the screen.
-struct MessageShareStatus: View {
-    let sharer: MessageSharer?
-
-    var body: some View {
-        Group {
-            switch sharer?.state {
-            case .creating:
-                HStack(spacing: 8) {
-                    ProgressView().controlSize(.small)
-                    Text("Creating…").romeFont(13, .medium).foregroundStyle(Palette.sub)
-                }
-                .padding(.horizontal, 14)
-                .frame(height: 34)
-                .glassSurface(Capsule(), frost: Frost.composer)
-            case .failed:
-                Text("Could not create the link.")
-                    .romeFont(13, .medium)
-                    .foregroundStyle(Palette.destructive)
-                    .padding(.horizontal, 14)
-                    .frame(height: 34)
-                    .glassSurface(Capsule(), frost: Frost.composer)
-            default:
-                EmptyView()
-            }
-        }
-        .transition(.move(edge: .top).combined(with: .opacity))
-        .animation(.easeOut(duration: 0.2), value: sharer?.state)
-        .allowsHitTesting(false)
-    }
 }
 
 /// The guardian's bubble: coral, right-aligned, fully round. Photos sent with
@@ -157,35 +26,12 @@ struct BubbleMenu {
     var onReply: (() -> Void)? = nil
     /// Inside a thread: the text is selectable instead, and there is no menu.
     var inThread = false
-    /// What Share does: a link to the stored message, the text where it
-    /// cannot be stored-linked, or nothing for a message not sent yet.
-    var share: ShareKind = .text
-
-    enum ShareKind: Equatable {
-        case link(sessionId: String, messageId: String)
-        case text
-        case none
-    }
-
-    /// A message not sent yet: nothing to share.
-    var unsent: BubbleMenu {
-        var menu = self
-        menu.share = .none
-        return menu
-    }
-
-    /// Share for `message`: its link when it is stored, the text otherwise.
-    static func share(for message: ChatMessage?) -> ShareKind {
-        guard let message else { return .text }
-        return .link(sessionId: message.sessionId, messageId: message.id)
-    }
 }
 
 /// The menu's items, shared by both bubbles.
 private struct BubbleMenuItems: View {
     let text: String
     let menu: BubbleMenu
-    @Environment(\.messageSharer) private var sharer
 
     var body: some View {
         Section {
@@ -193,18 +39,7 @@ private struct BubbleMenuItems: View {
                 Button(action: onReply) { Label("Reply", systemImage: "arrowshape.turn.up.left") }
             }
             CopyButton(text: text)
-            switch menu.share {
-            case .link(let sessionId, let messageId) where sharer != nil:
-                Button {
-                    Task { await sharer?.share(sessionId: sessionId, messageId: messageId, text: text) }
-                } label: {
-                    Label("Share", systemImage: "square.and.arrow.up")
-                }
-            case .none:
-                EmptyView()
-            default:
-                ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
-            }
+            ShareLink(item: text) { Label("Share", systemImage: "square.and.arrow.up") }
         } header: {
             if let date = menu.date { Text(verbatim: RelativeTime.separator(date)) }
         }
@@ -253,7 +88,7 @@ struct UserBubble: View {
                             .padding(.vertical, 10)
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
-                            .bubbleMenu(text: text, menu: pending == nil ? menu : menu.unsent)
+                            .bubbleMenu(text: text, menu: menu)
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)

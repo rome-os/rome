@@ -793,16 +793,6 @@
         }
       }
     },
-    "Could not create the link." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法创建链接。"
-          }
-        }
-      }
-    },
     "Could not load apps" : {
       "localizations" : {
         "zh-Hans" : {
@@ -939,16 +929,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在 Rome Cloud 创建一个后再打开。"
-          }
-        }
-      }
-    },
-    "Creating…" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "创建中…"
           }
         }
       }

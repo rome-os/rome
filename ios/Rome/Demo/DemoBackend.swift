@@ -338,11 +338,6 @@ final class DemoBackend: RomeBackend {
     /// The demo's Concierge goes by a name of its own.
     func agentName() async -> String? { "Milo" }
 
-    func shareMessage(sessionId: String, messageId: String) async throws -> SharedMessage {
-        try await pause(0.5)
-        return SharedMessage(id: "share-\(messageId)", url: "/share/demo-\(messageId)", title: "Milo")
-    }
-
     func me() async throws -> AccountIdentity? { AccountIdentity(name: "Lin", isGuardian: variant != .visitor) }
 
     func isGuardian() async -> Bool { variant != .visitor }
