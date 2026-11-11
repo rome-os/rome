@@ -51,7 +51,6 @@ export default function SharePage() {
     return {
       messages: snapshot.messages,
       mainSessionId: snapshot.mainSessionId,
-      traces: snapshot.traces ?? {},
       agentName: snapshot.agentName,
     };
   }, [state]);

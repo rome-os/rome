@@ -5,7 +5,6 @@ import { PublicChat } from "@/components/chat/PublicChat";
 import { AppWidget } from "@/pages/free/AppWidget";
 import type { WidgetPlacement } from "@/pages/free/use-free-cells";
 import type { ChatMessage } from "@/lib/chat-types";
-import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { PublicProjectsWidget } from "./PublicProjectsWidget";
 import { ShareHeader } from "./ShareBranding";
 
@@ -18,7 +17,6 @@ interface PublicFreeGridProps {
   chat: {
     messages: ChatMessage[];
     mainSessionId: string;
-    traces: Record<string, TraceSnapshot>;
     agentName?: string;
   };
 }
@@ -120,9 +118,7 @@ export function PublicFreeGrid({ placements, token, chat }: PublicFreeGridProps)
         <PublicChat
           messages={chat.messages}
           mainSessionId={chat.mainSessionId}
-          traces={chat.traces}
           agentName={chat.agentName}
-          hasApps={hasApps}
         />
       </div>
 

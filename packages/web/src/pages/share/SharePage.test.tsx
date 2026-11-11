@@ -156,6 +156,44 @@ describe("SharePage", () => {
     );
   });
 
+  it("shows no trace from a share made before shares stopped carrying them", async () => {
+    rs.mocked(fetchSharedChat).mockResolvedValue({
+      id: "tok",
+      title: "Trip",
+      snapshot: {
+        mainSessionId: "s",
+        messages: [
+          {
+            id: "tr",
+            sessionId: "s",
+            turnId: "t1",
+            role: "trace",
+            content: "",
+            createdAt: "2026-11-10T09:59:59.000Z",
+            traceSummary: {
+              distinctApps: [],
+              totalSteps: 3,
+              invocationCounts: {},
+            },
+          } as never,
+          {
+            id: "a1",
+            sessionId: "s",
+            turnId: "t1",
+            role: "assistant",
+            content: JSON.stringify([{ type: "text", content: "Day one: walk the Alfama." }]),
+            createdAt: "2026-11-10T10:00:00.000Z",
+          },
+        ],
+        traces: {},
+      },
+      layout: [],
+    });
+    renderAt("tok");
+    await screen.findByText("Day one: walk the Alfama.");
+    expect(screen.queryByText(/3 steps?/i)).toBeNull();
+  });
+
   it("keeps the branding and noindex on an unavailable link", async () => {
     rs.mocked(fetchSharedChat).mockResolvedValue(null);
     renderAt("gone");
