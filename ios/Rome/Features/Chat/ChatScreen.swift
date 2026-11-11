@@ -329,8 +329,10 @@ struct ChatIdentity: View {
     var announces = false
 
     @State private var pokes = 0
+    @State private var streak = TapStreak()
     @State private var haptic = UIImpactFeedbackGenerator(style: .soft)
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(AppModel.self) private var model
 
     /// What VoiceOver reads when the status changes: nothing for a chat
     /// that is not the one on screen.
@@ -398,6 +400,10 @@ struct ChatIdentity: View {
                         haptic.impactOccurred()
                         haptic.prepare()
                         pokes += 1
+                        // Ten quick taps in a row open the stacking game.
+                        if streak.tap(at: CACurrentMediaTime()) {
+                            model.stackGame = StackGameLaunch()
+                        }
                     }
                     .onAppear { if !still { haptic.prepare() } }
                 // The name tag, over the avatar's lower edge; wider than the

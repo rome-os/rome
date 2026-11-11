@@ -506,6 +506,8 @@ final class AppModel {
     /// Said once when this account was taken off the open Rome's allow-list
     /// and another Rome opened in its place.
     var accessNotice: String?
+    /// The stacking game, open over everything; it outlives the update page.
+    var stackGame: StackGameLaunch?
     /// Goes up when a tapped push asks the shell to show Chat.
     private(set) var chatRequest = ChatRequest(serial: 0, topicId: nil)
     /// A tapped push waiting for an instance to open.

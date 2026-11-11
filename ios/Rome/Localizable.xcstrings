@@ -101,6 +101,34 @@
         }
       }
     },
+    "%lld blocks" : {
+      "localizations" : {
+        "en" : {
+          "variations" : {
+            "plural" : {
+              "one" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld block"
+                }
+              },
+              "other" : {
+                "stringUnit" : {
+                  "state" : "translated",
+                  "value" : "%lld blocks"
+                }
+              }
+            }
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 块"
+          }
+        }
+      }
+    },
     "%lld hours ago" : {
       "localizations" : {
         "en" : {
@@ -233,6 +261,26 @@
         }
       }
     },
+    "5 actions → 1 skill" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5 个动作 → 1 个技能"
+          }
+        }
+      }
+    },
+    "5 skills → 1 app" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "5 个技能 → 1 个应用"
+          }
+        }
+      }
+    },
     "A card" : {
       "localizations" : {
         "zh-Hans" : {
@@ -303,6 +351,16 @@
         }
       }
     },
+    "Action" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "动作"
+          }
+        }
+      }
+    },
     "Active energy" : {
       "localizations" : {
         "zh-Hans" : {
@@ -369,6 +427,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已回答"
+          }
+        }
+      }
+    },
+    "App" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用"
           }
         }
       }
@@ -1173,6 +1241,16 @@
         }
       }
     },
+    "Game over" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "游戏结束"
+          }
+        }
+      }
+    },
     "Get notified when Rome has something for you" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1651,6 +1729,16 @@
         }
       }
     },
+    "New best" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新纪录"
+          }
+        }
+      }
+    },
     "New chat" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2081,6 +2169,26 @@
         }
       }
     },
+    "Perfect" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完美"
+          }
+        }
+      }
+    },
+    "Perfect ×%lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完美 ×%lld"
+          }
+        }
+      }
+    },
     "Photo" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2107,6 +2215,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "帮我规划锻炼，争取三月前减 3 公斤。"
+          }
+        }
+      }
+    },
+    "Play a game" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "玩个小游戏"
+          }
+        }
+      }
+    },
+    "Play again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "再玩一次"
           }
         }
       }
@@ -2883,6 +3011,16 @@
         }
       }
     },
+    "Skill" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "技能"
+          }
+        }
+      }
+    },
     "Sleep" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2899,6 +3037,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "出了点问题"
+          }
+        }
+      }
+    },
+    "Stack up" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "叠一叠"
           }
         }
       }
@@ -3079,6 +3227,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "拍照"
+          }
+        }
+      }
+    },
+    "Tap to drop the block" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点一下放下方块"
+          }
+        }
+      }
+    },
+    "Tap to start" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点一下开始"
           }
         }
       }
@@ -3871,6 +4039,16 @@
         }
       }
     },
+    "Your Rome is on %@." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 Rome 已是 %@。"
+          }
+        }
+      }
+    },
     "Your Rome is on %@. The latest is %@." : {
       "localizations" : {
         "zh-Hans" : {
@@ -4003,6 +4181,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "等你回复"
+          }
+        }
+      }
+    },
+    "×%lld · Best %lld" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "×%lld · 最高 %lld"
           }
         }
       }
