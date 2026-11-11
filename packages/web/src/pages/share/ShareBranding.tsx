@@ -41,13 +41,16 @@ export function ShareHeader() {
 export function ShareFooter() {
   const { t } = useTranslation("chat");
   return (
-    <footer className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-2 px-4 pt-6 pb-[calc(var(--rome-safe-area-bottom,0px)+1.5rem)] text-aux text-muted-foreground">
-      <span>{t("share.madeWith")}</span>
-      <Button asChild variant="outline" size="sm">
-        <a href={ROME_SITE_URL} target="_blank" rel="noopener">
-          {t("share.learnAbout")}
-        </a>
-      </Button>
+    // `pb-safe` keeps the line clear of a phone's home indicator.
+    <footer className="shrink-0 pb-safe">
+      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 px-4 py-6 text-aux text-muted-foreground">
+        <span>{t("share.madeWith")}</span>
+        <Button asChild variant="outline" size="sm">
+          <a href={ROME_SITE_URL} target="_blank" rel="noopener">
+            {t("share.learnAbout")}
+          </a>
+        </Button>
+      </div>
     </footer>
   );
 }
