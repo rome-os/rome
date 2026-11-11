@@ -74,7 +74,7 @@ export function ConciergeHeaderStatus({
       <div
         data-concierge-header-name
         className={cn(
-          badge ? "row-start-2 -mt-2" : "row-start-1",
+          badge ? "row-start-2 -mt-1" : "row-start-1",
           // Above the badge, so the tag covers the badge's edge, not the reverse.
           "pointer-events-auto relative z-10 col-start-2 flex h-5 min-w-0 max-w-full items-center justify-self-center rounded-full px-2",
           FLOATING_SURFACE,
