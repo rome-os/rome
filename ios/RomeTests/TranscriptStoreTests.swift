@@ -234,11 +234,7 @@ final class FakeBackend: RomeBackend {
         return try (startResults.isEmpty ? .success(UpgradeStarted(status: "started", target: target)) : startResults.removeFirst()).get()
     }
 
-    /// Runs inside a version read, before it answers.
-    var duringBuildInfo: (() async -> Void)?
-
     func buildInfo() async throws -> BuildInfo {
-        await duringBuildInfo?()
         guard let buildVersion else { throw APIError.network }
         return BuildInfo(version: buildVersion)
     }

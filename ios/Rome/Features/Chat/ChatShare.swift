@@ -36,35 +36,15 @@ struct ShareTurns: Equatable {
         }
         return TranscriptRow.message(ofPart: id)
     }
-
-    /// The text of the chosen turns' bubbles, in order: what an instance
-    /// that cannot make a link shares instead.
-    func text(of turns: Set<String>, rows: [TranscriptRow]) -> String {
-        rows.compactMap { row -> String? in
-            guard let turn = turnOfRow[row.id], turns.contains(turn) else { return nil }
-            switch row {
-            case .userText(_, let text, _, _), .agentText(_, let text, _, _, _):
-                let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-                return trimmed.isEmpty ? nil : trimmed
-            default:
-                return nil
-            }
-        }
-        .joined(separator: "\n\n")
-    }
 }
 
-/// What the system share sheet offers: a link with its title, or plain text.
+/// What the system share sheet offers: a link, with its title.
 struct ShareOutgoing: Identifiable {
     let id = UUID()
-    var url: URL?
+    var url: URL
     var title: String?
-    var text: String?
 
-    var items: [Any] {
-        if let url { return [ShareLinkSource(url: url, subject: title)] }
-        return [text ?? ""]
-    }
+    var items: [Any] { [ShareLinkSource(url: url, subject: title)] }
 }
 
 /// A link for the share sheet, with the share's title as a mail's subject.
@@ -173,14 +153,12 @@ final class ChatShareFlow {
 
     /// Makes the link of the picked turns and offers it in the share sheet.
     /// `agentName` is the Agent's name as the header shows it, nil when
-    /// unknown. An instance before `ShareGate.minimumVersion` would publish
-    /// the work behind the turns, so it gets the turns' text shared instead,
-    /// and nothing is sent to it. A version that cannot be fetched is an
-    /// error, and share mode stays.
+    /// unknown. Any failure is a short error, and share mode stays. The app
+    /// talks only to instances at or above its minimum version, which all
+    /// keep a share to the picked turns' messages.
     ///
-    /// Share mode may be cancelled, or its picks changed, while this waits.
-    /// Before the link is asked for, that stops it; after, the link it made
-    /// is revoked unseen.
+    /// Share mode may be cancelled, or its picks changed, while the link is
+    /// made: the link is then revoked unseen.
     func create(agentName: String? = nil) async {
         guard let chat, let sessionId, let picked = selection, !picked.isEmpty, !creating else { return }
         let started = round
@@ -188,20 +166,7 @@ final class ChatShareFlow {
         creating = true
         error = nil
         defer { creating = false }
-        let version: String?
-        do {
-            version = try await backend.buildInfo().version
-        } catch {
-            if current { self.error = String(localized: "Couldn't create the link.") }
-            return
-        }
-        guard current else { return }
         let turns = ShareTurns(messages: chat.messages, rows: chat.rows)
-        guard ShareGate.makesLinks(version: version) else {
-            outgoing = ShareOutgoing(text: turns.text(of: picked, rows: chat.rows))
-            selection = nil
-            return
-        }
         let ordered = turns.order.filter(picked.contains)
         do {
             let link = try await backend.shareChat(sessionId: sessionId, turnIds: ordered, agentName: agentName)
@@ -258,24 +223,6 @@ final class ChatShareFlow {
 
     private static func newestFirst(_ links: [ChatShareLink]) -> [ChatShareLink] {
         links.sorted { ($0.date ?? .distantPast) > ($1.date ?? .distantPast) }
-    }
-}
-
-/// Which instances get a link. Before #1983 a share's snapshot kept the
-/// chat's trace rows and summaries, so a link published the Agent's tool
-/// work; those instances get the turns' text instead.
-enum ShareGate {
-    /// The first instance release whose share snapshot carries only the
-    /// picked turns' messages (rome-os/rome#1983). PLACEHOLDER: the release
-    /// after v1.1.190, the latest tag when this was written. Set it to the
-    /// real release when #1983 ships.
-    static let minimumVersion = "1.1.191"
-
-    /// Only an instance known to be at or above it: an unknown or
-    /// unreadable version is held back, the safe side.
-    static func makesLinks(version: String?) -> Bool {
-        guard let version, UpdateGate.isVersion(version) else { return false }
-        return UpdateGate.isSupported(version, minimum: minimumVersion)
     }
 }
 

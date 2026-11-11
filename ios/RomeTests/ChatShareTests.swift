@@ -20,10 +20,8 @@ private let twoTurns = [
 /// Picking turns in share mode, and what the share sheet then offers.
 @MainActor
 @Suite struct ChatShareTests {
-    /// On an instance that makes links unless the test says otherwise.
     private func chat(_ backend: FakeBackend, _ messages: [ChatMessage], session: String = "chat-1") async -> TranscriptStore {
         backend.stored = messages
-        if backend.buildVersion == nil { backend.buildVersion = ShareGate.minimumVersion }
         let store = TranscriptStore(sessionId: session, kind: .concierge, backend: backend)
         store.start()
         for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
@@ -111,7 +109,7 @@ private let twoTurns = [
         #expect(backend.shareRequests.first?.sessionId == "chat-1")
         #expect(backend.shareRequests.first?.turnIds == ["t1", "t2"])
         // The share sheet gets the link on the instance, titled; share mode ends.
-        #expect(share.outgoing?.url?.absoluteString == "https://test/share/tok1")
+        #expect(share.outgoing?.url.absoluteString == "https://test/share/tok1")
         #expect(share.outgoing?.title == "Trip")
         #expect(!share.isSelecting && !share.creating && share.error == nil)
     }
@@ -130,43 +128,6 @@ private let twoTurns = [
         #expect(ChatShareFlow.absoluteURL("/share/x", origin: origin)?.absoluteString == "https://me.romeos.cc/share/x")
         #expect(ChatShareFlow.absoluteURL("https://other.example/share/x", origin: origin)?.absoluteString == "https://other.example/share/x")
         #expect(ChatShareFlow.absoluteURL("/share/x", origin: nil) == nil)
-    }
-
-    /// An instance before the gate would publish the work behind the turns:
-    /// it is never asked for a link, and the turns' text is shared instead.
-    @Test func anInstanceBeforeTheGateGetsTheTextShared() async {
-        for version in ["1.1.190", "dev"] {
-            let backend = FakeBackend()
-            backend.buildVersion = version
-            let store = await chat(backend, twoTurns)
-            let share = store.share
-            share.begin(turn: "t2")
-            await share.create()
-            #expect(backend.shareRequests.isEmpty, "\(version)")
-            #expect(share.outgoing?.url == nil)
-            #expect(share.outgoing?.text == "Check the weather\n\nMild, bring a jacket")
-            #expect(!share.isSelecting && share.error == nil)
-        }
-    }
-
-    @Test func onlyAKnownVersionAtTheGateMakesLinks() {
-        #expect(!ShareGate.makesLinks(version: nil))
-        #expect(!ShareGate.makesLinks(version: "dev"))
-        #expect(!ShareGate.makesLinks(version: "1.1.190"))
-        #expect(ShareGate.makesLinks(version: ShareGate.minimumVersion))
-        #expect(ShareGate.makesLinks(version: "v1.2.0"))
-    }
-
-    /// Cancel while the version is read: no link is asked for, nothing to share.
-    @Test func cancelBeforeTheLinkIsMadeSendsNothing() async {
-        let backend = FakeBackend()
-        let store = await chat(backend, twoTurns)
-        let share = store.share
-        backend.duringBuildInfo = { share.cancel() }
-        share.begin(turn: "t1")
-        await share.create()
-        #expect(backend.shareRequests.isEmpty)
-        #expect(share.outgoing == nil && !share.isSelecting && share.error == nil)
     }
 
     /// Cancel once the link is being made: the link is revoked, unseen.
@@ -195,19 +156,6 @@ private let twoTurns = [
         #expect(share.outgoing == nil && share.selection == ["t1", "t2"])
     }
 
-    /// A version that cannot be read is no proof of an old instance: an
-    /// error, share mode stays, and nothing is shared.
-    @Test func aFailedVersionReadIsAnError() async {
-        let backend = FakeBackend()
-        let store = await chat(backend, twoTurns)
-        backend.buildVersion = nil
-        store.share.begin(turn: "t1")
-        await store.share.create()
-        #expect(backend.shareRequests.isEmpty)
-        #expect(store.share.outgoing == nil)
-        #expect(store.share.isSelecting && store.share.selection == ["t1"] && store.share.error != nil)
-    }
-
     /// Share mode leaves a quoted reply, and where its draft goes, as it was.
     @Test func shareModeKeepsAQuotedReply() async throws {
         let messages = twoTurns.map { m -> ChatMessage in var m = m; m.knowsThreads = true; return m }
@@ -221,8 +169,8 @@ private let twoTurns = [
         #expect(store.quote == quote && store.composerThread == quote)
     }
 
-    /// Past the gate a refused share is an error, never a silent text share.
-    @Test func aNotFoundPastTheGateIsAnError() async {
+    /// A refused share is an error, never a text share in its place.
+    @Test func aRefusedShareIsAnError() async {
         let backend = FakeBackend()
         backend.shareAnswer = .failure(.notFound)
         let store = await chat(backend, twoTurns)
@@ -479,7 +427,6 @@ final class ShareRequestRecorder: URLProtocol, @unchecked Sendable {
     @Test func createLinkPassesTheAgentsName() async {
         let fake = FakeBackend()
         fake.stored = twoTurns
-        fake.buildVersion = ShareGate.minimumVersion
         let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: fake)
         store.start()
         for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }

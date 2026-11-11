@@ -90,8 +90,7 @@ protocol RomeBackend: AnyObject, Sendable {
     func notifyServiceConnected(chatId: String, service: String) async
     /// Makes a public link to these turns of the chat, showing the Agent as
     /// `agentName` (nil: the page says Rome). No title: the instance names
-    /// the share after the first turn. An older instance answers 404 for a
-    /// chat it cannot share, a Concierge chat among them.
+    /// the share after the first turn.
     func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink
     /// The chat's live share links, newest first.
     func chatShares(sessionId: String) async throws -> [ChatShareLink]
@@ -303,9 +302,9 @@ final class LiveBackend: RomeBackend {
         try await client.post("/chat/sessions/\(escape(sessionId))/share", json: Self.shareBody(turnIds: turnIds, agentName: agentName), as: ChatShareLink.self)
     }
 
-    /// An older instance ignores `agentName`. `layout` is always empty: the
-    /// app shares turns only, so a chat's saved tiles (a project's files)
-    /// never ride along, as they would by default.
+    /// `layout` is always empty: the app shares turns only, so a chat's
+    /// saved tiles (a project's files) never ride along, as they would by
+    /// default.
     static func shareBody(turnIds: [String], agentName: String?) -> JSONValue {
         var body: [String: JSONValue] = ["turnIds": .array(turnIds.map(JSONValue.string)), "layout": .array([])]
         if let agentName { body["agentName"] = .string(agentName) }
