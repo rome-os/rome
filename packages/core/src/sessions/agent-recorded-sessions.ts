@@ -1,16 +1,15 @@
-// The dashboard's sessions (`rome_sessions`), read and written through the
-// session records, behind the DashboardSessions port in
-// ../agent/domain/dashboard-sessions.ts.
+// The agent context's view of the session records, behind the RecordedSessions
+// port in ../agent/domain/recorded-sessions.ts.
 
 import type { SessionRecords } from "./session-records.js";
 import { createLogger } from "../logger.js";
-import type { DashboardSession, DashboardSessions, NewSubagentSession } from "../agent/index.js";
+import type { RecordedSession, RecordedSessions, NewSubagentSession } from "../agent/index.js";
 import { parentTurnSession } from "../agent/index.js";
 import type { SessionRecordId } from "../agent/index.js";
 
-const log = createLogger("dashboard-sessions");
+const log = createLogger("recorded-sessions");
 
-export class DashboardSessionRecords implements DashboardSessions {
+export class AgentRecordedSessions implements RecordedSessions {
   constructor(
     private readonly records: Pick<
       SessionRecords,
@@ -24,7 +23,7 @@ export class DashboardSessionRecords implements DashboardSessions {
     return parentTurnSession(session.type, session.parentSessionId);
   }
 
-  async get(id: SessionRecordId): Promise<DashboardSession | null> {
+  async get(id: SessionRecordId): Promise<RecordedSession | null> {
     const row = await this.records.getSession(id);
     if (!row) return null;
     return {

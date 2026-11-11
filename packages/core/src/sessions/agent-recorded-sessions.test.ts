@@ -2,17 +2,17 @@ import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { romeSessions } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
-import { DashboardSessionRecords } from "./dashboard-session-records.js";
+import { AgentRecordedSessions } from "./agent-recorded-sessions.js";
 
-describe("DashboardSessionRecords", () => {
+describe("AgentRecordedSessions", () => {
   let testDb: TestDb;
-  let sessions: DashboardSessionRecords;
+  let sessions: AgentRecordedSessions;
   let webchat: ChatsWebChatRepository;
 
   beforeEach(() => {
     testDb = createTestDb();
     webchat = new ChatsWebChatRepository(testDb.db);
-    sessions = new DashboardSessionRecords(webchat);
+    sessions = new AgentRecordedSessions(webchat);
   });
 
   afterEach(() => testDb.close());
@@ -47,7 +47,7 @@ describe("DashboardSessionRecords", () => {
     expect(await sessions.parentSession("orphan")).toBeNull();
   });
 
-  it("knows no session the dashboard does not have", async () => {
+  it("knows no session that is not recorded", async () => {
     expect(await sessions.parentSession("missing")).toBeUndefined();
   });
 

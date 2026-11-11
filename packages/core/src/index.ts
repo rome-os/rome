@@ -2,7 +2,7 @@ import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
-import { DashboardSessionRecords } from "./sessions/dashboard-session-records.js";
+import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
 import { SessionRecords } from "./sessions/session-records.js";
 import { romeToolPorts } from "./core/rome-tool-ports.js";
 import { createNodeDevicesService } from "./desktops/node-devices.js";
@@ -1091,9 +1091,9 @@ async function main() {
 
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
   const chatTurns = createChatTurns();
-  const dashboardSessions = new DashboardSessionRecords(sessionRecords);
+  const recordedSessions = new AgentRecordedSessions(sessionRecords);
   const subagentCalls = createSubagentCalls({
-    dashboard: dashboardSessions,
+    recorded: recordedSessions,
     turnLog: subagentTurnLog(webchatRepo),
     liveTurns: subagentLiveTurns(agentTurnStreamRegistry),
   });
@@ -1117,7 +1117,7 @@ async function main() {
   const usageAttribution = new UsageAttributionResolver(
     {
       getSession: (id) => webchatRepo.getSession(id),
-      rootSession: (id) => rootSession(dashboardSessions, id),
+      rootSession: (id) => rootSession(recordedSessions, id),
       getExecution: async (id) => {
         const row = await actionExecutionsRepo.findById(id);
         return row

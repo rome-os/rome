@@ -2,7 +2,7 @@
 // subagent's session (docs/domains/agents.md#subagent-call).
 
 import type { StreamAgentEvent, ThreadContext } from "@rome-os/app-runtime";
-import type { DashboardSessions } from "../domain/dashboard-sessions.js";
+import type { RecordedSessions } from "../domain/recorded-sessions.js";
 import type { AgentName, SessionId } from "../domain/session.js";
 import type { TurnActor } from "../domain/turn-facts.js";
 import {
@@ -31,7 +31,7 @@ export interface SessionPlace {
 /** The turn a call comes from, as the run that owns it knows it. */
 export interface CallingTurn {
   key: SubagentCallKey;
-  /** The dashboard chat the calling turn records in, which the subagent's
+  /** The chat the calling turn records in, which the subagent's
    *  session is listed under. Carried with the turn while each turn picks its
    *  own chat (ZHA-157). */
   chat: SessionRecordId;
@@ -62,7 +62,7 @@ export interface SubagentCalls {
   /**
    * Starts a call and returns it running. Fails, in this order:
    * - the resume is refused: nothing is opened;
-   * - opening or resuming the session, or adding a fresh one to the dashboard,
+   * - opening or resuming the session, or adding a fresh one to the records,
    *   fails: the session may be open with no turn;
    * - a call with the same key is already held: the subagent's turn is stopped
    *   and its live turn finished.
@@ -120,7 +120,7 @@ const callKey = (key: SubagentCallKey): string =>
   `${key.parentSessionId}\u0000${key.turnId}\u0000${key.toolUseId}`;
 
 export function createSubagentCalls(deps: {
-  dashboard: DashboardSessions;
+  recorded: RecordedSessions;
   turnLog: SubagentTurnLog;
   liveTurns: LiveTurns;
 }): SubagentCalls {
@@ -131,9 +131,9 @@ export function createSubagentCalls(deps: {
     request: SubagentRequest,
     from: CallingTurn,
   ): Promise<SubagentSession> => {
-    const parent = await deps.dashboard.get(from.chat);
+    const parent = await deps.recorded.get(from.chat);
     if (request.resumeSessionId) {
-      const stored = parent ? await deps.dashboard.get(request.resumeSessionId) : null;
+      const stored = parent ? await deps.recorded.get(request.resumeSessionId) : null;
       const refusal = refuseResume(stored, parent, {
         subagent,
         parentRecordId: from.chat,
@@ -144,7 +144,7 @@ export function createSubagentCalls(deps: {
     }
     const session = await from.sessions.open(subagent, from.at);
     try {
-      await deps.dashboard.addSubagentSession(
+      await deps.recorded.addSubagentSession(
         newSubagentSession(session.id, subagent, parent, {
           chat: from.chat,
           turnId: from.key.turnId,

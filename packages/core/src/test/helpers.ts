@@ -1,6 +1,6 @@
 import { romeToolPorts } from "../core/rome-tool-ports.js";
 import { appGuardianProfile } from "../app-host/guardian-profile.js";
-import { DashboardSessionRecords } from "../sessions/dashboard-session-records.js";
+import { AgentRecordedSessions } from "../sessions/agent-recorded-sessions.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";
 import { ROME_AGENT_TRAITS } from "../concierge/agent-traits.js";
@@ -671,7 +671,7 @@ export async function buildTestDeps(
   });
   const agentTurnStreamRegistry = createAgentTurnStreamRegistry();
   const subagentCalls = createSubagentCalls({
-    dashboard: new DashboardSessionRecords(webchatRepo),
+    recorded: new AgentRecordedSessions(webchatRepo),
     turnLog: subagentTurnLog(webchatRepo),
     liveTurns: subagentLiveTurns(agentTurnStreamRegistry),
   });
