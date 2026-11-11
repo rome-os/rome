@@ -54,6 +54,8 @@ const REASONS: Record<string, string> = {
     "A favor request never names a connection, so no file in favors/ imports connections/.",
   "favors-never-imports-people":
     "A favor request knows its visitor by their Rome Cloud account, not as a person, so no file in favors/ imports people/.",
+  "connections-never-imports-webchat":
+    "The dashboard is Rome's own chat, not a connection, so no file in connections/ imports webchat/.",
   "desktops-never-imports-agent":
     "Desktops says which machines Rome can reach and what it can do on them, whoever asks, so no file in desktops/ imports agent/.",
   "desktops-never-imports-chats":
@@ -126,6 +128,27 @@ export const contextRules: ImportRule[] = contexts.flatMap((from) =>
 
 /** Crossings that remain until their ticket lands. */
 export const contextCrossings: ListedCrossing[] = [
+  {
+    rule: "connections-never-imports-webchat",
+    from: "connections/open-chat.ts",
+    to: "webchat/repository.ts",
+    ticket: "ZHA-170",
+    why: "A chat on a connected platform gets its session record from the Webchat repository, until session records move to Sessions.",
+  },
+  {
+    rule: "connections-never-imports-webchat",
+    from: "connections/open-chat.test.ts",
+    to: "webchat/chats-webchat-repository.ts",
+    ticket: "ZHA-170",
+    why: "The test builds the same repository for session records, until they move to Sessions.",
+  },
+  {
+    rule: "connections-never-imports-webchat",
+    from: "connections/send.ts",
+    to: "webchat/dashboard-account.ts",
+    ticket: "ZHA-170",
+    why: "The send path for every place has a branch for the dashboard and reads its platform name, until that path moves to Chats.",
+  },
   {
     rule: "instance-never-imports-relay",
     from: "instance/diagnostics.ts",
