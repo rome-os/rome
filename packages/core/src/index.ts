@@ -234,6 +234,7 @@ import { RoutinesRepository } from "./db/repositories/routines.js";
 import { RoutineRunsRepository } from "./db/repositories/routine-runs.js";
 import { RoutineEngine } from "./routines/engine.js";
 import { routineWorkerCalls } from "./routines/for-apps.js";
+import { instanceWorkerCalls } from "./instance/for-apps.js";
 import { EventCatalog } from "./event-catalog.js";
 import {
   resolveOneOffDate,
@@ -1953,7 +1954,6 @@ async function main() {
       eventService,
       appLifecycle,
       appStore,
-      systemUpgrade: systemUpgradeService,
       hasAgent: (name) => agentLoader.find(name) !== undefined,
       hasRegisteredAction: (name) => actionRegistry.has(name),
       isExplicitAction: (name) => actionRegistry.isExplicit(name),
@@ -1963,8 +1963,6 @@ async function main() {
       backendTurnRunner,
       notify: notifyClient,
       privateOwnerOf: privateOwnerOfChat,
-      feedback: feedbackClient,
-      cloudProfile: cloudProfileClient,
       agentNames: agentNameResolver,
       appConnections,
       appIdForAction: (actionName) => {
@@ -1973,7 +1971,14 @@ async function main() {
       },
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
-    routineWorkerCalls({ routinesRepo, routineEngine }),
+    {
+      ...routineWorkerCalls({ routinesRepo, routineEngine }),
+      ...instanceWorkerCalls({
+        systemUpgrade: systemUpgradeService,
+        feedback: feedbackClient,
+        cloudProfile: cloudProfileClient,
+      }),
+    },
   );
   actionEngine.setWorkerRpcServer(workerRpcServer);
   actionEngine.startWorkerWarmPool();

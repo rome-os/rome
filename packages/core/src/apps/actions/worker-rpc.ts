@@ -25,10 +25,7 @@ import type { ConnectionRegistry } from "../../connections/registry.js";
 import type { EventService } from "../../events/event-service.js";
 import type { AppLifecycleService } from "../lifecycle-service.js";
 import type { AppStoreReader } from "../store-service.js";
-import type { SystemUpgradeChecker } from "../../instance/system-upgrade/service.js";
-import { feedbackSendSchema, type FeedbackService } from "../../lib/feedback-client.js";
 import type { AgentNamesService } from "../../chats/accounts/agent-names.js";
-import type { CloudProfileService } from "../../instance/cloud-profile.js";
 import type { SendOutcome, SystemNotifyContent } from "../../lib/notify-client.js";
 import type { ConciergeOwner } from "../../concierge/owner.js";
 import { actionCaller, sendForCaller } from "./caller-notify.js";
@@ -257,11 +254,6 @@ export interface WorkerRpcServices {
   appLifecycle: AppLifecycleService;
   /** Rome App Store read surface. */
   appStore: AppStoreReader;
-  /** Upgrade probe coordinator. The `system_upgrade` action runs in a worker
-   * (a routine-fired root action → subprocess), but the countdown hub + timers
-   * live in the main process, so `system.upgrade.checkAndOffer` runs the probe
-   * here where the hub it drives actually exists. */
-  systemUpgrade: SystemUpgradeChecker;
   /** Catalog membership check. Action workers hold an `RpcAgentRunner` that has
    * no local catalog, so `agent.hasAgent` bridges the lookup back to main —
    * this is how the inbox trusted-path fallback (route to `main` when the bound
@@ -293,9 +285,6 @@ export interface WorkerRpcServices {
   notify: { send(content?: SystemNotifyContent): Promise<SendOutcome> };
   /** The one person a dashboard chat is private to, or null for a shared chat: a push it calls for rings them. */
   privateOwnerOf: (chatId: string) => Promise<ConciergeOwner | null>;
-  feedback: FeedbackService;
-  /** System-only: what `system:get_guardian_cloud_profile` reads from Rome Cloud. */
-  cloudProfile: CloudProfileService;
   /** System-only: how `system:send_message` turns an agent's name into its id. */
   agentNames: AgentNamesService;
   appConnections: AppConnectionBrokerPort;
@@ -375,11 +364,7 @@ export class WorkerRpcServer {
         "appStore.getListing": (params) => this.handleAppStoreGetListing(params),
         // No params: the probe takes none. All policy (Rome Cloud check,
         // countdown open) runs in the main-process service.
-        "system.upgrade.checkAndOffer": () => this.services.systemUpgrade.checkAndOffer(),
         "session.continue": (params, context) => this.handleSessionContinue(params, context),
-        "feedback.send": (params) =>
-          this.services.feedback.send(parseParams("feedback.send", feedbackSendSchema, params)),
-        "cloudProfile.get": () => this.services.cloudProfile.get(),
         "notify.send": (params, context) => {
           // The sender reads token/origin from main-process state; the only wire
           // param is the optional body. Preserve the no-body call shape
