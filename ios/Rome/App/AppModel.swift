@@ -1034,16 +1034,23 @@ final class AppModel {
     private func renewSession(box: TokenBox, instance: CloudInstance, force: Bool) async -> Result<InstanceSession, Error> {
         if let renewal, renewal.box === box { return await renewal.task.value }
         let cloud = self.cloud
-        let task = Task { () -> Result<InstanceSession, Error> in
-            do { return .success(try await cloud.session(for: instance, forceRefresh: force)) } catch { return .failure(error) }
+        // The new session goes into the box inside the shared task, before
+        // it completes: every request waiting on it sends the new token.
+        let task = Task { @MainActor [weak self] () -> Result<InstanceSession, Error> in
+            do {
+                let session = try await cloud.session(for: instance, forceRefresh: force)
+                if let self, box === self.tokenBox {
+                    box.use(session)
+                    self.sessionExpired = false
+                }
+                return .success(session)
+            } catch {
+                return .failure(error)
+            }
         }
         renewal = (box, task)
         let result = await task.value
         if renewal?.box === box { renewal = nil }
-        if case .success(let session) = result, box === tokenBox {
-            box.use(session)
-            sessionExpired = false
-        }
         return result
     }
 

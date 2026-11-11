@@ -619,7 +619,10 @@ struct CappedWidth: Layout {
     func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
         guard let child = subviews.first else { return .zero }
         let ideal = child.sizeThatFits(.unspecified).width
-        return child.sizeThatFits(ProposedViewSize(width: Swift.min(ideal, max), height: nil))
+        // Never past the width offered: between the header's buttons at the
+        // largest text sizes, a name is cut there too.
+        let offered = proposal.width ?? .infinity
+        return child.sizeThatFits(ProposedViewSize(width: Swift.min(ideal, max, offered), height: nil))
     }
 
     func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {

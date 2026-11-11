@@ -188,6 +188,29 @@ extension LastInstanceDefaults {
             }
         }
 
+        /// Two requests refused at once share one renewal, and both go again
+        /// with the new token: the one that joined it too.
+        @Test func twoRefusedRequestsBothGoAgainWithTheNewToken() async {
+            await clean {
+                list("running")
+                LaunchProtocol.refused = "old"
+                LaunchProtocol.answers["/api/auth/cloud/native/start"] = (200, #"{"authorization_request":{"client_id":"rome-instance","state":"s"},"origin":"https://b.example"}"#)
+                LaunchProtocol.answers["/v1/instances/b/authorizations"] = (200, #"{"code":"c","state":"s","iss":"https://romeos.cc"}"#)
+                LaunchProtocol.answers["/api/auth/cloud/native/complete"] = (200, #"{"cookie_name":"rome_session","session_token":"renewed","expires_at":"\#(iso(7200))","origin":"https://b.example"}"#)
+                LaunchProtocol.answers["/api/concierge/session"] = (200, #"{"id":"main-1","unread":0}"#)
+                LaunchProtocol.answers["/api/concierge/chats"] = (200, #"{"chats":[]}"#)
+                // Looks fresh here; the instance no longer takes it.
+                let (app, _) = model(session: InstanceSession(token: "old", expiresAt: iso(3600), origin: "https://b.example"))
+                await app.launch(skipSnapshot: true)
+                guard let backend = app.workspace?.backend else { Issue.record("no workspace"); return }
+                async let first = try? backend.conciergeSession()
+                async let second = try? backend.conciergeChats()
+                let (session, chats) = await (first, second)
+                #expect(session?.id == "main-1")
+                #expect(chats != nil)
+            }
+        }
+
         /// A request on a session the instance refuses is sent once more after
         /// the renewal: a send is never left failed by a session about to change.
         @Test func aRefusedRequestGoesAgainAfterRenewal() async {
