@@ -51,10 +51,12 @@ The workflow freezes `ROME_VERSION` (tag with `v` stripped — always equal to t
 After the image is published, the workflow's last job creates a GitHub release for the tag, titled `Rome vX.Y.Z`. [`scripts/docker/release-notes.mjs`](../scripts/docker/release-notes.mjs) writes its notes, and they hold:
 
 - The image name and version, and the commit it was built from.
-- The commits since the previous release, grouped as Breaking changes, New (`feat`), Fixes (`fix`, `perf`, `revert`) and Other changes (subjects that are not Conventional Commits), with every other type in a collapsed Internal changes list.
+- The commits since the previous release, grouped as Breaking changes (a `!` after the type, or a `BREAKING CHANGE:` footer), New (`feat`), Fixes (`fix`, `perf`, `revert`) and Other changes (subjects that are not Conventional Commits). Every other type goes in a collapsed Internal changes list.
 - A link to the full comparison.
 
-The previous release is the highest stable version below this one on Docker Hub, so the changes of a tag whose build never shipped roll into the next release. A prerelease counts from the stable version before it. Commits that only touch paths that ship elsewhere or never reach the image (`ios/`, the Mac app packages, `docs/`, `.github/`, `.claude/`, top-level Markdown) are left out, and so are release-please's `chore: release` commits. Keep that list in the script in step with what [`prepare-runtime-workspace.mjs`](../scripts/docker/prepare-runtime-workspace.mjs) copies into the image.
+The previous release is the highest stable version below this one on Docker Hub, so the changes of a tag whose build never shipped roll into the next release. A prerelease counts from the stable version before it.
+
+A commit is listed only when it touches a file the image is built from. [`scripts/docker/runtime-inputs.mjs`](../scripts/docker/runtime-inputs.mjs) holds those rules, and [`prepare-runtime-workspace.mjs`](../scripts/docker/prepare-runtime-workspace.mjs) copies the build context by the same rules, so the notes and the image cannot disagree. The shipped docs are the one exception. The agent answers from them, but a commit whose only shipped files are docs is left out, since it changes no behavior.
 
 A prerelease tag gets a prerelease. The release never takes the **Latest** badge from the package releases. The job fails when a release for the tag already exists. If it fails after the image went out, rerun that job alone.
 

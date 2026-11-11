@@ -285,8 +285,7 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
-      - name: Find the previous release
-        id: previous
+      - name: Write release notes
         run: |
           set -euo pipefail
 
@@ -295,34 +294,16 @@ jobs:
             exit 1
           fi
 
-          # The highest stable version below this one on Docker Hub. Published
-          # images, not git tags: a tag whose build never shipped must not
-          # swallow its changes. A prerelease counts from the stable before it.
-          version="${RELEASE_TAG#v}"
+          # Every version published on Docker Hub. The notes count from the
+          # highest stable one below this release (see release-notes.mjs).
           url="https://hub.docker.com/v2/repositories/${IMAGE_NAME}/tags?page_size=100"
-          existing=""
+          : > published-versions.txt
           while [[ -n "$url" && "$url" != "null" ]]; do
             page=$(curl -fsSL "$url")
-            existing+=$(jq -r '.results[].name' <<< "$page")$'\n'
+            jq -r '.results[].name' <<< "$page" >> published-versions.txt
             url=$(jq -r '.next' <<< "$page")
           done
-          stable='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-          base="${version%%-*}"
-          previous=$({ grep -E "$stable" <<< "$existing" || true; } \
-            | { cat; printf '%s\n' "$base"; } \
-            | sort -u -V \
-            | awk -v v="$base" '$0 == v { print p } { p = $0 }')
-          if [[ -n "$previous" ]] && ! git rev-parse --verify --quiet "refs/tags/v${previous}" >/dev/null; then
-            echo "::warning::Docker Hub has ${previous}, but no v${previous} tag exists; the notes list no changes."
-            previous=""
-          fi
-          echo "tag=${previous:+v${previous}}" >> "$GITHUB_OUTPUT"
-
-      - name: Write release notes
-        env:
-          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
-        run: |
-          node scripts/docker/release-notes.mjs "$RELEASE_TAG" "$PREVIOUS_TAG" > release-notes.md
+          node scripts/docker/release-notes.mjs "$RELEASE_TAG" published-versions.txt > release-notes.md
           cat release-notes.md
 
       - name: Create release
