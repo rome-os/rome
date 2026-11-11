@@ -25,6 +25,7 @@ import {
   type Channels,
   type PlatformOfChannel,
 } from "../chats/connected-accounts/connected-account.js";
+import { WEBCHAT_CHANNEL } from "../webchat/dashboard-account.js";
 import { startChannelChat } from "./channel-chat.js";
 import { platformIdOfMessage, type ChatAdapters } from "./chat-adapter.js";
 import { kindAt } from "./recorded-sends.js";
@@ -88,9 +89,8 @@ export interface SendIntoPlaceDeps extends SendDeps {
   dashboard?: DashboardInbox;
 }
 
-/** The dashboard's platform: Rome's own chat behind the guardian's sign-in,
- *  on the `webchat` connection. */
-export const DASHBOARD_PLATFORM = platformOf("webchat");
+/** The dashboard's platform: Rome's own chat behind the guardian's sign-in. */
+export const DASHBOARD_PLATFORM = platformOf(WEBCHAT_CHANNEL);
 
 /**
  * The dashboard's side of a send. Rome is the dashboard's platform, so there
