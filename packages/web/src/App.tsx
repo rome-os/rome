@@ -1,7 +1,7 @@
 import { hasSession, useAuthStateSnapshot } from "./lib/auth-state";
 import { invalidateNewChatDrafts } from "./lib/new-chat-draft-storage";
-import { lazy, Suspense, useEffect } from "react";
-import { Navigate, Route, Routes } from "react-router-dom";
+import { lazy, Suspense, useEffect, useRef } from "react";
+import { type Location, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
 import { SlotProvider } from "./components/slot";
 import { AuthGate } from "./shell/AuthGate";
@@ -48,6 +48,7 @@ const NamedDesktopPage = lazy(() =>
   import("./pages/DesktopPage").then((m) => ({ default: m.NamedDesktopPage })),
 );
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const SettingsDialog = lazy(() => import("./pages/SettingsDialog"));
 const SettingsTabPage = lazy(() => import("./pages/SettingsTabPage"));
 const ConnectionDetailPage = lazy(() => import("./pages/ConnectionDetailPage"));
 const DeviceActivityPage = lazy(() => import("./pages/DeviceActivityPage"));
@@ -61,6 +62,29 @@ const DevIndexPage = import.meta.env.DEV
   ? lazy(() => import("./pages/dev/DevIndexPage"))
   : () => null;
 
+const SETTINGS_FALLBACK_BACKDROP = "/chat";
+
+/**
+ * Settings opens as a dialog over the page the guardian came from, so while a
+ * `/settings` address is showing, the app's routes keep rendering that page. A
+ * fresh load has none, and falls back to chat.
+ */
+function useSettingsBackdrop() {
+  const location = useLocation();
+  const settingsOpen =
+    location.pathname === "/settings" || location.pathname.startsWith("/settings/");
+  const lastOutside = useRef<Location | null>(null);
+  if (!settingsOpen) lastOutside.current = location;
+  const behind = lastOutside.current;
+  return {
+    settingsOpen,
+    backdrop: settingsOpen ? (behind ?? SETTINGS_FALLBACK_BACKDROP) : location,
+    closeTo: behind
+      ? `${behind.pathname}${behind.search}${behind.hash}`
+      : SETTINGS_FALLBACK_BACKDROP,
+  };
+}
+
 export default function App() {
   const auth = useAuthStateSnapshot();
   useEffect(() => {
@@ -70,6 +94,7 @@ export default function App() {
   // One root-level bridge turns SDK `navigateRome`/`startChat` events into
   // react-router navigations for every surface (shell, full-mode apps, auth).
   useHostNavigation();
+  const { backdrop, settingsOpen, closeTo } = useSettingsBackdrop();
   const resumeRemix = useAppRemixResume();
   const cloudLoginReturn = useCloudLoginReturn();
   // Resume before mounting AuthGate so its login-to-home redirect cannot race us.
@@ -80,7 +105,7 @@ export default function App() {
     <SlotProvider>
       <Toaster position="top-right" />
       <Suspense fallback={null}>
-        <Routes>
+        <Routes location={backdrop}>
           <Route
             path="/login"
             element={
@@ -198,25 +223,35 @@ export default function App() {
             <Route path="/desktop/:name" element={<NamedDesktopPage />} />
             {/* Guide merged into the Showcases app; keep the old path working. */}
             <Route path="/guide" element={<Navigate to="/apps/showcases" replace />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            {/* More-specific static-segment path must win over the wildcard
-                `:tab` route: `/settings/connections` (no id) still falls through
-                to SettingsTabPage. */}
-            {/* App keys moved from its own page into a sheet on the Advanced
-                tab; keep the old path working. The static segment outranks
-                `:serviceId`, so it never reaches ConnectionDetailPage's
-                unknown-id redirect. */}
-            <Route
-              path="/settings/connections/app-keys"
-              element={<Navigate to="/settings/advanced" replace />}
-            />
-            <Route path="/settings/connections/:serviceId" element={<ConnectionDetailPage />} />
-            <Route path="/settings/devices/:deviceId" element={<DeviceActivityPage />} />
-            <Route path="/settings/:tab" element={<SettingsTabPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        {settingsOpen ? (
+          <AuthGate>
+            <SettingsDialog closeTo={closeTo}>
+              <Suspense fallback={null}>
+                <Routes>
+                  <Route path="/settings" element={<SettingsPage />} />
+                  {/* App keys moved from its own page into a sheet on the Advanced
+                      tab; keep the old path working. The static segment outranks
+                      `:serviceId`, so it never reaches ConnectionDetailPage's
+                      unknown-id redirect. */}
+                  <Route
+                    path="/settings/connections/app-keys"
+                    element={<Navigate to="/settings/advanced" replace />}
+                  />
+                  <Route
+                    path="/settings/connections/:serviceId"
+                    element={<ConnectionDetailPage />}
+                  />
+                  <Route path="/settings/devices/:deviceId" element={<DeviceActivityPage />} />
+                  <Route path="/settings/:tab" element={<SettingsTabPage />} />
+                </Routes>
+              </Suspense>
+            </SettingsDialog>
+          </AuthGate>
+        ) : null}
       </Suspense>
     </SlotProvider>
   );

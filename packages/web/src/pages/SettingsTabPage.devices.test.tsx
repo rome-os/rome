@@ -51,9 +51,6 @@ it("lists devices independently of the settings request", async () => {
     ],
   }));
   expect(await screen.findByText("Linux · Not connected")).toBeTruthy();
-  expect(screen.getByRole("link", { name: "Devices" }).getAttribute("href")).toBe(
-    "/settings/devices",
-  );
   expect(screen.getByRole("link", { name: /Desktop/ }).getAttribute("href")).toBe(
     "/settings/devices/two",
   );

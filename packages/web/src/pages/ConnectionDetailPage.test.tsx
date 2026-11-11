@@ -317,7 +317,7 @@ describe("ConnectionDetailPage — several accounts", () => {
     mockApi([feishu(), secondFeishu()]);
     renderDetail("feishu");
 
-    const title = await screen.findByRole("heading", { level: 1 });
+    const title = await screen.findByRole("heading", { level: 2 });
     expect(title.textContent).toBe("Feishu");
   });
 

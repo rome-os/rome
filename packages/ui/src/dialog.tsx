@@ -45,7 +45,7 @@ export function Dialog({
       }}
     >
       <AutoPortal portal={DialogPrimitive.Portal}>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-foreground/35 backdrop-blur-sm" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-foreground/35 backdrop-blur-sm dark:bg-black/60" />
         <DialogPrimitive.Content
           aria-label={ariaLabel}
           onEscapeKeyDown={(event) => {
