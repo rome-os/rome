@@ -8,6 +8,7 @@ import { ApprovalCard } from "../approval/ApprovalCard";
 import { AgentCallView } from "./AgentCallView";
 import { SystemInputView } from "./SystemInputView";
 import { AiToolsCard } from "./AiToolsCard";
+import { WidgetUiCard } from "./widget-ui/WidgetUiCard";
 import { AppComponentView } from "./AppComponentView";
 import { ConnectCard } from "./ConnectCard";
 import { ErrorRunView } from "./ErrorEventView";
@@ -234,6 +235,18 @@ export function renderSingleEntry(
       );
     }
     case "widget":
+      if ("ui" in block) {
+        return (
+          <WidgetUiCard
+            key={`app-widget-${block.toolUseId}`}
+            toolUseId={block.toolUseId}
+            appId={block.appId}
+            ui={block.ui}
+            bind={block.bind}
+            text={block.text}
+          />
+        );
+      }
       // Nothing answers a widget, so the card gets no submit or dismiss.
       return (
         <AppComponentView

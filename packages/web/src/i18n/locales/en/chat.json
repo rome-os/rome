@@ -386,7 +386,8 @@
     "send": "Send"
   },
   "appComponent": {
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "widgetUnavailable": "Could not read this card's data. {{text}}"
   },
   "aiToolsCard": {
     "title": "Connect Claude or ChatGPT",

@@ -3,10 +3,12 @@ import { z } from "zod";
 import type { JSONSchema } from "zod/v4/core";
 import type { ChatSettingsControl } from "./chat-settings.js";
 import type { ChatReads, MessageRef, Place } from "./chats.js";
+import type { WidgetUi } from "./widget-ui.js";
 
 export { z };
 export type { JSONSchema };
 export * from "./chat-settings.js";
+export * from "./widget-ui.js";
 
 // Browser-safe package entry point. Node-only CDP helpers live under the `/browser` subpath.
 
@@ -280,16 +282,22 @@ export interface PendingInteraction {
 }
 
 /**
- * One of this app's components, shown inside the agent's message in the
- * dashboard chat. The app is the one that owns the action: Rome takes it from
- * the action, never from the result.
+ * A card from this app, shown inside the agent's message in the dashboard
+ * chat. The app is the one that owns the action: Rome takes it from the
+ * action, never from the result.
+ *
+ * The card is either one of the app's web components (`componentId`), which
+ * only the dashboard draws, or a card described as data (`ui`), which the
+ * dashboard and the iOS app both draw. See {@link WidgetUi}.
  *
  * By default the card shows and the turn goes on. A button on such a card
- * calls the app's own API through `fetchAppApi`, says nothing in the chat and
- * does not wake the agent. With `waits: true` the card behaves as a
+ * calls the app's own API, says nothing in the chat and does not wake the
+ * agent. With `waits: true` a component card behaves as a
  * {@link PendingInteraction} does: the agent stops until the card answers.
  */
-export interface ShownWidget {
+export type ShownWidget = ShownComponent | ShownUi;
+
+export interface ShownComponent {
   /** A component the app declares under `components:` in app.yaml. A
    *  component the app does not declare shows no card. */
   componentId: string;
@@ -303,6 +311,18 @@ export interface ShownWidget {
   text: string;
   /** True: the agent stops until the guardian answers the card. Default false. */
   waits?: boolean;
+}
+
+export interface ShownUi {
+  /** The card, described as data. A card that fails {@link checkWidgetUi}
+   *  shows nowhere, and the model is told why. */
+  ui: WidgetUi;
+  /** Where the card's data model comes from: JSON Pointer to a GET path in
+   *  the app's own API, such as `{ "/today": "logs/2026-11-11" }`. */
+  bind?: Record<string, string>;
+  /** What the model reads, as for {@link ShownComponent.text}. Also the
+   *  card's line for a reader that draws no card. */
+  text: string;
 }
 
 /** True only for Rome Core's default agent, in legacy or canonical form. */
@@ -1593,24 +1613,31 @@ export type MessagePart =
         requiresCard?: boolean;
       };
     }
-  | {
+  | ({
       /**
        * An app's card the agent showed without waiting: the action that showed
-       * it returned `show_widget` without `waits`. The host mounts the app's
-       * component in the message from `componentId` and `props`, on every
-       * load, so the card always shows its app's current data. Nothing
+       * it returned `show_widget` without `waits`. The host draws it on every
+       * load, from the app's component (`componentId`, `props`) or from its
+       * description (`ui`, `bind`), so the card always shows its app's
+       * current data. Nothing
        * answers it, so the chat never waits on it. A widget that waits stores
        * a `pending_interaction` part instead.
        */
       type: "widget";
       toolUseId: string;
       appId: string;
-      componentId: string;
-      props?: Record<string, unknown>;
       /** The widget's plain-text line, the `text` its action wrote, for a
        *  reader that draws no card. */
       text: string;
-    }
+    } & (
+      | { componentId: string; props?: Record<string, unknown> }
+      | {
+          /** A card described as data, already checked by
+           *  {@link checkWidgetUi}. Drawn by the dashboard and the iOS app. */
+          ui: WidgetUi;
+          bind?: Record<string, string>;
+        }
+    ))
   | {
       /**
        * Resolution of an inline interaction. Lives in a user-role
