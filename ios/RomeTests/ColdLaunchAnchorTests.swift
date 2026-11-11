@@ -180,6 +180,11 @@ private struct ShrinkHost: View {
 
 /// Content that shrinks 83 pt under a list resting on the bottom, with no
 /// touch: the list ends at the new bottom, with no gap left under it.
+/// One turn of the main run loop, without waiting for anything.
+private func runLoopTurn() {
+    RunLoop.main.run(mode: .default, before: .now)
+}
+
 @MainActor
 @Suite(.serialized) struct ShrinkAtRestTests {
     @Test func aShrinkAtRestLeavesNoGap() async throws {
@@ -189,7 +194,8 @@ private struct ShrinkHost: View {
         }
         let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: backend)
         store.start()
-        for _ in 0..<50 where !store.loaded { try await Task.sleep(for: .milliseconds(10)) }
+        for _ in 0..<1000 where !store.loaded { await Task.yield() }
+        #expect(store.loaded)
         let spacer = Spacer83()
         let host = UIHostingController(rootView: ShrinkHost(store: store, spacer: spacer))
         let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
@@ -203,13 +209,31 @@ private struct ShrinkHost: View {
             window.windowScene = nil
             store.stop()
         }
-        try await Task.sleep(for: .milliseconds(800))
-        let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
-        func toEnd() -> CGFloat { scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height - scroll.contentOffset.y }
+        // Layout passes, not time: each turn lets SwiftUI apply its updates
+        // and lays the window out, until the list is where it should be or
+        // the passes run out. A slow machine only takes more turns.
+        func settle(_ done: () -> Bool) async {
+            for _ in 0..<400 {
+                window.layoutIfNeeded()
+                if done() { return }
+                await Task.yield()
+                runLoopTurn()
+            }
+        }
+        var scroll: UIScrollView?
+        await settle {
+            scroll = ColdLaunchAnchorTests.transcript(in: host.view)
+            return (scroll?.contentSize.height ?? 0) > (scroll?.bounds.height ?? .infinity)
+        }
+        let list = try #require(scroll)
+        func toEnd() -> CGFloat { list.contentSize.height + list.adjustedContentInset.bottom - list.bounds.height - list.contentOffset.y }
+        await settle { abs(toEnd()) < 1 }
         #expect(abs(toEnd()) < 1, "settled: \(toEnd())")
+        let before = list.contentSize.height
 
         spacer.height = 0
-        try await Task.sleep(for: .milliseconds(1500))
+        await settle { list.contentSize.height < before - 80 && abs(toEnd()) < 1 }
+        #expect(list.contentSize.height < before - 80, "the content did not shrink: \(before) → \(list.contentSize.height)")
         #expect(abs(toEnd()) < 1, "after an 83 pt shrink at rest: \(toEnd())")
     }
 }
