@@ -94,6 +94,23 @@ describe("Share chat", () => {
     expect(payload.snapshot.messages).toHaveLength(2);
   });
 
+  it("keeps a common chat's trace rows in its share", async () => {
+    const sessionId = await seedTwoTurnSession();
+    await deps.webchatRepo.addMessage("m1t", sessionId, "trace", "[]", "turn-1");
+    const manage = createWebchatRuntime(deps).routes;
+    const { id } = (await (
+      await manage.request(`/chat/sessions/${sessionId}/share`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ turnIds: ["turn-1"] }),
+      })
+    ).json()) as { id: string };
+    const payload = (await (
+      await shareRoutes(deps).request(`/share/${id}`)
+    ).json()) as PublicSharePayload;
+    expect(payload.snapshot.messages.map((m) => m.id)).toContain("m1t");
+  });
+
   it("strips browser (desktop) widgets from the frozen layout", async () => {
     const sessionId = await seedTwoTurnSession();
     await deps.webchatRepo.saveLayout(sessionId, [
@@ -436,7 +453,7 @@ describe("Share chat", () => {
     expect(missing.headers.get("x-robots-tag")).toBe("noindex, nofollow");
   });
 
-  it("shares a Concierge chat's turns like any chat's, with its agent's name, and has no one-message route", async () => {
+  it("shares a Concierge chat's turns without their traces, with its agent's name, and has no one-message route", async () => {
     await deps.webchatRepo.createSession(
       "topic",
       "Trip to Lisbon",
@@ -463,6 +480,7 @@ describe("Share chat", () => {
       JSON.stringify([{ type: "text", content: "Day one: the Alfama." }]),
       "topic-turn",
     );
+    await deps.webchatRepo.addMessage("topic-trace", "topic", "trace", "[]", "topic-turn");
     const manage = createWebchatRuntime(deps).routes;
 
     const created = await manage.request("/chat/sessions/topic/share", {
@@ -475,7 +493,9 @@ describe("Share chat", () => {
     const payload = (await (
       await shareRoutes(deps).request(`/share/${id}`)
     ).json()) as PublicSharePayload;
+    // The Concierge's own work, its trace, stays private: messages only.
     expect(payload.snapshot.messages.map((m) => m.id)).toEqual(["topic-u", "topic-a"]);
+    expect(payload.snapshot.traces).toEqual({});
     // The name the chat showed for its agent, for the shared page's speaker.
     expect(payload.snapshot.agentName).toBe("Milo");
 

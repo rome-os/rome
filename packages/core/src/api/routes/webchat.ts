@@ -1426,6 +1426,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const buildChatShareSnapshot = async (
     rootSessionId: string,
     turnIds: Set<string>,
+    { withTraces }: { withTraces: boolean },
   ): Promise<ChatShareSnapshot> => {
     const messages: ChatShareMessage[] = [];
     const traces: Record<string, TraceSnapshot> = {};
@@ -1437,6 +1438,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       for (const row of rows) {
         // Only the chosen turns are kept; rows with no turnId are skipped.
         if (!row.turnId || !turnFilter.has(row.turnId)) continue;
+        if (row.role === "trace" && !withTraces) continue;
         const message: ChatShareMessage = {
           id: row.id,
           sessionId: row.sessionId,
@@ -2919,7 +2921,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return c.json({ error: "turnIds must be a non-empty array" }, 400);
     }
 
-    const snapshot = await buildChatShareSnapshot(sessionId, new Set(turnIds));
+    // A Concierge chat's work (its tool calls, subagents and their traces) is
+    // its owner's alone, so its share carries the messages only.
+    const snapshot = await buildChatShareSnapshot(sessionId, new Set(turnIds), {
+      withTraces: !isConciergeChat(session),
+    });
     if (snapshot.messages.length === 0) {
       return c.json({ error: "No messages match the selected turns" }, 400);
     }

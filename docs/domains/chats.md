@@ -170,9 +170,10 @@ One thing a participant said or did in a chat.
 
 A read-only copy of chosen turns of a dashboard chat, which anyone with its link can open at `/share/<token>` without signing in.
 
-- Every dashboard chat shares the same way: a common chat, a fork chat, a task chat and a [Concierge chat](#concierge-chat) alike. Its owner picks the turns in the chat's share mode, from Share chat in the chat's menu, and makes the link there.
+- Every dashboard chat shares the same way: a common chat, a fork chat, a task chat and a [Concierge chat](#concierge-chat) alike. Its owner picks the turns in the chat's share mode, from Share chat in the chat's menu, and makes the link there. Share chat starts with every turn picked, except in a Concierge chat, where it starts with none.
 - Share on a message opens the same share mode with that message's turn already picked. Its owner can make the link at once or pick more turns. There is no link to one message on its own.
-- A link carries the picked turns, and the workspace panels its owner leaves in. It also keeps the name the chat showed for its agent, and the page labels the agent's turns by it.
+- A link carries the picked turns, and the workspace panels its owner leaves in. It also keeps the name the chat showed for its agent, and the page labels the agent's turns by it. A Concierge chat's link carries its messages only, never the work behind them: no trace, tool call or subagent.
+- The page shows a task chat named in a shared message by its title only, without its status or a way to open it.
 - A link is a snapshot made when it is shared. What is said or changed in the chat later does not reach it.
 - The page tells search engines not to index it. A link pasted elsewhere previews with the share's title and a fixed line about Rome, never with the chat's words.
 - A chat's links are listed in its share mode, and its owner revokes any of them there. A revoked link opens nothing, and deleting the chat removes its links.
