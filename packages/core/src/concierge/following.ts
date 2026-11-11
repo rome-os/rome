@@ -47,13 +47,8 @@ import { mergeConnectors, type ProviderService, type ProviderWatchSection } from
 import { addressedToOf, cleanLabels } from "./event-shape.js";
 import { optionValue, renderOptions } from "./follow-options.js";
 import type { ConciergeService } from "./service.js";
-import {
-  type ConciergeOwner,
-  GUARDIAN_OWNER,
-  MAIN_CHAT_NAME,
-  mainChatIdOf,
-  storedChatId,
-} from "../webchat/owner.js";
+import { type ConciergeOwner, GUARDIAN_OWNER, storedChatId } from "../webchat/owner.js";
+import { MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
 import {
   type FollowEvent,
   MAX_EVENTS_PER_TRIAGE,
