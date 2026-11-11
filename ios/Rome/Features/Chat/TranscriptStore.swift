@@ -66,6 +66,8 @@ final class TranscriptStore {
     /// The rows came from `cache`: the first fetch sets the paging and
     /// replaces what it covers.
     private var fromCache = false
+    /// How many messages a page holds, the newest page included.
+    static let pageSize = 40
     private var resyncWork: Task<Void, Never>?
     private var resyncAgain = false
 
@@ -145,7 +147,7 @@ final class TranscriptStore {
 
     func reload() async {
         do {
-            let page = try await backend.messages(sessionId: sessionId, before: nil, limit: 40)
+            let page = try await backend.messages(sessionId: sessionId, before: nil, limit: Self.pageSize)
             // A newest page that shares nothing with what is held leaves a gap
             // behind it: start over from it. Otherwise keep the pages already
             // loaded, so a reload never puts the older-page spinner back on top.
@@ -206,7 +208,7 @@ final class TranscriptStore {
         guard hasOlder, !loadingOlder, olderPage == nil, let cursor else { return }
         loadingOlder = true
         defer { loadingOlder = false }
-        let page = try? await backend.messages(sessionId: sessionId, before: cursor, limit: 40)
+        let page = try? await backend.messages(sessionId: sessionId, before: cursor, limit: Self.pageSize)
         // A reload that found a gap started the history over while this ran;
         // a page from the old cursor would leave a hole in it.
         guard self.cursor == cursor else { return }

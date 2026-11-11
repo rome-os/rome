@@ -29,7 +29,7 @@ private struct ScrollState: CustomStringConvertible {
 /// no space kept for a bar that is not shown.
 @MainActor
 @Suite(.serialized) struct ColdLaunchAnchorTests {
-    private static func transcript(in view: UIView) -> UIScrollView? {
+    static func transcript(in view: UIView) -> UIScrollView? {
         var best: UIScrollView?
         func walk(_ view: UIView) {
             if let scroll = view as? UIScrollView, !(scroll is UITextView), scroll.contentSize.height > (best?.contentSize.height ?? 0) {
@@ -145,3 +145,72 @@ private struct ScrollState: CustomStringConvertible {
         #expect(worst.toEnd > -1, "a gap opened: \(worst)")
     }
 }
+
+@MainActor
+@Observable
+private final class Spacer83 {
+    var height: CGFloat = 83
+}
+
+/// The transcript with a block under its last row that can shrink, as the
+/// lazy stack's leftover guess did.
+private struct ShrinkHost: View {
+    let store: TranscriptStore
+    let spacer: Spacer83
+
+    var body: some View {
+        TranscriptList(store: store, footer: AnyView(SpacerView(spacer: spacer))) { row, previous in
+            Group {
+                switch row {
+                case .userText(_, let text, _, let pending): UserBubble(text: text, pending: pending)
+                case .agentText(_, let text, _, let forwarded, let position): AgentBubble(text: text, forwardedFrom: forwarded, position: position)
+                default: EmptyView()
+                }
+            }
+            .padding(.top, TranscriptSpacing.top(row, after: previous))
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) { Color.gray.frame(height: 66) }
+    }
+
+    private struct SpacerView: View {
+        let spacer: Spacer83
+        var body: some View { Color.clear.frame(height: spacer.height) }
+    }
+}
+
+/// Content that shrinks 83 pt under a list resting on the bottom, with no
+/// touch: the list ends at the new bottom, with no gap left under it.
+@MainActor
+@Suite(.serialized) struct ShrinkAtRestTests {
+    @Test func aShrinkAtRestLeavesNoGap() async throws {
+        let backend = FakeBackend()
+        backend.stored = (0..<40).map { index in
+            ChatMessage(id: "m\(index)", sessionId: "chat-1", turnId: "t\(index)", role: index.isMultiple(of: 2) ? "user" : "assistant", content: "Message \(index), long enough to fill a line or two of the bubble.", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + Double(index * 60))))
+        }
+        let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<50 where !store.loaded { try await Task.sleep(for: .milliseconds(10)) }
+        let spacer = Spacer83()
+        let host = UIHostingController(rootView: ShrinkHost(store: store, spacer: spacer))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 402, height: 874)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+            store.stop()
+        }
+        try await Task.sleep(for: .milliseconds(800))
+        let scroll = try #require(ColdLaunchAnchorTests.transcript(in: host.view))
+        func toEnd() -> CGFloat { scroll.contentSize.height + scroll.adjustedContentInset.bottom - scroll.bounds.height - scroll.contentOffset.y }
+        #expect(abs(toEnd()) < 1, "settled: \(toEnd())")
+
+        spacer.height = 0
+        try await Task.sleep(for: .milliseconds(1500))
+        #expect(abs(toEnd()) < 1, "after an 83 pt shrink at rest: \(toEnd())")
+    }
+}
+

@@ -780,6 +780,19 @@ struct TranscriptList<Row: View>: View {
             .onChange(of: lazy, initial: true) { _, now in
                 if now { lazyLocked = true }
             }
+            // Rows that changed under a list at rest on the bottom: lay the
+            // scroll out again and bring an offset left past the end back,
+            // without waiting for a touch to do it.
+            .onChange(of: RowsShape(rows), initial: true) {
+                guard following, atRest else { return }
+                Task {
+                    for delay in [150, 500, 1200] {
+                        try? await Task.sleep(for: .milliseconds(delay))
+                        guard following, atRest else { return }
+                        scrollHandle.settleAtEnd()
+                    }
+                }
+            }
             .onChange(of: rows.last?.id) {
                 // Before iOS 18 a list that follows also scrolls to a new last
                 // row itself, in case the anchor does not hold the bottom.
@@ -894,6 +907,17 @@ struct TranscriptList<Row: View>: View {
 
 /// The transcript's stack: lazy for a long transcript, all at once for a
 /// short one (`TranscriptList.eagerRowLimit`).
+/// What a change of rows is, for re-settling the list: how many, and the last.
+private struct RowsShape: Equatable {
+    let count: Int
+    let last: String?
+
+    init(_ rows: [TranscriptRow]) {
+        count = rows.count
+        last = rows.last?.id
+    }
+}
+
 private struct TranscriptStack<Content: View>: View {
     let lazy: Bool
     @ViewBuilder var content: () -> Content
@@ -988,6 +1012,15 @@ final class ScrollHandle {
         guard let view else { return }
         view.contentOffset.y += dy
         transcriptScrollLog.notice("shifted by \(dy, privacy: .public) to \(view.contentOffset.y, privacy: .public)")
+    }
+
+    /// Lays the scroll out now, so its content size is the rows' own, then
+    /// clamps an offset past the end. A list at rest only.
+    func settleAtEnd() {
+        guard let view, !view.isDragging, !view.isDecelerating else { return }
+        view.setNeedsLayout()
+        view.layoutIfNeeded()
+        clampToEnd()
     }
 
     /// Moves an offset left past the end of the content back to the end. A
