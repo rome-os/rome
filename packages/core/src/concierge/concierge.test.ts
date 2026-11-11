@@ -2124,6 +2124,57 @@ describe("Concierge task anchors", () => {
     expect(await s.taskRepo.listForAgent(true)).toHaveLength(1);
   });
 
+  it.each([
+    ["a guardian's message started it", true],
+    ["no guardian message started it", false],
+  ])("chat_start sets up the thread before the task starts: a failed thread write (%s) starts nothing, and the retry runs once", async (_name, asked) => {
+    const s = setup({ said: false });
+    if (asked) guardianAsks(s, "g1", "research X");
+    else s.inTurn("wake-up");
+    rs.spyOn(s.tasks.repo, "setThreadRoot").mockRejectedValueOnce(new Error("disk full"));
+    const failed = await s.tool("chat_start", { title: "A", brief: "a", ack: "On it" });
+    expect(failed.isError).toBe(true);
+    expect(s.posted).toEqual([]);
+    const retried = await s.tool("chat_start", { title: "A", brief: "a", ack: "On it" });
+    expect(retried.isError).toBeFalsy();
+    expect(s.posted).toHaveLength(1);
+  });
+
+  it("chat_start stays a success when the push after the task started throws", async () => {
+    const s = setup({ said: false });
+    guardianAsks(s, "g1", "research X");
+    rs.spyOn(s.service, "said").mockImplementation(() => {
+      throw new Error("push hold lookup failed");
+    });
+    const result = await s.tool("chat_start", { title: "A", brief: "a", ack: "On it" });
+    expect(result.isError).toBeFalsy();
+    expect(s.posted).toHaveLength(1);
+  });
+
+  it("chat_start sends a slash skill's one acknowledgement with its card, and starts the skill", async () => {
+    const s = setup({ said: false });
+    guardianAsks(s, "g1", "/coding:app_creation Build a tracker");
+    const result = await s.tool("chat_start", {
+      title: "Build a tracker",
+      brief: "Build a habit tracker",
+      skill: "coding:app_creation",
+      agent: "main",
+      ack: "On it: the tracker",
+    });
+    expect(result.isError).toBeFalsy();
+    const said = (s.messages.get(CONCIERGE_CHAT) ?? []).filter((row) => row.role === "assistant");
+    expect(said).toHaveLength(1);
+    expect(JSON.parse(said[0].content).slice(1)).toEqual([
+      { type: "text", content: "On it: the tracker" },
+      startCard("Build a tracker"),
+    ]);
+    expect(s.send).toHaveBeenCalledWith(
+      expect.anything(),
+      { text: "Build a habit tracker", skillName: "coding:app_creation" },
+      CONCIERGE_ACCOUNT,
+    );
+  });
+
   it("chat_start rings no push for a start that never began", async () => {
     const s = setup({ said: false });
     s.pushLevel("active");

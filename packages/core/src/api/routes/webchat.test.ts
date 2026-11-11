@@ -4006,9 +4006,13 @@ describe("Webchat API", () => {
       });
       expect(sent.status).toBe(200);
       const prompt = turns.at(-1)?.prompt;
-      expect(prompt).toContain("Acknowledge with `say` first");
-      expect(prompt).toContain("`chat_start`");
-      expect(prompt).toContain('`agent: "main"`, `skill: "coding:app_creation"`');
+      expect(prompt).toContain("Call `chat_start` right away");
+      expect(prompt).toContain(
+        '`agent: "main"`, `skill: "coding:app_creation"`, a short title and an `ack`',
+      );
+      // One acknowledgement, sent by chat_start itself.
+      expect(prompt).toContain("Do not `say` an acknowledgement first");
+      expect(prompt).not.toContain("Acknowledge with `say`");
       // Concierge writes the brief itself, so it can add conversation context.
       expect(prompt).toContain("plus any context from this conversation or a quoted message");
       expect(prompt).not.toContain('"brief"');

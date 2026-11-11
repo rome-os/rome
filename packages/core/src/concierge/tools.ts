@@ -932,12 +932,22 @@ export async function buildConciergeTools(
                   chatId: conciergeChatId,
                 },
           ]);
+          // The thread is set up before the task gets its first input, so
+          // whatever can fail fails before anything runs and a retry never
+          // runs the task twice. Nothing after the input may throw.
+          if (start) await rootTaskAt(task.id, start);
+          if (!startPlace.chatThread) await rootAtMessage(task.id, startId);
           await sendInput(chatId, brief, skill?.name);
           // One message, one push, once the task runs. Its line is the
           // acknowledgement alone, never the quote, the title or the card.
-          said(conciergeChatId, turnId, ack ?? null);
-          if (start) await rootTaskAt(task.id, start);
-          if (!startPlace.chatThread) await rootAtMessage(task.id, startId);
+          try {
+            said(conciergeChatId, turnId, ack ?? null);
+          } catch (error) {
+            log.warn("failed to push a task's start", {
+              chatId,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
           // Named after the first turn: the first message would rename it.
           if (conversationTitleLength(title) <= CONVERSATION_TITLE_MAX_LENGTH) {
             // The task already runs, so a failure here must not read as a
