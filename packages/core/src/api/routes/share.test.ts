@@ -504,4 +504,122 @@ describe("Share chat", () => {
     });
     expect(oneMessage.status).toBe(404);
   });
+  describe("a share stored before private chats stopped freezing traces", () => {
+    // The shape a share took before the write-time rule: a trace row with its
+    // summary, and the trace body beside the messages.
+    const storedWithTrace = (id: string, sessionId: string) =>
+      deps.webchatRepo.createSharedChat({
+        id,
+        sessionId,
+        title: "Plan",
+        snapshot: JSON.stringify({
+          mainSessionId: sessionId,
+          messages: [
+            {
+              id: "u",
+              sessionId,
+              turnId: "t",
+              role: "user",
+              content: "Plan my trip",
+              createdAt: "2026-11-10T01:11:22.000Z",
+            },
+            {
+              id: "tr",
+              sessionId,
+              turnId: "t",
+              role: "trace",
+              content: "",
+              createdAt: "2026-11-10T01:11:23.000Z",
+              traceSummary: { totalSteps: 2 },
+            },
+            {
+              id: "a",
+              sessionId,
+              turnId: "t",
+              role: "assistant",
+              content: "Day one: the Alfama.",
+              createdAt: "2026-11-10T01:11:24.000Z",
+              traceSummary: { totalSteps: 2 },
+            },
+          ],
+          traces: { tr: { summary: { totalSteps: 2 }, segments: [{ kind: "tool" }] } },
+        }),
+        layout: "[]",
+      });
+    const served = async (token: string) =>
+      ((await (await shareRoutes(deps).request(`/share/${token}`)).json()) as PublicSharePayload)
+        .snapshot;
+    const privateChat = async (id: string, agentName: string | null, triggerKind?: string) => {
+      await deps.webchatRepo.createSession(
+        id,
+        "Private",
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        agentName,
+        "webchat",
+        null,
+        { ownerKey: "guardian" },
+      );
+      if (triggerKind) {
+        await deps.webchatRepo.setSessionTrigger(id, { triggerKind, triggerName: "Task" });
+      }
+    };
+
+    it("serves a Concierge chat's or its task chat's share without traces", async () => {
+      await privateChat("topic", "core:concierge");
+      await privateChat("task", null, "concierge");
+      for (const chat of ["topic", "task"]) {
+        await storedWithTrace(`old-${chat}`, chat);
+        const snapshot = await served(`old-${chat}`);
+        expect(snapshot.messages.map((m) => m.id)).toEqual(["u", "a"]);
+        expect(snapshot.messages.some((m) => "traceSummary" in m)).toBe(false);
+        expect(snapshot.traces).toEqual({});
+      }
+      // The stored row is left as it was.
+      expect((await deps.webchatRepo.getSharedChat("old-topic"))?.snapshot).toContain('"tr"');
+    });
+
+    it("serves a common chat's share with its traces", async () => {
+      await deps.webchatRepo.createSession("plain", "Plain");
+      await storedWithTrace("old-plain", "plain");
+      const snapshot = await served("old-plain");
+      expect(snapshot.messages.map((m) => m.id)).toEqual(["u", "tr", "a"]);
+      expect(Object.keys(snapshot.traces)).toEqual(["tr"]);
+    });
+  });
+
+  it("freezes no trace into a share of a task chat the Concierge started", async () => {
+    await deps.webchatRepo.createSession(
+      "task",
+      "Book a hotel",
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      null,
+      "webchat",
+      null,
+      { ownerKey: "guardian" },
+    );
+    await deps.webchatRepo.setSessionTrigger("task", {
+      triggerKind: "concierge",
+      triggerName: "Task",
+    });
+    await deps.webchatRepo.addMessage("tu", "task", "user", "Book it", "tt");
+    await deps.webchatRepo.addMessage("ttr", "task", "trace", "[]", "tt");
+    const manage = createWebchatRuntime(deps).routes;
+    const { id } = (await (
+      await manage.request("/chat/sessions/task/share", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ turnIds: ["tt"] }),
+      })
+    ).json()) as { id: string };
+    const stored = JSON.parse((await deps.webchatRepo.getSharedChat(id))!.snapshot) as {
+      messages: { id: string }[];
+    };
+    expect(stored.messages.map((m) => m.id)).toEqual(["tu"]);
+  });
 });
