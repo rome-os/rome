@@ -13,21 +13,31 @@
  * - `pnpm lint:imports`, and `pnpm typecheck:lint` when lint/ changed.
  * - Type checks of every workspace package that changed and every package
  *   that depends on one, incremental between runs.
- * - The unit tests that import a changed file, per rstest package.
+ * - The unit tests that import a changed file, in every package whose `test`
+ *   script runs rstest.
  *
- * Tests that need a Linux host with flock or a session bus are left out, as
- * are integration and e2e tests. CI runs all of them.
+ * A deleted or renamed file counts toward the package that held it. A change
+ * to root config such as `tsconfig.json` or `pnpm-lock.yaml` type-checks every
+ * package, and prints a reminder that only `pnpm test:unit` covers its effect
+ * on tests. Tests that need a Linux host with flock or a session bus are left
+ * out, as are integration and e2e tests and packages whose tests need a build
+ * first. CI runs all of them.
+ *
+ * At most `os.availableParallelism()` checks run at once.
  */
 
 import { type SpawnOptions, execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { availableParallelism } from "node:os";
+import { basename, dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const CACHE = join(ROOT, "node_modules/.cache/preflight");
 const CORE = join(ROOT, "packages/core");
 const CODE = /\.(ts|tsx|mts|cts|js|jsx|mjs|cjs)$/;
+/** Files outside every workspace that every workspace reads. */
+const ROOT_CONFIG = /^(tsconfig.*\.json|package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml)$/;
 
 /** Unit tests that fail on hosts without flock or a D-Bus session bus. */
 const HOST_BOUND_TESTS = [
@@ -48,6 +58,7 @@ interface Workspace {
   dir: string;
   deps: string[];
   typecheck?: string;
+  test?: string;
 }
 
 function git(...args: string[]): string {
@@ -69,11 +80,11 @@ function baseRef(argv: string[]): string {
   return "HEAD";
 }
 
-function changedFiles(base: string): string[] {
-  const tracked = git("diff", "--name-only", "--diff-filter=d", base);
+/** Every changed path, with a deleted file and both sides of a rename kept. */
+function changedPaths(base: string): string[] {
+  const tracked = git("diff", "--name-only", "--no-renames", base);
   const untracked = git("ls-files", "--others", "--exclude-standard");
-  const files = new Set(`${tracked}\n${untracked}`.split("\n").filter(Boolean));
-  return [...files].filter((f) => existsSync(join(ROOT, f))).sort();
+  return [...new Set(`${tracked}\n${untracked}`.split("\n").filter(Boolean))].sort();
 }
 
 function workspaces(): Workspace[] {
@@ -89,6 +100,7 @@ function workspaces(): Workspace[] {
         dir: p.path,
         deps: Object.keys({ ...pkg.dependencies, ...pkg.devDependencies, ...pkg.peerDependencies }),
         typecheck: pkg.scripts?.typecheck,
+        test: pkg.scripts?.test,
       };
     });
 }
@@ -143,35 +155,41 @@ function typecheckChecks(w: Workspace): Check[] {
   });
 }
 
-function testChecks(code: string[], affected: Workspace[], all: Workspace[]): Check[] {
-  if (code.length === 0) return [];
+function testChecks(
+  code: string[],
+  affected: Workspace[],
+  all: Workspace[],
+): { checks: Check[]; skipped: Workspace[] } {
+  if (code.length === 0) return { checks: [], skipped: [] };
   // Core's rstest config also collects the tests of rome_apps, scripts, lint and
   // infra, so it runs for every change. Every other package runs its tests when
   // it or a dependency changed. rstest keeps the tests that import a changed file.
   const core = all.filter((w) => w.dir === CORE);
-  const runners = [...new Set([...core, ...affected])].filter((w) =>
-    ["rstest.config.ts", "rstest.config.mts"].some((c) => existsSync(join(w.dir, c))),
-  );
+  const candidates = [...new Set([...core, ...affected])].filter((w) => w.test?.includes("rstest"));
+  const needsBuild = (w: Workspace) => /\bbuild\b/.test(w.test?.split("rstest")[0] ?? "");
   const abs = code.map((f) => join(ROOT, f));
-  return runners.map((r) => ({
-    name: `unit tests ${relative(ROOT, r.dir)}`,
-    command: join(ROOT, "scripts/test-env.sh"),
-    args: [
-      join(ROOT, "node_modules/.bin/rstest"),
-      "run",
-      "--related",
-      ...abs,
-      "--passWithNoTests",
-      "--silent",
-      "passed-only",
-      "--exclude",
-      "**/*.integration.test.ts",
-      "--exclude",
-      "**/*.e2e.test.ts",
-      ...(r.dir === CORE ? HOST_BOUND_TESTS.flatMap((t) => ["--exclude", t]) : []),
-    ],
-    cwd: r.dir,
-  }));
+  const checks = candidates
+    .filter((w) => !needsBuild(w))
+    .map((r) => ({
+      name: `unit tests ${relative(ROOT, r.dir)}`,
+      command: join(ROOT, "scripts/test-env.sh"),
+      args: [
+        join(ROOT, "node_modules/.bin/rstest"),
+        "run",
+        "--related",
+        ...abs,
+        "--passWithNoTests",
+        "--silent",
+        "passed-only",
+        "--exclude",
+        "**/*.integration.test.ts",
+        "--exclude",
+        "**/*.e2e.test.ts",
+        ...(r.dir === CORE ? HOST_BOUND_TESTS.flatMap((t) => ["--exclude", t]) : []),
+      ],
+      cwd: r.dir,
+    }));
+  return { checks, skipped: candidates.filter(needsBuild) };
 }
 
 interface Result {
@@ -206,38 +224,73 @@ function run(check: Check): Promise<Result> {
   });
 }
 
+/** Runs the checks in list order, at most `size` at a time. */
+async function pool(checks: Check[], size: number): Promise<Result[]> {
+  const results: Result[] = [];
+  let next = 0;
+  const lane = async () => {
+    while (next < checks.length) {
+      const i = next++;
+      results[i] = await run(checks[i]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(size, checks.length) }, lane));
+  return results;
+}
+
 async function main() {
   const start = performance.now();
   const base = baseRef(process.argv.slice(2));
-  const files = changedFiles(base);
-  if (files.length === 0) {
+  const paths = changedPaths(base);
+  if (paths.length === 0) {
     console.log(`No files changed since ${base.slice(0, 12)}.`);
     return;
   }
   mkdirSync(CACHE, { recursive: true });
   const all = workspaces();
+  const files = paths.filter((f) => existsSync(join(ROOT, f)));
   const code = files.filter((f) => CODE.test(f));
-  const touched = new Set(files.map((f) => owner(f, all)).filter((w) => w !== undefined));
-  const reached = affected(touched, all);
+  const rootConfig = paths.filter(
+    (f) => !owner(f, all) && ROOT_CONFIG.test(basename(f)) && !f.includes("/"),
+  );
+  const touched = new Set(paths.map((f) => owner(f, all)).filter((w) => w !== undefined));
+  const reached = rootConfig.length > 0 ? all : affected(touched, all);
+  const tests = testChecks(code, reached, all);
 
   const checks: Check[] = [
-    {
-      name: "biome",
-      command: join(ROOT, "node_modules/.bin/biome"),
-      args: ["check", "--no-errors-on-unmatched", "--files-ignore-unknown=true", ...files],
-    },
+    // Biome with no paths checks the whole repo, so a branch that only deletes skips it.
+    ...(files.length > 0
+      ? [
+          {
+            name: "biome",
+            command: join(ROOT, "node_modules/.bin/biome"),
+            args: ["check", "--no-errors-on-unmatched", "--files-ignore-unknown=true", ...files],
+          },
+        ]
+      : []),
     { name: "lint:imports", command: "pnpm", args: ["-s", "lint:imports"] },
-    ...(files.some((f) => f.startsWith("lint/"))
+    // Tests and the larger type checks go first so the pool starts them early.
+    ...tests.checks,
+    ...(rootConfig.length > 0 || paths.some((f) => f.startsWith("lint/"))
       ? [{ name: "typecheck:lint", command: "pnpm", args: ["-s", "typecheck:lint"] }]
       : []),
-    ...reached.flatMap(typecheckChecks),
-    ...testChecks(code, reached, all),
+    ...reached
+      .toSorted((a, b) => Number(b.dir === CORE) - Number(a.dir === CORE))
+      .flatMap(typecheckChecks),
   ];
 
+  for (const w of tests.skipped) {
+    console.log(`- unit tests ${relative(ROOT, w.dir)} skipped: they need a build first`);
+  }
+  if (rootConfig.length > 0) {
+    console.log(
+      `- ${rootConfig.join(", ")} changed: every package is type-checked, but run pnpm test:unit for the tests`,
+    );
+  }
   console.log(
-    `${files.length} files changed since ${base.slice(0, 12)}. Running ${checks.length} checks.\n`,
+    `${paths.length} files changed since ${base.slice(0, 12)}. Running ${checks.length} checks.\n`,
   );
-  const results = await Promise.all(checks.map(run));
+  const results = await pool(checks, availableParallelism());
   const failed = results.filter((r) => !r.ok);
   for (const r of failed) {
     console.log(`\n━━ ${r.check.name} ━━\n${r.output.trimEnd()}`);
