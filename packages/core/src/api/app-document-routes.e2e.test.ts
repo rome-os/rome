@@ -113,6 +113,63 @@ describe("shared chat pages through buildApp", () => {
   });
 });
 
+describe("shared chat cards through buildApp", () => {
+  const share = (deps: ApiDeps, id: string, title: string) =>
+    deps.webchatRepo.createSharedChat({
+      id,
+      sessionId: "chat-1",
+      title,
+      snapshot: JSON.stringify({ mainSessionId: "chat-1", messages: [], traces: {} }),
+      layout: "[]",
+    });
+
+  it("titles a live share's card by the share, with the fixed line and the shell's image", async () => {
+    const { app, deps } = await buildTestHost();
+    await share(deps, "live-token", "Lisbon in three days <for two>");
+    const res = await app.request("/share/live-token", { headers: HEADERS });
+    expect(res.status).toBe(200);
+    expect(res.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+    const body = await res.text();
+    expect(body).toContain("<title>Lisbon in three days &lt;for two&gt; · Rome</title>");
+    expect(body).toContain(
+      '<meta property="og:title" content="Lisbon in three days &lt;for two&gt;" />',
+    );
+    expect(body).toContain(
+      '<meta property="og:description" content="From Rome · Your personal assistant" />',
+    );
+    expect(body).toContain(
+      '<meta property="og:url" content="https://jessie.romeos.cc/share/live-token" />',
+    );
+    expect(body).toContain('<meta name="twitter:card" content="summary_large_image" />');
+    expect(body).toContain(
+      '<meta property="og:image" content="https://romeos.cc/public-og-20260825.jpg" />',
+    );
+  });
+
+  it("cuts a long share title short", async () => {
+    const { app, deps } = await buildTestHost();
+    await share(deps, "long-token", `A ${"very ".repeat(30)}long plan`);
+    const body = await (await app.request("/share/long-token", { headers: HEADERS })).text();
+    const title = body.match(/<meta property="og:title" content="([^"]*)"/)?.[1] ?? "";
+    expect(title.length).toBe(70);
+    expect(title.endsWith("…")).toBe(true);
+  });
+
+  it("serves the generic card for a revoked or unknown share", async () => {
+    const { app, deps } = await buildTestHost();
+    await share(deps, "gone-token", "Private plan");
+    await deps.webchatRepo.revokeSharedChat("gone-token");
+    for (const path of ["/share/gone-token", "/share/no-such-token"]) {
+      const res = await app.request(path, { headers: HEADERS });
+      expect(res.status).toBe(200);
+      expect(res.headers.get("x-robots-tag")).toBe("noindex, nofollow");
+      const body = await res.text();
+      expect(body).toBe(INDEX_HTML);
+      expect(body).not.toContain("Private plan");
+    }
+  });
+});
+
 describe("app document routes through buildApp", () => {
   it("swaps the shell's social meta for a routed app on /full/apps/:id", async () => {
     const { app } = await buildTestHost();

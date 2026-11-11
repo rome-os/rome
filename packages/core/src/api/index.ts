@@ -10,6 +10,7 @@ import { renderAppIdentity, renderSocialMeta } from "../lib/social-meta.js";
 import { SHARE_ROBOTS } from "../lib/share-robots.js";
 import { buildAppIdentity } from "./app-home-screen.js";
 import { buildAppSocialCard } from "./app-social-card.js";
+import { buildShareSocialCard } from "./share-social-card.js";
 import { attachTerminalServer } from "../terminal-server.js";
 import { attachLiveEventsServer } from "../live-events-server.js";
 import { attachNodeConsoleServer } from "../desktops/node-console-server.js";
@@ -267,7 +268,7 @@ export function buildApp(
 function mountSpa(
   app: Hono,
   webRoot: string,
-  deps: Pick<ApiDeps, "appCatalog" | "ogImageStore">,
+  deps: Pick<ApiDeps, "appCatalog" | "ogImageStore" | "webchatRepo">,
 ): void {
   // App document routes get the shell with per-app social meta and
   // home-screen identity. Registered before `serveStatic` so the static
@@ -290,6 +291,15 @@ function mountSpa(
   app.use("/share/*", async (c, next) => {
     await next();
     c.header("X-Robots-Tag", SHARE_ROBOTS);
+  });
+
+  // A shared chat's page gets a card titled by the share. A revoked or unknown
+  // token keeps the generic card, so nothing of the share leaks through it.
+  app.get("/share/*", async (c) => {
+    const card = await buildShareSocialCard(deps, c.req.raw);
+    return c.html(renderSocialMeta(readIndexHtml(webRoot), card), 200, {
+      "Cache-Control": "no-cache",
+    });
   });
 
   // Serve hashed assets + public files. `serveStatic` calls next() on

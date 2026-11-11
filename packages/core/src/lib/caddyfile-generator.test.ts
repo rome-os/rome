@@ -43,7 +43,7 @@ describe("generateCaddyfile runtime-config.js delivery", () => {
 describe("generateCaddyfile app document routes", () => {
   it("proxies /apps and /full/apps documents to Hono, after the asset handlers", () => {
     const caddyfile = generateCaddyfile();
-    expect(caddyfile).toContain("@appDocs path /apps /apps/* /full/apps /full/apps/*");
+    expect(caddyfile).toContain("@appDocs path /apps /apps/* /full/apps /full/apps/* /share/*");
     const appDocsAt = caddyfile.indexOf("handle @appDocs {");
     const missingAssetsAt = caddyfile.indexOf("handle @missingSpaAssets {");
     const fallbackAt = caddyfile.lastIndexOf("try_files {path} /index.html");
