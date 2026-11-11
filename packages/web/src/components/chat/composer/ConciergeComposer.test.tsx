@@ -73,17 +73,33 @@ function renderComposer(
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
-  render(
+  const tree = (next: Partial<ConciergeComposerProps>) => (
     <QueryClientProvider client={client}>
       <ReplyDraftHarness initial={reply} threads={threads}>
-        <ConciergeComposer ref={ref} onSend={onSend} {...props} />
+        <ConciergeComposer ref={ref} onSend={onSend} {...next} />
       </ReplyDraftHarness>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
-  return { onSend };
+  const view = render(tree(props));
+  return {
+    onSend,
+    rerenderWith: (next: Partial<ConciergeComposerProps>) => view.rerender(tree(next)),
+  };
 }
 
 describe("ConciergeComposer", () => {
+  it("says a topic chat's name in its placeholder, and follows a rename", () => {
+    const { rerenderWith } = renderComposer({ chatName: "Trip to Lisbon" });
+    expect(screen.getByPlaceholderText("Message in Trip to Lisbon")).toBeTruthy();
+    rerenderWith({ chatName: "Lisbon flights" });
+    expect(screen.getByPlaceholderText("Message in Lisbon flights")).toBeTruthy();
+  });
+
+  it("keeps the plain placeholder without a chat name", () => {
+    renderComposer({ chatName: null });
+    expect(screen.getByPlaceholderText("Message")).toBeTruthy();
+  });
+
   it("picks a scoped skill, sends a chip-only turn, and clears the chip", async () => {
     const { onSend } = renderComposer();
     const box = screen.getByRole("textbox") as HTMLTextAreaElement;
@@ -258,6 +274,11 @@ describe("ConciergeComposer reply", () => {
       replyTo: reply,
     });
     expect(screen.queryByRole("button", { name: "Cancel reply" })).toBeNull();
+  });
+
+  it("leaves the thread reply's own placeholder alone in a named topic chat", async () => {
+    renderComposer({ chatName: "Trip to Lisbon" }, reply, true, undefined, true);
+    expect(await screen.findByPlaceholderText("Reply")).toBeTruthy();
   });
 
   it("sends into the open chat thread, then closes it and clears the reply", async () => {
