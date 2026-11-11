@@ -7,7 +7,7 @@ import {
   type ImgHTMLAttributes,
   type ReactElement,
 } from "react";
-import { RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
+import { Download, RotateCcw, X, ZoomIn, ZoomOut } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ControlledProps } from "react-medium-image-zoom";
 import { IconButton } from "@/components/ui/icon-button";
@@ -18,7 +18,43 @@ const MIN_SCALE = 1;
 const MAX_SCALE = 4;
 const SCALE_STEP = 0.25;
 
-export function ImagePreviewContent({ img, modalState, onUnzoom }: PreviewContentProps) {
+export type ImagePreviewContentProps = PreviewContentProps & {
+  /**
+   * The picture is one in a chat reply, not a composer preview. A reply picture
+   * has a Download button and opens from its own shape. A composer preview is a
+   * blob of what was just picked, in a square card, so it has neither.
+   */
+  inReply?: boolean;
+};
+
+/**
+ * Saves the picture at `src`. A same-origin file downloads through a link. A
+ * picture from another origin opens in a new tab, because a link's `download`
+ * ignores it and a fetch needs the host's CORS consent. Both run inside the
+ * tap, since Safari blocks a tab opened after an `await`.
+ */
+export function downloadImage(src: string) {
+  try {
+    const url = new URL(src, window.location.href);
+    if (url.origin === window.location.origin) {
+      const link = document.createElement("a");
+      link.href = url.href;
+      link.download = decodeURIComponent(url.pathname.split("/").pop() ?? "") || "image";
+      link.click();
+      return;
+    }
+  } catch {
+    // A URL that does not parse opens as it is.
+  }
+  window.open(src, "_blank", "noopener,noreferrer");
+}
+
+export function ImagePreviewContent({
+  img,
+  modalState,
+  onUnzoom,
+  inReply = false,
+}: ImagePreviewContentProps) {
   const { t } = useTranslation("chat");
   const [scale, setScale] = useState(MIN_SCALE);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -132,16 +168,29 @@ export function ImagePreviewContent({ img, modalState, onUnzoom }: PreviewConten
         }}
         onDragStart={(event) => event.preventDefault()}
       >
-        {image && clipToThumbnail(image, modalState)}
+        {image && (inReply ? image : clipToThumbnail(image, modalState))}
       </div>
-      <IconButton
-        data-preview-controls
-        label={t("composer.closeImagePreview")}
-        icon={<X aria-hidden />}
-        onClick={(event) => onUnzoom(event.nativeEvent)}
-        disabled={modalState === "UNLOADING"}
-        className="absolute right-4 top-4 rounded-full border-border bg-surface shadow-sm"
-      />
+      {/* Close comes first in the DOM, so it keeps the viewer's initial focus. */}
+      <div className="absolute right-4 top-4 flex flex-row-reverse gap-2">
+        <IconButton
+          data-preview-controls
+          label={t("composer.closeImagePreview")}
+          icon={<X aria-hidden />}
+          onClick={(event) => onUnzoom(event.nativeEvent)}
+          disabled={modalState === "UNLOADING"}
+          className="rounded-full border-border bg-surface shadow-sm"
+        />
+        {inReply && image?.props.src && (
+          <IconButton
+            data-preview-controls
+            label={t("composer.downloadImage")}
+            icon={<Download aria-hidden />}
+            onClick={() => downloadImage(image.props.src as string)}
+            disabled={modalState === "UNLOADING"}
+            className="rounded-full border-border bg-surface shadow-sm"
+          />
+        )}
+      </div>
       <div
         data-preview-controls
         className="absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border border-border bg-surface p-2 text-foreground shadow-sm"

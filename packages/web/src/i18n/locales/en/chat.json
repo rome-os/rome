@@ -4,7 +4,8 @@
   "senderAutomation": "Automation",
   "markdown": {
     "code": "Code",
-    "mermaid": "Mermaid diagram"
+    "mermaid": "Mermaid diagram",
+    "imageNotAvailable": "Image not available"
   },
   "title": "Rome",
   "concierge": {
@@ -366,6 +367,7 @@
     "previewImage": "Preview",
     "playVideo": "Play",
     "closeImagePreview": "Close",
+    "downloadImage": "Download",
     "filePill": "#File {{index}}",
     "uploadProgressFor": "Upload progress for {{name}}",
     "cancelUpload": "Cancel",
