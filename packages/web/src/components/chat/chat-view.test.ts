@@ -401,6 +401,26 @@ describe("isAwaitingGuardian", () => {
   const awaiting = (main: ChatMessage[], runningTurnId?: string) =>
     isAwaitingGuardian(buildChatView(new Map([[MAIN, main]]), MAIN, MAIN_IDENTITY), runningTurnId);
 
+  it("is false while the last message is a widget, which nothing answers", () => {
+    const widget = {
+      type: "widget",
+      toolUseId: "w_0",
+      appId: "meals",
+      componentId: "today",
+      text: "Showing today's meals.",
+    };
+    const main = [
+      mk(MAIN, "user", "t1", [{ type: "text", content: "what did I eat today?" }]),
+      mk(MAIN, "assistant", "t1", [widget]),
+    ];
+
+    expect(awaiting(main)).toBe(false);
+    expect(awaiting(main, "t1")).toBe(false);
+    expect(isLockedByCard(buildChatView(new Map([[MAIN, main]]), MAIN, MAIN_IDENTITY), "t1")).toBe(
+      false,
+    );
+  });
+
   it("is true while the last message is an unanswered card", () => {
     expect(
       awaiting([

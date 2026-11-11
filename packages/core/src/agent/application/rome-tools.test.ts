@@ -23,7 +23,12 @@ const TURN: TurnFacts = {
 function tools(overrides: Partial<RomeToolsOptions> = {}) {
   return createRomeTools({
     turn: TURN,
-    actions: { list: () => [], permits: () => true, run: async () => ({ status: "ok" }) },
+    actions: {
+      list: () => [],
+      permits: () => true,
+      appOf: () => undefined,
+      run: async () => ({ status: "ok" }),
+    },
     skills: { list: () => [] },
     subagents: { list: () => [], run: async () => ({}) },
     widgetsShow: false,
@@ -303,6 +308,7 @@ describe("execute_action", () => {
       actions: {
         list: () => [],
         permits: () => true,
+        appOf: () => undefined,
         run: async () => ({
           status: "place_widget",
           placement: { appId: "maps" },
@@ -315,11 +321,33 @@ describe("execute_action", () => {
     expect((await callAction(false)).content[0].text).toContain("could not be shown");
   });
 
+  it("shows a widget as the app that owns the action", async () => {
+    const result = await tools({
+      widgetsShow: true,
+      actions: {
+        list: () => [],
+        permits: () => true,
+        appOf: (name) => (name === "show_today" ? "meals" : undefined),
+        run: async () => ({
+          status: "show_widget",
+          widget: { componentId: "today", text: "Showing today's meals." },
+        }),
+      },
+    }).callTool("actions", "execute_action", { action_name: "show_today", json_args: {} });
+
+    expect(JSON.parse(result.content[0].text)).toMatchObject({
+      showWidget: true,
+      appId: "meals",
+      componentId: "today",
+    });
+  });
+
   it("turns an unknown action into an error result", async () => {
     const result = await tools({
       actions: {
         list: () => [],
         permits: () => false,
+        appOf: () => undefined,
         run: async (_turn, name) => {
           throw new Error(`Unknown action: ${name}`);
         },

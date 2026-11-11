@@ -4089,6 +4089,7 @@ describe("Webchat API", () => {
         listResolved: () => [
           { appId: "workflow-studio", manifest: { components: [] } },
           { appId: "ask-user", manifest: { components: ["question-card"] } },
+          { appId: "meals", manifest: { components: ["today"] } },
         ],
       } as unknown as typeof deps.appCatalog;
       let scripted: () => AsyncGenerator<unknown> = async function* () {
@@ -4791,6 +4792,106 @@ describe("Webchat API", () => {
         };
         yield { type: "result", content: "" };
       };
+
+    // A widget that does not wait, as `actionToolOutput` hands it to the drain.
+    const widgetEvents = (toolUseId: string, appId: string, componentId: string) =>
+      async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId,
+          tool: "execute_action",
+          output: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                showWidget: true,
+                appId,
+                componentId,
+                props: { date: "2026-11-11" },
+                text: "Showing today's meals as a card.",
+                message: "Showing today's meals as a card. The card is shown in your message.",
+              }),
+            },
+          ],
+        };
+        yield { type: "result", content: "" };
+      };
+
+    async function assistantPartsIn(sessionId: string) {
+      return (await deps.webchatRepo.getMessages(sessionId))
+        .filter((m) => m.role === "assistant")
+        .flatMap((m) => {
+          try {
+            const parts = JSON.parse(m.content);
+            return Array.isArray(parts) ? (parts as Array<Record<string, unknown>>) : [];
+          } catch {
+            return [];
+          }
+        });
+    }
+
+    it("stores a widget that does not wait as its own part, not a pending card", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(widgetEvents("tu-widget-1", "meals", "today"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "what did I eat today?" }),
+        }),
+      );
+
+      const parts = await assistantPartsIn(sessionId);
+      expect(parts).toContainEqual({
+        type: "widget",
+        toolUseId: "tu-widget-1",
+        appId: "meals",
+        componentId: "today",
+        props: { date: "2026-11-11" },
+        text: "Showing today's meals as a card.",
+      });
+      expect(parts.some((p) => p.type === "pending_interaction")).toBe(false);
+    });
+
+    it("stores no widget for a component its app does not declare", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(widgetEvents("tu-widget-2", "meals", "undeclared"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "what did I eat today?" }),
+        }),
+      );
+
+      expect((await assistantPartsIn(sessionId)).some((p) => p.type === "widget")).toBe(false);
+    });
+
+    it("stores no widget for an app that is not installed", async () => {
+      const ctl = mockScriptedManager();
+      ctl.setEvents(widgetEvents("tu-widget-3", "not-installed", "today"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "what did I eat today?" }),
+        }),
+      );
+
+      expect((await assistantPartsIn(sessionId)).some((p) => p.type === "widget")).toBe(false);
+    });
 
     it("keeps requiresCard on the stored card, and only when the payload set it", async () => {
       const ctl = mockScriptedManager();

@@ -52,4 +52,31 @@ describe("AppComponentView", () => {
     expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
     expect(screen.getByRole("alert").dataset.chatPendingCard).toBeUndefined();
   });
+
+  it("never marks a widget as waiting", () => {
+    rs.spyOn(globalThis, "fetch").mockReturnValue(new Promise<Response>(() => {}));
+    const { container } = render(
+      <ThemeProvider>
+        <AppComponentView toolUseId="w1" appId="meals" componentId="today" />
+      </ThemeProvider>,
+    );
+
+    const card = container.querySelector("[data-ui-scale]") as HTMLElement;
+    expect(card.dataset.chatPendingCard).toBeUndefined();
+  });
+
+  it("offers no dismiss on a widget that cannot load", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ error: "App is disabled" }), { status: 404 }),
+    );
+    render(
+      <ThemeProvider>
+        <AppComponentView toolUseId="w1" appId="meals" componentId="today" />
+      </ThemeProvider>,
+    );
+
+    await screen.findByText(/App is disabled/);
+    expect(screen.queryByRole("button", { name: "Dismiss" })).toBeNull();
+    expect(screen.getByRole("alert").dataset.chatPendingCard).toBeUndefined();
+  });
 });

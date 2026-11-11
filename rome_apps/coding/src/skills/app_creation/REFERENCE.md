@@ -408,7 +408,7 @@ export function createAction(
 |---|---|
 | `Action` | Shape of the returned object: `{ config, inputSchema?, execute }` |
 | `ActionConfig` | Parsed from `action.yaml` and passed through at runtime |
-| `ActionResult` | `{ status: "ok", data?: unknown } \| { status: "error", error: string } \| { status: "pending_approval", approval } \| { status: "pending_interaction", interaction }` |
+| `ActionResult` | `{ status: "ok", data?: unknown } \| { status: "error", error: string } \| { status: "pending_approval", approval } \| { status: "pending_interaction", interaction } \| { status: "show_widget", widget: { componentId, props?, text, waits? } }` |
 | `AppActionRuntimeDeps<T>` | Dependency container; generic `T` is app-defined extras |
 
 **Commonly used fields on `AppActionRuntimeDeps`**

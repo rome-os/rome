@@ -93,6 +93,7 @@ function build(args: BuildArgs = {}) {
       actions: {
         list: args.getActionCatalog ?? (() => actionSnapshot),
         permits: () => true,
+        appOf: () => undefined,
         run: async (_turn, name, input) => ({
           status: "ok",
           data: await (args.executeAction ?? (async () => ({ ok: true })))(name, input),

@@ -50,6 +50,9 @@ function formatResultForAgent(result: ActionResult): string {
   if (result.status === "place_widget") {
     return `The action you requested was approved and executed; the "${result.placement.appId}" widget has been placed on the guardian's workspace.`;
   }
+  if (result.status === "show_widget") {
+    return `The action you requested was approved and executed. ${result.widget.text}`;
+  }
   const dataStr = result.data ? JSON.stringify(result.data, null, 2) : "no data";
   return `The action you requested has been approved and executed successfully.\n\nResult: ${dataStr}`;
 }
