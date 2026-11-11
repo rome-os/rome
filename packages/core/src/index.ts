@@ -1,4 +1,5 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
+import { appGuardianProfile } from "./people/for-apps.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { WebChatDashboardSessions } from "./webchat/webchat-dashboard-sessions.js";
@@ -536,7 +537,11 @@ async function main() {
         open: (input) => openChannelChat({ webchatRepo, speakers: appSpeakers }, input),
       },
     },
-    guardianProfile: { db, reactivateFloating: () => routineEngine.reactivateFloating() },
+    guardianProfile: appGuardianProfile({
+      db,
+      settingsRepo,
+      reactivateFloating: () => routineEngine.reactivateFloating(),
+    }),
   });
   const actionExecutionsRepo = new ActionExecutionsRepository(db);
   const usageOutboxRepo = new UsageOutboxRepository(db);
