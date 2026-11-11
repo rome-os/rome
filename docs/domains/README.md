@@ -34,6 +34,8 @@ Connections carry messages between chats and Rome. Participation sits between Ch
 
 People follows Chats for platform and account and changes neither. Participation asks People who a sender is and gets a person with their bond level, or nobody. People never decides what happens to a message. Connections and People do not depend on each other, so a disconnect removes nothing from People.
 
+The code in `@rome/core` is split into more contexts than these, one folder each. [`packages/core/src/README.md`](../../packages/core/src/README.md) says what each folder owns and which others it may import.
+
 ## How to read a context file
 
 Each word has a heading, its meaning in one or two sentences, and the rules that go with it: identity, lifetime, operations, and what must stay true. A context file ends with the alternatives decided against, each with the force that killed it, so a settled question is not argued again.
