@@ -167,8 +167,23 @@ rs.mock("@/components/chat/AgentAvatar", () => ({
 }));
 
 rs.mock("@/components/chat/ShareBar", () => ({
-  ShareBar: ({ selectedTurnIds }: { selectedTurnIds: string[] }) => (
-    <div data-testid="share-bar">{selectedTurnIds.join(",")}</div>
+  ShareBar: ({
+    selectedTurnIds,
+    agentName,
+    onExit,
+  }: {
+    selectedTurnIds: string[];
+    agentName?: string;
+    onExit: () => void;
+  }) => (
+    <>
+      <div data-testid="share-bar" data-agent-name={agentName}>
+        {selectedTurnIds.join(",")}
+      </div>
+      <button type="button" data-testid="share-exit" onClick={onExit}>
+        exit
+      </button>
+    </>
   ),
 }));
 
@@ -2455,6 +2470,36 @@ describe("Chat Concierge empty state", () => {
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     await user.click(screen.getByRole("menuitem", { name: "share.title" }));
     expect((await screen.findByTestId("share-bar")).textContent).toBe("");
+  });
+
+  it("keeps the composer, and its draft, through share mode", async () => {
+    twoTurns();
+    renderChat(<Chat sessionId="session-1" />);
+    await screen.findAllByTestId("user-row");
+    const composer = screen.getByTestId("chat-composer");
+    await shareFrom("Second");
+    await screen.findByTestId("share-bar");
+    // Hidden, not unmounted: the same composer, with whatever it holds.
+    expect(composer.isConnected).toBe(true);
+    expect(composer.parentElement?.className).toContain("hidden");
+    fireEvent.click(screen.getByTestId("share-exit"));
+    await waitFor(() => expect(screen.queryByTestId("share-bar")).toBeNull());
+    expect(screen.getByTestId("chat-composer")).toBe(composer);
+    expect(composer.parentElement?.className).not.toContain("hidden");
+  });
+
+  it("labels a Concierge share's agent by the name its header shows", async () => {
+    twoTurns();
+    renderChat(
+      <Chat
+        sessionId="session-1"
+        variant="concierge"
+        conciergeMainChatId="session-1"
+        conciergeName="Flint"
+      />,
+    );
+    await shareFrom("Second");
+    expect((await screen.findByTestId("share-bar")).dataset.agentName).toBe("Flint");
   });
 
   it("closes the thread view before a message's Share opens share mode behind it", async () => {

@@ -2122,11 +2122,14 @@ export function Chat({
   const actionBadge = floating
     ? cn("rounded-full text-foreground", FLOATING_SURFACE)
     : "text-muted-foreground hover:text-foreground";
+  // The name the header shows for the Concierge, which a share of this chat
+  // labels its turns by too.
+  const conciergeDisplayName = conciergeName || "Concierge";
   const conciergeStatus = concierge ? (
     <ConciergeHeaderStatus
       // Every Concierge chat, main or topic, goes by the Concierge's name
       // here; a topic chat's own name is in the chat list.
-      name={conciergeName || "Concierge"}
+      name={conciergeDisplayName}
       activity={conciergeActivity}
       // A chat with no messages yet draws its own large mascot.
       badge={!conciergeEmpty}
@@ -2508,65 +2511,70 @@ export function Chat({
                     <ShareBar
                       sessionId={mainSessionId}
                       selectedTurnIds={[...selectedShareTurns]}
-                      agentName={mainIdentity.name}
+                      agentName={concierge ? conciergeDisplayName : mainIdentity.name}
                       onExit={exitShareMode}
                     />
-                  ) : isArchived ? (
-                    <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
-                      <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => void handleUnarchive()}
-                      >
-                        <ArchiveRestore data-icon="inline-start" className="size-3.5" />
-                        {t("archived.unarchive")}
-                      </Button>
-                    </div>
-                  ) : concierge ? (
-                    <ConciergeComposer
-                      ref={composerRef}
-                      boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
-                      onSend={handleComposerSend}
-                      isStreaming={displayedStreaming}
-                      onStop={stopComposerTurn}
-                      streamError={streamError}
-                      modelSelection={
-                        chatModelPickable
-                          ? { value: chatModelValue, onChange: pickChatModel }
-                          : undefined
-                      }
-                    />
-                  ) : (
-                    <ChatComposer
-                      persistNewChatDraft={!mainSessionId}
-                      ref={composerRef}
-                      // The box look lives on the composer now so the chip row can sit
-                      // outside it; this mount adds the floating blur/translucency.
-                      boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
-                      onSend={handleComposerSend}
-                      // A draft picks the session's project, model, and agent.
-                      // A session keeps its project and agent, and its model
-                      // can change from the next turn.
-                      showProjectSelector={!mainSessionId}
-                      showModelSelector={!mainSessionId || chatModelPickable}
-                      chatModelSelection={composerModelSelection}
-                      initialProjectName={initialProjectName}
-                      initialDeviceFolder={initialDeviceFolder}
-                      initialAgentMention={initialAgentMention}
-                      isStreaming={displayedStreaming}
-                      onStop={stopComposerTurn}
-                      streamError={streamError}
-                      pinnedAgentMention={pinnedAgentMention}
-                      lockAgentMention={Boolean(mainSessionId)}
-                      // Locks once the turn that saved the card has ended, so
-                      // Stop stays in reach while it still streams.
-                      lockedReason={
-                        lockedByCard && !displayedStreaming ? t("composer.lockedByCard") : null
-                      }
-                    />
-                  )}
+                  ) : null}
+                  {/* Share mode hides the composer rather than unmounting it,
+                      so a draft is still there when share mode ends. */}
+                  <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
+                    {isArchived ? (
+                      <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
+                        <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          onClick={() => void handleUnarchive()}
+                        >
+                          <ArchiveRestore data-icon="inline-start" className="size-3.5" />
+                          {t("archived.unarchive")}
+                        </Button>
+                      </div>
+                    ) : concierge ? (
+                      <ConciergeComposer
+                        ref={composerRef}
+                        boxClassName="rounded-16 border border-border bg-surface/95 p-2 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                        onSend={handleComposerSend}
+                        isStreaming={displayedStreaming}
+                        onStop={stopComposerTurn}
+                        streamError={streamError}
+                        modelSelection={
+                          chatModelPickable
+                            ? { value: chatModelValue, onChange: pickChatModel }
+                            : undefined
+                        }
+                      />
+                    ) : (
+                      <ChatComposer
+                        persistNewChatDraft={!mainSessionId}
+                        ref={composerRef}
+                        // The box look lives on the composer now so the chip row can sit
+                        // outside it; this mount adds the floating blur/translucency.
+                        boxClassName="rounded-16 border border-border bg-surface/95 p-4 shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
+                        onSend={handleComposerSend}
+                        // A draft picks the session's project, model, and agent.
+                        // A session keeps its project and agent, and its model
+                        // can change from the next turn.
+                        showProjectSelector={!mainSessionId}
+                        showModelSelector={!mainSessionId || chatModelPickable}
+                        chatModelSelection={composerModelSelection}
+                        initialProjectName={initialProjectName}
+                        initialDeviceFolder={initialDeviceFolder}
+                        initialAgentMention={initialAgentMention}
+                        isStreaming={displayedStreaming}
+                        onStop={stopComposerTurn}
+                        streamError={streamError}
+                        pinnedAgentMention={pinnedAgentMention}
+                        lockAgentMention={Boolean(mainSessionId)}
+                        // Locks once the turn that saved the card has ended, so
+                        // Stop stays in reach while it still streams.
+                        lockedReason={
+                          lockedByCard && !displayedStreaming ? t("composer.lockedByCard") : null
+                        }
+                      />
+                    )}
+                  </div>
                 </div>
               </div>
               {/* Pairs with the empty state's `md:flex-auto`. Both use auto basis,
