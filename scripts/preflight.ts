@@ -9,12 +9,15 @@
  * tree, untracked files included. `<ref>` defaults to the merge base with
  * origin/main. The checks are:
  *
- * - Biome over the changed files.
+ * - Biome over the changed files, or the whole repo when `biome.json` changed.
  * - `pnpm lint:imports`, and `pnpm typecheck:lint` when lint/ changed.
  * - Type checks of every workspace package that changed and every package
- *   that depends on one, incremental between runs.
+ *   that depends on one, incremental between runs. A changed package that
+ *   others read from `dist` is rebuilt first, so they check against the edit.
  * - The unit tests that import a changed file, in every package whose `test`
- *   script runs rstest.
+ *   script runs rstest. A package whose rstest config or `package.json`
+ *   changed runs all its unit tests.
+ * - The `node --test` suite of a changed `.mjs` file, and a changed suite.
  *
  * A deleted or renamed file counts toward the package that held it. A change
  * to root config such as `tsconfig.json` or `pnpm-lock.yaml` type-checks every
@@ -59,6 +62,9 @@ interface Workspace {
   deps: string[];
   typecheck?: string;
   test?: string;
+  build?: string;
+  /** Other packages read this one's types from its build output. */
+  distTypes: boolean;
 }
 
 function git(...args: string[]): string {
@@ -101,6 +107,8 @@ function workspaces(): Workspace[] {
         deps: Object.keys({ ...pkg.dependencies, ...pkg.devDependencies, ...pkg.peerDependencies }),
         typecheck: pkg.scripts?.typecheck,
         test: pkg.scripts?.test,
+        build: pkg.scripts?.build,
+        distTypes: /"\.\/dist\//.test(JSON.stringify([pkg.exports, pkg.types, pkg.main])),
       };
     });
 }
@@ -155,12 +163,81 @@ function typecheckChecks(w: Workspace): Check[] {
   });
 }
 
+/** Splits a script into its `tsc` steps, or returns null when any step is something else. */
+function tscSteps(script: string | undefined): string[][] | null {
+  if (!script) return null;
+  const steps = script.split("&&").map((s) => s.trim().split(/\s+/));
+  return steps.every((s) => s[0] === "tsc") ? steps : null;
+}
+
+/**
+ * Builds of the reached packages that another reached package reads from
+ * `dist`, in dependency order: each inner list can run at once.
+ */
+function buildLevels(reached: Workspace[]): { levels: Check[][]; unbuilt: Workspace[] } {
+  const needed = reached.filter(
+    (w) => w.distTypes && reached.some((o) => o !== w && o.deps.includes(w.name)),
+  );
+  const unbuilt = needed.filter((w) => !tscSteps(w.build));
+  let left = needed.filter((w) => tscSteps(w.build));
+  const levels: Check[][] = [];
+  while (left.length > 0) {
+    const ready = left.filter((w) => !left.some((o) => o !== w && w.deps.includes(o.name)));
+    const level = ready.length > 0 ? ready : left;
+    levels.push(
+      level.flatMap((w) =>
+        (tscSteps(w.build) ?? []).map((s) => ({
+          name: `build ${relative(ROOT, w.dir)}`,
+          command: join(ROOT, "node_modules/.bin/tsc"),
+          args: s.slice(1),
+          cwd: w.dir,
+        })),
+      ),
+    );
+    left = left.filter((w) => !level.includes(w));
+  }
+  return { levels, unbuilt };
+}
+
+/** `node --test` suites for changed `.mjs` files: a changed suite, or the suite beside a changed module. */
+function nodeTestChecks(files: string[]): Check[] {
+  const suites = new Set<string>();
+  for (const f of files) {
+    if (f.endsWith(".test.mjs")) suites.add(f);
+    else if (f.endsWith(".mjs") && existsSync(join(ROOT, f.replace(/\.mjs$/, ".test.mjs")))) {
+      suites.add(f.replace(/\.mjs$/, ".test.mjs"));
+    }
+  }
+  if (suites.size === 0) return [];
+  return [
+    {
+      name: "node --test",
+      command: join(ROOT, "scripts/test-env.sh"),
+      args: ["node", "--test", ...suites],
+    },
+  ];
+}
+
+/** The npm Biome the repo pins, or the devShell's when the npm binary cannot run on this host. */
+function biomeCommand(): { command: string; note?: string } {
+  const pinned = join(ROOT, "node_modules/.bin/biome");
+  try {
+    execFileSync(pinned, ["--version"], { stdio: "ignore" });
+    return { command: pinned };
+  } catch {
+    return {
+      command: "biome",
+      note: "- the npm Biome binary does not run here, so Biome comes from PATH and its version may differ from CI's",
+    };
+  }
+}
+
 function testChecks(
+  paths: string[],
   code: string[],
   affected: Workspace[],
   all: Workspace[],
 ): { checks: Check[]; skipped: Workspace[] } {
-  if (code.length === 0) return { checks: [], skipped: [] };
   // Core's rstest config also collects the tests of rome_apps, scripts, lint and
   // infra, so it runs for every change. Every other package runs its tests when
   // it or a dependency changed. rstest keeps the tests that import a changed file.
@@ -168,16 +245,21 @@ function testChecks(
   const candidates = [...new Set([...core, ...affected])].filter((w) => w.test?.includes("rstest"));
   const needsBuild = (w: Workspace) => /\bbuild\b/.test(w.test?.split("rstest")[0] ?? "");
   const abs = code.map((f) => join(ROOT, f));
+  // A config file is not in the import graph `--related` follows.
+  const configChanged = (w: Workspace) =>
+    paths.some((f) => {
+      const a = join(ROOT, f);
+      return dirname(a) === w.dir && /^(rstest\.config\.[cm]?ts|package\.json)$/.test(basename(a));
+    });
   const checks = candidates
-    .filter((w) => !needsBuild(w))
+    .filter((w) => !needsBuild(w) && (abs.length > 0 || configChanged(w)))
     .map((r) => ({
-      name: `unit tests ${relative(ROOT, r.dir)}`,
+      name: `unit tests ${relative(ROOT, r.dir)}${configChanged(r) ? " (all)" : ""}`,
       command: join(ROOT, "scripts/test-env.sh"),
       args: [
         join(ROOT, "node_modules/.bin/rstest"),
         "run",
-        "--related",
-        ...abs,
+        ...(configChanged(r) ? [] : ["--related", ...abs]),
         "--passWithNoTests",
         "--silent",
         "passed-only",
@@ -255,30 +337,47 @@ async function main() {
   );
   const touched = new Set(paths.map((f) => owner(f, all)).filter((w) => w !== undefined));
   const reached = rootConfig.length > 0 ? all : affected(touched, all);
-  const tests = testChecks(code, reached, all);
+  const tests = testChecks(paths, code, reached, all);
+  const builds = buildLevels(reached);
+  const biome = biomeCommand();
+  const wholeRepoBiome = paths.some((f) => /^biome\.jsonc?$/.test(f));
 
-  const checks: Check[] = [
+  // These read only source, so they run while the builds do.
+  const independent: Check[] = [
     // Biome with no paths checks the whole repo, so a branch that only deletes skips it.
     ...(files.length > 0
       ? [
           {
-            name: "biome",
-            command: join(ROOT, "node_modules/.bin/biome"),
-            args: ["check", "--no-errors-on-unmatched", "--files-ignore-unknown=true", ...files],
+            name: wholeRepoBiome ? "biome (whole repo)" : "biome",
+            command: biome.command,
+            args: [
+              "check",
+              ...(wholeRepoBiome
+                ? []
+                : ["--no-errors-on-unmatched", "--files-ignore-unknown=true", ...files]),
+            ],
           },
         ]
       : []),
     { name: "lint:imports", command: "pnpm", args: ["-s", "lint:imports"] },
-    // Tests and the larger type checks go first so the pool starts them early.
-    ...tests.checks,
+    ...nodeTestChecks(files),
     ...(rootConfig.length > 0 || paths.some((f) => f.startsWith("lint/"))
       ? [{ name: "typecheck:lint", command: "pnpm", args: ["-s", "typecheck:lint"] }]
       : []),
+  ];
+  // Tests and the larger type checks go first so the pool starts them early.
+  const afterBuilds: Check[] = [
+    ...tests.checks,
     ...reached
       .toSorted((a, b) => Number(b.dir === CORE) - Number(a.dir === CORE))
       .flatMap(typecheckChecks),
   ];
+  const total = independent.length + builds.levels.flat().length + afterBuilds.length;
 
+  if (biome.note) console.log(biome.note);
+  for (const w of builds.unbuilt) {
+    console.log(`- ${relative(ROOT, w.dir)} is not rebuilt: its build is not plain tsc`);
+  }
   for (const w of tests.skipped) {
     console.log(`- unit tests ${relative(ROOT, w.dir)} skipped: they need a build first`);
   }
@@ -288,9 +387,15 @@ async function main() {
     );
   }
   console.log(
-    `${paths.length} files changed since ${base.slice(0, 12)}. Running ${checks.length} checks.\n`,
+    `${paths.length} files changed since ${base.slice(0, 12)}. Running ${total} checks.\n`,
   );
-  const results = await pool(checks, availableParallelism());
+  const size = availableParallelism();
+  const built = (async () => {
+    const results: Result[] = [];
+    for (const level of builds.levels) results.push(...(await pool(level, size)));
+    return [...results, ...(await pool(afterBuilds, size))];
+  })();
+  const results = (await Promise.all([pool(independent, size), built])).flat();
   const failed = results.filter((r) => !r.ok);
   for (const r of failed) {
     console.log(`\n━━ ${r.check.name} ━━\n${r.output.trimEnd()}`);
@@ -299,7 +404,7 @@ async function main() {
   console.log(
     failed.length === 0
       ? `\nPreflight passed in ${seconds}s.`
-      : `\nPreflight failed ${failed.length} of ${checks.length} checks in ${seconds}s.`,
+      : `\nPreflight failed ${failed.length} of ${total} checks in ${seconds}s.`,
   );
   process.exitCode = failed.length === 0 ? 0 : 1;
 }
