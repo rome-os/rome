@@ -782,12 +782,24 @@ export function Chat({
     inThread: (messageId) => threadedRef.current.has(messageId),
   });
 
-  // A Concierge chat is not shared whole: its messages each offer Share.
   const enterShareMode = useCallback(() => {
-    if (concierge) return;
     setSelectedShareTurns(new Set(mainTurnIds));
     setShareMode(true);
-  }, [concierge, mainTurnIds]);
+  }, [mainTurnIds]);
+
+  // Share on a message: the same share mode, with only that message's turn
+  // selected. A message outside the chat's own turns selects nothing. Read
+  // through the ref so the shortcut keeps one identity while messages arrive.
+  const shareMessageTurn = useCallback(
+    (messageId: string) => {
+      const turnId = mainSessionId
+        ? messagesRef.current.get(mainSessionId)?.find((m) => m.id === messageId)?.turnId
+        : undefined;
+      setSelectedShareTurns(new Set(turnId ? [turnId] : []));
+      setShareMode(true);
+    },
+    [mainSessionId],
+  );
 
   const exitShareMode = useCallback(() => {
     setShareMode(false);
@@ -2162,12 +2174,10 @@ export function Chat({
                 {t("concierge.tasks.title")}
               </DropdownMenuItem>
             ) : null}
-            {concierge ? null : (
-              <DropdownMenuItem onSelect={() => enterShareMode()}>
-                <Share2 className="size-4" />
-                {t("share.title", "Share chat")}
-              </DropdownMenuItem>
-            )}
+            <DropdownMenuItem onSelect={() => enterShareMode()}>
+              <Share2 className="size-4" />
+              {t("share.title", "Share chat")}
+            </DropdownMenuItem>
             {isMainChat ? null : isArchived ? (
               <DropdownMenuItem onSelect={() => void handleUnarchive()}>
                 <ArchiveRestore className="size-4" />
@@ -2492,6 +2502,7 @@ export function Chat({
                     <ShareBar
                       sessionId={mainSessionId}
                       selectedTurnIds={[...selectedShareTurns]}
+                      agentName={mainIdentity.name}
                       onExit={exitShareMode}
                     />
                   ) : isArchived ? (
@@ -2645,7 +2656,9 @@ export function Chat({
 
   return (
     <ReplyDraftProvider value={replyDraft}>
-      <MessageSharingContext.Provider value>{page}</MessageSharingContext.Provider>
+      <MessageSharingContext.Provider value={shareMessageTurn}>
+        {page}
+      </MessageSharingContext.Provider>
     </ReplyDraftProvider>
   );
 }

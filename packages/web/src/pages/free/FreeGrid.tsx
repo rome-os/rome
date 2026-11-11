@@ -163,26 +163,19 @@ function ToolsToggle({ unread }: { unread: boolean }) {
   );
 }
 
-/**
- * The phone header's "⋯" menu. A Concierge chat offers no Share chat: its
- * owner shares one message instead.
- */
-export function MobileChatMenu({
+/** The phone header's "⋯" menu. */
+function MobileChatMenu({
   chatSessionId,
-  shareable,
   deletable,
   onShare,
   onDelete,
 }: {
   chatSessionId: string | undefined;
-  shareable: boolean;
   deletable: boolean;
   onShare: () => void;
   onDelete: () => void;
 }) {
   const { t } = useTranslation("common");
-  const share = !!chatSessionId && shareable;
-  if (!share && !deletable) return null;
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -194,7 +187,7 @@ export function MobileChatMenu({
         />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
-        {share && (
+        {chatSessionId && (
           <DropdownMenuItem onSelect={onShare}>
             <Share2 className="size-4" />
             {t("share.title", { ns: "chat", defaultValue: "Share chat" })}
@@ -525,7 +518,6 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
               )}
               <MobileChatMenu
                 chatSessionId={chatSessionId}
-                shareable={!isConcierge}
                 // The main chat is never deleted.
                 deletable={!isMainConcierge}
                 onShare={() => eventBus.emit("share:start", {})}

@@ -33,14 +33,10 @@ rs.mock("@/shell/DesktopTitlebar", () => ({ DesktopTitlebar: () => null }));
 rs.mock("@/components/upgrade-countdown-banner", () => ({ UpgradeCountdownBanner: () => null }));
 rs.mock("@/shell/UpgradeIndicator", () => ({ UpgradeIndicator: () => null }));
 // Concierge's chat id comes from its own query, which these tests do not serve.
-const concierge = rs.hoisted(() => ({
-  chatId: null as string | null,
-  chats: [] as { id: string; name: string; main: boolean }[],
-}));
+const concierge = rs.hoisted(() => ({ chatId: null as string | null }));
 rs.mock("@/hooks/use-concierge", () => ({
   ...conciergeModule,
   useConciergeChatId: () => concierge.chatId,
-  useConciergeChats: () => concierge.chats,
 }));
 const identity = rs.hoisted(() => ({
   current: { sessionName: null } as {
@@ -153,7 +149,6 @@ afterEach(() => {
   rs.unstubAllGlobals();
   localStorage.clear();
   concierge.chatId = null;
-  concierge.chats = [];
   identity.current = { sessionName: null };
 });
 
@@ -335,7 +330,7 @@ describe("FreeGrid mobile header", () => {
     concierge.chatId = "concierge";
     identity.current = { sessionName: "Concierge" };
     const { container } = renderAt("/chat/concierge", { agentName: "Milo" });
-    await within(header(container)).findAllByRole("button");
+    await moreButton(container);
     expect(header(container).textContent).not.toContain("Milo");
     expect(header(container).textContent).not.toContain("Concierge");
     expect(header(container).querySelector("[data-concierge-tasks-pill]")).toBeNull();
@@ -369,33 +364,20 @@ describe("FreeGrid mobile header", () => {
     await waitFor(() => expect(header(container).textContent).toContain("Workflow Studio"));
   });
 
-  it("offers the main chat no phone header menu, since it has no Share chat or Delete", async () => {
+  it("offers no Delete for the main chat in the phone header's menu", async () => {
     concierge.chatId = "concierge";
     identity.current = { sessionName: "Concierge" };
     const user = userEvent.setup();
     const main = renderAt("/message", {}, <FreeGrid sessionId="concierge" />);
-    await within(header(main.container)).findAllByRole("button");
-    expect(
-      within(header(main.container)).queryByRole("button", { name: "More actions" }),
-    ).toBeNull();
+    await user.click(await moreButton(main.container));
+    expect(screen.queryByRole("menuitem", { name: "Delete" })).toBeNull();
+    await user.keyboard("{Escape}");
     main.unmount();
 
     identity.current = { sessionName: "Plan the launch" };
     const other = renderAt("/chat/some-other-chat");
     await user.click(await moreButton(other.container));
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
-    expect(screen.getByRole("menuitem", { name: "Share chat" })).toBeTruthy();
-  });
-
-  it("offers a topic chat Delete but no Share chat in the phone header's menu", async () => {
-    concierge.chatId = "concierge";
-    concierge.chats = [{ id: "topic-1", name: "Calendar", main: false }];
-    identity.current = { sessionName: "Calendar" };
-    const user = userEvent.setup();
-    const topic = renderAt("/chat/topic-1");
-    await user.click(await moreButton(topic.container));
-    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
-    expect(screen.queryByRole("menuitem", { name: "Share chat" })).toBeNull();
   });
 });
 

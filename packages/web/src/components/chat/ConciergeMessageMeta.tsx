@@ -8,8 +8,8 @@ import { formatMessageTimestamp } from "@/lib/message-timestamp";
 
 /**
  * A Concierge bubble's details: when it was sent, a copy button for its text,
- * Reply, Share (a link to the message alone), and for the last bubble of an
- * agent turn, the turn's feedback buttons.
+ * Reply, Share (the chat's share mode with this message's turn selected), and
+ * for the last bubble of an agent turn, the turn's feedback buttons.
  * Hover devices show them in a toolbar over the bubble with `size` `xs`; touch
  * devices in the row a tap opens under it. `feedbackTurn` is null where there
  * is nothing to rate; `reply` is null where the bubble has no Reply, and then
@@ -42,14 +42,7 @@ export const ConciergeMessageMeta = memo(function ConciergeMessageMeta({
       ) : null}
       {copyText ? <CopyMessageButton text={copyText} size={size} /> : null}
       {reply ? <ReplyButton source={reply} onReply={onReply} size={size} /> : null}
-      {reply ? (
-        <ShareMessageButton
-          sessionId={reply.sessionId}
-          messageId={reply.messageId}
-          preview={reply.text}
-          size={size}
-        />
-      ) : null}
+      {reply ? <ShareMessageButton messageId={reply.messageId} size={size} /> : null}
       {feedbackTurn ? (
         <TurnFeedbackButtons
           key={`${feedbackTurn.sessionId}:${feedbackTurn.turnId}`}

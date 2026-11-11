@@ -8,15 +8,13 @@ import {
 import { buildChatView, buildRows, type AgentIdentity } from "@/components/chat/chat-view";
 import { renderFlatEntries, renderSingleEntry } from "@/components/chat/entries";
 import { MessageList, type BlockActions } from "@/components/chat/MessageList";
-import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import type { ChatMessage } from "@/lib/chat-types";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 
-// Default agent identity for the public feed. The frozen snapshot doesn't carry
-// the guardian's chosen agent name, so the main session shows a neutral label.
-// A one-message share shows no sender at all: the page's header names Rome.
-const PUBLIC_MAIN_IDENTITY: AgentIdentity = { name: "Rome", iconUrl: null };
+// The main agent's name on the public feed: the name the chat showed for it,
+// frozen at share time. An older share without one shows "Rome".
+const FALLBACK_AGENT_NAME = "Rome";
 
 const NO_OP = () => {};
 
@@ -26,13 +24,25 @@ export interface PublicChatProps {
   mainSessionId: string;
   // Trace message id → prebuilt TraceSnapshot, served straight to the drawer.
   traces: Record<string, TraceSnapshot>;
+  /** The name the chat showed for its main agent. */
+  agentName?: string;
   hasApps?: boolean;
 }
 
 // A login-free, read-only rendering of a shared chat. Reuses the exact
 // chat-view → MessageList pipeline as the live /chat, minus the composer,
 // streaming, and any guardian-only affordance. No new turns can be sent.
-export function PublicChat({ messages, mainSessionId, traces, hasApps = false }: PublicChatProps) {
+export function PublicChat({
+  messages,
+  mainSessionId,
+  traces,
+  agentName,
+  hasApps = false,
+}: PublicChatProps) {
+  const mainIdentity = useMemo<AgentIdentity>(
+    () => ({ name: agentName || FALLBACK_AGENT_NAME, iconUrl: null }),
+    [agentName],
+  );
   const [traceDrawerTarget, setTraceDrawerTarget] = useState<TraceDrawerTarget | null>(null);
 
   // Group the flat snapshot back into the per-session map chat-view expects.
@@ -46,24 +56,18 @@ export function PublicChat({ messages, mainSessionId, traces, hasApps = false }:
     return map;
   }, [messages]);
 
-  // A share of one message, the only kind a Concierge chat makes.
-  const single =
-    messages.length === 1 && (messages[0]?.role === "user" || messages[0]?.role === "assistant")
-      ? messages[0]
-      : null;
-
   const view = useMemo(
-    () => buildChatView(messagesBySession, mainSessionId, PUBLIC_MAIN_IDENTITY),
-    [messagesBySession, mainSessionId],
+    () => buildChatView(messagesBySession, mainSessionId, mainIdentity),
+    [messagesBySession, mainSessionId, mainIdentity],
   );
 
   const rows = useMemo(
     () =>
-      buildRows(view.displayMessages, view.identityBySession, PUBLIC_MAIN_IDENTITY, {
+      buildRows(view.displayMessages, view.identityBySession, mainIdentity, {
         runningTurnId: null,
         isStreaming: false,
       }),
-    [view],
+    [view, mainIdentity],
   );
 
   // Read-only: inline app cards render, but submit/dismiss are inert.
@@ -96,35 +100,20 @@ export function PublicChat({ messages, mainSessionId, traces, hasApps = false }:
             hasApps,
           )}`}
         >
-          {single ? (
-            <div className="flex-1">
-              <div data-chat-transcript className="mx-auto max-w-5xl px-4 pt-4 md:px-6">
-                <div data-shared-message className="mb-4 flex min-w-0 flex-col gap-1">
-                  {renderFlatEntries(parseMessageEntries(single), {
-                    ...actions,
-                    sessionId: single.sessionId,
-                    turnId: single.turnId ?? undefined,
-                    transcript: { live: false },
-                  })}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <MessageList
-              rows={rows}
-              live={{
-                isStreaming: false,
-                runningTurnId: null,
-                snapshot: null,
-                textStore: EMPTY_LIVE_TEXT,
-                identity: PUBLIC_MAIN_IDENTITY,
-              }}
-              contentRef={NO_OP}
-              onOpenLiveTrace={NO_OP}
-              onOpenStoredTrace={setTraceDrawerTarget}
-              actions={actions}
-            />
-          )}
+          <MessageList
+            rows={rows}
+            live={{
+              isStreaming: false,
+              runningTurnId: null,
+              snapshot: null,
+              textStore: EMPTY_LIVE_TEXT,
+              identity: mainIdentity,
+            }}
+            contentRef={NO_OP}
+            onOpenLiveTrace={NO_OP}
+            onOpenStoredTrace={setTraceDrawerTarget}
+            actions={actions}
+          />
         </div>
         <TraceDrawer
           target={traceDrawerTarget}

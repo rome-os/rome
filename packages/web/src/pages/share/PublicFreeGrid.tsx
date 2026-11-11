@@ -15,7 +15,12 @@ const CHAT_COLUMN_WIDTH = "clamp(420px, 34vw, 680px)";
 interface PublicFreeGridProps {
   placements: WidgetPlacement[];
   token: string;
-  chat: { messages: ChatMessage[]; mainSessionId: string; traces: Record<string, TraceSnapshot> };
+  chat: {
+    messages: ChatMessage[];
+    mainSessionId: string;
+    traces: Record<string, TraceSnapshot>;
+    agentName?: string;
+  };
 }
 
 function PublicWidgetContent({ widget, token }: { widget: WidgetPlacement; token: string }) {
@@ -116,6 +121,7 @@ export function PublicFreeGrid({ placements, token, chat }: PublicFreeGridProps)
           messages={chat.messages}
           mainSessionId={chat.mainSessionId}
           traces={chat.traces}
+          agentName={chat.agentName}
           hasApps={hasApps}
         />
       </div>

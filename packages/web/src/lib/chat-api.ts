@@ -773,6 +773,8 @@ export async function saveSetting(key: string, value: unknown): Promise<boolean>
 
 export interface ChatShareSnapshot {
   mainSessionId: string;
+  /** The name the chat showed for its main agent; absent on older shares. */
+  agentName?: string;
   messages: ChatMessage[];
   traces: Record<string, TraceSnapshot>;
 }
@@ -793,6 +795,8 @@ export interface ShareSummary {
 
 export interface CreateShareInput {
   turnIds: string[];
+  /** The name the chat shows for its main agent, frozen for the shared page. */
+  agentName?: string;
   title?: string;
   layout?: WidgetPlacement[];
 }
@@ -814,31 +818,6 @@ export async function createShare(
     body: JSON.stringify(input),
   });
   return jsonOrThrow<CreateShareResult>(res);
-}
-
-/**
- * Share one message as a link: a snapshot of its text alone. A message has one
- * live link, so sharing it again answers the link it already has.
- */
-export async function shareMessage(sessionId: string, messageId: string): Promise<ShareSummary> {
-  const res = await fetch(messageShareUrl(sessionId, messageId), {
-    method: "POST",
-    credentials: "include",
-  });
-  return jsonOrThrow<ShareSummary>(res);
-}
-
-/** The message's live link, or null when it has none. */
-export async function getMessageShare(
-  sessionId: string,
-  messageId: string,
-): Promise<ShareSummary | null> {
-  const res = await fetch(messageShareUrl(sessionId, messageId), { credentials: "include" });
-  return (await jsonOrThrow<{ share: ShareSummary | null }>(res)).share;
-}
-
-function messageShareUrl(sessionId: string, messageId: string): string {
-  return `/api/chat/sessions/${encodeURIComponent(sessionId)}/messages/${encodeURIComponent(messageId)}/share`;
 }
 
 export async function listShares(sessionId: string): Promise<ShareSummary[]> {

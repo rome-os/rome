@@ -86,27 +86,14 @@ describe("SharePage", () => {
     expect(screen.queryByRole("contentinfo")).toBeNull();
   });
 
-  it("shows a shared message without a sender row, since the header names Rome", async () => {
-    renderAt("tok");
-    await screen.findByText("Day one: walk the Alfama.");
-    expect(screen.getAllByText("Rome")).toHaveLength(1);
-  });
-
-  it("keeps the speakers in a share of several turns", async () => {
+  it("labels the agent by the name the chat showed, not the header's Rome", async () => {
     rs.mocked(fetchSharedChat).mockResolvedValue({
       id: "tok",
       title: "Trip",
       snapshot: {
         mainSessionId: "s",
+        agentName: "Milo",
         messages: [
-          {
-            id: "u1",
-            sessionId: "s",
-            turnId: "t1",
-            role: "user",
-            content: JSON.stringify([{ type: "text", content: "Plan my trip" }]),
-            createdAt: "2026-11-10T09:59:00.000Z",
-          },
           {
             id: "a1",
             sessionId: "s",
@@ -122,7 +109,15 @@ describe("SharePage", () => {
     });
     renderAt("tok");
     await screen.findByText("Day one: walk the Alfama.");
-    // The header's "Rome", and the agent's sender row.
+    expect(screen.getByText("Milo")).toBeTruthy();
+    // Only the header's.
+    expect(screen.getAllByText("Rome")).toHaveLength(1);
+  });
+
+  it("falls back to Rome for the agent on a share that froze no name", async () => {
+    renderAt("tok");
+    await screen.findByText("Day one: walk the Alfama.");
+    // The header's, and the agent's sender row.
     expect(screen.getAllByText("Rome")).toHaveLength(2);
   });
 

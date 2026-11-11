@@ -32,10 +32,13 @@ function shareableWidgets(placements: WidgetPlacement[]): WidgetPlacement[] {
 export function ShareBar({
   sessionId,
   selectedTurnIds,
+  agentName,
   onExit,
 }: {
   sessionId: string;
   selectedTurnIds: string[];
+  /** The name the chat shows for its agent, which the shared page shows too. */
+  agentName?: string;
   onExit: () => void;
 }) {
   const { t } = useTranslation("chat");
@@ -109,7 +112,7 @@ export function ShareBar({
     setError(null);
     try {
       const layout = widgets.filter((w) => selectedWidgets.has(w.id));
-      const result = await createShare(sessionId, { turnIds: selectedTurnIds, layout });
+      const result = await createShare(sessionId, { turnIds: selectedTurnIds, layout, agentName });
       const url = `${window.location.origin}${result.url}`;
       setCreatedUrl(url);
       handleCopy(url);
@@ -123,7 +126,16 @@ export function ShareBar({
     } finally {
       setCreating(false);
     }
-  }, [sessionId, selectedTurnIds, selectedWidgets, widgets, handleCopy, refreshShares, t]);
+  }, [
+    sessionId,
+    selectedTurnIds,
+    agentName,
+    selectedWidgets,
+    widgets,
+    handleCopy,
+    refreshShares,
+    t,
+  ]);
 
   const handleRevoke = useCallback(
     async (id: string) => {

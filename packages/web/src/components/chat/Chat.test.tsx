@@ -11,6 +11,7 @@ import * as streamingSessionsModule from "@/hooks/use-streaming-sessions" with {
 import { requestConciergeJump } from "@/components/concierge/concierge-jump";
 import { HOLD_STICK_EVENT } from "@/hooks/use-stick-to-bottom";
 import { useReplyDraft } from "@/components/chat/reply/reply-draft";
+import { ShareMessageButton } from "@/components/chat/ShareMessageButton";
 import type { ConciergeActivity } from "@rome/api-types/concierge-activity";
 import { SlotOutlet, SlotProvider, useSlotOutlet } from "@/components/slot";
 import {
@@ -165,7 +166,9 @@ rs.mock("@/components/chat/AgentAvatar", () => ({
 }));
 
 rs.mock("@/components/chat/ShareBar", () => ({
-  ShareBar: () => null,
+  ShareBar: ({ selectedTurnIds }: { selectedTurnIds: string[] }) => (
+    <div data-testid="share-bar">{selectedTurnIds.join(",")}</div>
+  ),
 }));
 
 rs.mock("@/pages/free/WidgetPicker", () => ({
@@ -241,6 +244,7 @@ rs.mock("@/components/chat/MessageList", () => ({
             data-sender-avatar={row.message?.sender?.avatarUrl}
           >
             {row.message?.content}
+            {row.message?.id ? <ShareMessageButton messageId={row.message.id} /> : null}
           </div>
         ))}
       {rows
@@ -2356,7 +2360,7 @@ describe("Chat Concierge empty state", () => {
     expect(mockOpenTaskList).toHaveBeenCalledTimes(1);
   });
 
-  it("offers no Share chat, Archive or Delete for the main chat, and no Share chat for a topic chat", async () => {
+  it("offers Share chat but no Archive or Delete for the main chat, and all three for a topic chat", async () => {
     const user = userEvent.setup();
     mockUseSessionIdentity.mockReturnValue({
       sessionName: "Concierge",
@@ -2369,6 +2373,7 @@ describe("Chat Concierge empty state", () => {
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     expect(screen.getAllByRole("menuitem").map((item) => item.textContent)).toEqual([
       "concierge.tasks.title",
+      "share.title",
     ]);
     await user.keyboard("{Escape}");
     main.unmount();
@@ -2382,14 +2387,37 @@ describe("Chat Concierge empty state", () => {
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     expect(screen.getByRole("menuitem", { name: "navbar.archive" })).toBeTruthy();
     expect(screen.getByRole("menuitem", { name: "navbar.delete" })).toBeTruthy();
-    expect(screen.queryByRole("menuitem", { name: "share.title" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "share.title" })).toBeTruthy();
   });
 
-  it("keeps Share chat for a common chat or a task chat, which are not Concierge chats", async () => {
+  it("offers Share chat in a common chat too", async () => {
     const user = userEvent.setup();
     renderChat(<Chat sessionId="session-1" />);
     await user.click(await screen.findByRole("button", { name: "navbar.more" }));
     expect(screen.getByRole("menuitem", { name: "share.title" })).toBeTruthy();
+  });
+
+  it("opens share mode from a message's Share, with only that message's turn selected", async () => {
+    const user = userEvent.setup();
+    const message = (id: string, turnId: string, text: string) => ({
+      id,
+      sessionId: "session-1",
+      turnId,
+      role: "user",
+      content: JSON.stringify([{ type: "text", content: text }]),
+      createdAt: "2026-11-10T10:00:00Z",
+    });
+    rs.mocked(listSessionMessages).mockResolvedValueOnce([
+      message("u-1", "turn-a", "First"),
+      message("u-2", "turn-b", "Second"),
+    ]);
+    renderChat(<Chat sessionId="session-1" />);
+    const row = (await screen.findAllByTestId("user-row")).find((r) =>
+      r.textContent?.includes("Second"),
+    );
+    expect(screen.queryByTestId("share-bar")).toBeNull();
+    await user.click(within(row!).getByRole("button", { name: "message.share" }));
+    expect((await screen.findByTestId("share-bar")).textContent).toBe("turn-b");
   });
 
   it("heads the main chat and a topic chat alike, with the agent's chosen name", async () => {
