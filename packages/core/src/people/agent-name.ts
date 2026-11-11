@@ -1,4 +1,3 @@
-import type { ConciergeService } from "../concierge/service.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { ActionRegistry } from "../apps/actions/types.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
@@ -12,7 +11,11 @@ export interface AgentNameEvents {
 /** Registers the guardian's rename action and its dashboard notifications. */
 export function registerAgentNameAction(
   actions: Pick<ActionRegistry, "register">,
-  deps: { settingsRepo: Pick<SettingsRepository, "set"> } & Pick<ConciergeService, "ownerOfChat">,
+  deps: {
+    settingsRepo: Pick<SettingsRepository, "set">;
+    /** Whose chat it is ("guardian" or "visitor:<account>"), or null for a chat that no longer exists. */
+    ownerOfChat(chatId: string | null | undefined): Promise<string | null>;
+  },
 ): AgentNameEvents {
   const listeners = new Set<LiveEventEmit>();
   actions.register({

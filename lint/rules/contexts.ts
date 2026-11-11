@@ -15,6 +15,7 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
     "agent",
     "apps",
     "chats",
+    "concierge",
     "connections",
     "favors",
     "instance",
@@ -23,6 +24,7 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
   ],
   apps: ["access", "instance"],
   chats: ["access", "agent", "apps", "connections", "participation", "people"],
+  concierge: ["access", "agent", "apps", "chats", "connections", "instance", "routines"],
   connections: ["apps", "chats", "desktops", "instance", "participation", "people"],
   desktops: ["access", "instance"],
   favors: ["access", "apps", "instance"],
@@ -119,4 +121,19 @@ export const contextRules: ImportRule[] = contexts.flatMap((from) =>
 );
 
 /** Crossings that remain until their ticket lands. */
-export const contextCrossings: ListedCrossing[] = [];
+export const contextCrossings: ListedCrossing[] = [
+  {
+    rule: "chats-never-imports-concierge",
+    from: "chats/dashboard/dashboard-account.ts",
+    to: "concierge/privacy.ts",
+    ticket: "ZHA-168",
+    why: "Which dashboard chats are private, and to whom, is decided in Concierge, until that rule has its home.",
+  },
+  {
+    rule: "routines-never-imports-concierge",
+    from: "routines/legacy-actor.ts",
+    to: "concierge/owner.ts",
+    ticket: "ZHA-168",
+    why: "A legacy routine acts for its chat's owner, read through Concierge, until a chat's owner has its home.",
+  },
+];
