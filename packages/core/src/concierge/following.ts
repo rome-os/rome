@@ -826,7 +826,7 @@ export function startConciergeFollowing(
       const id = existing
         ? existing.id
         : await deps.routines.create({
-            name: `Concierge digest at ${localTime}`,
+            name: `Digest at ${localTime}`,
             key,
             trigger,
             actionName: CONCIERGE_DIGEST_ACTION,
@@ -906,7 +906,7 @@ export function startConciergeFollowing(
       } else {
         // An event's payload (a whole mail, say) stays out of the run history.
         id = await deps.routines.create({
-          name: `Concierge follows ${follow.target} (${source.label})`,
+          name: `Follow ${follow.target} (${source.label})`,
           key,
           trigger: routineTrigger,
           actionName: CONCIERGE_FOLLOW_ACTION,
