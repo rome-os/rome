@@ -4,9 +4,6 @@ import type { ApprovalCard } from "./approval-card.js";
 import { z } from "zod";
 import { parseWorkerCallParams } from "../../lib/worker-call-params.js";
 import { runWithHookInvocationContext } from "../../core/hook-recursion.js";
-import type { EmailInboundResult } from "../../connections/kinds/email/email-control.js";
-import { emailConnection } from "../accounts-service.js";
-import type { ChannelOf } from "../../chats/connected-accounts/connection-ports.js";
 import type {
   BackendTurnRunner,
   ChatId,
@@ -22,7 +19,6 @@ import type {
   PreviewPayload,
   ThreadContext,
 } from "@rome-os/app-runtime";
-import type { ConnectionRegistry } from "../../connections/registry.js";
 import type { EventService } from "../../events/event-service.js";
 import type { AppLifecycleService } from "../lifecycle-service.js";
 import type { AppStoreReader } from "../store-service.js";
@@ -33,10 +29,6 @@ import { actionCaller, sendForCaller } from "./caller-notify.js";
 import type { MainBackendTurnRunner } from "./backend-turn.js";
 import { SpecSourceSchema } from "../lockfile.js";
 import { parseRemixSource } from "../remix-source.js";
-import type {
-  AppConnectionBrokerPort,
-  AppConnectionBrokerResult,
-} from "../../connections/app-connections.js";
 
 const AppIdSchema = z.string().min(1);
 
@@ -85,11 +77,6 @@ const ChatRefParams = z.object({
 const ChatSettingsInput = z.custom<
   UpdateChatSettingsInput | ResetChatSettingsInput | ListChatSettingsInput
 >((value) => typeof value === "object" && value !== null);
-
-const EmailIngestInboundParams = z.object({
-  rawBody: z.string(),
-  signature: z.string(),
-});
 
 // An optional sender-supplied body. `{}` (the legacy no-arg call) is
 // valid; a present body must be a string. `.strict()` so an unknown key on this
@@ -188,49 +175,9 @@ const SessionContinueParams = z.object({
   ownerKey: z.string().optional(),
 });
 
-const AppConnectionsListParams = z
-  .object({
-    cursor: z.string().optional(),
-    limit: z.number().int().positive().max(50).optional(),
-  })
-  .strict();
-const AppConnectionsIdentityParams = z
-  .object({ connectionId: z.string().min(1), identity: z.string().min(1) })
-  .strict();
-const AppConnectionsOperationsParams = AppConnectionsIdentityParams.extend({
-  cursor: z.string().optional(),
-  limit: z.number().int().positive().max(50).optional(),
-}).strict();
-const AppConnectionsInvokeParams = AppConnectionsIdentityParams.extend({
-  operation: z.string().min(1),
-  input: z.unknown().optional(),
-  requestId: z.string().optional(),
-}).strict();
-
-function parseAppConnectionParams<T extends z.ZodType>(
-  method: string,
-  schema: T,
-  params: unknown,
-): AppConnectionBrokerResult<z.infer<T>> {
-  try {
-    return { ok: true, value: parseWorkerCallParams(method, schema, params) };
-  } catch {
-    return {
-      ok: false,
-      error: {
-        code: "invalid_input",
-        message: "The App connection request is invalid.",
-        retryable: false,
-      },
-    };
-  }
-}
-
 export interface WorkerRpcServices {
   /** How a worker's actions send and read on channels (`channels.*`). */
   channelsService: ChannelsService;
-  connectionRegistry: ConnectionRegistry;
-  channelOf: ChannelOf;
   chatSettings: ChatSettingsControl;
   /** Event coordinator (bus + catalog). `events.publish` / `events.searchCatalog`
    * delegate the business logic here so it is shared with the main-process
@@ -264,9 +211,6 @@ export interface WorkerRpcServices {
   privateOwnerOf: (chatId: string) => Promise<ConciergeOwner | null>;
   /** System-only: how `system:send_message` turns an agent's name into its id. */
   agentNames: AgentNamesService;
-  appConnections: AppConnectionBrokerPort;
-  /** Resolve the owner from the action that the Core IPC boundary captured. */
-  appIdForAction: (actionName: string) => string | null;
   /** Puts an approval's card in the conversation it came from, recorded in
    *  that chat (`approvals.sendCard`). */
   sendApprovalCard: (approval: ApprovalCard) => Promise<void>;
@@ -337,7 +281,6 @@ export class WorkerRpcServer {
               params,
             ) as ResetChatSettingsInput,
           ),
-        "channels.email.ingestInbound": (params) => this.handleEmailIngestInbound(params),
         "actions.has": (params) => this.handleActionsHas(params),
         "actions.isExplicit": (params) => this.handleActionsIsExplicit(params),
         "actions.validateArgs": (params) => this.handleActionsValidateArgs(params),
@@ -365,14 +308,6 @@ export class WorkerRpcServer {
             body !== undefined ? { body } : undefined,
           );
         },
-        "connections.app.list": (params, context) =>
-          this.handleAppConnections("list", params, context),
-        "connections.app.describe": (params, context) =>
-          this.handleAppConnections("describe", params, context),
-        "connections.app.operations": (params, context) =>
-          this.handleAppConnections("operations", params, context),
-        "connections.app.invoke": (params, context) =>
-          this.handleAppConnections("invoke", params, context),
       }),
     );
     for (const [method, handler] of Object.entries(calls)) {
@@ -400,67 +335,6 @@ export class WorkerRpcServer {
     const handler = this.handlers.get(method);
     if (!handler) throw new Error(`Unknown WorkerRPC method: ${method}`);
     return await handler(params);
-  }
-
-  private async handleAppConnections(
-    method: "list" | "describe" | "operations" | "invoke",
-    params: unknown,
-    context?: IpcCallContext,
-  ): Promise<unknown> {
-    const actionName = context?.callerActionName;
-    const appId = actionName ? this.services.appIdForAction(actionName) : null;
-    if (!appId) {
-      return {
-        ok: false,
-        error: {
-          code: "access_denied",
-          message: "Connection access requires an App-owned action context.",
-          retryable: false,
-        },
-      };
-    }
-    switch (method) {
-      case "list": {
-        const parsed = parseAppConnectionParams(
-          "connections.app.list",
-          AppConnectionsListParams,
-          params,
-        );
-        if (!parsed.ok) return parsed;
-        return await this.services.appConnections.list(appId, parsed.value);
-      }
-      case "describe": {
-        const parsed = parseAppConnectionParams(
-          "connections.app.describe",
-          AppConnectionsIdentityParams,
-          params,
-        );
-        if (!parsed.ok) return parsed;
-        return await this.services.appConnections.describe(appId, parsed.value);
-      }
-      case "operations": {
-        const parsed = parseAppConnectionParams(
-          "connections.app.operations",
-          AppConnectionsOperationsParams,
-          params,
-        );
-        if (!parsed.ok) return parsed;
-        return await this.services.appConnections.operations(appId, parsed.value);
-      }
-      case "invoke": {
-        const parsed = parseAppConnectionParams(
-          "connections.app.invoke",
-          AppConnectionsInvokeParams,
-          params,
-        );
-        if (!parsed.ok) return parsed;
-        return await this.services.appConnections.invoke(
-          appId,
-          parsed.value,
-          context?.callerActionContext,
-        );
-      }
-    }
   }
 
   private async handleAppsCreate(params: unknown): Promise<unknown> {
@@ -569,20 +443,6 @@ export class WorkerRpcServer {
         ...(limit ? { limit } : {}),
       }),
     );
-  }
-
-  private async handleEmailIngestInbound(params: unknown): Promise<EmailInboundResult> {
-    const { rawBody, signature } = parseWorkerCallParams(
-      "channels.email.ingestInbound",
-      EmailIngestInboundParams,
-      params,
-    );
-    const email = emailConnection(this.services.connectionRegistry, this.services.channelOf);
-    if (!email) return { status: "skipped", reason: "channel_inactive" };
-    return (await this.services.connectionRegistry.ingest(email.id, {
-      rawBody,
-      signature,
-    })) as EmailInboundResult;
   }
 
   /**

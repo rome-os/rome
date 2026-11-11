@@ -4,6 +4,8 @@ import { describe, it, expect, rs } from "@rstest/core";
 import { context, propagation, ROOT_CONTEXT, trace } from "@opentelemetry/api";
 import { runWithCurrentActionContext } from "@rome-os/app-runtime";
 import { WorkerRpcServer, type WorkerRpcServices } from "./worker-rpc.js";
+import { connectionWorkerCalls } from "../../connections/index.js";
+import { emailConnection } from "../accounts-service.js";
 import { IpcRpc, type IpcMessage, type IpcTransport } from "./ipc.js";
 import { ActionEngine } from "./engine.js";
 import { replayContext, type ReplayStore } from "./replay.js";
@@ -124,15 +126,25 @@ function makeServer(
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },
     channelsService: overrides.channelsService,
-    connectionRegistry: overrides.connectionRegistry,
-    channelOf: (connection: { service: string }) => connection.service,
     agentNames: overrides.agentNames,
-    appConnections: overrides.appConnections,
-    appIdForAction: overrides.appIdForAction ?? (() => null),
     sendApprovalCard: overrides.sendApprovalCard ?? rs.fn(async () => {}),
   } as unknown as WorkerRpcServices;
   return {
-    server: new WorkerRpcServer(services),
+    // Connections' calls ride the same worker boundary, which is what
+    // captures the calling action that app connections trust.
+    server: new WorkerRpcServer(
+      services,
+      connectionWorkerCalls({
+        appConnections: overrides.appConnections as never,
+        appIdForAction: overrides.appIdForAction ?? (() => null),
+        connectionRegistry: overrides.connectionRegistry as never,
+        emailConnectionId: () =>
+          emailConnection(
+            overrides.connectionRegistry as never,
+            ((connection: { service: string }) => connection.service) as never,
+          )?.id,
+      }),
+    ),
     services,
     eventBus,
     eventCatalog,

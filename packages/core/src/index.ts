@@ -236,6 +236,7 @@ import { RoutineEngine } from "./routines/engine.js";
 import { routineWorkerCalls } from "./routines/for-apps.js";
 import { instanceWorkerCalls } from "./instance/for-apps.js";
 import { agentWorkerCalls } from "./agent/index.js";
+import { connectionWorkerCalls } from "./connections/index.js";
 import { EventCatalog } from "./event-catalog.js";
 import {
   resolveOneOffDate,
@@ -1949,8 +1950,6 @@ async function main() {
   const workerRpcServer = new WorkerRpcServer(
     {
       channelsService,
-      connectionRegistry,
-      channelOf,
       chatSettings,
       eventService,
       appLifecycle,
@@ -1962,15 +1961,19 @@ async function main() {
       notify: notifyClient,
       privateOwnerOf: privateOwnerOfChat,
       agentNames: agentNameResolver,
-      appConnections,
-      appIdForAction: (actionName) => {
-        const metadata = actionRegistry.getMetadata(actionName);
-        return metadata?.ownerType === "app" ? metadata.ownerId : null;
-      },
       sendApprovalCard: (approval) => sendApprovalCard(approvalCardChannels, approval),
     },
     {
       ...routineWorkerCalls({ routinesRepo, routineEngine }),
+      ...connectionWorkerCalls({
+        appConnections,
+        appIdForAction: (actionName) => {
+          const metadata = actionRegistry.getMetadata(actionName);
+          return metadata?.ownerType === "app" ? metadata.ownerId : null;
+        },
+        connectionRegistry,
+        emailConnectionId: () => emailConnection(connectionRegistry, channelOf)?.id,
+      }),
       ...agentWorkerCalls({
         hasAgent: (name) => agentLoader.find(name) !== undefined,
         // Same allow-list resolution as the agent session's tool gate.
