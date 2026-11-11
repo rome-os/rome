@@ -22,11 +22,12 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
     "people",
     "relay",
     "routines",
+    "webchat",
   ],
   apps: ["access", "instance"],
   chats: ["access", "agent", "apps", "connections", "participation", "people"],
-  concierge: ["access", "agent", "apps", "chats", "connections", "instance", "routines"],
-  connections: ["apps", "chats", "desktops", "instance", "participation", "people"],
+  concierge: ["access", "agent", "apps", "chats", "connections", "instance", "routines", "webchat"],
+  connections: ["apps", "chats", "desktops", "instance", "participation", "people", "webchat"],
   desktops: ["access", "instance"],
   favors: ["access", "apps", "instance"],
   instance: [],
@@ -34,6 +35,7 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
   people: ["apps", "chats", "connections", "instance"],
   relay: ["apps", "instance"],
   routines: ["access", "agent", "apps"],
+  webchat: ["access", "agent", "apps", "chats", "participation"],
 };
 
 /** Why a context never imports another, where the model says more than the graph. */
@@ -125,8 +127,22 @@ export const contextRules: ImportRule[] = contexts.flatMap((from) =>
 /** Crossings that remain until their ticket lands. */
 export const contextCrossings: ListedCrossing[] = [
   {
-    rule: "chats-never-imports-concierge",
-    from: "chats/dashboard/dashboard-account.ts",
+    rule: "webchat-never-imports-concierge",
+    from: "webchat/chat-read-model.ts",
+    to: "concierge/privacy.ts",
+    ticket: "ZHA-168",
+    why: "Which dashboard chats are private, and to whom, is decided in Concierge, until that rule has its home.",
+  },
+  {
+    rule: "webchat-never-imports-concierge",
+    from: "webchat/dashboard-account.ts",
+    to: "concierge/privacy.ts",
+    ticket: "ZHA-168",
+    why: "Which dashboard chats are private, and to whom, is decided in Concierge, until that rule has its home.",
+  },
+  {
+    rule: "webchat-never-imports-concierge",
+    from: "webchat/repository.ts",
     to: "concierge/privacy.ts",
     ticket: "ZHA-168",
     why: "Which dashboard chats are private, and to whom, is decided in Concierge, until that rule has its home.",

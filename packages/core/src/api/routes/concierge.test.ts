@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import type { ConciergeService } from "../../concierge/service.js";
 import { ConciergeTasks } from "../../concierge/tasks.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
-import { WebChatRepository } from "../../db/repositories/webchat.js";
+import { WebChatRepository } from "../../webchat/repository.js";
 import { chatMessages } from "../../db/schema.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import {

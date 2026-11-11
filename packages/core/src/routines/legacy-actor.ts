@@ -6,7 +6,6 @@ import { actorOfOwner } from "../access/owner-actor.js";
 import type { SessionActor } from "../access/session-actor.js";
 import { ownerOf } from "../concierge/owner.js";
 import type { DrizzleDb } from "../db/index.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
 import type { Routine } from "./types.js";
 
 /**
@@ -16,7 +15,10 @@ import type { Routine } from "./types.js";
  */
 export async function legacyRoutineActor(
   routine: Pick<Routine, "args">,
-  deps: { db: DrizzleDb; webchatRepo: Pick<WebChatRepository, "getSession"> },
+  deps: {
+    db: DrizzleDb;
+    webchatRepo: { getSession(id: string): Promise<{ ownerKey?: string | null } | null> };
+  },
 ): Promise<SessionActor | undefined> {
   const { args } = routine;
   let owner: string | null = typeof args.ownerKey === "string" ? args.ownerKey : null;

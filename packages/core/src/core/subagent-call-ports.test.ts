@@ -3,7 +3,7 @@ import { WebChatDashboardSessions } from "../webchat/webchat-dashboard-sessions.
 import { testReceipt, testTurnHandle } from "../test/turn-handle.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import type { AgentSession, Sessions, AgentTurnInput, SendTurnOptions } from "../agent/index.js";
 import { createSubagentCalls, subagentRequest, type SubagentCalls } from "../agent/index.js";

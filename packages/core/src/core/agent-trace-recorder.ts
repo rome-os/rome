@@ -8,7 +8,7 @@ import type {
   RomeAgentTranscriptMessageInput,
   RomeAgentTraceTriggerMetadata,
   WebChatRepository,
-} from "../db/repositories/webchat.js";
+} from "../webchat/repository.js";
 import type { AgentEvent, MessagePart } from "../types.js";
 import type { ThreadContext } from "./types.js";
 import { toTraceEvent, type TraceableEvent } from "../api/helpers.js";

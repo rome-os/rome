@@ -110,7 +110,7 @@ export interface ChatSearchHit {
  * per chat.
  * json_valid and the object check skip lines whose parts are not a block
  * array, which would otherwise fail the whole list. The Chats version of the
- * legacy `sessionAwaitingGuardian` (db/repositories/webchat.ts), for a
+ * legacy `sessionAwaitingGuardian` (webchat/repository.ts), for a
  * select over `rome_sessions`.
  */
 export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (

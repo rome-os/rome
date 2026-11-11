@@ -16,7 +16,7 @@ import {
 } from "../../webchat/projects.js";
 import { createLogger } from "../../logger.js";
 import { SHARE_ROBOTS } from "../../lib/share-robots.js";
-import type { StoredSharedChat } from "../../db/repositories/webchat.js";
+import type { StoredSharedChat } from "../../webchat/repository.js";
 import type { ApiDeps } from "../deps.js";
 
 const log = createLogger("api:share");

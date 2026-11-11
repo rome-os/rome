@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
 import { chatMessages, romeSessions } from "../schema.js";
-import type { WebChatRepository } from "./webchat.js";
+import type { WebChatRepository } from "../../webchat/repository.js";
 import { ConciergeTasksRepository } from "./concierge-tasks.js";
 import { renderTaskEvents } from "../../concierge/events.js";
 import { mainChatIdOf } from "../../concierge/owner.js";

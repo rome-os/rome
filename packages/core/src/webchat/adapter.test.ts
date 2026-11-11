@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
-import { readWebchatMessages, WebChatAdapter } from "./webchat.js";
-import { createTestDb, type TestDb } from "../../test/db.js";
-import { WebChatRepository } from "../../db/repositories/webchat.js";
-import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
+import { readWebchatMessages, WebChatAdapter } from "./adapter.js";
+import { createTestDb, type TestDb } from "../test/db.js";
+import { WebChatRepository } from "./repository.js";
+import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
 /** The instant `hours` before the test's fixed clock. */
 function hoursAgo(hours: number): Date {

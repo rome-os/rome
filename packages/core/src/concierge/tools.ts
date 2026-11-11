@@ -9,7 +9,7 @@ import {
   type ConciergeTaskState,
 } from "@rome/api-types/concierge";
 import type { SaidMessage } from "../chats/message.js";
-import type { ChatThreadPlacement } from "../db/repositories/webchat.js";
+import type { ChatThreadPlacement } from "../webchat/repository.js";
 import type { SendResult } from "../connections/send.js";
 import type {
   ConciergeTaskWithChat,

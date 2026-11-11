@@ -21,7 +21,7 @@ import type { MessageRepository as ChatLines } from "../chats/storage/message-re
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { AccountNames } from "../chats/accounts/account-names.js";
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import type { WebhookInvocationsRepository } from "../apps/repositories/webhook-invocations.js";
 import type { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { ApprovalHandler } from "../apps/actions/approval-handler.js";

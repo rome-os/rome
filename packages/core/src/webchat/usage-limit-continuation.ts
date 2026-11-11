@@ -1,15 +1,18 @@
 import type { SessionActor } from "../access/session-actor.js";
-import type { MainBackendTurnRunner } from "../app-host/backend-turn.js";
 import {
   isAnthropicUsageLimitError,
   type ModelAccountReports,
   type ModelAccounts,
   type ProviderId,
 } from "../agent/index.js";
-import { failoverReason } from "../concierge/failover-reason.js";
+import { failoverReason } from "./failover-reason.js";
 import { createLogger } from "../logger.js";
 import type { ChatsWebChatRepository, ErroredTurn } from "./chats-webchat-repository.js";
-import { isRecentActivity, MAX_RESTART_INACTIVITY_MS } from "./restart-continuation.js";
+import {
+  type ContinuationRunner,
+  isRecentActivity,
+  MAX_RESTART_INACTIVITY_MS,
+} from "./restart-continuation.js";
 
 const log = createLogger("usage-limit-continuation");
 const USAGE_LIMIT_MARKER = "<usage_limit_recovery>";
@@ -68,7 +71,7 @@ export interface UsageLimitContinuationOptions {
     | "getRestartGuardianPrompt"
     | "getRestartLastActivityAt"
   >;
-  runner: Pick<MainBackendTurnRunner, "runAndReport">;
+  runner: ContinuationRunner;
   /** Who a continuation acts for: the person whose turn it continues. Absent, no one. */
   actorOf?: (turn: ErroredTurn["turn"]) => Promise<SessionActor | undefined>;
 }

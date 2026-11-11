@@ -105,7 +105,7 @@ import { SettingsRepository } from "../db/repositories/settings.js";
 import { AppKeysRepository } from "../apps/repositories/app-keys.js";
 import { AppKeyInjector } from "../apps/app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { chatsWiring } from "../chats-wiring.js";
 import { openChannelChat, type OpenSpeakerDeps } from "../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";

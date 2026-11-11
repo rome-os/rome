@@ -20,7 +20,7 @@ import { ConciergeActivityTracker } from "./activity.js";
 import { isConciergeChat } from "./privacy.js";
 import { openQuestion } from "./transcript.js";
 
-import { failoverReason } from "./failover-reason.js";
+import { failoverReason } from "../webchat/failover-reason.js";
 
 const log = createLogger("concierge-events");
 

@@ -4,7 +4,7 @@
 // returned `agent.turn:<turnId>` stream.
 
 import { canOpen } from "../concierge/privacy.js";
-import { readerOwner } from "../chats/dashboard/dashboard-account.js";
+import { readerOwner } from "../webchat/dashboard-account.js";
 import type { ChildProcess } from "node:child_process";
 import type { IpcCallContext, IpcRpc } from "../apps/actions/ipc.js";
 import { walkToRoot } from "../agent/index.js";
@@ -29,7 +29,7 @@ import { createLogger } from "../logger.js";
 import { type ChatResetPolicy, resetPolicyOfMessage } from "./chat-reset-policy.js";
 import { type SessionOpeningFor, sessionOpeningFor } from "./session-opening.js";
 import { runWithHookInvocationContext, type HookInvocationContext } from "./hook-recursion.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import {
   AgentTraceRecorder,
   recordAgentTraceBestEffort,

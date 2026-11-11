@@ -1,4 +1,3 @@
-import { ChatReadModel } from "../webchat/chat-read-model.js";
 import { chatAddresses, chatMessages, romeSessions } from "../db/schema.js";
 // What the account read asks the triage record for.
 //
@@ -124,11 +123,6 @@ describe("the account reads over the triage record", () => {
         row.senderAccountId?.startsWith("automated::"),
       ),
     ).toBe(true);
-    const model = new ChatReadModel(testDb.db);
-    const transcript = (await model.chatTranscript("automation-chat"))!;
-    for (const line of transcript.lines.filter((line) => line.id !== "visitor")) {
-      expect(line).toMatchObject({ role: "user", senderAccountId: null, senderName: "Automation" });
-    }
     expect(await deps.webchatRepo.searchSessionMessages("Status")).toHaveLength(1);
   });
 

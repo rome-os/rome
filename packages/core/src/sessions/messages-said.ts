@@ -10,7 +10,7 @@ import type { InboundEvent, MessagesSaid, SaidInboundEvent } from "@rome-os/app-
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { ChatEvents, MessageSaid } from "../chats/storage/events.js";
 import type { InboundRecording } from "../connections/inbound-recording.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import type { TurnLinks } from "./turn-links.js";
 
 export interface MessagesSaidDeps {

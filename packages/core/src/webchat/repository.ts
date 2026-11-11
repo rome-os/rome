@@ -1,6 +1,6 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type { TranscriptPart } from "@rome/api-types/chat";
-import { canOpenSql, PRIVATE_CHILD_TRIGGER_KIND, privateOwnerOf } from "../../concierge/privacy.js";
+import { canOpenSql, PRIVATE_CHILD_TRIGGER_KIND, privateOwnerOf } from "../concierge/privacy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { posix as pathPosix } from "node:path";
 import {
@@ -32,33 +32,33 @@ import {
   sessions,
   webchatTurnFeedback,
   webchatWorkspaceLayouts,
-} from "../schema.js";
-import type { DrizzleDb, DrizzleTx } from "../index.js";
+} from "../db/schema.js";
+import type { DrizzleDb, DrizzleTx } from "../db/index.js";
 import {
   channelChatId,
   isWebchatChat,
   romeSessionKind,
   storedSessionType,
   withSessionKind,
-} from "../session-kind.js";
-import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
-import { firstPlacementSecond, placedCreatedAt } from "../speaker-placement.js";
+} from "../db/session-kind.js";
+import { DEFAULT_WEBCHAT_PROJECT_NAME } from "./constants.js";
+import { firstPlacementSecond, placedCreatedAt } from "../db/speaker-placement.js";
 import {
   isSessionTraceArchived,
   sessionTraceCutoff,
   TRACE_ACTIVITY_ROLES,
-} from "../../webchat/trace-retention.js";
+} from "./trace-retention.js";
 import type {
   TraceSubagentResultEvent,
   TraceSubagentStartEvent,
   TurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import type { Account, RomeSessionType } from "@rome-os/app-runtime";
-import type { MessagePart } from "../../types.js";
-import { isCoreMainAgentId } from "../../apps/artifact-id.js";
-import { agentMessageOutbound } from "../../chats/history/messages-agent.js";
-import { sessionOwnerKey, type SessionActor } from "../../access/session-actor.js";
-import type { ChatRef } from "../../chats/storage/place.js";
+import type { MessagePart } from "../types.js";
+import { isCoreMainAgentId } from "../apps/artifact-id.js";
+import { agentMessageOutbound } from "../chats/history/messages-agent.js";
+import { sessionOwnerKey, type SessionActor } from "../access/session-actor.js";
+import type { ChatRef } from "../chats/storage/place.js";
 
 export interface StoredTurnFeedback {
   rating: TurnFeedbackRating;

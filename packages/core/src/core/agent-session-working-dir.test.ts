@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ActionEngine } from "../apps/actions/engine.js";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { createTestDb, type TestDb, createActionEngineRepos } from "../test/db.js";
 import { AgentLoader } from "../app-host/agent-loader.js";
 import { TurnListeners } from "../agent/index.js";

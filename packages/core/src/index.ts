@@ -116,11 +116,7 @@ import {
   channelList,
   joinLaterChannel,
 } from "./chats/connected-accounts/connected-account-list.js";
-import {
-  WEBCHAT_CHANNEL,
-  WEBCHAT_SURFACE,
-  webchatChannel,
-} from "./chats/dashboard/dashboard-account.js";
+import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./webchat/dashboard-account.js";
 import { claimChannels, recordChannelAccounts } from "./wiring/boot.js";
 import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
 import { domainOf, domainOfGrant } from "./connections/platform.js";

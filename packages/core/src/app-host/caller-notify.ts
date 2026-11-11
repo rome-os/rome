@@ -3,7 +3,7 @@
 // nothing. A visitor's call never reaches the guardian:
 // docs/architecture/notification-delivery.md.
 import type { SessionActor } from "../access/session-actor.js";
-import { WEBCHAT_CHANNEL } from "../chats/dashboard/dashboard-account.js";
+import { WEBCHAT_CHANNEL } from "../webchat/dashboard-account.js";
 import { GUARDIAN_OWNER, recipientOf, type ConciergeOwner } from "../concierge/owner.js";
 import type {
   NotifyContent,
