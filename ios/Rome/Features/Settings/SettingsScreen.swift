@@ -279,19 +279,20 @@ struct SettingsScreen: View {
         Button(action: onInstances) {
             HStack(spacing: 14) {
                 InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host, account: workspace.backend.account, size: 44)
-                VStack(alignment: .leading, spacing: 1) {
-                    // An email keeps its start and its domain.
-                    Text(workspace.accountLabel)
-                        .romeFont(16, .semibold)
-                        .foregroundStyle(Palette.fg)
-                        .lineLimit(1)
-                        .truncationMode(workspace.accountLabel.contains("@") ? .middle : .tail)
+                // Centered on the avatar as a pair, with room between the lines.
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        // An email keeps its start and its domain; the name is
+                        // cut, never the badge.
+                        Text(workspace.accountLabel)
+                            .romeFont(16, .semibold)
+                            .foregroundStyle(Palette.fg)
+                            .lineLimit(1)
+                            .truncationMode(workspace.accountLabel.contains("@") ? .middle : .tail)
+                        if model.currentInstance?.isVisitor == true { VisitorBadge().fixedSize() }
+                    }
                     HStack(spacing: 6) {
                         Circle().fill(Palette.success).frame(width: 7, height: 7)
-                        // A visitor's role leads the line, in place of a badge.
-                        if model.currentInstance?.isVisitor == true {
-                            (Text("Visitor") + Text(verbatim: " ·")).fixedSize()
-                        }
                         // The version before the host: a long domain is cut, never the version.
                         if let version = InstanceLine.version(model.update.runningVersion) {
                             Text(verbatim: "\(version) ·").fixedSize()
