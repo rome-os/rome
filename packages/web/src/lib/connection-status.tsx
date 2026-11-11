@@ -1,9 +1,13 @@
 /**
  * Shared status presentation for the unified Connections surface.
  *
- * `StatusIndicator` is a dot (semantic color token) + text — NOT a filled
+ * `StatusIndicator` is a mark (semantic color token) + text — NOT a filled
  * `Badge`. It is the single source of the status vocabulary so the list and the
- * detail-page header render identically.
+ * detail-page header render identically. The mark is a dot, or a warning
+ * triangle for anything that wants attention.
+ *
+ * A list of many rows passes `quiet`: a healthy row keeps its dot and drops the
+ * word from sight, so the rows that need the guardian are the ones that read.
  *
  * Four labels, each meaning something different to the guardian
  * ("Disconnected" is banned vocabulary). Working and Broken are the
@@ -16,18 +20,19 @@
  *                   carries the reason as a tooltip.
  *
  * A working connection whose transport is temporarily impaired keeps the
- * Working label with an amber dot and the reason as a tooltip, since the
+ * Working label with an amber triangle and the reason as a tooltip, since the
  * platform still accepts its grant and recovery may happen automatically.
  *
  * Mapping over the card's slot states:
- *   any slot broken                        → amber dot, "Broken"
- *   working, but no account known          → amber dot, "Broken"
- *   transient runtime degradation          → amber dot, "Working" (reason tooltip)
+ *   any slot broken                        → amber triangle, "Broken"
+ *   working, but no account known          → amber triangle, "Broken"
+ *   transient runtime degradation          → amber triangle, "Working" (reason tooltip)
  *   any slot working                       → green dot, "Working"
  *   none connected + connect unavailable   → muted dot, "Unavailable" (reason tooltip)
  *   everything else                        → muted dot, "Not connected"
  */
 
+import { Roll } from "@/components/motion/Roll";
 import { cn } from "@/lib/utils";
 import type { ConnectionCard } from "@/lib/connection-cards";
 import { AlertTriangle } from "lucide-react";
@@ -98,7 +103,13 @@ const DOT_TONE: Record<DotTone, string> = {
 
 export function StatusDot({ tone }: { tone: DotTone }) {
   return (
-    <span className={cn("inline-block size-2 shrink-0 rounded-full", DOT_TONE[tone])} aria-hidden />
+    <span
+      className={cn(
+        "inline-block size-2 shrink-0 rounded-full transition-colors duration-200",
+        DOT_TONE[tone],
+      )}
+      aria-hidden
+    />
   );
 }
 
@@ -109,25 +120,35 @@ export function StatusDot({ tone }: { tone: DotTone }) {
 export function StatusIndicator({
   card,
   status,
+  quiet = false,
   className,
 }: {
   card?: ConnectionCard;
   status?: ConnectionStatus;
+  /** Show a healthy status as its dot alone; the word stays for screen readers. */
+  quiet?: boolean;
   className?: string;
 }) {
   const resolved = status ?? (card ? connectionStatus(card) : undefined);
   if (!resolved) return null;
+  const dotOnly = quiet && resolved.tone === "success";
 
   return (
     <span
+      data-slot="status-indicator"
       className={cn("inline-flex items-center gap-2 text-ui text-muted-foreground", className)}
-      title={resolved.title}
+      title={resolved.title ?? (dotOnly ? resolved.label : undefined)}
     >
-      <StatusDot tone={resolved.tone} />
       {resolved.tone === "attention" ? (
-        <AlertTriangle className="size-3.5 shrink-0" aria-hidden />
-      ) : null}
-      {resolved.label}
+        <AlertTriangle className="size-3.5 shrink-0 text-warning" aria-hidden />
+      ) : (
+        <StatusDot tone={resolved.tone} />
+      )}
+      {dotOnly ? (
+        <span className="sr-only">{resolved.label}</span>
+      ) : (
+        <Roll value={resolved.label} />
+      )}
     </span>
   );
 }

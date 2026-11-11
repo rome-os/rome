@@ -1,5 +1,6 @@
 import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
+import { DetailPane } from "@/components/connections/detail-pane";
 import { StatusIndicator } from "@/lib/connection-status";
 import { AvailableToAddLabel, SoleSlotScope } from "@/components/connection-slot-card";
 import { OAuthConnectionSection } from "@/components/connections/oauth-connection-section";
@@ -192,6 +193,44 @@ export function ConnectionDetailDialog({
         </>
       )}
     </Dialog>
+  );
+}
+
+/** The same detail as {@link ConnectionDetailDialog}, as a pane in Settings. */
+export function ConnectionDetailPane({
+  card,
+  backLabel,
+  composio,
+  onClose,
+  onRefresh,
+  onFlash,
+  onOpenAccount,
+}: {
+  card: ConnectionCard;
+  backLabel: string;
+  composio: ComposioCliStatus | null;
+  onClose: () => void;
+  onRefresh: () => void;
+  onFlash: (message: string) => void;
+  onOpenAccount?: (connectionId: string) => void | Promise<void>;
+}) {
+  return (
+    <DetailPane
+      label={card.label}
+      backLabel={backLabel}
+      onClose={onClose}
+      mark={<ConnectionBrandBadge connection={card.service} />}
+      status={<StatusIndicator card={card} />}
+    >
+      <ConnectionDetailBody
+        key={card.route}
+        card={card}
+        composio={composio}
+        onRefresh={onRefresh}
+        onFlash={onFlash}
+        onOpenAccount={onOpenAccount}
+      />
+    </DetailPane>
   );
 }
 

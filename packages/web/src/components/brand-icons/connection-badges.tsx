@@ -8,12 +8,32 @@ import { GoogleIcon } from "@/components/brand-icons/google-icon";
 import { ShopifyIcon } from "@/components/brand-icons/shopify-icon";
 import { SlackIcon } from "@/components/brand-icons/slack-icon";
 
+export type BrandTileSize = "sm" | "md";
+
+const BRAND_TILE_SIZE: Record<BrandTileSize, string> = {
+  sm: "size-7 [&>svg]:size-4",
+  md: "size-9 [&>svg]:size-5",
+};
+
 /**
- * Brand marks + colored badges for the Settings → Channels / Integrations cards.
+ * The one tile every service mark sits on: white, or the muted surface in the
+ * dark theme, so a list of them does not glare. A mark with no color of its own
+ * takes the theme's ink.
+ */
+export function brandTile(size: BrandTileSize, mark = "text-[#1a130f] dark:text-foreground") {
+  return cn(
+    "flex shrink-0 items-center justify-center rounded-8 border border-border bg-white dark:bg-surface-muted",
+    BRAND_TILE_SIZE[size],
+    mark,
+  );
+}
+
+/**
+ * Brand marks + badges for the Settings → Channels / Integrations cards.
  *
  * Brand glyphs are official single-path logos (Simple Icons), drawn with
- * `fill="currentColor"` so the badge wrapper sets their color. Brand background
- * colors are intentional logo colors — the one place raw brand hex is allowed,
+ * `fill="currentColor"` so the badge wrapper sets their color. Brand colors are
+ * intentional logo colors — the one place raw brand hex is allowed,
  * matching `ai-tool-icons.tsx`.
  */
 
@@ -110,37 +130,33 @@ export function LinkedInIcon({ className, ...props }: SVGProps<SVGSVGElement>) {
 
 interface ConnectionBadge {
   Icon: ComponentType<{ className?: string }>;
-  badge: string;
-  iconClassName?: string;
+  /** The mark's color; a multi-color mark has none. */
+  mark?: string;
 }
 
-/** Brand mark and badge colors per connection service. The Telegram personal
+/** Brand mark and its color per connection service. The Telegram personal
     account folds onto the Telegram row as a slot, so it shares the single
     `telegram` brand mark. Rome-owned surfaces use the Rome mark, while generic
     transports use a matching Lucide glyph. */
 const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
   // Brand hex is intentional logo color (see file header).
-  telegram: { Icon: TelegramIcon, badge: "bg-[#229ED9] text-white" },
-  whatsapp: { Icon: WhatsAppIcon, badge: "bg-[#25D366] text-white" },
-  wechat: { Icon: WeChatIcon, badge: "bg-[#07C160] text-white" },
-  linkedin: { Icon: LinkedInIcon, badge: "bg-[#0A66C2] text-white" },
-  discord: { Icon: DiscordIcon, badge: "bg-[#5865F2] text-white" },
-  // Multi-color brand marks sit on white (the paths carry their own colors).
-  feishu: { Icon: FeishuIcon, badge: "border border-border bg-white" },
-  slack: { Icon: SlackIcon, badge: "border border-border bg-white" },
-  google: { Icon: GoogleIcon, badge: "border border-border bg-white" },
-  github: { Icon: GithubIcon, badge: "bg-foreground text-background" },
-  shopify: { Icon: ShopifyIcon, badge: "bg-foreground text-background" },
-  webchat: {
-    Icon: RomeLogo,
-    badge: "bg-foreground text-background",
-    iconClassName: "[--background:var(--foreground)]",
-  },
-  email: { Icon: Mail, badge: "bg-primary/15 text-primary" },
-  agents: { Icon: Bot, badge: "bg-primary/15 text-primary" },
+  telegram: { Icon: TelegramIcon, mark: "text-[#229ED9]" },
+  whatsapp: { Icon: WhatsAppIcon, mark: "text-[#25D366]" },
+  wechat: { Icon: WeChatIcon, mark: "text-[#07C160]" },
+  linkedin: { Icon: LinkedInIcon, mark: "text-[#0A66C2]" },
+  discord: { Icon: DiscordIcon, mark: "text-[#5865F2]" },
+  // Multi-color marks carry their own colors.
+  feishu: { Icon: FeishuIcon },
+  slack: { Icon: SlackIcon },
+  google: { Icon: GoogleIcon },
+  github: { Icon: GithubIcon },
+  shopify: { Icon: ShopifyIcon },
+  webchat: { Icon: RomeLogo },
+  email: { Icon: Mail, mark: "text-primary" },
+  agents: { Icon: Bot, mark: "text-primary" },
   // Composio is a broker, not a single brand — reuse the legacy Integrations
   // tab's `Blocks` mark so it reads consistently across the app.
-  composio: { Icon: Blocks, badge: "bg-primary/15 text-primary" },
+  composio: { Icon: Blocks, mark: "text-primary" },
 };
 
 /** Services drawn with another service's mark: a Slack bot is still Slack. */
@@ -155,22 +171,17 @@ export function hasConnectionBrand(connection: string): boolean {
  *  gets an empty bordered square. */
 export function ConnectionBrandBadge({
   connection,
+  size = "md",
   className,
 }: {
   connection: string;
+  size?: BrandTileSize;
   className?: string;
 }) {
   const entry = CONNECTION_BADGES[BADGE_OF_SERVICE[connection] ?? connection];
   return (
-    <div
-      className={cn(
-        "flex h-9 w-9 shrink-0 items-center justify-center rounded-8",
-        entry ? entry.badge : "border border-border bg-surface",
-        className,
-      )}
-      aria-hidden
-    >
-      {entry ? <entry.Icon className={cn("h-5 w-5", entry.iconClassName)} /> : null}
+    <div className={cn(brandTile(size, entry?.mark), className)} aria-hidden>
+      {entry ? <entry.Icon /> : null}
     </div>
   );
 }

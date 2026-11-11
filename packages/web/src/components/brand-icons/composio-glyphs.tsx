@@ -1,14 +1,17 @@
 import type { ReactNode } from "react";
 import { Plug } from "lucide-react";
 
+import { brandTile, type BrandTileSize } from "@/components/brand-icons/connection-badges";
+import { COMPOSIO_LOGOS } from "@/components/brand-icons/composio-logos";
 import { cn } from "@/lib/utils";
 import { GmailIcon } from "./gmail-icon";
 import { GoogleCalendarIcon } from "./google-calendar-icon";
 
-/* Glyphs for the services Rome reaches through Composio, keyed by the
-   catalog's `glyph` id (`rome_apps/connector/src/catalog.ts`); add one when a
-   service joins the catalog. Most are monochrome; Gmail and Google Calendar
-   draw their own multicolor brand marks. GitHub, Slack and Shopify are left out:
+/* Glyphs, the fallback for a service with no logo, for the services Rome
+   reaches through Composio, keyed by the catalog's `glyph` id
+   (`rome_apps/connector/src/catalog.ts`); add one when a service joins the
+   catalog. Most are monochrome; Gmail and Google Calendar draw their own
+   multicolor brand marks. GitHub, Slack and Shopify are left out:
    Rome connects those itself, never through Composio. */
 const COMPOSIO_GLYPHS: Record<string, ReactNode> = {
   calendar: <GoogleCalendarIcon className="h-5 w-5" />,
@@ -250,24 +253,21 @@ export function hasComposioGlyph(glyph: string): boolean {
   return Object.hasOwn(COMPOSIO_GLYPHS, glyph);
 }
 
-/** The badge for a Composio service row, sized like `ConnectionBrandBadge`.
- *  An unknown glyph falls back to a plug mark. */
+/** The badge for a Composio service row, on the same tile as
+ *  `ConnectionBrandBadge`: the service's logo where Rome has one, else its
+ *  glyph. An unknown glyph falls back to a plug mark. */
 export function ComposioServiceBadge({
   glyph,
+  size = "md",
   className,
 }: {
   glyph: string | undefined;
+  size?: BrandTileSize;
   className?: string;
 }) {
   return (
-    <div
-      className={cn(
-        "flex h-9 w-9 shrink-0 items-center justify-center rounded-8 border border-border bg-surface text-foreground",
-        className,
-      )}
-      aria-hidden
-    >
-      {(glyph && COMPOSIO_GLYPHS[glyph]) || <Plug className="h-5 w-5" />}
+    <div className={cn(brandTile(size), className)} aria-hidden>
+      {(glyph && (COMPOSIO_LOGOS[glyph] ?? COMPOSIO_GLYPHS[glyph])) || <Plug />}
     </div>
   );
 }

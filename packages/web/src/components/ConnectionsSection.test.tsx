@@ -211,23 +211,21 @@ describe("ConnectionsSection — cards", () => {
     expect(within(screen.getByRole("dialog")).getByText("Connect")).toBeTruthy();
   });
 
-  it("a broken OAuth connection reads Broken with an attention-toned dot on the card (#1472)", () => {
+  it("a broken OAuth connection reads Broken with an attention-toned mark on the card (#1472)", () => {
     // The old expired-token case (client-side tokenExpiresAt clock) is now the
     // registry's own health signal: the connection reads broken.
     renderSection([...minimalConnections(), oauth("github", "degraded")]);
 
     const row = within(connectedList()).getByRole("button", { name: "Open GitHub" });
     expect(within(row).getByText("Broken")).toBeTruthy();
-    const dot = row.querySelector("span[aria-hidden]");
-    expect(dot).toBeTruthy();
-    expect(dot?.className).toContain("bg-warning");
-    expect(dot?.parentElement?.getAttribute("title")).toBe(
+    const mark = row.querySelector("svg.lucide-triangle-alert");
+    expect(mark?.getAttribute("class")).toContain("text-warning");
+    expect(mark?.parentElement?.getAttribute("title")).toBe(
       "The platform stopped accepting Rome's access. Give access again.",
     );
-    expect(row.querySelector("svg.lucide-triangle-alert")).toBeTruthy();
   });
 
-  it("a stale WeChat runtime reads Working with an attention dot while its grant remains authorized", () => {
+  it("a stale WeChat runtime reads Working with an attention mark while its grant remains authorized", () => {
     renderSection([
       ...minimalConnections(),
       connection({
@@ -249,7 +247,9 @@ describe("ConnectionsSection — cards", () => {
 
     const row = within(connectedList()).getByRole("button", { name: "Open WeChat" });
     expect(within(row).getByText("Working")).toBeTruthy();
-    expect(row.querySelector("span[aria-hidden]")?.className).toContain("bg-warning");
+    expect(row.querySelector("svg.lucide-triangle-alert")?.getAttribute("class")).toContain(
+      "text-warning",
+    );
   });
 });
 
@@ -277,7 +277,8 @@ describe("ConnectionsSection — Connected and Add", () => {
     renderSection(mixed());
     const github = within(connectedList()).getByRole("button", { name: "Open GitHub" });
     const google = within(addList()).getByRole("button", { name: "Open Google" });
-    expect(within(github).getByText("Working")).toBeTruthy();
+    // A healthy card keeps its dot; the word is for screen readers.
+    expect(within(github).getByText("Working").className).toContain("sr-only");
     expect(within(google).queryByText("Connect")).toBeNull();
     expect(within(google).queryByText("Work across your Google services as you")).toBeNull();
     expect(google.getAttribute("title")).toBe("Work across your Google services as you");
@@ -311,7 +312,9 @@ describe("ConnectionsSection — Connected and Add", () => {
       }),
     ]);
     const row = within(addList()).getByRole("button", { name: "Open Shopify" });
-    expect(within(row).getByText("Unavailable").getAttribute("title")).toBe("Not configured");
+    expect(within(row).getByText("Unavailable").closest("[title]")?.getAttribute("title")).toBe(
+      "Not configured",
+    );
   });
 
   it("searches both lists, matching what a service does only under Add", () => {
@@ -363,13 +366,14 @@ describe("ConnectionsSection — Telegram fold card status", () => {
     expect(screen.queryByRole("button", { name: /personal account/i })).toBeNull();
   });
 
-  it("bot working + broken personal account ⇒ attention override (Broken, attention dot)", () => {
+  it("bot working + broken personal account ⇒ attention override (Broken, attention mark)", () => {
     // The old failed sessionHealth signal is now the registry's broken state
     // on the telegram_user connection.
     const row = telegramRow([telegramBot("authorized", "mybot"), telegramUser("degraded")]);
     expect(within(row).getByText("Broken")).toBeTruthy();
-    const dot = row.querySelector("span[aria-hidden]");
-    expect(dot?.className).toContain("bg-warning");
+    expect(row.querySelector("svg.lucide-triangle-alert")?.getAttribute("class")).toContain(
+      "text-warning",
+    );
   });
 
   it("opening the Telegram card shows both slot cards (bot + personal account)", () => {

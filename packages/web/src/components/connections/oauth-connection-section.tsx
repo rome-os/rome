@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Spinner } from "@rome-os/ui/spinner";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { ConnectionSlotCard } from "@/components/connection-slot-card";
@@ -237,8 +238,20 @@ export function OAuthConnectionSection({
               aria-label={setup.busy ? t("common.connecting") : undefined}
               onClick={() => beginConnect()}
             >
-              {setup.busy && <Spinner data-icon="inline-start" label={t("common.connecting")} />}
-              {t("common.connect")}
+              {/* One cell, so the button keeps its width while it waits. */}
+              <span className="grid place-items-center">
+                <span
+                  className={cn(
+                    "col-start-1 row-start-1 transition-opacity duration-150",
+                    setup.busy && "opacity-0",
+                  )}
+                >
+                  {t("common.connect")}
+                </span>
+                {setup.busy && (
+                  <Spinner className="col-start-1 row-start-1" label={t("common.connecting")} />
+                )}
+              </span>
             </Button>
           </div>
         )}

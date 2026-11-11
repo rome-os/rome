@@ -6,7 +6,8 @@ import { useSearchParams } from "react-router-dom";
 import { toast } from "sonner";
 import { ComposioServiceBadge } from "@/components/brand-icons/composio-glyphs";
 import { Button } from "@/components/ui/button";
-import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+import { DetailPane } from "@/components/connections/detail-pane";
 import {
   Select,
   SelectContent,
@@ -203,14 +204,21 @@ export function ComposioServiceRowButton({
         aria-label={`Connect ${row.name}`}
       >
         <span className="flex min-w-0 items-center gap-3">
-          <ComposioServiceBadge glyph={row.glyph} />
+          <ComposioServiceBadge glyph={row.glyph} size="sm" />
           <span className="truncate text-ui text-foreground">{row.name}</span>
         </span>
-        {busy ? (
-          <Spinner size="sm" label={t("common.connecting")} />
-        ) : (
-          <Plus className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-        )}
+        <span className="grid size-4 shrink-0 place-items-center">
+          <Plus
+            className={cn(
+              "col-start-1 row-start-1 size-4 text-muted-foreground transition-opacity duration-150",
+              busy && "opacity-0",
+            )}
+            aria-hidden
+          />
+          {busy ? (
+            <Spinner size="sm" className="col-start-1 row-start-1" label={t("common.connecting")} />
+          ) : null}
+        </span>
       </Button>
     );
   }
@@ -226,11 +234,11 @@ export function ComposioServiceRowButton({
       aria-label={`${connected ? "Open" : "Connect"} ${row.name}`}
     >
       <span className="flex min-w-0 items-center gap-3">
-        <ComposioServiceBadge glyph={row.glyph} />
+        <ComposioServiceBadge glyph={row.glyph} size="sm" />
         <span className="truncate text-ui text-foreground">{row.name}</span>
       </span>
       {connected ? (
-        <StatusIndicator status={rowStatus(row)} />
+        <StatusIndicator status={rowStatus(row)} quiet />
       ) : busy ? (
         <Spinner size="sm" label={t("common.connecting")} />
       ) : null}
@@ -254,7 +262,7 @@ export function ComposioSignInBanner({ onSignIn }: { onSignIn: () => void }) {
 
 /** A connected Composio service: what it lets Rome do, Reconnect when it is
  *  broken, and a confirmed Disconnect. */
-export function ComposioServiceDialog({
+export function ComposioServicePane({
   row,
   busy,
   onReconnect,
@@ -285,69 +293,62 @@ export function ComposioServiceDialog({
   };
 
   return (
-    <Dialog open={row !== null} onClose={close} size="md">
-      {row && (
-        <>
-          <DialogHeader onClose={close}>
-            <div className="flex items-center gap-3">
-              <ComposioServiceBadge glyph={row.glyph} />
-              <div className="min-w-0 flex-1">
-                <DialogTitle className="text-section">{row.name}</DialogTitle>
-                <StatusIndicator status={rowStatus(row)} className="mt-1" />
+    row && (
+      <DetailPane
+        label={row.name}
+        backLabel={t("tabs.Connections")}
+        onClose={close}
+        mark={<ComposioServiceBadge glyph={row.glyph} />}
+        status={<StatusIndicator status={rowStatus(row)} />}
+      >
+        <div className="flex flex-col gap-4">
+          <p className="text-ui text-muted-foreground">
+            {t("connections.composioServices.viaLong")}
+          </p>
+          {row.scope ? (
+            <div className="flex flex-col gap-1">
+              <p className="text-aux text-muted-foreground">
+                {t("connections.headings.connected")}
+              </p>
+              <p className="text-ui">{row.scope}</p>
+            </div>
+          ) : null}
+          {confirming ? (
+            <div className="flex flex-col gap-3 rounded-8 border border-border p-3">
+              <p className="text-ui">
+                {t("connections.composioServices.disconnectConfirm", { name: row.name })}
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" onClick={() => setConfirming(false)}>
+                  {t("common.cancel")}
+                </Button>
+                <Button
+                  type="button"
+                  variant="destructive"
+                  disabled={disconnect.isPending}
+                  onClick={() => disconnect.mutate(row.slug)}
+                >
+                  {t("common.disconnect")}
+                </Button>
               </div>
             </div>
-          </DialogHeader>
-          <DialogBody>
-            <div className="flex flex-col gap-4">
-              <p className="text-ui text-muted-foreground">
-                {t("connections.composioServices.viaLong")}
-              </p>
-              {row.scope ? (
-                <div className="flex flex-col gap-1">
-                  <p className="text-aux text-muted-foreground">
-                    {t("connections.headings.connected")}
-                  </p>
-                  <p className="text-ui">{row.scope}</p>
-                </div>
-              ) : null}
-              {confirming ? (
-                <div className="flex flex-col gap-3 rounded-8 border border-border p-3">
-                  <p className="text-ui">
-                    {t("connections.composioServices.disconnectConfirm", { name: row.name })}
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    <Button type="button" variant="outline" onClick={() => setConfirming(false)}>
-                      {t("common.cancel")}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      disabled={disconnect.isPending}
-                      onClick={() => disconnect.mutate(row.slug)}
-                    >
-                      {t("common.disconnect")}
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex flex-wrap gap-2">
-                  {/* A working service has nothing to reconnect: Composio would
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {/* A working service has nothing to reconnect: Composio would
                       answer that it is already connected. */}
-                  {row.needsAttention ? (
-                    <Button type="button" disabled={busy} onClick={() => onReconnect(row)}>
-                      {t("connections.composioServices.reconnect")}
-                    </Button>
-                  ) : null}
-                  <Button type="button" variant="outline" onClick={() => setConfirming(true)}>
-                    {t("common.disconnect")}
-                  </Button>
-                </div>
-              )}
+              {row.needsAttention ? (
+                <Button type="button" disabled={busy} onClick={() => onReconnect(row)}>
+                  {t("connections.composioServices.reconnect")}
+                </Button>
+              ) : null}
+              <Button type="button" variant="outline" onClick={() => setConfirming(true)}>
+                {t("common.disconnect")}
+              </Button>
             </div>
-          </DialogBody>
-        </>
-      )}
-    </Dialog>
+          )}
+        </div>
+      </DetailPane>
+    )
   );
 }
 

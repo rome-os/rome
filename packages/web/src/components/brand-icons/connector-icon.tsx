@@ -30,7 +30,7 @@ export function ConnectorIcon({
   return (
     <div
       className={cn(
-        "flex h-9 w-9 shrink-0 items-center justify-center rounded-8 border border-border bg-surface text-ui font-medium text-muted-foreground",
+        "flex size-9 shrink-0 items-center justify-center rounded-8 border border-border bg-surface text-ui font-medium text-muted-foreground",
         className,
       )}
       aria-hidden

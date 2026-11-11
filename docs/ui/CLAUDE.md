@@ -6,6 +6,8 @@ The design token docs. One directory per kind of token: `primitive-token/` (one 
 
 [`motion.md`](motion.md) sits beside them too, and holds the rules for how a surface changes state: what moves, how fast, and what stays still.
 
+[`service-lists.md`](service-lists.md) sits beside them too, and holds the rules for a page that lists many services: their marks, their size, and what each row says about status.
+
 [`VOICE.md`](VOICE.md) and [`secondary-text.md`](secondary-text.md) govern the words rather than the pixels. The first fixes how every string a guardian reads sounds. The second decides whether a piece of secondary text exists at all, and the `secondary-text-audit` skill reads it as its ruleset.
 
 ## Playbook

@@ -13,7 +13,7 @@ describe("ConnectorIcon", () => {
     const el = tile("brand:github", "GitHub");
     expect(el.querySelector("svg")).not.toBeNull();
     expect(el.textContent).toBe("");
-    expect(el.className).toContain("h-9 w-9");
+    expect(el.className).toContain("size-9");
   });
 
   it("draws a brand mark a kind shares with another, such as the Slack bot's", () => {
@@ -24,14 +24,14 @@ describe("ConnectorIcon", () => {
     const el = tile("glyph:gmail", "Gmail");
     expect(el.querySelector("svg")).not.toBeNull();
     expect(el.textContent).toBe("");
-    expect(el.className).toContain("h-9 w-9");
+    expect(el.className).toContain("size-9");
   });
 
   it("draws Gmail's own multicolor mark, not a generic envelope", () => {
     const el = tile("glyph:gmail", "Gmail");
     const fills = [...el.querySelectorAll("path")].map((path) => path.getAttribute("fill"));
     expect(fills).toEqual(["#4285f4", "#34a853", "#fbbc04", "#ea4335", "#c5221f"]);
-    expect(el.querySelector("svg")?.getAttribute("viewBox")).toBe("52 42 88 66");
+    expect(el.querySelector("svg")?.getAttribute("viewBox")).toBe("0 49.4 512 399.42");
   });
 
   it("draws Google Calendar's own multicolor mark", () => {
@@ -45,8 +45,8 @@ describe("ConnectorIcon", () => {
     expect(fills).toContain("#34A853");
   });
 
-  it("still draws the other Composio services with their monochrome glyphs", () => {
-    const el = tile("glyph:notion", "Notion");
+  it("still draws a service with no logo with its monochrome glyph", () => {
+    const el = tile("glyph:outlook", "Outlook");
     expect(el.querySelector("svg")?.getAttribute("stroke")).toBe("currentColor");
   });
 
@@ -61,6 +61,6 @@ describe("ConnectorIcon", () => {
     const el = tile(icon, "linear");
     expect(el.querySelector("svg")).toBeNull();
     expect(el.textContent).toBe("L");
-    expect(el.className).toContain("h-9 w-9");
+    expect(el.className).toContain("size-9");
   });
 });
