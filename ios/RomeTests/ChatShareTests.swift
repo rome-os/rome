@@ -286,3 +286,80 @@ private struct ShareModeHost: View {
         }
     }
 }
+
+/// Records each request with its body, and answers a created share.
+final class ShareRequestRecorder: URLProtocol, @unchecked Sendable {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var recorded: [(URLRequest, Data)] = []
+    static var requests: [(URLRequest, Data)] { lock.withLock { recorded } }
+    static func reset() { lock.withLock { recorded = [] } }
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        var body = request.httpBody ?? Data()
+        if body.isEmpty, let stream = request.httpBodyStream {
+            stream.open()
+            var buffer = [UInt8](repeating: 0, count: 4096)
+            while stream.hasBytesAvailable {
+                let read = stream.read(&buffer, maxLength: buffer.count)
+                if read <= 0 { break }
+                body.append(buffer, count: read)
+            }
+            stream.close()
+        }
+        Self.lock.withLock { Self.recorded.append((request, body)) }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 201, httpVersion: nil, headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(#"{"id":"s1","url":"/share/tok1","title":"Plan the trip"}"#.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
+}
+
+/// What a share request tells the instance.
+@MainActor
+@Suite(.serialized) struct ShareRequestTests {
+    private func backend() -> LiveBackend {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ShareRequestRecorder.self]
+        return LiveBackend(client: APIClient(origin: URL(string: "http://127.0.0.1:4141")!, token: { "t" }, configuration: configuration))
+    }
+
+    private func lastBody() throws -> [String: Any] {
+        let (request, body) = try #require(ShareRequestRecorder.requests.last)
+        #expect(request.httpMethod == "POST")
+        #expect(request.url?.path == "/api/chat/sessions/chat-1/share")
+        return try #require(try JSONSerialization.jsonObject(with: body) as? [String: Any])
+    }
+
+    @Test func aShareSendsTheTurnsAndTheAgentsNameButNoTitle() async throws {
+        ShareRequestRecorder.reset()
+        let link = try await backend().shareChat(sessionId: "chat-1", turnIds: ["t1", "t2"], agentName: "Milo")
+        #expect(link.url == "/share/tok1")
+        let body = try lastBody()
+        #expect(body["turnIds"] as? [String] == ["t1", "t2"])
+        #expect(body["agentName"] as? String == "Milo")
+        // The instance names the share after the first turn.
+        #expect(body["title"] == nil)
+    }
+
+    @Test func anUnknownAgentNameIsLeftOut() async throws {
+        ShareRequestRecorder.reset()
+        _ = try await backend().shareChat(sessionId: "chat-1", turnIds: ["t1"], agentName: nil)
+        let body = try lastBody()
+        #expect(body.keys.sorted() == ["turnIds"])
+    }
+
+    @Test func createLinkPassesTheAgentsName() async {
+        let fake = FakeBackend()
+        fake.stored = twoTurns
+        let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: fake)
+        store.start()
+        for _ in 0..<50 where !store.loaded { try? await Task.sleep(for: .milliseconds(10)) }
+        store.share.begin(turn: "t1")
+        await store.share.create(agentName: "Milo")
+        #expect(fake.shareRequests.first?.agentName == "Milo")
+        store.stop()
+    }
+}

@@ -94,14 +94,14 @@ final class FakeBackend: RomeBackend {
 
     /// Share links: what each create asked for, the answer it gets, the
     /// chat's links, and the revokes, in order.
-    var shareRequests: [(sessionId: String, turnIds: [String])] = []
+    var shareRequests: [(sessionId: String, turnIds: [String], agentName: String?)] = []
     var shareAnswer: Result<ChatShareLink, APIError> = .success(ChatShareLink(id: "s1", url: "/share/tok1", title: "Trip"))
     var shareLinks: [ChatShareLink] = []
     var revoked: [String] = []
     var revokeError: APIError?
 
-    func shareChat(sessionId: String, turnIds: [String]) async throws -> ChatShareLink {
-        shareRequests.append((sessionId, turnIds))
+    func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink {
+        shareRequests.append((sessionId, turnIds, agentName))
         return try shareAnswer.get()
     }
 

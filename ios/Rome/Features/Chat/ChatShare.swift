@@ -166,9 +166,10 @@ final class ChatShareFlow {
     func url(of link: ChatShareLink) -> URL? { Self.absoluteURL(link.url, origin: origin) }
 
     /// Makes the link of the picked turns and offers it in the share sheet.
-    /// An instance that refuses this chat (404: older ones cannot share a
-    /// Concierge chat) gets the turns' text shared instead.
-    func create() async {
+    /// `agentName` is the Agent's name as the header shows it, nil when
+    /// unknown. An instance that refuses this chat (404: older ones cannot
+    /// share a Concierge chat) gets the turns' text shared instead.
+    func create(agentName: String? = nil) async {
         guard let chat, let sessionId, let picked = selection, !picked.isEmpty, !creating else { return }
         let turns = ShareTurns(messages: chat.messages, rows: chat.rows)
         let ordered = turns.order.filter(picked.contains)
@@ -176,7 +177,7 @@ final class ChatShareFlow {
         error = nil
         defer { creating = false }
         do {
-            let link = try await backend.shareChat(sessionId: sessionId, turnIds: ordered)
+            let link = try await backend.shareChat(sessionId: sessionId, turnIds: ordered, agentName: agentName)
             guard let url = url(of: link) else {
                 error = String(localized: "Couldn't create the link.")
                 return
@@ -230,6 +231,8 @@ extension EnvironmentValues {
     @Entry var shareTurns: ShareTurns? = nil
     /// The chat's sharing, for the "…" menu; nil where it cannot share.
     @Entry var chatShare: ChatShareFlow? = nil
+    /// The Agent's own name, which a share link shows; nil when none is set.
+    @Entry var shareAgentName: String? = nil
 }
 
 /// A transcript row in share mode: its turn's check circle on the first row,
@@ -392,6 +395,7 @@ private struct ShareModeBar: View {
 
 private struct ShareModeComposer: ViewModifier {
     @Bindable var share: ChatShareFlow
+    @Environment(\.shareAgentName) private var agentName
 
     // The composer stays in the layout, faded out, and the bar lies over it:
     // swapping them would change the space under the transcript, which then
@@ -411,7 +415,7 @@ private struct ShareModeComposer: ViewModifier {
                                 .transition(.opacity)
                         }
                         PrimaryButton(title: "Create link", loadingTitle: "Creating…", loading: share.creating, disabled: share.count == 0) {
-                            Task { await share.create() }
+                            Task { await share.create(agentName: agentName) }
                         }
                     }
                     .transition(.opacity)

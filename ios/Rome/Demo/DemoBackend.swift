@@ -174,7 +174,7 @@ final class DemoBackend: RomeBackend {
         }
     }
 
-    func shareChat(sessionId: String, turnIds: [String]) async throws -> ChatShareLink {
+    func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink {
         try await pause(0.4)
         guard !turnIds.isEmpty else { throw APIError.server(status: 400, message: nil) }
         let title = topicChats.first { $0.id == sessionId }?.name ?? String(localized: "Chat")

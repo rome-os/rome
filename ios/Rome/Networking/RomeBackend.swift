@@ -88,9 +88,11 @@ protocol RomeBackend: AnyObject, Sendable {
     func routines() async throws -> [RoutineRef]
     /// Tells Chat in `chatId` that `service` is connected, so it goes on.
     func notifyServiceConnected(chatId: String, service: String) async
-    /// Makes a public link to these turns of the chat. An older instance
-    /// answers 404 for a chat it cannot share, a Concierge chat among them.
-    func shareChat(sessionId: String, turnIds: [String]) async throws -> ChatShareLink
+    /// Makes a public link to these turns of the chat, showing the Agent as
+    /// `agentName` (nil: the page says Rome). No title: the instance names
+    /// the share after the first turn. An older instance answers 404 for a
+    /// chat it cannot share, a Concierge chat among them.
+    func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink
     /// The chat's live share links, newest first.
     func chatShares(sessionId: String) async throws -> [ChatShareLink]
     /// Revokes a share link: it stops opening.
@@ -297,8 +299,15 @@ final class LiveBackend: RomeBackend {
         try await client.get("/build-info", reportsUnauthorized: false)
     }
 
-    func shareChat(sessionId: String, turnIds: [String]) async throws -> ChatShareLink {
-        try await client.post("/chat/sessions/\(escape(sessionId))/share", json: .object(["turnIds": .array(turnIds.map(JSONValue.string))]), as: ChatShareLink.self)
+    func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink {
+        try await client.post("/chat/sessions/\(escape(sessionId))/share", json: Self.shareBody(turnIds: turnIds, agentName: agentName), as: ChatShareLink.self)
+    }
+
+    /// An older instance ignores `agentName`.
+    static func shareBody(turnIds: [String], agentName: String?) -> JSONValue {
+        var body: [String: JSONValue] = ["turnIds": .array(turnIds.map(JSONValue.string))]
+        if let agentName { body["agentName"] = .string(agentName) }
+        return .object(body)
     }
 
     func chatShares(sessionId: String) async throws -> [ChatShareLink] {
@@ -376,7 +385,7 @@ extension RomeBackend {
     func setGuardianLanguage(_ code: String) async throws {}
     func apps() async throws -> [InstalledApp] { [] }
     func webSessionCookie() -> HTTPCookie? { nil }
-    func shareChat(sessionId: String, turnIds: [String]) async throws -> ChatShareLink { throw APIError.notFound }
+    func shareChat(sessionId: String, turnIds: [String], agentName: String?) async throws -> ChatShareLink { throw APIError.notFound }
     func chatShares(sessionId: String) async throws -> [ChatShareLink] { [] }
     func revokeShare(id: String) async throws {}
 }
