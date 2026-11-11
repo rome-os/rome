@@ -33,7 +33,7 @@ export function ChatImage({ node: _node, src, alt, className, onError, ...props 
         <span
           data-streamdown="image-fallback"
           title={alt}
-          className="text-xs italic text-muted-foreground"
+          className="text-ui italic text-muted-foreground"
         >
           {t("markdown.imageNotAvailable")}
         </span>
