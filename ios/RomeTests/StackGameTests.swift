@@ -306,3 +306,61 @@ import UIKit
         #expect(closedView == nil)
     }
 }
+
+/// The game's update strip says the release was reached only when the
+/// updater confirmed it, never for the release it asked for.
+@Suite struct UpdateStripTests {
+    private let updating = InstanceUpdater.State.updating(target: "1.2.0", since: .now)
+
+    private func run(_ steps: [(InstanceUpdater.State, String?)]) -> UpdateStripTracker {
+        var tracker = UpdateStripTracker()
+        for (state, updatedTo) in steps { tracker.observe(state, updatedTo: updatedTo) }
+        return tracker
+    }
+
+    @Test func aFinishedUpgradeIsReached() {
+        let tracker = run([(.starting(current: "1.1.0", latest: "1.2.0"), nil), (updating, nil), (.upToDate, "1.2.0")])
+        #expect(tracker.line(for: .upToDate) == .reached("1.2.0"))
+        // The chat clearing what it said does not take it back.
+        #expect(tracker.line(for: .upToDate) == .reached("1.2.0"))
+    }
+
+    @Test func aTimedOutUpgradeSaysSoAndCanStillFinish() {
+        var tracker = run([(updating, nil), (.failed(.timedOut(target: "1.2.0")), nil)])
+        #expect(tracker.line(for: .failed(.timedOut(target: "1.2.0"))) == .tookTooLong)
+        tracker.observe(.upToDate, updatedTo: "1.2.0")
+        #expect(tracker.line(for: .upToDate) == .reached("1.2.0"))
+    }
+
+    @Test func aDismissedFailureIsNotASuccess() {
+        let failure = InstanceUpdater.State.failed(.start(current: "1.1.0", latest: "1.2.0", message: "x"))
+        let tracker = run([(.starting(current: "1.1.0", latest: "1.2.0"), nil), (failure, nil), (.required(current: "1.1.0", latest: "1.2.0", latestChanged: false), nil)])
+        #expect(tracker.line(for: failure) == .couldNotStart)
+        #expect(tracker.line(for: .required(current: "1.1.0", latest: "1.2.0", latestChanged: false)) == .none)
+        // A timed-out failure closed from the page goes back to being offered.
+        let closed = run([(updating, nil), (.failed(.timedOut(target: "1.2.0")), nil), (.required(current: "1.1.0", latest: "1.2.0", latestChanged: false), nil), (.upToDate, nil)])
+        #expect(closed.line(for: .upToDate) == .none)
+    }
+
+    @Test func aTargetThatMovedOnIsNotASuccess() {
+        // Moved on: idle, then the check that follows finds it current.
+        let tracker = run([(updating, nil), (.idle, nil), (.upToDate, nil)])
+        #expect(tracker.line(for: .idle) == .none)
+        #expect(tracker.line(for: .upToDate) == .none)
+    }
+
+    @Test func aStaleVerdictIsNotASuccess() {
+        // A newer release replaced the target, or the check says current
+        // without the updater finishing.
+        let newer = run([(updating, nil), (.required(current: "1.1.0", latest: "1.3.0", latestChanged: true), nil)])
+        #expect(newer.line(for: .required(current: "1.1.0", latest: "1.3.0", latestChanged: true)) == .none)
+        let current = run([(updating, nil), (.upToDate, nil)])
+        #expect(current.line(for: .upToDate) == .none)
+    }
+
+    @Test func anEarlierUpgradesLineIsNotThisOnes() {
+        // Opened with an older "updated" still unsaid, and nothing under way.
+        let tracker = run([(.upToDate, "1.1.0")])
+        #expect(tracker.line(for: .upToDate) == .none)
+    }
+}

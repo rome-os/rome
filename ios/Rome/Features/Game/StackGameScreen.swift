@@ -878,51 +878,42 @@ private struct SpeechBubble: InsettableShape {
 /// lands, it says the release reached; nothing interrupts the game.
 private struct UpdateStrip: View {
     @Environment(AppModel.self) private var model
-    /// The release being upgraded to, kept once the upgrade ends.
-    @State private var target: String?
+    @State private var tracker = UpdateStripTracker()
 
     private var updater: InstanceUpdater { model.update }
 
     var body: some View {
         Group {
-            switch updater.state {
-            case .starting, .updating:
+            switch tracker.line(for: updater.state) {
+            case .progress:
                 row {
                     Spinner(size: 13, lineWidth: 1.8, color: Palette.sub)
                     if let line = UpdateGate.statusLine(updater.state, progress: updater.progress, agentName: model.workspace?.agentName) {
                         Text(line)
                     }
                 }
-            case .failed(.timedOut):
+            case .tookTooLong:
                 row {
                     AlertGlyph(size: 13)
                     Text("The update is taking too long")
                 }
-            case .failed(.start):
+            case .couldNotStart:
                 row {
                     AlertGlyph(size: 13)
                     Text("Could not start the update")
                 }
-            default:
-                if let version = updater.updatedTo ?? target {
-                    row {
-                        Image(systemName: "checkmark").romeFont(12, .semibold).foregroundStyle(Palette.success)
-                        Text("Your Rome is on \(version).")
-                    }
+            case .reached(let version):
+                row {
+                    Image(systemName: "checkmark").romeFont(12, .semibold).foregroundStyle(Palette.success)
+                    Text("Your Rome is on \(version).")
                 }
+            case .none:
+                EmptyView()
             }
         }
-        .onAppear { remember(updater.state) }
-        .onChange(of: updater.state) { _, state in remember(state) }
+        .onAppear { tracker.observe(updater.state, updatedTo: updater.updatedTo) }
+        .onChange(of: updater.state) { _, state in tracker.observe(state, updatedTo: updater.updatedTo) }
         .animation(.easeInOut(duration: 0.25), value: updater.state)
-    }
-
-    private func remember(_ state: InstanceUpdater.State) {
-        switch state {
-        case .starting(_, let latest): target = latest
-        case .updating(let release, _): target = release
-        default: break
-        }
     }
 
     private func row<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
@@ -935,6 +926,47 @@ private struct UpdateStrip: View {
             .frame(height: 38)
             .glassSurface(Capsule())
             .accessibilityElement(children: .combine)
+    }
+}
+
+/// What the game's update strip says. Success is said only for an upgrade
+/// this strip saw under way and the updater then confirmed (`updatedTo`, set
+/// as it finishes), never for the release it asked for: the updater also
+/// leaves the upgrade without finishing it (a stale or moved-on target, a
+/// dismissed failure). The confirmed release is kept, since the chat clears
+/// `updatedTo` once it has said it.
+struct UpdateStripTracker: Equatable {
+    enum Line: Equatable {
+        case progress, tookTooLong, couldNotStart, reached(String), none
+    }
+
+    /// An upgrade is under way, or failed in a way it may still finish from.
+    private var watching = false
+    private(set) var reached: String?
+
+    mutating func observe(_ state: InstanceUpdater.State, updatedTo: String?) {
+        switch state {
+        case .starting, .updating:
+            watching = true
+            reached = nil
+        case .failed(.timedOut):
+            // A late arrival still finishes it.
+            break
+        case .upToDate where watching:
+            reached = updatedTo
+            watching = false
+        default:
+            watching = false
+        }
+    }
+
+    func line(for state: InstanceUpdater.State) -> Line {
+        switch state {
+        case .starting, .updating: return .progress
+        case .failed(.timedOut): return .tookTooLong
+        case .failed(.start): return .couldNotStart
+        default: return reached.map(Line.reached) ?? .none
+        }
     }
 }
 
