@@ -110,6 +110,16 @@ enum ImageSource: Hashable, Sendable {
 
 /// Bytes of an image, from the instance or the open web.
 enum ImageFetch {
+    /// The query of an instance asset URL with `w=width` added; any other URL, or
+    /// one that already names a width, keeps its query.
+    static func assetQuery(_ query: String?, path: String, width: Int?) -> String? {
+        guard let width, let query, !query.isEmpty,
+              path == "/projects/asset" || path.hasPrefix("/projects/asset/") || path == "/memory/asset" || path.hasPrefix("/memory/asset/"),
+              !query.split(separator: "&").contains(where: { $0.hasPrefix("w=") })
+        else { return query }
+        return "\(query)&w=\(width)"
+    }
+
     /// No cookies, no cache on disk: an outside host never sees the session.
     static let publicSession: URLSession = {
         let configuration = URLSessionConfiguration.ephemeral
@@ -120,14 +130,16 @@ enum ImageFetch {
     }()
 
     @MainActor
-    static func data(_ source: ImageSource, assetLoader: (@MainActor (String) async throws -> Data)?, apiLoader: (@MainActor (String, String?) async throws -> Data)? = nil) async throws -> Data {
+    /// `width`: ask the instance for a thumbnail this wide (600 or 900) of one of
+    /// its own pictures. An external image ignores it, and nil is the original.
+    static func data(_ source: ImageSource, assetLoader: (@MainActor (String, Int?) async throws -> Data)?, apiLoader: (@MainActor (String, String?) async throws -> Data)? = nil, width: Int? = nil) async throws -> Data {
         switch source {
         case .asset(let path):
             guard let assetLoader else { throw APIError.network }
-            return try await assetLoader(path)
+            return try await assetLoader(path, width)
         case .instance(let path, let query):
             guard let apiLoader else { throw APIError.network }
-            return try await apiLoader(path, query)
+            return try await apiLoader(path, assetQuery(query, path: path, width: width))
         case .external(let url):
             let (data, response) = try await APIClient.cappedData(for: URLRequest(url: url), in: publicSession, limit: APIClient.imageLimit)
             guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else { throw APIError.network }
@@ -174,7 +186,7 @@ enum ViewerImage: Identifiable, Hashable {
     }
 
     @MainActor
-    func data(assetLoader: (@MainActor (String) async throws -> Data)?, apiLoader: (@MainActor (String, String?) async throws -> Data)? = nil) async throws -> Data {
+    func data(assetLoader: (@MainActor (String, Int?) async throws -> Data)?, apiLoader: (@MainActor (String, String?) async throws -> Data)? = nil) async throws -> Data {
         switch self {
         case .local(let photo): return photo.jpeg
         case .stored(let upload): return try await ImageFetch.data(.asset(path: upload.assetPath), assetLoader: assetLoader)
@@ -197,7 +209,8 @@ struct MarkdownImageView: View {
     @State private var failed = false
 
     nonisolated static let maxHeight: CGFloat = 240
-    /// Big enough for a bubble's width at 3x.
+    /// Big enough for a bubble's width at 3x. It is also a width the server
+    /// offers (`?w=900`), so keep the two in step.
     nonisolated static let pixels: CGFloat = 900
 
     var body: some View {
@@ -246,7 +259,8 @@ struct MarkdownImageView: View {
             return
         }
         do {
-            let data = try await ImageFetch.data(source, assetLoader: assetLoader, apiLoader: apiLoader)
+            // A thumbnail of the size it shows at, not the original. The viewer fetches the original.
+            let data = try await ImageFetch.data(source, assetLoader: assetLoader, apiLoader: apiLoader, width: Int(Self.pixels))
             let decoded = await Task.detached(priority: .userInitiated) {
                 ImageCompressor.thumbnail(from: data, maxPixel: Self.pixels)
             }.value

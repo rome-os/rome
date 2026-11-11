@@ -171,4 +171,22 @@ describe("image preview in a reply", () => {
     fireEvent.click(screen.getByRole("button", { name: "Download" }));
     expect(open).toHaveBeenCalledTimes(1);
   });
+
+  it("downloads downloadSrc when the viewer still shows a smaller picture", () => {
+    const open = rs.spyOn(window, "open").mockImplementation(() => null);
+    render(
+      <ImagePreviewContent
+        {...preview()}
+        img={<img src="https://example.com/small.webp" alt="Test image" />}
+        inReply
+        downloadSrc="https://example.com/original.png"
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    expect(open).toHaveBeenCalledWith(
+      "https://example.com/original.png",
+      "_blank",
+      "noopener,noreferrer",
+    );
+  });
 });

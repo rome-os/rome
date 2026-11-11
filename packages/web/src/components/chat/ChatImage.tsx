@@ -1,8 +1,9 @@
-import { createContext, useContext, useState, type ComponentPropsWithoutRef } from "react";
+import { createContext, useContext, useMemo, useState, type ComponentPropsWithoutRef } from "react";
 import { X } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import Zoom from "react-medium-image-zoom";
 import "./composer/pending-image-preview.css";
+import { useDesktop } from "@/hooks/use-desktop";
 import { cn } from "@/lib/utils";
 import { ImagePreviewContent, type PreviewContentProps } from "./composer/ImagePreviewContent";
 
@@ -14,10 +15,23 @@ const NoGlyph = () => null;
  */
 export const InsideLinkContext = createContext(false);
 
-// A module-level component keeps the viewer's identity stable, so a streaming
-// re-render does not remount an open picture.
-function ReplyImagePreviewContent(props: PreviewContentProps) {
-  return <ImagePreviewContent {...props} inReply />;
+// A picture on this instance's asset routes loads as a thumbnail this wide.
+// The viewer and Download use the original.
+const THUMBNAIL_WIDTH = 900;
+const ASSET_SRC = /^\/api\/(?:projects|memory)\/asset(?:[/?]|$)/;
+
+// Space around an open picture. A phone gives it little, so a picture as wide
+// as the column still opens larger than its thumbnail.
+const VIEWER_MARGIN_WIDE = 64;
+const VIEWER_MARGIN_PHONE = 16;
+
+/** `src` asking the server for a thumbnail, or `src` itself when it is not an asset route. */
+function thumbnailSrc(src: string): string {
+  if (!ASSET_SRC.test(src) || /[?&]w=/.test(src)) return src;
+  const hashAt = src.indexOf("#");
+  const path = hashAt < 0 ? src : src.slice(0, hashAt);
+  const hash = hashAt < 0 ? "" : src.slice(hashAt);
+  return `${path}${path.includes("?") ? "&" : "?"}w=${THUMBNAIL_WIDTH}${hash}`;
 }
 
 type ChatImageProps = ComponentPropsWithoutRef<"img"> & { node?: unknown };
@@ -32,12 +46,24 @@ export function ChatImage({ node: _node, src, alt, className, onError, ...props 
   const { t } = useTranslation("chat");
   const [failedSrc, setFailedSrc] = useState<string>();
   const insideLink = useContext(InsideLinkContext);
+  const desktop = useDesktop();
+  // The viewer's component is stable for one picture, so a streaming re-render
+  // does not remount an open viewer. It downloads the original even while the
+  // viewer still shows the thumbnail.
+  const ZoomContent = useMemo(
+    () =>
+      function ReplyImagePreviewContent(props: PreviewContentProps) {
+        return <ImagePreviewContent {...props} inReply downloadSrc={src} />;
+      },
+    [src],
+  );
   if (!src) return null;
+  const thumbnail = thumbnailSrc(src);
 
   const image = (
     <img
       {...props}
-      src={src}
+      src={thumbnail}
       alt={alt}
       data-streamdown="image"
       className={cn("h-auto max-h-72 w-auto max-w-full rounded-8 object-contain", className)}
@@ -67,9 +93,10 @@ export function ChatImage({ node: _node, src, alt, className, onError, ...props 
           classDialog="pending-image-preview"
           IconZoom={NoGlyph}
           IconUnzoom={X}
-          ZoomContent={ReplyImagePreviewContent}
+          ZoomContent={ZoomContent}
+          zoomImg={thumbnail === src ? undefined : { src, alt }}
           canSwipeToUnzoom={false}
-          zoomMargin={64}
+          zoomMargin={desktop ? VIEWER_MARGIN_WIDE : VIEWER_MARGIN_PHONE}
         >
           {image}
         </Zoom>

@@ -10,6 +10,17 @@ import Testing
         #expect(ImageSource(src: "/memory/notes/plan.jpg") == .asset(path: "memory/notes/plan.jpg"))
     }
 
+    @Test func aThumbnailWidthIsAskedForOnlyOnTheInstancesAssetRoutes() {
+        let query = "path=projects%2Fa.png"
+        #expect(ImageFetch.assetQuery(query, path: "/projects/asset/a.png", width: 900) == "path=projects%2Fa.png&w=900")
+        #expect(ImageFetch.assetQuery(query, path: "/memory/asset/a.png", width: 600) == "path=projects%2Fa.png&w=600")
+        #expect(ImageFetch.assetQuery(query, path: "/projects/asset/a.png", width: nil) == query)
+        #expect(ImageFetch.assetQuery("path=a.png&w=600", path: "/projects/asset/a.png", width: 900) == "path=a.png&w=600")
+        #expect(ImageFetch.assetQuery(query, path: "/projects/assets/a.png", width: 900) == query)
+        #expect(ImageFetch.assetQuery(query, path: "/share/t/projects/asset/a.png", width: 900) == query)
+        #expect(ImageFetch.assetQuery(nil, path: "/projects/asset/a.png", width: 900) == nil)
+    }
+
     @Test func publicHttpsImagesLoadWithoutTheSession() {
         #expect(ImageSource(src: "https://example.com/cat.png") == .external(URL(string: "https://example.com/cat.png")!))
     }
