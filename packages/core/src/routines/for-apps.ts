@@ -4,6 +4,7 @@
 
 import { z } from "zod";
 import { toRoutine, type RoutinesRepository } from "../db/repositories/routines.js";
+import { parseWorkerCallParams } from "../lib/worker-call-params.js";
 import type { RoutineEngine } from "./engine.js";
 
 /** A call an app's worker makes on the main process: it takes the call's params and returns its result. */
@@ -12,12 +13,7 @@ export type WorkerCallHandler = (params: unknown) => Promise<unknown>;
 const RoutineIdParams = z.object({ routineId: z.string().min(1) });
 
 function routineIdOf(method: string, params: unknown): string {
-  const result = RoutineIdParams.safeParse(params);
-  if (result.success) return result.data.routineId;
-  const issues = result.error.issues
-    .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-    .join("; ");
-  throw new Error(`${method}: invalid params — ${issues}`);
+  return parseWorkerCallParams(method, RoutineIdParams, params).routineId;
 }
 
 export interface RoutineWorkerCallsDeps {

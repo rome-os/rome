@@ -118,11 +118,9 @@ function makeServer(
     // exercise, so stub them.
     appLifecycle: new AppLifecycleService(appManager as never, {} as never, {} as never),
     appStore,
-    hasAgent: () => false,
     hasRegisteredAction: overrides.hasRegisteredAction ?? rs.fn(() => false),
     isExplicitAction: overrides.isExplicitAction ?? rs.fn(() => false),
     validateActionArgs: overrides.validateActionArgs ?? rs.fn(() => null),
-    hasAction: () => false,
     backendTurnRunner: { runAndDeliver: rs.fn() },
     notify: overrides.notify ?? { send: rs.fn() },
     channelsService: overrides.channelsService,

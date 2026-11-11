@@ -3,6 +3,7 @@
 // and the upgrade countdown live.
 
 import { feedbackSendSchema, type FeedbackService } from "../lib/feedback-client.js";
+import { parseWorkerCallParams } from "../lib/worker-call-params.js";
 import type { CloudProfileService } from "./cloud-profile.js";
 import type { SystemUpgradeChecker } from "./system-upgrade/service.js";
 
@@ -20,16 +21,8 @@ export function instanceWorkerCalls(
 ): Record<string, (params: unknown) => Promise<unknown>> {
   return {
     "system.upgrade.checkAndOffer": () => deps.systemUpgrade.checkAndOffer(),
-    "feedback.send": async (params) => {
-      const result = feedbackSendSchema.safeParse(params);
-      if (!result.success) {
-        const issues = result.error.issues
-          .map((issue) => `${issue.path.join(".") || "(root)"}: ${issue.message}`)
-          .join("; ");
-        throw new Error(`feedback.send: invalid params — ${issues}`);
-      }
-      return deps.feedback.send(result.data);
-    },
+    "feedback.send": async (params) =>
+      deps.feedback.send(parseWorkerCallParams("feedback.send", feedbackSendSchema, params)),
     "cloudProfile.get": () => deps.cloudProfile.get(),
   };
 }
