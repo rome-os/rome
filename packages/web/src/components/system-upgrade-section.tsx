@@ -222,7 +222,7 @@ export function SystemUpgradeSection() {
 function CheckErrorNotice({ message }: { message: string }) {
   const { t } = useTranslation("settings");
   // The core relay encodes legible non-error states as error codes; render the
-  // ones a guardian can act on as inline copy rather than a raw failure.
+  // ones the viewer can act on as inline copy rather than a raw failure.
   if (message === "pantheon_unconfigured") {
     return <p className="text-ui text-muted-foreground">{t("system.notManaged")}</p>;
   }

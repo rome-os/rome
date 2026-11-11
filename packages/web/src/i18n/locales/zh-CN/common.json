@@ -141,7 +141,6 @@
   },
   "profile": {
     "menuLabel": "账户",
-    "guardian": "守护者",
     "visitor": "访客",
     "signOut": "退出登录",
     "signOutError": "退出登录失败，请重试。"

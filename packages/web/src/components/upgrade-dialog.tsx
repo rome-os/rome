@@ -37,7 +37,7 @@ export function UpgradeDialog({
   const { restartingTo, restartTimedOut } = upgrade;
   const restarting = restartingTo !== null && !restartTimedOut;
   // Once the request is out there is nothing to cancel, and closing would hide
-  // the only thing telling the guardian the page is about to reload.
+  // the only thing telling the viewer the page is about to reload.
   const locked = upgrade.pending || restarting;
 
   const title =
