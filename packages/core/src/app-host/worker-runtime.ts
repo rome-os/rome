@@ -20,7 +20,7 @@ import { appPersonMapping } from "../people/app-person-mapping.js";
 import { appPeople } from "../people/app-people.js";
 import { SentinelLogRepository } from "../db/repositories/sentinel-log.js";
 import { SettingsRepository } from "../db/repositories/settings.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { chatsWiring } from "../chats-wiring.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";

@@ -2,7 +2,7 @@
 // web chat repository, behind the DashboardSessions port in
 // ../agent/domain/dashboard-sessions.ts.
 
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "./repository.js";
 import { createLogger } from "../logger.js";
 import type { DashboardSession, DashboardSessions, NewSubagentSession } from "../agent/index.js";
 import { parentTurnSession } from "../agent/index.js";

@@ -12,7 +12,7 @@ import type { Place } from "../chats/place.js";
 import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../connections/send.js";
 import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import type { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { SkillCatalog } from "../agent/index.js";
 import { resolveWebchatLargeModelSelection } from "../core/model-selector.js";
@@ -44,7 +44,7 @@ import {
   mainChatIdOf,
   ownerOf,
   storedChatId,
-} from "./owner.js";
+} from "../webchat/owner.js";
 import {
   CONCIERGE_AGENT_ID,
   canOpenChat,
@@ -53,10 +53,10 @@ import {
   isMainConciergeChat,
   privateOwnerOf,
   TASK_CHAT_TRIGGER_KIND,
-} from "./privacy.js";
+} from "../webchat/privacy.js";
 import { ALL_OWNERS_SERVED, type ConciergeOwners, type OwnerProfile } from "./owners.js";
 
-import { ambiguousQuota, type FailoverReason } from "./failover-reason.js";
+import { ambiguousQuota, type FailoverReason } from "../agent/index.js";
 
 const log = createLogger("concierge");
 

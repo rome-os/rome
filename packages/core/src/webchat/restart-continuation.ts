@@ -1,6 +1,7 @@
 import type { SessionActor } from "../access/session-actor.js";
-import type { MainBackendTurnRunner } from "../app-host/backend-turn.js";
-import type { InterruptedTurn } from "../db/repositories/webchat.js";
+import type { BackendTurnParams } from "@rome-os/app-runtime";
+import type { BackendTurnOptions, BackendTurnOutcome } from "../apps/actions/session-runner.js";
+import type { InterruptedTurn } from "./repository.js";
 import { createLogger } from "../logger.js";
 import type { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 
@@ -15,6 +16,14 @@ export const RESTART_CONTINUATION_PROMPT =
   "Check the actual state of the work and verify anything uncertain. Do only what remains. " +
   "If a side-effecting action cannot be confirmed, ask the guardian rather than redo it. " +
   "</restart_recovery>";
+
+/** What a continuation asks of whatever runs backend turns: run this turn in its chat and say how it ended. */
+export interface ContinuationRunner {
+  runAndReport(
+    params: BackendTurnParams,
+    options?: BackendTurnOptions,
+  ): Promise<BackendTurnOutcome>;
+}
 
 /** Whether a turn's last timestamped activity is less than a day before `now`. */
 export function isRecentActivity(lastActivityAt: number | null, now: number): boolean {
@@ -34,7 +43,7 @@ export async function continueInterruptedTurns(
     ChatsWebChatRepository,
     "canContinueAfterRestart" | "getRestartGuardianPrompt" | "getRestartLastActivityAt"
   >,
-  runner: Pick<MainBackendTurnRunner, "runAndReport">,
+  runner: ContinuationRunner,
   now = Date.now(),
   /** Who the continuation acts for: the person whose turn it continues. Absent, no one. */
   actorOf: (turn: InterruptedTurn) => Promise<SessionActor | undefined> = async () => undefined,

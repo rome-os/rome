@@ -7,7 +7,7 @@ import type {
 } from "@rome-os/app-runtime";
 import { openChannelChat, type OpenSpeakerDeps } from "../connections/open-chat.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import { type AppChatReadsDeps, appChatReads } from "./chat-reads.js";
 import { type AppChatWritesDeps, appChatWrites } from "./chat-writes.js";
 

@@ -4,7 +4,7 @@
 
 import { CONCIERGE_DONE_DAYS, type ConciergeTaskDto } from "@rome/api-types/concierge";
 import type { LiveEventEmit } from "../lib/live-event.js";
-import { type ConciergeOwner, GUARDIAN_OWNER } from "./owner.js";
+import { type ConciergeOwner, GUARDIAN_OWNER } from "../webchat/owner.js";
 import type {
   ConciergeTasksRepository,
   ConciergeTaskWithChat,

@@ -4,7 +4,7 @@
 import type { ChatRecord, EnsureChannelChatInput } from "@rome-os/app-runtime";
 import { startChannelChat, type StartChannelChatDeps } from "./channel-chat.js";
 import { addressOf, type ChatAdapters } from "./chat-adapter.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import type { Speakers } from "../sessions/speakers.js";
 
 export interface OpenChannelChatDeps {

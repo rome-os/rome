@@ -1,7 +1,7 @@
 // Reads what a chat set for its sessions: the model a web chat saved, from
 // the web chat side.
 
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "./repository.js";
 import { findOwnWebChat } from "../core/session-conversation.js";
 import { isModelSelectionId, MODEL_SELECTIONS, type ModelSelection } from "../agent/index.js";
 import type { SessionSettings } from "../agent/index.js";

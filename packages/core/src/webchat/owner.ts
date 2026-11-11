@@ -25,6 +25,15 @@ export function ownerOf(chat: { ownerKey?: string | null }): ConciergeOwner {
   return chat.ownerKey || GUARDIAN_OWNER;
 }
 
+/** The owner of dashboard chat `chatId`, or null when there is no such chat. */
+export async function ownerOfChat(
+  getSession: (id: string) => Promise<{ ownerKey?: string | null } | null>,
+  chatId: string,
+): Promise<ConciergeOwner | null> {
+  const chat = await getSession(chatId);
+  return chat ? ownerOf(chat) : null;
+}
+
 /** The name a main chat is created with. A client labels it by `main: true`. */
 export const MAIN_CHAT_NAME = "Main chat";
 

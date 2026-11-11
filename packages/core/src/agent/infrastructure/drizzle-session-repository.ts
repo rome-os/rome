@@ -23,7 +23,7 @@ type SessionRow = typeof sessions.$inferSelect;
  * that touches `sessions` and `session_turn_checkpoints`, except the
  * `chat_id` column: the web chat side reads and records which chat has a
  * session there (`chatOfSession`, `recordSessionInChat` in
- * db/repositories/webchat.ts).
+ * webchat/repository.ts).
  */
 export class DrizzleSessionRepository implements SessionRepository {
   constructor(private readonly db: DrizzleDb) {}

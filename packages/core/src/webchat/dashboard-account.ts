@@ -4,14 +4,14 @@
 // its ports itself, in-process. Channel contract: channel.ts.
 
 import { AsyncLocalStorage } from "node:async_hooks";
-import { actionExecutionContext } from "../../apps/actions/context.js";
-import { canOpenChat, privateOwnerOf } from "../../concierge/privacy.js";
-import { type SessionActor, sessionOwnerKey } from "../../access/session-actor.js";
-import type { ChannelSurface } from "../../core/session-opening.js";
-import type { WebChatRepository } from "../../db/repositories/webchat.js";
-import type { Channel } from "../connected-accounts/connected-account.js";
-import { queryPage } from "../history/messages.js";
-import { readWebchatMessages, WebChatAdapter } from "./webchat.js";
+import { actionExecutionContext } from "../apps/actions/context.js";
+import { canOpenChat, privateOwnerOf } from "./privacy.js";
+import { type SessionActor, sessionOwnerKey } from "../access/session-actor.js";
+import type { ChannelSurface } from "../core/session-opening.js";
+import type { WebChatRepository } from "./repository.js";
+import type { Channel } from "../chats/connected-accounts/connected-account.js";
+import { queryPage } from "../chats/history/messages.js";
+import { readWebchatMessages, WebChatAdapter } from "./adapter.js";
 
 export const WEBCHAT_CHANNEL = "webchat";
 

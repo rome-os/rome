@@ -6,7 +6,7 @@ import type {
   BackendTurnParams,
   ChatId,
 } from "@rome-os/app-runtime";
-import type { ChatThreadPlacement } from "../db/repositories/webchat.js";
+import type { ChatThreadPlacement } from "../webchat/repository.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -23,12 +23,12 @@ import { placeIn } from "../chats/storage/place.js";
 import { chatKey } from "../connections/chat-ids.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { createTestDb, type TestDb } from "../test/db.js";
-import { readWebchatMessages } from "../chats/dashboard/webchat.js";
+import { readWebchatMessages } from "../webchat/adapter.js";
 import type { AgentTurnFailedBeforeStart, TurnLifecycleListener } from "../agent/index.js";
 import { startConciergeEvents } from "./events.js";
 import { RETRY_MS } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
-import { mainChatIdOf } from "./owner.js";
+import { mainChatIdOf } from "../webchat/owner.js";
 import { createConciergeOwners } from "./owners.js";
 import {
   CONCIERGE_ACCOUNT,
