@@ -34,6 +34,9 @@ One line of conversation inside a [Concierge chat](#concierge-chat) that its own
 - An owner's message sent as a reply, or from the thread view, is in that thread at once, and nothing moves it.
 - A task has one root, kept for good. A task started for an owner's message has that message's thread, or that message as its root. The Concierge's messages in that turn that answer the message join the thread with it. A task no one owner's message started takes the first owner's message sent on to it, or the first thing it brings back.
 - Whatever a task brings back later, its result, its question card or a forward, joins the task's thread. So does an owner's message sent on to it, which keeps a follow-up in the task's story.
+- A Concierge message that names what it is about goes there, whatever turn says it: a task's result or news joins that task's thread, and a message naming a thread, or the owner's message it answers, goes where that is. Only a message that names nothing goes by its turn: into the thread of the task the turn reports on, or of the turn's one owner's message.
+- A turn about two things, the owner's message and another task's news that a newer message took over, is mixed. There a message that names nothing goes in no thread, and is never guessed into the owner's.
+- A task's row points to the owner's message the task is for, before anything said in the same turn, which may be another task's report.
 - A task moved to another Concierge chat leaves its thread behind, and starts a new one there the same way.
 - Any other message is in no chat thread: an owner's message typed in the chat, and the Concierge's answer to one. The Concierge's answer to a message in a thread is in that thread.
 - A message in no chat thread opens a thread view that shows it alone.

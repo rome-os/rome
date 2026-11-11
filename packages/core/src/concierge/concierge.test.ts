@@ -620,9 +620,9 @@ describe("Concierge tools", () => {
       await expect(s.tool("say", { text: "x", answers: "elsewhere" })).resolves.toMatchObject({
         isError: true,
       });
-      // In a turn the guardian started, a named thread changes nothing.
-      const ignored = saidId(await s.tool("say", { text: "Still here", thread: "flights" }));
-      expect(threadOf(s, ignored)).toBeUndefined();
+      // A named thread holds in a turn the guardian started too.
+      const named = saidId(await s.tool("say", { text: "Flights news", thread: "g2" }));
+      expect(threadOf(s, named)).toBe("flights");
     });
 
     it("puts an answer in no thread when the turn holds several guardian messages and names none", async () => {
@@ -777,6 +777,61 @@ describe("Concierge tools", () => {
       (s.messages.get(CONCIERGE_CHAT) ?? []).filter(
         (row) => row.chatThread === root && row.id !== root,
       ).length;
+
+    /** Task `taskId`'s report turn, which a newer guardian message took over before it said anything. */
+    const reportTakenOver = async (s: ReturnType<typeof setup>, taskId: string) => {
+      s.onBackendTurn(() => "interrupted");
+      await s.service.systemTurnOutcome(
+        CONCIERGE_CHAT,
+        `<task_events>\n<task id="${taskId}" title="Flights">\n</task>\n</task_events>`,
+      );
+      s.onBackendTurn(() => "completed");
+    };
+
+    it("puts a report a guardian message took over in its task's thread, and the new task's row on that message", async () => {
+      const s = setup({ said: false });
+      const short = await startTaskFor(s, "ask-short", ["g0"]);
+      await reportTakenOver(s, short.taskId);
+      // The guardian's new request is the turn's only prompt.
+      s.inTurn("notes");
+      guardianSays(s, { id: "g1", turnId: "notes" });
+      const report = saidId(await s.tool("say", { text: "Updated short.txt", task: short.taskId }));
+      const notes = JSON.parse(
+        (await s.tool("chat_start", { title: "Notes", brief: "Write notes", answers: "g1" }))
+          .content[0].text,
+      ) as { taskId: string };
+      expect(threadOf(s, report)).toBe("g0");
+      const row = await s.tasks.repo.getWithChat(notes.taskId);
+      expect(row?.sourceMessageId).toBe("g1");
+      expect(await s.tasks.repo.threadRoot(notes.taskId)).toBe("g1");
+    });
+
+    it("puts a message naming nothing in no thread, in a turn that also carries another task's report", async () => {
+      const s = setup({ said: false });
+      const short = await startTaskFor(s, "ask-short", ["g0"]);
+      await reportTakenOver(s, short.taskId);
+      s.inTurn("notes");
+      guardianSays(s, { id: "g1", turnId: "notes", chatThread: "g1" });
+      const unnamed = saidId(await s.tool("say", { text: "Updated short.txt" }));
+      expect(threadOf(s, unnamed)).toBeUndefined();
+      // Once that turn ends, the next turn has one subject again.
+      await s.finish({
+        turnId: "notes",
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        text: "ok",
+      });
+      s.inTurn("next");
+      guardianSays(s, { id: "g2", turnId: "next", chatThread: "g1" });
+      expect(threadOf(s, saidId(await s.tool("say", { text: "Sure" })))).toBe("g1");
+    });
+
+    it("puts a message naming nothing in its turn's one guardian message's thread", async () => {
+      const s = setup({ said: false });
+      s.inTurn("ask");
+      guardianSays(s, { id: "g1", turnId: "ask", chatThread: "g0" });
+      expect(threadOf(s, saidId(await s.tool("say", { text: "Sunny" })))).toBe("g0");
+    });
 
     it("(a) keeps a plain task's story under the guardian's message: result, follow-up, second result", async () => {
       const s = setup({ said: false });

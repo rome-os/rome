@@ -237,6 +237,7 @@ export function startConciergeEvents(
     // The ended turn's stream may still be draining, so it is left out.
     const running = service.dashboard.chats.activeTurns(chatId).filter((id) => id !== ended);
     if (status === "interrupted" && running.length > 0) return;
+    service.turnSettled(chatId);
     await tasks.repo
       .settleTurnReactions(chatId, reactionEndOf(status), running)
       .catch((error: unknown) =>

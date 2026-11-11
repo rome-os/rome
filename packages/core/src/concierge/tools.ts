@@ -54,7 +54,14 @@ const NAMED_ANSWERS_TURNS = 64;
 const THREAD_PARAMETER = {
   type: "string",
   description:
-    "Only in a turn the guardian did not start, such as task events about several tasks: the id of an existing chat thread, or of a message in one, that this message reports on. Leave it out to report in the thread of the task the turn is about. It never starts a thread, and in a turn the guardian started your answer goes where their message is.",
+    "The id of an existing chat thread, or of a message in one, that this message is about. It never starts a thread. Prefer task when the message reports a task.",
+};
+
+/** The parameter that names the task a message reports on. */
+const TASK_PARAMETER = {
+  type: "string",
+  description:
+    "The id of the task this message reports on, from task_list or a <task id> line. Pass it whenever the message tells a task's result or news, in any turn: the message then goes in that task's thread. In a turn that holds both a guardian message and another task's news, a message that names no task, thread or answers goes in no thread.",
 };
 
 /** The parameter that names the guardian message whose words go on to a task. */
@@ -68,7 +75,7 @@ const RELAYS_PARAMETER = {
 const ANSWERS_PARAMETER = {
   type: "string",
   description:
-    "The message_id of the guardian message this answers, from its <chat_thread> line. Give it when the guardian sent several messages in this turn, so the answer goes where that one is; without it such an answer goes in no thread.",
+    "The message_id of the guardian message this answers, from its <chat_thread> line. Give it when the turn holds several guardian messages, or a guardian message and another task's news, so the answer goes where that message is; without it such an answer goes in no thread.",
 };
 
 function requireString(args: Record<string, unknown>, field: string): string {
@@ -256,21 +263,27 @@ export async function buildConciergeTools(
     return latest;
   };
 
-  // The message a new task's row points to. The Concierge sends no
-  // acknowledgement before a task, so with nothing said this turn it is the
-  // guardian message the task is for: the one `answers` names, or the turn's
-  // only one.
+  // The message a new task's row points to: the one passed, else the
+  // guardian message `answers` names, else the latest thing said this turn,
+  // else the turn's only guardian message. What was said this turn may be
+  // another task's report, so the guardian message the task is for comes
+  // first.
   const sourceMessageForTask = async (
     explicit: string | undefined,
     answers: string | undefined,
   ) => {
     if (explicit) return requireSourceMessage(explicit);
+    const { chatId } = currentTurn();
+    // The guardian message the task is for comes before anything said this
+    // turn, which may be another task's report.
+    if (answers && (await webchatRepo.getReplyTarget(chatId, answers))?.role === "user") {
+      return answers;
+    }
     const latest = await latestSaidThisTurn();
     if (latest) return latest;
     const prompts = await turnPrompts();
-    const asked = answers ?? (prompts.length === 1 ? prompts[0] : undefined);
-    const { chatId } = currentTurn();
-    if (asked && (await webchatRepo.getReplyTarget(chatId, asked))?.role === "user") return asked;
+    const only = prompts.length === 1 ? prompts[0] : undefined;
+    if (only && (await webchatRepo.getReplyTarget(chatId, only))?.role === "user") return only;
     throw new Error(NO_ROW_MESSAGE);
   };
 
@@ -524,28 +537,28 @@ export async function buildConciergeTools(
   };
 
   // Where a message the Concierge says goes (docs/domains/chats.md#chat-thread).
-  // One about a task goes into the task's thread; when the task has none
-  // yet, the message becomes its root (`rootFor`). An answer goes where the
-  // guardian's message it answers is. A report names a thread with `thread`.
+  // A message that names its subject goes there, whichever turn says it: the
+  // task it is about goes into the task's thread, and when the task has none
+  // yet the message becomes its root (`rootFor`); a named thread, or the
+  // guardian message it answers, goes where that is. One that names nothing
+  // goes where the turn's one subject is: the task it reports on, or its
+  // only guardian message's thread. A turn with two subjects, the owner's
+  // message and a report a newer input took over, puts it in no thread.
   const placementFor = async (
     answers: string | undefined,
     about: { thread?: string; taskId?: string | null } = {},
   ): Promise<{ chatThread?: ChatThreadPlacement; rootFor?: string }> => {
     const { chatId } = currentTurn();
     const prompts = await requireTurnPrompt(answers);
-    const reported = prompts.length === 0 && !about.thread ? context.getTurnReportedTask() : null;
-    const taskId = about.taskId ?? reported ?? null;
-    const own = taskId ? await tasks.repo.getWithChat(taskId) : null;
-    if (taskId && own?.conciergeChat.id === chatId) {
+    const toTask = async (taskId: string) => {
+      const own = await tasks.repo.getWithChat(taskId);
+      if (own?.conciergeChat.id !== chatId) return null;
       const root = await rootOf(taskId);
       return root ? { chatThread: { in: root } } : { rootFor: taskId };
-    }
-    if (prompts.length > 0) {
-      // With several guardian messages and no `answers`, which one this
-      // answers is a guess, so it goes in no thread.
-      const answered = answers ?? (prompts.length === 1 ? prompts[0] : undefined);
-      const thread = answered ? await threadOf(chatId, answered) : null;
-      return thread ? { chatThread: { in: thread } } : {};
+    };
+    if (about.taskId) {
+      const placed = await toTask(about.taskId);
+      if (placed) return placed;
     }
     if (about.thread !== undefined) {
       const thread = await threadOf(chatId, about.thread);
@@ -556,7 +569,19 @@ export async function buildConciergeTools(
       }
       return { chatThread: { in: thread } };
     }
-    return {};
+    if (answers) {
+      const thread = await threadOf(chatId, answers);
+      return thread ? { chatThread: { in: thread } } : {};
+    }
+    if (prompts.length === 0) {
+      const reported = context.getTurnReportedTask();
+      return (reported ? await toTask(reported) : null) ?? {};
+    }
+    // Two subjects, or several guardian messages: which one this is about
+    // is a guess, so it goes in no thread.
+    if (prompts.length > 1 || service.carriedReport(chatId)) return {};
+    const thread = await threadOf(chatId, prompts[0] as string);
+    return thread ? { chatThread: { in: thread } } : {};
   };
 
   // Says `parts` where `placementFor` puts them, and roots the task there
@@ -624,11 +649,18 @@ export async function buildConciergeTools(
     isPrivate: boolean,
     answers?: string,
     thread?: string,
+    taskId?: string,
   ) => {
     const { chatId, turnId } = currentTurn();
+    if (taskId) {
+      const own = await tasks.repo.getWithChat(taskId);
+      if (own?.conciergeChat.id !== chatId) {
+        throw new Error(`No task ${taskId} in this chat. Pass a task id from task_list.`);
+      }
+    }
     const id = await addMessage(
       [{ type: "text", content: text, ...(format === "long" ? { format } : {}) }],
-      await placementFor(answers, thread ? { thread } : {}),
+      await placementFor(answers, { ...(thread ? { thread } : {}), ...(taskId ? { taskId } : {}) }),
     );
     noteAnswers(id, answers);
     said(chatId, turnId, text, isPrivate);
@@ -689,6 +721,7 @@ export async function buildConciergeTools(
             description:
               "true: the message holds a secret, so its words never show on the phone's lock screen.",
           },
+          task: TASK_PARAMETER,
           answers: ANSWERS_PARAMETER,
           thread: THREAD_PARAMETER,
         },
@@ -701,6 +734,7 @@ export async function buildConciergeTools(
             args.private === true,
             optionalString(args, "answers"),
             optionalString(args, "thread"),
+            optionalString(args, "task"),
           );
           return {
             sent: "The guardian sees it. Call say again only for a new message.",

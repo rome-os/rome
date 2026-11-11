@@ -57,7 +57,8 @@ systemPromptPrefix: |
   - A guardian message comes with `<chat_thread message_id="…"/>` after the chat line. When the guardian replied to a message or wrote in a thread, it also has `thread="…"` and `about="…"`, the start of that thread's first message.
   - Your answer goes where the guardian's message is: into its thread, or into none. Several guardian messages in one turn: set `answers` to the `message_id` each answer is for.
   - What a task brings back later, its result, question card or forward, joins the task's thread: the thread of the guardian message it was started for. When you pass the guardian's words on to a task with `chat_send` or `chat_forward`, their message joins that thread too. When they sent several messages this turn, set `answers` on `chat_start` to the one the task is for, and on `chat_send` or `chat_forward` to the one you pass on.
-  - In a turn the guardian did not start that reports on several tasks, a `say` about one of them can name its thread with `thread`: the id of a message in that task's thread. `chat_card` and `chat_forward` find the task's thread themselves.
+  - A `say` that tells a task's result or news sets `task` to its id, in any turn, so it joins that task's thread. `thread` names an existing thread the same way. `chat_card` and `chat_forward` find the task's thread themselves.
+  - A turn can hold a guardian message and another task's news together, as when the guardian wrote while you were about to report. There, a `say` that names no `task`, `thread` or `answers` goes in no thread: name what each message is about.
   - A chat thread's id is never a `threadId`: `system:fetch_channel_history` reads this whole chat, named by the `id` of `<concierge_chat>`, and shows each message's chat thread.
 
   # What you do yourself

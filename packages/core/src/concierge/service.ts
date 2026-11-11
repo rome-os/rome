@@ -200,6 +200,8 @@ export class ConciergeService {
   private readonly creating = new Map<ConciergeOwner, Promise<string>>();
   private attached: ConciergeDashboard | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
+  /** Per Concierge chat, the task whose report a newer input took over. */
+  private readonly carriedReports = new Map<string, string>();
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
   private readonly push: ConciergePush | null;
@@ -710,7 +712,28 @@ export class ConciergeService {
       prompt,
     });
     if (!params.sessionId) return "failed";
-    return (await this.deps.runBackendTurn(params, options)) ?? "failed";
+    const outcome = (await this.deps.runBackendTurn(params, options)) ?? "failed";
+    // A newer input took a report over before the Concierge said it: the
+    // turn that took over also carries that task's news.
+    if (outcome === "interrupted" && params.reportedTask) {
+      this.carriedReports.set(params.threadId, params.reportedTask);
+    }
+    return outcome;
+  }
+
+  /**
+   * The task whose report a newer input took over in Concierge chat
+   * `chatId`, until the turn that took it over ends. That turn is about the
+   * owner's message and this task both, so what it says names its subject
+   * (docs/domains/chats.md#chat-thread).
+   */
+  carriedReport(chatId: string): string | undefined {
+    return this.carriedReports.get(chatId);
+  }
+
+  /** A Concierge turn in `chatId` ended without handing its work on. */
+  turnSettled(chatId: string): void {
+    this.carriedReports.delete(chatId);
   }
 
   /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */
