@@ -31,7 +31,7 @@ import {
   type EmailRecipients,
 } from "../connections/email-chat-adapter.js";
 import type { SpeakerAt, SpeakerMessages } from "../connections/speaker-messages.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import type { SpeakerReplies } from "../sessions/speaker-replies.js";
 import type { Speakers } from "../sessions/speakers.js";
 import type { TurnLinks } from "../sessions/turn-links.js";

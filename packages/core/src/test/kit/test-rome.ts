@@ -340,7 +340,7 @@ async function buildHarness(
       ensureChannelChat: (input) =>
         openChannelChat(
           {
-            webchatRepo: new ChatsWebChatRepository(db, {
+            records: new ChatsWebChatRepository(db, {
               chats: chatsWired.chats,
               lines: chatsWired.messages,
               links: chatsWired.links,

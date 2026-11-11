@@ -35,7 +35,8 @@ import { setupsRoutes } from "./routes/setups.js";
 import { approvalsRoutes } from "./routes/approvals.js";
 import { appApiDashboardRoutes, appApiPublicRoutes } from "./routes/app-api.js";
 import { webhookRoutes } from "./routes/webhooks.js";
-import { send } from "../connections/send.js";
+import { send } from "../chats/send.js";
+import { ownPlatforms } from "../webchat/send.js";
 import { createWebchatRuntime, type WebchatRuntime } from "./routes/webchat.js";
 import { conciergeRoutes } from "./routes/concierge.js";
 import { settingsRoutes } from "./routes/settings.js";
@@ -85,7 +86,7 @@ import { ConnectedAccountsRepository } from "../db/repositories/connected-accoun
 import { accountLinkOf, connectionKindOf } from "../chats/connected-accounts/account-links.js";
 import { byChannel, readAccountAgent } from "../chats/connected-accounts/account-agents.js";
 import { SessionQueryService } from "../sessions/query-service.js";
-import { canOpenChat } from "../concierge/privacy.js";
+import { canOpenChat } from "../webchat/privacy.js";
 import type { ApiConfig, ApiDeps, ApiHandle } from "./deps.js";
 
 const log = createLogger("api");
@@ -241,9 +242,10 @@ export function buildApp(
   deps.backendTurnRunner.setWebchatRuntime(webchatRuntime);
   // Concierge is built before the API layer too. Its sends are Chats' own,
   // with the dashboard taking those into its chats.
+  const sendDeps = { ...deps, ownPlatforms: ownPlatforms(webchatRuntime) };
   deps.concierge?.attachDashboard({
     chats: webchatRuntime,
-    send: (place, body, as) => send({ ...deps, dashboard: webchatRuntime }, place, body, as),
+    send: (place, body, as) => send(sendDeps, place, body, as),
   });
 
   app.route("/api", api);

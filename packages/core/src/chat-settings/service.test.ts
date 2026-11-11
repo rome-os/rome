@@ -87,7 +87,7 @@ function openSpeaker(
 ) {
   return openChannelChat(
     {
-      webchatRepo: new ChatsWebChatRepository(db),
+      records: new ChatsWebChatRepository(db),
       speakers: { chats: wired.chats, adapters: wired.adapters, speakers: wired.speakers },
     },
     input,

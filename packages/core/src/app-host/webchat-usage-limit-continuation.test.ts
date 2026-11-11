@@ -6,19 +6,19 @@ import {
   type ModelAccountReport,
   type ModelAccounts,
 } from "../agent/index.js";
-import { createBackendTurnRunner, type MainBackendTurnRunner } from "../app-host/backend-turn.js";
+import { createBackendTurnRunner, type MainBackendTurnRunner } from "./backend-turn.js";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { guardianAuth, romeSessions, sessions } from "../db/schema.js";
 import { createMockAgentRunner, createTestDb, type TestDb } from "../test/helpers.js";
-import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
-import { continuationActor } from "./continuation-actor.js";
-import { sendForCaller } from "../app-host/caller-notify.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { continuationActor } from "../webchat/continuation-actor.js";
+import { sendForCaller } from "./caller-notify.js";
 import type { SessionActor } from "../access/session-actor.js";
-import { continueInterruptedTurns } from "./restart-continuation.js";
+import { continueInterruptedTurns } from "../webchat/restart-continuation.js";
 import {
   startUsageLimitContinuation,
   usageLimitContinuationPrompt,
-} from "./usage-limit-continuation.js";
+} from "../webchat/usage-limit-continuation.js";
 
 const HOUR = 60 * 60 * 1000;
 /** How long after a stated limit end the account is read. */

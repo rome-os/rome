@@ -9,7 +9,8 @@ import { withoutSessionActor } from "../access/session-actor.js";
 import { marked, type Token } from "marked";
 import type { NotifyLevel, SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
 import { createLogger } from "../logger.js";
-import { recipientOf, type ConciergeOwner } from "./owner.js";
+import type { ConciergeOwner } from "../webchat/owner.js";
+import { recipientOf } from "./owners.js";
 
 const log = createLogger("concierge-push");
 

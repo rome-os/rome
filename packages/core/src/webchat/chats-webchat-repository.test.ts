@@ -1,4 +1,4 @@
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "./repository.js";
 import { backfillLegacyChats } from "../db/chats-backfill.js";
 import { resolveChatSenders } from "../api/routes/chat-senders.js";
 import { resolveReply } from "../api/routes/webchat-reply.js";

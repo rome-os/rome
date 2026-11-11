@@ -1,7 +1,20 @@
 import { expect, it } from "@rstest/core";
 import { failoverReason, type FailoverReason } from "./failover-reason.js";
-import type { ModelAccountReports } from "../agent/index.js";
-import { reportOf } from "../test/kit/model-accounts.js";
+import type { ModelAccountStatus } from "./model-account.js";
+import type {
+  ModelAccountReport,
+  ModelAccountReports,
+  ProviderAvailabilityState,
+} from "./model-account-report.js";
+
+const reportOf = (
+  state: ProviderAvailabilityState,
+  account: Partial<ModelAccountStatus> = {},
+): ModelAccountReport => ({
+  state,
+  account: { loggedIn: state !== "unauthorized", ...account },
+});
+
 const state = (): ModelAccountReports => ({
   anthropic: reportOf("available"),
   openai: reportOf("available"),

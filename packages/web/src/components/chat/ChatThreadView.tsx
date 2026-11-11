@@ -137,7 +137,7 @@ export function ChatThreadView({
       <div
         ref={listRef}
         onScroll={onScroll}
-        className="relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain concierge-header-clear"
+        className="scrollbar-idle-hidden relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain concierge-header-clear"
         style={{ paddingBottom: floorHeight }}
       >
         <div className="mt-auto">

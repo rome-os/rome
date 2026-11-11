@@ -1,9 +1,8 @@
 import { beforeEach, describe, expect, it } from "@rstest/core";
 import type { ChatId } from "@rome-os/app-runtime";
 import { sql } from "drizzle-orm";
-import { chatKey, ownedBy } from "../connections/chat-ids.js";
-import type { ChatRef } from "../chats/storage/place.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { type ChatRef, chatKey } from "../chats/storage/place.js";
+import { WebChatRepository } from "./repository.js";
 import { approvals, channels, romeAgentMessages, romeSessions } from "../db/schema.js";
 import { TurnLinks } from "../sessions/turn-links.js";
 import { createTestDb, type TestDb } from "../test/db.js";
@@ -31,6 +30,28 @@ describe("ChatReadModel", () => {
     reads = new ChatReadModel(testDb.db);
     links = new TurnLinks(testDb.db);
     fixture = speakerFixture(testDb.db);
+  });
+
+  it("shows what an automated source said under the source's name, with no account", async () => {
+    await repo.createSession("automation-chat", "Automation");
+    const guardian = { kind: "guardian" as const, userId: "seat", via: "cookie" as const };
+    for (const [id, source, actor] of [
+      ["app", "automated::1::app:daily-report", guardian],
+      ["routine", "automated::0::routine:Morning briefing", guardian],
+      ["concierge", "core:concierge", guardian],
+      ["subagent", "coding:coding", undefined],
+    ] as const) {
+      await repo.recordUserInput(id, "automation-chat", text(`Status ${id}`), actor, {
+        platform: "webchat",
+        id: source,
+      });
+    }
+
+    const transcript = (await reads.chatTranscript("automation-chat"))!;
+    expect(transcript.lines).toHaveLength(4);
+    for (const line of transcript.lines) {
+      expect(line).toMatchObject({ role: "user", senderAccountId: null, senderName: "Automation" });
+    }
   });
 
   /** A dashboard chat, and the agent's speaker in it, opened under `id`. */
@@ -150,7 +171,7 @@ describe("ChatReadModel", () => {
       fixture.speaker({ id: support, chat, accountId: "bot-support", agentName: "support" });
       // Wei's question reaches both bots: one line in the chat.
       const asked = fixture.say({
-        id: ownedBy(key, "bot-sales", "om_1"),
+        id: "om_1",
         chat,
         from: "ou_wei",
         name: "Wei",
@@ -160,7 +181,7 @@ describe("ChatReadModel", () => {
       links.prompt(asked, sales, "sales-turn-7");
       await traceAt(sales, "sales-trace-7", "sales-turn-7", now.getTime() / 1000);
       const answered = fixture.say({
-        id: ownedBy(key, "bot-sales", "om_2"),
+        id: "om_2",
         chat,
         from: "bot-sales",
         agent: "sales",

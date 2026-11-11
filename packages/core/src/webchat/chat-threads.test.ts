@@ -1,10 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { sql } from "drizzle-orm";
-import type {
-  ChatThreadPlaced,
-  ChatThreadPlacement,
-  StoredWebchatMessage,
-} from "../db/repositories/webchat.js";
+import type { ChatThreadPlaced, ChatThreadPlacement, StoredWebchatMessage } from "./repository.js";
 import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
 

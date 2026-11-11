@@ -1,9 +1,9 @@
 import { ROOT_CONTEXT } from "@opentelemetry/api";
-import { WebChatDashboardSessions } from "../webchat/webchat-dashboard-sessions.js";
+import { AgentRecordedSessions } from "../sessions/agent-recorded-sessions.js";
 import { testReceipt, testTurnHandle } from "../test/turn-handle.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import type { StreamAgentEvent } from "@rome-os/app-runtime";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import type { AgentSession, Sessions, AgentTurnInput, SendTurnOptions } from "../agent/index.js";
 import { createSubagentCalls, subagentRequest, type SubagentCalls } from "../agent/index.js";
@@ -115,7 +115,7 @@ describe("subagent calls through the run's ports", () => {
     db = createTestDb();
     repo = new ChatsWebChatRepository(db.db);
     calls = createSubagentCalls({
-      dashboard: new WebChatDashboardSessions(repo),
+      recorded: new AgentRecordedSessions(repo),
       turnLog: subagentTurnLog(repo),
       liveTurns: subagentLiveTurns(createAgentTurnStreamRegistry()),
     });

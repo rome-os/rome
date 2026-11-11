@@ -1,13 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";
-import { createBackendTurnRunner } from "../app-host/backend-turn.js";
+import { createBackendTurnRunner } from "./backend-turn.js";
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { romeAgentMessages, romeSessions, sessions } from "../db/schema.js";
 import { createMockAgentRunner, createTestDb, type TestDb } from "../test/helpers.js";
-import { ChatsWebChatRepository } from "./chats-webchat-repository.js";
-import { continueInterruptedTurns, RESTART_CONTINUATION_PROMPT } from "./restart-continuation.js";
-import { continuationActor } from "./continuation-actor.js";
-import { sendForCaller } from "../app-host/caller-notify.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import {
+  continueInterruptedTurns,
+  RESTART_CONTINUATION_PROMPT,
+} from "../webchat/restart-continuation.js";
+import { continuationActor } from "../webchat/continuation-actor.js";
+import { sendForCaller } from "./caller-notify.js";
 import { guardianAuth } from "../db/schema.js";
 
 const DAY = 24 * 60 * 60 * 1000;

@@ -22,6 +22,11 @@ export interface BackendTurnOptions {
   actor?: SessionActor;
 }
 
+/** How a backend turn ended: `stopped` when a Stop request cut it short,
+ *  `interrupted` when something else did, such as a newer input, and
+ *  `failed` when it errored or never ran. */
+export type BackendTurnOutcome = "completed" | "stopped" | "interrupted" | "failed";
+
 export interface BackendEmitOptions {
   /** The task already saved this event's trace and delivers its turn's reply
    * itself, so the session stream only shows the event live and mounts its

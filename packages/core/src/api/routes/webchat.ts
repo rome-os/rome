@@ -55,7 +55,7 @@ import {
   isTurnFeedbackRating,
 } from "@rome/api-types/trace-segments";
 import type { TurnFeedback } from "@rome/api-types/trace-segments";
-import type { MessagePageCursor, StoredTurnFeedback } from "../../db/repositories/webchat.js";
+import type { MessagePageCursor, StoredTurnFeedback } from "../../webchat/repository.js";
 import type { AgentEvent, MessagePart } from "../../types.js";
 import { createAgentTurnRef } from "../../agent/index.js";
 import type { AgentSession, AgentTurnHandle } from "../../agent/index.js";
@@ -91,7 +91,7 @@ import {
   sessionOwnerKey,
   type SessionActor,
 } from "../../access/session-actor.js";
-import type { DashboardInbox } from "../../connections/send.js";
+import type { DashboardInbox } from "../../webchat/send.js";
 import {
   resolveChatSenders,
   resolveAutomatedSender,
@@ -110,7 +110,7 @@ import type {
 import { z } from "zod";
 import { withReplyContext } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
-import type { ChatThreadPlacement } from "../../db/repositories/webchat.js";
+import type { ChatThreadPlacement } from "../../webchat/repository.js";
 import { messageContentText } from "../../chats/history/messages-agent.js";
 
 /** The agent of a chat that saved no agent, under the name its sessions are saved by. */
@@ -318,7 +318,7 @@ type WebchatEventName =
 // `routineKey` is set for an `activate: true` call: the key its routine was
 // created with, so the card's lookup finds it and opens saved.
 async function persistRoutineDraftCard(
-  webchatRepo: import("../../db/repositories/webchat.js").WebChatRepository,
+  webchatRepo: import("../../webchat/repository.js").WebChatRepository,
   actionRegistry: import("../../apps/actions/types.js").ActionRegistry,
   sessionId: string,
   turnId: string,
@@ -378,7 +378,7 @@ async function persistRoutineDraftCard(
 // `{ pendingInteraction: true, ... }` on the tool_result. `toolUseId` is the correlation key the component /
 // surface cites when it posts its result back.
 async function persistSuspensionCard(
-  webchatRepo: import("../../db/repositories/webchat.js").WebChatRepository,
+  webchatRepo: import("../../webchat/repository.js").WebChatRepository,
   sessionId: string,
   turnId: string,
   part: Extract<MessagePart, { type: "pending_interaction" }>,
@@ -641,7 +641,7 @@ interface OpenSuspensionCard {
 }
 
 async function findOpenSuspensions(
-  webchatRepo: import("../../db/repositories/webchat.js").WebChatRepository,
+  webchatRepo: import("../../webchat/repository.js").WebChatRepository,
   sessionId: string,
 ): Promise<Map<string, OpenSuspensionCard>> {
   // Matching is order-aware because provider toolUseIds are only unique within
@@ -822,7 +822,7 @@ export interface WebchatRuntime {
   subscribeSessionEvents(sessionId: string, emit: LiveEventEmit): () => void;
   /** Whether the id names a session the session events stream serves. */
   hasStoredSession(sessionId: string): Promise<boolean>;
-  /** The dashboard's side of a send into one of its chats (connections/send.ts). */
+  /** The dashboard's side of a send into one of its chats (webchat/send.ts). */
   post: DashboardInbox["post"];
   /** Start a chat owned by `ownerKey`, as `POST /chat/sessions` does, and answer
    *  its id. Throws the route's error. */

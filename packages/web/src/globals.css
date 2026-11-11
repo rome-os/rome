@@ -719,6 +719,13 @@
     scrollbar-gutter: stable;
   }
 
+  /* A page that fills the viewport and scrolls inside itself, such as a chat,
+     never scrolls the document, so the reserved track would only stand as an
+     empty strip down its right edge wherever scrollbars take space. */
+  html:has([data-fills-viewport]) {
+    scrollbar-gutter: auto;
+  }
+
   /* react-remove-scroll, under every Radix overlay, hides the body's overflow
      and adds the scrollbar's width as a body margin so content does not widen
      when the track disappears. The gutter reserved above keeps the track, so
@@ -776,6 +783,18 @@
 
   &:hover,
   &:focus-within {
+    scrollbar-color: var(--color-border-strong) transparent;
+  }
+}
+
+/* `scrollbar-idle-hidden` for a scroller that holds a field of its own, such
+   as a chat transcript with its composer: focus in that field is typing, not
+   scrolling, so only the pointer shows the thumb. */
+@utility scrollbar-hover-shown {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+
+  &:hover {
     scrollbar-color: var(--color-border-strong) transparent;
   }
 }

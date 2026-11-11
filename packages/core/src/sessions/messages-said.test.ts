@@ -13,7 +13,7 @@ import { ChatEvents } from "../chats/storage/events.js";
 import { messageToRome } from "../chats/storage/message.js";
 import { chatKey, placeIn } from "../chats/storage/place.js";
 import { inboundRecording } from "../connections/inbound-recording.js";
-import { WebChatRepository } from "../db/repositories/webchat.js";
+import { WebChatRepository } from "../webchat/repository.js";
 import { chatMessages, romeSessions } from "../db/schema.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { messagesSaid } from "./messages-said.js";

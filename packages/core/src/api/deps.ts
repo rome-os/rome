@@ -15,13 +15,14 @@ import type {
   PlatformOfChannel,
   RecordedOn,
 } from "../chats/connected-accounts/connected-account.js";
+import type { PlatformSend } from "../chats/send.js";
 import type { SendRecording } from "../connections/send.js";
 import type { ChatRepository } from "../chats/storage/chat-repository.js";
 import type { MessageRepository as ChatLines } from "../chats/storage/message-repository.js";
 import type { ChannelRecordsRepository, SendersOn } from "../db/repositories/channel-records.js";
 import type { AccountNames } from "../chats/accounts/account-names.js";
 import type { ExternalAgents } from "../chats/accounts/agents-accounts.js";
-import type { WebChatRepository } from "../db/repositories/webchat.js";
+import type { WebChatRepository } from "../webchat/repository.js";
 import type { WebhookInvocationsRepository } from "../apps/repositories/webhook-invocations.js";
 import type { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import type { ApprovalHandler } from "../apps/actions/approval-handler.js";
@@ -132,6 +133,9 @@ export interface ApiDeps {
   webchatRepo: WebChatRepository;
   /** Where a send into a place is said and put on record in Chats. */
   recording: SendRecording;
+  /** The platforms Rome serves itself, each with its side of a send. The
+   *  dashboard's takes no sends here: only Concierge's send reaches it. */
+  ownPlatforms: ReadonlyMap<string, PlatformSend>;
   /** The chats Rome takes part in, by their adapter's keys. */
   chats: Pick<ChatRepository, "byKey">;
   /** What was said in each chat, as Chats records it. */

@@ -4,7 +4,7 @@ import {
   type ChatMessageSender,
 } from "@rome/api-types/chat";
 import { isCoreMainAgentId } from "../../apps/artifact-id.js";
-import { isConciergeAgent } from "../../concierge/privacy.js";
+import { isConciergeAgent } from "../../webchat/privacy.js";
 import { guardianAuth } from "../../db/schema.js";
 import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
 import type { SessionActor } from "../../access/session-actor.js";
