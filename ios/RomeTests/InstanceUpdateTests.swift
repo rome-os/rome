@@ -224,7 +224,8 @@ final class Counter: @unchecked Sendable {
     @Test func eachPhaseHasItsLine() {
         #expect(UpdateGate.statusLine(.starting(current: "1.1.183", latest: "1.1.190"), progress: .downloading) == "Asking Rome Cloud to start the update…")
         let updating = InstanceUpdater.State.updating(target: "1.1.190", since: .now)
-        #expect(UpdateGate.statusLine(updating, progress: .downloading) == "Upgrading to 1.1.190…")
+        #expect(UpdateGate.statusLine(updating, progress: .downloading) == "Rome is upgrading to 1.1.190…")
+        #expect(UpdateGate.statusLine(updating, progress: .downloading, agentName: "Milo") == "Milo is upgrading to 1.1.190…")
         #expect(UpdateGate.statusLine(updating, progress: .restarting) == "Restarting your Rome…")
         #expect(UpdateGate.statusLine(updating, progress: .almostDone) == "Almost done…")
     }
@@ -267,7 +268,7 @@ final class Counter: @unchecked Sendable {
     /// The prompts name the Rome, never this app, on one line.
     @Test func thePromptsNameTheRome() {
         #expect(UpdateCopy.banner("My Rome") == "My Rome has an update")
-        #expect(UpdateCopy.action("Team Rome") == "Update Team Rome")
+        #expect(UpdateCopy.agent(nil) == "Rome" && UpdateCopy.agent(" ") == "Rome" && UpdateCopy.agent("Milo") == "Milo")
         #expect(UpdateCopy.shortName("  Short  ") == "Short")
         let long = UpdateCopy.shortName("The Kyoto planning and family Rome")
         #expect(long.count == UpdateCopy.nameLimit)
@@ -290,6 +291,22 @@ final class Counter: @unchecked Sendable {
         updater.closePage()
         #expect(!updater.blocking)
         #expect(updater.showsBanner)
+    }
+
+    /// Settings shows the domain and the release the instance runs, once
+    /// the check says; the domain alone before, with no placeholder.
+    @Test func settingsNamesTheRunningRelease() async {
+        #expect(InstanceLine.text(host: "yo.romeos.cc", version: nil) == "yo.romeos.cc")
+        #expect(InstanceLine.text(host: "yo.romeos.cc", version: "1.1.190") == "v1.1.190 · yo.romeos.cc")
+        #expect(InstanceLine.text(host: "yo.romeos.cc", version: "v1.1.190") == "v1.1.190 · yo.romeos.cc")
+        let backend = FakeBackend()
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.189"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
+        let updater = updater(defaults())
+        #expect(updater.runningVersion == nil)
+        await updater.attach(backend: backend, instanceID: "i1")
+        #expect(updater.runningVersion == "1.1.189")
+        updater.reset()
+        #expect(updater.runningVersion == nil)
     }
 
     @Test func belowTheMinimumBlocksWithNoWayPast() async {
@@ -348,25 +365,36 @@ final class Counter: @unchecked Sendable {
         #expect(updater.offered == "1.1.190")
     }
 
-    /// A visitor cannot update: their workspace is never checked, so no page,
-    /// banner or drawer line.
-    @Test func visitorsAreNotOffered() async {
+    /// A visitor gets the guardian's update flow: the offer, and a start
+    /// the instance accepts from them.
+    @Test func visitorsAreOfferedAndCanStart() async {
         let backend = FakeBackend()
+        backend.identity = .success(AccountIdentity(name: "Visitor", isGuardian: false))
+        backend.check = .success(UpgradeCheck(current: .init(version: "1.1.189"), latest: .init(version: "1.1.190"), upgradeAvailable: true))
         let drafts = DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-soft-\(UUID().uuidString)/Drafts"), instance: "t")
-        let guardianSpace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
-        backend.identity = .success(AccountIdentity(name: "Owner", isGuardian: true))
-        await guardianSpace.readRole()
-        #expect(AppModel.offersUpdates(to: guardianSpace))
-
-        let visitorBackend = FakeBackend()
-        visitorBackend.identity = .success(AccountIdentity(name: "Visitor", isGuardian: false))
-        let visitorSpace = Workspace(backend: visitorBackend, instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
+        let visitorSpace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
         await visitorSpace.readRole()
-        #expect(!AppModel.offersUpdates(to: visitorSpace))
-        // What a visitor's never-attached updater shows.
-        let idle = updater(defaults())
-        #expect(!idle.blocking && idle.offered == nil && !idle.showsBanner)
+        #expect(visitorSpace.isVisitor)
+        let updater = updater(defaults())
+        await updater.attach(backend: visitorSpace.backend, instanceID: "i1")
+        #expect(updater.offered == "1.1.190" && updater.showsBanner)
+        updater.openPage()
+        #expect(updater.blocking && updater.canClose)
+        await updater.updateNow()
+        if case .updating(let target, _) = updater.state {
+            #expect(target == "1.1.190")
+        } else {
+            Issue.record("the visitor's start did not go through: \(updater.state)")
+        }
+        updater.reset()
     }
+}
+
+/// A clock a test moves on by hand, so a wait ends when the test says,
+/// never after real seconds.
+final class UpdateClock: @unchecked Sendable {
+    var date = Date(timeIntervalSince1970: 1_800_000_000)
+    func advance(_ seconds: TimeInterval) { date = date.addingTimeInterval(seconds) }
 }
 
 @MainActor
@@ -377,16 +405,19 @@ final class Counter: @unchecked Sendable {
         for (from, closes) in [("1.1.189", true), ("1.1.100", false)] {
             let defaults = UserDefaults(suiteName: "UpdateFailureTests-\(UUID().uuidString)")!
             let store = PendingUpgradeStore(defaults: defaults)
-            store.save(PendingUpgrade(target: "1.1.190", since: .now.addingTimeInterval(-UpdateGate.upgradeTimeout + 0.2), from: from), for: "i1")
-            let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults))
+            let clock = UpdateClock()
+            store.save(PendingUpgrade(target: "1.1.190", since: clock.date.addingTimeInterval(-UpdateGate.upgradeTimeout + 60), from: from), for: "i1")
+            let updater = InstanceUpdater(store: store, banners: UpdateBannerStore(defaults: defaults), pollInterval: .milliseconds(5), now: { clock.date })
             // Restarting: neither the check nor the build answers.
             let backend = FakeBackend()
             backend.check = .failure(APIError.network)
             await updater.attach(backend: backend, instanceID: "i1")
-            // The poll's next look, one interval on, finds the time up.
-            for _ in 0..<80 {
+            #expect(updater.state != .upToDate)
+            // Past the timeout: the poll's next look finds the time up.
+            clock.advance(120)
+            for _ in 0..<400 {
                 if case .failed = updater.state { break }
-                try await Task.sleep(for: .milliseconds(100))
+                try await Task.sleep(for: .milliseconds(5))
             }
             guard case .failed(.timedOut) = updater.state else { Issue.record("\(updater.state)"); continue }
             #expect(updater.blocking)

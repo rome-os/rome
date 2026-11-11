@@ -131,7 +131,7 @@ enum CardScale {
     static let title: CGFloat = 16
     /// Body text, option labels, field values.
     static let body: CGFloat = 15
-    /// The small label above a title ("Needs approval", "Task"), semibold.
+    /// The small grey label above a title ("Needs approval", "Task"), regular.
     static let label: CGFloat = 12
     /// Secondary lines and field labels.
     static let caption: CGFloat = 13

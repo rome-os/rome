@@ -16,6 +16,7 @@ struct TopicChatScreen: View {
     let onCreated: (String) -> Void
 
     @Environment(AppModel.self) private var model
+    @Environment(\.visibleChat) private var visibleChat
     @State private var draft = ""
     @State private var starting: String?
     @State private var startFailed = false
@@ -75,6 +76,7 @@ struct TopicChatScreen: View {
         }
         // Reply brings the keyboard up; the replies line opens it for reading.
         .onChange(of: store?.thread != nil) { _, open in if open, store?.thread?.toReply == true { composerFocused = true } }
+        .onChange(of: store?.quote) { _, quote in if quote != nil { composerFocused = true } }
         .alert("Rename chat", isPresented: $renaming) {
             TextField("Name", text: $newName)
             Button("Cancel", role: .cancel) {}
@@ -89,6 +91,12 @@ struct TopicChatScreen: View {
         .toolbar(.hidden, for: .navigationBar)
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 10) {
+                // Inside the composer's inset, so the last message rests above it too.
+                UpdatePill(agentName: workspace.agentName)
+                if let store, store.quote != nil {
+                    QuoteBar(message: store.quotedMessage) { store.cancelQuote() }
+                        .transition(.move(edge: .bottom).combined(with: .opacity))
+                }
                 if startFailed && store == nil {
                     Text("Could not start the chat")
                         .romeFont(13, .medium)
@@ -101,6 +109,7 @@ struct TopicChatScreen: View {
                 Composer(text: $draft, placeholder: store?.composerThread == nil ? String(localized: "Message") : String(localized: "Reply"), focused: $composerFocused, attachments: attachments) { send() }
             }
             .animation(.easeOut(duration: 0.2), value: showsStarters)
+            .animation(.easeOut(duration: 0.2), value: store?.quote)
             .disabled(starting != nil)
             .padding(.horizontal, Metrics.pagePadding)
             .readableColumn()
@@ -118,7 +127,10 @@ struct TopicChatScreen: View {
         }
     }
 
+    /// Read only while it is the chat on screen: never under an instance
+    /// page's sheet, the Tasks sheet or the drawer.
     private func markRead(_ store: TranscriptStore) {
+        guard visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId) else { return }
         store.markRead()
         workspace.topics.markRead(store.sessionId)
     }
@@ -133,6 +145,8 @@ struct TopicChatScreen: View {
             .onTapGesture { composerFocused = false }
             .onAppear { markRead(store) }
             .onChange(of: store.arrivals) { markRead(store) }
+            // Back from under a sheet: what arrived meanwhile is read now.
+            .onChange(of: visibleChat) { markRead(store) }
         } else if let starting {
             // The chat is being started: the message waits as a pending bubble.
             ScrollView {

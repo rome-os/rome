@@ -90,9 +90,16 @@ import Testing
         backend.identity = .success(AccountIdentity(name: "Lin"))
         await space.readRole()
         #expect(space.isGuardian)
+        // A read that fails keeps the role known, as a cached launch shows it.
         backend.identity = .failure(APIError.network)
         await space.readRole()
-        #expect(space.role == .unknown && !space.isVisitor)
+        #expect(space.isGuardian)
+        // Never read: unknown.
+        let fresh = workspace(FakeBackend(), drafts: draftStore())
+        let failing = fresh.backend as! FakeBackend
+        failing.identity = .failure(APIError.network)
+        await fresh.readRole()
+        #expect(fresh.role == .unknown && !fresh.isVisitor)
     }
 
     @Test func visitorIdentityFromAuthMe() {

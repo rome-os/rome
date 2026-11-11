@@ -9,7 +9,7 @@ struct PushPromptCard: View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 12) {
                 Image(systemName: "bell.badge")
-                    .romeFont(15, .semibold)
+                    .romeFont(15)
                     .foregroundStyle(Palette.primaryIcon)
                     .frame(width: 34, height: 34)
                     .background(Palette.primarySoft, in: Circle())
@@ -33,7 +33,7 @@ struct PushPromptCard: View {
                 .buttonStyle(PressScaleStyle())
                 Button(action: onTurnOn) {
                     Text("Turn on")
-                        .romeFont(15, .semibold)
+                        .romeFont(15, .medium)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 16)
                         .frame(minHeight: 36)

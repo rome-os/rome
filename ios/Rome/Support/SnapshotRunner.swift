@@ -17,6 +17,8 @@ enum DebugCommand: Equatable {
     case photoViewer(Bool)
     /// The Apps page's "New app" sheet, or closed.
     case appIdeas(Bool)
+    /// A page of the instance in its sheet; nil closes it.
+    case page(URL?)
 }
 
 /// Debug builds only: with `ROME_SNAPSHOT_DIR` set, the app opens the demo data,
@@ -53,6 +55,32 @@ enum SnapshotRunner {
             model.openDemo()
             try? await Task.sleep(for: .seconds(2))
             await capture("04-chat", style: styleName, in: directory) {}
+            // The header: the mascot with its name tag, and the status in a
+            // capsule of its own, in each state.
+            if let workspace = model.workspace {
+                let main = workspace.mainChatServerID ?? conciergeChatID
+                await capture("57-header-idle", style: styleName, in: directory, wait: 0.8) { workspace.topics.setActivity(nil, for: main) }
+                await capture("57b-header-working", style: styleName, in: directory, wait: 0.8) { workspace.topics.setActivity(.working, for: main) }
+                await capture("57c-header-long-task", style: styleName, in: directory, wait: 0.8) {
+                    workspace.topics.setActivity(.tasks(title: "整理本周所有会议纪要，并发给团队每个人确认", more: 2), for: main)
+                }
+                await capture("57d-header-long-name", style: styleName, in: directory, wait: 0.8) {
+                    workspace.debugSetAgentName("米洛的超级长名字小管家助手")
+                    workspace.topics.setActivity(.working, for: main)
+                }
+                workspace.debugSetAgentName("Milo")
+                workspace.topics.setActivity(nil, for: main)
+            }
+            // Reply on an Agent message in no chat thread: quoted above the composer.
+            await capture("04b-chat-quote", style: styleName, in: directory, wait: 1) {
+                guard let chat = model.workspace?.concierge,
+                      let said = chat.messages.last(where: { message in
+                          !message.isUser && message.parts.contains { if case .text = $0 { true } else { false } }
+                      })
+                else { return }
+                chat.reply(to: said.id)
+            }
+            model.workspace?.concierge.cancelQuote()
             // The header's status line in each state, then back to the name alone.
             let states: [(String, ConciergeActivity)] = [
                 ("working", .working), ("tool", .tool(.searchingWeb)), ("tasks", .tasks(title: "整理本周会议纪要", more: 1)),
@@ -126,7 +154,7 @@ enum SnapshotRunner {
             await capture("44-question-defaults", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-mail-setup")) }
             // Chat threads: the replies lines, then one thread open over its chat.
             await capture("50-topic-threads", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-trip")) }
-            // A long chat thread: its last answer carries the replies line.
+            // A long chat thread: its root carries the replies line.
             await capture("53-topic-long-thread", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-books")) }
             // A long topic name: cut at the end inside the header's pill.
             await capture("52-topic-long-name", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
@@ -137,14 +165,35 @@ enum SnapshotRunner {
             }
             model.workspace?.topicStore("topic-trip").closeThread()
             try? await Task.sleep(for: .seconds(0.4))
+            // A thread taller than the screen, opened near its foot: the
+            // header above the rows, the last answer just above the composer.
+            model.debugCommand = .section(.topic("topic-books"))
+            try? await Task.sleep(for: .seconds(1.5))
+            await capture("54-long-thread-open", style: styleName, in: directory, wait: 1.5) {
+                model.workspace?.topicStore("topic-books").openThread(at: "b23")
+            }
+            model.workspace?.topicStore("topic-books").closeThread()
+            try? await Task.sleep(for: .seconds(0.4))
             // Routine cards with their state, and the rows for cards only the web draws.
             await capture("48-routine-cards", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-routine")) }
+            // Markdown tables: a narrow one, and a wide one that scrolls inside its bubble.
+            await capture("56-markdown-tables", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-table")) }
             // The drawer over a topic chat: its row selected.
             await capture("05b-drawer-topic", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)
             try? await Task.sleep(for: .seconds(0.8))
             await capture("25-topic-blank", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .section(.newTopic(UUID())) }
             await capture("29-topic-photo-long-reply", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
+            // The same reply unfolded, its chevron pointing up.
+            AgentBubble.startsExpanded = true
+            model.debugCommand = .section(.chat)
+            try? await Task.sleep(for: .seconds(0.6))
+            await capture("29b-topic-long-reply-unfolded", style: styleName, in: directory, wait: 2) { model.debugCommand = .section(.topic("topic-home")) }
+            AgentBubble.startsExpanded = false
+            model.debugCommand = .section(.chat)
+            try? await Task.sleep(for: .seconds(0.6))
+            model.debugCommand = .section(.topic("topic-home"))
+            try? await Task.sleep(for: .seconds(0.6))
             await capture("34-photo-viewer", style: styleName, in: directory, wait: 2) { model.debugCommand = .photoViewer(true) }
             model.debugCommand = .photoViewer(false)
             try? await Task.sleep(for: .seconds(0.4))
@@ -165,11 +214,11 @@ enum SnapshotRunner {
             }
             model.debugCommand = .route([])
             try? await Task.sleep(for: .seconds(0.6))
-            // A dashboard page a card opened, in the app's web view.
+            // A dashboard page a card opened, in the app's web view, as a sheet.
             await capture("49-dashboard-page", style: styleName, in: directory, wait: 2.5) {
-                model.debugCommand = .route([.page(URL(string: "https://me.romeos.cc/routines")!)])
+                model.debugCommand = .page(URL(string: "https://me.romeos.cc/routines")!)
             }
-            model.debugCommand = .route([])
+            model.debugCommand = .page(nil)
             try? await Task.sleep(for: .seconds(0.6))
             await capture("37b-apps-new", style: styleName, in: directory, wait: 1.2) {
                 model.debugCommand = .section(.apps)
@@ -238,13 +287,18 @@ enum SnapshotRunner {
             await capture("36-update-ax3", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
             model.dynamicTypeOverride = nil
             await capture("20-update-required", style: styleName, in: directory, wait: 2) { model.openDemo(.updateRequired) }
-            // Behind but new enough: the banner, the drawer's line, and the page it opens.
-            await capture("48-update-banner", style: styleName, in: directory, wait: 4) { model.openDemo(.updateOffered) }
+            // Behind but new enough: the pill above the composer, the drawer's
+            // line, and the page it opens; then the pill after an upgrade.
+            await capture("48-update-pill", style: styleName, in: directory, wait: 4) { model.openDemo(.updateOffered) }
             await capture("49-update-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)
             try? await Task.sleep(for: .seconds(0.8))
             await capture("50-update-offered-page", style: styleName, in: directory, wait: 1.2) { model.update.openPage() }
             model.update.closePage()
+            await capture("48b-update-done", style: styleName, in: directory, wait: 1) {
+                model.update.debugShow(.upToDate)
+                model.update.debugShowUpdated(DemoBackend.releasedVersion)
+            }
             await capture("21-update-updating", style: styleName, in: directory, wait: 1) {
                 model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now))
             }

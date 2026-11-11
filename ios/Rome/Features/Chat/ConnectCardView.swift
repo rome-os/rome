@@ -75,7 +75,7 @@ struct ConnectCardView: View {
             } else {
                 Button(action: onConnect) {
                     Text(phase == .idle ? "Connect" : "Try again")
-                        .romeFont(CardScale.actionFont, .semibold)
+                        .romeFont(CardScale.actionFont, .medium)
                         .foregroundStyle(.white)
                         .padding(.horizontal, 14)
                         .frame(minHeight: CardScale.actionHeight)

@@ -26,6 +26,31 @@ final class TokenBox: Sendable {
     }
 }
 
+/// The role, name and picture an instance's session had last time, kept on
+/// this phone per instance so a cached launch shows them before `/auth/me`.
+struct KeptIdentity: Codable, Equatable, Sendable {
+    var guardian: Bool
+    var name: String
+    var avatarURL: URL?
+
+    private static let prefix = "keptIdentity."
+
+    static func load(_ instanceID: String, defaults: UserDefaults = .standard) -> KeptIdentity? {
+        defaults.data(forKey: prefix + instanceID).flatMap { try? JSONDecoder().decode(KeptIdentity.self, from: $0) }
+    }
+
+    static func save(_ identity: KeptIdentity?, for instanceID: String, defaults: UserDefaults = .standard) {
+        guard let identity else { return }
+        defaults.set(try? JSONEncoder().encode(identity), forKey: prefix + instanceID)
+    }
+
+    static func removeAll(defaults: UserDefaults = .standard) {
+        for key in defaults.dictionaryRepresentation().keys where key.hasPrefix(prefix) {
+            defaults.removeObject(forKey: key)
+        }
+    }
+}
+
 /// Decides when coming back to the foreground means the screens may be behind.
 /// A trip to the background always does; a moment inactive (a system alert,
 /// Notification Center pulled over the app) does once it lasts a second.
@@ -64,8 +89,12 @@ final class Workspace {
     enum ConciergeState: Equatable { case loading, ready, off, failed }
 
     let backend: RomeBackend
-    let instanceName: String
+    /// The instance's name in Rome Cloud; a cached launch corrects it.
+    private(set) var instanceName: String
     let host: String
+
+    /// Rome Cloud renamed the instance since it was kept.
+    func renamed(_ name: String) { instanceName = name }
     private(set) var accountLabel: String
     /// The Rome Cloud picture of who is signed in, when they have one.
     private(set) var avatarURL: URL?
@@ -97,7 +126,8 @@ final class Workspace {
     var isGuardian: Bool { role == .guardian }
     var isVisitor: Bool { role == .visitor }
 
-    /// Reads who this session is from `/auth/me`.
+    /// Reads who this session is from `/auth/me`. A read that fails keeps
+    /// what is shown: the role kept from last time stays until one answers.
     func readRole() async {
         do {
             let identity = try await backend.me()
@@ -106,9 +136,20 @@ final class Workspace {
                 accountLabel = identity.name
                 avatarURL = identity.avatarURL
             }
-        } catch {
-            role = .unknown
-        }
+        } catch {}
+    }
+
+    /// Who this session was last time on this instance, shown at once on a
+    /// cached launch until `/auth/me` answers.
+    func restore(_ kept: KeptIdentity) {
+        role = kept.guardian ? .guardian : .visitor
+        accountLabel = kept.name
+        avatarURL = kept.avatarURL
+    }
+
+    /// What `restore` takes back next launch; nil while the role is unknown.
+    var kept: KeptIdentity? {
+        role == .unknown ? nil : KeptIdentity(guardian: role == .guardian, name: accountLabel, avatarURL: avatarURL)
     }
     /// A Chat message to scroll to and highlight, set from the Tasks sheet.
     var focusMessageID: String?
@@ -269,6 +310,11 @@ final class Workspace {
         agentName = await backend.agentName()
     }
 
+    #if DEBUG
+    /// Snapshot runs only: another name in the header.
+    func debugSetAgentName(_ name: String?) { agentName = name }
+    #endif
+
     /// The main chat's name in its header: the Concierge's own, else "Chat".
     var mainChatTitle: String { agentName ?? String(localized: "Chat") }
 
@@ -395,7 +441,6 @@ final class AppModel {
         /// The instance last opened, as Rome Cloud listed it: opened again
         /// when Rome Cloud cannot be reached at launch.
         static let lastInstanceRecord = "lastInstanceRecord"
-        static let hintShown = "autoOpenHintShown"
     }
 
     private(set) var phase: Phase = .launching {
@@ -414,8 +459,9 @@ final class AppModel {
     /// set with its error.
     private(set) var browserSignIn: URL?
     private(set) var sessionExpired = false
-    /// Shown once after the app picked an instance among several on its own.
-    var autoOpenHint: String?
+    /// Said once when this account was taken off the open Rome's allow-list
+    /// and another Rome opened in its place.
+    var accessNotice: String?
     /// Goes up when a tapped push asks the shell to show Chat.
     private(set) var chatRequest = ChatRequest(serial: 0, topicId: nil)
     /// A tapped push waiting for an instance to open.
@@ -430,7 +476,7 @@ final class AppModel {
     /// Light, dark or automatic, for the whole app; kept across sign-out.
     let appearance = AppearanceSetting()
     /// Keeps the open instance on its latest release.
-    let update = InstanceUpdater()
+    let update: InstanceUpdater
     static let updateCheckHold: Duration = .seconds(1)
 
     /// The open instance's Web dashboard.
@@ -442,15 +488,19 @@ final class AppModel {
     /// instance's cookie, and its late 401 is told apart from the open one.
     private var tokenBox: TokenBox?
     private let languageSync = LanguageSync()
-    private var refreshing = false
     private var foreground = ForegroundGate()
 
     /// The pictures the open workspace loaded; `shared` in the app.
     private let images: StoredImageCache
 
-    init(cloud: CloudAuth = CloudAuth(origin: CloudAuth.configuredOrigin), images: StoredImageCache = .shared) {
+    /// How an instance's connection is set up; tests answer it themselves.
+    private let instanceConfiguration: () -> URLSessionConfiguration
+
+    init(cloud: CloudAuth = CloudAuth(origin: CloudAuth.configuredOrigin), images: StoredImageCache = .shared, instanceConfiguration: @escaping () -> URLSessionConfiguration = { .default }, update: InstanceUpdater = InstanceUpdater()) {
         self.cloud = cloud
+        self.update = update
         self.images = images
+        self.instanceConfiguration = instanceConfiguration
         push = PushCenter(registry: cloud)
         node = NodeHost(credentials: cloud)
         node.onCredentialRejected = { [weak self] in self?.nodeCredentialRejected() }
@@ -497,11 +547,182 @@ final class AppModel {
         }
         #endif
         if cloud.hasCredential {
-            // A tap that launched the app opens its instance first.
-            await openInstance(preferring: pendingPush?.instanceId, showHint: false)
+            // The instance opened last, with its kept session, opens at once
+            // and catches up after. A tap that launched the app for another
+            // instance opens that one first, as does a phone with nothing kept.
+            if let instance = Self.rememberedInstance(), pendingPush.map({ $0.instanceId == instance.id }) ?? true,
+               let session = cloud.storedSession(for: instance) {
+                await openCached(instance, session: session)
+            } else {
+                await openInstance(preferring: pendingPush?.instanceId)
+            }
         } else {
             phase = .signedOut
         }
+    }
+
+    /// A cached launch: the instance opened last opens with what this phone
+    /// kept (its session, chats, the role from last time), with no loading
+    /// screen. Its session, Rome Cloud's list, the role and the update
+    /// check then catch up in the background; offline, nothing changes.
+    private func openCached(_ instance: CloudInstance, session: InstanceSession) async {
+        update.reset()
+        stoppedInstanceID = nil
+        instances = [instance]
+        let account = cloud.account.stamp()
+        let box = TokenBox()
+        box.use(session)
+        tokenBox = box
+        currentInstanceID = instance.id
+        Task { await push.upload() }
+        let workspace = workspace(for: instance, box: box, account: account)
+        if let kept = KeptIdentity.load(instance.id) { workspace.restore(kept) }
+        // On screen at once, from what is kept. Nothing that needs the
+        // session runs yet: `catchUp` starts it once the session is good.
+        sessionExpired = false
+        self.workspace = workspace
+        syncLanguage()
+        update.onFinished = { [weak self] in Task { await self?.reopenAfterUpgrade() } }
+        phase = .ready
+        Task { await catchUp(instance, session: session, box: box, workspace: workspace) }
+    }
+
+    /// The work a cached launch holds back until its session is good: the
+    /// role, the update check, a tapped push, and the workspace's own start
+    /// (the main chat's session, the live socket, its watches, topics and
+    /// tasks). Started on a renewed session, none of it meets an old token.
+    private func bootstrap(_ workspace: Workspace, instanceID: String) async {
+        guard self.workspace === workspace else { return }
+        // Corrected once `/auth/me` answers; the update page covers Chat
+        // when a check finds the instance below the minimum.
+        Task {
+            await workspace.readRole()
+            if self.workspace === workspace { KeptIdentity.save(workspace.kept, for: instanceID) }
+        }
+        Task { await update.attach(backend: workspace.backend, instanceID: instanceID) }
+        if pendingPush != nil {
+            await routePendingPush()
+            // The push was for another instance, now open in its place.
+            guard self.workspace === workspace else { return }
+        }
+        await workspace.start()
+    }
+
+    /// What a cached launch checks once it shows: a session past its time is
+    /// renewed quietly, and Rome Cloud's list decides whether the instance
+    /// is still there and running. Every step after an await checks that
+    /// this workspace, on this account, is still the open one: a sign-out or
+    /// a switch meanwhile is never undone here.
+    private func catchUp(_ instance: CloudInstance, session: InstanceSession, box: TokenBox, workspace: Workspace) async {
+        let account = cloud.account.stamp()
+        func stillOpen() -> Bool { account.isCurrent && self.workspace === workspace && box === tokenBox }
+        if !session.isFresh, case .failure(let error) = await renewSession(box: box, instance: instance, force: false) {
+            guard stillOpen() else { return }
+            switch error as? AuthError {
+            case .network, nil:
+                // Offline, or the instance did not answer: the workspace
+                // starts anyway, and a 401 once it is back renews the
+                // session and sends again. The list below decides.
+                break
+            case .cloudUnauthorized:
+                leaveWorkspace()
+                phase = .signedOut
+                return
+            case .instanceNotReady:
+                leaveWorkspace()
+                await failedToConnect(to: instance, error: error)
+                return
+            default:
+                // Refused here (allow-list, a moved or rebuilt instance): Rome
+                // Cloud's record decides before anything is torn down.
+                await recover(instance, error: error, workspace: workspace, box: box, account: account)
+                return
+            }
+        }
+        guard stillOpen() else { return }
+        Task { await bootstrap(workspace, instanceID: instance.id) }
+        do {
+            let list = try await cloud.listInstances()
+            guard stillOpen() else { return }
+            take(list)
+            await follow(list, instance: instance, workspace: workspace)
+        } catch {
+            guard stillOpen() else { return }
+            if error as? AuthError == .cloudUnauthorized {
+                leaveWorkspace()
+                phase = .signedOut
+            }
+            // Offline: the cached workspace stays as it is.
+        }
+    }
+
+    /// The instance refused the kept session's renewal. Rome Cloud's list
+    /// says what happened: moved to a new origin opens it there; gone opens
+    /// another; taken off the allow-list says so; still the same and
+    /// running keeps the workspace, whose next 401 offers a sign-in.
+    private func recover(_ instance: CloudInstance, error: Error, workspace: Workspace, box: TokenBox, account: AccountStamp) async {
+        func stillOpen() -> Bool { account.isCurrent && self.workspace === workspace && box === tokenBox }
+        let list: [CloudInstance]
+        do {
+            list = try await cloud.listInstances()
+        } catch {
+            guard stillOpen() else { return }
+            if error as? AuthError == .cloudUnauthorized {
+                leaveWorkspace()
+                phase = .signedOut
+            } else {
+                // Rome Cloud cannot be reached either: keep what shows.
+                Task { await bootstrap(workspace, instanceID: instance.id) }
+            }
+            return
+        }
+        guard stillOpen() else { return }
+        take(list)
+        if error as? AuthError == .accessRevoked {
+            leaveWorkspace()
+            await failedToConnect(to: instance, error: error)
+            return
+        }
+        guard let current = list.first(where: { $0.id == instance.id }), current.origin == instance.origin, current.isVisitor == instance.isVisitor, current.isRunning else {
+            await follow(list, instance: instance, workspace: workspace)
+            return
+        }
+        // Rome Cloud still lists it as it was: keep the workspace.
+        Task { await bootstrap(workspace, instanceID: instance.id) }
+    }
+
+    /// Rome Cloud's record of the cached instance, followed: gone opens
+    /// another, stopped shows its page, moved or with another role opens
+    /// again, renamed shows the new name. The kept record is written again.
+    private func follow(_ list: [CloudInstance], instance: CloudInstance, workspace: Workspace) async {
+        guard let current = list.first(where: { $0.id == instance.id }) else {
+            leaveWorkspace()
+            await openInstance(preferring: nil)
+            return
+        }
+        if !current.isRunning {
+            leaveWorkspace()
+            await failedToConnect(to: current, error: AuthError.instanceNotReady)
+            return
+        }
+        UserDefaults.standard.set(try? JSONEncoder().encode(current), forKey: Defaults.lastInstanceRecord)
+        if current.origin != instance.origin || current.isVisitor != instance.isVisitor {
+            leaveWorkspace()
+            await connect(to: current)
+        } else if current.name != instance.name {
+            workspace.renamed(current.name)
+        }
+    }
+
+    /// Closes the open workspace, keeping the account signed in.
+    private func leaveWorkspace() {
+        update.reset()
+        workspace?.stop()
+        workspace = nil
+        tokenBox?.token = nil
+        tokenBox = nil
+        currentInstanceID = nil
+        sessionExpired = false
     }
 
     // MARK: Cloud sign-in
@@ -527,7 +748,7 @@ final class AppModel {
                 forgetAccountData()
                 // After the wipe, so the device starts with this account's defaults.
                 node.accountStarted()
-                await openInstance(preferring: nil, showHint: true)
+                await openInstance(preferring: nil)
             } catch {
                 signInError = (error as? LocalizedError)?.errorDescription ?? String(localized: "Sign-in did not finish")
                 phase = .signedOut
@@ -537,7 +758,7 @@ final class AppModel {
 
     /// Picks and opens an instance. The one this device opened last wins, then
     /// the only running one, then the first running one.
-    func openInstance(preferring id: String?, showHint: Bool) async {
+    func openInstance(preferring id: String?) async {
         let account = cloud.account.stamp()
         do {
             let list = try await cloud.listInstances()
@@ -562,12 +783,7 @@ final class AppModel {
                 }
                 return
             }
-            let pickedAmongMany = running.count > 1 && id == nil && remembered == nil
             await connect(to: chosen)
-            if showHint, pickedAmongMany, !UserDefaults.standard.bool(forKey: Defaults.hintShown) {
-                UserDefaults.standard.set(true, forKey: Defaults.hintShown)
-                autoOpenHint = String(localized: "Opened “\(chosen.name)”. Switch instances in Settings.")
-            }
         } catch {
             guard account.isCurrent else { return }
             if error as? AuthError == .cloudUnauthorized {
@@ -614,20 +830,27 @@ final class AppModel {
             currentInstanceID = instance.id
             // Signed in to Rome Cloud: this launch's token, if it has one yet.
             Task { await push.upload() }
-            let client = APIClient(origin: URL(string: instance.origin)!, token: { box.token }, cookieName: { box.cookieName }) { [weak self] in
-                Task { @MainActor in self?.handleUnauthorized(box: box, instance: instance) }
-            }
-            await open(Workspace(
-                backend: LiveBackend(client: client, account: account),
-                instanceName: instance.name,
-                host: instance.host,
-                accountLabel: instance.name
-            ))
+            await open(workspace(for: instance, box: box, account: account))
         } catch {
             // An older account's attempt changes nothing for the one signed in now.
             guard account.isCurrent else { return }
             await failedToConnect(to: instance, error: error)
         }
+    }
+
+    /// The workspace of `instance`, its requests sending `box`'s session.
+    private func workspace(for instance: CloudInstance, box: TokenBox, account: AccountStamp) -> Workspace {
+        let client = APIClient(origin: URL(string: instance.origin)!, token: { box.token }, cookieName: { box.cookieName }, configuration: instanceConfiguration(), onUnauthorized: { [weak self] in
+            Task { @MainActor in self?.handleUnauthorized(box: box, instance: instance) }
+        }, renew: { [weak self] in
+            await self?.renewAfterUnauthorized(box: box, instance: instance) ?? false
+        })
+        return Workspace(
+            backend: LiveBackend(client: client, account: account),
+            instanceName: instance.name,
+            host: instance.host,
+            accountLabel: instance.name
+        )
     }
 
     private func failedToConnect(to instance: CloudInstance, error: Error) async {
@@ -660,7 +883,7 @@ final class AppModel {
         }
         currentInstanceID = nil
         if let next = instances.first(where: \.isRunning) {
-            autoOpenHint = reason
+            accessNotice = reason
             await connect(to: next)
         } else {
             signInError = reason
@@ -703,7 +926,7 @@ final class AppModel {
         // stopped, the one this phone opened last opens instead. The page's
         // instance is kept until one opens (`connect`), so a retry that
         // leaves the page up still tries it next time.
-        await openInstance(preferring: stoppedInstanceID, showHint: false)
+        await openInstance(preferring: stoppedInstanceID)
     }
 
     /// A tapped push for an instance that is not running: the open one closes
@@ -764,6 +987,7 @@ final class AppModel {
         URLCache.shared.removeAllCachedResponses()
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstance)
         UserDefaults.standard.removeObject(forKey: Defaults.lastInstanceRecord)
+        KeptIdentity.removeAll()
         // The device's switches and its Recent activity.
         node.forgetAccount()
     }
@@ -784,45 +1008,78 @@ final class AppModel {
     /// A 401 from a connection that is no longer the open one changes nothing.
     private func handleUnauthorized(box: TokenBox, instance: CloudInstance) {
         guard box === tokenBox else { return }
-        guard !refreshing else { return }
-        refreshing = true
-        Task {
-            defer { refreshing = false }
+        Task { _ = await renewAfterUnauthorized(box: box, instance: instance) }
+    }
+
+    /// A request got a 401: the session is renewed (once, for every request
+    /// that asks meanwhile), and the request may go again. Failing, the
+    /// session-expired banner offers a sign-in.
+    private func renewAfterUnauthorized(box: TokenBox, instance: CloudInstance) async -> Bool {
+        guard box === tokenBox else { return false }
+        switch await renewSession(box: box, instance: instance, force: true) {
+        case .success:
+            return box === tokenBox
+        case .failure:
+            if box === tokenBox { sessionExpired = true }
+            return false
+        }
+    }
+
+    /// The renewal under way, by connection: a cached launch's and every 401's share it.
+    private var renewal: (box: TokenBox, task: Task<Result<InstanceSession, Error>, Never>)?
+
+    /// Renews `box`'s session, or joins the renewal already under way.
+    /// `force`: a new session even when the kept one looks fresh (a 401 said
+    /// it is not). A visitor's session runs the visitor sign-in again.
+    private func renewSession(box: TokenBox, instance: CloudInstance, force: Bool) async -> Result<InstanceSession, Error> {
+        if let renewal, renewal.box === box { return await renewal.task.value }
+        let cloud = self.cloud
+        // The new session goes into the box inside the shared task, before
+        // it completes: every request waiting on it sends the new token.
+        let task = Task { @MainActor [weak self] () -> Result<InstanceSession, Error> in
             do {
-                // A visitor's session runs the visitor sign-in again, the guardian's the owner's.
-                let session = try await cloud.session(for: instance, forceRefresh: true)
-                guard box === tokenBox else { return }
-                box.use(session)
-                sessionExpired = false
+                let session = try await cloud.session(for: instance, forceRefresh: force)
+                if let self, box === self.tokenBox {
+                    box.use(session)
+                    self.sessionExpired = false
+                }
+                return .success(session)
             } catch {
-                if box === tokenBox { sessionExpired = true }
+                return .failure(error)
             }
         }
+        renewal = (box, task)
+        let result = await task.value
+        if renewal?.box === box { renewal = nil }
+        return result
     }
 
     func reauthenticate() async {
         sessionExpired = false
         workspace?.stop()
         workspace = nil
-        await openInstance(preferring: currentInstanceID, showHint: false)
+        await openInstance(preferring: currentInstanceID)
     }
 
-    /// Only the guardian can update the instance, so only the guardian's
-    /// workspace is checked: a visitor gets no page, banner or drawer line.
-    static func offersUpdates(to workspace: Workspace) -> Bool { !workspace.isVisitor }
-
+    /// Opens a workspace behind the loading screen: the role and the update
+    /// check are asked first. A cached launch goes through `openCached`.
     private func open(_ workspace: Workspace) async {
+        // A banner from the workspace this one replaces does not carry over.
+        sessionExpired = false
         self.workspace = workspace
         syncLanguage()
         // Its own task: the poll that reports the finish is cancelled when the
         // reopened workspace attaches, and would cancel the reopen with it.
         update.onFinished = { [weak self] in Task { await self?.reopenAfterUpgrade() } }
-        // Updating the instance is the guardian's call: a visitor never sees
-        // the page, the banner or the drawer's line.
+        let instanceID = currentInstanceID
+        // The role first, so the screens know a visitor from the start. Both
+        // get the same update flow: the instance lets a visitor on its
+        // allow-list check and start an upgrade, as the dashboard does.
         await workspace.readRole()
         // Signed out, or another workspace opened, while it read.
         guard self.workspace === workspace else { return }
-        if let id = currentInstanceID, Self.offersUpdates(to: workspace) {
+        if let instanceID { KeptIdentity.save(workspace.kept, for: instanceID) }
+        if let id = currentInstanceID {
             Task { await update.attach(backend: workspace.backend, instanceID: id) }
             // Hold the loading state briefly for the check, so a Rome below the
             // app's minimum goes straight to the update page instead of showing
@@ -965,7 +1222,7 @@ final class AppModel {
         // instance, or show its own stopped page.
         if workspace == nil, phase.waitsOnAnInstance {
             signInError = nil
-            await openInstance(preferring: target.instanceId, showHint: false)
+            await openInstance(preferring: target.instanceId)
             return
         }
         await routePendingPush()

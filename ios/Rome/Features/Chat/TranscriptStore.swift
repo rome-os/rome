@@ -320,9 +320,41 @@ final class TranscriptStore {
     /// message is not in the pages held.
     private(set) var reopening: ThreadTarget?
 
+    /// A message in no chat thread the guardian replies to, quoted above the
+    /// composer while the chat stays in view (rome-os/rome#1976).
+    private(set) var quote: ThreadTarget?
+
     /// Where the composer sends, and what its draft keeps: the open thread,
-    /// or one still being looked up.
-    var composerThread: ThreadTarget? { thread?.target ?? reopening }
+    /// one still being looked up, or the quoted message.
+    var composerThread: ThreadTarget? { thread?.target ?? reopening ?? quote }
+
+    /// The quoted message, when it is held.
+    var quotedMessage: ChatMessage? { quote.flatMap { message($0.messageId) } }
+
+    /// Reply on a message. One already in a chat thread, as its root or
+    /// inside it, opens that thread. One in no thread is quoted above the
+    /// composer; the send starts its thread. An instance from before chat
+    /// threads cannot tell, so there Reply opens the thread as before.
+    func reply(to messageId: String) {
+        guard kind == .concierge, let message = message(messageId) else { return }
+        if Self.quotes(message, among: messages, instanceKnowsThreads: instanceKnowsThreads) {
+            closeThread()
+            quote = ThreadTarget(messageId: messageId, instanceKnowsThreads: true, quote: true)
+        } else {
+            openThread(at: messageId)
+        }
+    }
+
+    /// Whether Reply on `message` quotes it rather than opening a thread.
+    /// A live insert leaves `chatThreadId` out, so whether the instance has
+    /// chat threads is the chat's to say, not the one message's.
+    nonisolated static func quotes(_ message: ChatMessage, among messages: [ChatMessage], instanceKnowsThreads: Bool = false) -> Bool {
+        (instanceKnowsThreads || message.knowsThreads) && message.chatThreadId == nil && !messages.contains { $0.chatThreadId == message.id }
+    }
+
+    func cancelQuote() {
+        quote = nil
+    }
 
     /// Opens the chat thread a stored message is in, over the chat.
     /// `toReply`: Reply was chosen, so the composer takes the keyboard; the
@@ -335,15 +367,18 @@ final class TranscriptStore {
     private func open(anchor: ChatMessage, older: [ChatMessage], toReply: Bool) {
         thread?.stop()
         reopening = nil
+        quote = nil
         let opened = ThreadStore(anchor: anchor, chat: self, backend: backend, toReply: toReply, older: older)
         thread = opened
         opened.start()
     }
 
+    /// Closes the open thread, and drops a quote: both end with a send.
     func closeThread() {
         thread?.stop()
         thread = nil
         reopening = nil
+        quote = nil
     }
 
     /// A restored draft was written in a chat thread: it opens again. Its
@@ -353,6 +388,11 @@ final class TranscriptStore {
     /// the text goes to the chat when the message is not held.
     func reopenThread(_ target: ThreadTarget) {
         guard kind == .concierge, thread == nil else { return }
+        // A quote comes back as a quote, the chat in view.
+        if target.isQuote {
+            quote = target
+            return
+        }
         if message(target.messageId) != nil {
             openThread(at: target.messageId)
             return

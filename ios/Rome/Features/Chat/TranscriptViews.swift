@@ -13,6 +13,9 @@ extension EnvironmentValues {
     @Entry var chatLinkOpener: (@MainActor (URL) -> OpenURLAction.Result)? = nil
     /// An allow-listed visitor, not the guardian: approvals are not theirs to answer.
     @Entry var isVisitor = false
+    /// The chat on screen, by its store's id: nil under a sheet, the drawer
+    /// or a pushed page. A chat marks what arrives as read only while it is.
+    @Entry var visibleChat: String? = nil
 }
 
 /// The guardian's bubble: coral, right-aligned, fully round. Photos sent with
@@ -267,14 +270,20 @@ final class StoredImageCache {
 /// The agent's bubble. In a run of bubbles the first keeps a small bottom-left
 /// corner and the last a small top-left corner, as on the design's Chat board.
 /// Every reply sits in a bubble, a long one too: past about fifteen lines it
-/// folds, with "Show more".
+/// folds under a soft fade, with a small chevron below to unfold it.
 struct AgentBubble: View {
     let text: String
     let forwardedFrom: MessagePart.ForwardedFrom?
     let position: BubblePosition
     var onOpenChat: (String, String) -> Void = { _, _ in }
     var menu = BubbleMenu()
-    @State private var expanded = false
+    #if DEBUG
+    /// Snapshot runs only: long bubbles open unfolded.
+    static var startsExpanded = false
+    #else
+    static let startsExpanded = false
+    #endif
+    @State private var expanded = AgentBubble.startsExpanded
     /// The reply's laid-out height, measured: Chinese fits far fewer
     /// characters on a line than English, so characters cannot tell.
     @State private var fullHeight: CGFloat = 0
@@ -339,13 +348,12 @@ struct AgentBubble: View {
                 .frame(maxHeight: capped ? Self.foldHeight(for: dynamicTypeSize) : nil, alignment: .top)
                 .clipped()
                 .overlay(alignment: .bottom) {
-                    if folds && !expanded {
-                        LinearGradient(colors: [Palette.bubble.opacity(0), Palette.bubble], startPoint: .top, endPoint: .bottom)
-                            .frame(height: 48)
-                            .allowsHitTesting(false)
-                    }
+                    // Folded, the chevron sits on the fade over the last
+                    // lines, so the bubble does not grow for it.
+                    if folds && !expanded { expandButton }
                 }
-            if folds { expandButton }
+            // Open, it sits right under the last line.
+            if folds && expanded { expandButton.padding(.top, -6) }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 10)
@@ -361,12 +369,64 @@ struct AgentBubble: View {
         .padding(.trailing, forwardedFrom == nil ? 64 : 32)
     }
 
+    /// A small grey chevron, centred. Folded, its backdrop is the fade into
+    /// the bubble's colour; open, it stands alone. Either way it lays out
+    /// short and taps 44 pt tall: the tap area reaches past its frame.
     private var expandButton: some View {
-        Button(expanded ? "Show less" : "Show more") {
-            withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { expanded.toggle() }
+        Button(action: toggle) {
+            Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                .romeFont(13, .semibold)
+                .foregroundStyle(Palette.sub)
+                .frame(maxWidth: .infinity, minHeight: expanded ? 16 : 40, alignment: .bottom)
+                .background {
+                    if !expanded {
+                        LinearGradient(colors: [Palette.bubble.opacity(0), Palette.bubble], startPoint: .top, endPoint: .bottom)
+                    }
+                }
+                .contentShape(Rectangle().inset(by: expanded ? -14 : -4))
         }
-        .romeFont(14, .semibold)
-        .foregroundStyle(Palette.primaryText)
+        .buttonStyle(.plain)
+        .accessibilityLabel(expanded ? Text("Show less") : Text("Show more"))
+    }
+
+    private func toggle() {
+        withAnimation(.spring(response: 0.35, dampingFraction: 0.9)) { expanded.toggle() }
+    }
+}
+
+/// What the Concierge said in a task chat it started (rome-os/rome#1976):
+/// on the guardian's side, since it speaks for them, but in a neutral
+/// bubble under its own name and mascot, so it never reads as the guardian.
+struct ConciergeBubble: View {
+    let name: String
+    let text: String
+    var menu = BubbleMenu()
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Spacer(minLength: 40)
+            VStack(alignment: .trailing, spacing: 4) {
+                Text(verbatim: name)
+                    .romeFont(12)
+                    .foregroundStyle(Palette.sub)
+                    .lineLimit(1)
+                MarkdownText(source: text)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .background(Palette.bubble, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
+                    .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
+                    .bubbleMenu(text: text, menu: menu)
+            }
+            Mascot()
+                .frame(height: 16)
+                .frame(width: 28, height: 28)
+                .background(Palette.elevated, in: Circle())
+                .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
+                .padding(.top, 18)
+                .accessibilityHidden(true)
+        }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -393,7 +453,7 @@ struct TaskCard: View {
         Button(action: action) {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Task")
-                    .romeFont(CardScale.label, .semibold)
+                    .romeFont(CardScale.label)
                     .foregroundStyle(Palette.sub)
                 HStack(spacing: 8) {
                     Text(title)
