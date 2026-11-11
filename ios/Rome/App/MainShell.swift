@@ -133,7 +133,7 @@ struct MainShell: View {
                 .environment(\.visibleChat, visibleChat)
                 .instancePageSheet(workspace: workspace, url: $page)
                 .environment(\.isVisitor, workspace.isVisitor)
-                .environment(\.shareAgentName, workspace.agentName)
+                .environment(\.shareAgentName, AgentName.display(workspace.agentName))
                 // Pushed aside, the page becomes a card of its own color, following the drag.
                 .environment(\.pageBackground, Palette.blend(Palette.bg, Palette.drawerPage, progress))
                 // Over the page, so beside a pinned drawer they sit above the chat.

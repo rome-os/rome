@@ -49,7 +49,7 @@ struct TopicChatScreen: View {
             ChatHeader(
                 // The Concierge's name, as in the main chat; the topic's own
                 // title stays in the "…" menu.
-                name: workspace.mainChatTitle,
+                name: workspace.agentDisplayName,
                 menuTitle: title,
                 activity: workspace.topics.activity(for: chatId),
                 announces: chatId != nil && model.visibleChat == chatId,
@@ -72,7 +72,7 @@ struct TopicChatScreen: View {
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let store, let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.mainChatTitle, activity: workspace.topics.activity(for: chatId), onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: workspace.topics.activity(for: chatId), onOpenChat: onOpenChat) { store.closeThread() }
             }
         }
         // Reply brings the keyboard up; the replies line opens it for reading.

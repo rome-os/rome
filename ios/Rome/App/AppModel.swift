@@ -316,7 +316,8 @@ final class Workspace {
     #endif
 
     /// The main chat's name in its header: the Concierge's own, else "Chat".
-    var mainChatTitle: String { agentName ?? String(localized: "Chat") }
+    /// The Agent's name on screen: the header's name tag and its bubbles.
+    var agentDisplayName: String { AgentName.shown(agentName) }
 
     /// Kept rows from last time stay on screen while this runs, and when the
     /// instance cannot be reached: the store fetches again when it is back.

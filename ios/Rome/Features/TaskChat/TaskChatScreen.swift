@@ -165,7 +165,7 @@ struct TaskChatScreen: View {
                 BriefCard(text: text)
             } else if let message = row.messageId.flatMap(store.message), message.saidByAgent {
                 // The Concierge relays the guardian's words: their side, its name.
-                ConciergeBubble(name: message.sender?.name ?? model.workspace?.mainChatTitle ?? "Rome", text: text, menu: menu(row))
+                ConciergeBubble(name: message.sender?.name ?? model.workspace?.agentDisplayName ?? AgentName.fallback, text: text, menu: menu(row))
             } else {
                 UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, menu: menu(row))
             }

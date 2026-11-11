@@ -84,7 +84,7 @@ final class DemoBackend: RomeBackend {
         try await pause(0.2)
         if variant == .conciergeOff { throw APIError.conciergeOff }
         startActivityCycle()
-        return [ConciergeChat(id: conciergeChatID, name: "Concierge", main: true, unread: 0, activity: .working)] + topicChats
+        return [ConciergeChat(id: conciergeChatID, name: "Main chat", main: true, unread: 0, activity: .working)] + topicChats
     }
 
     /// The header's states, in turn, so each can be seen on a phone: working,

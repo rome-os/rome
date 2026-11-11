@@ -17,8 +17,7 @@ enum UpdateCopy {
 
     /// The Agent's name as the chat header shows it, or Rome before it is known.
     static func agent(_ name: String?) -> String {
-        guard let name = name?.trimmingCharacters(in: .whitespacesAndNewlines), !name.isEmpty else { return "Rome" }
-        return shortName(name)
+        shortName(AgentName.shown(name))
     }
 }
 

@@ -397,4 +397,12 @@ enum AgentName {
         let name = configured?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         return name.isEmpty ? nil : name
     }
+
+    /// What the Agent is called on screen: its own name, or Rome when none is
+    /// set. Never "Chat" or "Concierge", which name the screen and the code.
+    static let fallback = "Rome"
+
+    static func shown(_ configured: String?) -> String {
+        display(configured) ?? fallback
+    }
 }
