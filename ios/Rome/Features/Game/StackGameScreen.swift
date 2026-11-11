@@ -29,6 +29,11 @@ struct StackGameScreen: View {
     @State private var dropHaptic = UIImpactFeedbackGenerator(style: .light)
     @State private var perfectHaptic = UIImpactFeedbackGenerator(style: .medium)
     @State private var endHaptic = UINotificationFeedbackGenerator()
+    /// The HUD capsule's bottom edge on screen, measured: the end's label
+    /// and the fitted tower stay below it.
+    @State private var hudBottom: CGFloat?
+    /// The mascot's bubble on screen while it shows: part of the tap target.
+    @State private var bubbleFrame: CGRect?
 
     /// The widest the blocks travel, so an iPad's slide stays a phone's length.
     static let maxFieldWidth: CGFloat = 520
@@ -53,7 +58,7 @@ struct StackGameScreen: View {
     static let dotSpacing: CGFloat = 24
     static let dotParallax: CGFloat = 0.35
     /// At the end: the mascot's tumble to the ground, the camera easing out
-    /// to the whole tower, and the toast's time on screen.
+    /// to the whole tower, and when "Game over" and then the bubble show.
     static let tumbleTime: TimeInterval = 0.9
     static let fitDelay: TimeInterval = 0.5
     static let fitTime: TimeInterval = 0.9
@@ -61,8 +66,11 @@ struct StackGameScreen: View {
     static let toastTime: TimeInterval = 1.2
     /// After the toast, the mascot offers another game.
     static var againAfter: TimeInterval { toastFrom + toastTime }
-    /// Below the HUD: the fitted tower keeps under this share of the screen.
+    /// Below the HUD: the fitted tower keeps under this share of the screen
+    /// until the HUD has been measured.
     static let fitTopShare: CGFloat = 0.3
+    /// Between the HUD and the fitted tower: room for "Game over".
+    static let endLabelRoom: CGFloat = 52
 
     private var frozen: Bool { launch.sample != nil }
 
@@ -121,7 +129,8 @@ struct StackGameScreen: View {
         if let point {
             let shown = effects.shownLevel(at: now, reduceMotion: reduceMotion)
             let pose = mascotPose(next, layout: layout(next, size: size, fieldWidth: fieldWidth, shown: shown, now: now), shown: shown, now: now)
-            guard next.tapCounts(at: point, mascot: pose.center) else { return }
+            let area = StackGame.startArea(mascot: pose.center, bubble: next.phase == .playing ? nil : bubbleFrame)
+            guard next.tapCounts(at: point, area: area) else { return }
         }
         switch next.phase {
         case .ready:
@@ -169,7 +178,7 @@ struct StackGameScreen: View {
         layout.camera = max(0, (shown + 2) * StackGame.blockHeight + Self.hover - (groundY - size.height * Self.followShare))
         guard game.phase == .over, let ended = effects.ended else { return layout }
         let towerHeight = CGFloat(game.tower.count) * StackGame.blockHeight + 8
-        let room = groundY - size.height * Self.fitTopShare
+        let room = groundY - (hudBottom.map { $0 + Self.endLabelRoom } ?? size.height * Self.fitTopShare)
         let fit = min(1, room / towerHeight)
         let progress = reduceMotion ? 1 : min(max((now - ended - Self.fitDelay) / Self.fitTime, 0), 1)
         let eased = CGFloat(progress < 0.5 ? 4 * pow(progress, 3) : 1 - pow(-2 * progress + 2, 3) / 2)
@@ -207,6 +216,7 @@ struct StackGameScreen: View {
                 if game.phase == .ready {
                     anchored(at: CGPoint(x: pose.center.x, y: pose.top - 6), alignment: .bottom) {
                         MascotBubble(text: "Tap me to start")
+                            .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { bubbleFrame = $0 }
                     }
                 }
                 if game.phase == .over, let ended = effects.ended {
@@ -215,13 +225,21 @@ struct StackGameScreen: View {
                         // Running right from the mascot; it may cover some of the tower.
                         anchored(at: CGPoint(x: pose.center.x - MascotBubble.tailInset, y: pose.top - 6), alignment: .bottomLeading) {
                             MascotBubble(text: "Play again", tailLeading: true)
+                                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { bubbleFrame = $0 }
                         }
                     }
-                    if age >= Self.toastFrom, age < Self.againAfter {
-                        let into = (age - Self.toastFrom) / Self.toastTime
-                        toast(game)
-                            .position(x: size.width / 2, y: size.height * 0.45)
-                            .opacity(min(into / 0.15, 1, (1 - into) / 0.25))
+                    if age >= Self.toastFrom {
+                        // Stays, midway between the HUD and the tower's top:
+                        // part of the frame worth a screenshot.
+                        let towerTop = layout.y(CGFloat(game.tower.count) * StackGame.blockHeight)
+                        let above = hudBottom ?? size.height * Self.fitTopShare - 24
+                        Text("Game over")
+                            .romeFont(18, .semibold)
+                            .foregroundStyle(Palette.fg)
+                            .fixedSize()
+                            .position(x: size.width / 2, y: (above + towerTop) / 2)
+                            .opacity(reduceMotion ? 1 : min((age - Self.toastFrom) / 0.3, 1))
+                            .accessibilityHidden(true)
                     }
                 }
                 ForEach(effects.floats) { float in
@@ -584,6 +602,7 @@ struct StackGameScreen: View {
                 .padding(.horizontal, 14)
                 .frame(height: 30)
                 .glassSurface(Capsule())
+                .onGeometryChange(for: CGFloat.self) { $0.frame(in: .global).maxY } action: { hudBottom = $0 }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .padding(.top, 60)
@@ -601,18 +620,6 @@ struct StackGameScreen: View {
         // The combo only once there is one.
         guard game.multiplier > 1 else { return best }
         return Text(verbatim: "×\(game.multiplier)").foregroundStyle(Palette.primaryText) + dot + best
-    }
-
-    /// Said once over the tower at the end, then gone.
-    private func toast(_ game: StackGame) -> some View {
-        Text(game.newBest ? "New best" : "Game over")
-            .romeFont(17, .semibold)
-            .foregroundStyle(game.newBest ? Palette.primaryText : Palette.fg)
-            .fixedSize()
-            .padding(.horizontal, 18)
-            .frame(height: 40)
-            .glassSurface(Capsule())
-            .allowsHitTesting(false)
     }
 }
 

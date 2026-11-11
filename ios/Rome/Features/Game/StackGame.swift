@@ -85,16 +85,25 @@ struct StackGame: Equatable {
     var multiplier: Int { 1 + min(combo, 4) }
     var speed: CGFloat { min(Self.startSpeed + Self.speedStep * CGFloat(placed), Self.maxSpeed) }
 
-    /// The square around the mascot where the first tap starts the game.
+    /// The square around the mascot where a tap starts a game.
     static let startTarget: CGFloat = 88
+    /// Around the mascot's bubble, which counts as the mascot.
+    static let bubblePadding: CGFloat = 12
 
-    /// Before the start and after the end, only a tap on the mascot (its
-    /// middle at `mascot`) counts: it starts a game. While playing, a tap
+    /// What a tap must hit to start a game: the square around the mascot
+    /// (its middle at `mascot`) and its bubble, padded.
+    static func startArea(mascot: CGPoint, bubble: CGRect?) -> CGRect {
+        let square = CGRect(x: mascot.x - startTarget / 2, y: mascot.y - startTarget / 2, width: startTarget, height: startTarget)
+        guard let bubble else { return square }
+        return square.union(bubble.insetBy(dx: -bubblePadding, dy: -bubblePadding))
+    }
+
+    /// Before the start and after the end, only a tap on the mascot or its
+    /// bubble (`area`) counts: it starts a game. While playing, a tap
     /// anywhere drops.
-    func tapCounts(at point: CGPoint, mascot: CGPoint) -> Bool {
+    func tapCounts(at point: CGPoint, area: CGRect) -> Bool {
         switch phase {
-        case .ready, .over:
-            return abs(point.x - mascot.x) <= Self.startTarget / 2 && abs(point.y - mascot.y) <= Self.startTarget / 2
+        case .ready, .over: return area.contains(point)
         case .playing: return true
         }
     }

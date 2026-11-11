@@ -146,18 +146,30 @@ import Testing
 
     @Test func onlyATapOnTheMascotStartsOrPlaysAgain() {
         var game = StackGame(fieldWidth: 400)
-        let mascot = CGPoint(x: 200, y: 600)
-        #expect(game.tapCounts(at: CGPoint(x: 240, y: 560), mascot: mascot))
-        #expect(!game.tapCounts(at: CGPoint(x: 250, y: 600), mascot: mascot))
-        #expect(!game.tapCounts(at: CGPoint(x: 200, y: 300), mascot: mascot))
+        let area = StackGame.startArea(mascot: CGPoint(x: 200, y: 600), bubble: nil)
+        #expect(game.tapCounts(at: CGPoint(x: 240, y: 560), area: area))
+        #expect(!game.tapCounts(at: CGPoint(x: 250, y: 600), area: area))
+        #expect(!game.tapCounts(at: CGPoint(x: 200, y: 300), area: area))
         // Playing, a tap anywhere drops.
         game.start(at: 0)
-        #expect(game.tapCounts(at: CGPoint(x: 10, y: 10), mascot: mascot))
+        #expect(game.tapCounts(at: CGPoint(x: 10, y: 10), area: area))
         game.drop(x: 400, at: 1)
         // Over: only the mascot, now lying beside the base, plays again.
-        let lying = CGPoint(x: 340, y: 660)
-        #expect(game.tapCounts(at: CGPoint(x: 360, y: 640), mascot: lying))
-        #expect(!game.tapCounts(at: CGPoint(x: 200, y: 400), mascot: lying))
+        let lying = StackGame.startArea(mascot: CGPoint(x: 340, y: 660), bubble: nil)
+        #expect(game.tapCounts(at: CGPoint(x: 360, y: 640), area: lying))
+        #expect(!game.tapCounts(at: CGPoint(x: 200, y: 400), area: lying))
+    }
+
+    @Test func theBubbleCountsAsTheMascot() {
+        let game = StackGame(fieldWidth: 400)
+        // "Play again" runs right from the mascot, past its square.
+        let bubble = CGRect(x: 300, y: 580, width: 130, height: 44)
+        let area = StackGame.startArea(mascot: CGPoint(x: 320, y: 650), bubble: bubble)
+        #expect(game.tapCounts(at: CGPoint(x: 420, y: 600), area: area))
+        // Its padding counts too, and nothing past it.
+        #expect(game.tapCounts(at: CGPoint(x: 438, y: 600), area: area))
+        #expect(!game.tapCounts(at: CGPoint(x: 445, y: 600), area: area))
+        #expect(!game.tapCounts(at: CGPoint(x: 400, y: 540), area: area))
     }
 
     @Test func theEndSampleIsATallLostTower() {
