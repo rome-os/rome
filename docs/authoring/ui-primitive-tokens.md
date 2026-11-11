@@ -25,8 +25,8 @@ Twelve dimensions carry a scale.
 | Border radius | Continuous | [border-radius-primitives.md](../ui/primitive-token/border-radius-primitives.md) |
 | Elevation | Continuous across offset, blur, spread, and opacity together | [elevation-primitives.md](../ui/primitive-token/elevation-primitives.md) |
 | Opacity | Continuous from 0 to 1 | Not written |
-| Motion duration | Continuous milliseconds | Not written |
-| Motion easing | Continuous bezier space | Not written |
+| Motion duration | Continuous milliseconds | [motion-duration-primitives.md](../ui/primitive-token/motion-duration-primitives.md) |
+| Motion easing | Continuous bezier space | [motion-easing-primitives.md](../ui/primitive-token/motion-easing-primitives.md) |
 | Z-index | Discrete, but an unconstrained integer space with no natural stopping point | Not written |
 
 Letter spacing and font weight hold their values inside the [typography roles](../ui/semantic-token/typography.md), which the every-literal rule above does not allow. Each carries too few distinct values across the roster for a scale to separate anything. The other unwritten dimensions resolve to values Tailwind ships. `[human]`

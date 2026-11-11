@@ -96,6 +96,14 @@
   --font-serif: var(--rome-font-serif);
   --font-mono: var(--rome-font-mono);
 
+  /* Motion. Scale and rationale: docs/ui/primitive-token/motion-duration-primitives.md
+     and motion-easing-primitives.md. */
+  --rome-duration-150: 150ms;
+  --rome-duration-200: 200ms;
+  --rome-duration-300: 300ms;
+  --rome-ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --rome-ease-in-out-travel: cubic-bezier(0.45, 0, 0.1, 1);
+
   /* Spacing. Authored in rem so a reader's font-size preference scales the
      layout. The px note is the value at a 16px root. */
   --rome-space-0: 0;

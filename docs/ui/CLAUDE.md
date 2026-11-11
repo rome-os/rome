@@ -4,6 +4,8 @@ The design token docs. One directory per kind of token: `primitive-token/` (one 
 
 [`layouts.md`](layouts.md) sits beside them too, and holds the catalogue of page layouts a routed page picks from by naming the reader's task.
 
+[`motion.md`](motion.md) sits beside them too, and holds the rules for how a surface changes state: what moves, how fast, and what stays still.
+
 [`VOICE.md`](VOICE.md) and [`secondary-text.md`](secondary-text.md) govern the words rather than the pixels. The first fixes how every string a guardian reads sounds. The second decides whether a piece of secondary text exists at all, and the `secondary-text-audit` skill reads it as its ruleset.
 
 ## Playbook

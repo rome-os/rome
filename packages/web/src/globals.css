@@ -270,7 +270,7 @@
 }
 
 .rome-empty-rise {
-  animation: rome-empty-rise 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  animation: rome-empty-rise 720ms var(--rome-ease-out-expo) both;
 }
 
 @media (prefers-reduced-motion: reduce) {
@@ -304,7 +304,7 @@
 }
 
 .rome-sidebar-link:is(:hover, :focus-visible) .rome-sidebar-icon[data-motion="apps"] {
-  animation: rome-sidebar-apps-hover 420ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: rome-sidebar-apps-hover 420ms var(--rome-ease-out-expo);
 }
 
 .rome-sidebar-link:is(:hover, :focus-visible) .rome-sidebar-icon[data-motion="chat"] {
@@ -553,7 +553,7 @@
 }
 
 .rome-sheet-rise {
-  animation: rome-sheet-rise 280ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: rome-sheet-rise 280ms var(--rome-ease-out-expo);
 }
 
 .rome-backdrop-fade {
@@ -621,7 +621,7 @@
 }
 
 .rome-advanced-easter-egg {
-  animation: rome-advanced-easter-egg-enter 520ms cubic-bezier(0.16, 1, 0.3, 1);
+  animation: rome-advanced-easter-egg-enter 520ms var(--rome-ease-out-expo);
 }
 
 .rome-advanced-easter-egg-art {
