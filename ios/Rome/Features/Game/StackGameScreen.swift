@@ -662,9 +662,10 @@ struct GroundArt: View, Equatable {
     /// ground has the room.
     static let wallHeight: CGFloat = 1.7
     /// The letters' tops sit this far under the ground's edge.
-    static let letterTop: CGFloat = 34
-    /// The Colosseum stops this far under the ground's edge.
-    static let wallTop: CGFloat = 6
+    static let letterTop: CGFloat = 60
+    /// The Colosseum stops this far under the ground's edge: room to
+    /// breathe under the base block.
+    static let wallTop: CGFloat = 32
 
     /// The point size at which the word spans `width`, measured, since a
     /// shrink-to-fit misjudges the tight tracking and cuts the last letter.
