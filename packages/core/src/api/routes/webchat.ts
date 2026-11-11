@@ -87,7 +87,7 @@ import {
   sessionOwnerKey,
   type SessionActor,
 } from "../../access/session-actor.js";
-import type { DashboardInbox } from "../../connections/send.js";
+import type { DashboardInbox } from "../../webchat/send.js";
 import {
   resolveChatSenders,
   resolveAutomatedSender,
@@ -818,7 +818,7 @@ export interface WebchatRuntime {
   subscribeSessionEvents(sessionId: string, emit: LiveEventEmit): () => void;
   /** Whether the id names a session the session events stream serves. */
   hasStoredSession(sessionId: string): Promise<boolean>;
-  /** The dashboard's side of a send into one of its chats (connections/send.ts). */
+  /** The dashboard's side of a send into one of its chats (webchat/send.ts). */
   post: DashboardInbox["post"];
   /** Start a chat owned by `ownerKey`, as `POST /chat/sessions` does, and answer
    *  its id. Throws the route's error. */

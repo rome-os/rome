@@ -117,6 +117,7 @@ import {
   joinLaterChannel,
 } from "./chats/connected-accounts/connected-account-list.js";
 import { WEBCHAT_CHANNEL, WEBCHAT_SURFACE, webchatChannel } from "./webchat/dashboard-account.js";
+import { ownPlatforms } from "./webchat/send.js";
 import { claimChannels, recordChannelAccounts } from "./wiring/boot.js";
 import { backfillLegacyChats, backfillLegacyChatsIn } from "./db/chats-backfill.js";
 import { domainOf, domainOfGrant } from "./connections/platform.js";
@@ -2141,6 +2142,7 @@ async function main() {
         chats: chatsWired.chats,
         messages: chatsWired.messages,
       },
+      ownPlatforms: ownPlatforms(),
       chats: chatsWired.chats,
       messages: chatsWired.messages,
       webhookInvocationsRepo,
