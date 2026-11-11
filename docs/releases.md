@@ -46,9 +46,23 @@ The invariants behind that table, each enforced by the workflow rather than by c
 
 The workflow freezes `ROME_VERSION` (tag with `v` stripped — always equal to the image's docker tag), `ROME_BUILD_SHA`, and `ROME_BUILD_TIME` into the image as env vars. The runtime reports them via `getBuildInfo()` → `/api/build-info`. `version` is `null` on non-release builds (local/source runs), and consumers degrade gracefully on null rather than guessing.
 
+### GitHub release
+
+After the image is published, the workflow's last job creates a GitHub release for the tag, titled `Rome vX.Y.Z`. [`scripts/docker/release-notes.mjs`](../scripts/docker/release-notes.mjs) writes its notes, and they hold:
+
+- The image name and version, and the commit it was built from.
+- The commits since the previous release, grouped as Breaking changes (a `!` after the type, or a `BREAKING CHANGE:` footer), New (`feat`), Fixes (`fix`, `perf`, `revert`) and Other changes (subjects that are not Conventional Commits). Every other type goes in a collapsed Internal changes list.
+- A link to the full comparison.
+
+The previous release is the highest stable version below this one on Docker Hub, so the changes of a tag whose build never shipped roll into the next release. A prerelease counts from the stable version before it.
+
+A commit is listed only when it touches a file the image is built from. [`scripts/docker/runtime-inputs.mjs`](../scripts/docker/runtime-inputs.mjs) holds those rules, and [`prepare-runtime-workspace.mjs`](../scripts/docker/prepare-runtime-workspace.mjs) copies the build context by the same rules, so the notes and the image cannot disagree. The shipped docs are the one exception. The agent answers from them, but a commit whose only shipped files are docs is left out, since it changes no behavior.
+
+A prerelease tag gets a prerelease. The release never takes the **Latest** badge from the package releases. The job fails when a release for the tag already exists. If it fails after the image went out, rerun that job alone.
+
 ### Rehearsing the pipeline
 
-`.github/workflows/docker-publish-test.yml` publishes to `zoolsher/rome` with separate `TEST_DOCKERHUB_*` secrets on manual dispatch and twice-daily schedules. It exercises the multi-arch build and manifest publish without creating production release tags. It does not use the production weekday schedule, CI gate, or version allocation. It is a copy, not a shared workflow — when changing the release pipeline, update both or note the drift.
+`.github/workflows/docker-publish-test.yml` publishes to `zoolsher/rome` with separate `TEST_DOCKERHUB_*` secrets on manual dispatch and twice-daily schedules. It exercises the multi-arch build and manifest publish without creating production release tags. It does not use the production weekday schedule, CI gate, or version allocation, and creates no GitHub release. It is a copy, not a shared workflow — when changing the release pipeline, update both or note the drift.
 
 ## Mac app
 

@@ -4,49 +4,21 @@ import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import {
+  excludedDocsPaths as excludedDocsPathsByGit,
+  forbiddenPackages,
+  ignoredFileSuffixes,
+  ignoredNames,
+  optionalRuntimePackages,
+  rootFiles,
+  rootScripts,
+  runtimePackages,
+} from "./runtime-inputs.mjs";
 
 const scriptDir = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(scriptDir, "../..");
 const runtimeWorkspace = path.join(repoRoot, ".docker/rome-runtime-workspace");
 const manifestWorkspace = path.join(runtimeWorkspace, ".docker-manifests");
-
-const rootFiles = [
-  ".dockerignore",
-  "Caddyfile",
-  "Dockerfile",
-  "package.json",
-  "pnpm-lock.yaml",
-  "sshd_config",
-  "tsconfig.json",
-  "tsconfig.scripts.build.json",
-];
-
-const runtimePackages = [
-  "packages/api-types",
-  "packages/lib",
-  "packages/web-content",
-  "packages/core",
-  "packages/discord-cli",
-  "packages/signer",
-  "packages/rome-node-cli",
-  "packages/rome-node-core",
-  "packages/rome-node-ui",
-  "packages/ui",
-  "packages/web",
-  "packages/app-web-sdk",
-  "packages/app-runtime-sdk",
-];
-
-const optionalRuntimePackages = ["packages/app-template"];
-
-const forbiddenPackages = ["packages/desktop", "packages/pantheon", "packages/cdp-client"];
-
-const rootScripts = [
-  "scripts/bundle-docker-core.mjs",
-  "scripts/obfuscate-docker-runtime.mjs",
-  "scripts/generate-caddyfile.ts",
-  "scripts/docker",
-];
 
 const runtimeWorkspacePackagesYaml = `packages:
   - "packages/api-types"
@@ -79,37 +51,9 @@ async function generateWorkspaceYaml() {
   return rootYaml.replace(packagesBlock, runtimeWorkspacePackagesYaml);
 }
 
-// Contributor-only docs stay out of the image. northstars/ and adrs/ describe
-// goals and past options rather than what Rome does, so an agent answering the
-// guardian from them would claim features that do not exist.
-const excludedDocsPaths = [
-  "docs/adrs",
-  "docs/assets",
-  "docs/authoring",
-  "docs/northstars",
-  "docs/screenshots",
-  "docs/ui",
-  "docs/AGENTS.md",
-  "docs/CLAUDE.md",
-  "docs/dashboard-mock-mode.md",
-  "docs/design-system.md",
-  "docs/midscene-e2e-cases.md",
-  "docs/midscene-e2e-plan.md",
-  "docs/storybook.md",
-  "docs/ui-kit.md",
-].map((docsPath) => docsPath.split("/").join(path.sep));
-
-const ignoredNames = new Set([".git", ".next", ".turbo", "coverage", "dist", "node_modules"]);
-
-const ignoredFileSuffixes = [
-  ".test.ts",
-  ".test.tsx",
-  ".integration.test.ts",
-  ".integration.test.tsx",
-  ".e2e.test.ts",
-  ".e2e.test.tsx",
-  ".tsbuildinfo",
-];
+const excludedDocsPaths = excludedDocsPathsByGit.map((docsPath) =>
+  docsPath.split("/").join(path.sep),
+);
 
 /**
  * On macOS, pnpm guards `node_modules` (and dirs it manages) with a

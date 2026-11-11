@@ -263,3 +263,60 @@ jobs:
           done
 
           docker buildx imagetools create "${tag_args[@]}" "${sources[@]}"
+
+  github-release:
+    name: Create GitHub release
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    needs:
+      - release
+      - publish
+    env:
+      RELEASE_TAG: ${{ needs.release.outputs.tag }}
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          # The notes walk history back to the previous release's tag.
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Write release notes
+        run: |
+          set -euo pipefail
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            echo "::error::A release for ${RELEASE_TAG} already exists"
+            exit 1
+          fi
+
+          # Every version published on Docker Hub. The notes count from the
+          # highest stable one below this release (see release-notes.mjs).
+          url="https://hub.docker.com/v2/repositories/${IMAGE_NAME}/tags?page_size=100"
+          : > published-versions.txt
+          while [[ -n "$url" && "$url" != "null" ]]; do
+            page=$(curl -fsSL "$url")
+            jq -r '.results[].name' <<< "$page" >> published-versions.txt
+            url=$(jq -r '.next' <<< "$page")
+          done
+          node scripts/docker/release-notes.mjs "$RELEASE_TAG" published-versions.txt > release-notes.md
+          cat release-notes.md
+
+      - name: Create release
+        run: |
+          set -euo pipefail
+
+          # Not Latest: that badge stays with the package releases, which
+          # release-please would take it back for anyway.
+          prerelease=false
+          [[ "$RELEASE_TAG" == *-* ]] && prerelease=true
+          gh release create "$RELEASE_TAG" \
+            --verify-tag \
+            --latest=false \
+            --prerelease="$prerelease" \
+            --title "Rome ${RELEASE_TAG}" \
+            --notes-file release-notes.md
