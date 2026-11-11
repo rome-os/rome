@@ -2813,6 +2813,93 @@ describe("AgentRunner", () => {
       await manager.shutdown();
     });
 
+    describe("a Claude turn a now input supersedes", () => {
+      // A Claude stop ends with a result of the adapter's own making, which
+      // marks the turn stopped; a turn the model finished first ends with its
+      // real result. Only the stopped turn's request reaches the next prompt.
+      const supersede = async (finishedFirst: boolean) => {
+        const prompts: string[] = [];
+        let releaseFirst!: () => void;
+        const firstGate = new Promise<void>((resolve) => {
+          releaseFirst = resolve;
+        });
+        const provider: ModelProvider = {
+          id: "anthropic",
+          builtinTools: new Set(),
+          async openSession(params) {
+            const model = createSessionFromRun(
+              "anthropic",
+              async function* ({ prompt }) {
+                prompts.push(prompt);
+                if (prompts.length === 1) {
+                  // Claude has read the request when the stop comes.
+                  yield { type: "input_status", inputId: "first", state: "consumed" };
+                  await firstGate;
+                }
+                yield {
+                  type: "result",
+                  content: `answer:${prompt}`,
+                  ...(prompts.length === 1 && !finishedFirst
+                    ? {
+                        accounting: {
+                          provider: "anthropic",
+                          model: "claude-test",
+                          usage: {
+                            inputTokens: 0,
+                            outputTokens: 0,
+                            cacheReadTokens: 0,
+                            cacheWriteTokens: 0,
+                          },
+                          stop: { reason: "interrupted" as const },
+                        },
+                      }
+                    : {}),
+                };
+              },
+              params,
+            );
+            return {
+              ...model,
+              async interrupt() {
+                releaseFirst();
+              },
+            };
+          },
+        };
+        const manager = createSessions(
+          managerDeps(createTestModelResolver({ providers: [provider] })),
+          { keepAliveAcrossTurns: true },
+        );
+        const session = await manager.open({
+          agentName: "test-main",
+          channelThreadKey: `webchat:claude-supersede-${finishedFirst}`,
+        });
+        const first = session.submit(
+          { inputId: "first", prompt: "Start a task" },
+          { priority: "now" },
+        );
+        const firstMessages = collectMessages((await first.turn).events());
+        await rs.waitFor(() => expect(prompts).toHaveLength(1));
+        const second = session.submit({ prompt: "What is 6 times 9?" }, { priority: "now" });
+        await firstMessages;
+        await collectMessages((await second.turn).events());
+        await manager.shutdown();
+        return prompts[1];
+      };
+
+      it("carries the stopped turn's request into the next prompt", async () => {
+        const next = await supersede(false);
+        // The input queue's note that names interrupted work.
+        expect(next).toMatch(/previous turn was stopped before it finished/);
+        expect(next).toContain("Start a task");
+        expect(next).toContain("What is 6 times 9?");
+      });
+
+      it("carries nothing from a turn that completed", async () => {
+        expect(await supersede(true)).toBe("What is 6 times 9?");
+      });
+    });
+
     it("takes the next input on the same model session after an interrupt", async () => {
       const opens: ModelSessionParams[] = [];
       const prompts: string[] = [];

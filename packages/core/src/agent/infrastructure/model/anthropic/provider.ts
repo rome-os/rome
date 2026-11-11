@@ -544,6 +544,15 @@ export class AnthropicProvider implements ModelProvider {
     const effectiveModel = queryEnv.ANTHROPIC_MODEL ?? model;
     const authRevokedSource = queryContext.authRevokedSource;
     const providerId = this.id;
+    // An abort that reached no SDK result still ends as a stopped turn, not a
+    // completed one, so the session hands its read inputs on to the next turn.
+    const interruptedAccounting = () =>
+      buildAgentAccounting({
+        provider: providerId,
+        model: effectiveModel,
+        usage: { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0 },
+        stop: { reason: "interrupted" },
+      });
     // Captured for the events generator below (a plain `async function*` with no
     // `this`): update runtime state before classified terminals become observable.
     const account = this.options.account;
@@ -1035,6 +1044,7 @@ export class AnthropicProvider implements ModelProvider {
                 type: "result",
                 content: partialText || pendingText || "",
                 reasoningEffort: effort,
+                accounting: interruptedAccounting(),
               };
         }
       } catch (err) {
@@ -1059,6 +1069,7 @@ export class AnthropicProvider implements ModelProvider {
                   type: "result",
                   content: partialText || pendingText || "",
                   reasoningEffort: effort,
+                  accounting: interruptedAccounting(),
                 };
           }
           return;

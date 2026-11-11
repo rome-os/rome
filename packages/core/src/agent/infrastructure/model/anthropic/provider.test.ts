@@ -899,8 +899,14 @@ describe("AnthropicProvider", () => {
     expect(q.interrupt).not.toHaveBeenCalled();
     expect(q.close).not.toHaveBeenCalled();
     expect(controller.signal.aborted).toBe(true);
+    // The abort's own result says the turn was stopped, not completed, so the
+    // session hands the turn's inputs on.
     expect(messages.filter((message) => message.type === "result")).toEqual([
-      { type: "result", content: phase === "startup" ? "" : "Saved work" },
+      {
+        type: "result",
+        content: phase === "startup" ? "" : "Saved work",
+        accounting: expect.objectContaining({ stop: { reason: "interrupted" } }),
+      },
     ]);
     if (phase !== "startup") {
       expect(messages).toContainEqual({ type: "text", content: "Saved work", turnPhase: "final" });
@@ -998,6 +1004,7 @@ describe("AnthropicProvider", () => {
       type: "result",
       content: interruptedCheckpoint ? "Current turn" : "",
       reasoningEffort: "high",
+      accounting: expect.objectContaining({ stop: { reason: "interrupted" } }),
     });
     await session.close();
   });
