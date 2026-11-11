@@ -1,5 +1,5 @@
 import { romeToolPorts } from "../core/rome-tool-ports.js";
-import { appGuardianProfile } from "../people/for-apps.js";
+import { appGuardianProfile } from "../app-host/guardian-profile.js";
 import { WebChatDashboardSessions } from "../webchat/webchat-dashboard-sessions.js";
 import { createLogger } from "../logger.js";
 import { sessionOpeningFor } from "../core/session-opening.js";

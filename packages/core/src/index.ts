@@ -1,5 +1,5 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
-import { appGuardianProfile } from "./people/for-apps.js";
+import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { WebChatDashboardSessions } from "./webchat/webchat-dashboard-sessions.js";
