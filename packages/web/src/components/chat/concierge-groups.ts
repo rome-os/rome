@@ -68,6 +68,12 @@ export function turnHasSpoken(rows: ChatRow[], turnId: string | null): boolean {
   );
 }
 
+/** Whether turn `turnId` took one of the owner's messages as its input. */
+function turnTookOwnerMessage(rows: ChatRow[], turnId: string | null): boolean {
+  if (!turnId) return false;
+  return rows.some((row) => row.kind === "user" && row.message.turnId === turnId);
+}
+
 // The tools whose call is itself a message the chat draws: once one lands,
 // nothing is left to type for it.
 const MESSAGE_TOOLS = new Set(["say", "chat_forward"]);
@@ -105,17 +111,21 @@ export function hasOpenWorkCall(snapshot: TraceSnapshot | null): boolean {
 }
 
 /**
- * Whether the Concierge chat shows its typing dots. Until the running turn
- * says its first message they show, unless the turn is quiet. Once it has
- * said one they show only while it is in a call other than one that says a
- * message, so a turn that only closes off after its last message (writing
- * its private `done`) shows none.
+ * Whether the Concierge chat shows its typing dots. A turn that took the
+ * owner's message shows none: that message's status reaction already says
+ * the Concierge is on it (docs/domains/chats.md#status-reaction). Any other
+ * turn, such as one bringing back a task's result, shows them until it says
+ * its first message, unless it is quiet. Once it has said one they show only
+ * while it is in a call other than one that says a message, so a turn that
+ * only closes off after its last message (writing its private `done`) shows
+ * none.
  */
 export function showsTyping(
   rows: ChatRow[],
   live: Pick<LivePreview, "isStreaming" | "runningTurnId" | "quiet" | "snapshot">,
 ): boolean {
   if (!live.isStreaming) return false;
+  if (turnTookOwnerMessage(rows, live.runningTurnId)) return false;
   if (!turnHasSpoken(rows, live.runningTurnId)) return !live.quiet;
   return hasOpenWorkCall(live.snapshot);
 }

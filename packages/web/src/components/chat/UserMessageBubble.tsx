@@ -25,7 +25,7 @@ export function UserMessageBubble({
   text: string;
   own: boolean;
   className?: string;
-  /** Sits on the bubble's own surface, positioned against it, as a status reaction does. */
+  /** Sits on the bubble's own surface, positioned against it, as a status reaction does. Pass it, null included, to keep the bubble its anchor. */
   badge?: ReactNode;
 }) {
   const { t } = useTranslation("chat");
@@ -45,8 +45,8 @@ export function UserMessageBubble({
         tone={undelivered ? "muted" : own ? "sent" : "received"}
         className={cn(
           "transition-colors motion-reduce:transition-none",
-          // The badge hangs half below the bubble; the margin keeps it off the next row.
-          badge && "relative mb-5",
+          // The badge is placed against the bubble, and takes no room of its own.
+          badge !== undefined && "relative",
           undelivered && "flex items-start gap-2",
           // A pending bubble is the normal bubble, breathing until the agent
           // takes the input in (see `.rome-bubble-pending` in globals.css).

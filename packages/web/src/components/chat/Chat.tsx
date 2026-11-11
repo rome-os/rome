@@ -92,7 +92,7 @@ import {
   useReplyDraftState,
 } from "@/components/chat/reply/reply-draft";
 import { findMessageAnchor } from "@/components/chat/reply/reply-source";
-import { isAnchorInView, LANDING_MS, THREAD_FADE_MS } from "@/components/chat/reply/thread-anchor";
+import { isAnchorInView, LANDING_MS } from "@/components/chat/reply/thread-anchor";
 import { useDesktop } from "@/hooks/use-desktop";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
@@ -2356,25 +2356,13 @@ export function Chat({
     : floatingHeader;
   const threadOpen = concierge && Boolean(mainSessionId) && replyDraft.thread !== null;
   // The thread view stays on the message it opened from while it is open,
-  // and for its fade once it closed. Closing takes effect at once: the
-  // fading view takes no input.
+  // a reply picked inside it included. It fades in, and closes at once: the
+  // backdrop's blur cannot fade out cleanly, and the composer and header
+  // return under a fading view, so a fade out flashes.
   const draftThread = threadOpen ? replyDraft.thread : null;
-  const [threadView, setThreadView] = useState<{ id: string; closing: boolean } | null>(null);
-  if (draftThread && (!threadView || threadView.closing)) {
-    setThreadView({ id: draftThread, closing: false });
-  } else if (!draftThread && threadView && !threadView.closing) {
-    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    setThreadView(still ? null : { id: threadView.id, closing: true });
-  }
-  const threadClosing = threadView?.closing === true;
-  useEffect(() => {
-    if (!threadClosing) return;
-    const timer = window.setTimeout(
-      () => setThreadView((current) => (current?.closing ? null : current)),
-      THREAD_FADE_MS,
-    );
-    return () => window.clearTimeout(timer);
-  }, [threadClosing]);
+  const [threadView, setThreadView] = useState<string | null>(null);
+  if (draftThread && !threadView) setThreadView(draftThread);
+  else if (!draftThread && threadView) setThreadView(null);
   const openedFromRef = useRef<string | null>(null);
   useEffect(() => {
     if (draftThread) {
@@ -2709,48 +2697,47 @@ export function Chat({
             )}
             {threadView && mainSessionId ? (
               <ChatThreadView
-                key={threadView.id}
+                key={threadView}
                 sessionId={mainSessionId}
-                messageId={threadView.id}
+                messageId={threadView}
                 onClose={replyDraft.closeThread}
                 floor={floorEl}
-                closing={threadView.closing}
-                originTop={threadOrigin(threadView.id)}
-                header={
-                  threadView.closing
-                    ? undefined
-                    : conciergeHeaderWith(
-                        <IconButton
-                          size={floating ? "md" : "sm"}
-                          label={t("thread.close")}
-                          icon={<X />}
-                          onClick={replyDraft.closeThread}
-                          className={actionBadge}
-                        />,
-                      )
-                }
+                originTop={threadOrigin(threadView)}
+                header={conciergeHeaderWith(
+                  <IconButton
+                    size={floating ? "md" : "sm"}
+                    label={t("thread.close")}
+                    icon={<X />}
+                    onClick={replyDraft.closeThread}
+                    className={actionBadge}
+                  />,
+                )}
                 renderMessages={(threadMessages) => (
-                  <ConciergeTranscript
-                    rows={buildRows(threadMessages, identityBySession, mainIdentity, {
-                      runningTurnId: null,
-                      isStreaming: false,
-                    })}
-                    live={{
-                      isStreaming: false,
-                      runningTurnId: null,
-                      snapshot: null,
-                      textStore: liveTextStore,
-                      identity: mainIdentity,
-                    }}
-                    actions={{
-                      ...blockActions,
-                      interactionResults: threadInteractionResults(threadMessages, {
-                        messages: displayMessages,
-                        results: blockActions.interactionResults,
-                      }),
-                    }}
-                    contentRef={ignoreThreadContent}
-                  />
+                  // The thread view offers Copy and Reply, not Share: a share
+                  // is made from the chat's own timeline.
+                  <MessageSharingContext.Provider value={null}>
+                    <ConciergeTranscript
+                      rows={buildRows(threadMessages, identityBySession, mainIdentity, {
+                        runningTurnId: null,
+                        isStreaming: false,
+                      })}
+                      live={{
+                        isStreaming: false,
+                        runningTurnId: null,
+                        snapshot: null,
+                        textStore: liveTextStore,
+                        identity: mainIdentity,
+                      }}
+                      actions={{
+                        ...blockActions,
+                        interactionResults: threadInteractionResults(threadMessages, {
+                          messages: displayMessages,
+                          results: blockActions.interactionResults,
+                        }),
+                      }}
+                      contentRef={ignoreThreadContent}
+                    />
+                  </MessageSharingContext.Provider>
                 )}
               />
             ) : null}

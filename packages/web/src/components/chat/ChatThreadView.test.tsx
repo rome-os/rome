@@ -397,29 +397,6 @@ describe("ChatThreadView", () => {
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
   });
 
-  it("while it fades out after closing, takes no press and hears no Esc", async () => {
-    const onClose = rs.fn();
-    render(
-      host(
-        <ChatThreadView
-          sessionId="concierge"
-          messageId="a1"
-          onClose={onClose}
-          closing
-          renderMessages={paragraphs}
-        />,
-      ),
-    );
-    await screen.findByText("Which day?");
-    const view = document.querySelector<HTMLElement>("[data-chat-thread-view]")!;
-    expect(view.hasAttribute("data-closing")).toBe(true);
-    expect(view.className).toMatch(/pointer-events-none/);
-
-    fireEvent.pointerDown(view);
-    fireEvent.keyDown(document, { key: "Escape" });
-    expect(onClose).not.toHaveBeenCalled();
-  });
-
   it("tints the message it opened from once it has faded in, then lets it go", async () => {
     render(
       host(

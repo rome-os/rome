@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { cleanup, render } from "@testing-library/react";
+import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({
@@ -118,10 +118,12 @@ describe("Concierge status reaction", () => {
       expect(bubble?.hasAttribute("data-chat-bubble")).toBe(true);
       // The bubble is the badge's positioned ancestor.
       expect(bubble?.className).toMatch(/\brelative\b/);
+      // The mark takes no room: the bubble keeps its normal spacing.
+      expect(bubble?.className).not.toMatch(/\bm[by]-/);
     }
   });
 
-  it("follows the live reaction once one arrives", () => {
+  it("follows the live reaction once one arrives", async () => {
     const { container, rerender } = render(transcript());
     rerender(transcript(new Map([["weather", "failed"]])));
     expect(badges(container)).toEqual([
@@ -149,7 +151,13 @@ describe("Concierge status reaction", () => {
         ]),
       ),
     );
-    expect(badges(container)).toEqual([]);
+    // A mark that goes fades out first, then leaves.
+    expect(
+      Array.from(container.querySelectorAll("[data-status-reaction]")).every((badge) =>
+        badge.hasAttribute("data-leaving"),
+      ),
+    ).toBe(true);
+    await waitFor(() => expect(badges(container)).toEqual([]));
   });
 
   it("reads the live event the server sends, and refuses a value it does not know", () => {

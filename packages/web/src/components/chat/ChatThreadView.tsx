@@ -39,7 +39,7 @@ const CONTENT =
  * by `renderMessages`, sit at the bottom above the composer and scroll when
  * long. With `originTop`, the message it was opened from keeps the place it
  * had in the timeline instead (see `threadAnchor`). New messages in the
- * thread appear as they are said. It fades in, and out while `closing`.
+ * thread appear as they are said. It fades in, and closes at once.
  *
  * The composer is not part of it: `floor` is the element holding it, whose
  * height the messages keep clear of. It closes on Esc and on a press on the
@@ -53,7 +53,6 @@ export function ChatThreadView({
   renderMessages,
   floor = null,
   originTop,
-  closing = false,
   className,
 }: {
   sessionId: string;
@@ -69,8 +68,6 @@ export function ChatThreadView({
    * bottom.
    */
   originTop?: () => number | null;
-  /** Fading out after it closed: it takes no input and hears no Esc. */
-  closing?: boolean;
   className?: string;
 }) {
   const { t } = useTranslation("chat");
@@ -89,13 +86,12 @@ export function ChatThreadView({
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   useEffect(() => {
-    if (closing) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") closeRef.current();
     };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
-  }, [closing]);
+  }, []);
 
   // The composer's floor rides over the bottom of the column, so the last
   // message keeps clear of it however tall the draft grows.
@@ -171,7 +167,7 @@ export function ChatThreadView({
   const shown = count > 0;
   useEffect(() => {
     const list = listRef.current;
-    if (!list || !shown || landed.current || closing) return;
+    if (!list || !shown || landed.current) return;
     landed.current = true;
     const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     let copy: HTMLElement | null = null;
@@ -191,7 +187,7 @@ export function ChatThreadView({
       window.clearTimeout(end);
       copy?.removeAttribute("data-timeline-landed");
     };
-  }, [shown, closing, messageId]);
+  }, [shown, messageId]);
 
   const onScroll = () => {
     const list = listRef.current;
@@ -205,7 +201,6 @@ export function ChatThreadView({
   };
 
   const onPointerDown = (event: PointerEvent<HTMLDivElement>) => {
-    if (closing) return;
     // A layer the thread's content opened in a portal (a popover, a menu)
     // bubbles here through React, though it lies outside the overlay.
     if (!event.currentTarget.contains(event.target as Node)) return;
@@ -217,15 +212,9 @@ export function ChatThreadView({
     <div
       role="dialog"
       aria-label={t("thread.title")}
-      aria-hidden={closing || undefined}
       data-chat-thread-view
-      data-closing={closing || undefined}
       onPointerDown={onPointerDown}
-      className={cn(
-        "absolute inset-0 z-20 flex flex-col",
-        closing && "pointer-events-none",
-        className,
-      )}
+      className={cn("absolute inset-0 z-20 flex flex-col", className)}
     >
       {/* Each layer fades on its own: an ancestor's opacity would cut the
           backdrop's blur off from the chat behind it while it fades. */}

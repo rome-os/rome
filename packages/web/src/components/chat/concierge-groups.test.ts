@@ -391,6 +391,12 @@ describe("showsTyping", () => {
     expect(showsTyping(said, live(trace(use("w1", "WebSearch")), { quiet: true }))).toBe(true);
   });
 
+  it("never types in a turn that took the owner's message, which shows its own mark", () => {
+    const taken = [userRow({ ...guardian("g2", MIN), turnId: "t1" } as ChatMessage)];
+    expect(showsTyping(taken, live(null))).toBe(false);
+    expect(showsTyping(taken, live(trace(use("w1", "WebSearch"))))).toBe(false);
+  });
+
   it("never types once the turn has ended", () => {
     expect(showsTyping(asked, { ...live(null), isStreaming: false })).toBe(false);
   });

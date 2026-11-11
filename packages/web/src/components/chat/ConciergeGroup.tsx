@@ -54,7 +54,7 @@ const GuardianBubble = memo(
           msg={msg}
           text={text}
           own
-          badge={reaction ? <StatusReactionBadge reaction={reaction} /> : null}
+          badge={<StatusReactionBadge reaction={reaction} />}
         />
       </ConciergeBubble>
     );

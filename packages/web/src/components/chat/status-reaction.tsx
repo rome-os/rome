@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { z } from "zod";
 import {
@@ -35,26 +35,54 @@ const EMOJI: Record<ConciergeStatusReaction, string> = {
   failed: "⚠️",
 };
 
+/** How long the mark fades in and out, in ms. Matches `[data-status-reaction]` in globals.css. */
+const MARK_FADE_MS = 150;
+
 /**
  * Rome's status reaction on a guardian message in a Concierge chat
  * (docs/domains/chats.md#status-reaction): a small capsule at the
  * bubble's bottom-right corner, like a tapback, hanging mostly below the
  * bubble so it never covers its text. It is a child of the bubble, so it
- * stays on the bubble whatever the row around it holds. It only shows; it
- * does nothing.
+ * stays on the bubble whatever the row around it holds. It takes no room:
+ * it lies over the row below, so the timeline never moves when it comes or
+ * goes. It fades in and out, and only shows; it does nothing.
  */
-export function StatusReactionBadge({ reaction }: { reaction: ConciergeStatusReaction }) {
+export function StatusReactionBadge({ reaction }: { reaction: ConciergeStatusReaction | null }) {
   const { t } = useTranslation("chat");
-  const label = t(`concierge.statusReaction.${reaction}`);
+  // The last reaction stays drawn while the mark fades out.
+  const [shown, setShown] = useState(reaction);
+  const [leaving, setLeaving] = useState(false);
+  if (reaction && (reaction !== shown || leaving)) {
+    setShown(reaction);
+    setLeaving(false);
+  } else if (!reaction && shown && !leaving) {
+    setLeaving(true);
+  }
+  useEffect(() => {
+    if (!leaving) return;
+    const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
+    const timer = window.setTimeout(
+      () => {
+        setShown(null);
+        setLeaving(false);
+      },
+      still ? 0 : MARK_FADE_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [leaving]);
+  if (!shown) return null;
+  const label = t(`concierge.statusReaction.${shown}`);
   return (
     <span
       role="img"
       aria-label={label}
+      aria-hidden={leaving || undefined}
       title={label}
-      data-status-reaction={reaction}
+      data-status-reaction={shown}
+      data-leaving={leaving || undefined}
       className="pointer-events-none absolute right-3 -bottom-4.5 z-10 flex h-6 select-none items-center rounded-full bg-surface-muted px-2 text-composer"
     >
-      {EMOJI[reaction]}
+      {EMOJI[shown]}
     </span>
   );
 }
