@@ -59,7 +59,9 @@ final class DemoBackend: RomeBackend {
     /// `visitor`: the full demo, seen by a dashboard visitor of the shared Rome.
     /// `updateOffered`: a Rome behind its latest release but new enough for
     /// the app, which offers the update instead of requiring it.
-    enum Variant { case full, empty, conciergeOff, updateRequired, updateOffered, manyApps, visitor }
+    /// `longChat`: the full data with a main chat long enough to page, ending
+    /// in a long digest that folds: what a cold launch from kept rows meets.
+    enum Variant { case full, empty, conciergeOff, updateRequired, updateOffered, manyApps, visitor, longChat }
     private let variant: Variant
 
     init(variant: Variant = .full) {
@@ -70,6 +72,19 @@ final class DemoBackend: RomeBackend {
             tasks = []
             topicChats = []
         }
+        if variant == .longChat { lengthenMainChat() }
+    }
+
+    private func lengthenMainChat() {
+        let start = Date.now.addingTimeInterval(-2 * 86400)
+        var earlier: [ChatMessage] = []
+        for index in 0..<60 {
+            let at = start.addingTimeInterval(Double(index) * 600)
+            earlier.append(user("long-u\(index)", "第 \(index + 1) 个问题：今天有什么要注意的？", at: at))
+            earlier.append(agent("第 \(index + 1) 个回答：没有新的安排，照常进行。", at: at.addingTimeInterval(30)))
+        }
+        let digest = (1...24).map { "\($0). 今天的邮件摘要第 \($0) 条：项目进度、会议时间和需要你回复的事项。" }.joined(separator: "\n")
+        messages[conciergeChatID] = earlier + (messages[conciergeChatID] ?? []) + [agent(digest, at: .now.addingTimeInterval(-60))]
     }
 
     // MARK: RomeBackend
@@ -386,7 +401,7 @@ final class DemoBackend: RomeBackend {
             InstalledApp(id: "browser-automation", displayName: "Browser", description: "Ships with Rome", fullHref: "/full/apps/browser-automation", origin: "builtin"),
         ]
         switch variant {
-        case .full, .visitor, .updateOffered:
+        case .full, .visitor, .updateOffered, .longChat:
             return few
         case .manyApps:
             let names = ["记账本", "Recipes", "Workout plan", "家庭相册", "Plant care", "Budget", "单词卡片", "Meal planner",

@@ -540,6 +540,10 @@ final class AppModel {
             openDemo(.manyApps)
             return
         }
+        if environment["ROME_DEMO"] == "long-chat" {
+            openDemo(.longChat)
+            return
+        }
         if let origin = environment["ROME_LOCAL_ORIGIN"],
            let user = environment["ROME_LOCAL_USER"],
            let password = environment["ROME_LOCAL_PASSWORD"] {
