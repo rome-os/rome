@@ -172,7 +172,7 @@ describe("NodeDevices", () => {
       "WorkstationLinux · Connected",
       "LaptopmacOS · Not connected",
     ]);
-    expect(within(cards[0]!).getByRole("img", { name: "3 commands in 24 h" })).toBeTruthy();
+    expect(await within(cards[0]!).findByRole("img", { name: "3 commands in 24 h" })).toBeTruthy();
     expect(within(cards[1]!).getByRole("img", { name: "0 commands in 24 h" })).toBeTruthy();
     await userEvent.click(screen.getByText("Workstation"));
     expect(nav.navigate).toHaveBeenCalledWith("/devices/dev-1");
@@ -238,7 +238,7 @@ describe("NodeDevices", () => {
     expect((await screen.findByRole("status")).textContent).toBe("Reconnecting to Gateway");
   });
 
-  it("draws the devices once, after the counts arrive", async () => {
+  it("draws the devices before the counts arrive and adds the curves after", async () => {
     serve([row(2), row(1)]);
     const answer = FakeSocket.reply;
     const held: Array<() => void> = [];
@@ -250,13 +250,17 @@ describe("NodeDevices", () => {
       <NodeDevices url="ws://rome.test/ws/node" devices={devices} navigation={navigation()} />,
     );
     await waitFor(() => expect(held).toHaveLength(1));
-    expect(screen.queryByText("Workstation")).toBeNull();
+    expect(screen.getByText("Workstation")).toBeTruthy();
+    expect(screen.getByText("Laptop")).toBeTruthy();
+    expect(screen.queryByRole("img")).toBeNull();
+    expect(screen.getByRole("region").getAttribute("aria-busy")).toBe("true");
     act(() => held.shift()!());
     expect(await screen.findByRole("img", { name: "2 commands in 24 h" })).toBeTruthy();
     expect(screen.getByRole("img", { name: "0 commands in 24 h" })).toBeTruthy();
+    expect(screen.getByRole("region").getAttribute("aria-busy")).toBeNull();
   });
 
-  it("orders devices once: connected first, then by their latest command", async () => {
+  it("orders devices once: connected first, then by name", async () => {
     const hour = 60 * 60 * 1000;
     serve([
       row(1, { peer: "dev-b", startedAt: Date.now() - 5 * hour }),
@@ -274,8 +278,9 @@ describe("NodeDevices", () => {
       <NodeDevices url="ws://rome.test/ws/node" devices={list} navigation={navigation()} />,
     );
     await screen.findByText("Online");
-    expect(names()).toEqual(["Online", "Newer", "Older", "Idle"]);
-    expect(screen.getAllByRole("img", { name: "1 command in 24 h" })).toHaveLength(2);
+    // Activity does not move a card, because the counts may arrive after the cards draw.
+    expect(names()).toEqual(["Online", "Idle", "Newer", "Older"]);
+    expect(await screen.findAllByRole("img", { name: "1 command in 24 h" })).toHaveLength(2);
     // A change of connection updates the card in place, and a new device goes last.
     rerender(
       <NodeDevices
@@ -289,7 +294,7 @@ describe("NodeDevices", () => {
         navigation={navigation()}
       />,
     );
-    expect(names()).toEqual(["Online", "Newer", "Older", "Idle", "New"]);
+    expect(names()).toEqual(["Online", "Idle", "Newer", "Older", "New"]);
     expect(
       within(screen.getAllByRole("listitem")[0]!).getByText("Linux · Not connected"),
     ).toBeTruthy();
