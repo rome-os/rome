@@ -1,5 +1,12 @@
 # @rome-os/app-runtime
 
+## [0.11.3](https://github.com/rome-os/rome/compare/app-runtime-v0.11.2...app-runtime-v0.11.3) (2026-11-11)
+
+
+### Features
+
+* **concierge:** group a Concierge chat's messages into chat threads, and renew its session when its setup changes ([#1934](https://github.com/rome-os/rome/issues/1934)) ([7c88832](https://github.com/rome-os/rome/commit/7c88832c4e28a15552e0f12e71be201eb5248439))
+
 ## [0.11.2](https://github.com/rome-os/rome/compare/app-runtime-v0.11.1...app-runtime-v0.11.2) (2026-11-08)
 
 

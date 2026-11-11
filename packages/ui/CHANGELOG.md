@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.10](https://github.com/rome-os/rome/compare/ui-v0.3.9...ui-v0.3.10) (2026-11-11)
+
+
+### Features
+
+* **concierge:** group a Concierge chat's messages into chat threads, and renew its session when its setup changes ([#1934](https://github.com/rome-os/rome/issues/1934)) ([7c88832](https://github.com/rome-os/rome/commit/7c88832c4e28a15552e0f12e71be201eb5248439))
+* **ui:** message typography, one share flow from every chat, and keep the request a superseded turn drops ([#1983](https://github.com/rome-os/rome/issues/1983)) ([a5a06bd](https://github.com/rome-os/rome/commit/a5a06bd9765f91ac82c0418a8f30bc2d8deefd43))
+* **web:** show whether Rome can use this computer next to the sidebar avatar ([#1911](https://github.com/rome-os/rome/issues/1911)) ([fea1ee0](https://github.com/rome-os/rome/commit/fea1ee0918d7d5ebbc6a2f36da9d824613680393))
+
+
+### Bug Fixes
+
+* **ui:** underline prose links at rest so they read as links on every theme and on touch ([#2006](https://github.com/rome-os/rome/issues/2006)) ([66265f0](https://github.com/rome-os/rome/commit/66265f0eecd66c45d3ac3ddfb1739f2a57899946))
+
 ## [0.3.9](https://github.com/rome-os/rome/compare/ui-v0.3.8...ui-v0.3.9) (2026-11-08)
 
 
