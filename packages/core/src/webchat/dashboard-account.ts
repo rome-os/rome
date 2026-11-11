@@ -4,6 +4,7 @@
 // its ports itself, in-process. Channel contract: channel.ts.
 
 import { AsyncLocalStorage } from "node:async_hooks";
+import { platformOf } from "@rome/api-types/platform";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import { canOpenChat, privateOwnerOf } from "./privacy.js";
 import { type SessionActor, sessionOwnerKey } from "../access/session-actor.js";
@@ -14,6 +15,9 @@ import { queryPage } from "../chats/history/messages.js";
 import { readWebchatMessages, WebChatAdapter } from "./adapter.js";
 
 export const WEBCHAT_CHANNEL = "webchat";
+
+/** The dashboard's platform: Rome's own chat behind the guardian's sign-in. */
+export const DASHBOARD_PLATFORM = platformOf(WEBCHAT_CHANNEL);
 
 /** How the dashboard chat prompts: it renders cards inline and answers them
  *  as the next turn, and every line in it is a guardian turn or the agent's

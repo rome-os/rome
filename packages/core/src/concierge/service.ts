@@ -9,7 +9,8 @@ import { CONCIERGE_CHAT_ID, type ConciergeChatRef } from "@rome/api-types/concie
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
 import type { Place } from "../chats/place.js";
-import { DASHBOARD_PLATFORM, type Body, type SendResult } from "../connections/send.js";
+import type { Body, SendResult } from "../chats/send.js";
+import { DASHBOARD_PLATFORM } from "../webchat/dashboard-account.js";
 import { webchatSessionKey } from "../core/agent-session-key.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../webchat/repository.js";
@@ -141,7 +142,7 @@ export interface TaskChats {
  *  Concierge, so it is attached once that layer is up. */
 export interface ConciergeDashboard {
   chats: TaskChats;
-  /** The ordinary send into a chat (connections/send.ts), with the dashboard able to take it. */
+  /** The ordinary send into a chat (chats/send.ts), with the dashboard able to take it. */
   send(place: Place, body: Body, as: Account): Promise<SendResult>;
 }
 
