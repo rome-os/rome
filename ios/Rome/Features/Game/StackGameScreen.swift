@@ -34,6 +34,9 @@ struct StackGameScreen: View {
     @State private var hudBottom: CGFloat?
     /// The mascot's bubble on screen while it shows: part of the tap target.
     @State private var bubbleFrame: CGRect?
+    /// The Colosseum on the horizon, built once for the page's width and
+    /// gone with the screen.
+    @State private var horizon: (width: CGFloat, path: Path)?
 
     /// The widest the blocks travel, so an iPad's slide stays a phone's length.
     static let maxFieldWidth: CGFloat = 520
@@ -94,8 +97,10 @@ struct StackGameScreen: View {
                     // A lost sample shows its end, long settled.
                     effects = StackEffects(level: first.placed, ended: first.phase == .over ? -100 : nil)
                     game = first
+                    horizon = Self.horizon(for: geometry.size.width)
                     dropHaptic.prepare()
                 }
+                .onChange(of: geometry.size.width) { _, width in horizon = Self.horizon(for: width) }
                 // A window resized or turned: the game follows its width.
                 .onChange(of: fieldWidth) { _, width in
                     guard var next = game else { return }
@@ -308,6 +313,12 @@ struct StackGameScreen: View {
         }
     }
 
+    /// The horizon's shape for a page this wide: as wide as the word below.
+    private static func horizon(for pageWidth: CGFloat) -> (width: CGFloat, path: Path) {
+        let width = min(pageWidth, Metrics.readableWidth) - Metrics.pagePadding * 2
+        return (width, Horizon.path(width: width))
+    }
+
     /// A view with one edge pinned to a point, whatever its size.
     private func anchored<Content: View>(at point: CGPoint, alignment: Alignment, @ViewBuilder _ content: () -> Content) -> some View {
         Color.clear
@@ -335,8 +346,18 @@ struct StackGameScreen: View {
             row += spacing
         }
         canvas.fill(dots, with: .color(Palette.fg.opacity(colorScheme == .dark ? 0.06 : 0.05)))
-        // The ground under the base.
+        // The Colosseum on the horizon, standing on the ground's edge behind
+        // the tower; it moves down and away as the tower rises.
         let groundTop = layout.y(0)
+        if let horizon {
+            let height = Horizon.height(for: horizon.width)
+            if groundTop - height < size.height {
+                var distant = canvas
+                distant.translateBy(x: (size.width - horizon.width) / 2, y: groundTop - height)
+                distant.fill(horizon.path, with: .color(Palette.stackHorizon))
+            }
+        }
+        // The ground under the base.
         if groundTop < size.height {
             canvas.fill(Path(CGRect(x: 0, y: groundTop, width: size.width, height: size.height - groundTop)), with: .color(Palette.stackGround))
         }
@@ -647,25 +668,16 @@ struct StackGameScreen: View {
 }
 
 /// The ground's art: a giant "Rome" in the opening screen's wordmark family
-/// at a heavy weight, as wide as the page allows, fluted like a column, in
-/// front of a faint Colosseum. The whole group dissolves into the ground
-/// toward the bottom. Drawn once per width: the camera only moves it.
-/// Decoration only.
+/// at a heavy weight, as wide as the page allows, fluted like a column. It
+/// dissolves into the ground toward its baseline. Drawn once per width: the
+/// camera only moves it. Decoration only.
 struct GroundArt: View, Equatable {
     let width: CGFloat
 
-    @Environment(\.colorScheme) private var colorScheme
-
     /// Tight, as the opening screen's wordmark sets it.
     static let tracking: CGFloat = -0.02
-    /// The tall part of the Colosseum rises this many cap heights, when the
-    /// ground has the room.
-    static let wallHeight: CGFloat = 1.7
     /// The letters' tops sit this far under the ground's edge.
-    static let letterTop: CGFloat = 60
-    /// The Colosseum stops this far under the ground's edge: room to
-    /// breathe under the base block.
-    static let wallTop: CGFloat = 32
+    static let letterTop: CGFloat = 14
 
     /// The point size at which the word spans `width`, measured, since a
     /// shrink-to-fit misjudges the tight tracking and cuts the last letter.
@@ -682,8 +694,7 @@ struct GroundArt: View, Equatable {
         let size = Self.size(for: width)
         let font = UIFont.systemFont(ofSize: size, weight: .heavy)
         let baseline = (Self.letterTop + font.capHeight).rounded()
-        let wallTop = max(Self.wallTop, baseline - font.capHeight * Self.wallHeight)
-        let height = baseline + font.capHeight * 0.06
+        let height = baseline + 2
         Canvas { canvas, _ in
             let word = canvas.resolve(
                 // A fixed size, not romeFont: the word is fitted to the page as
@@ -693,27 +704,22 @@ struct GroundArt: View, Equatable {
                     .tracking(size * Self.tracking)
                     .foregroundStyle(Palette.stackWordmark)
             )
-            Colosseum(width: width, baseline: baseline, top: wallTop, capHeight: font.capHeight).draw(in: &canvas)
             let measured = word.measure(in: CGSize(width: width * 2, height: size * 2))
             let frame = CGRect(x: (width - measured.width) / 2, y: baseline - word.firstBaseline(in: measured), width: measured.width, height: measured.height)
-            // A thin halo of the ground's color sets the word off the wall.
-            var halo = canvas
-            halo.addFilter(.shadow(color: Palette.stackGround, radius: max(2, size * 0.015)))
-            halo.draw(word, in: frame)
             canvas.draw(word, in: frame)
-            // Fluting and a capital band, cut to the letters.
+            // Fluting and a capital band, faint, cut to the letters.
             var letters = canvas
             letters.clipToLayer { mask in mask.draw(word, in: frame) }
             let unit = width / 640
             var flutes = Path()
             var x = frame.minX
             while x < frame.maxX {
-                flutes.addRect(CGRect(x: x, y: 0, width: 3 * unit, height: baseline + size))
+                flutes.addRect(CGRect(x: x, y: 0, width: 3 * unit, height: height))
                 x += 11 * unit
             }
-            letters.fill(flutes, with: .color(Palette.blend(Palette.stackWordmark, Palette.stackGround, 0.3)))
+            letters.fill(flutes, with: .color(Palette.blend(Palette.stackWordmark, Palette.stackGround, 0.2)))
             let band = max(1.5, size * 0.02)
-            letters.fill(Path(CGRect(x: 0, y: baseline - font.xHeight - band / 2, width: width, height: band)), with: .color(Palette.blend(Palette.stackWordmark, Palette.sub, 0.18)))
+            letters.fill(Path(CGRect(x: 0, y: baseline - font.xHeight - band / 2, width: width, height: band)), with: .color(Palette.blend(Palette.stackWordmark, Palette.sub, 0.12)))
         }
         .frame(width: width, height: height)
         .mask {
@@ -725,23 +731,22 @@ struct GroundArt: View, Equatable {
     }
 }
 
-/// The Colosseum in one flat tone: the full outer wall on the left (three
-/// arcades and an attic), its broken edge stepping down, and the lower inner
-/// ring on the right. Arches narrow toward the right, as the ellipse turns
-/// away. A cypress and an umbrella pine stand at the ends.
-private struct Colosseum {
-    let width: CGFloat
-    /// Where the wall stands and where its tall part ends, from the top of
-    /// the drawing.
-    let baseline: CGFloat
-    let top: CGFloat
-    let capHeight: CGFloat
+/// The Colosseum on the horizon, as one shape: the full outer wall on the
+/// left (three arcades and an attic), its broken edge stepping down, and the
+/// lower inner ring on the right, with a cypress and an umbrella pine at the
+/// ends. Arches, windows and the lines between levels are holes, so the sky
+/// shows through them whatever its tone. Arches narrow toward the right, as
+/// the ellipse turns away.
+enum Horizon {
+    /// Its height for a given width.
+    static func height(for width: CGFloat) -> CGFloat { (width * 0.36).rounded() }
 
-    func draw(in canvas: inout GraphicsContext) {
-        let tone = Palette.stackColosseum
+    /// The shape in a `width` × `height(for:)` box, standing on its bottom.
+    static func path(width: CGFloat) -> Path {
+        let baseline = height(for: width)
         let left = width * 0.05, right = width * 0.95
         // Three arcades and an attic of 0.7 of one.
-        let level = (baseline - top) / 3.7
+        let level = baseline / 3.7
         let ring = 2.35 * level
         let edge = left + (right - left) * 0.46
         let step = (right - left) * 0.05
@@ -749,8 +754,8 @@ private struct Colosseum {
 
         var wall = Path()
         wall.move(to: CGPoint(x: left, y: baseline))
-        wall.addLine(to: CGPoint(x: left + lean, y: top))
-        wall.addLine(to: CGPoint(x: edge, y: top))
+        wall.addLine(to: CGPoint(x: left + lean, y: 0))
+        wall.addLine(to: CGPoint(x: edge, y: 0))
         // The broken edge: down through the attic, a ledge, then the third level.
         wall.addLine(to: CGPoint(x: edge + step, y: baseline - 3 * level))
         wall.addLine(to: CGPoint(x: edge + step * 1.6, y: baseline - 3 * level))
@@ -760,28 +765,16 @@ private struct Colosseum {
         wall.addLine(to: CGPoint(x: right, y: baseline))
         wall.closeSubpath()
 
-        // Trees at the ends.
-        let cypress = CGRect(x: left - width * 0.03, y: baseline - capHeight * 1.15, width: width * 0.026, height: capHeight * 1.15)
-        let trunk = CGRect(x: right - width * 0.035, y: baseline - capHeight * 0.95, width: max(1.2, width * 0.004), height: capHeight * 0.95)
-        let crown = CGRect(x: trunk.midX - width * 0.05, y: trunk.minY - width * 0.02, width: width * 0.1, height: width * 0.03)
-        var trees = Path(ellipseIn: cypress)
-        trees.addRect(trunk)
-        trees.addEllipse(in: crown)
-        canvas.fill(trees, with: .color(tone))
-        canvas.fill(wall, with: .color(tone))
-
-        // Cornices between the levels, lighter, inside the wall.
-        var inside = canvas
-        inside.clip(to: wall)
-        var cornices = Path()
+        var holes = Path()
+        // The lines between the levels.
         for line in [1.0, 2.0, 3.0] {
-            cornices.addRect(CGRect(x: 0, y: baseline - line * level - 0.6, width: width, height: 1.2))
+            holes.addRect(CGRect(x: 0, y: baseline - line * level - 0.5, width: width, height: 1))
         }
-        inside.fill(cornices, with: .color(Palette.blend(tone, Palette.stackGround, 0.7)))
-
-        // Openings in the ground's color, where the wall holds them whole.
-        var openings = Path()
         func narrowing(_ x: CGFloat) -> CGFloat { 1 - 0.4 * (x - left) / (right - left) }
+        func holds(_ rect: CGRect) -> Bool {
+            [CGPoint(x: rect.minX - 1, y: rect.minY - 1), CGPoint(x: rect.maxX + 1, y: rect.minY - 1)].allSatisfy { wall.contains($0) }
+        }
+        // The arches, where the wall holds them whole.
         for row in 0..<3 {
             let bottom = baseline - CGFloat(row) * level - level * 0.08
             let height = level * 0.72
@@ -789,10 +782,7 @@ private struct Colosseum {
             while x < right {
                 let scale = narrowing(x)
                 let arch = CGRect(x: x, y: bottom - height * scale, width: height * 0.6 * scale, height: height * scale)
-                let corners = [CGPoint(x: arch.minX - 1, y: arch.minY - 1), CGPoint(x: arch.maxX + 1, y: arch.minY - 1)]
-                if corners.allSatisfy({ wall.contains($0) }) {
-                    openings.addPath(Self.arch(in: arch))
-                }
+                if holds(arch) { holes.addPath(Self.arch(in: arch)) }
                 x += arch.width / 0.58
             }
         }
@@ -806,13 +796,20 @@ private struct Colosseum {
             while x < right {
                 let side = row.size * narrowing(x)
                 let window = CGRect(x: x, y: row.y - side / 2, width: side, height: side)
-                if [CGPoint(x: window.minX - 1, y: window.minY - 1), CGPoint(x: window.maxX + 1, y: window.minY - 1)].allSatisfy({ wall.contains($0) }) {
-                    openings.addRect(window)
-                }
+                if holds(window) { holes.addRect(window) }
                 x += side * 3.2
             }
         }
-        canvas.fill(openings, with: .color(Palette.stackGround))
+
+        // Trees at the ends.
+        let cypress = CGRect(x: left - width * 0.03, y: baseline * 0.32, width: width * 0.026, height: baseline * 0.68)
+        let trunk = CGRect(x: right - width * 0.035, y: baseline * 0.44, width: max(1.2, width * 0.004), height: baseline * 0.56)
+        let crown = CGRect(x: trunk.midX - width * 0.05, y: trunk.minY - width * 0.02, width: width * 0.1, height: width * 0.03)
+        var trees = Path(ellipseIn: cypress)
+        trees.addRect(trunk)
+        trees.addEllipse(in: crown)
+
+        return wall.subtracting(holes).union(trees)
     }
 
     /// A round-topped opening filling `rect`.
