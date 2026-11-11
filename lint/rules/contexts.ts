@@ -20,6 +20,7 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
     "favors",
     "instance",
     "people",
+    "relay",
     "routines",
   ],
   apps: ["access", "instance"],
@@ -31,6 +32,7 @@ const ALLOWED_IMPORTS: Record<string, readonly string[]> = {
   instance: [],
   participation: [],
   people: ["apps", "chats", "connections", "instance"],
+  relay: ["apps", "instance"],
   routines: ["access", "agent", "apps"],
 };
 
@@ -135,5 +137,12 @@ export const contextCrossings: ListedCrossing[] = [
     to: "concierge/owner.ts",
     ticket: "ZHA-168",
     why: "A legacy routine acts for its chat's owner, read through Concierge, until a chat's owner has its home.",
+  },
+  {
+    rule: "instance-never-imports-relay",
+    from: "instance/diagnostics.ts",
+    to: "relay/settings.ts",
+    ticket: "ZHA-169",
+    why: "The diagnostics report says whether the relay is set up, until the report gets each context's status from that context.",
   },
 ];
