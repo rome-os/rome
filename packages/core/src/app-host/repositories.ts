@@ -53,7 +53,7 @@ export function createAppRuntimeRepositories(
 
 function createChatRepository(repo: WebChatRepository, speakers: OpenSpeakerDeps): ChatRepository {
   const open: ChatRepository["ensureChannelChat"] = (input) =>
-    openChannelChat({ webchatRepo: repo, speakers }, input);
+    openChannelChat({ records: repo, speakers }, input);
   return {
     ensureChannelChat: open,
     ensureChannelConversation: open,

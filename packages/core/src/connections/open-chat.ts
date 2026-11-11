@@ -4,11 +4,11 @@
 import type { ChatRecord, EnsureChannelChatInput } from "@rome-os/app-runtime";
 import { startChannelChat, type StartChannelChatDeps } from "./channel-chat.js";
 import { addressOf, type ChatAdapters } from "./chat-adapter.js";
-import type { WebChatRepository } from "../webchat/repository.js";
+import type { SessionRecords } from "../sessions/session-records.js";
 import type { Speakers } from "../sessions/speakers.js";
 
 export interface OpenChannelChatDeps {
-  webchatRepo: Pick<WebChatRepository, "ensureChannelChat">;
+  records: Pick<SessionRecords, "ensureChannelChat">;
   /** Chats and Agents' speakers: the chat starts in Chats and the row's
    *  session stands in it as the speaker of the channel's account. */
   speakers: OpenSpeakerDeps;
@@ -31,9 +31,9 @@ export function openChannelChat(
   input: EnsureChannelChatInput,
 ): Promise<ChatRecord> {
   if (input.channel !== "webchat") {
-    return openAsSpeaker(deps.webchatRepo, deps.speakers, input);
+    return openAsSpeaker(deps.records, deps.speakers, input);
   }
-  return deps.webchatRepo.ensureChannelChat(input);
+  return deps.records.ensureChannelChat(input);
 }
 
 /**
@@ -43,7 +43,7 @@ export function openChannelChat(
  * left alone: only a session that stands nowhere yet is placed.
  */
 async function openAsSpeaker(
-  webchatRepo: OpenChannelChatDeps["webchatRepo"],
+  records: OpenChannelChatDeps["records"],
   deps: OpenSpeakerDeps,
   named: EnsureChannelChatInput,
 ): Promise<ChatRecord> {
@@ -58,7 +58,7 @@ async function openAsSpeaker(
     ? { ...named, parentThreadId: addressOf(thread), threadType: "group" }
     : named;
   const { chat, romeEnd } = startChannelChat(deps, input);
-  const opened = await webchatRepo.ensureChannelChat(input);
+  const opened = await records.ensureChannelChat(input);
   // A session keeps its place while the channel's account is still the one
   // it speaks as. A channel paired again as another account moves it to that
   // account's chat; what was said in the old one stays there.
@@ -66,7 +66,7 @@ async function openAsSpeaker(
   if (standing?.accountId === romeEnd && standing.place.chat.platform === chat.platform) {
     return opened;
   }
-  return webchatRepo.ensureChannelChat({
+  return records.ensureChannelChat({
     ...input,
     speaker: { chat, accountId: romeEnd, at: new Date() },
   });

@@ -214,10 +214,10 @@ export {
   type StoredRoot,
 } from "./domain/session-parent.js";
 export type {
-  DashboardSession,
-  DashboardSessions,
+  RecordedSession,
+  RecordedSessions,
   NewSubagentSession,
-} from "./domain/dashboard-sessions.js";
+} from "./domain/recorded-sessions.js";
 export {
   createSubagentCalls,
   type LiveTurns,

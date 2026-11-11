@@ -129,20 +129,6 @@ export const contextRules: ImportRule[] = contexts.flatMap((from) =>
 /** Crossings that remain until their ticket lands. */
 export const contextCrossings: ListedCrossing[] = [
   {
-    rule: "connections-never-imports-webchat",
-    from: "connections/open-chat.ts",
-    to: "webchat/repository.ts",
-    ticket: "ZHA-170",
-    why: "A chat on a connected platform gets its session record from the Webchat repository, until session records move to Sessions.",
-  },
-  {
-    rule: "connections-never-imports-webchat",
-    from: "connections/open-chat.test.ts",
-    to: "webchat/chats-webchat-repository.ts",
-    ticket: "ZHA-170",
-    why: "The test builds the same repository for session records, until they move to Sessions.",
-  },
-  {
     rule: "instance-never-imports-relay",
     from: "instance/diagnostics.ts",
     to: "relay/settings.ts",
