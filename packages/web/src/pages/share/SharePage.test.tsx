@@ -1,6 +1,7 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import "@/i18n";
 import { ThemeProvider } from "@/hooks/use-theme";
@@ -12,13 +13,17 @@ const robots = () => document.head.querySelector('meta[name="robots"]')?.getAttr
 
 const renderAt = (token: string) =>
   render(
-    <ThemeProvider>
-      <MemoryRouter initialEntries={[`/share/${token}`]}>
-        <Routes>
-          <Route path="/share/:token" element={<SharePage />} />
-        </Routes>
-      </MemoryRouter>
-    </ThemeProvider>,
+    <QueryClientProvider
+      client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}
+    >
+      <ThemeProvider>
+        <MemoryRouter initialEntries={[`/share/${token}`]}>
+          <Routes>
+            <Route path="/share/:token" element={<SharePage />} />
+          </Routes>
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
   );
 
 beforeEach(() => {
@@ -67,16 +72,58 @@ describe("SharePage", () => {
     expect(robots()).toBeUndefined();
   });
 
-  it("is branded with Rome's mark and a link to learn about Rome, in a new tab", async () => {
+  it("puts Rome's mark, tagline and a link to learn about Rome in one header", async () => {
     renderAt("tok");
     await screen.findByText("Day one: walk the Alfama.");
-    const mark = screen.getByRole("link", { name: "Rome" });
+    const header = screen.getByRole("banner");
+    const mark = within(header).getByRole("link", { name: /^Rome/ });
     expect(mark.getAttribute("href")).toBe("https://romeos.io");
-    expect(screen.getByText("Made with Rome")).toBeTruthy();
-    const learn = screen.getByRole("link", { name: "Learn about Rome" });
+    expect(mark.textContent).toContain("Your personal assistant");
+    const learn = within(header).getByRole("link", { name: "Learn about Rome" });
     expect(learn.getAttribute("href")).toBe("https://romeos.io");
     expect(learn.getAttribute("target")).toBe("_blank");
     expect(learn.getAttribute("rel")).toBe("noopener");
+    expect(screen.queryByRole("contentinfo")).toBeNull();
+  });
+
+  it("shows a shared message without a sender row, since the header names Rome", async () => {
+    renderAt("tok");
+    await screen.findByText("Day one: walk the Alfama.");
+    expect(screen.getAllByText("Rome")).toHaveLength(1);
+  });
+
+  it("keeps the speakers in a share of several turns", async () => {
+    rs.mocked(fetchSharedChat).mockResolvedValue({
+      id: "tok",
+      title: "Trip",
+      snapshot: {
+        mainSessionId: "s",
+        messages: [
+          {
+            id: "u1",
+            sessionId: "s",
+            turnId: "t1",
+            role: "user",
+            content: JSON.stringify([{ type: "text", content: "Plan my trip" }]),
+            createdAt: "2026-11-10T09:59:00.000Z",
+          },
+          {
+            id: "a1",
+            sessionId: "s",
+            turnId: "t1",
+            role: "assistant",
+            content: JSON.stringify([{ type: "text", content: "Day one: walk the Alfama." }]),
+            createdAt: "2026-11-10T10:00:00.000Z",
+          },
+        ],
+        traces: {},
+      },
+      layout: [],
+    });
+    renderAt("tok");
+    await screen.findByText("Day one: walk the Alfama.");
+    // The header's "Rome", and the agent's sender row.
+    expect(screen.getAllByText("Rome")).toHaveLength(2);
   });
 
   it("keeps the branding and noindex on an unavailable link", async () => {
@@ -84,7 +131,6 @@ describe("SharePage", () => {
     renderAt("gone");
     await screen.findByText("This shared chat is unavailable");
     expect(robots()).toBe("noindex, nofollow");
-    expect(screen.getByRole("link", { name: "Rome" })).toBeTruthy();
-    expect(screen.getByText("Made with Rome")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Learn about Rome" })).toBeTruthy();
   });
 });

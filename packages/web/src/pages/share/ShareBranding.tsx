@@ -20,37 +20,32 @@ export function useNoIndex(): void {
   }, []);
 }
 
-/** The share page's slim top bar: Rome's mark and name, linking to Rome's site. */
+/**
+ * The share page's one row of Rome branding: the mark, the name and a tagline
+ * on the left, linking to Rome's site, and "Learn about Rome" on the right. The
+ * tagline hides on a narrow phone so the row stays one line.
+ */
 export function ShareHeader() {
+  const { t } = useTranslation("chat");
   return (
-    <header className="flex h-12 shrink-0 items-center px-4">
+    <header className="flex h-12 shrink-0 items-center gap-3 px-4">
       <a
         href={ROME_SITE_URL}
         target="_blank"
         rel="noopener"
-        className="flex items-center gap-2 rounded-8 text-ui font-medium text-foreground outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring/50"
+        className="flex min-w-0 items-center gap-2 rounded-8 outline-none focus-visible:outline-2 focus-visible:outline-solid focus-visible:outline-ring/50"
       >
-        <img src="/icon.svg" alt="" className="size-5" />
-        Rome
+        <img src="/icon.svg" alt="" className="size-5 shrink-0" />
+        <span className="shrink-0 text-ui font-medium text-foreground">Rome</span>
+        <span className="truncate text-aux text-muted-foreground max-[400px]:hidden">
+          {t("share.tagline")}
+        </span>
       </a>
+      <Button asChild variant="outline" size="sm" className="ml-auto">
+        <a href={ROME_SITE_URL} target="_blank" rel="noopener">
+          {t("share.learnAbout")}
+        </a>
+      </Button>
     </header>
-  );
-}
-
-/** The share page's closing line, saying what made the page. */
-export function ShareFooter() {
-  const { t } = useTranslation("chat");
-  return (
-    // `pb-safe` keeps the line clear of a phone's home indicator.
-    <footer className="shrink-0 pb-safe">
-      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-2 px-4 py-6 text-aux text-muted-foreground">
-        <span>{t("share.madeWith")}</span>
-        <Button asChild variant="outline" size="sm">
-          <a href={ROME_SITE_URL} target="_blank" rel="noopener">
-            {t("share.learnAbout")}
-          </a>
-        </Button>
-      </div>
-    </footer>
   );
 }
