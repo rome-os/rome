@@ -33,7 +33,9 @@ type CardState =
   // `owned`: this card provably made the routine (same key, or created here),
   // so it may pause or delete it; a legacy name match only links to it.
   // `enabled` is null when the routine exists but its state couldn't be read.
-  // `running`: its latest run was still going when the card looked it up.
+  // `running`: its latest run was still going when the card looked it up. It
+  // only withholds Run now (the server doesn't serialize runs); it is a
+  // snapshot, so it isn't shown as a status that could go stale.
   | { kind: "on"; routineId?: string; enabled: boolean | null; owned: boolean; running?: boolean }
   | { kind: "error"; message: string };
 
@@ -128,11 +130,13 @@ export function RoutineDraftCard({
       // 409: the keyed routine already existed and was left as it is — it may
       // be paused — so read its real state rather than assume On.
       let enabled: boolean | null = true;
+      let running = false;
       if (result.status === 409 && result.routineId) {
-        const refs = await listRoutineRefs();
-        enabled = refs?.find((r) => r.id === result.routineId)?.enabled ?? null;
+        const ref = (await listRoutineRefs())?.find((r) => r.id === result.routineId);
+        enabled = ref?.enabled ?? null;
+        running = !!ref?.running;
       }
-      setState({ kind: "on", routineId: result.routineId, enabled, owned: true });
+      setState({ kind: "on", routineId: result.routineId, enabled, owned: true, running });
     } else {
       setState({
         kind: "error",
@@ -146,7 +150,8 @@ export function RoutineDraftCard({
     const result = await setRoutineEnabled(id, enabled);
     setBusy(null);
     setActionError(result.ok ? null : (result.error ?? null));
-    if (result.ok) setState({ kind: "on", routineId: id, enabled, owned: true });
+    // Pausing doesn't stop a run that is going, so `running` carries over.
+    if (result.ok) setState((prev) => (prev.kind === "on" ? { ...prev, enabled } : prev));
   };
 
   // Deleting returns the card to its draft, so "Turn it on" undoes it.
@@ -256,7 +261,7 @@ export function RoutineDraftCard({
                   <SavedStatus
                     enabled={saved.enabled}
                     isManual={isManual}
-                    running={busy === "run" || !!saved.running}
+                    running={busy === "run"}
                     busy={busy}
                   />
                   {/* A name-only match on an old card may be an unrelated

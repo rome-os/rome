@@ -436,7 +436,54 @@ describe("RoutineDraftCard", () => {
         routineKey="chat-routine:card-5"
       />,
     );
-    expect(await screen.findByText("Running…")).toBeTruthy();
+    await openMenu(user);
+    expect(screen.queryByRole("menuitem", { name: "Run now" })).toBeNull();
+    expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
+  });
+
+  it("keeps withholding Run now after resuming a routine whose run is still going", async () => {
+    const user = userEvent.setup();
+    mockList.mockResolvedValue([
+      {
+        id: "r-5",
+        name: "Landlord emails",
+        key: "chat-routine:card-5",
+        enabled: false,
+        running: true,
+      },
+    ]);
+    render(
+      <RoutineDraftCard
+        draft={{ ...eventDraft, filterSummary: undefined, trigger: { type: "manual" } }}
+        routineKey="chat-routine:card-5"
+      />,
+    );
+    await openMenu(user);
+    await user.click(screen.getByRole("menuitem", { name: "Resume" }));
+    await waitFor(() => expect(screen.queryByText("Paused")).toBeNull());
+    await openMenu(user);
+    expect(screen.queryByRole("menuitem", { name: "Run now" })).toBeNull();
+  });
+
+  it("withholds Run now when Turn it on finds the routine running", async () => {
+    const user = userEvent.setup();
+    mockList.mockResolvedValueOnce(null).mockResolvedValue([
+      {
+        id: "r-5",
+        name: "Landlord emails",
+        key: "chat-routine:card-5",
+        enabled: true,
+        running: true,
+      },
+    ]);
+    mockCreate.mockResolvedValue({ ok: true, status: 409, routineId: "r-5" });
+    render(
+      <RoutineDraftCard
+        draft={{ ...eventDraft, filterSummary: undefined, trigger: { type: "manual" } }}
+        routineKey="chat-routine:card-5"
+      />,
+    );
+    await user.click(await screen.findByRole("button", { name: /turn it on/i }));
     await openMenu(user);
     expect(screen.queryByRole("menuitem", { name: "Run now" })).toBeNull();
     expect(screen.getByRole("menuitem", { name: "Delete" })).toBeTruthy();
