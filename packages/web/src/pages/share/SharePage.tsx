@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { useDocumentTitle } from "@/hooks/use-document-title";
 import { fetchSharedChat, type SharedChatPayload } from "@/lib/chat-api";
 import { PublicFreeGrid } from "./PublicFreeGrid";
+import { ShareFooter, ShareHeader, useNoIndex } from "./ShareBranding";
 
 type LoadState =
   | { status: "loading" }
@@ -13,7 +14,8 @@ type LoadState =
 
 // Public, login-free entry point for a shared chat. Mounted OUTSIDE the auth
 // shell (App.tsx), so a guest reaches it with no session. Renders the frozen
-// chat + live app/projects widgets via PublicFreeGrid.
+// chat + live app/projects widgets via PublicFreeGrid, under Rome's header and
+// footer, and keeps search engines out while mounted.
 export default function SharePage() {
   const { token } = useParams<{ token: string }>();
   const { t } = useTranslation("chat");
@@ -41,6 +43,7 @@ export default function SharePage() {
 
   const title = state.status === "ready" ? state.payload.title : null;
   useDocumentTitle(title);
+  useNoIndex();
 
   const chat = useMemo(() => {
     if (state.status !== "ready") return null;
@@ -62,13 +65,17 @@ export default function SharePage() {
 
   if (state.status === "missing" || state.status === "error" || !chat) {
     return (
-      <div className="flex min-h-dvh flex-col items-center justify-center gap-2 px-6 pb-safe pt-safe text-center">
-        <h1 className="text-title text-foreground">
-          {t("share.unavailableTitle", "This shared chat is unavailable")}
-        </h1>
-        <p className="max-w-md text-ui text-muted-foreground">
-          {t("share.unavailableBody", "The link may have been revoked or is no longer valid.")}
-        </p>
+      <div className="flex min-h-dvh flex-col pt-safe">
+        <ShareHeader />
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+          <h1 className="text-title text-foreground">
+            {t("share.unavailableTitle", "This shared chat is unavailable")}
+          </h1>
+          <p className="max-w-md text-ui text-muted-foreground">
+            {t("share.unavailableBody", "The link may have been revoked or is no longer valid.")}
+          </p>
+        </div>
+        <ShareFooter />
       </div>
     );
   }

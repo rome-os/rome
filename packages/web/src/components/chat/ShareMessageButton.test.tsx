@@ -50,7 +50,7 @@ describe("Share on a message", () => {
     rs.mocked(shareMessage).mockRejectedValue(new Error("nope"));
     live(<ShareMessageButton sessionId="topic-1" messageId="m-1" />);
     fireEvent.click(screen.getByRole("button", { name: "Share" }));
-    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Couldn't create the link."));
+    await waitFor(() => expect(toast.error).toHaveBeenCalledWith("Could not create the link."));
   });
 
   it("is offered on a Concierge bubble and under a common chat's answer", () => {

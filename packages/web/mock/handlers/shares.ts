@@ -57,7 +57,7 @@ export function shareHandlers(sessions: ChatSession[], transcripts: Record<strin
       if (!session) return HttpResponse.json({ error: "Session not found" }, { status: 404 });
       if (sessionId === CONCIERGE_CHAT_ID || session.agentName === CONCIERGE_AGENT_ID) {
         return HttpResponse.json(
-          { error: "A Concierge chat can't be shared. Share one message instead." },
+          { error: "A Concierge chat cannot be shared. Share one message instead." },
           { status: 403 },
         );
       }

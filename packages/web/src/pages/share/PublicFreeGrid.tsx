@@ -7,6 +7,7 @@ import type { WidgetPlacement } from "@/pages/free/use-free-cells";
 import type { ChatMessage } from "@/lib/chat-types";
 import type { TraceSnapshot } from "@rome/api-types/trace-segments";
 import { PublicProjectsWidget } from "./PublicProjectsWidget";
+import { ShareFooter, ShareHeader } from "./ShareBranding";
 
 // Mirror of FreeGrid's chat column width so the public page matches /chat.
 const CHAT_COLUMN_WIDTH = "clamp(420px, 34vw, 680px)";
@@ -51,8 +52,9 @@ function PublicWidgetIcon({ widget, className }: { widget: WidgetPlacement; clas
   return null;
 }
 
-// Read-only twin of FreeGrid: the frozen chat as the base column, live app +
-// read-only projects tiles in the right strip. No dnd, no add/close, no
+// Read-only twin of FreeGrid: the frozen chat as the base column, between
+// Rome's header and footer, with live app + read-only projects tiles in the
+// right strip. No dnd, no add/close, no
 // composer — the layout is fixed by the snapshot.
 export function PublicFreeGrid({ placements, token, chat }: PublicFreeGridProps) {
   const { t } = useTranslation("common");
@@ -102,7 +104,7 @@ export function PublicFreeGrid({ placements, token, chat }: PublicFreeGridProps)
       {/* Chat column */}
       <div
         style={{ "--rome-chat-col": CHAT_COLUMN_WIDTH } as CSSProperties}
-        className={`relative ${
+        className={`relative flex flex-col ${
           hasApps
             ? "min-h-[var(--rome-mobile-content-height)]"
             : "min-h-[calc(var(--rome-viewport-height)-var(--rome-safe-area-top))]"
@@ -110,12 +112,14 @@ export function PublicFreeGrid({ placements, token, chat }: PublicFreeGridProps)
           hasApps ? "md:w-[var(--rome-chat-col)]" : "w-full"
         } ${hasApps && mobileTab !== "chat" ? "max-md:hidden" : ""}`}
       >
+        <ShareHeader />
         <PublicChat
           messages={chat.messages}
           mainSessionId={chat.mainSessionId}
           traces={chat.traces}
           hasApps={hasApps}
         />
+        <ShareFooter />
       </div>
 
       {/* Apps strip — flush against the chat column on desktop (no sidebar here,

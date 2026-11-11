@@ -172,6 +172,8 @@
     "cancel": "Cancel",
     "create": "Create link",
     "creating": "Creating…",
+    "madeWith": "Made with Rome",
+    "learnAbout": "Learn about Rome",
     "unavailableTitle": "This shared chat is unavailable",
     "unavailableBody": "The link may have been revoked or is no longer valid."
   },
@@ -190,7 +192,7 @@
     "share": "Share",
     "shareCopied": "Link copied",
     "shareReady": "Link ready",
-    "shareFailed": "Couldn't create the link.",
+    "shareFailed": "Could not create the link.",
     "feedback": {
       "thumbsUp": "Mark this turn helpful",
       "thumbsDown": "Mark this turn unhelpful",
