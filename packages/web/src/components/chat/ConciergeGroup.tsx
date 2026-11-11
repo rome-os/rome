@@ -1,6 +1,7 @@
 import { ThreadLabelLine } from "@/components/chat/reply/chat-threads";
 import { Fragment, memo, useMemo, type ReactNode } from "react";
 import type { ForwardedFrom } from "@rome/api-types/chat";
+import type { ConciergeStatusReaction } from "@rome/api-types/concierge";
 import { UserMessage } from "./UserMessage";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
@@ -8,7 +9,7 @@ import { CollapsibleBubbleContent } from "@/components/chat/CollapsibleBubbleCon
 import { ConciergeBubble } from "@/components/chat/ConciergeBubble";
 import { ForwardedChip } from "@/components/chat/ForwardedChip";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
-import { StatusReactionBadge, useStatusReaction } from "@/components/chat/status-reaction";
+import { StatusReactionBadge, useRunReaction } from "@/components/chat/status-reaction";
 import { renderFlatEntries } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { BlockActions, ShareSelection } from "@/components/chat/MessageList";
@@ -24,9 +25,17 @@ import { cn } from "@/lib/utils";
 // The same bubble reparses nothing while the transcript re-renders around it;
 // a message's identity changes on every reload, so compare what it shows.
 const GuardianBubble = memo(
-  function GuardianBubble({ msg, arrival }: { msg: ChatMessage; arrival?: number }) {
+  function GuardianBubble({
+    msg,
+    arrival,
+    reaction,
+  }: {
+    msg: ChatMessage;
+    arrival?: number;
+    /** The run's status reaction, on its last bubble only. */
+    reaction: ConciergeStatusReaction | null;
+  }) {
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
-    const reaction = useStatusReaction(msg);
     // The bubble is a direct child of the group, so its width cap is a share
     // of the column, as the agent's is.
     return (
@@ -63,7 +72,7 @@ const GuardianBubble = memo(
     prev.msg.id === next.msg.id &&
     prev.msg.content === next.msg.content &&
     prev.msg.inputState === next.msg.inputState &&
-    prev.msg.statusReaction === next.msg.statusReaction &&
+    prev.reaction === next.reaction &&
     prev.arrival === next.arrival,
 );
 
@@ -213,6 +222,16 @@ export const ConciergeGroup = memo(function ConciergeGroup({
   arrival: ArrivalProps;
   typing: ReactNode;
 }) {
+  // A run of the owner's own messages shows one mark, under its last bubble.
+  const own = useMemo(
+    () =>
+      group.sender === "guardian"
+        ? group.entries.filter((entry) => entry.message.sender?.kind !== "automated")
+        : [],
+    [group],
+  );
+  const lastOwn = own[own.length - 1];
+  const runReaction = useRunReaction(useMemo(() => own.map((entry) => entry.message), [own]));
   return (
     <div
       className={cn(
@@ -236,6 +255,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
                 key={entry.message.id}
                 msg={entry.message}
                 arrival={arrival(entry.message.id)["data-arrival"]}
+                reaction={entry === lastOwn ? runReaction : null}
               />
             ) : (
               <AgentEntry

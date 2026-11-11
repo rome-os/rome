@@ -66,21 +66,24 @@ const message = (
   ...extra,
 });
 
+// Each of the owner's messages here is a run of its own: a reply sits between.
 const messages: ChatMessage[] = [
   message("weather", "user", 0, { statusReaction: "working" }),
-  message("quoted", "user", 0, {
+  message("sunny", "assistant", 0),
+  message("quoted", "user", 1, {
     statusReaction: "working",
     content: JSON.stringify([
       { type: "reply_to", messageId: "weather", author: "guardian", text: "weather" },
       { type: "text", content: "And tomorrow?" },
     ]),
   }),
-  message("thanks", "user", 1),
-  message("you're welcome", "assistant", 1),
+  message("rain", "assistant", 1),
+  message("thanks", "user", 2),
+  message("you're welcome", "assistant", 2),
 ];
 
-function transcript(reactions: LiveStatusReactions = new Map()) {
-  const rows = buildRows(messages, new Map(), IDENTITY, {
+function transcript(reactions: LiveStatusReactions = new Map(), shown = messages) {
+  const rows = buildRows(shown, new Map(), IDENTITY, {
     runningTurnId: null,
     isStreaming: false,
   });
@@ -158,6 +161,20 @@ describe("Concierge status reaction", () => {
       ),
     ).toBe(true);
     await waitFor(() => expect(badges(container)).toEqual([]));
+  });
+
+  it("shows one mark for a run of the owner's own messages, under its last bubble", () => {
+    const run = [
+      message("first", "user", 5, { statusReaction: "failed" }),
+      message("second", "user", 5, { statusReaction: "working" }),
+      message("third", "user", 6),
+    ];
+    const { container, rerender } = render(transcript(new Map(), run));
+    // Working while any works, on the last bubble only.
+    expect(badges(container)).toEqual([["third", "working", "👀"]]);
+    // Then failed if any failed.
+    rerender(transcript(new Map([["second", null]]), run));
+    expect(badges(container).filter(([, , text]) => text)).toContainEqual(["third", "failed", "⚠️"]);
   });
 
   it("reads the live event the server sends, and refuses a value it does not know", () => {

@@ -30,6 +30,20 @@ export function useStatusReaction(msg: ChatMessage): ConciergeStatusReaction | n
   return live.has(msg.id) ? (live.get(msg.id) ?? null) : (msg.statusReaction ?? null);
 }
 
+/**
+ * The one status reaction a run of the owner's own messages shows, under its
+ * last bubble: working while any of them works, then failed if any failed,
+ * else none. Each message keeps its own state; only the display joins them.
+ */
+export function useRunReaction(messages: readonly ChatMessage[]): ConciergeStatusReaction | null {
+  const live = useContext(LiveStatusReactionsContext);
+  const states = messages.map((msg) =>
+    live.has(msg.id) ? (live.get(msg.id) ?? null) : (msg.statusReaction ?? null),
+  );
+  if (states.includes("working")) return "working";
+  return states.includes("failed") ? "failed" : null;
+}
+
 const EMOJI: Record<ConciergeStatusReaction, string> = {
   working: "👀",
   failed: "⚠️",
