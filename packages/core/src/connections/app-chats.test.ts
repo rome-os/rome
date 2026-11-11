@@ -127,6 +127,7 @@ describe("appChats", () => {
         links: new TurnLinks(testDb.db, messages),
       }),
       messages,
+      ownPlatforms: new Set(["webchat"]),
     });
   });
   afterEach(() => testDb.close());

@@ -106,6 +106,7 @@ import { AppKeysRepository } from "../apps/repositories/app-keys.js";
 import { AppKeyInjector } from "../apps/app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { WebChatRepository } from "../webchat/repository.js";
+import { ownPlatforms } from "../webchat/send.js";
 import { chatsWiring } from "../chats-wiring.js";
 import { openChannelChat, type OpenSpeakerDeps } from "../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
@@ -813,6 +814,7 @@ export async function buildTestDeps(
       chats: chatsWired.chats,
       messages: chatsWired.messages,
     },
+    ownPlatforms: ownPlatforms(),
     actionExecutionsRepo,
     executionJournalRepo,
     webhookInvocationsRepo,

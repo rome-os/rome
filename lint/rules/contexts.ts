@@ -143,13 +143,6 @@ export const contextCrossings: ListedCrossing[] = [
     why: "The test builds the same repository for session records, until they move to Sessions.",
   },
   {
-    rule: "connections-never-imports-webchat",
-    from: "connections/send.ts",
-    to: "webchat/dashboard-account.ts",
-    ticket: "ZHA-170",
-    why: "The send path for every place has a branch for the dashboard and reads its platform name, until that path moves to Chats.",
-  },
-  {
     rule: "instance-never-imports-relay",
     from: "instance/diagnostics.ts",
     to: "relay/settings.ts",

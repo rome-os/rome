@@ -13,7 +13,7 @@ import { join } from "node:path";
 import type { MessagePage } from "../chats/message-repository.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { Place } from "../chats/place.js";
-import type { Body, SendResult } from "../connections/send.js";
+import type { Body, SendResult } from "../chats/send.js";
 import type { SessionToolContext } from "../core/session-tools.js";
 import type { NotifyLevel, SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
 import type { ConciergeFollowing } from "./following.js";
