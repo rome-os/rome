@@ -5,6 +5,7 @@
 
 import type { PhoneWatching } from "../lib/phone-watching.js";
 import type { DashboardActivity } from "../lib/dashboard-activity.js";
+import type { ReplyToPart } from "@rome/api-types/chat";
 import { CONCIERGE_CHAT_ID, type ConciergeChatRef } from "@rome/api-types/concierge";
 import type { Account, AgentTurnFailure, BackendTurnParams } from "@rome-os/app-runtime";
 import type { MessageRepository } from "../chats/message-repository.js";
@@ -181,6 +182,11 @@ export interface ConciergeDeps {
     params: BackendTurnParams,
     options?: SystemTurnOptions,
   ) => Promise<"completed" | "stopped" | "interrupted" | "failed" | void>;
+  /**
+   * The `reply_to` part that quotes a message of a chat in full, or null when
+   * it has no text to quote. Absent, a start message quotes nothing.
+   */
+  quote?: (chatId: string, messageId: string) => Promise<ReplyToPart | null>;
   /** Asks Rome Cloud to push to a person's phone. Absent, nothing is pushed. */
   notify?: ConciergePushDeps["notify"];
   /** The chats each person's phone app holds open; nothing said there is pushed to them. */

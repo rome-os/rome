@@ -112,3 +112,17 @@ export async function resolveReply(
     }),
   };
 }
+
+/**
+ * The `reply_to` part that quotes the whole of message `messageId` of
+ * `sessionId`, as a reply to it stores it, or null when it has no text to
+ * quote. The Concierge's start message quotes the guardian's message this way.
+ */
+export async function quoteOf(
+  deps: Parameters<typeof resolveReply>[0],
+  sessionId: string,
+  messageId: string,
+): Promise<ReplyToPart | null> {
+  const resolved = await resolveReply(deps, { sessionId, messageId, ownRowOnly: true });
+  return resolved.ok ? resolved.part : null;
+}

@@ -13,6 +13,7 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime, openToolOf } from "./webchat.js";
+import { quoteOf } from "./webchat-reply.js";
 import { Session } from "../../agent/index.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
@@ -7638,6 +7639,52 @@ describe("Webchat API", () => {
       expect((await send({ replyToMessageId: "card1" })).status).toBe(200);
 
       expect((await lastUser())[0].text).toBe("[Task chat] Trip (chat chat-7)");
+    });
+
+    it("quotes a Concierge start message by its acknowledgement and card, not by the quote it carries", async () => {
+      const { seed, send, lastUser } = await setup({ agentName: "concierge", id: "concierge" });
+      await seed(
+        "start1",
+        "assistant",
+        [
+          {
+            type: "reply_to",
+            messageId: "g1",
+            author: "guardian",
+            text: "research the Eiffel Tower",
+          },
+          { type: "text", content: "On it: the Eiffel Tower" },
+          { type: "task_chat", chatId: "chat-7", title: "Eiffel Tower" },
+        ],
+        "t1",
+      );
+
+      expect((await send({ replyToMessageId: "start1" })).status).toBe(200);
+
+      const [quote] = await lastUser();
+      expect(quote).toEqual({
+        type: "reply_to",
+        messageId: "start1",
+        author: "agent",
+        text: "On it: the Eiffel Tower\n\n[Task chat] Eiffel Tower (chat chat-7)",
+      });
+      expect(JSON.stringify(await lastUser())).not.toContain("research the Eiffel Tower");
+      expect(prompts[0]).not.toContain("research the Eiffel Tower");
+    });
+
+    it("builds the quote a Concierge start message carries from the guardian's message, as a reply does", async () => {
+      const { sessionId, seed } = await setup({ agentName: "concierge", id: "concierge" });
+      await seed("g1", "user", [{ type: "text", content: "research the Eiffel Tower" }], "t1");
+      await seed("g2", "user", [{ type: "text", content: "   " }], "t1");
+
+      expect(await quoteOf(deps, sessionId, "g1")).toEqual({
+        type: "reply_to",
+        messageId: "g1",
+        author: "guardian",
+        text: "research the Eiffel Tower",
+      });
+      expect(await quoteOf(deps, sessionId, "g2")).toBeNull();
+      expect(await quoteOf(deps, sessionId, "missing")).toBeNull();
     });
 
     it("accepts a selection of the message and rejects text that is not in it", async () => {

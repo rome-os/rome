@@ -351,6 +351,12 @@ function setup(
       anthropic: reportOf("available"),
       openai: reportOf("unauthorized"),
     }),
+    // What the host's reply snapshot answers: the words of a message in the chat.
+    quote: async (chatId: string, messageId: string) => {
+      const row = (messages.get(chatId) ?? []).find((candidate) => candidate.id === messageId);
+      const words = row ? textOf(row.content) : "";
+      return words ? { type: "reply_to", messageId, author: "guardian", text: words } : null;
+    },
     runBackendTurn: async (params: BackendTurnParams, turn?: SystemTurnOptions) => {
       backendTurns.push(params);
       quietFlags.push(turn?.quiet === true);
@@ -798,7 +804,8 @@ describe("Concierge tools", () => {
         "g0",
         "g0",
       ]);
-      expect(inThread(s, "g0")).toBe(4);
+      // The acknowledgement and the card of the start message are one message.
+      expect(inThread(s, "g0")).toBe(5);
     });
 
     it("(b) roots a task started for the second of two guardian messages at that message", async () => {
@@ -811,18 +818,24 @@ describe("Concierge tools", () => {
       expect(threadOf(s, "weather")).toBeUndefined();
     });
 
-    it("(c) roots a task no guardian message started at its first result", async () => {
+    it("(c) roots a task no guardian message started at its start message", async () => {
       const s = setup({ said: false });
       const { taskId } = await startTaskFor(s, "routine", []);
-      expect(await s.tasks.repo.threadRoot(taskId)).toBeNull();
+      const last = (s.messages.get(CONCIERGE_CHAT) ?? []).at(-1)!;
+      expect(JSON.parse(last.content).at(-1).type).toBe("task_chat");
+      const begin = { id: last.id! };
+      expect(await s.tasks.repo.threadRoot(taskId)).toBe(begin.id);
 
       reportTurn(s, "result-1", taskId);
       const first = saidId(await s.tool("say", { text: "The report is ready" }));
       reportTurn(s, "result-2", taskId);
       const second = saidId(await s.tool("say", { text: "And updated" }));
 
-      expect(await s.tasks.repo.threadRoot(taskId)).toBe(first);
-      expect([threadOf(s, first), threadOf(s, second)]).toEqual([first, first]);
+      expect([threadOf(s, begin.id), threadOf(s, first), threadOf(s, second)]).toEqual([
+        begin.id,
+        begin.id,
+        begin.id,
+      ]);
     });
 
     it("(d) takes a reply to the acknowledgement into the task's thread: one root", async () => {
@@ -852,17 +865,23 @@ describe("Concierge tools", () => {
       s.inTurn("turn-b");
       guardianSays(s, { id: "times", turnId: "turn-b" });
       const fiftySix = saidId(await s.tool("say", { text: "56." }));
-      // The task starts in turn B, pointing back at A's acknowledgement.
+      // The task starts in turn B, for the message A's acknowledgement answered.
       const { taskId } = JSON.parse(
-        (await s.tool("chat_start", { title: "Eiffel Tower", brief: "Find it", messageId: ack }))
-          .content[0].text,
+        (
+          await s.tool("chat_start", {
+            title: "Eiffel Tower",
+            brief: "Find it",
+            ack: "On it",
+            answers: "eiffel",
+          })
+        ).content[0].text,
       );
 
       expect(await s.tasks.repo.threadRoot(taskId)).toBe("eiffel");
       expect([threadOf(s, "eiffel"), threadOf(s, ack)]).toEqual(["eiffel", "eiffel"]);
       expect([threadOf(s, "times"), threadOf(s, fiftySix)]).toEqual([undefined, undefined]);
 
-      // Naming A's message with answers from turn B works too.
+      // Naming A's message with answers from turn B, a second time.
       const named = JSON.parse(
         (
           await s.tool("chat_start", {
@@ -955,7 +974,8 @@ describe("Concierge tools", () => {
       expect(await s.tasks.repo.threadRoot(first.taskId)).toBe("g0");
       expect(await s.tasks.repo.threadRoot(second.taskId)).toBe("g0");
       expect(threadOf(s, first.ack)).toBe("g0");
-      expect(inThread(s, "g0")).toBe(1);
+      // The acknowledgement once, and a start message for each task.
+      expect(inThread(s, "g0")).toBe(3);
     });
 
     it("(e) roots a task moved from a topic chat to the main chat afresh there", async () => {
@@ -1214,10 +1234,11 @@ describe("Concierge tools", () => {
     const result = await s.tool("chat_forward", { chatId: "task-1" });
     expect(JSON.parse(result.content[0].text)).toEqual({
       forwardedChars: 8,
-      messageId: "said-1",
+      messageId: "said-2",
       taskAnchored: started.taskId,
     });
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [{ type: "task_chat", chatId: "task-1", title: "Flights" }],
       [
         {
           type: "text",
@@ -1341,13 +1362,13 @@ describe("Concierge tools", () => {
     );
   });
 
-  it("chat_card shows the card for a task chat started without one", async () => {
+  it("chat_card shows a task chat's card again, after the start message's", async () => {
     const s = setup();
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
-    expect(s.messages.get(CONCIERGE_CHAT)).toBeUndefined();
     const result = await s.tool("chat_card", { chatId: "task-1" });
     expect(result.isError).toBeFalsy();
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [{ type: "task_chat", chatId: "task-1", title: "Flights" }],
       [{ type: "task_chat", chatId: "task-1", title: "Flights" }],
     ]);
   });
@@ -1362,6 +1383,7 @@ describe("Concierge tools", () => {
     const result = await s.tool("chat_forward", { chatId: "task-1", intro: "Here it is" });
     expect(result.isError).toBeFalsy();
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [{ type: "task_chat", chatId: "task-1", title: "Flights" }],
       [
         { type: "text", content: "Here it is" },
         {
@@ -1383,6 +1405,7 @@ describe("Concierge tools", () => {
     });
     await s.tool("chat_forward", { chatId: "task-1" });
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [{ type: "task_chat", chatId: "task-1", title: "Flights" }],
       [
         {
           type: "text",
@@ -1595,9 +1618,9 @@ describe("Concierge task anchors", () => {
     });
     expect(text(await s.tool("chat_card", { chatId: "task-1" }))).toEqual({
       sent: expect.any(String),
-      messageId: "said-2",
+      messageId: "said-3",
     });
-    expect(text(await s.tool("chat_forward", { chatId: "task-1" })).messageId).toBe("said-3");
+    expect(text(await s.tool("chat_forward", { chatId: "task-1" })).messageId).toBe("said-4");
   });
 
   it.each([
@@ -1614,11 +1637,12 @@ describe("Concierge task anchors", () => {
     s.messages.set(createdIn, [
       { id: "g0", role: "user", content: "[]", turnId: "concierge-turn-1" },
     ]);
-    const acknowledgment = text(await s.tool("say", { text: "Looking into flights" })).messageId;
+    await s.tool("say", { text: "Looking into flights" });
     const { chatId, taskId } = text(
-      await s.tool("chat_start", { title: "Flights", brief: "Find flights" }),
+      await s.tool("chat_start", { title: "Flights", brief: "Find flights", ack: "On it" }),
     );
-    expect(await anchorOf(s, taskId)).toBe(acknowledgment);
+    // The row points to the message that started it, not the line said before.
+    expect(await anchorOf(s, taskId)).toBe(s.messages.get(createdIn)?.at(-1)?.id);
     expect((await s.taskRepo.get(taskId))?.chatId).toBe(
       createdIn === CONCIERGE_CHAT ? null : createdIn,
     );
@@ -1641,7 +1665,7 @@ describe("Concierge task anchors", () => {
     const forwarded = text(result);
     expect(s.messages.get(forwardedIn)?.at(-1)?.id).toBe(forwarded.messageId);
     expect(await anchorOf(s, taskId)).toBe(forwarded.messageId);
-    expect(forwarded).toEqual({ forwardedChars: 9, messageId: "said-2", taskAnchored: taskId });
+    expect(forwarded).toEqual({ forwardedChars: 9, messageId: "said-3", taskAnchored: taskId });
     expect(await s.taskRepo.get(taskId)).toEqual({
       ...before,
       chatId: forwardedIn === CONCIERGE_CHAT ? null : forwardedIn,
@@ -1689,8 +1713,8 @@ describe("Concierge task anchors", () => {
     expect(await s.taskRepo.get(taskId)).toEqual({
       ...before,
       sourceMessageId: expect.any(Number),
-      // The first thing the task brings back roots its chat thread.
-      threadRoot: forwarded.messageId,
+      // No guardian message started the task, so its start message roots its chat thread.
+      threadRoot: "said-1",
     });
   });
 
@@ -1927,68 +1951,230 @@ describe("Concierge task anchors", () => {
     });
   });
 
-  it("chat_start linking a taskId sets doing and needs no messageId", async () => {
+  /** The parts of the Concierge's latest message. */
+  const latestParts = (s: ReturnType<typeof setup>) =>
+    JSON.parse((s.messages.get(CONCIERGE_CHAT) ?? []).at(-1)?.content ?? "[]");
+  const startCard = (title: string, chatId = "task-1") => ({ type: "task_chat", chatId, title });
+  /** The guardian's message in the running turn, as stored. */
+  const guardianAsks = (
+    s: ReturnType<typeof setup>,
+    id: string,
+    words: string,
+    turnId = "concierge-turn-1",
+  ) => {
+    const list = s.messages.get(CONCIERGE_CHAT) ?? [];
+    list.push({
+      id,
+      role: "user",
+      content: JSON.stringify([{ type: "text", content: words }]),
+      turnId,
+    });
+    s.messages.set(CONCIERGE_CHAT, list);
+  };
+
+  it("describes chat_start by its start message, and chat_forward as opt-in full text", async () => {
+    const s = setup();
+    const tools = await buildConciergeTools(s.service, s.context());
+    const tool = (name: string) => tools.find((candidate) => candidate.name === name)!;
+    const schema = tool("chat_start").inputSchema as {
+      required: string[];
+      properties: Record<string, unknown>;
+    };
+    expect(schema.required).toEqual(["title", "brief", "ack"]);
+    expect(schema.properties).not.toHaveProperty("card");
+    expect(schema.properties).not.toHaveProperty("messageId");
+    expect(tool("chat_start").description).toContain(
+      "a quote of their message this turn answers, your `ack`, and a card",
+    );
+    expect(tool("chat_forward").description).toContain(
+      "only when the guardian explicitly asks for the full text here",
+    );
+    expect(tool("chat_forward").description).not.toContain("long content the guardian asked for");
+    expect(tool("say").description).toContain("never paste its output");
+  });
+
+  it("chat_start points the row it creates at its own start message", async () => {
     const s = setup({ said: false });
-    const first = text(await s.tool("say", { text: "Planning" })).messageId;
-    const planned = await created(s, { state: "next" });
-    const result = await s.tool("chat_start", { title: "Go", brief: "Do it", taskId: planned });
+    const earlier = text(await s.tool("say", { text: "Looking into flights" })).messageId;
+    const started = text(
+      await s.tool("chat_start", { title: "Flights", brief: "Find flights", ack: "On it" }),
+    );
+    const anchor = await anchorOf(s, started.taskId);
+    expect(anchor).not.toBe(earlier);
+    expect(anchor).toBe((s.messages.get(CONCIERGE_CHAT) ?? []).at(-1)?.id);
+    expect(latestParts(s)).toEqual([{ type: "text", content: "On it" }, startCard("Flights")]);
+  });
+
+  it("chat_start needs no earlier message: the start message is the row's", async () => {
+    const s = setup({ said: false });
+    const result = await s.tool("chat_start", { title: "Flights", brief: "Find", ack: "On it" });
     expect(result.isError).toBeFalsy();
-    expect(await anchorOf(s, planned)).toBe(first);
+    expect(await anchorOf(s, text(result).taskId)).toBe("said-1");
+  });
+
+  it("chat_start posts one message in order: the guardian's words quoted, the ack, the card", async () => {
+    const s = setup({ said: false });
+    guardianAsks(s, "g-ask", "research X");
+    const started = text(
+      await s.tool("chat_start", { title: "Research X", brief: "Research X", ack: "On it: X" }),
+    );
+    const messages = s.messages.get(CONCIERGE_CHAT)?.filter((row) => row.role === "assistant");
+    expect(messages).toHaveLength(1);
+    expect(latestParts(s)).toEqual([
+      { type: "reply_to", messageId: "g-ask", author: "guardian", text: "research X" },
+      { type: "text", content: "On it: X" },
+      startCard("Research X"),
+    ]);
+    expect(await anchorOf(s, started.taskId)).toBe(messages?.[0].id);
+  });
+
+  it("chat_start quotes only the message answers names, or the turn's only one", async () => {
+    const s = setup({ said: false });
+    guardianAsks(s, "g1", "research X");
+    guardianAsks(s, "g2", "and book Y");
+    await s.tool("chat_start", { title: "A", brief: "a", ack: "On it: A" });
+    expect(latestParts(s)[0]).toEqual({ type: "text", content: "On it: A" });
+    await s.tool("chat_start", { title: "B", brief: "b", ack: "On it: B", answers: "g2" });
+    expect(latestParts(s)[0]).toMatchObject({
+      type: "reply_to",
+      messageId: "g2",
+      text: "and book Y",
+    });
+  });
+
+  it("chat_start quotes nothing in a turn the guardian did not start, nor a message of an earlier turn", async () => {
+    const s = setup({ said: false });
+    guardianAsks(s, "old", "research X", "older-turn");
+    await s.tool("chat_start", { title: "A", brief: "a", ack: "On it: A" });
+    expect(latestParts(s)).toEqual([
+      { type: "text", content: "On it: A" },
+      startCard("A", "task-1"),
+    ]);
+    await s.tool("chat_start", { title: "B", brief: "b", ack: "On it: B", answers: "old" });
+    expect(latestParts(s)).toEqual([
+      { type: "text", content: "On it: B" },
+      startCard("B", "task-2"),
+    ]);
+  });
+
+  it("chat_start starts a task whose quote cannot be read", async () => {
+    const s = setup({ said: false });
+    guardianAsks(s, "g1", "research X");
+    s.deps.quote = async () => {
+      throw new Error("no snapshot");
+    };
+    const result = await s.tool("chat_start", { title: "A", brief: "a", ack: "On it: A" });
+    expect(result.isError).toBeFalsy();
+    expect(latestParts(s)).toEqual([{ type: "text", content: "On it: A" }, startCard("A")]);
+  });
+
+  it("chat_start without an ack posts the card alone, as a session on the old prompt expects", async () => {
+    const s = setup({ said: false });
+    guardianAsks(s, "g1", "research X");
+    const result = await s.tool("chat_start", { title: "A", brief: "a", card: false });
+    expect(result.isError).toBeFalsy();
+    expect(latestParts(s)).toEqual([startCard("A")]);
+    expect(await anchorOf(s, text(result).taskId)).toBe("said-1");
+  });
+
+  it("chat_start puts each of several tasks' start messages and rows together, never on another's card", async () => {
+    const s = setup({ said: false });
+    const started = [];
+    for (const title of ["Flights", "Hotel", "Budget"]) {
+      started.push(
+        text(await s.tool("chat_start", { title, brief: title, ack: `On it: ${title}` })),
+      );
+    }
+    const rows = (s.messages.get(CONCIERGE_CHAT) ?? []).map((row) => row.id);
+    for (const [index, task] of started.entries()) {
+      expect(await anchorOf(s, task.taskId)).toBe(rows[index]);
+    }
+  });
+
+  it("chat_start pushes the acknowledgement alone, once, never the quote, title or card", async () => {
+    const s = setup({ said: false });
+    s.pushLevel("active");
+    guardianAsks(s, "g1", "research the vault code 4471");
+    await s.tool("chat_start", {
+      title: "Vault 4471 research",
+      brief: "Research",
+      ack: "On it: research",
+    });
+    await s.settle();
+    expect(s.pushes.map((push) => push.body)).toEqual(["On it: research"]);
+    const bare = setup({ said: false });
+    bare.pushLevel("active");
+    await bare.tool("chat_start", { title: "Vault 4471", brief: "Research" });
+    await bare.settle();
+    expect(bare.pushes.map((push) => push.body)).toEqual(["A task has an update"]);
+  });
+
+  it("chat_start posts its start message before the task starts: a failed write starts nothing, and a retry runs once", async () => {
+    const s = setup({ said: false });
+    guardianAsks(s, "g1", "research X");
+    rs.mocked(s.deps.webchatRepo.addBackendMessage).mockRejectedValueOnce(new Error("disk full"));
+    const failed = await s.tool("chat_start", { title: "A", brief: "a", ack: "On it" });
+    expect(failed.isError).toBe(true);
+    expect(s.posted).toEqual([]);
+    expect(await s.taskRepo.listForAgent(true)).toEqual([]);
+    s.pushLevel("active");
+    const retried = await s.tool("chat_start", { title: "A", brief: "a", ack: "On it" });
+    expect(retried.isError).toBeFalsy();
+    expect(s.posted).toHaveLength(1);
+    expect(await s.taskRepo.listForAgent(true)).toHaveLength(1);
+  });
+
+  it("chat_start rings no push for a start that never began", async () => {
+    const s = setup({ said: false });
+    s.pushLevel("active");
+    rs.mocked(s.deps.webchatRepo.addBackendMessage).mockRejectedValueOnce(new Error("disk full"));
+    await s.tool("chat_start", { title: "A", brief: "a", ack: "On it" });
+    await s.settle();
+    expect(s.pushes).toEqual([]);
+  });
+
+  it("chat_start puts the start message in the thread of the guardian's message, or starts a task's own", async () => {
+    const s = setup({ said: false });
+    guardianAsks(s, "g1", "research X");
+    await s.tool("chat_start", { title: "A", brief: "a", ack: "On it" });
+    const start = (s.messages.get(CONCIERGE_CHAT) ?? []).at(-1)!;
+    expect(start.chatThread).toBe("g1");
+    const quiet = setup({ said: false });
+    quiet.inTurn("wake-up");
+    const started = text(await quiet.tool("chat_start", { title: "B", brief: "b", ack: "On it" }));
+    const begin = (quiet.messages.get(CONCIERGE_CHAT) ?? []).at(-1)!;
+    expect(begin.chatThread).toBe(begin.id);
+    expect(await quiet.tasks.repo.threadRoot(started.taskId)).toBe(begin.id);
+  });
+
+  it("chat_start links a planned row to its start message, whatever messageId a session still passes", async () => {
+    const s = setup({ said: false });
+    text(await s.tool("say", { text: "Planning" }));
+    const planned = await created(s, { state: "next" });
+    const chosen = text(await s.tool("say", { text: "Choose" })).messageId;
+    const result = await s.tool("chat_start", {
+      title: "Go",
+      brief: "Do it",
+      ack: "On it",
+      taskId: planned,
+      messageId: chosen,
+    });
+    expect(result.isError).toBeFalsy();
+    expect(await anchorOf(s, planned)).toBe((s.messages.get(CONCIERGE_CHAT) ?? []).at(-1)?.id);
     expect((await s.taskRepo.get(planned))?.state).toBe("doing");
   });
 
-  it("chat_start points the row it creates at the latest message of the turn", async () => {
-    const s = setup({ said: false });
-    await s.tool("say", { text: "Looking into flights" });
-    const started = text(await s.tool("chat_start", { title: "Flights", brief: "Find flights" }));
-    expect(await anchorOf(s, started.taskId)).toBe("said-1");
-  });
-
-  it("chat_start starts no chat when the row has no message to point to", async () => {
-    const s = setup({ said: false });
-    const none = await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
-    expect(none.isError).toBe(true);
-    expect(none.content[0].text).toContain("Call say first");
-    const bogus = await s.tool("chat_start", {
-      title: "Flights",
-      brief: "Find flights",
-      messageId: "no-such-message",
-    });
-    expect(bogus.isError).toBe(true);
-    expect(s.chats.startChat).not.toHaveBeenCalled();
-    expect(s.posted).toEqual([]);
-    expect(await s.taskRepo.listForAgent(true)).toEqual([]);
-  });
-
-  it("chat_start keeps a linked row's message unless a messageId replaces it", async () => {
-    const s = setup({ said: false });
-    const first = text(await s.tool("say", { text: "Planning" })).messageId;
-    const planned = await created(s, { state: "next" });
-    await s.tool("say", { text: "Starting now" });
-    await s.tool("chat_start", { title: "Flights", brief: "Find flights", taskId: planned });
-    expect(await anchorOf(s, planned)).toBe(first);
-
-    const other = await created(s, { title: "Other", state: "next" });
-    const chosen = text(await s.tool("say", { text: "Choose" })).messageId;
-    await s.tool("chat_start", {
-      title: "Hotels",
-      brief: "Find hotels",
-      taskId: other,
-      messageId: chosen,
-    });
-    expect(await anchorOf(s, other)).toBe(chosen);
-  });
-
-  it("chat_start with a taskId needs no message of the turn when the row has none", async () => {
+  it("chat_start with a taskId whose row had no message gives it the start message", async () => {
     const s = setup({ said: false });
     const [legacy] = await s.taskRepo.upsertMany([{ title: "Old", state: "next" }]);
     const result = await s.tool("chat_start", {
       title: "Old",
       brief: "Do it",
+      ack: "On it",
       taskId: legacy.id,
     });
     expect(result.isError).toBeFalsy();
-    expect(await anchorOf(s, legacy.id)).toBeNull();
+    expect(await anchorOf(s, legacy.id)).toBe("said-1");
   });
 });
 

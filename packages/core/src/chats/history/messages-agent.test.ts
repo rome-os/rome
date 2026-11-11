@@ -13,6 +13,16 @@ describe("messageContentText", () => {
     expect(messageContentText(content)).toBe("3 options");
   });
 
+  it("reads a Concierge start message as its acknowledgement, without the quote or the card", () => {
+    const content = JSON.stringify([
+      { type: "reply_to", messageId: "g1", author: "guardian", text: "research X" },
+      { type: "text", content: "On it: X" },
+      { type: "task_chat", chatId: "task-1", title: "Research X" },
+    ]);
+
+    expect(messageContentText(content)).toBe("On it: X");
+  });
+
   it("reads a card as the plain-text line a text-only platform showed", () => {
     const card = {
       type: "approval_card",

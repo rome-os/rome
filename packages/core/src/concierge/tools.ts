@@ -554,6 +554,49 @@ export async function buildConciergeTools(
     );
   };
 
+  // A task takes the thread it already has, else its guardian message's
+  // (`startingRoot`). A message of neither is rooted at the message itself
+  // once the row exists (`rootAtMessage`).
+  const startPlacement = async (
+    start: { root: string } | null,
+    taskId: string | undefined,
+  ): Promise<{ chatThread?: ChatThreadPlacement }> => {
+    const root = (taskId ? await rootOf(taskId) : null) ?? start?.root;
+    return root ? { chatThread: { in: root } } : {};
+  };
+
+  // `messageId` starts the thread of task `taskId` when the task has none.
+  const rootAtMessage = async (taskId: string, messageId: string) => {
+    const { chatId } = currentTurn();
+    const root = await tasks.repo.setThreadRoot(taskId, messageId);
+    await webchatRepo.placeInChatThread(
+      chatId,
+      messageId,
+      root === messageId || !root ? { starts: true, settle: true } : { in: root, settle: true },
+    );
+  };
+
+  // The guardian message this turn answers, quoted in the start message: the
+  // one `answers` names, else the turn's only one. A turn the guardian did
+  // not start, or with several and none named, quotes nothing.
+  const quoteForStart = async (answers: string | undefined) => {
+    const { chatId } = currentTurn();
+    const prompts = await turnPrompts();
+    const answered =
+      answers === undefined ? (prompts.length === 1 ? prompts[0] : undefined) : answers;
+    if (!answered || !prompts.includes(answered)) return undefined;
+    // A quote the Concierge cannot read must not stop a task from starting.
+    return (
+      (await service.deps.quote?.(chatId, answered).catch((error: unknown) => {
+        log.warn("failed to quote the guardian's message", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return null;
+      })) ?? undefined
+    );
+  };
+
   // Points the task in task chat `taskChatId` to `messageId`, its panel's
   // jump target. Answers the row, or null.
   const pointTaskTo = async (taskChatId: string, messageId: string) => {
@@ -618,7 +661,8 @@ export async function buildConciergeTools(
       name: "say",
       description:
         "Send the guardian one message. This is the only way the guardian hears you: text you write outside this tool is private. " +
-        "One call is one message. Use format bubble (default) for a short chat line, and long for one long message with content the guardian asked for. " +
+        "One call is one message. Use format bubble (default) for a short chat line, and long for one long message of content you write yourself. " +
+        "To report a finished task, write at most two short sentences with its name linked, `[Task name](/chat/<chat_id>)`, and never paste its output. " +
         "Every message can show on the guardian's phone lock screen: set private for one that holds a code, password, token or other secret, and the phone shows a fixed line instead.",
       inputSchema: {
         type: "object",
@@ -768,10 +812,11 @@ export async function buildConciergeTools(
       name: "chat_start",
       description:
         "Start a task chat: a normal chat with another agent (main by default) that does the work while you keep talking. " +
-        "Pass skill to invoke a catalog skill on its first turn. Its result comes back to you in a <task_events> batch, in the Concierge chat you start it from. Every task chat has a row on your task list: this call creates one (or links taskId). Returns the chat's id and the row's id.",
+        "Pass skill to invoke a catalog skill on its first turn. Its result comes back to you in a <task_events> batch, in the Concierge chat you start it from. Every task chat has a row on your task list: this call creates one (or links taskId). Returns the chat's id and the row's id. " +
+        "The call itself tells the guardian it started, in one message: a quote of their message this turn answers, your `ack`, and a card that opens the task chat. The row points to that message. Do not `say` an acknowledgement before it.",
       inputSchema: {
         type: "object",
-        required: ["title", "brief"],
+        required: ["title", "brief", "ack"],
         properties: {
           title: {
             type: "string",
@@ -797,20 +842,15 @@ export async function buildConciergeTools(
             description:
               "Link the chat to this existing task row, such as one planned under next, and set it to doing. Without it a doing row is created for the chat.",
           },
-          messageId: {
+          ack: {
             type: "string",
             description:
-              "The message the new row points to, as say returned it. Leave it out to use your latest message this turn. With taskId the row keeps its message unless you pass this.",
+              "The one-line acknowledgement the guardian reads, in their language, naming the task: \"On it: …\". It can show on their phone's lock screen, so keep any secret out of it. The task's title and the card never do.",
           },
           answers: {
             type: "string",
             description:
               "The message_id of the guardian message this task is for, from its <chat_thread> line, in this turn or an earlier one. Give it when the guardian sent several messages, or the task is for one from an earlier turn, so the task's results join that message's chat thread.",
-          },
-          card: {
-            type: "boolean",
-            description:
-              "Also show the guardian a card that opens the task chat. The task runs either way. Decide by complexity: on for complex or long-running work they may want to watch, such as code, a PR, or research across many sources; off for a simple task that will finish quickly.",
           },
         },
       },
@@ -828,32 +868,26 @@ export async function buildConciergeTools(
             );
           }
           const taskId = optionalString(args, "taskId");
-          const messageId = optionalString(args, "messageId");
-          if (taskId) {
-            const planned = await requireTaskRow(taskId);
-            if (planned.sessionId) {
-              throw new Error(
-                `Task ${taskId} already has chat ${planned.sessionId}. Use chat_send to continue it.`,
-              );
-            }
+          const planned = taskId ? await requireTaskRow(taskId) : undefined;
+          if (taskId && planned?.sessionId) {
+            throw new Error(
+              `Task ${taskId} already has chat ${planned.sessionId}. Use chat_send to continue it.`,
+            );
           }
-          // Settled before the chat starts, so a refusal leaves nothing running.
-          // A linked row keeps its message unless one is passed.
-          const sourceMessageId = taskId
-            ? messageId
-              ? await requireSourceMessage(messageId)
-              : undefined
-            : await sourceMessageForNewRow(messageId);
+          // A session that still follows the old prompt gives no ack: its start
+          // message is the card alone, and it pushes the fixed line.
+          const ack = optionalString(args, "ack");
+          const answers = optionalString(args, "answers");
           // The guardian message the task is for, if one can tell. Checked
           // before anything starts; the root is set once the task runs.
           const start = await startingRoot(
-            optionalString(args, "answers"),
-            sourceMessageId ??
-              (taskId
-                ? ((await tasks.repo.getWithChat(taskId))?.sourceMessageId ?? undefined)
-                : undefined),
+            answers,
+            planned
+              ? ((await tasks.repo.getWithChat(planned.id))?.sourceMessageId ?? undefined)
+              : undefined,
           );
-          const { chatId: conciergeChatId } = currentTurn();
+          const quote = ack ? await quoteForStart(answers) : undefined;
+          const { chatId: conciergeChatId, turnId } = currentTurn();
           // The task chat is the owner's, private to them as their Concierge is.
           const chatId = await service.dashboard.chats.startChat(
             {
@@ -861,6 +895,18 @@ export async function buildConciergeTools(
               projectPath: await taskProjectPath(optionalString(args, "project")),
             },
             await ownerHere(),
+          );
+          // The one message that tells the guardian it started. It comes before
+          // the row and the first input, so a failed write leaves nothing
+          // started and a retry never runs the task twice.
+          const startPlace = await startPlacement(start, taskId);
+          const startId = await addMessage(
+            [
+              ...(quote ? [quote] : []),
+              ...(ack ? [{ type: "text" as const, content: ack }] : []),
+              { type: "task_chat" as const, chatId, title },
+            ],
+            startPlace,
           );
           // Marked before the first turn, so that turn's event already sees it.
           await webchatRepo.setSessionTrigger(chatId, {
@@ -875,18 +921,23 @@ export async function buildConciergeTools(
                   sessionId: chatId,
                   state: "doing",
                   waitingOn: null,
-                  ...(sourceMessageId ? { sourceMessageId, chatId: conciergeChatId } : {}),
+                  sourceMessageId: startId,
+                  chatId: conciergeChatId,
                 }
               : {
                   title,
                   state: "doing",
                   sessionId: chatId,
-                  sourceMessageId,
+                  sourceMessageId: startId,
                   chatId: conciergeChatId,
                 },
           ]);
           await sendInput(chatId, brief, skill?.name);
+          // One message, one push, once the task runs. Its line is the
+          // acknowledgement alone, never the quote, the title or the card.
+          said(conciergeChatId, turnId, ack ?? null);
           if (start) await rootTaskAt(task.id, start);
+          if (!startPlace.chatThread) await rootAtMessage(task.id, startId);
           // Named after the first turn: the first message would rename it.
           if (conversationTitleLength(title) <= CONVERSATION_TITLE_MAX_LENGTH) {
             // The task already runs, so a failure here must not read as a
@@ -900,7 +951,6 @@ export async function buildConciergeTools(
           } else {
             log.warn("task chat title too long to name the chat", { chatId });
           }
-          if (args.card === true) await showCard(chatId, title);
           return { chatId, taskId: task.id };
         }),
     },
@@ -1070,7 +1120,7 @@ export async function buildConciergeTools(
       name: "chat_forward",
       description:
         "Send the guardian a task chat's latest answer as one long message, word for word, without retyping it. " +
-        "Use it for long content the guardian asked for. An existing task row automatically points to the forwarded message in this Concierge chat, unless the task already has a chat thread.",
+        "Use it only when the guardian explicitly asks for the full text here: a report is a short conclusion with a task link, sent with say. An existing task row automatically points to the forwarded message in this Concierge chat, unless the task already has a chat thread.",
       inputSchema: {
         type: "object",
         required: ["chatId"],

@@ -222,6 +222,7 @@ import { buildConciergeTools } from "./concierge/tools.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
 import { listConnectionViews } from "./api/routes/connections.js";
+import { quoteOf } from "./api/routes/webchat-reply.js";
 import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
 import { createAppStartedDispatcher } from "./apps/app-started.js";
 import { AgentSessionBridge } from "./core/agent-session-bridge.js";
@@ -1165,6 +1166,8 @@ async function main() {
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
     notify: notifyClient,
+    quote: (chatId, messageId) =>
+      quoteOf({ db, settingsRepo, webchatRepo, agentLoader, appCatalog }, chatId, messageId),
     phoneWatching,
     dashboardActivity,
   });

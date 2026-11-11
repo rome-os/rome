@@ -88,7 +88,55 @@ describe("pushBody", () => {
   });
 });
 
+describe("pushBody and links to chats", () => {
+  // A task's title or a chat's name can hold a secret: only the Concierge's words go on the lock screen.
+  it("drops the name a report leads with, and what led into the rest", () => {
+    expect(pushBody("[Flights](/chat/x): Found an option.")).toBe("Found an option.");
+    expect(pushBody("[Flights](/chat/x) - Found an option.")).toBe("Found an option.");
+    expect(pushBody("**[Flights](/chat/x)**: Found an option.")).toBe("Found an option.");
+    expect(pushBody("[Flights](/chat/x)\n\nFound an option.")).toBe("Found an option.");
+  });
+
+  it("leaks no title from a list of linked outcomes", () => {
+    const body = pushBody(
+      "Two finished:\n\n- [Hotel hunt](/chat/a): booked.\n- [Budget plan](/chat/b): done, 4k.",
+    );
+    expect(body).toBe("Two finished: booked. done, 4k.");
+    expect(body).not.toMatch(/Hotel|Budget/);
+  });
+
+  it("is empty for a message of nothing but links to chats", () => {
+    expect(pushBody("[Flights](/chat/x)")).toBe("");
+    expect(pushBody("- [Flights](/chat/x)\n- [Hotel](/chat/y)")).toBe("");
+  });
+
+  it("keeps the words of a link that goes elsewhere", () => {
+    expect(pushBody("[failed](https://ci.example/1): retry?")).toBe("failed: retry?");
+    expect(pushBody("[Docs](/docs/chat/x) are up")).toBe("Docs are up");
+  });
+});
+
 describe("ConciergePush", () => {
+  it("pushes a report without its task name, and the fixed line for links alone", async () => {
+    const { push, sent, advance } = pushWith({ language: "zh-CN" });
+    push.said({
+      turnId: "t1",
+      chatId: "c",
+      ownWords: "[Flights](/chat/x): Found an option.",
+      level: "active",
+    });
+    await advance(MERGE_MS);
+    push.said({ turnId: "t2", chatId: "c", ownWords: "[Flights](/chat/x)", level: "active" });
+    await advance(MERGE_MS);
+    push.said({ turnId: "t3", chatId: "c", ownWords: "", level: "active" });
+    await settle();
+    expect(sent.map((content) => content.body)).toEqual([
+      "Found an option.",
+      FIXED_LINE["zh-CN"],
+      FIXED_LINE["zh-CN"],
+    ]);
+  });
+
   it("pushes every message of a turn with a level, and nothing for a turn without one", async () => {
     const { push, sent, advance } = pushWith();
     push.said({ turnId: "t1", chatId: "c", ownWords: "first", level: "active" });

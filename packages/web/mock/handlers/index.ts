@@ -321,6 +321,25 @@ const turn = (
 // unreachable in mock mode. Worked queries: "roadmap" is content-only for both
 // chats that mention it, and "brief" matches one title *and* its transcript,
 // which is the session that keeps its title rank and gains a snippet.
+/** One exchange in which the Concierge starts a task: its start message quotes the guardian's prompt. */
+const startedTask = (
+  index: number,
+  startedAt: string,
+  prompt: string,
+  ack: string,
+  card: { chatId: string; title: string },
+): ChatMessage[] =>
+  turn(CONCIERGE_CHAT_ID, index, startedAt, prompt, [
+    {
+      type: "reply_to",
+      messageId: `${CONCIERGE_CHAT_ID}-t${index}-user`,
+      author: "guardian",
+      text: prompt,
+    },
+    text(ack),
+    { type: "task_chat", ...card },
+  ]);
+
 const transcripts: Record<string, ChatMessage[]> = {
   // The later turns cover the message shapes the Concierge sends: a short
   // answer, and long ones with a table, many links, a digest and a forward.
@@ -364,6 +383,22 @@ const transcripts: Record<string, ChatMessage[]> = {
         forwardedFrom: { chatId: "mock-chat-4", title: "拉斯维加斯景点" },
       } as TranscriptPart,
     ]),
+    // A task's start message: a quote of the guardian's message, the
+    // acknowledgement, and the task card, in one message.
+    ...startedTask(
+      8,
+      "2026-08-07T09:30:00.000Z",
+      "Research flights to Lisbon for the first week of March.",
+      "On it: flights to Lisbon.",
+      { chatId: "mock-task-lisbon", title: "Lisbon flights" },
+    ),
+    ...startedTask(
+      9,
+      "2026-08-07T09:50:00.000Z",
+      "Compare the three standing desks I shortlisted last week: check the price, the height range, the warranty and what reviewers say about wobble at full height. Put the results in a table, mention any recall notices, and tell me which one you would buy, with the reason, in two lines.",
+      "On it: comparing the three desks.",
+      { chatId: "mock-task-desks", title: "Standing desk comparison" },
+    ),
   ],
   "mock-task-question": turn(
     "mock-task-question",

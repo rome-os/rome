@@ -604,6 +604,64 @@ describe("Concierge reply", () => {
     expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
   });
 
+  describe("a task's start message", () => {
+    const start = (parts?: unknown[]) =>
+      agent(
+        "s1",
+        2_000,
+        parts ?? [
+          { type: "reply_to", messageId: "u1", author: "guardian", text: "research X" },
+          text("On it: X"),
+          { type: "task_chat", chatId: "chat-7", title: "Research X" },
+        ],
+      );
+
+    it("shows the quote inside the acknowledgement's bubble, then the card", () => {
+      inChat(draftOf(), [userRow(guardian("u1", 0, "research X")), agentRow(start())]);
+
+      const bubble = bubbleOf("On it: X");
+      expect(
+        within(bubble).getByRole("button", { name: "Go to the original message" }).textContent,
+      ).toContain("research X");
+      // One quote, drawn once, and the card is its own bubble after it.
+      expect(screen.getAllByRole("button", { name: "Go to the original message" })).toHaveLength(1);
+      expect(screen.getByTestId("task-card").textContent).toBe("Research X");
+    });
+
+    it("jumps to the guardian's message when the quote is clicked", () => {
+      const draft = draftOf();
+      inChat(draft, [userRow(guardian("u1", 0, "research X")), agentRow(start())]);
+
+      fireEvent.click(screen.getByRole("button", { name: "Go to the original message" }));
+
+      expect(draft.jump).toHaveBeenCalledWith("u1");
+    });
+
+    it("keeps a long quote to two lines", () => {
+      const long = "research this at length ".repeat(80);
+      inChat(draftOf(), [
+        agentRow(
+          start([
+            { type: "reply_to", messageId: "u1", author: "guardian", text: long },
+            text("On it: X"),
+          ]),
+        ),
+      ]);
+
+      const quote = screen.getByRole("button", { name: "Go to the original message" });
+      expect(quote.querySelector(".line-clamp-2")).toBeTruthy();
+    });
+
+    it("draws a message without a quote as before, and no quote of its own", () => {
+      inChat(draftOf(), [
+        agentRow(start([text("On it: X"), { type: "task_chat", chatId: "chat-7", title: "R" }])),
+      ]);
+
+      expect(screen.queryByRole("button", { name: "Go to the original message" })).toBeNull();
+      expect(screen.getByText("On it: X")).toBeTruthy();
+    });
+  });
+
   it("shows a reply's quote above its text in the guardian's bubble", () => {
     inChat(draftOf(), [
       userRow(

@@ -35,6 +35,43 @@ describe("the Concierge agent", () => {
     }
   });
 
+  it("starts a task with one message from chat_start, and reports it briefly with a link", () => {
+    const lines = concierge.systemPromptPrefix.split("\n");
+    const rule = (start: string) => lines.find((line) => line.startsWith(start)) ?? "";
+    const prompt = concierge.systemPromptPrefix;
+    const start = rule("- `chat_start` tells the guardian");
+    for (const text of [
+      "a quote of the message of theirs it answers, your `ack`, and a card",
+      "Do not `say` an acknowledgement before `chat_start`",
+      "even a quick one",
+      "Do not report interim progress",
+    ])
+      expect(start).toContain(text);
+    const finished = rule('- `task_finished` with initiator="concierge"');
+    for (const text of [
+      "at most two short sentences",
+      "anything the guardian must do",
+      "`[Task name](/chat/<chat_id>)`",
+      "never paste task output or a long report",
+      "only when the guardian explicitly asks for the full text here",
+      "A failed or stopped task: say so plainly",
+      "one short list of their linked outcomes",
+    ])
+      expect(finished).toContain(text);
+    expect(rule("- In chat, send 1 to 3 short bubbles")).toContain("a batch of finished tasks");
+    expect(prompt).toContain("Give each `needs_user` row its own asking message or card");
+    expect(prompt).not.toContain("Combine pending decisions");
+    for (const obsolete of [
+      "`card: true`",
+      "BEFORE `chat_start`",
+      "`card` decides",
+      "Long content the guardian asked for: `chat_forward`",
+      "the card already links the chat",
+      "`say` with format long, or `chat_forward`",
+    ])
+      expect(prompt).not.toContain(obsolete);
+  });
+
   it("shows task questions and approvals as live cards without relaying card answers", () => {
     const rule = concierge.systemPromptPrefix
       .split("\n")

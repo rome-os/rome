@@ -8,6 +8,7 @@ import { CollapsibleBubbleContent } from "@/components/chat/CollapsibleBubbleCon
 import { ConciergeBubble } from "@/components/chat/ConciergeBubble";
 import { ForwardedChip } from "@/components/chat/ForwardedChip";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
+import { QuotedReply } from "@/components/chat/reply/QuotedReply";
 import { renderFlatEntries } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { BlockActions, ShareSelection } from "@/components/chat/MessageList";
@@ -76,7 +77,9 @@ function originOf(part: TranscriptPart): ForwardedFrom | undefined {
 // Each `say` call is its own message, so each text part is its own bubble,
 // cut with a toggle when it is tall. A forwarded report is a bubble of its own
 // with a chip that names its task chat; the intro that came with it is the
-// bubble above. Task chat cards render as they do anywhere.
+// bubble above. Task chat cards render as they do anywhere. A message that
+// quotes one of the guardian's, as a task's start message does, shows the
+// quote inside its first text bubble, as a reply's bubble does.
 const AgentEntry = memo(function AgentEntry({
   entry,
   actions,
@@ -92,6 +95,8 @@ const AgentEntry = memo(function AgentEntry({
   const { message } = entry;
   const parts = parseMessageEntries(message);
   const lastText = parts.findLastIndex((part) => part.type === "text" && part.content.trim());
+  const firstText = parts.findIndex((part) => part.type === "text" && part.content.trim());
+  const quote = parts.find((part) => part.type === "reply_to");
   // A quote of this message jumps to its first bubble.
   const firstBubble = parts.findIndex(
     (part) => part.type === "task_chat" || (part.type === "text" && part.content.trim()),
@@ -130,6 +135,8 @@ const AgentEntry = memo(function AgentEntry({
         </ConciergeBubble>
       );
     }
+    // Drawn in the first text bubble.
+    if (part.type === "reply_to") return null;
     if (part.type !== "text") {
       // The message id tells the Needs you jump which reply a card belongs to.
       return (
@@ -160,6 +167,7 @@ const AgentEntry = memo(function AgentEntry({
         anchorId={index === firstBubble ? message.id : undefined}
       >
         <ChatBubble tone="received" data-concierge-bubble {...arrival(message.id)}>
+          {quote && index === firstText ? <QuotedReply part={quote} /> : null}
           {forwardedFrom ? (
             <ForwardedChip chatId={forwardedFrom.chatId} title={forwardedFrom.title} />
           ) : null}

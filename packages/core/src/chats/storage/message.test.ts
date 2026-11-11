@@ -51,4 +51,14 @@ describe("partsText", () => {
       ]),
     ).toBe("first\nsecond");
   });
+
+  it("leaves a quote and a task card out of a Concierge start message's text", () => {
+    expect(
+      partsText([
+        { type: "reply_to", messageId: "g1", author: "guardian", text: "research X" },
+        { type: "text", content: "On it: X" },
+        { type: "task_chat", chatId: "c1", title: "Research X" },
+      ] as never),
+    ).toBe("On it: X");
+  });
 });

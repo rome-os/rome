@@ -62,6 +62,29 @@ describe("chat threads", () => {
     expect(placed).toEqual([{ sessionId: CHAT, messageId: "m2", chatThreadId: "m2" }]);
   });
 
+  it("keeps a Concierge start message's quote, acknowledgement and card in order, in the thread of the message it quotes", async () => {
+    await guardian("m1");
+    const { id } = await repo.addBackendMessage(
+      CHAT,
+      "t1",
+      [
+        { type: "reply_to", messageId: "m1", author: "guardian", text: "research X" },
+        { type: "text", content: "On it: X" },
+        { type: "task_chat", chatId: "task-1", title: "Research X" },
+      ],
+      { chatThread: { in: "m1" } },
+    );
+
+    const stored = (await repo.getMessages(CHAT)).find((message) => message.id === id)!;
+    expect(JSON.parse(stored.content).map((part: { type: string }) => part.type)).toEqual([
+      "reply_to",
+      "text",
+      "task_chat",
+    ]);
+    expect(stored.chatThreadId).toBe("m1");
+    expect(await threadOf("m1")).toBe("m1");
+  });
+
   it("makes a message in no thread the root of the thread a reply to it starts", async () => {
     await guardian("m1");
     const answer = (await repo.addBackendMessage(CHAT, "t1", [{ type: "text", content: "168" }]))

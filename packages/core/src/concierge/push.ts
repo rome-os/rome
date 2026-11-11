@@ -30,6 +30,18 @@ const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
 // Block tokens end with a space, so two paragraphs never run together.
 const BLOCKS = new Set(["paragraph", "heading", "code", "blockquote", "list_item", "table"]);
 
+// Stands where a link to a chat of this app was. A task's title or a chat's
+// name, which can hold a secret, is its text, and must never reach the lock
+// screen (docs/architecture/notification-delivery.md). {@link pushBody}
+// removes it, with the separators that followed the link.
+const DROPPED_LINK = "\uE000";
+
+function isChatLink(token: Token): boolean {
+  return (
+    token.type === "link" && (token.href === "/chat" || String(token.href).startsWith("/chat/"))
+  );
+}
+
 function plainOf(tokens: Token[]): string {
   return tokens
     .map((token) => {
@@ -42,6 +54,10 @@ function plainOf(tokens: Token[]): string {
               .flat()
               .map((cell: { tokens: Token[] }) => plainOf(cell.tokens))
               .join(" ");
+          case "link":
+            // Decided on the link's target, not on what its text says.
+            if (isChatLink(token)) return DROPPED_LINK;
+            break;
           case "image":
             return token.text;
           case "html":
@@ -63,10 +79,13 @@ function plainOf(tokens: Token[]): string {
 
 /**
  * The message as a push shows it: Markdown reduced to its words on one line,
- * cut to about {@link PUSH_BODY_MAX_CHARS} characters, never inside an emoji.
+ * without the text of a link to a chat, cut to about {@link PUSH_BODY_MAX_CHARS}
+ * characters, never inside an emoji. Empty when nothing else is left.
  */
 export function pushBody(markdown: string): string {
   const text = plainOf(marked.lexer(markdown))
+    // What led into a dropped link ("[Flights](/chat/x): Found") is no part of the words.
+    .replace(new RegExp(`${DROPPED_LINK}[\\s:：\\-–—]*`, "g"), "")
     .replace(/&(amp|lt|gt|quot|#39);/g, (_, name: string) => ENTITIES[name] ?? "")
     .replace(/\s+/g, " ")
     .trim();
@@ -254,10 +273,11 @@ export class ConciergePush {
   private async send(said: SaidInTurn, owner: ConciergeOwner, level: NotifyLevel): Promise<void> {
     const { turnId, chatId } = said;
     const words = said.private ? null : said.ownWords;
-    const body = words ?? (await this.fixedLine(owner));
+    // A message of nothing but links to chats has no words left: the fixed line.
+    const body = (words && pushBody(words)) || pushBody(await this.fixedLine(owner));
     const recipient = recipientOf(owner);
     const outcome = await this.deps.notify.send({
-      body: pushBody(body),
+      body,
       level,
       chatId,
       ...(recipient !== undefined ? { recipient } : {}),
