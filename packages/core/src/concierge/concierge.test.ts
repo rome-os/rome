@@ -50,11 +50,16 @@ import {
   RESTRICTED_PLAN,
 } from "../test/kit/model-accounts.js";
 import type { ModelAccountReports } from "../agent/index.js";
+import { CONCLUSION_CLOSE, CONCLUSION_MAX_CHARS, CONCLUSION_OPEN } from "./conclusion.js";
 
 const CONCIERGE_CHAT = CONCIERGE_CHAT_ID;
 /** A topic chat: another Concierge chat. */
 const TOPIC_CHAT = "topic-1";
 const isConciergeChatId = (id: string) => id === CONCIERGE_CHAT || id === TOPIC_CHAT;
+
+/** A task chat's final answer: its details, then its conclusion between the markers. */
+const concluded = (conclusion: string, details = "Full details of the work.") =>
+  `${details}\n\n${CONCLUSION_OPEN}\n${conclusion}\n${CONCLUSION_CLOSE}`;
 
 const opened: TestDb[] = [];
 afterEach(() => {
@@ -1408,11 +1413,12 @@ describe("Concierge tools", () => {
     );
     s.messages.get("task-1")?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "# Report" }]),
+      content: JSON.stringify([{ type: "text", content: concluded("# Report") }]),
     });
     await s.tool("chat_send", { chatId: "task-1", text: "Trains too" });
     const result = await s.tool("chat_forward", { chatId: "task-1" });
     expect(JSON.parse(result.content[0].text)).toEqual({
+      forwarded: "conclusion",
       forwardedChars: 8,
       messageId: "said-1",
       taskAnchored: started.taskId,
@@ -1557,7 +1563,7 @@ describe("Concierge tools", () => {
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
     s.messages.get("task-1")?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "# Report\n\nThree options." }]),
+      content: JSON.stringify([{ type: "text", content: concluded("# Report\n\nThree options.") }]),
     });
     const result = await s.tool("chat_forward", { chatId: "task-1", intro: "Here it is" });
     expect(result.isError).toBeFalsy();
@@ -1579,7 +1585,7 @@ describe("Concierge tools", () => {
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
     s.messages.get("task-1")?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "Three options." }]),
+      content: JSON.stringify([{ type: "text", content: concluded("Three options.") }]),
     });
     await s.tool("chat_forward", { chatId: "task-1" });
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
@@ -1592,6 +1598,118 @@ describe("Concierge tools", () => {
         },
       ],
     ]);
+  });
+
+  describe("chat_forward passes on a task's conclusion", () => {
+    const DETAILS = "A long table of fares that must stay in the task chat.";
+    const text = (result: { content: Array<{ text: string }> }) =>
+      JSON.parse(result.content[0].text);
+    /** A started task chat whose latest answer is `answer`. */
+    const withAnswer = async (answer: string) => {
+      const s = setup();
+      await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+      s.messages.get("task-1")?.push({
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: answer }]),
+      });
+      return s;
+    };
+    const stored = (s: Awaited<ReturnType<typeof withAnswer>>) =>
+      (s.messages.get(CONCIERGE_CHAT) ?? []).map((row) => JSON.parse(row.content));
+    /** The guardian sent a message in the running turn. */
+    const guardianAsked = (s: Awaited<ReturnType<typeof withAnswer>>) => {
+      const list = s.messages.get(CONCIERGE_CHAT) ?? [];
+      list.push({
+        id: "g-ask",
+        role: "user",
+        content: JSON.stringify([{ type: "text", content: "show me the full report" }]),
+        turnId: "concierge-turn-1",
+      });
+      s.messages.set(CONCIERGE_CHAT, list);
+    };
+
+    it("forwards only the conclusion, word for word, with its source chat and no marker", async () => {
+      const s = await withAnswer(concluded("Found 3 flights. Which one?", DETAILS));
+      const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
+      expect(result).toMatchObject({
+        forwarded: "conclusion",
+        forwardedChars: "Found 3 flights. Which one?".length,
+      });
+      const forwarded = stored(s).at(-1);
+      expect(forwarded).toEqual([
+        {
+          type: "text",
+          content: "Found 3 flights. Which one?",
+          format: "long",
+          forwardedFrom: { chatId: "task-1", title: "Flights" },
+        },
+      ]);
+      expect(JSON.stringify(stored(s))).not.toContain("rome:conclusion");
+      expect(JSON.stringify(stored(s))).not.toContain("long table of fares");
+    });
+
+    it("anchors the task's row to the forwarded message, so it can be needs_user", async () => {
+      const s = await withAnswer(concluded("Which one?", DETAILS));
+      const result = text(await s.tool("chat_forward", { chatId: "task-1" }));
+      expect(
+        await s.taskRepo.getWithChat(result.taskAnchored)?.then((row) => row?.sourceMessageId),
+      ).toBe(result.messageId);
+    });
+
+    it("refuses an answer with no conclusion, sends nothing, and says what to do instead", async () => {
+      const s = await withAnswer(DETAILS);
+      const result = await s.tool("chat_forward", { chatId: "task-1", intro: "Done" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("no conclusion section");
+      expect(result.content[0].text).toContain("Nothing was sent");
+      expect(result.content[0].text).toContain("at most two sentences");
+      expect(stored(s)).toEqual([]);
+    });
+
+    it("refuses a conclusion over the cap, sends nothing, and moves no thread", async () => {
+      const s = await withAnswer(concluded("x".repeat(CONCLUSION_MAX_CHARS + 1), DETAILS));
+      const result = await s.tool("chat_forward", { chatId: "task-1" });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain(`over the ${CONCLUSION_MAX_CHARS} limit`);
+      expect(stored(s)).toEqual([]);
+    });
+
+    it("refuses the full text in a turn the guardian did not start, so a report turn never pastes a report", async () => {
+      const s = await withAnswer(concluded("Done.", DETAILS));
+      const result = await s.tool("chat_forward", { chatId: "task-1", full: true });
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("only in a turn they started");
+      expect(stored(s)).toEqual([]);
+    });
+
+    it("sends the whole answer, without markers, when the guardian asked for it this turn", async () => {
+      const s = await withAnswer(concluded("Done.", DETAILS));
+      guardianAsked(s);
+      const result = text(await s.tool("chat_forward", { chatId: "task-1", full: true }));
+      expect(result.forwarded).toBe("full");
+      const body = stored(s).at(-1)[0].content as string;
+      expect(body).toContain(DETAILS);
+      expect(body).toContain("Done.");
+      expect(body).not.toContain("rome:conclusion");
+    });
+
+    it("sends the whole answer even when it has no conclusion, in a guardian's turn", async () => {
+      const s = await withAnswer(DETAILS);
+      guardianAsked(s);
+      const result = text(await s.tool("chat_forward", { chatId: "task-1", full: true }));
+      expect(result).toMatchObject({ forwarded: "full", forwardedChars: DETAILS.length });
+    });
+
+    it("describes itself as conclusion-first, with an explicit full flag", async () => {
+      const s = setup();
+      const tools = await buildConciergeTools(s.service, s.context());
+      const forward = tools.find((candidate) => candidate.name === "chat_forward")!;
+      expect(forward.description).toContain("conclusion");
+      expect(forward.description).toContain(`${CONCLUSION_MAX_CHARS} characters`);
+      expect(forward.description).toContain("explicitly asks for the full text");
+      expect(forward.description).not.toContain("long content the guardian asked for");
+      expect(forward.inputSchema).toHaveProperty("properties.full");
+    });
   });
 
   it("say marks no origin on what the agent writes itself", async () => {
@@ -1791,7 +1909,7 @@ describe("Concierge task anchors", () => {
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
     s.messages.get("task-1")?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "3 options" }]),
+      content: JSON.stringify([{ type: "text", content: concluded("3 options") }]),
     });
     expect(text(await s.tool("chat_card", { chatId: "task-1" }))).toEqual({
       sent: expect.any(String),
@@ -1830,7 +1948,7 @@ describe("Concierge task anchors", () => {
     s.tasks.subscribe(emit);
     s.messages.get(chatId)?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "3 options" }]),
+      content: JSON.stringify([{ type: "text", content: concluded("3 options") }]),
     });
 
     s.turnIn(forwardedIn);
@@ -1839,7 +1957,12 @@ describe("Concierge task anchors", () => {
     const forwarded = text(result);
     expect(s.messages.get(forwardedIn)?.at(-1)?.id).toBe(forwarded.messageId);
     expect(await anchorOf(s, taskId)).toBe(forwarded.messageId);
-    expect(forwarded).toEqual({ forwardedChars: 9, messageId: "said-2", taskAnchored: taskId });
+    expect(forwarded).toEqual({
+      forwarded: "conclusion",
+      forwardedChars: 9,
+      messageId: "said-2",
+      taskAnchored: taskId,
+    });
     expect(await s.taskRepo.get(taskId)).toEqual({
       ...before,
       chatId: forwardedIn === CONCIERGE_CHAT ? null : forwardedIn,
@@ -2037,7 +2160,7 @@ describe("Concierge task anchors", () => {
     );
     s.messages.get(chatId)?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "3 options" }]),
+      content: JSON.stringify([{ type: "text", content: concluded("3 options") }]),
     });
     const forwarded = text(await s.tool("chat_forward", { chatId }));
     expect(await anchorOf(s, taskId)).toBe(forwarded.messageId);
@@ -2060,12 +2183,16 @@ describe("Concierge task anchors", () => {
     s.messages.set(chatId, [
       {
         role: "assistant",
-        content: JSON.stringify([{ type: "text", content: "3 options" }]),
+        content: JSON.stringify([{ type: "text", content: concluded("3 options") }]),
       },
     ]);
     const result = await s.tool("chat_forward", { chatId });
     expect(result.isError).toBeFalsy();
-    expect(text(result)).toEqual({ forwardedChars: 9, messageId: "said-1" });
+    expect(text(result)).toEqual({
+      forwarded: "conclusion",
+      forwardedChars: 9,
+      messageId: "said-1",
+    });
     expect(await s.taskRepo.findBySession(chatId)).toBeNull();
     expect(await s.taskRepo.listForAgent(true)).toEqual([]);
   });
@@ -2436,6 +2563,40 @@ describe("Concierge events", () => {
       `${"abcd ".repeat(79)}abcd${leftOut(301)}${"abcd ".repeat(59)}abcd`,
     );
     expect(await replyLine("我".repeat(700))).toBe("我".repeat(700));
+  });
+
+  /** The prompt of the one task event a finished task's answer `text` brings. */
+  const eventFor = async (text: string) => {
+    const s = setup();
+    const { chatId } = await startTask(s, text);
+    s.fakeTimers();
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    rs.useRealTimers();
+    return s.backendTurns[0].prompt;
+  };
+
+  it("gives the Concierge a task's conclusion whole, and the rest of its answer as the usual excerpt", async () => {
+    const question = "Which one should I book?";
+    const prompt = await eventFor(concluded(question, "y".repeat(2_000)));
+    expect(prompt).toContain(`\nconclusion: ${question}\n`);
+    expect(prompt).toContain(`\nreply: ${"y".repeat(400)}${leftOut(1_300)}${"y".repeat(300)}\n`);
+    expect(prompt).not.toContain("rome:conclusion");
+  });
+
+  it("gives only the conclusion when it is all the answer holds", async () => {
+    const prompt = await eventFor(
+      `${CONCLUSION_OPEN}\nAll done, nothing to decide.\n${CONCLUSION_CLOSE}`,
+    );
+    expect(prompt).toContain("\nconclusion: All done, nothing to decide.\n</task>");
+    expect(prompt).not.toContain("reply:");
+  });
+
+  it("falls back to the excerpt, without markers, for a conclusion over the cap", async () => {
+    const prompt = await eventFor(concluded("z".repeat(CONCLUSION_MAX_CHARS + 1), "Details."));
+    expect(prompt).not.toContain("conclusion:");
+    expect(prompt).not.toContain("rome:conclusion");
+    expect(prompt).toContain(`reply: Details.\n\n${"z".repeat(CONCLUSION_MAX_CHARS + 1)}`);
   });
 
   it("puts tasks that finish together in one turn", async () => {
@@ -3002,7 +3163,7 @@ describe("Concierge pushes", () => {
     ) as { chatId: string };
     s.messages.get(started.chatId)?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: answer }]),
+      content: JSON.stringify([{ type: "text", content: concluded(answer) }]),
     });
     return started.chatId;
   };
@@ -3048,7 +3209,10 @@ describe("Concierge pushes", () => {
     });
     await s.storedChats.createSession(chatId, "Login code 7291");
     s.messages.set(chatId, [
-      { role: "assistant", content: JSON.stringify([{ type: "text", content: SECRET_ANSWER }]) },
+      {
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: concluded(SECRET_ANSWER) }]),
+      },
     ]);
     // A guardian's turn sends into it, which fills in its row from the chat's name.
     await s.tool("chat_send", { chatId, text: "Anything new?" });

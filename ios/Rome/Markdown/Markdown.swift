@@ -86,6 +86,12 @@ enum MarkdownParser {
                 flushAll()
                 continue
             }
+            // An HTML comment on a line of its own, such as the marker that
+            // bounds a task's conclusion, shows nothing and ends the block.
+            if trimmed.hasPrefix("<!--") && trimmed.hasSuffix("-->") {
+                flushAll()
+                continue
+            }
             if trimmed == "---" || trimmed == "***" || trimmed == "___" {
                 flushAll()
                 blocks.append(.rule)

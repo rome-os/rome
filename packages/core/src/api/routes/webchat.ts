@@ -1,4 +1,10 @@
-import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
+import {
+  canOpenChat,
+  isConciergeChat,
+  isMainConciergeChat,
+  TASK_CHAT_TRIGGER_KIND,
+} from "../../concierge/service.js";
+import { CONCLUSION_INSTRUCTION } from "../../concierge/conclusion.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type {
   ConciergeStatusReaction,
@@ -1736,7 +1742,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           kind: "conversation",
           workingDir,
           threadContext,
-          contextSuffix: buildWebchatContextSuffix(),
+          contextSuffix: buildWebchatContextSuffix(input.session),
           selectionId: modelSelection?.id,
           reasoningEffort: await resolveRequestedReasoningEffort(undefined),
         },
@@ -2062,13 +2068,16 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     }
   };
 
-  const buildWebchatContextSuffix = (): string =>
+  // A task chat the Concierge started also carries how it ends its answers
+  // (`concierge/conclusion.ts`), on every turn, whoever sends it.
+  const buildWebchatContextSuffix = (chat?: { triggerKind?: string | null }): string =>
     [
       "# Context",
       "",
       "## Guardian",
       "",
       readGuardianProfile() ?? "Guardian profile unavailable.",
+      ...(chat?.triggerKind === TASK_CHAT_TRIGGER_KIND ? ["", CONCLUSION_INSTRUCTION] : []),
     ].join("\n");
 
   const persistTrace = async (stream: ActiveWebchatStream): Promise<void> => {
@@ -3914,7 +3923,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       senderBondLevel: "guardian",
     };
 
-    const contextSuffix = buildWebchatContextSuffix();
+    const contextSuffix = buildWebchatContextSuffix(session);
     let largeModelSelection = session.largeModelSelection;
     if (isConciergeChat(session)) {
       await deps.concierge?.switchIfExhausted(sessionId);
@@ -4916,7 +4925,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           kind: "conversation",
           workingDir,
           threadContext,
-          contextSuffix: buildWebchatContextSuffix(),
+          contextSuffix: buildWebchatContextSuffix(session),
           selectionId: modelSelection?.id ?? null,
         },
       );

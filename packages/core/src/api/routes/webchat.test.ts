@@ -13,6 +13,7 @@ import {
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createWebchatRuntime, openToolOf } from "./webchat.js";
+import { CONCLUSION_INSTRUCTION } from "../../concierge/conclusion.js";
 import { Session } from "../../agent/index.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
 import { runWithSessionActor } from "../../access/session-actor.js";
@@ -2597,6 +2598,72 @@ describe("Webchat API", () => {
     expect(sentTurn?.reasoningEffort).toBe("xhigh");
     expect(sentOptions).toMatchObject({ romeSessionId: session.id });
     expect(acquiredInit?.kind).toBe("conversation");
+  });
+
+  describe("the conclusion every task chat is told", () => {
+    const opened = async (triggerKind: string | null) => {
+      const inits: Array<SessionOpening | undefined> = [];
+      deps.agentSessionManager = fakeSessionManager(async (_key, init) => {
+        inits.push(init);
+        return {
+          key: { agentName: "main", channelThreadKey: "webchat:test" },
+          sessionId: "agent-session",
+          status: "idle",
+          startTurn() {
+            return testTurnHandle({
+              turnId: "turn-1",
+              events: (async function* () {
+                yield { type: "result", content: "" };
+              })(),
+              turnContext: otelContext.active(),
+            });
+          },
+          onStatusChange: () => () => undefined,
+          stop: async () => undefined,
+          close: async () => undefined,
+        } satisfies FakeSession;
+      });
+      await deps.webchatRepo.createSession("chat-1", "Chat");
+      if (triggerKind) {
+        await deps.webchatRepo.setSessionTrigger("chat-1", { triggerKind, triggerName: "Flights" });
+      }
+      const { routes, runtime } = createWebchatRuntime(deps);
+      return { inits, routes, runtime };
+    };
+    const send = (routes: Awaited<ReturnType<typeof opened>>["routes"], text: string) =>
+      routes.request("/chat/sessions/chat-1/turns", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text }),
+      });
+
+    it("adds the instruction to a task chat's context on a turn, and on every later one", async () => {
+      const { inits, routes } = await opened("concierge");
+      expect((await send(routes, "first")).status).toBe(200);
+      expect((await send(routes, "a follow-up")).status).toBe(200);
+      expect(inits.length).toBeGreaterThanOrEqual(2);
+      for (const init of inits) {
+        expect(String(init?.contextSuffix)).toContain("## Guardian");
+        expect(String(init?.contextSuffix)).toContain(CONCLUSION_INSTRUCTION);
+      }
+    });
+
+    it("adds it when a task chat's runtime is opened for a background turn", async () => {
+      const { inits, runtime } = await opened("concierge");
+      await runtime.openSession("chat-1");
+      expect(String(inits.at(-1)?.contextSuffix)).toContain(CONCLUSION_INSTRUCTION);
+    });
+
+    it("leaves an ordinary chat's context as it was", async () => {
+      const { inits, routes, runtime } = await opened(null);
+      expect((await send(routes, "hello")).status).toBe(200);
+      await runtime.openSession("chat-1");
+      expect(inits.length).toBeGreaterThanOrEqual(2);
+      for (const init of inits) {
+        expect(String(init?.contextSuffix)).toContain("## Guardian");
+        expect(String(init?.contextSuffix)).not.toContain("rome:conclusion");
+      }
+    });
   });
 
   describe("device folder", () => {

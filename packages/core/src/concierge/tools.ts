@@ -33,6 +33,7 @@ import {
   TASK_CHAT_TRIGGER_KIND,
 } from "./service.js";
 import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
+import { CONCLUSION_MAX_CHARS, conclusionOf, withoutMarkers } from "./conclusion.js";
 
 const log = createLogger("concierge-tools");
 const runTool = romeToolRunner(log);
@@ -465,6 +466,16 @@ export async function buildConciergeTools(
       .map((row) => row.id);
     const handedOn = service.promptsHandedOn(chatId).filter((id) => !own.includes(id));
     return [...handedOn, ...own];
+  };
+
+  // Whether the guardian started this turn: one of the messages it took is
+  // its own. A message an earlier, cut-short turn handed on does not count,
+  // so a turn that only reports on tasks never counts either.
+  const guardianStartedTurn = async () => {
+    const { chatId, turnId } = currentTurn();
+    return (await webchatRepo.getTurnChatMessages(chatId, turnId)).some(
+      (row) => row.role === "user" && row.inputState !== "queued",
+    );
   };
 
   /** This turn's guardian messages, once `answers`, when given, is one of them. */
@@ -1284,14 +1295,21 @@ export async function buildConciergeTools(
     {
       name: "chat_forward",
       description:
-        "Send the guardian the latest answer of a task chat started from this Concierge chat as one long message, word for word, without retyping it. " +
-        "Use it for long content the guardian asked for. An existing task row automatically points to the forwarded message in this Concierge chat, unless the task already has a chat thread.",
+        "Send the guardian a finished task's conclusion, word for word, without retyping it: the short closing section the task chat writes at the end of its final answer. The message shows its source chat, which opens the details. " +
+        `A conclusion over ${CONCLUSION_MAX_CHARS} characters, or none, is refused and nothing is sent: then report the outcome yourself in at most two sentences. ` +
+        "Set full to send the whole answer instead, only when the guardian explicitly asks for the full text in a message they sent this turn. " +
+        "The task chat must be one started from this Concierge chat. An existing task row automatically points to the forwarded message in this Concierge chat, unless the task already has a chat thread.",
       inputSchema: {
         type: "object",
         required: ["chatId"],
         properties: {
           chatId: { type: "string" },
           intro: { type: "string", description: "Optional short line sent before it." },
+          full: {
+            type: "boolean",
+            description:
+              "Send the whole answer, not its conclusion. Refused unless the guardian sent a message this turn: a turn that reports on a task never sends a full report.",
+          },
           answers: FORWARD_ANSWERS_PARAMETER,
         },
       },
@@ -1308,19 +1326,38 @@ export async function buildConciergeTools(
           const answer = latest?.body.text ?? null;
           if (!answer) throw new Error("The task chat has no answer yet");
           currentTurn();
+          const full = args.full === true;
+          // Everything that can refuse comes before anything is said.
+          if (full && !(await guardianStartedTurn())) {
+            throw new Error(
+              "The full text goes to the guardian only in a turn they started, when they explicitly ask for it. Forward the conclusion, or report the outcome yourself in at most two sentences.",
+            );
+          }
+          const conclusion = full ? null : conclusionOf(answer);
+          if (conclusion && conclusion.kind !== "found") {
+            throw new Error(
+              `${
+                conclusion.kind === "missing"
+                  ? "The task chat's latest answer has no conclusion section."
+                  : `The task chat's conclusion is ${conclusion.length} characters, over the ${CONCLUSION_MAX_CHARS} limit.`
+              } Nothing was sent. Report the outcome yourself with say, in one message of at most two sentences with task set to this task's id, and the guardian can open the task chat for details.`,
+            );
+          }
+          const text = conclusion?.kind === "found" ? conclusion.text : withoutMarkers(answer);
           // A forward shows the task's result to the guardian; it passes their
           // message on to no task, so it needs no message named. A message
           // already in a thread stays there.
           await relayToTaskThread(chatId, optionalString(args, "answers"));
           const messageId = await forward(
-            answer,
+            text,
             { chatId, title: chat.name },
             optionalString(args, "intro"),
             optionalString(args, "answers"),
           );
           const task = await pointTaskTo(chatId, messageId);
           return {
-            forwardedChars: answer.length,
+            forwarded: full ? "full" : "conclusion",
+            forwardedChars: text.length,
             messageId,
             ...(task ? { taskAnchored: task.id } : {}),
           };

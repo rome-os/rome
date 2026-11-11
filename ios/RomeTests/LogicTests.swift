@@ -120,6 +120,16 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
         ])
     }
 
+    @Test func aCommentLineShowsNothingAndSeparatesBlocks() {
+        let blocks = MarkdownParser.parse("""
+        Details.
+        <!-- rome:conclusion -->
+        Found 3 flights. Which one?
+        <!-- /rome:conclusion -->
+        """)
+        #expect(blocks == [.paragraph("Details."), .paragraph("Found 3 flights. Which one?")])
+    }
+
     @Test func unterminatedCodeStillRenders() {
         #expect(MarkdownParser.parse("```\nabc") == [.code(language: nil, text: "abc")])
     }
