@@ -105,9 +105,15 @@ struct StackGameScreen: View {
         frozen ? 0.6 : date.timeIntervalSince(epoch)
     }
 
-    private func tap() {
+    /// A tap at `point` in the field; nil from VoiceOver, which always counts.
+    private func tap(at point: CGPoint?, size: CGSize, fieldWidth: CGFloat) {
         guard var next = game, !frozen else { return }
         let now = clock()
+        if let point {
+            let shown = effects.shownLevel(at: now, reduceMotion: reduceMotion)
+            let foot = mascotFoot(next, layout: layout(size: size, fieldWidth: fieldWidth, shown: shown), shown: shown)
+            guard next.tapCounts(at: point, mascot: CGPoint(x: foot.x, y: foot.y - Self.mascotHeight / 2)) else { return }
+        }
         switch next.phase {
         case .ready:
             next.start(at: now)
@@ -142,14 +148,20 @@ struct StackGameScreen: View {
 
     // MARK: The field
 
-    private func field(_ game: StackGame, size: CGSize, fieldWidth: CGFloat) -> some View {
+    /// The field's layout with the tower shown `shown` levels high: the
+    /// camera keeps the sliding block in the upper third.
+    private func layout(size: CGSize, fieldWidth: CGFloat, shown: CGFloat) -> FieldLayout {
         let groundY = size.height * Self.groundShare
+        let camera = max(0, (shown + 2) * StackGame.blockHeight + Self.hover - (groundY - size.height * Self.followShare))
+        return FieldLayout(left: (size.width - fieldWidth) / 2, groundY: groundY, camera: camera, size: size)
+    }
+
+    private func field(_ game: StackGame, size: CGSize, fieldWidth: CGFloat) -> some View {
         let left = (size.width - fieldWidth) / 2
         return TimelineView(.animation(minimumInterval: 1.0 / 60, paused: frozen)) { context in
             let now = clock(context.date)
             let shown = effects.shownLevel(at: now, reduceMotion: reduceMotion)
-            let camera = max(0, (shown + 2) * StackGame.blockHeight + Self.hover - (groundY - size.height * Self.followShare))
-            let layout = FieldLayout(left: left, groundY: groundY, camera: camera, size: size)
+            let layout = layout(size: size, fieldWidth: fieldWidth, shown: shown)
             let foot = mascotFoot(game, layout: layout, shown: shown)
             ZStack(alignment: .topLeading) {
                 Canvas { canvas, _ in
@@ -160,7 +172,7 @@ struct StackGameScreen: View {
                 }
                 // How the tiers add up, on the ground under the base.
                 anchored(at: CGPoint(x: left + fieldWidth / 2, y: layout.y(0) + 18), alignment: .top) {
-                    Text("5 actions make a skill. 5 skills make an app.")
+                    Text("Every block builds on the last.")
                         .romeFont(13)
                         .foregroundStyle(Palette.sub)
                         .multilineTextAlignment(.center)
@@ -186,13 +198,13 @@ struct StackGameScreen: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture(perform: tap)
+        .onTapGesture { point in tap(at: point, size: size, fieldWidth: fieldWidth) }
         .accessibilityElement()
         .accessibilityLabel(Text("Stack up"))
         .accessibilityValue(Text(verbatim: "\(game.score)"))
         .accessibilityHint(Text("Tap to drop the block"))
         .accessibilityAddTraits(.allowsDirectInteraction)
-        .accessibilityAction { tap() }
+        .accessibilityAction { tap(at: nil, size: size, fieldWidth: fieldWidth) }
     }
 
     /// Where the field's world (heights from the ground up) lands on screen.

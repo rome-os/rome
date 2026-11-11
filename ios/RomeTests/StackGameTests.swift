@@ -144,6 +144,19 @@ import Testing
         defaults.removePersistentDomain(forName: "StackGameTests")
     }
 
+    @Test func onlyATapOnTheMascotStarts() {
+        var game = StackGame(fieldWidth: 400)
+        let mascot = CGPoint(x: 200, y: 600)
+        #expect(game.tapCounts(at: CGPoint(x: 240, y: 560), mascot: mascot))
+        #expect(!game.tapCounts(at: CGPoint(x: 250, y: 600), mascot: mascot))
+        #expect(!game.tapCounts(at: CGPoint(x: 200, y: 300), mascot: mascot))
+        // Playing, a tap anywhere drops.
+        game.start(at: 0)
+        #expect(game.tapCounts(at: CGPoint(x: 10, y: 10), mascot: mascot))
+        game.drop(x: 400, at: 1)
+        #expect(!game.tapCounts(at: mascot, mascot: mascot))
+    }
+
     @Test func tenQuickTapsOpenTheGame() {
         var streak = TapStreak()
         var opened: [Int] = []

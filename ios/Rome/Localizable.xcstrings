@@ -261,16 +261,6 @@
         }
       }
     },
-    "5 actions make a skill. 5 skills make an app." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "5 个 action 合成一个 skill，5 个 skill 合成一个 app。"
-          }
-        }
-      }
-    },
     "5 actions → 1 skill" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1207,6 +1197,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "事件例程"
+          }
+        }
+      }
+    },
+    "Every block builds on the last." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每一块，都建立在上一块之上。"
           }
         }
       }

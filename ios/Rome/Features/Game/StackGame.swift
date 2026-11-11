@@ -85,6 +85,20 @@ struct StackGame: Equatable {
     var multiplier: Int { 1 + min(combo, 4) }
     var speed: CGFloat { min(Self.startSpeed + Self.speedStep * CGFloat(placed), Self.maxSpeed) }
 
+    /// The square around the mascot where the first tap starts the game.
+    static let startTarget: CGFloat = 88
+
+    /// Before the start, only a tap on the mascot (its middle at
+    /// `mascot`) starts the game; once playing, a tap anywhere drops.
+    func tapCounts(at point: CGPoint, mascot: CGPoint) -> Bool {
+        switch phase {
+        case .ready:
+            return abs(point.x - mascot.x) <= Self.startTarget / 2 && abs(point.y - mascot.y) <= Self.startTarget / 2
+        case .playing: return true
+        case .over: return false
+        }
+    }
+
     /// The first tap: the block starts to slide.
     mutating func start(at time: TimeInterval) {
         guard phase == .ready else { return }
