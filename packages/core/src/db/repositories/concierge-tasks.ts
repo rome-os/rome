@@ -66,6 +66,15 @@ export interface ReactionTarget {
   messageKey: string;
 }
 
+/**
+ * How one task's work for a message stands. A stopped task counts toward no
+ * reaction (docs/domains/chats.md#status-reaction).
+ */
+export type TaskReactionState = ConciergeStatusReaction | "stopped";
+
+/** How a task's work for its messages ends. */
+export type TaskReactionEnd = Exclude<TaskReactionState, "working">;
+
 /** A message's status reaction changed; null when it has none now. */
 export type ReactionListener = (
   target: ReactionTarget,
@@ -74,15 +83,14 @@ export type ReactionListener = (
 
 /**
  * One reaction for a message from the work of every task it started or was
- * passed on to: working while any of them works, then failed when any failed,
- * else done.
+ * passed on to that was not stopped: working while any of them works, then
+ * failed when any failed, else done. None when every one was stopped.
  */
-export function reactionOf(
-  states: readonly ConciergeStatusReaction[],
-): ConciergeStatusReaction | null {
-  if (states.length === 0) return null;
-  if (states.includes("working")) return "working";
-  return states.includes("failed") ? "failed" : "done";
+export function reactionOf(states: readonly TaskReactionState[]): ConciergeStatusReaction | null {
+  const counted = states.filter((state) => state !== "stopped");
+  if (counted.length === 0) return null;
+  if (counted.includes("working")) return "working";
+  return counted.includes("failed") ? "failed" : "done";
 }
 
 /**
@@ -297,8 +305,9 @@ export class ConciergeTasksRepository {
     // `transaction` is synchronous on better-sqlite3, so the body uses `.run()`
     // and `.all()` and never awaits.
     // Rows the Concierge just marked done or dropped settle the messages
-    // still working for them, as a task that ends does.
-    const settled: { taskId: string; state: "done" | "failed" }[] = [];
+    // still working for them, as a task that ends does. A dropped task was
+    // called off, not failed, so it counts as stopped.
+    const settled: { taskId: string; state: TaskReactionEnd }[] = [];
     const written = await this.db.transaction((tx) => {
       const out: ConciergeTaskRow[] = [];
       for (const write of writes) {
@@ -322,7 +331,7 @@ export class ConciergeTasksRepository {
         }
         const state = write.state ?? existing?.state ?? "next";
         if (existing && !isFinished(existing.state) && isFinished(state)) {
-          settled.push({ taskId: existing.id, state: state === "done" ? "done" : "failed" });
+          settled.push({ taskId: existing.id, state: state === "done" ? "done" : "stopped" });
         }
         const archivedAt =
           write.archived === undefined
@@ -442,11 +451,7 @@ export class ConciergeTasksRepository {
   }
 
   /** Settles every message still working for task `taskId`. Answers how many changed. */
-  async settleReactions(
-    taskId: string,
-    state: "done" | "failed",
-    now = new Date(),
-  ): Promise<number> {
+  async settleReactions(taskId: string, state: TaskReactionEnd, now = new Date()): Promise<number> {
     const changed = await this.db
       .update(conciergeTaskReactions)
       .set({ state, updatedAt: now })
@@ -480,7 +485,7 @@ export class ConciergeTasksRepository {
           inArray(conciergeTaskReactions.messageKey, [...new Set(messageKeys)]),
         ),
       );
-    const states = new Map<string, ConciergeStatusReaction[]>();
+    const states = new Map<string, TaskReactionState[]>();
     for (const row of rows) {
       states.set(row.messageKey, [...(states.get(row.messageKey) ?? []), row.state]);
     }

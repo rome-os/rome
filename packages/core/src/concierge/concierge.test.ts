@@ -3812,7 +3812,7 @@ describe("Concierge status reactions", () => {
   it.each([
     ["completed", "done"],
     ["error", "failed"],
-    ["interrupted", "failed"],
+    ["interrupted", null],
     ["stopped", "failed"],
   ] as const)("a task turn that ends %s makes the reaction %s", async (status, reaction) => {
     const s = setup({ said: false });
@@ -3822,7 +3822,7 @@ describe("Concierge status reactions", () => {
     expect(await reactionOf(s, "g1")).toBe(reaction);
   });
 
-  it("fails the reaction when the guardian calls the task off", async () => {
+  it("clears the reaction, live, when the guardian stops the task", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
     const { chatId } = await started(s);
@@ -3831,8 +3831,10 @@ describe("Concierge status reactions", () => {
     guardianSays(s, "g2", "call-off");
     await s.tool("chat_stop", { chatId });
     s.chats.activeTurns = () => [];
+    const seen = watch(s);
     await finishTask(s, chatId, "interrupted");
-    expect(await reactionOf(s, "g1")).toBe("failed");
+    expect(await reactionOf(s, "g1")).toBeNull();
+    expect(seen).toEqual([["g1", null]]);
     // The call-off is answered in its own turn and gets none.
     expect(await reactionOf(s, "g2")).toBeNull();
   });
@@ -3902,12 +3904,48 @@ describe("Concierge status reactions", () => {
     expect(await reactionOf(s, "g1")).toBe("failed");
   });
 
+  it.each([
+    ["completed", "done"],
+    ["error", "failed"],
+  ] as const)("a message whose other task was stopped takes the reaction of the one that ended %s", async (status, reaction) => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const stopped = await started(s, { title: "Weather" });
+    const other = await started(s, { title: "Traffic" });
+    await finishTask(s, stopped.chatId, "interrupted");
+    expect(await reactionOf(s, "g1")).toBe("working");
+    await finishTask(s, other.chatId, status);
+    expect(await reactionOf(s, "g1")).toBe(reaction);
+  });
+
+  it("a stopped task works again when it is given more words", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    await finishTask(s, chatId, "interrupted");
+    expect(await reactionOf(s, "g1")).toBeNull();
+    s.inTurn("go-on");
+    guardianSays(s, "g2", "go-on");
+    await s.tool("chat_send", { chatId, text: "Go on" });
+    expect(await reactionOf(s, "g2")).toBe("working");
+    await finishTask(s, chatId);
+    expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, "done"]);
+  });
+
   it("settles when the Concierge closes the row, as after a question the guardian answered", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
     const { taskId } = await started(s);
+    await s.taskRepo.upsertMany([{ id: taskId, state: "done" }]);
+    expect(await reactionOf(s, "g1")).toBe("done");
+  });
+
+  it("clears the reaction when the Concierge drops the row, as a stop does", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { taskId } = await started(s);
     await s.taskRepo.upsertMany([{ id: taskId, state: "dropped" }]);
-    expect(await reactionOf(s, "g1")).toBe("failed");
+    expect(await reactionOf(s, "g1")).toBeNull();
   });
 
   it("never pushes a reaction to the phone", async () => {

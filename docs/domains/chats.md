@@ -100,8 +100,9 @@ A chat forked from one turn of another chat, carrying that chat's history up to 
 A mark Rome puts on its owner's message in a [Concierge chat](#concierge-chat) to show how the work it asked for stands: working, done or failed. It takes the place of an acknowledgement from the Concierge.
 
 - Rome sets it, never the Concierge. A message has at most one, and a newer state replaces the older one.
-- A message gets one when the Concierge starts a task for it, or passes its words on to a task: working. It turns done when that task finishes, and failed when the task fails or is stopped. A task that asks its owner a question is still working.
-- A message that started or reached several tasks is working while any of them works, then failed if any failed, else done.
+- A message gets one when the Concierge starts a task for it, or passes its words on to a task: working. It turns done when that task finishes, and failed only when the task fails. A task that asks its owner a question is still working.
+- A stopped task, by its owner's Stop or because the Concierge dropped it, counts toward no reaction. A message whose only task was stopped has none, and the mark goes away. A stopped task that is resumed or given more words is working again.
+- A message that started or reached several tasks counts only the ones not stopped: working while any of them works, then failed if any failed, else done. When every one was stopped, it has none.
 - A message the Concierge answers in the same turn, with no task, gets none: the answer says it was heard.
 - It is not a message. It never reaches the phone as a push, and it does nothing when pressed.
 - A common chat has none.

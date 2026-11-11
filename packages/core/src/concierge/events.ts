@@ -88,6 +88,15 @@ function answersCard(content: string): boolean {
   }
 }
 
+/**
+ * How a task's work for its messages ends with a turn that ended `status`. The
+ * guardian's Stop, or a newer input that supersedes the turn, is no failure.
+ */
+function reactionEndOf(status: AgentTurnFinishedEvent["status"]): "done" | "failed" | "stopped" {
+  if (status === "completed") return "done";
+  return status === "interrupted" ? "stopped" : "failed";
+}
+
 function userText(content: string): string {
   try {
     const parts: unknown = JSON.parse(content);
@@ -336,11 +345,12 @@ export function startConciergeEvents(
       return;
     }
     // The guardian messages the task worked for settle once the task chat
-    // has nothing left to run: done when it completed, failed when it failed
-    // or was stopped. A task that asks a question is still working.
+    // has nothing left to run: done when it completed, stopped when it was
+    // stopped, which clears their reaction, and failed when it failed or was
+    // abandoned. A task that asks a question is still working.
     if (service.dashboard.chats.activeTurns(chatId).length === 0) {
       await tasks.repo
-        .settleReactions(taskId, event.status === "completed" ? "done" : "failed")
+        .settleReactions(taskId, reactionEndOf(event.status))
         .catch((error: unknown) =>
           log.warn("failed to settle status reactions", {
             taskId,
