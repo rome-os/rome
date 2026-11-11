@@ -782,6 +782,45 @@ describe("RecentChats", () => {
     expect(screen.getByText("Cached chat")).toBeTruthy();
   });
 
+  it("still shows the cached topic chats after a long time away", async () => {
+    concierge.chatId = "concierge";
+    concierge.fromServer = true;
+    let conciergeCalls = 0;
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/chat/sessions")) return Response.json([]);
+      if (url === "/api/concierge/chats") {
+        conciergeCalls += 1;
+        return Response.json({
+          chats: [
+            { id: "concierge", name: "Concierge", main: true, unread: 0 },
+            { id: "topic-1", name: "Cached topic", main: false, unread: 0 },
+          ],
+        });
+      }
+      if (url === "/api/concierge/session") return Response.json({ id: "concierge", unread: 0 });
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch);
+    const queryClient = testQueryClient();
+    const view = renderRecentChats("/chat", undefined, queryClient);
+    await screen.findByRole("link", { name: "Cached topic" });
+    rs.useFakeTimers();
+    view.unmount();
+    // Past React Query's default five-minute garbage collection.
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(10 * 60_000);
+    });
+    const before = conciergeCalls;
+
+    renderRecentChats("/chat", undefined, queryClient);
+
+    // Synchronously, before any response: the cached topic chat, which the
+    // remount still refetches behind.
+    expect(screen.getByRole("link", { name: "Cached topic" })).toBeTruthy();
+    rs.useRealTimers();
+    await waitFor(() => expect(conciergeCalls).toBe(before + 1));
+  });
+
   it("offers a retry instead of claiming the guardian has no chats when the fetch fails", async () => {
     let attempts = 0;
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
