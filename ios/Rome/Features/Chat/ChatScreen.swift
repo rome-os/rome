@@ -467,13 +467,13 @@ struct ChatMoreMenu: View {
             Section {
                 // No count: task progress is not reported accurately enough to badge.
                 Button(action: onTasks) { Label("Tasks", systemImage: "checklist") }
-                ChatShareMenuItems(share: share)
                 if let onRename {
                     Button(action: onRename) { Label("Rename", systemImage: "pencil") }
                 }
                 if let onArchive {
                     Button(role: .destructive, action: onArchive) { Label("Archive", systemImage: "archivebox") }
                 }
+                ChatShareMenuItems(share: share)
             } header: {
                 // A system menu wraps its title whatever the line limit: it is cut here.
                 if !title.isEmpty { Text(verbatim: MenuTitle.oneLine(title)) }

@@ -2617,16 +2617,6 @@
         }
       }
     },
-    "Share chat" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "分享对话"
-          }
-        }
-      }
-    },
     "Shared chat" : {
       "localizations" : {
         "zh-Hans" : {

@@ -28,9 +28,6 @@ struct ShareTurns: Equatable {
         }
     }
 
-    /// The newest turn: what "Share chat" starts with.
-    var latest: String? { order.last }
-
     /// The stored message a row was drawn from, by the row's id.
     static func messageId(ofRow id: String) -> String? {
         if id.hasPrefix("sep-") { return nil }
@@ -87,7 +84,7 @@ final class ShareLinkSource: NSObject, UIActivityItemSource {
 
 /// Sharing one chat: share mode, where the guardian picks turns and makes a
 /// read-only public link of them, and the chat's list of links. A message's
-/// Share and the "…" menu's Share chat both open share mode.
+/// Share opens share mode.
 @Observable
 @MainActor
 final class ChatShareFlow {
@@ -133,11 +130,6 @@ final class ChatShareFlow {
     /// A message's Share: share mode with that message's turn picked.
     func begin(fromRow rowId: String) {
         begin(turn: turns?.turnOfRow[rowId])
-    }
-
-    /// The "…" menu's Share chat: share mode with the newest turn picked.
-    func beginWithLatest() {
-        begin(turn: turns?.latest)
     }
 
     func toggle(_ turn: String) {
@@ -243,8 +235,13 @@ extension EnvironmentValues {
 /// A transcript row in share mode: its turn's check circle on the first row,
 /// a soft tint while picked, and a tap anywhere on it toggles the turn.
 /// Nothing inside the row acts meanwhile. `top` is the row's space above.
+///
+/// Share mode never changes a row's layout: a narrower row would rewrap its
+/// text and grow taller, and the transcript would jump under the finger.
+/// The circle lies over the empty space left of the guardian's bubble; an
+/// Agent bubble that starts a turn moves right by drawing only.
 private struct ShareSelectable: ViewModifier {
-    let rowId: String
+    let row: TranscriptRow
     let share: ChatShareFlow
     let top: CGFloat
     @Environment(\.shareTurns) private var turns
@@ -253,12 +250,12 @@ private struct ShareSelectable: ViewModifier {
 
     func body(content: Content) -> some View {
         let active = share.isSelecting
-        let turn = active ? turns?.turnOfRow[rowId] : nil
-        let lead = turns?.leadRows.contains(rowId) ?? false
+        let turn = active ? turns?.turnOfRow[row.id] : nil
+        let lead = turns?.leadRows.contains(row.id) ?? false
         let picked = turn.map(share.isSelected) ?? false
         content
             .allowsHitTesting(!active)
-            .padding(.leading, active ? Self.circleSpace : 0)
+            .offset(x: active && lead && Self.startsAtLeft(row) ? Self.circleSpace : 0)
             // The first row's tint stops at its own top; later rows reach up
             // over the space above them, so a turn reads as one block.
             .background { if picked && lead { tint } }
@@ -288,6 +285,13 @@ private struct ShareSelectable: ViewModifier {
             .animation(.easeOut(duration: 0.2), value: active)
     }
 
+    /// An Agent bubble sits at the left edge, where the circle goes; it has
+    /// room to move right. The guardian's bubble leaves the left side empty.
+    static func startsAtLeft(_ row: TranscriptRow) -> Bool {
+        if case .agentText = row { return true }
+        return false
+    }
+
     private var tint: some View {
         Rectangle()
             .fill(Palette.primarySoft.opacity(0.6))
@@ -298,12 +302,12 @@ private struct ShareSelectable: ViewModifier {
 extension View {
     /// A transcript row that share mode can pick, with `top` space above it.
     func shareSelectable(_ row: TranscriptRow, share: ChatShareFlow, top: CGFloat) -> some View {
-        modifier(ShareSelectable(rowId: row.id, share: share, top: top))
+        modifier(ShareSelectable(row: row, share: share, top: top))
     }
 
-    /// The chat's header, replaced by Cancel and the count in share mode. The
-    /// header's "…" menu offers Share chat and Shared links. Nil: a chat not
-    /// started yet, with nothing to share.
+    /// The chat's header, covered by Cancel and the count in share mode. The
+    /// header's "…" menu offers Shared links. Nil: a chat not started yet,
+    /// with nothing to share.
     func shareModeHeader(_ share: ChatShareFlow?) -> some View {
         let selecting = share?.isSelecting ?? false
         return self
@@ -316,7 +320,7 @@ extension View {
             }
     }
 
-    /// The composer, replaced by Create link in share mode; also the share
+    /// The composer, covered by Create link in share mode; also the share
     /// sheet and the Shared links sheet.
     @ViewBuilder
     func shareModeComposer(_ share: ChatShareFlow?) -> some View {
@@ -324,13 +328,13 @@ extension View {
     }
 }
 
-/// The "…" menu's Share chat and Shared links.
+/// The "…" menu's Shared links, its last item. Sharing itself starts from a
+/// message's Share.
 struct ChatShareMenuItems: View {
     let share: ChatShareFlow?
 
     var body: some View {
         if let share {
-            Button { share.beginWithLatest() } label: { Label("Share chat", systemImage: "square.and.arrow.up") }
             Button { share.openLinks() } label: { Label("Shared links", systemImage: "link") }
         }
     }
@@ -389,26 +393,33 @@ private struct ShareModeBar: View {
 private struct ShareModeComposer: ViewModifier {
     @Bindable var share: ChatShareFlow
 
+    // The composer stays in the layout, faded out, and the bar lies over it:
+    // swapping them would change the space under the transcript, which then
+    // moves.
     func body(content: Content) -> some View {
-        Group {
-            if share.isSelecting {
-                VStack(spacing: 8) {
-                    if let error = share.error {
-                        Text(verbatim: error)
-                            .romeFont(13, .medium)
-                            .foregroundStyle(Palette.destructive)
-                            .transition(.opacity)
+        content
+            .opacity(share.isSelecting ? 0 : 1)
+            .allowsHitTesting(!share.isSelecting)
+            .accessibilityHidden(share.isSelecting)
+            .overlay(alignment: .bottom) {
+                if share.isSelecting {
+                    VStack(spacing: 8) {
+                        if let error = share.error {
+                            Text(verbatim: error)
+                                .romeFont(13, .medium)
+                                .foregroundStyle(Palette.destructive)
+                                .transition(.opacity)
+                        }
+                        PrimaryButton(title: "Create link", loadingTitle: "Creating…", loading: share.creating, disabled: share.count == 0) {
+                            Task { await share.create() }
+                        }
                     }
-                    PrimaryButton(title: "Create link", loadingTitle: "Creating…", loading: share.creating, disabled: share.count == 0) {
-                        Task { await share.create() }
-                    }
+                    .transition(.opacity)
+                    .onAppear { Keyboard.dismiss() }
                 }
-                .onAppear { Keyboard.dismiss() }
-            } else {
-                content
             }
-        }
-        .animation(.easeOut(duration: 0.2), value: share.error)
+            .animation(.easeOut(duration: 0.2), value: share.isSelecting)
+            .animation(.easeOut(duration: 0.2), value: share.error)
         .sheet(item: $share.outgoing) { outgoing in
             ActivitySheet(items: outgoing.items)
                 .presentationDetents([.medium, .large])

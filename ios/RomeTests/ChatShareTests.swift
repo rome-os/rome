@@ -1,4 +1,5 @@
 import Foundation
+import SwiftUI
 import Testing
 @testable import Rome
 
@@ -31,7 +32,6 @@ private let twoTurns = [
         let rows = TranscriptBuilder.rows(messages: twoTurns, pending: [], answers: [:], options: .init())
         let turns = ShareTurns(messages: twoTurns, rows: rows)
         #expect(turns.order == ["t1", "t2"])
-        #expect(turns.latest == "t2")
         // Every bubble belongs to its turn; the time line belongs to none.
         for row in rows {
             switch row {
@@ -76,9 +76,6 @@ private let twoTurns = [
         #expect(share.isSelecting && share.count == 0)
         share.cancel()
         #expect(!share.isSelecting)
-        // Share chat starts on the newest turn.
-        share.beginWithLatest()
-        #expect(share.selection == ["t2"])
     }
 
     @Test func shareModeClosesAnOpenThread() async {
@@ -109,7 +106,7 @@ private let twoTurns = [
         let backend = FakeBackend()
         let messages = twoTurns.map { m -> ChatMessage in var m = m; m.sessionId = "server-main"; return m }
         let store = await chat(backend, messages, session: conciergeChatID)
-        store.share.beginWithLatest()
+        store.share.begin(turn: "t2")
         await store.share.create()
         #expect(backend.shareRequests.first?.sessionId == "server-main")
     }
@@ -177,7 +174,7 @@ private let twoTurns = [
         let store = await chat(backend, twoTurns)
         await store.share.loadLinks()
         #expect(store.share.links?.isEmpty == true)
-        store.share.beginWithLatest()
+        store.share.begin(turn: "t2")
         await store.share.create()
         #expect(store.share.links?.map(\.id) == ["s1"])
     }
@@ -187,5 +184,103 @@ private let twoTurns = [
         #expect(listed.first?.date != nil)
         let created = try JSONDecoder().decode(ChatShareLink.self, from: Data(#"{"id":"b","url":"/share/b","title":"T"}"#.utf8))
         #expect(created.date == nil && created.url == "/share/b")
+    }
+}
+
+/// Where each row lies on screen, as the hosted transcript reports it.
+@MainActor
+private final class RowFrames {
+    var frames: [String: CGRect] = [:]
+}
+
+/// A chat on a phone-sized screen with share mode's pieces: the rows and
+/// a composer-sized bar under them.
+private struct ShareModeHost: View {
+    let store: TranscriptStore
+    let log: RowFrames
+
+    var body: some View {
+        TranscriptList(store: store) { row, previous in
+            bubble(row)
+                .onGeometryChange(for: CGRect.self) { $0.frame(in: .global) } action: { log.frames[row.id] = $0 }
+                .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            Color.gray.frame(height: 52)
+                .shareModeComposer(store.share)
+                .padding(.horizontal, 16)
+                .padding(.vertical, 8)
+        }
+    }
+
+    @ViewBuilder
+    private func bubble(_ row: TranscriptRow) -> some View {
+        switch row {
+        case .userText(_, let text, _, let pending): UserBubble(text: text, pending: pending)
+        case .agentText(_, let text, _, let forwarded, let position): AgentBubble(text: text, forwardedFrom: forwarded, position: position)
+        case .separator(_, let date): TimeSeparator(date: date)
+        default: EmptyView()
+        }
+    }
+}
+
+/// Entering and leaving share mode leaves every row where it was, the
+/// tapped turn included: no row changes size, and the space under the
+/// transcript stays the same.
+@MainActor
+@Suite struct ShareModeLayoutTests {
+    @Test func rowsHoldStillAsShareModeComesAndGoes() async throws {
+        // Long lines, so a narrower row would wrap differently and grow.
+        let line = "Sure — here is the plan for the whole week, with the times, the places and who to call first."
+        var messages: [ChatMessage] = []
+        for index in 0..<24 {
+            let at = TimeInterval(index * 30)
+            messages.append(message("u\(index)", role: "user", "\(index). \(line)", turn: "t\(index)", at: at))
+            messages.append(message("a\(index)", "\(line) \(line)", turn: "t\(index)", at: at + 5))
+        }
+        let backend = FakeBackend()
+        backend.stored = messages
+        let store = TranscriptStore(sessionId: "chat-1", kind: .concierge, backend: backend)
+        store.start()
+        for _ in 0..<50 where !store.loaded { try await Task.sleep(for: .milliseconds(10)) }
+
+        let log = RowFrames()
+        let host = UIHostingController(rootView: ShareModeHost(store: store, log: log))
+        let scene = try #require(UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }.first)
+        let window = UIWindow(windowScene: scene)
+        window.frame = CGRect(x: 0, y: 0, width: 393, height: 852)
+        window.rootViewController = host
+        window.isHidden = false
+        defer {
+            window.isHidden = true
+            window.rootViewController = nil
+            window.windowScene = nil
+            store.stop()
+        }
+        try await Task.sleep(for: .milliseconds(800))
+
+        let screen = window.bounds
+        func onScreen() -> [String: CGRect] { log.frames.filter { $0.value.intersects(screen) } }
+        let before = onScreen()
+        // A turn in the middle of the screen, entered from its reply's Share.
+        let middle = try #require(before.filter { $0.key.hasPrefix("a") }.min { abs($0.value.midY - screen.midY) < abs($1.value.midY - screen.midY) })
+        #expect(before.count > 4)
+
+        store.share.begin(fromRow: middle.key)
+        #expect(store.share.isSelecting)
+        try await Task.sleep(for: .milliseconds(600))
+        let selecting = log.frames
+        for (id, frame) in before {
+            let now = try #require(selecting[id])
+            #expect(abs(now.minY - frame.minY) < 0.5, "\(id) moved from \(frame.minY) to \(now.minY)")
+            #expect(abs(now.height - frame.height) < 0.5, "\(id) changed height from \(frame.height) to \(now.height)")
+        }
+
+        store.share.cancel()
+        try await Task.sleep(for: .milliseconds(600))
+        for (id, frame) in before {
+            let now = try #require(log.frames[id])
+            #expect(abs(now.minY - frame.minY) < 0.5 && abs(now.height - frame.height) < 0.5, "\(id) did not come back")
+        }
     }
 }
