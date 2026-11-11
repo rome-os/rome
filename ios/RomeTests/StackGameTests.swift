@@ -144,7 +144,7 @@ import Testing
         defaults.removePersistentDomain(forName: "StackGameTests")
     }
 
-    @Test func onlyATapOnTheMascotStarts() {
+    @Test func onlyATapOnTheMascotStartsOrPlaysAgain() {
         var game = StackGame(fieldWidth: 400)
         let mascot = CGPoint(x: 200, y: 600)
         #expect(game.tapCounts(at: CGPoint(x: 240, y: 560), mascot: mascot))
@@ -154,7 +154,19 @@ import Testing
         game.start(at: 0)
         #expect(game.tapCounts(at: CGPoint(x: 10, y: 10), mascot: mascot))
         game.drop(x: 400, at: 1)
-        #expect(!game.tapCounts(at: mascot, mascot: mascot))
+        // Over: only the mascot, now lying beside the base, plays again.
+        let lying = CGPoint(x: 340, y: 660)
+        #expect(game.tapCounts(at: CGPoint(x: 360, y: 640), mascot: lying))
+        #expect(!game.tapCounts(at: CGPoint(x: 200, y: 400), mascot: lying))
+    }
+
+    @Test func theEndSampleIsATallLostTower() {
+        let game = StackGame.sample(fieldWidth: 393, best: 24, over: true)
+        #expect(game.phase == .over)
+        #expect(game.placed == 40)
+        #expect(game.newBest)
+        #expect(game.tower[1...25].allSatisfy { $0.tier == .app })
+        #expect(game.tower[26...40].allSatisfy { $0.tier == .skill })
     }
 
     @Test func tenQuickTapsOpenTheGame() {

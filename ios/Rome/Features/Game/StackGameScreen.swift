@@ -52,6 +52,17 @@ struct StackGameScreen: View {
     /// The dot grid's spacing, and how much of the tower's climb it follows.
     static let dotSpacing: CGFloat = 24
     static let dotParallax: CGFloat = 0.35
+    /// At the end: the mascot's tumble to the ground, the camera easing out
+    /// to the whole tower, and the toast's time on screen.
+    static let tumbleTime: TimeInterval = 0.9
+    static let fitDelay: TimeInterval = 0.5
+    static let fitTime: TimeInterval = 0.9
+    static let toastFrom: TimeInterval = 0.25
+    static let toastTime: TimeInterval = 1.2
+    /// After the toast, the mascot offers another game.
+    static var againAfter: TimeInterval { toastFrom + toastTime }
+    /// Below the HUD: the fitted tower keeps under this share of the screen.
+    static let fitTopShare: CGFloat = 0.3
 
     private var frozen: Bool { launch.sample != nil }
 
@@ -69,23 +80,17 @@ struct StackGameScreen: View {
                 .onAppear {
                     guard game == nil else { return }
                     let first = makeGame(fieldWidth: fieldWidth)
-                    effects = StackEffects(level: first.placed)
+                    // A lost sample shows its end, long settled.
+                    effects = StackEffects(level: first.placed, ended: first.phase == .over ? -100 : nil)
                     game = first
                     dropHaptic.prepare()
                 }
             }
             .ignoresSafeArea()
             if let game {
-                if game.phase == .over {
-                    overCard(game)
-                        .transition(.opacity)
-                } else {
-                    hud(game)
-                        .transition(.opacity)
-                }
+                hud(game)
             }
         }
-        .animation(.easeOut(duration: 0.3).delay(reduceMotion ? 0 : 0.5), value: game?.phase == .over)
         .overlay(alignment: .top) { topBar }
     }
 
@@ -106,13 +111,17 @@ struct StackGameScreen: View {
     }
 
     /// A tap at `point` in the field; nil from VoiceOver, which always counts.
+    /// Before the start and after the end, only the mascot answers.
     private func tap(at point: CGPoint?, size: CGSize, fieldWidth: CGFloat) {
         guard var next = game, !frozen else { return }
         let now = clock()
+        if next.phase == .over {
+            guard let ended = effects.ended, now - ended >= Self.againAfter else { return }
+        }
         if let point {
             let shown = effects.shownLevel(at: now, reduceMotion: reduceMotion)
-            let foot = mascotFoot(next, layout: layout(size: size, fieldWidth: fieldWidth, shown: shown), shown: shown)
-            guard next.tapCounts(at: point, mascot: CGPoint(x: foot.x, y: foot.y - Self.mascotHeight / 2)) else { return }
+            let pose = mascotPose(next, layout: layout(next, size: size, fieldWidth: fieldWidth, shown: shown, now: now), shown: shown, now: now)
+            guard next.tapCounts(at: point, mascot: pose.center) else { return }
         }
         switch next.phase {
         case .ready:
@@ -132,6 +141,8 @@ struct StackGameScreen: View {
                 StackGameBest.save(next.best)
             }
         case .over:
+            dropHaptic.impactOccurred()
+            playAgain()
             return
         }
         dropHaptic.prepare()
@@ -149,11 +160,23 @@ struct StackGameScreen: View {
     // MARK: The field
 
     /// The field's layout with the tower shown `shown` levels high: the
-    /// camera keeps the sliding block in the upper third.
-    private func layout(size: CGSize, fieldWidth: CGFloat, shown: CGFloat) -> FieldLayout {
+    /// camera keeps the sliding block in the upper third. After the end it
+    /// eases out until the whole tower fits under the score, scaled down
+    /// for a tall one: the frame worth a screenshot.
+    private func layout(_ game: StackGame, size: CGSize, fieldWidth: CGFloat, shown: CGFloat, now: TimeInterval) -> FieldLayout {
         let groundY = size.height * Self.groundShare
-        let camera = max(0, (shown + 2) * StackGame.blockHeight + Self.hover - (groundY - size.height * Self.followShare))
-        return FieldLayout(left: (size.width - fieldWidth) / 2, groundY: groundY, camera: camera, size: size)
+        var layout = FieldLayout(left: (size.width - fieldWidth) / 2, groundY: groundY, camera: 0, size: size)
+        layout.camera = max(0, (shown + 2) * StackGame.blockHeight + Self.hover - (groundY - size.height * Self.followShare))
+        guard game.phase == .over, let ended = effects.ended else { return layout }
+        let towerHeight = CGFloat(game.tower.count) * StackGame.blockHeight + 8
+        let room = groundY - size.height * Self.fitTopShare
+        let fit = min(1, room / towerHeight)
+        let progress = reduceMotion ? 1 : min(max((now - ended - Self.fitDelay) / Self.fitTime, 0), 1)
+        let eased = CGFloat(progress < 0.5 ? 4 * pow(progress, 3) : 1 - pow(-2 * progress + 2, 3) / 2)
+        layout.camera *= 1 - eased
+        layout.scale = 1 + (fit - 1) * eased
+        layout.shift = -min(40, size.width * 0.1) * eased
+        return layout
     }
 
     private func field(_ game: StackGame, size: CGSize, fieldWidth: CGFloat) -> some View {
@@ -161,11 +184,11 @@ struct StackGameScreen: View {
         return TimelineView(.animation(minimumInterval: 1.0 / 60, paused: frozen)) { context in
             let now = clock(context.date)
             let shown = effects.shownLevel(at: now, reduceMotion: reduceMotion)
-            let layout = layout(size: size, fieldWidth: fieldWidth, shown: shown)
-            let foot = mascotFoot(game, layout: layout, shown: shown)
+            let layout = layout(game, size: size, fieldWidth: fieldWidth, shown: shown, now: now)
+            let pose = mascotPose(game, layout: layout, shown: shown, now: now)
             ZStack(alignment: .topLeading) {
                 Canvas { canvas, _ in
-                    draw(game, in: &canvas, now: now, layout: layout, shown: shown, foot: foot)
+                    draw(game, in: &canvas, now: now, layout: layout, shown: shown, mascot: pose)
                 } symbols: {
                     slabLabel("skill").tag(StackGame.Tier.skill)
                     slabLabel("app").tag(StackGame.Tier.app)
@@ -179,8 +202,23 @@ struct StackGameScreen: View {
                         .frame(width: min(fieldWidth - 48, 320))
                 }
                 if game.phase == .ready {
-                    anchored(at: CGPoint(x: foot.x, y: foot.y - Self.mascotHeight - 6), alignment: .bottom) {
-                        StartBubble()
+                    anchored(at: CGPoint(x: pose.center.x, y: pose.top - 6), alignment: .bottom) {
+                        MascotBubble(text: "Tap me to start")
+                    }
+                }
+                if game.phase == .over, let ended = effects.ended {
+                    let age = now - ended
+                    if age >= Self.againAfter {
+                        // Running right from the mascot, clear of the tower.
+                        anchored(at: CGPoint(x: pose.center.x - MascotBubble.tailInset, y: pose.top - 6), alignment: .bottomLeading) {
+                            MascotBubble(text: "Tap me to play again", tailLeading: true)
+                        }
+                    }
+                    if age >= Self.toastFrom, age < Self.againAfter {
+                        let into = (age - Self.toastFrom) / Self.toastTime
+                        toast(game)
+                            .position(x: size.width / 2, y: size.height * 0.45)
+                            .opacity(min(into / 0.15, 1, (1 - into) / 0.25))
                     }
                 }
                 ForEach(effects.floats) { float in
@@ -208,16 +246,22 @@ struct StackGameScreen: View {
     }
 
     /// Where the field's world (heights from the ground up) lands on screen.
+    /// Where the field's world (heights from the ground up) lands on
+    /// screen. `scale` shrinks it toward the ground's middle.
     private struct FieldLayout {
         var left: CGFloat
         var groundY: CGFloat
         var camera: CGFloat
         var size: CGSize
+        var scale: CGFloat = 1
+        /// At the end the tower moves left a little, to leave the mascot room.
+        var shift: CGFloat = 0
 
-        func y(_ height: CGFloat) -> CGFloat { groundY - height + camera }
+        func x(_ world: CGFloat) -> CGFloat { size.width / 2 + shift + (left + world - size.width / 2) * scale }
+        func y(_ height: CGFloat) -> CGFloat { groundY - height * scale + camera }
 
         func rect(_ block: StackGame.Block, level: Int, height: CGFloat = StackGame.blockHeight) -> CGRect {
-            CGRect(x: left + block.x, y: y(CGFloat(level + 1) * StackGame.blockHeight), width: block.width, height: height)
+            CGRect(x: x(block.x), y: y(CGFloat(level + 1) * StackGame.blockHeight), width: block.width * scale, height: height * scale)
         }
     }
 
@@ -229,7 +273,7 @@ struct StackGameScreen: View {
             .position(point)
     }
 
-    private func draw(_ game: StackGame, in canvas: inout GraphicsContext, now: TimeInterval, layout: FieldLayout, shown: CGFloat, foot: CGPoint) {
+    private func draw(_ game: StackGame, in canvas: inout GraphicsContext, now: TimeInterval, layout: FieldLayout, shown: CGFloat, mascot: MascotPlacement) {
         let h = StackGame.blockHeight
         let size = layout.size
         // The page: warm, toward dusk as the tower rises; flat in each frame.
@@ -261,7 +305,7 @@ struct StackGameScreen: View {
             // Half a point over the block below, so a slab shows no seam.
             var frame = layout.rect(block, level: level, height: level == 0 ? h : slab.joinsBelow ? h + 0.5 : h - 2)
             if level == game.tower.count - 1, landing > 0 {
-                frame.origin.y -= Self.hover * landing
+                frame.origin.y -= Self.hover * layout.scale * landing
             }
             guard frame.maxY > -h, frame.minY < size.height else { continue }
             let color = level == 0 ? Palette.stackStone : Self.color(block.tier)
@@ -282,13 +326,17 @@ struct StackGameScreen: View {
             let frame = layout.rect(block, level: game.tower.count, height: h - 2).offsetBy(dx: 0, dy: -Self.hover)
             // The aiming aid: the top block's edges, up to the sliding block.
             let top = game.top
-            let topY = layout.y(CGFloat(game.tower.count) * h)
-            var guides = Path()
-            for x in [layout.left + top.x, layout.left + top.right] {
-                guides.move(to: CGPoint(x: x, y: topY))
-                guides.addLine(to: CGPoint(x: x, y: frame.maxY))
+            // A thin top would leave them as stray hairlines: they fade out.
+            let guideOpacity = min(max((top.width - 4) / 8, 0), 1)
+            if guideOpacity > 0 {
+                let topY = layout.y(CGFloat(game.tower.count) * h)
+                var guides = Path()
+                for x in [layout.x(top.x), layout.x(top.right)] {
+                    guides.move(to: CGPoint(x: x, y: topY))
+                    guides.addLine(to: CGPoint(x: x, y: frame.maxY))
+                }
+                canvas.stroke(guides, with: .color(Palette.fg.opacity(0.2 * guideOpacity)), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
             }
-            canvas.stroke(guides, with: .color(Palette.fg.opacity(0.2)), style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
             drawBlock(frame, color: Self.color(.action), top: Self.blockRadius, bottom: Self.blockRadius, lip: true, highlight: true, in: &canvas)
         }
 
@@ -315,7 +363,7 @@ struct StackGameScreen: View {
             let age = now - piece.start
             guard age >= 0, age < StackEffects.fallLife else { continue }
             let t = CGFloat(age)
-            var frame = layout.rect(piece.block, level: piece.level, height: h - 2).offsetBy(dx: 0, dy: -Self.hover)
+            var frame = layout.rect(piece.block, level: piece.level, height: h - 2).offsetBy(dx: 0, dy: -Self.hover * layout.scale)
             frame.origin.x += piece.drift * 40 * t
             frame.origin.y += 0.5 * 1800 * t * t
             var context = canvas
@@ -325,12 +373,14 @@ struct StackGameScreen: View {
             drawBlock(CGRect(x: -frame.width / 2, y: -frame.height / 2, width: frame.width, height: frame.height), color: Self.color(piece.block.tier), top: Self.blockRadius, bottom: Self.blockRadius, lip: true, highlight: true, in: &context)
         }
 
-        drawMascot(game, in: &canvas, now: now, foot: foot)
+        drawMascot(mascot, in: &canvas)
     }
 
     /// A block: rounded, with a darker lip along its bottom and a hairline
     /// highlight along its top.
-    private func drawBlock(_ frame: CGRect, color: Color, top: CGFloat, bottom: CGFloat, lip: Bool, highlight: Bool, in canvas: inout GraphicsContext) {
+    private func drawBlock(_ drawn: CGRect, color: Color, top: CGFloat, bottom: CGFloat, lip: Bool, highlight: Bool, in canvas: inout GraphicsContext) {
+        // A sliver still reads as a block, not a hairline.
+        let frame = drawn.width >= 2 ? drawn : drawn.insetBy(dx: (drawn.width - 2) / 2, dy: 0)
         let top = min(top, frame.height / 2), bottom = min(bottom, frame.height / 2)
         let shape = UnevenRoundedRectangle(topLeadingRadius: top, bottomLeadingRadius: bottom, bottomTrailingRadius: bottom, topTrailingRadius: top, style: .continuous).path(in: frame)
         canvas.fill(shape, with: .color(color))
@@ -366,49 +416,74 @@ struct StackGameScreen: View {
         }
     }
 
-    /// Where the mascot stands: the middle of the tower's top, riding up
-    /// as it grows.
-    private func mascotFoot(_ game: StackGame, layout: FieldLayout, shown: CGFloat) -> CGPoint {
-        let top = game.top
-        return CGPoint(x: layout.left + top.x + top.width / 2, y: layout.y((shown + 1) * StackGame.blockHeight))
+    /// Where and how the mascot is drawn: the point it turns about (its
+    /// foot standing, its back lying down), its angle, its width on screen
+    /// and its face.
+    struct MascotPlacement {
+        var anchor: CGPoint
+        var angle: Double = 0
+        var width: CGFloat
+        var face = MascotPose.rest
+
+        var height: CGFloat { width * Mascot.viewBox.height / Mascot.viewBox.width }
+        /// Lying on its side once it has landed.
+        var lying: Bool { angle.truncatingRemainder(dividingBy: 360) == 90 }
+        /// The middle of the figure on screen, for a tap.
+        var center: CGPoint {
+            lying ? CGPoint(x: anchor.x + height / 2, y: anchor.y) : CGPoint(x: anchor.x, y: anchor.y - height / 2)
+        }
+        /// The figure's top edge on screen, for its bubble.
+        var top: CGFloat { lying ? anchor.y - width / 2 : anchor.y - height }
     }
 
-    private func drawMascot(_ game: StackGame, in canvas: inout GraphicsContext, now: TimeInterval, foot start: CGPoint) {
-        var foot = start
-        var angle = 0.0
-        var opacity = 1.0
-        var pose = MascotPose.rest
-        if !reduceMotion && !frozen {
-            if let event = effects.mascot {
-                let age = now - event.start
-                switch event.kind {
-                case .hop where age < 0.4:
-                    foot.y -= 18 * sin(.pi * age / 0.4)
-                case .shake where age < 0.35:
-                    foot.x += 3 * sin(age / 0.35 * 6 * .pi) * (1 - age / 0.35)
-                case .tumble:
-                    let t = min(age, 1.4)
-                    foot.x += 70 * t
-                    foot.y += -60 * t + 0.5 * 1400 * t * t
-                    angle = 300 * t
-                    opacity = max(0, 1 - t / 1.4)
-                default:
-                    break
-                }
-            }
+    /// Standing on the tower's middle and riding up as it grows; hopping on
+    /// a perfect and shaking on a cut. After the end it tumbles off the top
+    /// and lands lying on the ground beside the base.
+    private func mascotPose(_ game: StackGame, layout: FieldLayout, shown: CGFloat, now: TimeInterval) -> MascotPlacement {
+        // It shrinks with a fitted tower, but stays easy to see and tap.
+        let width = Self.mascotWidth * max(layout.scale, 0.8)
+        let moves = !reduceMotion && !frozen
+        var face = MascotPose.rest
+        if moves {
             let alive = MascotPose(time: now + 1)
-            pose.eyeScale = alive.eyeScale
-            // Waiting for the first tap, it looks about too.
-            if game.phase == .ready { pose.glance = alive.glance }
+            face.eyeScale = alive.eyeScale
+            // Waiting for a tap, it looks about too.
+            if game.phase != .playing { face.glance = alive.glance }
         }
-        // Lost: it has tumbled off, or with no motion, simply left.
-        if game.phase == .over, reduceMotion || frozen { return }
-        guard opacity > 0 else { return }
+        let top = game.top
+        let standing = CGPoint(x: top.x + top.width / 2, y: (shown + 1) * StackGame.blockHeight)
+        if game.phase == .over, let ended = effects.ended {
+            // Its back on the ground, just right of the base, head away from it.
+            let from = CGPoint(x: layout.x(standing.x), y: layout.y(standing.y))
+            let to = CGPoint(x: layout.x(game.tower[0].right) + 8, y: layout.y(0) - width / 2)
+            let progress = moves ? min(max((now - ended) / Self.tumbleTime, 0), 1) : 1
+            let p = CGFloat(progress)
+            let anchor = CGPoint(
+                x: from.x + (to.x - from.x) * p,
+                y: from.y + (to.y - from.y) * p * p - 60 * sin(.pi * p)
+            )
+            return MascotPlacement(anchor: anchor, angle: 450 * progress, width: width, face: face)
+        }
+        var anchor = CGPoint(x: layout.x(standing.x), y: layout.y(standing.y))
+        if moves, let event = effects.mascot {
+            let age = now - event.start
+            switch event.kind {
+            case .hop where age < 0.4:
+                anchor.y -= 18 * sin(.pi * age / 0.4)
+            case .shake where age < 0.35:
+                anchor.x += 3 * sin(age / 0.35 * 6 * .pi) * (1 - age / 0.35)
+            default:
+                break
+            }
+        }
+        return MascotPlacement(anchor: anchor, width: width, face: face)
+    }
+
+    private func drawMascot(_ placement: MascotPlacement, in canvas: inout GraphicsContext) {
         var context = canvas
-        context.opacity = opacity
-        context.translateBy(x: foot.x, y: foot.y)
-        context.rotate(by: .degrees(angle))
-        let scale = Self.mascotWidth / Mascot.viewBox.width
+        context.translateBy(x: placement.anchor.x, y: placement.anchor.y)
+        context.rotate(by: .degrees(placement.angle))
+        let scale = placement.width / Mascot.viewBox.width
         context.scaleBy(x: scale, y: scale)
         context.translateBy(x: -Mascot.viewBox.width / 2, y: -Mascot.viewBox.height)
         let shape = { (data: String) in SVGPath.cached(data) }
@@ -419,8 +494,8 @@ struct StackGameScreen: View {
         context.stroke(shape(MascotPaths.screen), with: .color(Palette.fg), style: StrokeStyle(lineWidth: 4, lineCap: .round, lineJoin: .round))
         var face = context
         let anchor = CGPoint(x: MascotPaths.eyeAnchor.x * Mascot.viewBox.width, y: MascotPaths.eyeAnchor.y * Mascot.viewBox.height)
-        face.translateBy(x: anchor.x + pose.glance, y: anchor.y)
-        face.scaleBy(x: 1, y: pose.eyeScale)
+        face.translateBy(x: anchor.x + placement.face.glance, y: anchor.y)
+        face.scaleBy(x: 1, y: placement.face.eyeScale)
         face.translateBy(x: -anchor.x, y: -anchor.y)
         for eye in [MascotPaths.leftEye, MascotPaths.rightEye] {
             face.fill(shape(eye), with: .color(Palette.fg))
@@ -495,15 +570,15 @@ struct StackGameScreen: View {
         .padding(.top, 4)
     }
 
+    /// The score, and under it the combo and best while playing; at the
+    /// end the blocks placed and the best, or "New best" in coral.
     private func hud(_ game: StackGame) -> some View {
         VStack(spacing: 10) {
             Text(verbatim: "\(game.score)")
                 .romeFont(60, .bold, design: .rounded, monospacedDigits: true)
                 .foregroundStyle(Palette.fg)
                 .contentTransition(.numericText())
-            (Text(verbatim: "×\(game.multiplier)").foregroundStyle(game.multiplier > 1 ? Palette.primaryText : Palette.sub)
-                + Text(verbatim: "  ·  ").foregroundStyle(Palette.sub)
-                + Text("Best \(game.best)").foregroundStyle(Palette.sub))
+            capsuleLine(game)
                 .romeFont(14, .semibold, monospacedDigits: true)
                 .padding(.horizontal, 14)
                 .frame(height: 30)
@@ -515,48 +590,49 @@ struct StackGameScreen: View {
         .accessibilityHidden(true)
     }
 
-    private func overCard(_ game: StackGame) -> some View {
-        VStack(spacing: 6) {
-            if game.newBest {
-                Text("New best")
-                    .romeFont(14, .semibold)
-                    .foregroundStyle(Palette.primaryText)
-                    .padding(.horizontal, 12)
-                    .frame(height: 28)
-                    .background(Palette.primarySoft, in: Capsule())
-            } else {
-                Text("Game over")
-                    .romeFont(15, .medium)
-                    .foregroundStyle(Palette.sub)
-            }
-            Text(verbatim: "\(game.score)")
-                .romeFont(60, .bold, design: .rounded, monospacedDigits: true)
-                .foregroundStyle(Palette.fg)
-            Text("\(game.placed) blocks")
-                .romeFont(14)
-                .foregroundStyle(Palette.sub)
-            PrimaryButton(title: "Play again", action: playAgain)
-                .padding(.top, 16)
+    private func capsuleLine(_ game: StackGame) -> Text {
+        let dot = Text(verbatim: "  ·  ").foregroundStyle(Palette.sub)
+        let best = Text("Best \(game.best)").foregroundStyle(Palette.sub)
+        if game.phase == .over {
+            let blocks = Text("\(game.placed) blocks").foregroundStyle(Palette.sub)
+            return blocks + dot + (game.newBest ? Text("New best").foregroundStyle(Palette.primaryText) : best)
         }
-        .padding(24)
-        .frame(maxWidth: 340)
-        .glassSurface(RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .padding(.horizontal, 24)
-        .accessibilityElement(children: .contain)
+        // The combo only once there is one.
+        guard game.multiplier > 1 else { return best }
+        return Text(verbatim: "×\(game.multiplier)").foregroundStyle(Palette.primaryText) + dot + best
+    }
+
+    /// Said once over the tower at the end, then gone.
+    private func toast(_ game: StackGame) -> some View {
+        Text(game.newBest ? "New best" : "Game over")
+            .romeFont(17, .semibold)
+            .foregroundStyle(game.newBest ? Palette.primaryText : Palette.fg)
+            .fixedSize()
+            .padding(.horizontal, 18)
+            .frame(height: 40)
+            .glassSurface(Capsule())
+            .allowsHitTesting(false)
     }
 }
 
-/// "Tap me to start" in a glass bubble whose tail points down at the mascot.
-private struct StartBubble: View {
+/// The mascot's line in a glass bubble whose tail points down at it.
+private struct MascotBubble: View {
+    let text: LocalizedStringKey
+    /// The tail near the leading edge rather than the middle.
+    var tailLeading = false
+
+    /// How far in from the leading edge a leading tail sits.
+    static let tailInset: CGFloat = 26
+
     var body: some View {
-        Text("Tap me to start")
+        Text(text)
             .romeFont(14, .semibold)
             .foregroundStyle(Palette.fg)
             .fixedSize()
             .padding(.horizontal, 14)
             .padding(.top, 9)
             .padding(.bottom, 9 + SpeechBubble.tail)
-            .glassSurface(SpeechBubble())
+            .glassSurface(SpeechBubble(tailInset: tailLeading ? Self.tailInset : nil))
             .allowsHitTesting(false)
     }
 }
@@ -564,6 +640,8 @@ private struct StartBubble: View {
 /// A rounded box with a small tail at the middle of its bottom edge.
 private struct SpeechBubble: InsettableShape {
     static let tail: CGFloat = 7
+    /// The tail's distance from the leading edge; nil puts it in the middle.
+    var tailInset: CGFloat? = nil
     var inset: CGFloat = 0
 
     func path(in rect: CGRect) -> Path {
@@ -571,9 +649,10 @@ private struct SpeechBubble: InsettableShape {
         let body = CGRect(x: frame.minX, y: frame.minY, width: frame.width, height: frame.height - Self.tail)
         var path = Path(roundedRect: body, cornerRadius: min(16, body.height / 2), style: .continuous)
         let tail = max(Self.tail - inset, 0)
-        path.move(to: CGPoint(x: body.midX - tail, y: body.maxY - 1))
-        path.addLine(to: CGPoint(x: body.midX, y: body.maxY + tail))
-        path.addLine(to: CGPoint(x: body.midX + tail, y: body.maxY - 1))
+        let tip = tailInset.map { rect.minX + $0 } ?? body.midX
+        path.move(to: CGPoint(x: tip - tail, y: body.maxY - 1))
+        path.addLine(to: CGPoint(x: tip, y: body.maxY + tail))
+        path.addLine(to: CGPoint(x: tip + tail, y: body.maxY - 1))
         path.closeSubpath()
         return path
     }
@@ -671,7 +750,7 @@ struct StackEffects {
     }
 
     struct MascotEvent {
-        enum Kind { case hop, shake, tumble }
+        enum Kind { case hop, shake }
         var kind: Kind
         var start: TimeInterval
     }
@@ -689,12 +768,15 @@ struct StackEffects {
     private(set) var ring: (level: Int, start: TimeInterval)?
     /// A merge: its blocks flash white.
     private(set) var flash: (levels: ClosedRange<Int>, start: TimeInterval)?
+    /// When the last drop missed.
+    private(set) var ended: TimeInterval?
     /// The tower's height the camera and mascot ease from and to, in levels.
     private var rise: (from: CGFloat, to: CGFloat, start: TimeInterval)
 
-    /// Resting on a tower `level` blocks high.
-    init(level: Int = 0) {
+    /// Resting on a tower `level` blocks high; `ended` for a game already over.
+    init(level: Int = 0, ended: TimeInterval? = nil) {
         rise = (CGFloat(level), CGFloat(level), 0)
+        self.ended = ended
     }
 
     mutating func record(_ drop: StackGame.Drop, level: Int, game: StackGame, at time: TimeInterval) {
@@ -715,7 +797,8 @@ struct StackEffects {
         case .miss(let block):
             let below = game.top
             falling.append(Falling(block: block, level: level, drift: block.x < below.x ? -1 : 1, start: time))
-            mascot = MascotEvent(kind: .tumble, start: time)
+            mascot = nil
+            ended = time
             return
         }
         rise = (from: CGFloat(level - 1), to: CGFloat(level), start: time)

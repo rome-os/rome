@@ -88,14 +88,14 @@ struct StackGame: Equatable {
     /// The square around the mascot where the first tap starts the game.
     static let startTarget: CGFloat = 88
 
-    /// Before the start, only a tap on the mascot (its middle at
-    /// `mascot`) starts the game; once playing, a tap anywhere drops.
+    /// Before the start and after the end, only a tap on the mascot (its
+    /// middle at `mascot`) counts: it starts a game. While playing, a tap
+    /// anywhere drops.
     func tapCounts(at point: CGPoint, mascot: CGPoint) -> Bool {
         switch phase {
-        case .ready:
+        case .ready, .over:
             return abs(point.x - mascot.x) <= Self.startTarget / 2 && abs(point.y - mascot.y) <= Self.startTarget / 2
         case .playing: return true
-        case .over: return false
         }
     }
 
@@ -199,11 +199,16 @@ struct StackGame: Equatable {
 extension StackGame {
     /// A tower part way up, for the snapshot runner: twelve blocks (two
     /// skills and two actions) after two perfects in a row; or, with
-    /// `over`, the same game lost above `best`.
+    /// `over`, a tall tower of forty (an app, then three skills) lost above
+    /// `best`.
     static func sample(fieldWidth: CGFloat, best: Int, over: Bool) -> StackGame {
         var game = StackGame(fieldWidth: fieldWidth, best: best)
         game.start(at: 0)
-        let offsets: [CGFloat] = [-14, 9, 0, -12, 11, 0, -8, 7, -9, 10, 0, 0]
+        var offsets: [CGFloat] = [-14, 9, 0, -12, 11, 0, -8, 7, -9, 10, 0, 0]
+        if over {
+            let more: [CGFloat] = [0, 6, 0, 0, -6, 0]
+            offsets += (0..<28).map { more[$0 % more.count] }
+        }
         for (index, offset) in offsets.enumerated() {
             game.drop(x: game.top.x + offset, at: TimeInterval(index + 1))
         }

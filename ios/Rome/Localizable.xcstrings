@@ -2249,16 +2249,6 @@
         }
       }
     },
-    "Play again" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "再玩一次"
-          }
-        }
-      }
-    },
     "Privacy Policy" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3237,6 +3227,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "拍照"
+          }
+        }
+      }
+    },
+    "Tap me to play again" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "点我再来一局"
           }
         }
       }
