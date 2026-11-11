@@ -86,8 +86,17 @@ function contextOf(path: string): string {
   return path.split("/")[0];
 }
 
+// Apps is what an app is and how it runs, and the contexts that use apps build
+// on it. Handing an app what another context offers is App host's job.
+const APPS_STAYS_FOUNDATIONAL =
+  "Apps defines what an app receives and runs it, and App host fills that in from the other contexts, so no file in apps/ imports";
+
 function describe(from: string, to: string, name: string): string {
   if (REASONS[name]) return REASONS[name];
+  if (to === "app-host") {
+    return `App host builds an app's ctx from every context, and only index.ts and the worker's entry point start it, so no file in ${from}/ imports app-host/.`;
+  }
+  if (from === "apps") return `${APPS_STAYS_FOUNDATIONAL} ${to}/.`;
   const allowed = ALLOWED_IMPORTS[from];
   const may = allowed.length > 0 ? allowed.map((c) => `${c}/`).join(", ") : "no other context";
   return `${from}/ may import only ${may}, so no file in ${from}/ imports ${to}/.`;
