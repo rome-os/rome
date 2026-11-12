@@ -37,7 +37,7 @@ async function collect(events: AsyncIterable<StreamAgentEvent>): Promise<StreamA
   return seen;
 }
 
-describe("AgentSession when its events loop dies mid-turn", () => {
+describe("AgentSession events loop", () => {
   let directory: string;
   let testDb: TestDb;
   let manager: Sessions;
@@ -45,6 +45,9 @@ describe("AgentSession when its events loop dies mid-turn", () => {
   let nextRun: () => AsyncIterable<AgentEvent | ModelSessionEvent>;
   let opened: ModelSession[];
   let closeCalls: number;
+  // Whether the provider's event stream throws after its first event.
+  let streamBreaks: boolean;
+  const log = createLogger("agent-session");
   let state: ModelAccountReports;
 
   beforeEach(async () => {
@@ -68,6 +71,7 @@ describe("AgentSession when its events loop dies mid-turn", () => {
     repository = new DrizzleSessionRepository(testDb.db);
     opened = [];
     closeCalls = 0;
+    streamBreaks = false;
     const provider: ModelProvider = {
       id: "openai",
       builtinTools: new Set<string>(),
@@ -78,6 +82,19 @@ describe("AgentSession when its events loop dies mid-turn", () => {
           closeCalls++;
           await close();
         };
+        if (streamBreaks) {
+          const original = session.events;
+          Object.defineProperty(session, "events", {
+            value: {
+              async *[Symbol.asyncIterator]() {
+                for await (const event of original) {
+                  yield event;
+                  throw new Error("provider stream broke");
+                }
+              },
+            },
+          });
+        }
         opened.push(session);
         return session;
       },
@@ -104,7 +121,7 @@ describe("AgentSession when its events loop dies mid-turn", () => {
         turnLifecycle: new TurnListeners(new AppTurnHooks()),
         readAnswerShape,
         folders: agentFolders(),
-        log: createLogger("agent-session"),
+        log,
         turnMiddleware: { run: async (_ctx, terminal) => void (await terminal()) },
         sessionTracing: romeSessionTracing,
         turnUsage: new TurnUsageReporter({ usage: { recordTurn: () => undefined } }),
@@ -126,8 +143,7 @@ describe("AgentSession when its events loop dies mid-turn", () => {
   });
 
   it("closes the model session and ends the turn with the real error", async () => {
-    // A block completes, and recording the session's activity fails.
-    rs.spyOn(repository, "save").mockRejectedValue(new Error("database is locked"));
+    streamBreaks = true;
     nextRun = async function* () {
       yield { type: "text", content: "partial answer" };
       // The provider has more to do; it stays running until it is closed.
@@ -140,10 +156,31 @@ describe("AgentSession when its events loop dies mid-turn", () => {
     // The error is the turn's terminal; turn_end only brackets it.
     const errors = seen.filter((event) => event.type === "error");
     expect(errors).toHaveLength(1);
-    expect(errors[0]).toMatchObject({ error: expect.stringContaining("database is locked") });
+    expect(errors[0]).toMatchObject({ error: expect.stringContaining("provider stream broke") });
     expect(seen.at(-1)?.type).toBe("turn_end");
     expect(closeCalls).toBe(1);
     expect(opened).toHaveLength(1);
+  });
+
+  it("keeps the turn going when recording the session's activity fails", async () => {
+    const warn = rs.spyOn(log, "warn");
+    const save = rs.spyOn(repository, "save").mockRejectedValue(new Error("database is locked"));
+    nextRun = async function* () {
+      yield { type: "text", content: "partial answer" };
+      yield { type: "result", content: "the answer" };
+    };
+    const session = await manager.open(key);
+    const seen = await collect((await startAfter(session, { prompt: "hello" })).events());
+
+    expect(seen.map((event) => event.type)).not.toContain("error");
+    expect(seen.filter((event) => event.type === "result")).toHaveLength(1);
+    expect(seen.at(-1)?.type).toBe("turn_end");
+    expect(save).toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledWith(
+      "failed to touch session",
+      expect.objectContaining({ error: "database is locked" }),
+    );
+    expect(closeCalls).toBe(0);
   });
 
   it("closes the model session once when the session is closed on purpose", async () => {

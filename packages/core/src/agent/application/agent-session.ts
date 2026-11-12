@@ -2557,9 +2557,21 @@ class AgentSessionImpl implements AgentSession {
     return this.deps.actions.permits(this.liveTurn, actionName);
   }
 
+  /**
+   * Records the session's activity. Best-effort: a failed write must not end
+   * the turn. The save throws before it marks the session saved, so the
+   * change stays queued for the next save.
+   */
   private async touchSession(): Promise<void> {
     this.session.touch();
-    await this.deps.sessionRepository.save(this.session);
+    try {
+      await this.deps.sessionRepository.save(this.session);
+    } catch (err) {
+      this.log.warn("failed to touch session", {
+        sessionId: this.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
   }
 
   /**
@@ -3054,14 +3066,7 @@ class AgentSessionImpl implements AgentSession {
       this.activeForkSessionIds.delete(forkSessionId);
       this.lastActiveAt = Date.now();
       this.emitStatus();
-      try {
-        await this.touchSession();
-      } catch (err) {
-        this.log.warn("failed to touch source session after fork", {
-          sessionId: this.sessionId,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
+      await this.touchSession();
     }
   }
 
