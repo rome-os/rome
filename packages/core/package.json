@@ -29,7 +29,7 @@
     "app:pack:first-party": "tsx bin/apps-cli.js pack:first-party",
     "app:install": "tsx bin/apps-cli.js install",
     "app:uninstall": "tsx bin/apps-cli.js uninstall",
-    "app:list:required": "tsx bin/apps-cli.js list:required"
+    "app:list:required": "tsx src/bin/list-required-apps.ts"
   },
   "oclif": {
     "bin": "rome-apps",
@@ -41,9 +41,6 @@
       },
       "pack": {
         "description": "Build release artifacts from app sources (a single app, or all first-party apps)"
-      },
-      "list": {
-        "description": "Inspect derived app sets"
       }
     }
   },
