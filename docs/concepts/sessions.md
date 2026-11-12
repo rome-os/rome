@@ -86,6 +86,7 @@ A handoff is the private note a retired session writes for the session that rene
 - The chat's renewal line opens to show the handoff. A renewal that wrote none shows the line as before.
 - An approval that holds a session still defers its renewal, so no handoff is written while it holds.
 - A session whose policy asks for a handoff is also renewed when a turn of it ends with its context past a limit (`SESSION_HANDOFF_CONTEXT_TOKENS`, 150,000 tokens by default). The handoff is written then, in the background, once nothing is queued on the session and no approval holds it, and the successor is stored with reason `context` on no thread yet. The next message opens it without waiting for a handoff. A message that comes while it is written waits for it. When no handoff is written, the session stays, and a later turn end tries again.
+- A new session starts at about the size of its setup, its handoff and its recent messages (about 30,000 tokens for the Concierge). A limit near that size renews it after every turn, so the limit stays well above it.
 - A session's context size is the input of its latest model request, as the provider reports it. Each turn that reports one records it on the session. The providers' own compaction stays on as the safety net.
 
 ## Session in use
