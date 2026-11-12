@@ -80,7 +80,9 @@
     "test:prose": "scripts/test-env.sh node --test scripts/check-prose.test.mjs",
     "check:ui:tailwind": "scripts/test-env.sh node scripts/check-tailwind-policy.mjs",
     "gc:worktrees": "tsx scripts/gc-worktrees.ts",
-    "move-files": "tsx scripts/move-files.ts"
+    "move-files": "tsx scripts/move-files.ts",
+    "move-symbol": "tsx scripts/move-symbol.ts",
+    "rename-symbol": "tsx scripts/rename-symbol.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.6",
