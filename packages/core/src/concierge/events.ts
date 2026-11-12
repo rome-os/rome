@@ -17,6 +17,7 @@ import {
 import { hasText, latestSaid, taskChatPlace } from "./task-chat.js";
 import { type DirtyTask, TaskEventCoalescer, type TaskEventDelivery } from "./task-events.js";
 import { ConciergeActivityTracker } from "./activity.js";
+import { WaitExpiry } from "./wait-expiry.js";
 import { isConciergeChat } from "../webchat/privacy.js";
 import { openQuestion } from "./transcript.js";
 
@@ -184,6 +185,11 @@ export async function renderTaskEvents(
     }
     if (changes.includes("chat_deleted")) lines.push("The task chat was deleted.");
     if (changes.includes("stopped_by_owner")) lines.push("The guardian stopped this task.");
+    if (changes.includes("no_response")) {
+      lines.push(
+        "Nobody answered its question or approval in time, so it ended for no response. Do not ask again; the card stays answerable.",
+      );
+    }
     const attrs = [
       `id="${attr(row.id)}"`,
       row.sessionId ? `chat_id="${attr(row.sessionId)}"` : null,
@@ -243,6 +249,12 @@ export function startConciergeEvents(
   service.attachTaskEvents(coalescer);
 
   const activity = startActivity(service, coalescer);
+  // A wait nobody answered within the expiry ends its task for no response.
+  const stopWaitExpiry = new WaitExpiry({
+    tasks,
+    expireApprovals: (chatId, until, reason) => service.expireApprovals(chatId, until, reason),
+    tell: (taskId) => coalescer.mark({ taskId, kind: "no_response", urgent: false }),
+  }).start();
 
   // The owner's messages a Concierge turn took settle once the chat runs no
   // turn that carries them: done when it completed, failed when it failed or
@@ -555,6 +567,7 @@ export function startConciergeEvents(
   return () => {
     for (const unsubscribe of unsubscribers) unsubscribe();
     activity();
+    stopWaitExpiry();
     coalescer.stop();
     service.attachTaskEvents(null);
     service.attachFailedBeforeStart(null);

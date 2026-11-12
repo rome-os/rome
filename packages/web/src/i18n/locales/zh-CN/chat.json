@@ -48,6 +48,7 @@
         "stopped": "已停止",
         "no_response": "没回应"
       },
+      "expired": "已过期，回答后继续",
       "stop": "停止",
       "done": "完成",
       "archive": "归档",

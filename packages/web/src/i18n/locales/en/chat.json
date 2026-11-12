@@ -48,6 +48,7 @@
         "stopped": "Stopped",
         "no_response": "No response"
       },
+      "expired": "Expired — answer to continue",
       "stop": "Stop",
       "done": "Done",
       "archive": "Archive",

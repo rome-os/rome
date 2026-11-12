@@ -821,6 +821,38 @@ export class ConciergeTasksRepository {
     return out;
   }
 
+  /**
+   * Task `id`'s wait that began at `waitingSince` expired: Rome handles it
+   * once. Answers false when that wait was handled already.
+   */
+  async markWaitExpired(id: string, waitingSince: Date): Promise<boolean> {
+    const marked = await this.db
+      .update(conciergeTasks)
+      .set({ expiredWaitAt: waitingSince, noResponseUnlisted: true })
+      .where(
+        and(
+          eq(conciergeTasks.id, id),
+          or(isNull(conciergeTasks.expiredWaitAt), ne(conciergeTasks.expiredWaitAt, waitingSince)),
+        ),
+      )
+      .returning({ id: conciergeTasks.id });
+    if (marked.length > 0) await this.announce(id, "refresh");
+    return marked.length > 0;
+  }
+
+  /** The tasks of `taskIds` that ended for no response and no digest listed yet; listed now. */
+  async takeNoResponseUnlisted(taskIds: readonly string[]): Promise<string[]> {
+    if (taskIds.length === 0) return [];
+    const rows = await this.db
+      .update(conciergeTasks)
+      .set({ noResponseUnlisted: false })
+      .where(
+        and(inArray(conciergeTasks.id, [...taskIds]), eq(conciergeTasks.noResponseUnlisted, true)),
+      )
+      .returning({ id: conciergeTasks.id });
+    return rows.map((row) => row.id);
+  }
+
   /** The tasks whose task chat's result the Concierge has not reported yet. */
   async tasksWithUnsaidOutcome(): Promise<string[]> {
     const rows = await this.db

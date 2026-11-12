@@ -128,6 +128,10 @@ function LiveTaskChatCard({
           <Link to={`/chat/${chatId}`}>{t("concierge.openTaskChat")}</Link>
         </Button>
       </div>
+      {isLatestForChat && status === "waiting" && derived?.endReason === "no_response" ? (
+        // The wait ran out and the task ended, yet its card still takes an answer.
+        <p className="text-aux text-muted-foreground">{t("concierge.tasks.expired")}</p>
+      ) : null}
       {isLatestForChat && status === "waiting" && (
         <WaitingTaskCard key={chatId} chatId={chatId} onRefresh={invalidate} />
       )}

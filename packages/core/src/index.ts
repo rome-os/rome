@@ -1368,6 +1368,32 @@ async function main() {
     // An approved action, and the turn it resumes, act for whoever's turn asked.
     executionRequester(actionExecutionsRepo),
   );
+  // A task chat's approval nobody answered within the wait is turned down,
+  // and its turn finishes as on any rejection.
+  concierge.attachApprovalExpiry(async (chatId, until, reason) => {
+    let turnedDown = 0;
+    for (const approval of await approvalsRepo.list("pending")) {
+      const threadId = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
+        ?.channelContext?.threadId;
+      if (threadId !== chatId || approval.createdAt.getTime() > until) continue;
+      const resolved = await approvalsRepo.resolvePending(
+        approval.id,
+        "reject",
+        "rome:no-response",
+      );
+      if (resolved.outcome !== "resolved") continue;
+      turnedDown += 1;
+      if (approval.type === "action_execution") {
+        await approvalHandler.onRejected(approval.id, reason).catch((error: unknown) =>
+          log.warn("failed to finish a turned-down approval's turn", {
+            approvalId: approval.id,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    }
+    return turnedDown;
+  });
 
   // Learn whether this boot's release version differs from the last completed
   // boot's — the dashboard reads the result via /api/build-info. The stored

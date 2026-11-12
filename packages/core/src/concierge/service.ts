@@ -221,6 +221,9 @@ export class ConciergeService {
   private readonly creating = new Map<ConciergeOwner, Promise<string>>();
   private attached: ConciergeDashboard | null = null;
   private failedStarts = new Map<string, { turnId: string; starts: Map<string, string> }>();
+  private approvalExpiry:
+    | ((chatId: string, until: number, reason: string) => Promise<number>)
+    | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
   /** Per Concierge chat, the task whose report a newer input took over. */
   private readonly carriedReports = new Map<string, readonly string[]>();
@@ -952,6 +955,15 @@ export class ConciergeService {
           ]
         : [];
     });
+    // Each task that ended for no response is listed once, so it can be resumed.
+    const unanswered = new Set(
+      await this.deps.tasks.repo.takeNoResponseUnlisted(rows.map((row) => row.id)),
+    );
+    for (const row of rows) {
+      if (unanswered.has(row.id)) {
+        lines.push(`<ended_no_response task="${attr(row.id)}" title="${attr(row.title)}"/>`);
+      }
+    }
     return lines.length > 0 ? `<task_review>\n${lines.join("\n")}\n</task_review>` : "";
   }
 
@@ -971,6 +983,21 @@ export class ConciergeService {
     const turns = chats.activeTurns(chatId);
     for (const turnId of turns) await chats.interruptTurn(turnId);
     return turns.length;
+  }
+
+  /**
+   * Attaches how Rome turns down a chat's pending approvals, once the
+   * approval handling is up. Until then an expiry turns none down.
+   */
+  attachApprovalExpiry(
+    expire: ((chatId: string, until: number, reason: string) => Promise<number>) | null,
+  ): void {
+    this.approvalExpiry = expire;
+  }
+
+  /** Turns down task chat `chatId`'s approvals still pending that began by `until`, with `reason`. */
+  async expireApprovals(chatId: string, until: number, reason: string): Promise<number> {
+    return (await this.approvalExpiry?.(chatId, until, reason)) ?? 0;
   }
 
   /** Cancels every check scheduled for task `taskId`, as when it is stopped or archived. */

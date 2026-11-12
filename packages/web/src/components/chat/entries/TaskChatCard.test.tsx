@@ -161,6 +161,13 @@ describe("TaskChatCard with its task", () => {
     await waitFor(() => expect(stopped).toEqual(["task-9"]));
   });
 
+  it("labels a question nobody answered in time as expired, and keeps it answerable", async () => {
+    taskRows = [taskRow("ended", "no_response")];
+    show();
+    expect(await screen.findByText("Expired — answer to continue")).toBeTruthy();
+    expect(await screen.findByText("Task chat · No response")).toBeTruthy();
+  });
+
   it("offers no Stop once its task ended, and says why it ended", async () => {
     waiting = false;
     taskRows = [taskRow("ended", "no_response")];

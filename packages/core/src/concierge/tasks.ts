@@ -50,6 +50,7 @@ export class ConciergeTasks {
   private facts: TaskFactSources | null = null;
   /** The status each task was last told with, so a fact that changes none tells nothing. */
   private told = new Map<string, string>();
+  private statusListeners = new Set<(taskId: string, status: TaskStatusView) => void>();
 
   constructor(
     readonly repo: ConciergeTasksRepository,
@@ -115,7 +116,7 @@ export class ConciergeTasks {
     const facts = await this.factsOf(rows);
     if (options.asReported) for (const of of facts.values()) of.reportPending = false;
     const now = this.now();
-    return new Map(
+    const read = new Map(
       rows.map((row) => {
         const of = facts.get(row.id) as ConciergeTaskFacts;
         return [
@@ -128,6 +129,26 @@ export class ConciergeTasks {
         ];
       }),
     );
+    // As the task is now, not as a report would leave it.
+    if (!options.asReported) {
+      for (const [taskId, status] of read) {
+        for (const listener of this.statusListeners) listener(taskId, status);
+      }
+    }
+    return read;
+  }
+
+  /** How long a wait on the owner keeps a task waiting for them, in milliseconds. */
+  get waitExpiry(): number {
+    return this.waitExpiryMs;
+  }
+
+  /** Calls `listener` with each task's status whenever it is read. Returns the unsubscribe. */
+  onStatus(listener: (taskId: string, status: TaskStatusView) => void): () => void {
+    this.statusListeners.add(listener);
+    return () => {
+      this.statusListeners.delete(listener);
+    };
   }
 
   toDto(

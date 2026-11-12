@@ -776,6 +776,15 @@ export const conciergeTasks = sqliteTable(
      * it. Kept here so a restart still knows a result was never said.
      */
     outcomeUnsaid: integer("outcome_unsaid", { mode: "boolean" }).notNull().default(false),
+    /**
+     * When the wait that ended the task for no response began, once Rome
+     * handled its expiry, so a restart never handles one wait twice.
+     */
+    expiredWaitAt: integer("expired_wait_at", { mode: "timestamp_ms" }),
+    /** Set when the task ended for no response, until a digest of its chat listed it. */
+    noResponseUnlisted: integer("no_response_unlisted", { mode: "boolean" })
+      .notNull()
+      .default(false),
   },
   (table) => [
     // A chat belongs to at most one row, so a chat event maps to exactly one row.
