@@ -1,10 +1,10 @@
 import { MessageProcessor } from "@a2ui/web_core/v0_9";
 import { A2uiSurface } from "@a2ui/react/v0_9";
 import type { TranscriptPart } from "@rome/api-types/chat";
-import { type ComponentProps, useCallback, useEffect, useMemo, useState } from "react";
+import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { fetchJson } from "@/lib/fetch-json";
-import { ROME_WIDGET_CATALOG_ID, romeWidgetCatalog } from "./catalog";
+import { ROME_WIDGET_CATALOG_ID, romeWidgetCatalog, WidgetLockedContext } from "./catalog";
 
 type WidgetUi = Extract<TranscriptPart, { type: "widget"; ui: unknown }>["ui"];
 
@@ -15,6 +15,38 @@ export interface WidgetUiCardProps {
   bind?: Record<string, string>;
   /** The widget's line, shown when the card's data cannot be read. */
   text: string;
+  /** Set for a card the agent waits on: its `rome:answer` and `rome:dismiss`
+   *  buttons answer the interaction, and `result` is the stored answer once
+   *  there is one, which locks the card. */
+  waiting?: {
+    result?: Record<string, unknown>;
+    onSubmit: (toolUseId: string, output: Record<string, unknown>, summary?: string) => void;
+    onDismiss: (toolUseId: string) => void;
+  };
+}
+
+// Rome's own strings a card names with `{ string }`, shown in the guardian's
+// language. They are the question card's labels.
+const HOST_STRINGS: Record<string, string> = {
+  send: "questionCard.send",
+  dismiss: "questionCard.dismiss",
+  typeOwn: "questionCard.typeOwn",
+  addOwn: "questionCard.addOwn",
+  typeAnswer: "questionCard.typeAnswer",
+  optional: "questionCard.optional",
+};
+
+/** The card's components with each `{ string }` replaced by its translation,
+ *  since A2UI itself only knows literals and paths. */
+function withHostStrings(value: unknown, translate: (key: string) => string): unknown {
+  if (Array.isArray(value)) return value.map((v) => withHostStrings(v, translate));
+  if (!value || typeof value !== "object") return value;
+  const o = value as Record<string, unknown>;
+  const keys = Object.keys(o);
+  if (keys.length === 1 && typeof o.string === "string") {
+    return HOST_STRINGS[o.string] ? translate(HOST_STRINGS[o.string]) : "";
+  }
+  return Object.fromEntries(keys.map((k) => [k, withHostStrings(o[k], translate)]));
 }
 
 const appApi = (appId: string, path: string) => `/api/apps/${encodeURIComponent(appId)}/${path}`;
@@ -25,10 +57,16 @@ const appApi = (appId: string, path: string) => `/api/apps/${encodeURIComponent(
  * shows the app's data as it stands. A button POSTs its event's context to
  * the app's API and reads every `bind` again; nothing is said in the chat.
  */
-export function WidgetUiCard({ toolUseId, appId, ui, bind, text }: WidgetUiCardProps) {
+export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: WidgetUiCardProps) {
   const { t } = useTranslation("chat");
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [sent, setSent] = useState(false);
+  const result = waiting?.result;
+  const dismissed = result?.dismissed === true;
+  const locked = result !== undefined || sent;
+  const waitingRef = useRef(waiting);
+  waitingRef.current = waiting;
   // A re-render hands new objects for the same stored part; key on content
   // so the surface is built once per card.
   const bindKey = JSON.stringify(bind ?? {});
@@ -54,6 +92,14 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text }: WidgetUiCardP
 
   const processor = useMemo(() => {
     const p = new MessageProcessor([romeWidgetCatalog], async (action) => {
+      const host = waitingRef.current;
+      if (action.name === "rome:answer" || action.name === "rome:dismiss") {
+        if (!host) return;
+        setSent(true);
+        if (action.name === "rome:dismiss") host.onDismiss(toolUseId);
+        else host.onSubmit(toolUseId, (action.context ?? {}) as Record<string, unknown>);
+        return;
+      }
       setBusy(true);
       try {
         await fetchJson<unknown>(appApi(appId, action.name), {
@@ -78,12 +124,28 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text }: WidgetUiCardP
         version: "v0.9",
         updateComponents: {
           surfaceId: toolUseId,
-          components: (JSON.parse(uiKey) as WidgetUi).components,
+          components: withHostStrings((JSON.parse(uiKey) as WidgetUi).components, t) as never,
         },
       },
     ]);
+    const data = (JSON.parse(uiKey) as WidgetUi).data;
+    if (data) {
+      p.processMessages([
+        { version: "v0.9", updateDataModel: { surfaceId: toolUseId, path: "/", value: data } },
+      ]);
+    }
     return p;
-  }, [appId, load, toolUseId, uiKey]);
+  }, [appId, load, toolUseId, uiKey, t]);
+
+  // An answered card shows what the guardian sent, which core keeps as `card`.
+  const answeredKey = JSON.stringify(result?.card ?? null);
+  useEffect(() => {
+    const card = JSON.parse(answeredKey) as unknown;
+    if (card === null) return;
+    processor.processMessages([
+      { version: "v0.9", updateDataModel: { surfaceId: toolUseId, path: "/answers", value: card } },
+    ]);
+  }, [answeredKey, processor, toolUseId]);
 
   useEffect(() => {
     let live = true;
@@ -98,14 +160,23 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text }: WidgetUiCardP
   const surface = processor.model.surfacesMap.get(toolUseId);
   return (
     <div
+      tabIndex={waiting ? -1 : undefined}
       className="flex w-full max-w-md flex-col gap-2 rounded-16 border border-border bg-surface px-4 py-3"
       aria-busy={busy}
       data-widget-app={appId}
+      data-chat-pending-card={waiting && !locked ? "" : undefined}
     >
       {surface ? (
-        <A2uiSurface
-          surface={surface as unknown as ComponentProps<typeof A2uiSurface>["surface"]}
-        />
+        <WidgetLockedContext.Provider value={locked}>
+          <A2uiSurface
+            surface={surface as unknown as ComponentProps<typeof A2uiSurface>["surface"]}
+          />
+        </WidgetLockedContext.Provider>
+      ) : null}
+      {waiting && locked ? (
+        <span className="text-aux text-muted-foreground">
+          {t(dismissed ? "questionCard.dismissed" : "questionCard.answered")}
+        </span>
       ) : null}
       {failed ? (
         <span className="text-aux text-destructive">

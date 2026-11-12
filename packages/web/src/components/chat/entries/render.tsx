@@ -209,6 +209,18 @@ export function renderSingleEntry(
           />
         );
       }
+      if (block.render.builtin && block.render.componentId === "question-card" && block.render.ui) {
+        return (
+          <WidgetUiCard
+            key={`question-card-${block.toolUseId}`}
+            toolUseId={block.toolUseId}
+            appId={block.appId}
+            ui={block.render.ui}
+            text=""
+            waiting={{ result: resultFor(block.toolUseId), onSubmit: submit, onDismiss: dismiss }}
+          />
+        );
+      }
       if (block.render.builtin && block.render.componentId === "question-card") {
         return (
           <QuestionCard

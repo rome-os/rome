@@ -1,21 +1,28 @@
 // Rome's A2UI catalog: the components a card described as data may use
 // (`WIDGET_UI_COMPONENTS` in @rome-os/app-runtime), drawn with the dashboard's
-// own tokens. The six from A2UI's basic catalog keep its schemas, so a card
-// reads as A2UI; `Stat` and `Progress` are Rome's.
+// own tokens. The components from A2UI's basic catalog keep its schemas, so
+// a card reads as A2UI; `Stat` and `Progress` are Rome's, and `TextField`
+// adds Rome's `placeholder`.
 import {
   ButtonApi,
   Catalog,
+  ChoicePickerApi,
   ColumnApi,
   CommonSchemas,
   type ComponentApi,
   ImageApi,
   ListApi,
+  OrImplementation,
+  RequiredImplementation,
   RowApi,
   TextApi,
+  TextFieldApi,
 } from "@a2ui/web_core/v0_9";
 import { createComponentImplementation } from "@a2ui/react/v0_9";
-import type { ReactNode } from "react";
+import { createContext, type ReactNode, useContext } from "react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 export const ROME_WIDGET_CATALOG_ID = "https://rome.app/a2ui/catalogs/chat-widget/v1.json";
@@ -42,6 +49,17 @@ const ProgressApi = {
     label: CommonSchemas.DynamicString.optional(),
   }).strict(),
 };
+
+const TextFieldWithPlaceholderApi = {
+  name: "TextField",
+  schema: TextFieldApi.schema
+    .extend({ placeholder: CommonSchemas.DynamicString.optional() })
+    .strict(),
+};
+
+/** True once the card is answered or dismissed: inputs stop taking input and
+ *  buttons are hidden. */
+export const WidgetLockedContext = createContext(false);
 
 const textClass: Record<string, string> = {
   h1: "text-title",
@@ -178,29 +196,128 @@ const List = createComponentImplementation(ListApi, ({ props, buildChild }) => (
   </div>
 ));
 
-const WidgetButton = createComponentImplementation(ButtonApi, ({ props, buildChild }) => (
-  <Button
-    size="sm"
-    variant={
-      props.variant === "primary" ? "default" : props.variant === "borderless" ? "ghost" : "outline"
-    }
-    className="self-start"
-    onClick={() => void props.action?.()}
-  >
-    {buildChild(props.child as string)}
-  </Button>
-));
+const WidgetButton = createComponentImplementation(ButtonApi, ({ props, buildChild }) => {
+  const locked = useContext(WidgetLockedContext);
+  if (locked) return null;
+  return (
+    <Button
+      size="sm"
+      variant={
+        props.variant === "primary"
+          ? "default"
+          : props.variant === "borderless"
+            ? "ghost"
+            : "outline"
+      }
+      className="self-start"
+      disabled={props.isValid === false}
+      onClick={() => void props.action?.()}
+    >
+      {buildChild(props.child as string)}
+    </Button>
+  );
+});
 
-export const romeWidgetCatalog = new Catalog(ROME_WIDGET_CATALOG_ID, [
-  Text,
-  Stat,
-  Progress,
-  Image,
-  Row,
-  Column,
-  List,
-  WidgetButton,
-  // @a2ui/react types its schemas with the page's zod 4 and web_core with
-  // its own zod 3. Only the types differ: @a2ui/react calls no zod at run
-  // time, and every schema here is web_core's.
-] as unknown as ComponentApi[]);
+// Options read as the question card's chips: a pressed chip is picked.
+const ChoicePicker = createComponentImplementation(ChoicePickerApi, ({ props }) => {
+  const locked = useContext(WidgetLockedContext);
+  const picked = Array.isArray(props.value) ? (props.value as string[]) : [];
+  const multi = props.variant === "multipleSelection";
+  const options = (props.options ?? []) as {
+    label?: unknown;
+    value: string;
+    description?: unknown;
+  }[];
+  const stacked = options.some((o) => shown(o.label).length > 32 || o.description);
+  const choose = (value: string) => {
+    const next = multi
+      ? picked.includes(value)
+        ? picked.filter((v) => v !== value)
+        : [...picked, value]
+      : [value];
+    props.setValue?.(next);
+  };
+  return (
+    <div
+      role="group"
+      aria-label={props.label ? shown(props.label) : undefined}
+      className={stacked ? "flex flex-col gap-2" : "flex flex-wrap items-center gap-2"}
+    >
+      {options.map((o) => {
+        const selected = picked.includes(o.value);
+        return (
+          <Button
+            key={o.value}
+            type="button"
+            size="sm"
+            variant={selected ? "default" : "outline"}
+            align={stacked ? "start" : "center"}
+            aria-pressed={selected}
+            disabled={locked}
+            onClick={() => choose(o.value)}
+            className={cn(
+              "h-auto min-h-[var(--control-h-sm)] min-w-0 max-w-full whitespace-normal wrap-anywhere",
+              stacked && "w-full text-left",
+              o.description ? "py-2" : null,
+            )}
+          >
+            {o.description ? (
+              <span className="flex min-w-0 flex-col gap-1">
+                <span>{shown(o.label)}</span>
+                <span
+                  className={cn(
+                    "text-aux",
+                    selected ? "text-primary-foreground/80" : "text-muted-foreground",
+                  )}
+                >
+                  {shown(o.description)}
+                </span>
+              </span>
+            ) : (
+              shown(o.label)
+            )}
+          </Button>
+        );
+      })}
+    </div>
+  );
+});
+
+const TextField = createComponentImplementation(TextFieldWithPlaceholderApi, ({ props }) => {
+  const locked = useContext(WidgetLockedContext);
+  const field = {
+    "aria-label": shown(props.label),
+    placeholder: props.placeholder ? shown(props.placeholder) : undefined,
+    value: typeof props.value === "string" ? props.value : "",
+    disabled: locked,
+  };
+  return props.variant === "longText" ? (
+    <Textarea {...field} rows={3} onChange={(e) => props.setValue?.(e.currentTarget.value)} />
+  ) : (
+    <Input {...field} onChange={(e) => props.setValue?.(e.currentTarget.value)} />
+  );
+});
+
+export const romeWidgetCatalog = new Catalog(
+  ROME_WIDGET_CATALOG_ID,
+  [
+    Text,
+    Stat,
+    Progress,
+    Image,
+    Row,
+    Column,
+    List,
+    WidgetButton,
+    ChoicePicker,
+    TextField,
+    // @a2ui/react types its schemas with the page's zod 4 and web_core with
+    // its own zod 3. Only the types differ: @a2ui/react calls no zod at run
+    // time, and every schema here is web_core's.
+  ] as unknown as ComponentApi[],
+  [
+    // The only functions a card may call, in its `checks`.
+    RequiredImplementation,
+    OrImplementation,
+  ],
+);
