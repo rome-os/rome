@@ -169,6 +169,7 @@
     "timed": "{{name}} · {{when}}",
     "waiting": "等待{{what}} · {{when}}检查",
     "cancel": "取消「{{name}}」",
+    "skip": "跳过 {{name}} 的下一次运行",
     "loadFailed": "无法加载排好的检查",
     "cancelFailed": "无法取消这个检查"
   },

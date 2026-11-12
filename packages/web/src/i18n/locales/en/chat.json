@@ -169,6 +169,7 @@
     "timed": "{{name}} · {{when}}",
     "waiting": "Waiting for {{what}} · checks {{when}}",
     "cancel": "Cancel {{name}}",
+    "skip": "Skip the next run of {{name}}",
     "loadFailed": "Failed to load scheduled checks",
     "cancelFailed": "Failed to cancel the check"
   },

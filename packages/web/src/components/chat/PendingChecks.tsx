@@ -62,7 +62,7 @@ export function PendingChecks({ chatId, turnKey }: { chatId: string; turnKey: un
             <span className="min-w-0 flex-1 truncate">{line}</span>
             <IconButton
               size="xs"
-              label={t("checks.cancel", { name: check.name })}
+              label={t(check.recurring ? "checks.skip" : "checks.cancel", { name: check.name })}
               icon={<X />}
               disabled={cancel.isPending && cancel.variables === check.id}
               onClick={() => cancel.mutate(check.id)}

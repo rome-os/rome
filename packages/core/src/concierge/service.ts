@@ -37,6 +37,8 @@ import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
 import type { ConciergeTasks } from "./tasks.js";
+import type { TaskSchedules } from "./task-schedule.js";
+import { taskChatPlace } from "./task-chat.js";
 import type { TaskChecks } from "./task-checks.js";
 import type { TurnDown } from "./approval-expiry.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
@@ -183,6 +185,8 @@ export interface ConciergeDeps {
   tasks: ConciergeTasks;
   /** The checks scheduled with `defer`. Absent, no task is ever later. */
   checks?: TaskChecks;
+  /** Each task's repeating schedule. Absent, no task has one. */
+  schedules?: TaskSchedules;
   approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved">;
   messages: Pick<MessageRepository, "recent" | "before">;
   sessionRepository: Pick<SessionRepository, "current">;
@@ -1057,7 +1061,7 @@ export class ConciergeService {
     });
   }
 
-  /** Cancels every check scheduled for task `taskId`, as when it is stopped or archived. */
+  /** Cancels every check scheduled for task `taskId`, and its schedule, as when it is stopped or archived. */
   async cancelChecks(taskId: string): Promise<void> {
     const row = await this.deps.tasks.repo.get(taskId);
     if (!row) return;
@@ -1067,6 +1071,61 @@ export class ConciergeService {
         error: error instanceof Error ? error.message : String(error),
       }),
     );
+    await this.deps.schedules?.remove(taskId).catch((error: unknown) =>
+      log.warn("failed to remove a task's schedule", {
+        taskId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
+  }
+
+  /** Task chats whose scheduled run in flight reports only when it matters. */
+  private readonly quietRuns = new Set<string>();
+
+  /**
+   * A scheduled run of task `taskId` fired at `firedAt`: its brief goes
+   * straight into the task's own task chat, as the Concierge's words, with no
+   * Concierge turn. The run comes back as any task's turn does. A run its
+   * owner skipped, or one of a task that has stopped or lost its chat, sends
+   * nothing; a stopped task's schedule is removed.
+   */
+  async runScheduledTask(
+    taskId: string,
+    firedAt: number,
+  ): Promise<"sent" | "skipped" | "stopped" | "no_chat"> {
+    const schedules = this.deps.schedules;
+    const row = await this.deps.tasks.repo.get(taskId);
+    if (!row || row.stoppedAt || row.archivedAt) {
+      await schedules?.remove(taskId);
+      return "stopped";
+    }
+    if (await schedules?.takeSkip(taskId, firedAt)) return "skipped";
+    const schedule = await schedules?.of(taskId);
+    if (!schedule) return "stopped";
+    if (!row.sessionId || !(await this.deps.webchatRepo.getSession(row.sessionId))) {
+      log.warn("a scheduled task has no task chat to run in", { taskId });
+      return "no_chat";
+    }
+    const chatId = row.sessionId;
+    if (schedule.report === "when_it_matters") this.quietRuns.add(chatId);
+    const sent = await this.dashboard.send(
+      taskChatPlace(chatId),
+      { text: schedule.brief },
+      CONCIERGE_ACCOUNT,
+    );
+    if (!sent.ok) {
+      this.quietRuns.delete(chatId);
+      throw new Error("error" in sent ? sent.error : "The task chat cannot take the scheduled run");
+    }
+    return "sent";
+  }
+
+  /**
+   * Whether the turn that just ended in task chat `chatId` was a scheduled
+   * run that reports only when it matters. Read once per run.
+   */
+  takeQuietRun(chatId: string): boolean {
+    return this.quietRuns.delete(chatId);
   }
 
   /**

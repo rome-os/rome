@@ -68,6 +68,25 @@ describe("PendingChecks", () => {
     expect(deleted).toEqual(["r-1"]);
   });
 
+  it("offers to skip the next run of a task's schedule, not to cancel it", async () => {
+    const deleted = serve([
+      {
+        id: "r-3",
+        name: "Daily summary",
+        at: Date.now() + HOUR + 1_000,
+        waitingFor: null,
+        taskId: "t-2",
+        recurring: true,
+      },
+    ]);
+    const user = userEvent.setup();
+    renderChecks();
+    expect(await screen.findByText("Daily summary · in 1 hr")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Cancel Daily summary" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Skip the next run of Daily summary" }));
+    await waitFor(() => expect(deleted).toEqual(["r-3"]));
+  });
+
   it("shows nothing when no check is pending", async () => {
     serve([]);
     const { container } = renderChecks();

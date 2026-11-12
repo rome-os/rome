@@ -127,6 +127,8 @@ export interface ChatPendingCheckDto {
   waitingFor: string | null;
   /** The task it is for, or null. */
   taskId: string | null;
+  /** The next run of the task's repeating schedule: cancelling it skips that run only. */
+  recurring?: boolean;
 }
 
 /** `GET /chat/sessions/:id/checks`, the soonest first. */

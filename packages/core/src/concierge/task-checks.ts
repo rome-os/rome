@@ -1,13 +1,20 @@
 // The checks the Concierge scheduled with `defer`: wake-ups of its chats,
-// some for a task. A task with a pending check is "later" until it is due,
-// stopping or archiving the task cancels its checks, and a chat shows the
-// checks pending in it, each of which its owner can cancel.
+// some for a task. A task's repeating schedule counts too: its next run is a
+// check. A task with a pending check is "later" until it is due, stopping or
+// archiving the task cancels its checks and its schedule, and a chat shows the
+// checks pending in it, each of which its owner can cancel. Cancelling a
+// schedule's check skips that one run.
 
 import { RESUME_SESSION_ACTION } from "../routines/defer.js";
 import type { RoutineEngine } from "../routines/engine.js";
 import type { Routine } from "../routines/types.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import { createLogger } from "../logger.js";
+import {
+  CONCIERGE_TASK_RUN_ACTION,
+  nextScheduledRun,
+  type TaskSchedules,
+} from "./task-schedule.js";
 
 const log = createLogger("concierge-task-checks");
 
@@ -23,6 +30,8 @@ export interface PendingCheck {
   /** What an event wait waits for, as `defer` labelled it; null for a timed one. */
   waitingFor: string | null;
   taskId: string | null;
+  /** The next run of the task's repeating schedule; cancelling it skips that run only. */
+  recurring?: true;
 }
 
 /** A pending wake-up of a chat, or null for a routine that is none. */
@@ -30,6 +39,7 @@ function pendingCheckOf(
   routine: Routine,
   now: number,
 ): (PendingCheck & { chatId: string; owner: string }) | null {
+  if (routine.actionName === CONCIERGE_TASK_RUN_ACTION) return scheduledRunOf(routine, now);
   if (!routine.enabled || routine.actionName !== RESUME_SESSION_ACTION) return null;
   const args = (routine.args ?? {}) as Record<string, unknown>;
   if (args.channel !== "webchat" || typeof args.threadId !== "string") return null;
@@ -55,9 +65,32 @@ function pendingCheckOf(
   };
 }
 
+/** The next run of a task's schedule, as a check of the chat the task reports to. */
+function scheduledRunOf(
+  routine: Routine,
+  now: number,
+): (PendingCheck & { chatId: string; owner: string }) | null {
+  const args = (routine.args ?? {}) as Record<string, unknown>;
+  if (typeof args.taskId !== "string" || typeof args.chatId !== "string") return null;
+  const at = nextScheduledRun(routine, now);
+  if (at === null) return null;
+  return {
+    id: routine.id,
+    name: routine.name,
+    at,
+    waitingFor: null,
+    taskId: args.taskId,
+    recurring: true,
+    chatId: args.chatId,
+    owner: typeof args.ownerKey === "string" ? args.ownerKey : "guardian",
+  };
+}
+
 export interface TaskChecksDeps {
   routines: Pick<RoutinesRepository, "listRoutines" | "deleteIfNoActiveRuns" | "update">;
   routineEngine: Pick<RoutineEngine, "deactivate" | "onChange">;
+  /** Skips a schedule's next run when its check is cancelled. */
+  schedules?: Pick<TaskSchedules, "skipNext" | "remove">;
   now?: () => number;
 }
 
@@ -140,10 +173,18 @@ export class TaskChecks {
     }));
   }
 
-  /** Cancels check `id` of chat `chatId`. Answers whether there was one. */
+  /**
+   * Cancels check `id` of chat `chatId`: a wake-up is removed, a schedule's
+   * next run is skipped and the schedule stays. Answers whether there was one.
+   */
   async cancel(chatId: string, id: string): Promise<boolean> {
     const check = (await this.pending()).find((found) => found.id === id);
     if (!check || check.chatId !== chatId) return false;
+    if (check.recurring) {
+      const routine = (await this.readRoutines()).find((found) => found.id === id);
+      this.routines = null;
+      return routine ? ((await this.deps.schedules?.skipNext(routine)) ?? false) : false;
+    }
     await this.remove(id);
     return true;
   }
@@ -156,7 +197,12 @@ export class TaskChecks {
     const checks = (await this.pending()).filter(
       (check) => check.taskId === taskId && check.owner === owner,
     );
-    for (const check of checks) await this.remove(check.id);
+    for (const check of checks) {
+      if (check.recurring && this.deps.schedules) {
+        this.routines = null;
+        await this.deps.schedules.remove(taskId);
+      } else await this.remove(check.id);
+    }
     return checks.length;
   }
 
