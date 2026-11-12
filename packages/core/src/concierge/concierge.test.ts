@@ -2650,6 +2650,48 @@ describe("Concierge events", () => {
     expect((await s.taskRepo.get(taskId))?.summary).toBe("Searching flights");
   });
 
+  it("holds a result its chat's other work outlives, until the task ends, unless the Concierge writes first", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await s.taskRepo.upsertMany([{ id: taskId, summary: "Waiting for approval" }]);
+    // An approved action's turn ends inside the stream it runs in, which runs on.
+    const stillRunning = (id: string) => (id === chatId ? ["backend:approval"] : []);
+    s.chats.activeTurns = stillRunning;
+    s.chats.isRunning = (id: string) => stillRunning(id).length > 0;
+    await s.finish({
+      turnId: "task-turn-2",
+      agentName: "core:main",
+      chatId,
+      text: concluded("Sent the booking email. It went to Eric."),
+    });
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Waiting for approval");
+
+    s.chats.activeTurns = () => [];
+    s.chats.isRunning = () => false;
+    const row = await s.taskRepo.get(taskId);
+    await s.tasks.statusOf(row ? [row] : []);
+    await s.settle();
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Sent the booking email.");
+
+    // A result held when the Concierge writes the task is dropped.
+    s.chats.activeTurns = stillRunning;
+    s.chats.isRunning = (id: string) => stillRunning(id).length > 0;
+    await s.finish({
+      turnId: "task-turn-3",
+      agentName: "core:main",
+      chatId,
+      text: concluded("Sent the follow-up."),
+    });
+    await s.tool("task_upsert", { tasks: [{ id: taskId, summary: "Eric replied" }] });
+    s.chats.activeTurns = () => [];
+    s.chats.isRunning = () => false;
+    const again = await s.taskRepo.get(taskId);
+    await s.tasks.statusOf(again ? [again] : []);
+    await s.settle();
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Eric replied");
+  });
+
   it("tells the Concierge of a result it asked for two seconds after the turn ends, as one batch", async () => {
     const s = setup();
     const { chatId, taskId } = await startTask(s);

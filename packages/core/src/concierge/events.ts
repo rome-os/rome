@@ -17,6 +17,7 @@ import {
 import { hasText, latestSaid, taskChatPlace } from "./task-chat.js";
 import { type DirtyTask, TaskEventCoalescer, type TaskEventDelivery } from "./task-events.js";
 import { ConciergeActivityTracker } from "./activity.js";
+import type { TaskStatusView } from "./tasks.js";
 import { WaitExpiry } from "./wait-expiry.js";
 import { isConciergeChat } from "../webchat/privacy.js";
 import { openQuestion } from "./transcript.js";
@@ -460,6 +461,8 @@ export function startConciergeEvents(
     if (carriesApproval) approvalAnswered.delete(chatId);
     const taskId = await taskOf(chatId);
     if (!taskId) return;
+    // A newer turn's result, or none, replaces a result still held.
+    heldSummaries.delete(taskId);
     // The task reads as running until its outcome is written, so its status
     // does not flicker to ended while the turn's stream drains.
     const release = tasks.holdRunning(chatId);
@@ -476,14 +479,28 @@ export function startConciergeEvents(
   // A task chat that gave its result keeps its row's line current: the
   // result's first sentence, until the Concierge writes another. Only a
   // result that ends the task counts, read once its turn no longer holds it
-  // running: a turn that left an approval or a check pending did not end it.
-  // A failed or stopped task keeps its line, since the row says why it ended.
+  // running. A result can come before the task ends, as an approved action's
+  // does while Rome still marks the approval executed, so it is held until
+  // the task reads ended. A failed or stopped task keeps its line, since the
+  // row says why it ended.
+  const heldSummaries = new Map<string, string>();
   const writeResultSummary = async (taskId: string, summary: string) => {
     const row = await tasks.repo.get(taskId);
     if (!row) return;
     const status = (await tasks.statusOf([row], { asReported: true })).get(taskId);
-    if (status?.status !== "ended" || status.endReason !== "done") return;
-    await tasks.repo.setResultSummary(taskId, summary);
+    if (status?.status !== "ended") {
+      heldSummaries.set(taskId, summary);
+      return;
+    }
+    heldSummaries.delete(taskId);
+    if (status.endReason === "done") await tasks.repo.setResultSummary(taskId, summary);
+  };
+  const onTaskStatus = (taskId: string, status: TaskStatusView) => {
+    const summary = heldSummaries.get(taskId);
+    if (summary === undefined || status.status !== "ended") return;
+    heldSummaries.delete(taskId);
+    if (status.endReason !== "done") return;
+    void guard("task result summary", tasks.repo.setResultSummary(taskId, summary));
   };
 
   const onTaskChatTurnHeld = async (
@@ -528,12 +545,11 @@ export function startConciergeEvents(
           }),
         );
     }
-    // A task chat that gave its result keeps its row's line current: the
-    // result's first sentence, until the Concierge writes another. A failed
-    // or stopped task keeps its line, since the row says why it ended.
     // The result's first sentence, for the row's line once the task ended.
+    // Work still running in the chat, such as the stream an approved action's
+    // turn runs in, holds it until the task ends; a newer turn replaces it.
     let summary: string | null = null;
-    if (event.status === "completed" && !question && stillRunning.length === 0) {
+    if (event.status === "completed" && !question) {
       // The turn's final answer, else its last reply in the chat.
       const reply = rows.filter((row) => row.role === "assistant").at(-1);
       const text = event.output.text?.trim() || (reply ? userText(reply.content) : "");
@@ -658,8 +674,12 @@ export function startConciergeEvents(
       },
     }),
     tasks.repo.onChange(({ row }, change) => {
-      if (change === "write") coalescer.settle(row.id);
+      if (change !== "write") return;
+      coalescer.settle(row.id);
+      // The Concierge wrote the task after its result: its line stands.
+      heldSummaries.delete(row.id);
     }),
+    tasks.onStatus(onTaskStatus),
     approvals.onCreated((approval) => void guard("approval event", onApproval(approval))),
     approvals.onResolved(onApprovalResolved),
   ];
