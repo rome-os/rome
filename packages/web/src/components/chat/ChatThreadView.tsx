@@ -14,7 +14,7 @@ import { listChatThreadMessages } from "@/lib/chat-api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 import { findMessageAnchor } from "./reply/reply-source";
-import { LANDING_MS, THREAD_FADE_MS, threadAnchor } from "./reply/thread-anchor";
+import { LANDING_MS, playLanding, THREAD_FADE_MS, threadAnchor } from "./reply/thread-anchor";
 
 /** The query key of one chat thread, named by any of its messages. */
 export function chatThreadQueryKey(sessionId: string, messageId: string) {
@@ -178,7 +178,7 @@ export function ChatThreadView({
         copy = findMessageAnchor(list, messageId);
         if (!copy) return;
         landed.current = true;
-        copy.setAttribute("data-timeline-landed", "");
+        playLanding(copy);
       },
       still ? 0 : THREAD_FADE_MS,
     );

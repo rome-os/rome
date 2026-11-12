@@ -5,6 +5,24 @@ export const THREAD_FADE_MS = 180;
 export const LANDING_MS = 900;
 
 /**
+ * Tints `anchor` from no tint, so the tint plays even on a message still
+ * tinted from the last time, as when a thread closes again within
+ * `LANDING_MS`. Setting the mark on a message that has it changes nothing,
+ * so the tint is first dropped at once, with no transition.
+ */
+export function playLanding(anchor: HTMLElement): void {
+  if (anchor.hasAttribute("data-timeline-landed")) {
+    const transition = anchor.style.transition;
+    anchor.style.transition = "none";
+    anchor.removeAttribute("data-timeline-landed");
+    // Reading a size applies the untinted style before the transition returns.
+    void anchor.offsetWidth;
+    anchor.style.transition = transition;
+  }
+  anchor.setAttribute("data-timeline-landed", "");
+}
+
+/**
  * Where the thread view puts its messages so the message it was opened from
  * stays exactly where it was in the timeline. All lengths are in px from the
  * top of the view's scroll box.

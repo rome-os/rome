@@ -93,7 +93,7 @@ import {
 } from "@/components/chat/reply/reply-draft";
 import { findMessageAnchor } from "@/components/chat/reply/reply-source";
 import { chatFloorLayering } from "@/components/chat/chat-floor";
-import { isAnchorInView, LANDING_MS } from "@/components/chat/reply/thread-anchor";
+import { isAnchorInView, LANDING_MS, playLanding } from "@/components/chat/reply/thread-anchor";
 import { useDesktop } from "@/hooks/use-desktop";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
@@ -710,9 +710,9 @@ export function Chat({
   const landOn = useCallback((scroller: HTMLElement, anchor: HTMLElement) => {
     window.clearTimeout(landingTimerRef.current);
     for (const el of scroller.querySelectorAll("[data-timeline-landed]")) {
-      el.removeAttribute("data-timeline-landed");
+      if (el !== anchor) el.removeAttribute("data-timeline-landed");
     }
-    anchor.setAttribute("data-timeline-landed", "");
+    playLanding(anchor);
     landingTimerRef.current = window.setTimeout(() => {
       anchor.removeAttribute("data-timeline-landed");
     }, LANDING_MS);

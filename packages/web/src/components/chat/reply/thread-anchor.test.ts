@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { isAnchorInView, threadAnchor } from "./thread-anchor";
+import { isAnchorInView, playLanding, threadAnchor } from "./thread-anchor";
 
 describe("threadAnchor", () => {
   it("scrolls a long thread so the message keeps its place in the timeline", () => {
@@ -70,5 +70,40 @@ describe("isAnchorInView", () => {
     expect(isAnchorInView({ top: -200, height: 100 }, view)).toBe(false);
     expect(isAnchorInView({ top: 90, height: 40 }, view)).toBe(false);
     expect(isAnchorInView({ top: 680, height: 100 }, view)).toBe(false);
+  });
+});
+
+describe("playLanding", () => {
+  // Records the message's transition each time its tint mark changes.
+  const watched = () => {
+    const anchor = { style: { transition: "" }, offsetWidth: 0 } as unknown as HTMLElement;
+    const marks = new Set<string>();
+    const steps: string[] = [];
+    Object.assign(anchor, {
+      hasAttribute: (name: string) => marks.has(name),
+      setAttribute: (name: string) => {
+        marks.add(name);
+        steps.push(`on ${anchor.style.transition || "-"}`);
+      },
+      removeAttribute: (name: string) => {
+        marks.delete(name);
+        steps.push(`off ${anchor.style.transition || "-"}`);
+      },
+    });
+    return { anchor, steps };
+  };
+
+  it("tints a message with no tint", () => {
+    const { anchor, steps } = watched();
+    playLanding(anchor);
+    expect(steps).toEqual(["on -"]);
+  });
+
+  it("drops a tint still on at once, so it plays again from none", () => {
+    const { anchor, steps } = watched();
+    playLanding(anchor);
+    playLanding(anchor);
+    expect(steps).toEqual(["on -", "off none", "on -"]);
+    expect(anchor.style.transition).toBe("");
   });
 });
