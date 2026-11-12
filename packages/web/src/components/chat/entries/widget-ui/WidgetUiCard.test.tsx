@@ -205,4 +205,49 @@ describe("a widget described as data", () => {
     expect(screen.queryByRole("button", { name: "Go" })).toBeNull();
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("keeps buttons off until the first read lands, and lets only the newest read write", async () => {
+    let water = 3;
+    let releaseFirst: (r: Response) => void = () => {};
+    let gets = 0;
+    const fetch = rs.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      if (init?.method === "POST") {
+        water += 1;
+        return Response.json({ ok: true });
+      }
+      gets += 1;
+      const body = { calories: 1200, goal: 2000, water, meals: [] };
+      if (gets === 1)
+        return new Promise<Response>((r) => {
+          releaseFirst = r;
+        });
+      return Response.json(body);
+    });
+    render(<>{renderFlatEntries(stored(), { sessionId: "s1" })}</>);
+    const button = await screen.findByRole("button", { name: "Log a glass of water" });
+    expect((button as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(button);
+    expect(fetch.mock.calls.filter(([, i]) => i?.method === "POST")).toHaveLength(0);
+
+    releaseFirst(Response.json({ calories: 1100, goal: 2000, water: 3, meals: [] }));
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+  });
+
+  it("shows what the read after a press returns", async () => {
+    const pending: Array<(r: Response) => void> = [];
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      if (init?.method === "POST") return Response.json({ ok: true });
+      return new Promise<Response>((r) => pending.push(r));
+    });
+    render(<>{renderFlatEntries(stored(), { sessionId: "s1" })}</>);
+    await waitFor(() => expect(pending).toHaveLength(1));
+    // The first read finishes, then a press starts a second one.
+    pending[0](Response.json({ calories: 1, goal: 2, meals: [{ name: "First" }] }));
+    const button = await screen.findByRole("button", { name: "Log a glass of water" });
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(button);
+    await waitFor(() => expect(pending).toHaveLength(2));
+    pending[1](Response.json({ calories: 1, goal: 2, meals: [{ name: "Newest" }] }));
+    expect(await screen.findByText("Newest")).toBeTruthy();
+  });
 });

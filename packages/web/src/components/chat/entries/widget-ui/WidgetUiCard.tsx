@@ -102,6 +102,9 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
   const locked = result !== undefined || sent;
   const waitingRef = useRef(waiting);
   waitingRef.current = waiting;
+  // Buttons wait for the first read: a press before it would post a context
+  // whose paths are not loaded yet.
+  const [ready, setReady] = useState(false);
   // A re-render hands new objects for the same stored part; key on content
   // so the surface is built once per card.
   const bindKey = JSON.stringify(bind ?? {});
@@ -117,6 +120,9 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
     );
   }, [uiKey, t]);
   const waits = waiting !== undefined;
+  // Only the newest read writes the data: a slow first read must not land
+  // after a press's refresh and put back an older value.
+  const reads = useRef(0);
   const valid = useMemo(
     () => isDrawableCard(appId, JSON.parse(uiKey), JSON.parse(bindKey), waits),
     [appId, uiKey, bindKey, waits],
@@ -125,12 +131,14 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
   const load = useCallback(
     async (processor: MessageProcessor) => {
       if (!valid) return;
+      const read = ++reads.current;
       const entries = Object.entries(JSON.parse(bindKey) as Record<string, string>);
       const values = await Promise.all(
         entries.map(([, path]) =>
           fetchJson<unknown>(appApi(appId, path), { fallback: "Could not read the card's data" }),
         ),
       );
+      if (read !== reads.current) return;
       processor.processMessages(
         entries.map(([pointer], i) => ({
           version: "v0.9" as const,
@@ -220,7 +228,9 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
 
   useEffect(() => {
     let live = true;
-    load(processor).catch(() => live && setFailed(true));
+    load(processor)
+      .catch(() => live && setFailed(true))
+      .finally(() => live && setReady(true));
     return () => {
       live = false;
     };
@@ -244,7 +254,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
     >
       {surface ? (
         <WidgetLockedContext.Provider value={locked}>
-          <WidgetBusyContext.Provider value={busy}>
+          <WidgetBusyContext.Provider value={busy || !ready}>
             <WidgetClearsContext.Provider value={parts.clears}>
               <CardBoundary fallback={undrawable}>
                 <A2uiSurface
