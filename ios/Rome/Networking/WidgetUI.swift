@@ -118,6 +118,23 @@ enum WidgetData {
         return set(root, ArraySlice(keys))
     }
 
+    /// The model after an input writes `value` at `pointer`. A non-empty write
+    /// also empties the input's `clears` target (Rome's: an empty list where
+    /// the input writes text, an empty string where it writes a list), so the
+    /// last of two inputs edited wins.
+    static func editing(_ value: JSONValue, at pointer: String, clears: JSONValue?, scope: String, in root: JSONValue) -> JSONValue {
+        let next = storing(value, at: pointer, in: root)
+        let written: Bool
+        switch value {
+        case .string(let text): written = !text.isEmpty
+        case .array(let list): written = !list.isEmpty
+        default: written = false
+        }
+        guard written, let target = clears?["path"]?.string else { return next }
+        let empty: JSONValue = value.array == nil ? .array([]) : .string("")
+        return storing(empty, at: absolute(target, scope: scope), in: next)
+    }
+
     /// Whether a check's condition holds: `required` is a non-empty string or
     /// list, `or` any of its values. Any other function fails, which the
     /// server never lets through.
@@ -181,9 +198,15 @@ enum WidgetData {
         return .object(object.mapValues { resolve($0, in: root, scope: scope) ?? .null })
     }
 
-    /// An app API path a card may use: relative, inside the app.
+    /// An app API path a card may use, such as `days/2026-11-11`:
+    /// `/`-separated segments of letters, digits and `-_.~`, none of them `.`
+    /// or `..`. Anything else, such as `%2e%2e` or a backslash, could resolve
+    /// outside the app once the URL is normalized.
     static func isAppPath(_ path: String) -> Bool {
-        !path.isEmpty && !path.hasPrefix("/") && !path.contains("://") && !path.contains("?")
-            && !path.contains("#") && !path.split(separator: "/").contains { $0 == ".." || $0 == "." }
+        let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~")
+        return path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy { segment in
+            !segment.isEmpty && segment != "." && segment != ".."
+                && segment.unicodeScalars.allSatisfy(allowed.contains)
+        }
     }
 }

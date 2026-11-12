@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import "@/i18n";
 import { parseEntries } from "../parse-entries";
 import { renderFlatEntries } from "../render";
+import { appApiUrl } from "./WidgetUiCard";
 
 afterEach(() => {
   cleanup();
@@ -90,5 +91,44 @@ describe("a widget described as data", () => {
     expect(
       parseEntries(JSON.stringify([{ type: "widget", toolUseId: "w", appId: "meals", text: "x" }])),
     ).toEqual([]);
+  });
+
+  it("sends one press at a time, so a second press while the first is in flight sends nothing", async () => {
+    let release: () => void = () => {};
+    const fetch = rs.spyOn(globalThis, "fetch").mockImplementation(async (_input, init) => {
+      if (init?.method === "POST") {
+        await new Promise<void>((resolve) => {
+          release = resolve;
+        });
+        return Response.json({ ok: true });
+      }
+      return Response.json({ calories: 1, goal: 2, meals: [] });
+    });
+    render(<>{renderFlatEntries(stored(), { sessionId: "s1" })}</>);
+    const button = await screen.findByRole("button", { name: "Log a glass of water" });
+    await waitFor(() => expect(fetch).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(button);
+    fireEvent.click(button);
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(true));
+    release();
+    await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
+    expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+});
+
+describe("appApiUrl", () => {
+  it("keeps every path inside the app, however the browser would normalize it", () => {
+    expect(appApiUrl("meals", "days/2026-11-11")).toBe("/api/apps/meals/days/2026-11-11");
+    for (const path of [
+      "%2e%2e/%2e%2e/settings",
+      "..\\..\\settings",
+      "../system",
+      "a?b=1",
+      "/x",
+      "",
+    ]) {
+      expect(appApiUrl("meals", path)).toBeNull();
+    }
   });
 });

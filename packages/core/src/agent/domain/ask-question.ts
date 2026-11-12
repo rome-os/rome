@@ -232,6 +232,9 @@ export function questionCardUi(questions: readonly Question[]): WidgetUi {
           ...(Object.hasOwn(descriptions, option) ? { description: descriptions[option] } : {}),
         })),
         value: { path: `${at}/values` },
+        // On a single choice the last of a pick and typed text wins, as the
+        // guardian sees it.
+        ...(q.type === "single" && q.freeText === true ? { clears: { path: `${at}/text` } } : {}),
       });
       parts.push(`${head}-pick`);
       answered.push({ call: "required", args: { value: { path: `${at}/values` } } });
@@ -246,6 +249,7 @@ export function questionCardUi(questions: readonly Question[]): WidgetUi {
         placeholder: {
           string: q.type === "text" ? "typeAnswer" : q.type === "multi" ? "addOwn" : "typeOwn",
         },
+        ...(q.type === "single" ? { clears: { path: `${at}/values` } } : {}),
       });
       parts.push(`${head}-own`);
       answered.push({ call: "required", args: { value: { path: `${at}/text` } } });
@@ -330,4 +334,41 @@ export function answersFromQuestionCard(
     return value ? [{ questionId: q.id, value }] : [];
   });
   return { answers };
+}
+
+/**
+ * What a described question card would have sent for `answers` in the shape
+ * the question card has always sent, so a card answered by a reader that
+ * draws its own question card shows the same answer when drawn from its
+ * description. A value that is one of the options is a pick; the rest is
+ * typed text.
+ */
+export function questionCardFromAnswers(
+  questions: readonly Question[],
+  output: unknown,
+): { values: string[]; text: string }[] | null {
+  const sent = (output as { answers?: unknown } | null)?.answers;
+  if (!Array.isArray(sent)) return null;
+  const answers = sent.filter(
+    (a): a is QuestionAnswer =>
+      !!a &&
+      typeof a === "object" &&
+      typeof (a as QuestionAnswer).questionId === "string" &&
+      typeof (a as QuestionAnswer).value === "string",
+  );
+  if (answers.length !== sent.length) return null;
+  return questions.map((q) => {
+    const answer = answers.find((a) => a.questionId === q.id);
+    if (!answer) return { values: [], text: "" };
+    if (q.type === "text") return { values: [], text: answer.value };
+    const options = q.options ?? [];
+    const parts =
+      q.type === "multi"
+        ? (answer.values ?? answer.value.split(", ")).map((part) => part.trim())
+        : [answer.value];
+    return {
+      values: parts.filter((part) => options.includes(part)),
+      text: parts.filter((part) => part && !options.includes(part)).join(", "),
+    };
+  });
 }

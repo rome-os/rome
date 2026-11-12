@@ -88,7 +88,8 @@ struct WidgetUICardView: View {
             else { waiting.answer(WidgetData.context(button["action"]?["event"]?["context"], in: data, scope: scope)) }
             return
         }
-        guard WidgetData.isAppPath(name) else { return }
+        // A card the agent waits on is Rome's own; it reaches no app.
+        guard waiting == nil, WidgetData.isAppPath(name) else { return }
         pressing = button.id
         defer { pressing = nil }
         let body = WidgetData.context(button["action"]?["event"]?["context"], in: data, scope: scope)
@@ -170,7 +171,7 @@ struct WidgetUICardView: View {
             let placeholder = c["placeholder"] != nil ? text("placeholder") : text("label")
             let field = Binding(
                 get: { WidgetData.read(data, pointer: pointer)?.string ?? "" },
-                set: { data = WidgetData.storing(.string($0), at: pointer, in: data) }
+                set: { data = WidgetData.editing(.string($0), at: pointer, clears: c["clears"], scope: scope, in: data) }
             )
             return AnyView(TextField(placeholder, text: field, axis: .vertical)
                 .lineLimit(c["variant"]?.string == "longText" ? 3...6 : 1...4)
@@ -220,7 +221,7 @@ struct WidgetUICardView: View {
                 let selected = picked.contains(value)
                 Button {
                     let next = multi ? (selected ? picked.filter { $0 != value } : picked + [value]) : [value]
-                    data = WidgetData.storing(.array(next.map(JSONValue.string)), at: pointer, in: data)
+                    data = WidgetData.editing(.array(next.map(JSONValue.string)), at: pointer, clears: c["clears"], scope: scope, in: data)
                 } label: {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(verbatim: WidgetData.text(option["label"], in: data, scope: scope))

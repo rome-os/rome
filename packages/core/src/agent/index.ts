@@ -57,6 +57,7 @@ export {
   askQuestionToolOutput,
   parseAskQuestionInput,
   type Question,
+  questionCardFromAnswers,
 } from "./domain/ask-question.js";
 export type { PromptFacts, PromptMessage, UnseenMessage } from "./domain/prompt-facts.js";
 export {

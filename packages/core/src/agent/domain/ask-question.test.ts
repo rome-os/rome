@@ -3,6 +3,7 @@ import { checkWidgetUi } from "@rome-os/app-runtime";
 import {
   answersFromQuestionCard,
   askQuestionToolOutput,
+  questionCardFromAnswers,
   parseAskQuestionInput,
   type Question,
   questionCardUi,
@@ -255,5 +256,30 @@ describe("the question card described as data", () => {
       answersFromQuestionCard(questions, { answers: [{ questionId: "tone", value: "Warm" }] }),
     ).toBeNull();
     expect(answersFromQuestionCard(questions, { dismissed: true })).toBeNull();
+  });
+
+  it("lets a pick and typed text on a single choice clear each other, so the last edit wins", () => {
+    const ui = questionCardUi(questions);
+    const pick = ui.components.find((c) => c.id === "q0-pick");
+    const own = ui.components.find((c) => c.id === "q0-own");
+    expect(pick).toMatchObject({ clears: { path: "/answers/0/text" } });
+    expect(own).toMatchObject({ clears: { path: "/answers/0/values" } });
+    expect(ui.components.find((c) => c.id === "q1-pick")).not.toHaveProperty("clears");
+  });
+
+  it("turns answers a reader sent in the card's own shape back into what the card holds", () => {
+    expect(
+      questionCardFromAnswers(questions, {
+        answers: [
+          { questionId: "tone", value: "Friendly" },
+          { questionId: "parts", value: "Intro, A, B", values: ["Intro", "A, B"] },
+        ],
+      }),
+    ).toEqual([
+      { values: [], text: "Friendly" },
+      { values: ["Intro", "A, B"], text: "" },
+      { values: [], text: "" },
+    ]);
+    expect(questionCardFromAnswers(questions, { answers: [{ values: [] }] })).toBeNull();
   });
 });

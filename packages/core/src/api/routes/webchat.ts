@@ -115,6 +115,7 @@ import {
   answersFromQuestionCard,
   parseAskQuestionInput,
   type Question,
+  questionCardFromAnswers,
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import type { ChatThreadPlacement } from "../../webchat/repository.js";
@@ -3717,6 +3718,17 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const questions = resolution && openSuspensions.get(resolution.toolUseId)?.questions;
     if (resolution && questions && !resolution.dismissed) {
       const answers = answersFromQuestionCard(questions, resolution.output);
+      // A reader that draws its own question card sends the answers as they
+      // are; keep what the described card would have sent beside them, so
+      // every reader shows the same answered card.
+      const card = answers ? null : questionCardFromAnswers(questions, resolution.output);
+      if (card) {
+        for (const part of body.parts as Array<Record<string, unknown>>) {
+          if (part?.type === "interaction_result" && part.toolUseId === resolution.toolUseId) {
+            part.output = { ...(resolution.output as Record<string, unknown>), card };
+          }
+        }
+      }
       if (answers) {
         const sent = (resolution.output as { answers?: unknown } | null)?.answers;
         Object.assign(

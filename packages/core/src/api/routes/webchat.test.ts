@@ -4742,6 +4742,50 @@ describe("Webchat API", () => {
       expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain('"questionId": "tone"');
     });
 
+    it("keeps what a described question card holds beside answers a reader sent in their own shape", async () => {
+      const questions: Question[] = [
+        { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
+      ];
+      const ctl = mockScriptedManager();
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-ask-old",
+          tool: "ask_question",
+          output: askQuestionToolOutput(questions, true),
+        };
+        yield { type: "result", content: "" };
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "help me write" }),
+        }),
+      );
+      expect(await findCard(sessionId, "tu-ask-old")).toBeDefined();
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      const answers = { answers: [{ questionId: "tone", value: "Plain" }] };
+      await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parts: [{ type: "interaction_result", toolUseId: "tu-ask-old", output: answers }],
+        }),
+      });
+
+      expect(await userPartsIn(sessionId)).toContainEqual({
+        type: "interaction_result",
+        toolUseId: "tu-ask-old",
+        output: { ...answers, card: [{ values: ["Plain"], text: "" }] },
+      });
+    });
+
     it("closes an open question card when the guardian types a reply instead", async () => {
       const ctl = mockScriptedManager();
       ctl.setEvents(askQuestionEvents("tu-ask-typed"));

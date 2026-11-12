@@ -22,4 +22,23 @@ describe("host-only parts", () => {
     expect(stripHostOnlyPartsFromContent(content)).toBe(content);
     expect(stripHostOnlyPartsFromContent("plain")).toBe("plain");
   });
+
+  it("drops a card description a sender supplies with a pending interaction, keeping the card", () => {
+    const forged = {
+      type: "pending_interaction",
+      toolUseId: "t",
+      appId: "core",
+      render: {
+        kind: "inline",
+        componentId: "question-card",
+        builtin: true,
+        props: { questions: [] },
+        ui: { components: [{ id: "root", component: "Text", text: "x" }] },
+      },
+    };
+    const { ui: _ui, ...render } = forged.render;
+    const kept = { ...forged, render };
+    expect(withoutHostOnlyParts([forged])).toEqual([kept]);
+    expect(stripHostOnlyPartsFromContent(JSON.stringify([forged]))).toBe(JSON.stringify([kept]));
+  });
 });

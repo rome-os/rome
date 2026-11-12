@@ -155,6 +155,9 @@ export type WidgetUiComponent =
       options: { label: WidgetUiString; value: string; description?: WidgetUiString }[];
       /** The picked values, a list of strings the picker writes to. */
       value: WidgetUiPath;
+      /** Rome's: a value a pick empties, so the last of two inputs edited
+       *  wins, such as the "type your own" text beside a single choice. */
+      clears?: WidgetUiPath;
     })
   | (Common & {
       component: "TextField";
@@ -164,6 +167,8 @@ export type WidgetUiComponent =
       variant?: "shortText" | "longText";
       /** Rome's: shown in the empty field. */
       placeholder?: WidgetUiString;
+      /** Rome's: a value typing empties, as for `ChoicePicker`. */
+      clears?: WidgetUiPath;
     });
 
 /**
@@ -300,6 +305,7 @@ const ComponentSchema = z.discriminatedUnion("component", [
         .array(z.object({ label: Str, value: z.string(), description: Str.optional() }).strict())
         .min(1),
       value: PathSchema,
+      clears: PathSchema.optional(),
     })
     .strict(),
   z
@@ -310,6 +316,7 @@ const ComponentSchema = z.discriminatedUnion("component", [
       value: PathSchema,
       variant: z.enum(["shortText", "longText"]).optional(),
       placeholder: Str.optional(),
+      clears: PathSchema.optional(),
     })
     .strict(),
 ]);
@@ -321,12 +328,14 @@ const WidgetUiSchema = z
   })
   .strict();
 
-/** An app API path a card may GET or POST: relative, with no `..` segment,
- *  scheme, query or `rome:` name that could reach outside the app. */
-function isAppApiPath(path: string): boolean {
-  if (path.startsWith("/") || path.includes("://") || path.includes("?")) return false;
-  if (path.startsWith("rome:")) return false;
-  return !path.split("/").some((segment) => segment === ".." || segment === ".");
+/** An app API path a card may GET or POST, such as `days/2026-11-11`:
+ *  `/`-separated segments of letters, digits and `-_.~`, none of them `.` or
+ *  `..`. Anything else, such as `%2e%2e`, a backslash, a scheme or a query,
+ *  could resolve outside the app once a browser normalizes the URL. */
+export function isWidgetAppPath(path: string): boolean {
+  return path
+    .split("/")
+    .every((segment) => /^[A-Za-z0-9_~.-]+$/.test(segment) && segment !== "." && segment !== "..");
 }
 
 /**
@@ -362,7 +371,7 @@ export function checkWidgetUi(
       const hostEvent = (WIDGET_UI_HOST_EVENTS as readonly string[]).includes(name);
       if (hostEvent && !options.waits) {
         problems.push(`"${c.id}" sends "${name}", which only a card the agent waits on may send`);
-      } else if (!hostEvent && !isAppApiPath(name)) {
+      } else if (!hostEvent && !isWidgetAppPath(name)) {
         problems.push(`"${c.id}" posts to "${name}", which is not a path in the app's API`);
       }
     }
@@ -377,7 +386,7 @@ export function checkWidgetUi(
       if (!pointer.startsWith("/") || pointer.length < 2) {
         problems.push(`bind key "${pointer}" is not a JSON Pointer such as "/today"`);
       }
-      if (!isAppApiPath(path))
+      if (!isWidgetAppPath(path))
         problems.push(`bind "${pointer}" reads "${path}", which is not a path in the app's API`);
     }
   }

@@ -75,10 +75,20 @@ describe("checkWidgetUi", () => {
         { id: "l", component: "Text", text: "Go" },
       ],
     });
-    for (const name of ["/api/system", "../system/x", "https://evil.example", "a?b=1"]) {
+    for (const name of [
+      "/api/system",
+      "../system/x",
+      "https://evil.example",
+      "a?b=1",
+      "%2e%2e/%2e%2e/settings",
+      "..\\..\\settings",
+      "a//b",
+      "",
+    ]) {
       expect(checkWidgetUi(post(name))).not.toEqual([]);
     }
     expect(checkWidgetUi(mealCard, { "/today": "../connector/tokens" })).not.toEqual([]);
     expect(checkWidgetUi(mealCard, { today: "days/1" })).not.toEqual([]);
+    expect(checkWidgetUi(mealCard, { "/today": "%2E%2E/connector/tokens" })).not.toEqual([]);
   });
 });

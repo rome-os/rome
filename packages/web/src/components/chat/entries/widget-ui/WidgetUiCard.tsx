@@ -4,7 +4,13 @@ import type { TranscriptPart } from "@rome/api-types/chat";
 import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { fetchJson } from "@/lib/fetch-json";
-import { ROME_WIDGET_CATALOG_ID, romeWidgetCatalog, WidgetLockedContext } from "./catalog";
+import {
+  ROME_WIDGET_CATALOG_ID,
+  romeWidgetCatalog,
+  WidgetBusyContext,
+  WidgetClearsContext,
+  WidgetLockedContext,
+} from "./catalog";
 
 type WidgetUi = Extract<TranscriptPart, { type: "widget"; ui: unknown }>["ui"];
 
@@ -49,7 +55,43 @@ function withHostStrings(value: unknown, translate: (key: string) => string): un
   return Object.fromEntries(keys.map((k) => [k, withHostStrings(o[k], translate)]));
 }
 
-const appApi = (appId: string, path: string) => `/api/apps/${encodeURIComponent(appId)}/${path}`;
+/**
+ * The URL of `path` in the app's API, or null when it would reach anything
+ * else: core checks every path, but a stored part is read back as data, so
+ * the dashboard checks again with the URL a browser would request.
+ */
+export function appApiUrl(appId: string, path: string): string | null {
+  const base = `/api/apps/${encodeURIComponent(appId)}/`;
+  const segments = path.split("/");
+  if (!segments.every((s) => /^[A-Za-z0-9_~.-]+$/.test(s) && s !== "." && s !== "..")) {
+    return null;
+  }
+  const url = new URL(base + path, "http://card.invalid");
+  return url.pathname.startsWith(base) ? url.pathname : null;
+}
+
+function appApi(appId: string, path: string): string {
+  const url = appApiUrl(appId, path);
+  if (!url) throw new Error("The card names a path outside its app");
+  return url;
+}
+
+/** Each component's `clears`, taken out of the components, since A2UI's
+ *  schemas have no such field. */
+function splitClears(components: unknown[]): {
+  components: unknown[];
+  clears: ReadonlyMap<string, string>;
+} {
+  const clears = new Map<string, string>();
+  const rest = components.map((c) => {
+    const o = c as { id?: unknown; clears?: { path?: unknown } };
+    if (!o || typeof o !== "object" || o.clears === undefined) return c;
+    const { clears: target, ...component } = o;
+    if (typeof o.id === "string" && typeof target?.path === "string") clears.set(o.id, target.path);
+    return component;
+  });
+  return { components: rest, clears };
+}
 
 /**
  * A card an app described as data (`ui`), drawn with Rome's A2UI catalog.
@@ -72,8 +114,17 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
   const bindKey = JSON.stringify(bind ?? {});
   const uiKey = JSON.stringify(ui);
 
+  const inFlight = useRef(false);
+  // A card the agent waits on is Rome's own; it reads and writes no app.
+  const appCalls = waiting === undefined;
+  const parts = useMemo(
+    () => splitClears(withHostStrings((JSON.parse(uiKey) as WidgetUi).components, t) as unknown[]),
+    [uiKey, t],
+  );
+
   const load = useCallback(
     async (processor: MessageProcessor) => {
+      if (!appCalls) return;
       const entries = Object.entries(JSON.parse(bindKey) as Record<string, string>);
       const values = await Promise.all(
         entries.map(([, path]) =>
@@ -87,7 +138,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
         })),
       );
     },
-    [appId, bindKey, toolUseId],
+    [appCalls, appId, bindKey, toolUseId],
   );
 
   const processor = useMemo(() => {
@@ -100,6 +151,8 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
         else host.onSubmit(toolUseId, (action.context ?? {}) as Record<string, unknown>);
         return;
       }
+      if (!appCalls || inFlight.current) return;
+      inFlight.current = true;
       setBusy(true);
       try {
         await fetchJson<unknown>(appApi(appId, action.name), {
@@ -112,6 +165,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
       } catch {
         setFailed(true);
       } finally {
+        inFlight.current = false;
         setBusy(false);
       }
     });
@@ -124,7 +178,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
         version: "v0.9",
         updateComponents: {
           surfaceId: toolUseId,
-          components: withHostStrings((JSON.parse(uiKey) as WidgetUi).components, t) as never,
+          components: parts.components as never,
         },
       },
     ]);
@@ -135,7 +189,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
       ]);
     }
     return p;
-  }, [appId, load, toolUseId, uiKey, t]);
+  }, [appCalls, appId, load, toolUseId, uiKey, parts]);
 
   // An answered card shows what the guardian sent, which core keeps as `card`.
   const answeredKey = JSON.stringify(result?.card ?? null);
@@ -168,9 +222,13 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
     >
       {surface ? (
         <WidgetLockedContext.Provider value={locked}>
-          <A2uiSurface
-            surface={surface as unknown as ComponentProps<typeof A2uiSurface>["surface"]}
-          />
+          <WidgetBusyContext.Provider value={busy}>
+            <WidgetClearsContext.Provider value={parts.clears}>
+              <A2uiSurface
+                surface={surface as unknown as ComponentProps<typeof A2uiSurface>["surface"]}
+              />
+            </WidgetClearsContext.Provider>
+          </WidgetBusyContext.Provider>
         </WidgetLockedContext.Provider>
       ) : null}
       {waiting && locked ? (

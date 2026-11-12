@@ -61,6 +61,23 @@ const TextFieldWithPlaceholderApi = {
  *  buttons are hidden. */
 export const WidgetLockedContext = createContext(false);
 
+/** True while a button's request is in flight: every button is disabled, so
+ *  a press is sent once. */
+export const WidgetBusyContext = createContext(false);
+
+/** Rome's `clears`, by component id: the value an input empties when it is
+ *  edited. A2UI's schemas have no such field, so the card hands it here. */
+export const WidgetClearsContext = createContext<ReadonlyMap<string, string>>(new Map());
+
+/** The empty value at `path`: `[]` for a list, `""` otherwise. */
+function clearValue(
+  dataContext: { set(path: string, value: unknown): void },
+  path: string,
+  list: boolean,
+) {
+  dataContext.set(path, list ? [] : "");
+}
+
 const textClass: Record<string, string> = {
   h1: "text-title",
   h2: "text-title",
@@ -198,6 +215,7 @@ const List = createComponentImplementation(ListApi, ({ props, buildChild }) => (
 
 const WidgetButton = createComponentImplementation(ButtonApi, ({ props, buildChild }) => {
   const locked = useContext(WidgetLockedContext);
+  const busy = useContext(WidgetBusyContext);
   if (locked) return null;
   return (
     <Button
@@ -210,7 +228,7 @@ const WidgetButton = createComponentImplementation(ButtonApi, ({ props, buildChi
             : "outline"
       }
       className="self-start"
-      disabled={props.isValid === false}
+      disabled={busy || props.isValid === false}
       onClick={() => void props.action?.()}
     >
       {buildChild(props.child as string)}
@@ -219,8 +237,9 @@ const WidgetButton = createComponentImplementation(ButtonApi, ({ props, buildChi
 });
 
 // Options read as the question card's chips: a pressed chip is picked.
-const ChoicePicker = createComponentImplementation(ChoicePickerApi, ({ props }) => {
+const ChoicePicker = createComponentImplementation(ChoicePickerApi, ({ props, context }) => {
   const locked = useContext(WidgetLockedContext);
+  const clears = useContext(WidgetClearsContext).get(context.componentModel.id);
   const picked = Array.isArray(props.value) ? (props.value as string[]) : [];
   const multi = props.variant === "multipleSelection";
   const options = (props.options ?? []) as {
@@ -236,6 +255,7 @@ const ChoicePicker = createComponentImplementation(ChoicePickerApi, ({ props }) 
         : [...picked, value]
       : [value];
     props.setValue?.(next);
+    if (clears) clearValue(context.dataContext, clears, false);
   };
   return (
     <div
@@ -283,20 +303,28 @@ const ChoicePicker = createComponentImplementation(ChoicePickerApi, ({ props }) 
   );
 });
 
-const TextField = createComponentImplementation(TextFieldWithPlaceholderApi, ({ props }) => {
-  const locked = useContext(WidgetLockedContext);
-  const field = {
-    "aria-label": shown(props.label),
-    placeholder: props.placeholder ? shown(props.placeholder) : undefined,
-    value: typeof props.value === "string" ? props.value : "",
-    disabled: locked,
-  };
-  return props.variant === "longText" ? (
-    <Textarea {...field} rows={3} onChange={(e) => props.setValue?.(e.currentTarget.value)} />
-  ) : (
-    <Input {...field} onChange={(e) => props.setValue?.(e.currentTarget.value)} />
-  );
-});
+const TextField = createComponentImplementation(
+  TextFieldWithPlaceholderApi,
+  ({ props, context }) => {
+    const locked = useContext(WidgetLockedContext);
+    const clears = useContext(WidgetClearsContext).get(context.componentModel.id);
+    const type = (text: string) => {
+      props.setValue?.(text);
+      if (clears && text) clearValue(context.dataContext, clears, true);
+    };
+    const field = {
+      "aria-label": shown(props.label),
+      placeholder: props.placeholder ? shown(props.placeholder) : undefined,
+      value: typeof props.value === "string" ? props.value : "",
+      disabled: locked,
+    };
+    return props.variant === "longText" ? (
+      <Textarea {...field} rows={3} onChange={(e) => type(e.currentTarget.value)} />
+    ) : (
+      <Input {...field} onChange={(e) => type(e.currentTarget.value)} />
+    );
+  },
+);
 
 export const romeWidgetCatalog = new Catalog(
   ROME_WIDGET_CATALOG_ID,

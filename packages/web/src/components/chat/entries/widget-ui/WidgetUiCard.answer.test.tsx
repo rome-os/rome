@@ -23,8 +23,24 @@ const ui = {
         { label: "Plain", value: "Plain", description: "Short sentences" },
       ],
       value: { path: "/answers/0/values" },
+      clears: { path: "/answers/0/text" },
     },
-    { id: "q0", component: "Column", children: ["q0-title", "q0-pick"] },
+    {
+      id: "q0-own",
+      component: "TextField",
+      label: "Which tone?",
+      value: { path: "/answers/0/text" },
+      placeholder: { string: "typeOwn" },
+      clears: { path: "/answers/0/values" },
+    },
+    { id: "q0", component: "Column", children: ["q0-title", "q0-pick", "q0-own"] },
+    {
+      id: "app-post",
+      component: "Button",
+      child: "app-post-label",
+      action: { event: { name: "anything" } },
+    },
+    { id: "app-post-label", component: "Text", text: "App post" },
     { id: "send-label", component: "Text", text: { string: "send" } },
     {
       id: "send",
@@ -34,7 +50,15 @@ const ui = {
       action: { event: { name: "rome:answer", context: { answers: { path: "/answers" } } } },
       checks: [
         {
-          condition: { call: "required", args: { value: { path: "/answers/0/values" } } },
+          condition: {
+            call: "or",
+            args: {
+              values: [
+                { call: "required", args: { value: { path: "/answers/0/values" } } },
+                { call: "required", args: { value: { path: "/answers/0/text" } } },
+              ],
+            },
+          },
           message: "",
         },
       ],
@@ -48,7 +72,7 @@ const ui = {
       action: { event: { name: "rome:dismiss" } },
     },
     { id: "actions", component: "Row", children: ["dismiss", "send"], justify: "end" },
-    { id: "root", component: "Column", children: ["q0", "actions"] },
+    { id: "root", component: "Column", children: ["q0", "app-post", "actions"] },
   ],
   data: { answers: [{ values: [], text: "" }] },
 } as never;
@@ -103,5 +127,48 @@ describe("a question card described as data", () => {
     expect(warm.getAttribute("aria-pressed")).toBe("true");
     expect((warm as HTMLButtonElement).disabled).toBe(true);
     expect(container.querySelector("[data-chat-pending-card]")).toBeNull();
+  });
+
+  it("lets the last of a pick and typed text win on a single choice", async () => {
+    const onSubmit = rs.fn();
+    render(
+      <WidgetUiCard
+        toolUseId="q2"
+        appId="core"
+        ui={ui}
+        text=""
+        waiting={{ onSubmit, onDismiss: rs.fn() }}
+      />,
+    );
+    const own = await screen.findByRole("textbox", { name: "Which tone?" });
+    fireEvent.change(own, { target: { value: "Friendly" } });
+    fireEvent.click(screen.getByRole("button", { name: /Plain/ }));
+    await waitFor(() => expect((own as HTMLInputElement).value).toBe(""));
+
+    fireEvent.change(own, { target: { value: "Calm" } });
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: /Plain/ }).getAttribute("aria-pressed")).toBe(
+        "false",
+      ),
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0]?.[1]).toEqual({ answers: [{ values: [], text: "Calm" }] });
+  });
+
+  it("reaches no app from a card the agent waits on", async () => {
+    const fetch = rs.spyOn(globalThis, "fetch");
+    render(
+      <WidgetUiCard
+        toolUseId="q3"
+        appId="core"
+        ui={ui}
+        text=""
+        waiting={{ onSubmit: rs.fn(), onDismiss: rs.fn() }}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "App post" }));
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fetch).not.toHaveBeenCalled();
   });
 });
