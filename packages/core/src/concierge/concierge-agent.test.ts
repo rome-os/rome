@@ -121,6 +121,11 @@ describe("the Concierge agent", () => {
     expect(actionName("delete-routine")).toBe("delete_routine");
   });
 
+  it("can continue a chat a restart cut off with a message into it", () => {
+    expect(concierge.actions).toContain("system:send_user_message");
+    expect(actionName("send-user-message")).toBe("send_user_message");
+  });
+
   it("tells dream to preserve the setting-owned agent name", () => {
     const dream = parseYaml(
       readFileSync(resolve(here, "../../../../rome_apps/dream/src/agents/dream.yaml"), "utf8"),

@@ -449,48 +449,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
     if (root) this.emitChatThreadPlaced({ sessionId, messageId: root, chatThreadId: root });
   }
 
-  /** Rechecked at dispatch: only an unchanged guardian root chat can continue. */
-  canContinueAfterRestart(turn: InterruptedTurn): boolean {
-    return (
-      this.db.get<{ eligible: number }>(sql`
-      SELECT 1 AS eligible
-      FROM ${romeSessions} s
-      JOIN ${CHATS} c ON c.id = s.chat_id AND c.platform = 'webchat'
-      JOIN ${romeAgentMessages} t ON t.id = ${turn.messageId} AND t.session_id = s.id
-      WHERE s.id = ${turn.sessionId} AND s.type = 'channel' AND s.chat_platform = 'webchat'
-        AND (s.owner_key IS NULL OR s.owner_key = 'guardian')
-        AND s.parent_session_id IS NULL AND s.parent_turn_id IS NULL
-        AND s.archived_at IS NULL AND s.trigger_kind IS NULL AND t.trigger_kind IS NULL
-        AND EXISTS (
-          SELECT 1 FROM agent_turn_messages l
-          JOIN ${CHAT_MESSAGES} m ON m.id = l.message_id
-          WHERE l.session_id = s.id AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
-            AND m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
-            AND m.sender_account_id = 'guardian' AND m.sender_agent IS NULL
-        )
-        AND NOT EXISTS (
-          SELECT 1 FROM ${CHAT_MESSAGES} m
-          WHERE m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
-            AND m.sender_account_id = 'guardian' AND m.sender_agent IS NULL
-            AND m.id > (
-              SELECT min(l.message_id) FROM agent_turn_messages l
-              WHERE l.session_id = s.id AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
-            )
-            AND NOT EXISTS (
-              SELECT 1 FROM agent_turn_messages l2
-              WHERE l2.message_id = m.id AND l2.session_id = s.id
-                AND l2.turn_id = ${turn.turnId} AND l2.role = 'prompt'
-            )
-        )
-        AND NOT EXISTS (
-          SELECT 1 FROM ${romeAgentMessages} n
-          WHERE n.session_id = s.id AND n.role = 'trace' AND n.id <> t.id
-            AND (n.created_at > t.created_at OR (n.created_at = t.created_at AND n.rowid > t.rowid))
-        )
-    `)?.eligible === 1
-    );
-  }
-
   /** Latest timestamped evidence for this turn, in milliseconds, or null. Not a heartbeat or exact restart time. */
   getRestartLastActivityAt(turn: InterruptedTurn): number | null {
     // Trace blocks have no timestamp column, and a trace has no updated_at.
@@ -529,43 +487,6 @@ export class ChatsWebChatRepository extends WebChatRepository {
     return latest;
   }
 
-  /** At most 1000 characters of this turn's guardian prompt lines, in chat order. Empty when none exist. */
-  getRestartGuardianPrompt(turn: InterruptedTurn): string {
-    return this.db
-      .all<{ text: string }>(sql`
-      SELECT m.text
-      FROM agent_turn_messages l
-      JOIN ${romeSessions} s ON s.id = l.session_id
-      JOIN ${CHAT_MESSAGES} m ON m.id = l.message_id
-        AND m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
-      WHERE l.session_id = ${turn.sessionId} AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
-        AND m.sender_account_id = 'guardian' AND m.sender_agent IS NULL
-      ORDER BY m.id
-    `)
-      .map((row) => row.text)
-      .join("\n\n")
-      .slice(0, 1000);
-  }
-
-  /**
-   * Who wrote the messages that started `turn`, by the account each records
-   * ("guardian", "visitor:<account>"), each once. More than one means the
-   * turn held more than one person's input. An agent's message names no one.
-   */
-  getTurnPromptSenders(turn: Pick<InterruptedTurn, "sessionId" | "turnId">): string[] {
-    return this.db
-      .all<{ sender: string }>(sql`
-      SELECT DISTINCT m.sender_account_id AS sender
-      FROM agent_turn_messages l
-      JOIN ${romeSessions} s ON s.id = l.session_id
-      JOIN ${CHAT_MESSAGES} m ON m.id = l.message_id
-        AND m.chat_id = s.chat_id AND m.thread_id IS s.thread_id
-      WHERE l.session_id = ${turn.sessionId} AND l.turn_id = ${turn.turnId} AND l.role = 'prompt'
-        AND m.sender_agent IS NULL AND m.sender_account_id IS NOT NULL
-    `)
-      .map((row) => row.sender);
-  }
-
   /**
    * The newest turn of each dashboard chat that ended in an error, when its
    * trace began at or after `sinceMs` or its runtime session was active then.
@@ -574,7 +495,7 @@ export class ChatsWebChatRepository extends WebChatRepository {
    * way, is not listed. A Concierge chat is listed like any other: when it moved
    * to another provider on its own, its recovery turn is its newest turn, and
    * when it could not move, its stopped turn still is. Oldest first.
-   * Eligibility is for `canContinueAfterRestart` to decide.
+   * Eligibility is for `describeInterrupted` to decide.
    */
   getLatestErroredTurns(sinceMs: number): ErroredTurn[] {
     const since = Math.floor(sinceMs / 1000);

@@ -106,7 +106,7 @@ A mark Rome puts on its owner's message in a [Concierge chat](#concierge-chat) t
 - The message's work is that turn and every task the Concierge starts for it or passes its words on to. The mark stays working while any of them works, and goes away once all are done. It turns failed only when one fails, and a failed mark stays, since a crash may leave no reply. A task that asks its owner a question is still working.
 - How the turn's end sets the reaction:
   - It completes: done, which shows no mark once its tasks are done too.
-  - It fails with an error, or ends with no end of its own, as when the process dies: failed. When Rome starts again and continues that turn, the mark stays working until the continuation ends.
+  - It fails with an error, or ends with no end of its own, as when the process dies: failed. When Rome starts again, the work that process was running fails too. A turn that then runs again, such as one the Concierge continues, marks its work again.
   - Its owner stops it: stopped, which counts toward no reaction.
   - A newer input supersedes it and the work carries into the next turn: still working, until that turn ends.
 - A task that ends keeps the message working until the Concierge says its result: until the turn that reports the task ends, a turn that says the result naming the task ends, or the Concierge marks the task done or drops it. Only then does it settle as the task ended. Until then the reply has not told the owner anything. A report turn that fails or is cut short keeps the mark working, since Rome hands the report over again, also after Rome restarts. The mark turns failed only once Rome gives up on the report.

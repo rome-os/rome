@@ -3139,7 +3139,7 @@ describe("AgentRunner", () => {
           },
         ],
       });
-      const [cutOff] = await repo.endInterruptedTurns(24 * 60 * 60 * 1000);
+      await repo.endInterruptedTurns(24 * 60 * 60 * 1000);
       const beforeTrace = await repo.getTraceContents(chatId);
       const provider = new MockModelProvider([[{ type: "result", content: "Done" }]]);
       const manager = createSessions(
@@ -3175,7 +3175,9 @@ describe("AgentRunner", () => {
           await task({ emit });
         },
       });
-      const shouldRun = rs.fn(() => repo.canContinueAfterRestart(cutOff!));
+      // A recovery turn queued for the chat is dropped when a newer guardian input arrives first.
+      let newerArrived = false;
+      const shouldRun = rs.fn(() => !newerArrived);
       try {
         const running = backend.runAndReport(
           {
@@ -3189,7 +3191,10 @@ describe("AgentRunner", () => {
         );
         await entered;
         expect(shouldRun).toHaveBeenCalledTimes(1);
-        if (newerInput) await repo.recordUserInput("new-guardian-input", chatId, "[]");
+        if (newerInput) {
+          await repo.recordUserInput("new-guardian-input", chatId, "[]");
+          newerArrived = true;
+        }
         expect(shouldRun()).toBe(!newerInput);
         releaseAcquire();
         const outcome = await running;

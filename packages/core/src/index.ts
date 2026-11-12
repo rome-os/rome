@@ -1,6 +1,6 @@
-import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
+import { announceInterrupted, conciergeNoticeSender } from "./webchat/interrupted-notice.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
-import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
+import { startUsageLimitNotice } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
 import { SessionRecords } from "./sessions/session-records.js";
@@ -215,7 +215,6 @@ import { createConciergeOwners } from "./concierge/owners.js";
 import { privateChildren, privateOwnerOf } from "./webchat/privacy.js";
 import { ownerOfChat } from "./webchat/owner.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
-import { continuationActor } from "./webchat/continuation-actor.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
@@ -1328,11 +1327,7 @@ async function main() {
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
   // The marks the stopped process left working settle before any turn runs.
-  const settledMarks = await settleMarksAfterRestart(
-    concierge.deps.tasks.repo,
-    webchatRepo,
-    endedTurns,
-  );
+  const settledMarks = await settleMarksAfterRestart(concierge.deps.tasks.repo, endedTurns);
   if (settledMarks > 0) {
     log.warn("Settled status reactions a stopped Rome process left working", {
       reactions: settledMarks,
@@ -2382,31 +2377,17 @@ async function main() {
   // the next boot's upgrade comparison runs against it.
   await commitBootVersion(settingsRepo, getBuildInfo());
 
-  // The API, actions and agents are ready. One continuation runs at a time,
-  // outside boot, and each rechecks its chat after waiting in the webchat queue.
-  // Each continuation acts for the person whose turn it continues.
-  const continuationActorOf = (turn: { sessionId: string; turnId: string }) =>
-    continuationActor(db, webchatRepo, turn);
-  void continueInterruptedTurns(
-    endedTurns,
-    webchatRepo,
-    backendTurnRunner,
-    Date.now(),
-    continuationActorOf,
-  ).catch((error) => {
-    log.warn("restart continuations failed", { error: String(error) });
-  });
+  // The API, actions and agents are ready. The Concierge is told once what the
+  // restart cut off, and decides what to continue (docs/concepts/sessions.md).
+  const tellConcierge = conciergeNoticeSender({ db, concierge, actions: actionEngine });
+  void announceInterrupted(db, webchatRepo, endedTurns, tellConcierge);
   // Subscribes after the first account read may have settled, so it also reads the
-  // remembered state: a limit that ended while Rome was down is swept now.
-  const stopUsageLimitContinuation = startUsageLimitContinuation({
+  // remembered state: a limit that ended while Rome was down is announced now.
+  const stopUsageLimitNotice = startUsageLimitNotice({
     accounts: modelAccounts,
+    db,
     repo: webchatRepo,
-    runner: backendTurnRunner,
-    actorOf: continuationActorOf,
-    // A Concierge turn a limit stopped shows its messages failed; run again,
-    // they work again until the continuation ends.
-    onContinue: (turn) =>
-      concierge.deps.tasks.repo.reopenTurnReactions(turn.sessionId, turn.turnId),
+    notify: tellConcierge,
   });
 
   // Best-effort instance-identity check. Fire-and-forget: announces
@@ -2517,7 +2498,7 @@ async function main() {
     capabilityDiscovery.stop();
     shutdownLog.info("capability discovery stopped");
 
-    stopUsageLimitContinuation();
+    stopUsageLimitNotice();
     stopCodexLoginChoice();
     unsubscribeInstanceLinked();
     visitorAllowListSync.stop();

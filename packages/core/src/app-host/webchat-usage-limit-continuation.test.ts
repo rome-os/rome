@@ -1,30 +1,18 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { eq } from "drizzle-orm";
 import {
   createModelAccounts,
   type ModelAccount,
   type ModelAccountReport,
   type ModelAccounts,
 } from "../agent/index.js";
-import { createBackendTurnRunner, type MainBackendTurnRunner } from "./backend-turn.js";
-import type { Channel } from "../chats/connected-accounts/connected-account.js";
-import { guardianAuth, romeSessions, sessions } from "../db/schema.js";
-import { createMockAgentRunner, createTestDb, type TestDb } from "../test/helpers.js";
-import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
+import { sessions } from "../db/schema.js";
+import { createTestDb, type TestDb } from "../test/helpers.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
-import { continuationActor } from "../webchat/continuation-actor.js";
-import { sendForCaller } from "./caller-notify.js";
-import type { SessionActor } from "../access/session-actor.js";
-import { continueInterruptedTurns } from "../webchat/restart-continuation.js";
-import {
-  startUsageLimitContinuation,
-  usageLimitContinuationPrompt,
-} from "../webchat/usage-limit-continuation.js";
+import { startUsageLimitNotice } from "../webchat/usage-limit-continuation.js";
 
 const HOUR = 60 * 60 * 1000;
 /** How long after a stated limit end the account is read. */
 const RESET_GRACE_MS = 2 * 60 * 1000;
-const DAY = 24 * HOUR;
 const NOW = Date.parse("2026-11-10T12:00:00Z");
 
 const available: ModelAccountReport = { state: "available", account: { loggedIn: true } };
@@ -83,19 +71,21 @@ const REFUSED = {
   reason: "quota_exhausted",
 };
 
-describe("usage-limit continuation", () => {
+describe("usage-limit notice", () => {
   let db: TestDb;
   let repo: ChatsWebChatRepository;
   let accounts: ModelAccounts;
   let claude: ReturnType<typeof fakeAccount>;
   let codex: ReturnType<typeof fakeAccount>;
   let stop: (() => void) | undefined;
+  let notify: ReturnType<typeof rs.fn<(text: string) => Promise<void>>>;
 
   beforeEach(() => {
     rs.useFakeTimers({ toFake: ["Date", "setTimeout", "clearTimeout"] });
     rs.setSystemTime(NOW);
     db = createTestDb();
     repo = new ChatsWebChatRepository(db.db);
+    notify = rs.fn(async () => {});
     claude = fakeAccount(available);
     codex = fakeAccount(available);
     accounts = createModelAccounts({
@@ -191,29 +181,8 @@ describe("usage-limit continuation", () => {
     });
   }
 
-  function backend(options: { beforeQueuedTask?: () => Promise<void> } = {}) {
-    const agent = createMockAgentRunner([]);
-    const send = rs.fn(async () => ({ messageId: "reply", chatId: "chat" }));
-    const runner = createBackendTurnRunner({
-      agentRunner: agent,
-      channel: () => ({ send: { send } }) as unknown as Channel,
-    });
-    runner.setWebchatRuntime({
-      enqueueSessionTask: async (_id, task) => {
-        await options.beforeQueuedTask?.();
-        await task({ emit: async () => {} });
-      },
-    });
-    return { agent, runner };
-  }
-
-  function start(
-    runner: Pick<MainBackendTurnRunner, "runAndReport">,
-    from: Pick<ModelAccounts, "read" | "refresh" | "onChanged"> = accounts,
-    actorOf?: (turn: { sessionId: string; turnId: string }) => Promise<SessionActor | undefined>,
-  ) {
-    stop = startUsageLimitContinuation({ accounts: from, repo, runner, actorOf });
-    return stop;
+  function start() {
+    stop = startUsageLimitNotice({ accounts, db: db.db, repo, notify });
   }
 
   /** Runs everything already scheduled, without moving the clock. */
@@ -224,184 +193,74 @@ describe("usage-limit continuation", () => {
     await settle();
   }
 
+  const noticeText = (call = 0) => (notify.mock.calls[call]?.[0] as string | undefined) ?? "";
+
   describe("a stopped turn", () => {
-    it("continues as the person whose turn it was, so send_notification rings them in a shared chat", async () => {
-      await db.db
-        .insert(guardianAuth)
-        .values({ id: "auth-1", userId: "seat-1", passwordHash: "x", createdAt: new Date() });
-      await stopped();
-      claude.set(available);
-      const { agent, runner } = backend();
-      start(runner, accounts, (turn) => continuationActor(db.db, repo, turn));
-      await clearAndSweep();
-      const actor = agent.calls[0]?.actor as SessionActor | undefined;
-      expect(actor).toEqual({ kind: "guardian", userId: "seat-1", via: "loopback" });
-      const pushes: unknown[] = [];
-      await sendForCaller(
-        {
-          send: async (content) => (
-            pushes.push(content), { kind: "ok", attempted: 1, sent: 1, failed: 0 }
-          ),
-        },
-        async () => null,
-        { actor, chatId: "chat" },
-        { body: "Done" },
-      );
-      expect(pushes).toEqual([{ body: "Done" }]);
-    });
-
-    it("marks the stopped turn's messages working again as its continuation runs", async () => {
-      // The stop's end marked the guardian's message failed.
-      const tasks = new ConciergeTasksRepository(db.db);
-      await stopped();
-      await tasks.markTurnWorking("chat-turn", { chatId: "chat", messageKey: "chat-input" });
-      await tasks.settleTurnReactions("chat", "failed", []);
-      claude.set(available);
-      const { agent, runner } = backend();
-      stop = startUsageLimitContinuation({
-        accounts,
-        repo,
-        runner,
-        onContinue: (turn) => tasks.reopenTurnReactions(turn.sessionId, turn.turnId),
-      });
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(1);
-      expect((await tasks.reactionsOf("chat", ["chat-input"])).get("chat-input")).toBe("working");
-      // The continuation's end settles it, as any turn's end does.
-      await tasks.settleTurnReactions("chat", "done", []);
-      expect(await tasks.reactionsOf("chat", ["chat-input"])).toEqual(new Map());
-    });
-
-    it("continues after the provider clears, in the same chat, runtime and agent", async () => {
+    it("is listed once the provider clears, in one notice that names the provider", async () => {
       await stopped();
       claude.set(limitedUntil(NOW + HOUR));
       await accounts.refresh("anthropic");
-      const { agent, runner } = backend();
-      start(runner);
+      start();
       await settle();
-      expect(agent.calls).toHaveLength(0);
+      expect(notify).not.toHaveBeenCalled();
 
       // An early clear arrives with the hourly read, long before the limit's stated end.
       claude.set(available);
       await clearAndSweep();
 
-      expect(agent.calls).toHaveLength(1);
-      expect(agent.calls[0]).toMatchObject({
-        agentName: "assistant:coder",
-        sessionId: "chat-runtime",
-        initiatedBy: "system",
-        inputLabel: "Usage limit recovery",
-        threadContext: { channel: "webchat", threadId: "chat" },
-      });
-      const prompt = agent.calls[0]?.prompt ?? "";
-      expect(prompt).toContain("<usage_limit_recovery>");
-      expect(prompt).toContain("Do only what remains");
-      expect(prompt).toContain("ask the guardian rather than redo it");
-      expect(prompt).toContain(
-        "Stopped request (may already be partly complete):\nFinish the work",
+      expect(notify).toHaveBeenCalledTimes(1);
+      const text = noticeText();
+      expect(text).toContain("<restart_recovery>");
+      expect(text).toContain(
+        "Model usage on anthropic is available again; these chats stopped on its limit:",
       );
-      expect(prompt).not.toContain("composed");
-      expect(prompt).not.toContain("none of it was done");
-      expect(prompt).not.toContain("cut at");
+      expect(text).toContain('guardian chat "chat" · assistant:coder · id chat');
+      expect(text).not.toContain("nothing was done");
     });
 
-    it("continues a turn the limit refused before it started, and says it never ran", async () => {
-      await stopped("chat", {
-        error: REFUSED,
-        guardianPrompt: "a".repeat(1500),
-        refusedByDashboard: true,
-      });
-      const { agent, runner } = backend();
-      start(runner);
+    it("says a turn the limit refused before it started did nothing", async () => {
+      await stopped("chat", { error: REFUSED, refusedByDashboard: true });
+      start();
       await clearAndSweep();
-      expect(agent.calls).toHaveLength(1);
-      // `turn_start` names the chat, so the runtime to resume is the chat's own.
-      expect(agent.calls[0]?.sessionId).toBe("chat-runtime");
-      const prompt = agent.calls[0]?.prompt ?? "";
-      expect(prompt).toContain("refused before it reached a model, so none of it was done");
-      expect(prompt).toContain("Treat it as the request to act on");
-      expect(prompt).toContain("cut at 1000 characters, so read the chat for its full text");
-      expect(prompt).toContain(`Refused request:\n${"a".repeat(1000)}`);
-      expect(prompt).not.toContain("a".repeat(1001));
-    });
-
-    it("continues a refusal that the session's own turn recorded, in that runtime", async () => {
-      await stopped("chat", { error: REFUSED });
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep();
-      expect(agent.calls.map((call) => call.sessionId)).toEqual(["chat-runtime"]);
-    });
-
-    it.each([
-      ["has no runtime session", { pin: null }],
-      ["has only a runtime session that is no longer active", { runtimeStatus: "completed" }],
-    ] as const)("leaves a stopped chat that %s, which cannot be resumed", async (_label, options) => {
-      await stopped("chat", { error: REFUSED, refusedByDashboard: true, ...options });
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(0);
-    });
-
-    it("takes the provider from the chat's model pin when every provider was limited", async () => {
-      const error = {
-        error: "All connected model providers have reached their usage limits",
-        code: "no_model_provider_available",
-        reason: "quota_exhausted",
-      };
-      await stopped("claude-chat", { error, pin: "anthropic", refusedByDashboard: true });
-      await stopped("codex-chat", { error, pin: "openai", refusedByDashboard: true });
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep("openai");
-      expect(agent.calls.map((call) => call.threadContext?.threadId)).toEqual(["codex-chat"]);
-      await clearAndSweep("anthropic");
-      expect(agent.calls.map((call) => call.threadContext?.threadId)).toEqual([
-        "codex-chat",
-        "claude-chat",
-      ]);
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect(noticeText()).toContain("nothing was done");
     });
 
     it("recognizes an older mid-run error that has only the provider's wording", async () => {
       await stopped("chat", { error: SESSION_LIMIT });
-      const { agent, runner } = backend();
-      start(runner);
+      start();
       await clearAndSweep();
-      expect(agent.calls).toHaveLength(1);
+      expect(notify).toHaveBeenCalledTimes(1);
     });
 
-    it("continues only chats on the provider that cleared", async () => {
+    it("lists only turns on the provider that cleared, in one notice for all of them", async () => {
       await stopped("claude-chat", { pin: "anthropic" });
+      await stopped("claude-chat-2", { pin: "anthropic" });
       await stopped("codex-chat", {
         pin: "openai",
         error: { error: "limit", code: "usage_limit" },
       });
       await stopped("unpinned-chat", { pin: null });
-      const { agent, runner } = backend();
-      start(runner);
+      start();
       await clearAndSweep("anthropic");
-      expect(agent.calls.map((call) => call.threadContext?.threadId)).toEqual(["claude-chat"]);
+      expect(notify).toHaveBeenCalledTimes(1);
+      const text = noticeText();
+      expect(text).toContain("id claude-chat ");
+      expect(text).toContain("id claude-chat-2 ");
+      expect(text).not.toContain("codex-chat");
+      expect(text).not.toContain("unpinned-chat");
+      await clearAndSweep("openai");
+      expect(notify).toHaveBeenCalledTimes(2);
+      expect(noticeText(1)).toContain("Model usage on openai");
+      expect(noticeText(1)).toContain("id codex-chat ");
     });
 
-    it("leaves a refusal on another provider than the chat's pin stopped", async () => {
-      // A resumed session runs on its pin, so a continuation would not run on the refused provider.
+    it("leaves a refusal on another provider than the chat's pin out", async () => {
       await stopped("chat", { error: REFUSED, pin: "openai" });
-      const { agent, runner } = backend();
-      start(runner);
+      start();
       await clearAndSweep("anthropic");
       await clearAndSweep("openai");
-      expect(agent.calls).toHaveLength(0);
-    });
-
-    it("continues a refusal that names a provider for a chat with no pin yet", async () => {
-      await stopped("chat", { error: REFUSED, unpinned: true, refusedByDashboard: true });
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep("openai");
-      expect(agent.calls).toHaveLength(0);
-      await clearAndSweep("anthropic");
-      expect(agent.calls).toHaveLength(1);
+      expect(notify).not.toHaveBeenCalled();
     });
 
     it.each([
@@ -411,578 +270,128 @@ describe("usage-limit continuation", () => {
       ["used-up credits", { error: "Rome credits are used up", code: "credits_used_up" }],
       ["an ambiguous limit", { error: "You've hit your limit" }],
       ["a transient failure", { error: "overloaded", code: "transient" }],
-      ["a single-model limit", { error: "Opus limit reached for this plan" }],
       ["a restart", { error: "Rome restarted while this was running. The task did not finish." }],
-      ["a plain error", { error: "something broke" }],
-    ])("leaves a turn stopped by %s alone", async (_label, error) => {
+    ])("leaves a turn stopped by %s out", async (_label, error) => {
       await stopped("chat", { error });
-      const { agent, runner } = backend();
-      start(runner);
+      start();
       await clearAndSweep("anthropic");
-      expect(agent.calls).toHaveLength(0);
+      expect(notify).not.toHaveBeenCalled();
     });
 
-    it("leaves a turn that is still running, or ended without an error, alone", async () => {
+    it("leaves a turn that is still running out", async () => {
       await stopped("running", { running: true });
-      const { agent, runner } = backend();
-      start(runner);
+      start();
       await clearAndSweep();
-      expect(agent.calls).toHaveLength(0);
+      expect(notify).not.toHaveBeenCalled();
     });
 
-    it("does not sweep while the provider is still limited", async () => {
-      await stopped();
-      claude.set(limitedUntil(NOW + HOUR));
-      const { agent, runner } = backend();
-      start(runner);
+    it("leaves a visitor's turn and a turn idle for a day out", async () => {
+      await stopped("visitor", { ownerKey: "visitor:someone" });
+      rs.setSystemTime(NOW - 30 * HOUR);
+      await stopped("idle", { runtimeActiveAt: new Date(NOW - 26 * HOUR) });
+      rs.setSystemTime(NOW);
+      start();
       await clearAndSweep();
-      expect(agent.calls).toHaveLength(0);
+      expect(notify).not.toHaveBeenCalled();
+    });
+
+    it("does not list a notice turn a limit stopped", async () => {
+      await stopped("chat", { guardianPrompt: "<restart_recovery>…" });
+      start();
+      await clearAndSweep();
+      expect(notify).not.toHaveBeenCalled();
     });
   });
 
   describe("when the limit ends", () => {
-    it("continues once the read after the stated end reports available", async () => {
+    it("notifies once the read after the stated end reports available", async () => {
       await stopped();
       claude.set(limitedUntil(NOW + 5 * HOUR));
       await accounts.refresh("anthropic");
-      const { agent, runner } = backend();
-      start(runner);
+      start();
 
       claude.set(available);
       await rs.advanceTimersByTimeAsync(5 * HOUR + RESET_GRACE_MS - 1);
-      expect(agent.calls).toHaveLength(0);
+      expect(notify).not.toHaveBeenCalled();
       await rs.advanceTimersByTimeAsync(1);
-      expect(agent.calls).toHaveLength(1);
+      expect(notify).toHaveBeenCalledTimes(1);
     });
 
-    it("sweeps at start for a limit that ended while Rome was down", async () => {
+    it("notifies at start for a limit that ended while Rome was down", async () => {
       await stopped();
       claude.set(limitedUntil(NOW - HOUR));
       await accounts.refresh("anthropic");
-      const { agent, runner } = backend();
-      start(runner);
+      start();
       await settle();
-      expect(agent.calls).toHaveLength(1);
+      expect(notify).toHaveBeenCalledTimes(1);
     });
 
-    it("sweeps after the first read of boot when it settles after start", async () => {
+    it("notifies after the first read of boot when it settles after start", async () => {
       await stopped();
-      const { agent, runner } = backend();
-      start(runner);
+      start();
       await settle();
-      expect(agent.calls).toHaveLength(0);
+      expect(notify).not.toHaveBeenCalled();
       await accounts.refresh();
       await settle();
-      expect(agent.calls).toHaveLength(1);
+      expect(notify).toHaveBeenCalledTimes(1);
     });
-  });
 
-  describe("eligibility", () => {
-    it("never continues a chat the guardian has written in since", async () => {
+    it("does not notify while the provider is still limited, or after a read that failed", async () => {
       await stopped();
-      await repo.recordUserInput("newer", "chat", "[]");
-      const { agent, runner } = backend();
-      start(runner);
+      claude.set(limitedUntil(NOW + HOUR));
+      start();
       await clearAndSweep();
-      expect(agent.calls).toHaveLength(0);
-    });
-
-    it("rechecks in the chat's queue, where a newer message may have arrived", async () => {
-      await stopped();
-      const { agent, runner } = backend({
-        beforeQueuedTask: async () => {
-          await repo.recordUserInput("newer", "chat", "[]");
-        },
-      });
-      start(runner);
+      expect(notify).not.toHaveBeenCalled();
+      claude.set(available);
+      claude.failReads(true);
       await clearAndSweep();
-      expect(agent.calls).toHaveLength(0);
-    });
-
-    it("continues only the chat's newest turn", async () => {
-      await stopped();
-      await repo.appendTraceBlocks({
-        messageId: "chat-newer-trace",
-        sessionId: "chat",
-        turnId: "newer",
-        startSeq: 0,
-        blocks: [
-          { type: "turn_start", turnId: "newer", sessionId: "chat-runtime" },
-          { type: "turn_end", turnId: "newer", status: "completed", durationMs: 1 },
-        ],
-      });
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(0);
-    });
-
-    it("continues the newest of two stopped turns, quoting its request", async () => {
-      await stopped("chat", { guardianPrompt: "First request" });
-      rs.setSystemTime(NOW + 1000);
-      await repo.recordUserInput(
-        "second-input",
-        "chat",
-        JSON.stringify([{ type: "text", content: "Second request" }]),
-      );
-      await repo.updateUserInput("chat", {
-        type: "input_status",
-        inputId: "second-input",
-        turnId: "second-turn",
-        state: "consumed",
-      });
-      await repo.appendTraceBlocks({
-        messageId: "chat-second-trace",
-        sessionId: "chat",
-        turnId: "second-turn",
-        startSeq: 0,
-        blocks: [
-          {
-            type: "turn_start",
-            turnId: "second-turn",
-            sessionId: "chat-runtime",
-            userPrompt: "Second request",
-          },
-          { type: "error", ...MID_RUN },
-          { type: "turn_end", turnId: "second-turn", status: "error", durationMs: 1 },
-        ] as never,
-      });
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(1);
-      expect(agent.calls[0]?.prompt).toContain("Second request");
-      expect(agent.calls[0]?.prompt).not.toContain("First request");
-    });
-
-    it.each([
-      // Stored times are whole seconds.
-      [DAY - 2000, 1],
-      [DAY, 0],
-      [30 * HOUR, 0],
-    ])("with the stop %i ms old, runs %i continuation(s)", async (age, expected) => {
-      rs.setSystemTime(NOW - age);
-      await stopped();
-      rs.setSystemTime(NOW);
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(expected);
-    });
-
-    it("continues a turn that began more than a day ago and was active since", async () => {
-      rs.setSystemTime(NOW - 30 * HOUR);
-      await stopped("chat", { runtimeActiveAt: new Date(NOW - HOUR) });
-      rs.setSystemTime(NOW);
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(1);
-    });
-
-    it("skips a turn that began more than a day ago and has been inactive since", async () => {
-      rs.setSystemTime(NOW - 30 * HOUR);
-      await stopped("chat", { runtimeActiveAt: new Date(NOW - 26 * HOUR) });
-      rs.setSystemTime(NOW);
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(0);
-    });
-
-    it("continues a system-started turn's chat only through a guardian prompt", async () => {
-      await stopped();
-      await db.db.run("DELETE FROM agent_turn_messages");
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(0);
-    });
-
-    it("continues the control chat, so each exclusion below is the change's doing", async () => {
-      await stopped();
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(1);
-    });
-
-    it.each([
-      { type: "routine" },
-      { type: "subagent" },
-      { type: "handoff" },
-      { type: "channel", chatPlatform: "telegram" },
-      { parentSessionId: "parent" },
-      { ownerKey: "visitor:someone" },
-      { triggerKind: "routine" },
-      { triggerKind: "concierge" },
-      { archivedAt: new Date() },
-      { chatId: null },
-    ])("leaves an out-of-scope chat stopped: %j", async (change) => {
-      await stopped();
-      await db.db.update(romeSessions).set(change).where(eq(romeSessions.id, "chat"));
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(0);
-    });
-
-    describe("a Concierge chat", () => {
-      const CONCIERGE = "core:concierge";
-      // The main chat has no owner. A topic chat records the guardian as its owner.
-      const chats = [
-        ["main chat", "concierge", undefined],
-        ["topic chat", "0192a8f0-topic", "guardian"],
-      ] as const;
-
-      it.each(
-        chats,
-      )("continues its %s when no provider move followed the limit", async (_label, id, ownerKey) => {
-        await stopped(id, { agent: CONCIERGE, ownerKey });
-        const { agent, runner } = backend();
-        start(runner);
-        await clearAndSweep();
-        expect(agent.calls).toHaveLength(1);
-        expect(agent.calls[0]).toMatchObject({
-          agentName: CONCIERGE,
-          sessionId: `${id}-runtime`,
-          initiatedBy: "system",
-          inputLabel: "Usage limit recovery",
-          threadContext: { channel: "webchat", threadId: id },
-        });
-      });
-
-      it("continues in the session that replaced the stopped turn's, which holds no pin yet", async () => {
-        await stopped("concierge", { agent: CONCIERGE, error: REFUSED, refusedByDashboard: true });
-        // A setup change renewed the session: the old one is completed, and its successor is active and unpinned.
-        await db.db
-          .update(sessions)
-          .set({ status: "completed", supersededBy: "concierge-renewed" })
-          .where(eq(sessions.id, "concierge-runtime"));
-        await db.db.insert(sessions).values({
-          id: "concierge-renewed",
-          agentName: CONCIERGE,
-          chatId: "concierge",
-          provider: null,
-          channelThreadKey: "webchat:concierge",
-          createdAt: new Date(),
-          lastActiveAt: new Date(),
-          status: "active",
-        });
-        const { agent, runner } = backend();
-        start(runner);
-        await clearAndSweep();
-        expect(agent.calls.map((call) => call.sessionId)).toEqual(["concierge-renewed"]);
-      });
-
-      it.each(
-        chats,
-      )("leaves its %s alone once a recovery turn follows the limit", async (_label, id, ownerKey) => {
-        await stopped(id, { agent: CONCIERGE, ownerKey });
-        // Its provider move ran a recovery turn, which is now the chat's newest.
-        rs.setSystemTime(NOW + 1000);
-        await repo.appendTraceBlocks({
-          messageId: `${id}-recovery-trace`,
-          sessionId: id,
-          turnId: "recovery-turn",
-          startSeq: 0,
-          blocks: [
-            { type: "turn_start", turnId: "recovery-turn", sessionId: `${id}-runtime` },
-            { type: "turn_end", turnId: "recovery-turn", status: "completed", durationMs: 1 },
-          ],
-        });
-        const { agent, runner } = backend();
-        start(runner);
-        await clearAndSweep();
-        expect(agent.calls).toHaveLength(0);
-      });
-
-      it("leaves the wording it alone treats as a quota failure to its own recovery", async () => {
-        await stopped("concierge", { agent: CONCIERGE, error: { error: "You've hit your limit" } });
-        const { agent, runner } = backend();
-        start(runner);
-        await clearAndSweep();
-        expect(agent.calls).toHaveLength(0);
-      });
-
-      it("leaves a visitor's Concierge chat alone", async () => {
-        await stopped("0192a8f0-visitor", { agent: CONCIERGE, ownerKey: "visitor:someone" });
-        const { agent, runner } = backend();
-        start(runner);
-        await clearAndSweep();
-        expect(agent.calls).toHaveLength(0);
-      });
+      expect(notify).not.toHaveBeenCalled();
     });
   });
 
   describe("bounds", () => {
-    it("continues each stop once however often the account is read", async () => {
+    it("lists each stopped turn once however often the account is read", async () => {
       await stopped();
-      const { agent, runner } = backend();
-      start(runner);
+      start();
       await clearAndSweep();
       await clearAndSweep();
       await clearAndSweep();
-      expect(agent.calls).toHaveLength(1);
+      expect(notify).toHaveBeenCalledTimes(1);
     });
 
-    it("never continues a recovery turn, even through a new process", async () => {
-      await stopped();
-      const { agent, runner } = backend();
-      start(runner);
+    it("sends one notice per reset: a later reset lists only turns stopped since", async () => {
+      await stopped("first");
+      start();
       await clearAndSweep();
-      const recovery = agent.calls[0]!;
-      // The recovery turn hit the limit again: its trace is the chat's newest.
-      rs.setSystemTime(NOW + 1000);
-      await repo.appendTraceBlocks({
-        messageId: "chat-recovery-trace",
-        sessionId: "chat",
-        turnId: "recovery-turn",
-        startSeq: 0,
-        blocks: [
-          {
-            type: "turn_start",
-            turnId: "recovery-turn",
-            sessionId: "chat-runtime",
-            userPrompt: recovery.prompt,
-          },
-          { type: "error", ...MID_RUN },
-          { type: "turn_end", turnId: "recovery-turn", status: "error", durationMs: 1 },
-        ] as never,
+      expect(notify).toHaveBeenCalledTimes(1);
+      claude.set(limitedUntil(NOW + HOUR));
+      await clearAndSweep();
+      await stopped("second");
+      claude.set(available);
+      await clearAndSweep();
+      expect(notify).toHaveBeenCalledTimes(2);
+      expect(noticeText(1)).toContain("id second ");
+      expect(noticeText(1)).not.toContain("id first ");
+    });
+
+    it("never fails a read because the notice could not be sent", async () => {
+      notify.mockImplementation(async () => {
+        throw new Error("no chat");
       });
+      await stopped();
+      start();
+      await clearAndSweep();
+      expect(notify).toHaveBeenCalledTimes(1);
+      await clearAndSweep();
+      expect(notify).toHaveBeenCalledTimes(1);
+    });
+
+    it("ignores later reads once stopped", async () => {
+      await stopped();
+      start();
       stop?.();
-      const next = backend();
-      start(next.runner);
       await clearAndSweep();
-      expect(next.agent.calls).toHaveLength(0);
-    });
-
-    it("never continues a turn whose own prompt carries the marker", async () => {
-      await stopped();
-      await db.db.run(
-        "UPDATE rome_agent_trace_blocks SET content = json_set(content, '$.userPrompt', '<usage_limit_recovery>x') WHERE json_extract(content, '$.type') = 'turn_start'",
-      );
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(0);
-    });
-
-    it("leaves a continuation a restart cut off to the restart notice", async () => {
-      await stopped();
-      const { agent, runner } = backend();
-      start(runner);
-      await clearAndSweep();
-      stop?.();
-      rs.setSystemTime(NOW + 1000);
-      await repo.appendTraceBlocks({
-        messageId: "chat-recovery-trace",
-        sessionId: "chat",
-        turnId: "recovery-turn",
-        startSeq: 0,
-        blocks: [
-          {
-            type: "turn_start",
-            turnId: "recovery-turn",
-            sessionId: "chat-runtime",
-            userPrompt: agent.calls[0]!.prompt,
-          },
-        ],
-      });
-      const cutOff = await repo.endInterruptedTurns(DAY);
-      expect(cutOff.map((turn) => turn.turnId)).toEqual(["recovery-turn"]);
-      const restart = backend();
-      await continueInterruptedTurns(cutOff, repo, restart.runner);
-      expect(restart.agent.calls).toHaveLength(0);
-    });
-
-    it("runs one chat at a time and a request during a sweep never starts a duplicate", async () => {
-      await stopped("one");
-      await stopped("two");
-      let active = 0;
-      let maxActive = 0;
-      const release: Array<() => void> = [];
-      const runAndReport = rs.fn(async () => {
-        active++;
-        maxActive = Math.max(maxActive, active);
-        await new Promise<void>((resolve) => release.push(resolve));
-        active--;
-        return "completed" as const;
-      });
-      start({ runAndReport });
-      await clearAndSweep();
-      expect(runAndReport).toHaveBeenCalledTimes(1);
-      // Reads that settle mid-sweep, for either provider.
-      await clearAndSweep();
-      await clearAndSweep("openai");
-      expect(runAndReport).toHaveBeenCalledTimes(1);
-
-      release.shift()?.();
-      await settle();
-      expect(runAndReport).toHaveBeenCalledTimes(2);
-      release.shift()?.();
-      await settle();
-      await clearAndSweep();
-      expect(runAndReport).toHaveBeenCalledTimes(2);
-      expect(maxActive).toBe(1);
-    });
-
-    it("stops the sweep when a continuation hits the limit again, before the next chat", async () => {
-      await stopped("one");
-      rs.setSystemTime(NOW + 1000);
-      await stopped("two");
-      const calls: string[] = [];
-      // As a real turn does: the provider refuses, the account is told, and its read has not settled.
-      const runAndReport = rs.fn(async (params: { threadId: string }) => {
-        calls.push(params.threadId);
-        claude.refused(limitedUntil(NOW + 6 * HOUR));
-        return "failed" as const;
-      });
-      start({ runAndReport });
-      await accounts.refresh("anthropic");
-      await rs.advanceTimersByTimeAsync(100);
-      expect(calls).toEqual(["one"]);
-
-      claude.settleReads();
-      claude.set(available);
-      await rs.advanceTimersByTimeAsync(6 * HOUR + RESET_GRACE_MS);
-      expect(calls).toEqual(["one", "two"]);
-    });
-
-    it("reads the account only after a continuation that failed", async () => {
-      await stopped("one");
-      rs.setSystemTime(NOW + 1000);
-      await stopped("two");
-      const refresh = rs.fn(accounts.refresh);
-      const outcomes = ["completed", "failed"] as const;
-      const runAndReport = rs.fn(async () => outcomes[runAndReport.mock.calls.length - 1]!);
-      start({ runAndReport }, { read: accounts.read, onChanged: accounts.onChanged, refresh });
-      await accounts.refresh("anthropic");
-      await settle();
-      expect(runAndReport).toHaveBeenCalledTimes(2);
-      expect(refresh).toHaveBeenCalledTimes(1);
-      expect(refresh).toHaveBeenCalledWith("anthropic");
-    });
-
-    it("ends the sweep when the read after a failed continuation fails, and a later read goes on", async () => {
-      await stopped("one");
-      rs.setSystemTime(NOW + 1000);
-      await stopped("two");
-      const calls: string[] = [];
-      const runAndReport = rs.fn(async (params: { threadId: string }) => {
-        calls.push(params.threadId);
-        // The turn hit the limit again, but the account cannot be read to say so.
-        claude.failReads(true);
-        claude.refused(limitedUntil(NOW + 6 * HOUR));
-        return "failed" as const;
-      });
-      start({ runAndReport });
-      await accounts.refresh("anthropic");
-      await rs.advanceTimersByTimeAsync(100);
-      // The next chat is not tried on the old answer, and the failed read starts no sweep of its own.
-      expect(accounts.read().anthropic?.state).toBe("available");
-      expect(calls).toEqual(["one"]);
-
-      claude.failReads(false);
-      claude.settleReads();
-      claude.set(available);
-      await accounts.refresh("anthropic");
-      await settle();
-      expect(calls).toEqual(["one", "two"]);
-    });
-
-    it("keeps a sweep queued by a read during a failed continuation from going on after a failed read", async () => {
-      await stopped("one");
-      rs.setSystemTime(NOW + 1000);
-      await stopped("two");
-      const calls: string[] = [];
-      const runAndReport = rs.fn(async (params: { threadId: string }) => {
-        calls.push(params.threadId);
-        // A read that works and shows the provider available lands during the turn, which queues a sweep.
-        await accounts.refresh("anthropic");
-        // The turn then hits the limit again, and the account cannot be read to say so.
-        claude.failReads(true);
-        claude.refused(limitedUntil(NOW + 6 * HOUR));
-        return "failed" as const;
-      });
-      start({ runAndReport });
-      await accounts.refresh("anthropic");
-      await rs.advanceTimersByTimeAsync(100);
-      expect(calls).toEqual(["one"]);
-
-      claude.failReads(false);
-      claude.settleReads();
-      claude.set(available);
-      await accounts.refresh("anthropic");
-      await settle();
-      expect(calls).toEqual(["one", "two"]);
-    });
-
-    it("tries a continuation again at the next reset when it was dropped, not run", async () => {
-      await stopped();
-      let limitedOnce = false;
-      const { agent, runner } = backend({
-        beforeQueuedTask: async () => {
-          if (limitedOnce) return;
-          limitedOnce = true;
-          // The chat's queue was long, and the provider is limited again by its turn.
-          claude.set(limitedUntil(NOW + 2 * HOUR));
-          await accounts.refresh("anthropic");
-        },
-      });
-      start(runner);
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(0);
-
-      claude.set(available);
-      await rs.advanceTimersByTimeAsync(2 * HOUR + RESET_GRACE_MS);
-      expect(agent.calls).toHaveLength(1);
-    });
-
-    it("does not retry a continuation whose dispatch failed", async () => {
-      await stopped();
-      const runAndReport = rs.fn(async () => {
-        throw new Error("dispatch failed");
-      });
-      start({ runAndReport });
-      await clearAndSweep();
-      await clearAndSweep();
-      expect(runAndReport).toHaveBeenCalledTimes(1);
-    });
-  });
-
-  describe("shutdown", () => {
-    it("ignores later reads", async () => {
-      await stopped();
-      const { agent, runner } = backend();
-      start(runner)();
-      await clearAndSweep();
-      expect(agent.calls).toHaveLength(0);
-    });
-  });
-
-  describe("the prompt", () => {
-    it("describes availability without claiming the subscription limit reset", () => {
-      const prompt = usageLimitContinuationPrompt("Continue the work", false);
-      expect(prompt).toContain("the provider is available again");
-      expect(prompt).not.toContain("the limit has since reset");
-    });
-
-    it("omits the excerpt, and the cut notice, when no request is known", () => {
-      const prompt = usageLimitContinuationPrompt("", false);
-      expect(prompt).not.toContain("request (may");
-      expect(prompt).not.toContain("cut at");
-      expect(prompt.endsWith("</usage_limit_recovery>")).toBe(true);
-    });
-
-    it.each([
-      [999, false],
-      [1000, true],
-    ])("with a %i character request, says the request is cut: %s", (length, cut) => {
-      const prompt = usageLimitContinuationPrompt("a".repeat(length), false);
-      expect(prompt.includes("cut at 1000 characters, so read the chat for its full text")).toBe(
-        cut,
-      );
+      expect(notify).not.toHaveBeenCalled();
     });
   });
 });

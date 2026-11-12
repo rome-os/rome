@@ -23,6 +23,8 @@ actions:
   - core:concierge_unfollow
   - core:concierge_following_list
   - core:concierge_following_configure
+  # Continues chats a restart or a usage limit cut off (see the restart notice).
+  - system:send_user_message
 policy:
   finalText: private
   autoTitle: false
