@@ -458,8 +458,15 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
       ).unref?.() ?? null;
   }
 
+  // What each closed session's thread had read of the sticky headers, so a
+  // reopen that resumes the thread does not send them again. In memory: a
+  // restart sends them once more.
+  const sentHeaders = new Map<string, SentHeaders>();
   const onSessionClosed = (sess: AgentSessionImpl) => {
     sessions.delete(keyOf(sess.key));
+    if (sess.readHeaders.size === 0) return;
+    if (sentHeaders.size >= 1_000) sentHeaders.clear();
+    sentHeaders.set(sess.sessionId, sess.readHeaders);
   };
 
   // A renewal for a full context, by key, from the turn end that found the
@@ -596,6 +603,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
         keepAlive,
         onClosed: onSessionClosed,
         onContextFull,
+        sentHeaders,
         isSubagent,
         turns,
       });
@@ -705,6 +713,8 @@ interface OpenOptions {
   onClosed: (s: AgentSessionImpl) => void;
   /** A turn of the session ended with its context past the handoff limit. */
   onContextFull?: (s: AgentSessionImpl) => void;
+  /** The header blocks each session's thread had read when it last closed, by session id. */
+  sentHeaders?: ReadonlyMap<string, SentHeaders>;
   isSubagent: boolean;
   turns: TurnsById;
 }
@@ -1758,6 +1768,8 @@ async function openSession(
         ? deps.handoffs?.contextLimitTokens
         : undefined,
     onContextFull: opts.onContextFull ? () => opts.onContextFull?.(impl) : undefined,
+    // A thread this open resumes already read what it read before the close.
+    sentHeaders: threadResumed ? opts.sentHeaders?.get(sessionId) : undefined,
   });
 
   impl.startModelSessionEvents();
@@ -1827,6 +1839,8 @@ interface ImplArgs {
   /** The context size past which a turn's end calls `onContextFull`. */
   contextLimitTokens?: number;
   onContextFull?: () => void;
+  /** The header blocks the resumed thread already read. */
+  sentHeaders?: SentHeaders;
 }
 
 interface TurnSink {
@@ -2152,6 +2166,12 @@ class AgentSessionImpl implements AgentSession {
     this.onClosed = args.onClosed;
     this.contextLimitTokens = args.contextLimitTokens;
     this.onContextFull = args.onContextFull;
+    if (args.sentHeaders) this.sentHeaders = args.sentHeaders;
+  }
+
+  /** The header blocks the current thread has read, by name. */
+  get readHeaders(): SentHeaders {
+    return this.sentHeaders;
   }
 
   /** The chat the session serves, when it serves one. */
