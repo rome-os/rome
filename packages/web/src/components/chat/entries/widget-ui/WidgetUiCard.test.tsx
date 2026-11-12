@@ -158,4 +158,51 @@ describe("a widget described as data", () => {
     expect(await screen.findAllByText(/Could not show this card/)).toHaveLength(3);
     expect(screen.getByText("Still here")).toBeTruthy();
   });
+
+  it("checks a stored card again before it draws or calls the app", async () => {
+    const fetch = rs.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({}));
+    const button = (name: string) => ({
+      components: [
+        { id: "root", component: "Button", child: "l", action: { event: { name } } },
+        { id: "l", component: "Text", text: "Go" },
+      ],
+    });
+    render(
+      <>
+        {renderFlatEntries(
+          parseEntries(
+            JSON.stringify([
+              {
+                type: "widget",
+                toolUseId: "a",
+                appId: "meals",
+                ui: ui,
+                bind: { "/today": "../../settings" },
+                text: "a",
+              },
+              {
+                type: "widget",
+                toolUseId: "b",
+                appId: "meals",
+                ui: button("../../approvals/x/approve"),
+                text: "b",
+              },
+              {
+                type: "widget",
+                toolUseId: "c",
+                appId: "..",
+                ui: ui,
+                bind: { "/today": "days/1" },
+                text: "c",
+              },
+            ]),
+          ),
+          { sessionId: "s1" },
+        )}
+      </>,
+    );
+    expect(await screen.findAllByText(/Could not show this card/)).toHaveLength(3);
+    expect(screen.queryByRole("button", { name: "Go" })).toBeNull();
+    expect(fetch).not.toHaveBeenCalled();
+  });
 });
