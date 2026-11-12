@@ -192,13 +192,21 @@ describe("ChatImage", () => {
     expect(container.querySelector("img")).toBeNull();
   });
 
-  it("shows a line of text when a video fails to load", () => {
+  it("keeps the file reachable as a chip when a video or audio file cannot be played", () => {
+    const id = "0123456789abcdef0123456789abcdef";
     const { container } = render(
-      <Message text="![Clip](/api/assets/0123456789abcdef0123456789abcdef.webm)" />,
+      <Message text={`![Clip](/api/assets/${id}.webm)\n\n![Song](/api/assets/${id}.mp3)`} />,
     );
     fireEvent.error(container.querySelector("video") as HTMLVideoElement);
-    expect(screen.getByText("Media not available")).toBeTruthy();
+    fireEvent.error(container.querySelector("audio") as HTMLAudioElement);
+
     expect(container.querySelector("video")).toBeNull();
+    expect(container.querySelector("audio")).toBeNull();
+    const clip = screen.getByText("Clip").closest("a") as HTMLAnchorElement;
+    expect(clip.getAttribute("href")).toBe(`/api/assets/${id}.webm`);
+    expect(clip.getAttribute("download")).toBe("Clip");
+    const song = screen.getByText("Song").closest("a") as HTMLAnchorElement;
+    expect(song.getAttribute("href")).toBe(`/api/assets/${id}.mp3`);
   });
 
   it.each([

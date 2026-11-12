@@ -69,8 +69,10 @@ export function assetsRoutes(): Hono {
       return new Response(null, { headers, status: 304 });
     }
 
+    // A download carries no filename, so the name the page asks for (the chip's
+    // `download` attribute) decides what the file is saved as.
     const disposition = (fileName: string) =>
-      `${inline ? "inline" : "attachment"}; filename="${fileName}"`;
+      inline ? `inline; filename="${fileName}"` : "attachment";
     const baseHeaders: Record<string, string> = {
       ...headers,
       "Accept-Ranges": "bytes",

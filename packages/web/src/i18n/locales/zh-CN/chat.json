@@ -5,8 +5,7 @@
   "markdown": {
     "code": "代码",
     "mermaid": "Mermaid 图表",
-    "imageNotAvailable": "图片无法显示",
-    "mediaNotAvailable": "媒体无法播放"
+    "imageNotAvailable": "图片无法显示"
   },
   "title": "Rome",
   "concierge": {

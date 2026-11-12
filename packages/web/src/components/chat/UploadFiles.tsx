@@ -19,12 +19,7 @@ export function UploadFiles({ uploads }: { uploads: UploadLink[] }) {
             className="max-h-40 max-w-48"
           />
         ) : (
-          <FileChip
-            key={upload.url}
-            href={upload.url}
-            label={upload.label}
-            download={upload.kind !== "pdf"}
-          />
+          <FileChip key={upload.url} href={upload.url} label={upload.label} />
         ),
       )}
     </div>

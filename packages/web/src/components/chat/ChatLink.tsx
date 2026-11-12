@@ -153,7 +153,7 @@ function AssetLink({ children, href }: MarkdownLinkProps) {
   if (asset.kind === "video" || asset.kind === "audio") {
     return <ChatMedia src={asset.path} kind={asset.kind} label={label} />;
   }
-  return <FileChip href={href} label={label} download={asset.kind !== "pdf"} />;
+  return <FileChip href={href} label={label} />;
 }
 
 function linkText(children: ReactNode): string {

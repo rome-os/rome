@@ -414,15 +414,14 @@ describe("ChatLink", () => {
     expect(store.get("followTargetPath")).toBeUndefined();
   });
 
-  it("opens a pdf in a new tab without downloading it", () => {
+  it("saves a pdf like any other file, so the desktop session handles it", () => {
     render(
       <MemoryRouter>
         <ChatLink href={`/api/assets/${ID}.pdf`}>spec.pdf</ChatLink>
       </MemoryRouter>,
     );
     const link = screen.getByText("spec.pdf").closest("a") as HTMLAnchorElement;
-    expect(link.hasAttribute("download")).toBe(false);
-    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("download")).toBe("spec.pdf");
   });
 
   it("plays a linked video or audio file in place", () => {

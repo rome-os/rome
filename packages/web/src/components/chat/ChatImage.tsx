@@ -6,6 +6,7 @@ import "./composer/pending-image-preview.css";
 import { useDesktop } from "@/hooks/use-desktop";
 import { mediaKindOfSrc } from "@/lib/asset-links";
 import { cn } from "@/lib/utils";
+import { FileChip } from "./FileChip";
 import { ImagePreviewContent, type PreviewContentProps } from "./composer/ImagePreviewContent";
 
 const NoGlyph = () => null;
@@ -43,8 +44,9 @@ type ChatImageProps = ComponentPropsWithoutRef<"img"> & {
 
 /**
  * A video or audio file in a chat message, with the browser's own controls.
- * Only its metadata loads until it plays. One that fails to load shows a line
- * of text, as a picture does.
+ * Only its metadata loads until it plays. One that cannot be played, because
+ * of a codec the browser lacks or a failed load, becomes a chip for the file,
+ * so it can still be saved.
  */
 export function ChatMedia({
   src,
@@ -55,14 +57,12 @@ export function ChatMedia({
   kind: "video" | "audio";
   label?: string;
 }) {
-  const { t } = useTranslation("chat");
   const [failed, setFailed] = useState(false);
+  const name = label || src.split(/[?#]/)[0]?.split("/").at(-1) || src;
   return (
     <div data-streamdown="media-wrapper" className="my-4 inline-block max-w-full">
       {failed ? (
-        <span title={label} className="text-ui italic text-muted-foreground">
-          {t("markdown.mediaNotAvailable")}
-        </span>
+        <FileChip href={src} label={name} />
       ) : kind === "video" ? (
         <video
           controls

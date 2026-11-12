@@ -3,18 +3,16 @@ import { cn } from "@/lib/utils";
 
 /**
  * A file shown in chat as a compact chip: a link to the stored file that saves
- * it under its own name (`download`) or, for a pdf, opens it in a new tab.
+ * it under its own name (`download`). Every file is saved, a pdf too, so the
+ * desktop app's authenticated session handles it like any other file.
  */
 export function FileChip({
   href,
   label,
-  download = true,
   className,
 }: {
   href: string;
   label: string;
-  /** False opens the file in a new tab instead of saving it. */
-  download?: boolean;
   className?: string;
 }) {
   return (
@@ -22,7 +20,7 @@ export function FileChip({
       href={href}
       target="_blank"
       rel="noopener"
-      {...(download ? { download: label } : {})}
+      download={label}
       className={cn(
         "inline-flex max-w-full items-center gap-2 rounded-8 border border-border bg-muted px-2 py-1 align-middle text-ui text-foreground !no-underline outline-1 outline-offset-0 outline-transparent hover:border-border-strong focus-visible:outline-solid focus-visible:outline-ring/50",
         className,

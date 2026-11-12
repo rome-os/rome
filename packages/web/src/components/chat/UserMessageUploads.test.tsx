@@ -58,7 +58,7 @@ describe("a guardian message with uploads", () => {
     const chip = screen.getByText("budget.xlsx").closest("a") as HTMLAnchorElement;
     expect(chip.getAttribute("href")).toBe(`/api/assets/${ID}.xlsx`);
     expect(chip.getAttribute("download")).toBe("budget.xlsx");
-    expect(screen.getByText("spec.pdf").closest("a")?.hasAttribute("download")).toBe(false);
+    expect(screen.getByText("spec.pdf").closest("a")?.getAttribute("download")).toBe("spec.pdf");
     // The upload lines are not left behind as text.
     expect(container.textContent).not.toContain("File 1");
     expect(container.querySelectorAll("li")).toHaveLength(0);

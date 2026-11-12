@@ -147,8 +147,9 @@ describe("GET /api/assets/:name", () => {
 
       expect(res.status).toBe(200);
       expect(res.headers.get("Content-Type")?.startsWith(type)).toBe(true);
+      // A download names no file, so the page's `download` name wins.
       expect(res.headers.get("Content-Disposition")).toBe(
-        `${disposition}; filename="${stored.fileName}"`,
+        disposition === "inline" ? `inline; filename="${stored.fileName}"` : "attachment",
       );
       expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     });
