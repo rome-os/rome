@@ -1,11 +1,5 @@
 import { describe, it, expect, rs } from "@rstest/core";
 import { chatWorkerCalls, type ChatWorkerCallsDeps } from "./chat-calls.js";
-import { createChannelsService } from "./accounts-service.js";
-import { conciergeChatGuard } from "../concierge/automated-input.js";
-import { createTestDb } from "../test/db.js";
-import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
-import { webchatChannel } from "../webchat/dashboard-account.js";
-import { isConciergeChat } from "../webchat/privacy.js";
 
 function makeCalls(overrides: Partial<ChatWorkerCallsDeps> = {}) {
   return chatWorkerCalls({
@@ -55,91 +49,5 @@ describe("channels.send", () => {
     );
 
     expect(send).toHaveBeenCalledWith("webchat", "c1", { text: "hi" });
-  });
-});
-
-describe("channels.send into a Concierge chat", () => {
-  const setup = async () => {
-    const testDb = createTestDb();
-    const repo = new ChatsWebChatRepository(testDb.db);
-    await repo.createSession(
-      "concierge",
-      "Main chat",
-      undefined,
-      undefined,
-      null,
-      null,
-      "core:concierge",
-    );
-    await repo.createSession("plain", "Plans");
-    const runSystemTurn = rs.fn(async () => true);
-    const channelsService = createChannelsService({
-      channels: () => [],
-      own: [webchatChannel(repo)],
-      registry: { list: () => [], find: () => [] } as never,
-      channelOf: () => null,
-    });
-    const calls = chatWorkerCalls({
-      channelsService,
-      chatSettings: {} as never,
-      agentNames: {} as never,
-      intoConciergeChat: conciergeChatGuard({
-        isConciergeChat: async (chatId) => isConciergeChat(await repo.getSession(chatId)),
-        senderOf: async (agentName) => ({
-          sourceType: agentName ? "agent" : null,
-          name: agentName === "core:main" ? "Milo" : null,
-        }),
-        runSystemTurn,
-      }),
-    });
-    // A task chat's main agent calling system:send_message.
-    const send = (chatId: string, agentName = "core:main") =>
-      calls["channels.send"](
-        { channel: "webchat", chatId, message: { text: "Here is the full report." } },
-        {
-          callerActionContext: {
-            // The Concierge sends from its own chat, the main agent from a task chat.
-            channelContext: {
-              channel: "webchat",
-              threadId: agentName === "core:concierge" ? "concierge" : "task-1",
-            },
-            agentName,
-          },
-        },
-      );
-    return { testDb, repo, runSystemTurn, send };
-  };
-
-  it("wakes the Concierge with a task chat's send, and writes no line for it", async () => {
-    const { testDb, repo, runSystemTurn, send } = await setup();
-    try {
-      expect(await send("concierge")).toEqual({ chatId: "concierge" });
-      expect(await repo.getMessages("concierge")).toEqual([]);
-      expect(runSystemTurn).toHaveBeenCalledWith(
-        "concierge",
-        '<automated_input source="agent" name="Milo">\nHere is the full report.\n</automated_input>',
-        {
-          quiet: true,
-          inputLabel: "Agent · Milo",
-          inputSource: { type: "agent", name: "Milo" },
-          pushLevel: "active",
-        },
-      );
-    } finally {
-      testDb.close();
-    }
-  });
-
-  it("leaves a common chat's send, and the Concierge's own, a line in the chat", async () => {
-    const { testDb, repo, runSystemTurn, send } = await setup();
-    try {
-      await send("plain");
-      await send("concierge", "core:concierge");
-      expect(runSystemTurn).not.toHaveBeenCalled();
-      expect((await repo.getMessages("plain")).map((row) => row.role)).toEqual(["assistant"]);
-      expect((await repo.getMessages("concierge")).map((row) => row.role)).toEqual(["assistant"]);
-    } finally {
-      testDb.close();
-    }
   });
 });

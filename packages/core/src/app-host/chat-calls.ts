@@ -3,13 +3,11 @@
 // the worker reaches them through these calls.
 
 import type {
-  Account,
   ChatId,
   ChatRef,
   ChatSettingsControl,
   ChannelsService,
   ListChatSettingsInput,
-  MessageReceipt,
   OutgoingMessage,
   ResetChatSettingsInput,
   ThreadContext,
@@ -58,11 +56,7 @@ const ChatSettingsInput = z.custom<
 
 /** The action behind a worker's call, as the worker boundary captured it. */
 export interface WorkerCaller {
-  callerActionContext?: {
-    actor?: SessionActor;
-    channelContext?: ThreadContext;
-    agentName?: string;
-  };
+  callerActionContext?: { actor?: SessionActor; channelContext?: ThreadContext };
 }
 
 export interface ChatWorkerCallsDeps {
@@ -71,16 +65,6 @@ export interface ChatWorkerCallsDeps {
   chatSettings: ChatSettingsControl;
   /** How `system:send_message` turns an agent's name into its id. */
   agentNames: AgentNamesService;
-  /**
-   * Takes a send into a Concierge chat that the Concierge did not make, and
-   * answers its receipt; null lets the send go on. Absent, every send goes on.
-   */
-  intoConciergeChat?: (
-    target: Account | string,
-    chatId: string,
-    message: OutgoingMessage,
-    agentName: string | undefined,
-  ) => Promise<MessageReceipt | null>;
 }
 
 /** The chat calls an app's worker makes, keyed by method name. */
@@ -96,15 +80,6 @@ export function chatWorkerCalls(
         SendParams,
         params,
       );
-      // Only the Concierge writes in a Concierge chat: another agent's or an
-      // app's send there wakes it instead.
-      const taken = await deps.intoConciergeChat?.(
-        channel,
-        chatId,
-        message,
-        caller?.callerActionContext?.agentName,
-      );
-      if (taken) return taken;
       // The dashboard chat writes only where the calling action's person may.
       return await webchatCaller.run(dashboardCallerOf(caller?.callerActionContext), () =>
         channelsService.send(channel, chatId as ChatId, message),
