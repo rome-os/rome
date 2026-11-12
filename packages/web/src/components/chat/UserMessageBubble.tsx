@@ -1,4 +1,5 @@
 import { CircleAlert, CircleHelp, CircleSlash } from "lucide-react";
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
@@ -18,11 +19,14 @@ export function UserMessageBubble({
   text,
   own,
   className,
+  badge,
 }: {
   msg: ChatMessage;
   text: string;
   own: boolean;
   className?: string;
+  /** Sits on the bubble's own surface, positioned against it, as a status reaction does. Pass it, null included, to keep the bubble its anchor. */
+  badge?: ReactNode;
 }) {
   const { t } = useTranslation("chat");
   const undelivered =
@@ -41,6 +45,8 @@ export function UserMessageBubble({
         tone={undelivered ? "muted" : own ? "sent" : "received"}
         className={cn(
           "transition-colors motion-reduce:transition-none",
+          // The badge is placed against the bubble, and takes no room of its own.
+          badge !== undefined && "relative",
           undelivered && "flex items-start gap-2",
           // A pending bubble is the normal bubble, breathing until the agent
           // takes the input in (see `.rome-bubble-pending` in globals.css).
@@ -61,11 +67,12 @@ export function UserMessageBubble({
           <CircleSlash className="mt-1 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
         ) : null}
         <div className="min-w-0">
-          {quote ? <QuotedReply part={quote} /> : null}
+          {quote ? <QuotedReply part={quote} hostId={msg.id} /> : null}
           <Markdown className="min-w-0 text-foreground" compact={false} preserveSoftBreaks>
             {text}
           </Markdown>
         </div>
+        {badge}
       </ChatBubble>
       <span className="sr-only" role="status">
         {statusLabel}

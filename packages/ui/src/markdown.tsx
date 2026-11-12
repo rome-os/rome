@@ -169,6 +169,7 @@ export interface MarkdownProps {
   preserveSoftBreaks?: boolean;
   inlineCodeComponent?: Components["inlineCode"];
   linkComponent?: Components["a"];
+  imageComponent?: Components["img"];
   preComponent?: Components["pre"];
   theme?: MarkdownTheme;
   controls?: StreamdownProps["controls"];
@@ -529,6 +530,7 @@ function MarkdownImpl({
   preserveSoftBreaks = false,
   inlineCodeComponent,
   linkComponent,
+  imageComponent,
   preComponent,
   theme,
   controls,
@@ -572,9 +574,10 @@ function MarkdownImpl({
       h5: MarkdownHeading5,
       h6: MarkdownHeading6,
       ...(inlineCodeComponent ? { inlineCode: inlineCodeComponent } : {}),
+      ...(imageComponent ? { img: imageComponent } : {}),
       ...(preComponent ? { pre: preComponent } : {}),
     }),
-    [inlineCodeComponent, linkComponent, preComponent],
+    [imageComponent, inlineCodeComponent, linkComponent, preComponent],
   );
 
   const wrapperClass = cn(

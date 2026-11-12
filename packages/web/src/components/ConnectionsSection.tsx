@@ -1,17 +1,17 @@
 import { Measure, Section } from "@rome-os/ui/page";
 import { ListCollection } from "@rome-os/ui/layout-list";
-import { useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { CircleAlert, Plus, RefreshCw, Search, Unplug, X } from "lucide-react";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import {
-  ComposioServiceDialog,
+  ComposioServicePane,
   ComposioServiceRowButton,
   ComposioSignInBanner,
   useComposioConnect,
   useComposioServices,
 } from "@/components/connections/composio-services";
-import { ConnectionDetailDialog } from "@/components/ConnectionDetail";
+import { ConnectionDetailPane } from "@/components/ConnectionDetail";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { EmptyState, EmptyStateIcon, EmptyStateTitle } from "@/components/ui/empty-state";
@@ -40,13 +40,13 @@ const CARD = "h-auto w-full bg-surface py-2 text-left hover:bg-accent";
  *
  * Connected lists every service that gives Rome access, Rome's own and
  * Composio's, attention first; each card shows its status and opens its
- * detail. Add lists the rest; each card opens its connect ceremony, and a
- * Composio service starts its authorization in a new tab. Composio services
- * need the Composio account first, so while it is signed out the Add grid
- * leads with its sign-in and those cards stay disabled.
+ * detail as a pane in place of the grids. Add lists the rest; each card opens
+ * its connect ceremony, and a Composio service starts its authorization in a
+ * new tab. Composio services need the Composio account first, so while it is
+ * signed out the Add grid leads with its sign-in and those cards stay disabled.
  *
  * Search matches names in both lists, and also what an unconnected service
- * does, which its tile shows on hover and its dialog states.
+ * does, which its tile shows on hover and its detail states.
  */
 export function ConnectionsSection({
   connections,
@@ -69,8 +69,8 @@ export function ConnectionsSection({
   const { t } = useTranslation("settings");
   const cards = buildConnectionCards(connections, composio);
 
-  // Which row's detail dialog is open (null = closed). Track the route, not
-  // the card object, so a refresh mid-dialog re-derives the LIVE card.
+  // Which card's detail pane is open (null = closed). Track the route, not
+  // the card object, so a refresh with the pane open re-derives the LIVE card.
   const [selectedRoute, setSelectedRoute] = useState<string | null>(null);
   // Mirrors `selectedRoute` for code that resumes after an await.
   const selectedRouteRef = useRef<string | null>(null);
@@ -137,77 +137,106 @@ export function ConnectionsSection({
     shownAvailable.length === 0 &&
     shownAvailableServices.length === 0;
 
+  const openRow = composioServices.rows.connected.find((row) => row.slug === openService) ?? null;
+  const paneCard = selected ? selected.route : openRow ? `composio:${openRow.slug}` : null;
+
+  // The open pane hides the grids, which drops the card's focus and scroll
+  // position, so its card takes both back once the grids show again. The card
+  // is looked up by id, since connecting from the pane moves it to Connected.
+  const grids = useRef<HTMLDivElement>(null);
+  const lastPaneCard = useRef<string | null>(null);
+  useEffect(() => {
+    const from = lastPaneCard.current;
+    lastPaneCard.current = paneCard;
+    if (paneCard !== null || from === null) return;
+    const card = [...(grids.current?.querySelectorAll("[data-card]") ?? [])].find(
+      (element) => element.getAttribute("data-card") === from,
+    );
+    card?.scrollIntoView?.({ block: "nearest" });
+    card?.querySelector("button")?.focus({ preventScroll: true });
+  }, [paneCard]);
+
+  const cardSlot = (id: string, card: ReactNode) => (
+    <div key={id} data-card={id} className="min-w-0">
+      {card}
+    </div>
+  );
+
   const renderRow = (row: ConnectionCard | ComposioServiceRow) =>
-    "route" in row ? (
+    "route" in row
+      ? cardSlot(
+          row.route,
+          <Button
+            type="button"
+            variant="outline"
+            size="default"
+            align="between"
+            onClick={() => select(row.route)}
+            className={CARD}
+            aria-label={`Open ${row.label}`}
+          >
+            <span className="flex min-w-0 items-center gap-3">
+              <ConnectionBrandBadge connection={row.service} />
+              <span className="truncate text-ui text-foreground">{row.label}</span>
+            </span>
+            <StatusIndicator card={row} />
+          </Button>,
+        )
+      : cardSlot(
+          `composio:${row.slug}`,
+          <ComposioServiceRowButton
+            row={row}
+            connected
+            disabled={false}
+            busy={false}
+            onClick={() => setOpenService(row.slug)}
+          />,
+        );
+
+  const renderTile = (card: ConnectionCard) =>
+    cardSlot(
+      card.route,
       <Button
-        key={row.route}
         type="button"
         variant="outline"
         size="default"
         align="between"
-        onClick={() => select(row.route)}
+        onClick={() => select(card.route)}
+        title={describe(card) || undefined}
         className={CARD}
-        aria-label={`Open ${row.label}`}
+        aria-label={`Open ${card.label}`}
       >
         <span className="flex min-w-0 items-center gap-3">
-          <ConnectionBrandBadge connection={row.service} />
-          <span className="truncate text-ui text-foreground">{row.label}</span>
+          <ConnectionBrandBadge connection={card.service} />
+          <span className="flex min-w-0 flex-col">
+            <span className="truncate text-ui text-foreground">{card.label}</span>
+            {/* A service the host cannot offer says so instead of offering a connect. */}
+            {card.connect?.available === false ? <StatusIndicator card={card} /> : null}
+          </span>
         </span>
-        <StatusIndicator card={row} />
-      </Button>
-    ) : (
-      <ComposioServiceRowButton
-        key={`composio:${row.slug}`}
-        row={row}
-        connected
-        disabled={false}
-        busy={false}
-        onClick={() => setOpenService(row.slug)}
-      />
+        {card.connect?.available === false ? null : (
+          <Plus className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+        )}
+      </Button>,
     );
 
-  const renderTile = (card: ConnectionCard) => (
-    <Button
-      key={card.route}
-      type="button"
-      variant="outline"
-      size="default"
-      align="between"
-      onClick={() => select(card.route)}
-      title={describe(card) || undefined}
-      className={CARD}
-      aria-label={`Open ${card.label}`}
-    >
-      <span className="flex min-w-0 items-center gap-3">
-        <ConnectionBrandBadge connection={card.service} />
-        <span className="flex min-w-0 flex-col">
-          <span className="truncate text-ui text-foreground">{card.label}</span>
-          {/* A service the host cannot offer says so instead of offering a connect. */}
-          {card.connect?.available === false ? <StatusIndicator card={card} /> : null}
-        </span>
-      </span>
-      {card.connect?.available === false ? null : (
-        <Plus className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-      )}
-    </Button>
-  );
-
-  const renderServiceTile = (row: ComposioServiceRow) => (
-    <ComposioServiceRowButton
-      key={`composio:${row.slug}`}
-      row={row}
-      connected={false}
-      variant="tile"
-      disabled={!composioSignedIn}
-      busy={busySlug === row.slug}
-      onClick={() => void connectComposio(row)}
-    />
-  );
+  const renderServiceTile = (row: ComposioServiceRow) =>
+    cardSlot(
+      `composio:${row.slug}`,
+      <ComposioServiceRowButton
+        row={row}
+        connected={false}
+        variant="tile"
+        disabled={!composioSignedIn}
+        busy={busySlug === row.slug}
+        onClick={() => void connectComposio(row)}
+      />,
+    );
 
   // A freshly added account has no card until the list refetches, so refetch
-  // first and point the dialog at it only once its card exists. Otherwise the
-  // dialog would close, then reopen by itself when a later poll lists it.
-  // A dialog the guardian closed, or moved to another card, during the add
+  // first and point the pane at it only once its card exists. Otherwise the
+  // pane would close, then reopen by itself when a later poll lists it.
+  // A pane the guardian closed, or moved to another card, during the add
   // stays where they left it.
   const openAccount = async (connectionId: string) => {
     const from = selectedRouteRef.current;
@@ -252,7 +281,7 @@ export function ConnectionsSection({
             <EmptyStateTitle>{t("connections.emptyTitle")}</EmptyStateTitle>
           </EmptyState>
         ) : (
-          <div className="flex flex-col gap-5">
+          <div ref={grids} className="flex flex-col gap-5" hidden={paneCard !== null}>
             <div className="relative w-full">
               <Search
                 className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle-foreground"
@@ -346,22 +375,27 @@ export function ConnectionsSection({
         )}
 
         {/* Keyed by service, so each opens fresh, never mid-confirmation. */}
-        <ComposioServiceDialog
+        <ComposioServicePane
           key={openService ?? "none"}
-          row={composioServices.rows.connected.find((row) => row.slug === openService) ?? null}
+          row={openRow}
           busy={busySlug !== null}
           onReconnect={(row) => void connectComposio(row)}
           onClose={() => setOpenService(null)}
           onFlash={onFlash}
         />
-        <ConnectionDetailDialog
-          card={selected}
-          composio={composio}
-          onClose={() => select(null)}
-          onRefresh={() => void onRefresh()}
-          onFlash={onFlash}
-          onOpenAccount={openAccount}
-        />
+        {selected ? (
+          <ConnectionDetailPane
+            card={selected}
+            backLabel={t("tabs.Connections")}
+            composio={composio}
+            onClose={() => select(null)}
+            // In the background: a foreground refresh swaps the grids for a
+            // loading skeleton, which would show above the pane.
+            onRefresh={() => void onRefresh(true)}
+            onFlash={onFlash}
+            onOpenAccount={openAccount}
+          />
+        ) : null}
       </Section>
     </Measure>
   );

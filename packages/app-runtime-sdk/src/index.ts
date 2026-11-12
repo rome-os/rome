@@ -262,6 +262,10 @@ export interface PendingApproval {
  * Resolves by posting an `interaction_result` (the produced artifact, or
  * `{ dismissed: true }`) on the session, which re-drives the calling agent
  * with a server-built outcome prompt. Control never leaves the calling agent.
+ *
+ * @deprecated Return `{ status: "show_widget", widget: { ..., waits: true } }`
+ * instead. Rome stores and answers both the same way, and this spelling keeps
+ * working for apps that already return it.
  */
 export interface PendingInteraction {
   appId: string;
@@ -277,6 +281,32 @@ export interface PendingInteraction {
     componentId: string;
     props?: Record<string, unknown>;
   };
+}
+
+/**
+ * One of this app's components, shown inside the agent's message in the
+ * dashboard chat. The app is the one that owns the action: Rome takes it from
+ * the action, never from the result.
+ *
+ * By default the card shows and the turn goes on. A button on such a card
+ * calls the app's own API through `fetchAppApi`, says nothing in the chat and
+ * does not wake the agent. With `waits: true` the card behaves as a
+ * {@link PendingInteraction} does: the agent stops until the card answers.
+ */
+export interface ShownWidget {
+  /** A component the app declares under `components:` in app.yaml. A
+   *  component the app does not declare shows no card. */
+  componentId: string;
+  /** What the card needs to find its data, such as a date. Stored with the
+   *  message and handed to the component on every mount, so the card reads
+   *  current data from its app rather than carrying a copy. */
+  props?: Record<string, unknown>;
+  /** What the model reads, such as "Showing today's meals as a card." Where
+   *  no card can show, such as a messaging connection, the model is told so
+   *  and gets this sentence. */
+  text: string;
+  /** True: the agent stops until the guardian answers the card. Default false. */
+  waits?: boolean;
 }
 
 /** True only for Rome Core's default agent, in legacy or canonical form. */
@@ -326,8 +356,9 @@ export interface PlaceWidget {
  * `runAction`, webhook invocation records — so the states are modeled as a union
  * rather than independent flags: a result is exactly one of completed (`ok`),
  * domain-rejected (`error`), suspended on approval, suspended on an inline
- * guardian input (`pending_interaction`), or completed-with-a-widget-placed (`place_widget`, which does NOT
- * suspend). Infrastructure failures (handler throw, serialization, worker crash)
+ * guardian input (`pending_interaction`), completed-with-a-widget-placed (`place_widget`, which does NOT
+ * suspend), or showing a card in the chat (`show_widget`, which suspends only
+ * when the widget `waits`). Infrastructure failures (handler throw, serialization, worker crash)
  * are NOT `error` results — they surface as a thrown {@link ActionInvocationError}.
  * The `error` variant is for domain rejections the caller can act on ("routine
  * name already taken").
@@ -337,7 +368,8 @@ export type ActionResult<T = unknown> =
   | { status: "error"; error: string }
   | { status: "pending_approval"; approval: PendingApproval }
   | { status: "pending_interaction"; interaction: PendingInteraction }
-  | { status: "place_widget"; placement: PlaceWidget };
+  | { status: "place_widget"; placement: PlaceWidget }
+  | { status: "show_widget"; widget: ShownWidget };
 
 const TRIGGER_PAYLOAD_KEY = "__triggerPayload";
 
@@ -1564,6 +1596,24 @@ export type MessagePart =
          *  (the default) keeps the composer open beside the card. */
         requiresCard?: boolean;
       };
+    }
+  | {
+      /**
+       * An app's card the agent showed without waiting: the action that showed
+       * it returned `show_widget` without `waits`. The host mounts the app's
+       * component in the message from `componentId` and `props`, on every
+       * load, so the card always shows its app's current data. Nothing
+       * answers it, so the chat never waits on it. A widget that waits stores
+       * a `pending_interaction` part instead.
+       */
+      type: "widget";
+      toolUseId: string;
+      appId: string;
+      componentId: string;
+      props?: Record<string, unknown>;
+      /** The widget's plain-text line, the `text` its action wrote, for a
+       *  reader that draws no card. */
+      text: string;
     }
   | {
       /**

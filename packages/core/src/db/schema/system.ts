@@ -763,6 +763,65 @@ export const conciergeTasks = sqliteTable(
 );
 
 /**
+ * Which guardian messages each task works for, and how that work stands: one
+ * row per task a message started or was passed on to. A message's status
+ * reaction (docs/domains/chats.md#status-reaction) is read from its rows, so
+ * a message that started several tasks has one. A row goes with its task.
+ */
+export const conciergeTaskReactions = sqliteTable(
+  "concierge_task_reactions",
+  {
+    taskId: text("task_id")
+      .notNull()
+      .references(() => conciergeTasks.id, { onDelete: "cascade" }),
+    /** The Concierge chat the message is in. */
+    chatId: text("chat_id").notNull(),
+    /** The message's key in that chat, as the dashboard names it. */
+    messageKey: text("message_key").notNull(),
+    /**
+     * `stopped`: the task was stopped and counts toward no reaction.
+     * `done_unsaid` / `failed_unsaid`: it ended, and its result is not said
+     * yet, so it still works.
+     */
+    state: text("state", {
+      enum: ["working", "done", "failed", "stopped", "done_unsaid", "failed_unsaid"],
+    }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.taskId, table.chatId, table.messageKey] }),
+    index("idx_concierge_task_reactions_message").on(table.chatId, table.messageKey),
+  ],
+);
+
+/**
+ * Which guardian messages each Concierge turn took as input, and how that
+ * turn ended: one row per message a turn took. The message shows working
+ * from the moment the turn takes it, before the Concierge starts any task,
+ * and its status reaction (docs/domains/chats.md#status-reaction) is read
+ * from these rows together with its task rows.
+ */
+export const conciergeTurnReactions = sqliteTable(
+  "concierge_turn_reactions",
+  {
+    /** The Concierge chat's turn that took the message. */
+    turnId: text("turn_id").notNull(),
+    /** The Concierge chat the message is in. */
+    chatId: text("chat_id").notNull(),
+    /** The message's key in that chat, as the dashboard names it. */
+    messageKey: text("message_key").notNull(),
+    /** `stopped`: the turn was stopped and counts toward no reaction. */
+    state: text("state", { enum: ["working", "done", "failed", "stopped"] }).notNull(),
+    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.turnId, table.chatId, table.messageKey] }),
+    index("idx_concierge_turn_reactions_message").on(table.chatId, table.messageKey),
+    index("idx_concierge_turn_reactions_chat_state").on(table.chatId, table.state),
+  ],
+);
+
+/**
  * Events from what the Concierge follows that its triage kept. An `important`
  * one goes to the Concierge after its batch, and every one, important or not,
  * goes into the next digest. Only the triage's one-line description is kept,

@@ -6,6 +6,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { deviceHref, nodeConsoleUrl, useDevicesQuery } from "@/components/devices-section";
 import { useDeviceManage } from "@/hooks/use-device-manage";
+import { useSettingsBack } from "@/hooks/use-settings-back";
 import { useThisDevice } from "@/hooks/use-this-device";
 
 /**
@@ -23,6 +24,7 @@ export default function DeviceActivityPage() {
   const manage = useDeviceManage(
     useCallback(() => navigate(deviceHref(null), { replace: true }), [navigate]),
   );
+  useSettingsBack(() => navigate(deviceHref(null)));
   const devices = query.data?.devices ?? [];
   const device = devices.find((item) => item.id.toLowerCase() === deviceId.toLowerCase()) ?? {
     id: deviceId,

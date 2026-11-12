@@ -41,7 +41,7 @@ import type { ActionRegistryImpl } from "../apps/actions/registry.js";
 import type { Agent, AgentCatalog } from "../agent/index.js";
 import type { AgentLoader } from "../app-host/agent-loader.js";
 import type { SkillCatalog, SubagentCalls } from "../agent/index.js";
-import type { FeedbackRelay } from "../lib/feedback-client.js";
+import type { FeedbackRelay } from "../instance/feedback-client.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { AppKeysRepository } from "../apps/repositories/app-keys.js";
 import type { AppKeyInjector } from "../apps/app-keys/injector.js";

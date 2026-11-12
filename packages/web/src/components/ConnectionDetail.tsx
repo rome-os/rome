@@ -1,6 +1,6 @@
-import { Dialog, DialogBody, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { StatusIndicator } from "@/lib/connection-status";
+import { DetailPane } from "@/components/connections/detail-pane";
 import { AvailableToAddLabel, SoleSlotScope } from "@/components/connection-slot-card";
 import { OAuthConnectionSection } from "@/components/connections/oauth-connection-section";
 import { ComposioConnectionSection } from "@/components/connections/composio-connection-section";
@@ -16,7 +16,7 @@ import { CHANNEL_CONFIGS, ChannelConnectCard } from "@/components/channels/chann
  * connected, + when not), an optional privacy note, and the service-specific
  * ceremony inline. Rendered both by the standalone
  * `/settings/connections/:serviceId` page and by the in-list
- * `ConnectionDetailDialog`, so the two surfaces never drift.
+ * {@link ConnectionDetailPane}, so the two surfaces never drift.
  *
  * The frame is service-agnostic; card-level facts come from `/api/connections`
  * (via the `ConnectionCard` presentation adapter) and each ceremony self-serves
@@ -153,21 +153,18 @@ function SlotEntry({
   );
 }
 
-/**
- * In-list Connection detail dialog. Clicking a row in `ConnectionsSection`
- * opens this instead of navigating — the slot cards live in a modal over the
- * list. Header carries the brand badge, name, and dot+text status; the body is
- * the shared `ConnectionDetailBody`.
- */
-export function ConnectionDetailDialog({
+/** A card's detail as a pane in place of the Settings › Connections grids. */
+export function ConnectionDetailPane({
   card,
+  backLabel,
   composio,
   onClose,
   onRefresh,
   onFlash,
   onOpenAccount,
 }: {
-  card: ConnectionCard | null;
+  card: ConnectionCard;
+  backLabel: string;
   composio: ComposioCliStatus | null;
   onClose: () => void;
   onRefresh: () => void;
@@ -175,42 +172,21 @@ export function ConnectionDetailDialog({
   onOpenAccount?: (connectionId: string) => void | Promise<void>;
 }) {
   return (
-    <Dialog open={card !== null} onClose={onClose} size="lg">
-      {card && (
-        <>
-          <ConnectionDetailHeader card={card} onClose={onClose} />
-          <DialogBody>
-            <ConnectionDetailBody
-              key={card.route}
-              card={card}
-              composio={composio}
-              onRefresh={onRefresh}
-              onFlash={onFlash}
-              onOpenAccount={onOpenAccount}
-            />
-          </DialogBody>
-        </>
-      )}
-    </Dialog>
-  );
-}
-
-export function ConnectionDetailHeader({
-  card,
-  onClose,
-}: {
-  card: ConnectionCard;
-  onClose: () => void;
-}) {
-  return (
-    <DialogHeader onClose={onClose}>
-      <div className="flex items-center gap-3">
-        <ConnectionBrandBadge connection={card.service} />
-        <div className="min-w-0 flex-1">
-          <DialogTitle className="text-section">{card.label}</DialogTitle>
-          <StatusIndicator card={card} className="mt-1" />
-        </div>
-      </div>
-    </DialogHeader>
+    <DetailPane
+      label={card.label}
+      backLabel={backLabel}
+      onClose={onClose}
+      mark={<ConnectionBrandBadge connection={card.service} />}
+      status={<StatusIndicator card={card} />}
+    >
+      <ConnectionDetailBody
+        key={card.route}
+        card={card}
+        composio={composio}
+        onRefresh={onRefresh}
+        onFlash={onFlash}
+        onOpenAccount={onOpenAccount}
+      />
+    </DetailPane>
   );
 }

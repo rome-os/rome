@@ -389,6 +389,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       onSend?: (snapshot: unknown, controls: unknown) => Promise<void>;
       isStreaming?: boolean;
       onStop?: () => void;
+      chatName?: string | null;
     },
     ref,
   ) {
@@ -398,7 +399,11 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       focus: () => {},
     }));
     return (
-      <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
+      <div
+        data-testid="chat-composer"
+        data-streaming={props.isStreaming ? "true" : "false"}
+        data-chat-name={props.chatName ?? ""}
+      >
         <button
           type="button"
           data-testid="concierge-send-button"
@@ -1546,6 +1551,36 @@ describe("Chat turn stream lifecycle", () => {
     }
   });
 
+  it("keeps a message sent while a turn's closing refetch is on the way", async () => {
+    // The first turn ends at once, so its follower refetches the chat and
+    // drops the local rows that page stands in for.
+    rs.mocked(postSessionTurn).mockResolvedValueOnce({ ok: true, data: { turnId: "turn-1" } });
+    rs.mocked(openTurnStream).mockImplementationOnce(
+      async () => new Response(null, { status: 404 }),
+    );
+    let resolveRefetch!: (messages: import("@/lib/chat-types").ChatMessage[]) => void;
+    rs.mocked(listSessionMessages)
+      .mockResolvedValueOnce([])
+      .mockImplementationOnce(() => new Promise((resolve) => (resolveRefetch = resolve)));
+    // The second send stays unaccepted, so only its local row shows it.
+    rs.mocked(postSessionTurn).mockImplementationOnce(() => new Promise(() => {}));
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalledTimes(1));
+
+    fireEvent.click(screen.getByTestId("send-button"));
+    await waitFor(() => expect(listSessionMessages).toHaveBeenCalledTimes(2));
+    // Sent while that page is on the way, which was read before it existed.
+    fireEvent.click(screen.getByTestId("send-text-button"));
+    await screen.findByText("sent at once", { exact: false });
+    await act(async () => {
+      resolveRefetch([]);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
+
+    const rows = screen.getAllByTestId("user-row").map((row) => row.dataset.rowKey);
+    expect(rows).toContain("11111111-1111-4111-8111-111111111111");
+  });
+
   it("shows a text-only send before the server accepts it, under the same id", async () => {
     let resolvePost!: (result: Awaited<ReturnType<typeof postSessionTurn>>) => void;
     rs.mocked(postSessionTurn).mockImplementationOnce(
@@ -2587,7 +2622,64 @@ describe("Chat Concierge empty state", () => {
       />,
     );
     expect(await screen.findByText("Milo")).toBeTruthy();
+    // The header still goes by the Concierge's name, not the topic's.
     expect(screen.queryByText("Calendar")).toBeNull();
+  });
+
+  it("names an open topic chat in its message box, which follows a rename, and not the main chat", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Main chat",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const main = renderChat(
+      <Chat sessionId="concierge" variant="concierge" conciergeMainChatId="concierge" />,
+    );
+    expect((await screen.findByTestId("chat-composer")).getAttribute("data-chat-name")).toBe("");
+    main.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Trip to Lisbon",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const view = renderChat(
+      <Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />,
+    );
+    expect((await screen.findByTestId("chat-composer")).getAttribute("data-chat-name")).toBe(
+      "Trip to Lisbon",
+    );
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Lisbon flights",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    view.rerender(
+      <MemoryRouter>
+        {pane(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />)}
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-composer").getAttribute("data-chat-name")).toBe(
+        "Lisbon flights",
+      ),
+    );
+
+    // A topic chat with no name yet keeps the plain box.
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "  ",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    view.rerender(
+      <MemoryRouter>
+        {pane(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />)}
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-composer").getAttribute("data-chat-name")).toBe(""),
+    );
   });
 
   it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {

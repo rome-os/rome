@@ -2,7 +2,7 @@ import { describe, expect, it } from "@rstest/core";
 import type {
   NotifyContent as CoreNotifyContent,
   SendOutcome as CoreSendOutcome,
-} from "../../lib/notify-client.js";
+} from "../../instance/notify-client.js";
 // The `send_notification` action re-declares these types structurally because a
 // rome_app cannot import `@rome/core`. This core-side test closes the loop the
 // action package can't: it imports both copies and asserts they are identical.

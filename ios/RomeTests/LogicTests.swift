@@ -508,6 +508,23 @@ final class StubBackend: RomeBackend {
         #expect(MainShell.visibleChat(section: .chat, path: [.taskChat(chatId: "c-1", title: "T")], covered: false) == "c-1")
         #expect(MainShell.visibleChat(section: .apps, path: [], covered: false) == nil)
     }
+
+    /// Over everything, the Agent page shows no chat of its own; a task chat
+    /// pushed inside it is the one on screen until a sheet covers it.
+    @Test func aTaskChatInsideTheAgentPageIsOnScreen() {
+        #expect(MainShell.visibleChat(agentPath: [], covered: false) == nil)
+        #expect(MainShell.visibleChat(agentPath: [.taskChat(chatId: "c-1", title: "T")], covered: false) == "c-1")
+        #expect(MainShell.visibleChat(agentPath: [.taskChat(chatId: "c-1", title: "T")], covered: true) == nil)
+    }
+
+    /// Only a task with its own chat opens; one without is only read.
+    @Test func onlyATaskWithAChatOpens() {
+        let plain = task("t", .next, updated: 1)
+        #expect(!TaskRow.opens(plain))
+        var withChat = plain
+        withChat.chat = .init(id: "c-1", name: "T")
+        #expect(TaskRow.opens(withChat))
+    }
 }
 
 @Suite struct ChatWatchTests {

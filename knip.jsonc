@@ -74,7 +74,7 @@
         // oclif discovers commands by directory, named in package.json.
         "src/apps/cli/commands/**/*.ts",
         "src/bin/*.ts",
-        "src/app-host/__fixtures__/**",
+        "src/api/routes/__fixtures__/**",
         "drizzle.*.config.ts"
       ]
     },

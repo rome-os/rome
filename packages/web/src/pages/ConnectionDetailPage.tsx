@@ -1,26 +1,19 @@
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { ArrowLeft } from "lucide-react";
 import { fetchJson } from "@/lib/fetch-json";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DetailPane } from "@/components/connections/detail-pane";
+import { useSettingsBack } from "@/hooks/use-settings-back";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { StatusIndicator } from "@/lib/connection-status";
 import { ConnectionDetailBody } from "@/components/ConnectionDetail";
 import { accountRoute, buildConnectionCards } from "@/lib/connection-cards";
 import { CONNECTIONS_REFRESH_INTERVAL_MS, fetchConnections } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
-import {
-  Page,
-  PageHeader,
-  PageHeaderNav,
-  PageHeading,
-  PageTitle,
-  Measure,
-  Section,
-} from "@rome-os/ui/page";
+import { Page, Measure, Section } from "@rome-os/ui/page";
 
 /**
  * Per-account Connection detail page (`/settings/connections/:serviceId`).
@@ -31,7 +24,7 @@ import {
  * first account routes as the service (`feishu`), later ones by their channel
  * id. Unknown or unmatched ids redirect back to the list. The connect ceremony
  * + enablement copy is the shared `ConnectionDetailBody` (also used by the
- * in-list dialog).
+ * in-list `ConnectionDetailPane`).
  */
 
 const BACK_TO_LIST = "/settings/connections";
@@ -72,6 +65,10 @@ export default function ConnectionDetailPage() {
   const composioQuery = useComposioStatus();
 
   const loading = connectionsQuery.isLoading || composioQuery.isLoading;
+  const backToList = () => navigate(BACK_TO_LIST);
+  // Registered here as well as by the pane, which is absent while loading or
+  // after a failed load, so Escape steps back in those states too.
+  useSettingsBack(backToList);
 
   const refresh = () => {
     void connectionsQuery.refetch();
@@ -152,27 +149,15 @@ export default function ConnectionDetailPage() {
 
   return (
     <Page>
-      <PageHeader>
-        <PageHeaderNav>
-          <Link
-            to={BACK_TO_LIST}
-            className="inline-flex items-center gap-2 text-ui text-muted-foreground hover:text-foreground"
-          >
-            <ArrowLeft className="size-4" aria-hidden />
-            Connections
-          </Link>
-        </PageHeaderNav>
-        <div className="flex items-center gap-3">
-          <ConnectionBrandBadge connection={card.service} />
-          <PageHeading>
-            <PageTitle>{card.label}</PageTitle>
-            <StatusIndicator card={card} />
-          </PageHeading>
-        </div>
-      </PageHeader>
-      <Measure>
+      <DetailPane
+        label={card.label}
+        backLabel="Connections"
+        onClose={backToList}
+        mark={<ConnectionBrandBadge connection={card.service} />}
+        status={<StatusIndicator card={card} />}
+      >
         {shopToConnect ? (
-          <Alert className="mb-6">
+          <Alert>
             <AlertTitle>Finish connecting {shopToConnect}</AlertTitle>
             <AlertDescription className="space-y-3">
               <p>Shopify installed Rome OS on this store. Connect it so Rome can work in it.</p>
@@ -192,7 +177,7 @@ export default function ConnectionDetailPage() {
           onFlash={flash}
           onOpenAccount={openAccount}
         />
-      </Measure>
+      </DetailPane>
     </Page>
   );
 }

@@ -4,7 +4,7 @@ import {
   type AgentMessageEnvelope,
   type AgentMessagingClient,
   AgentMessagingError,
-} from "../../lib/rome-cloud-agents.js";
+} from "./rome-cloud-agents.js";
 import { createTestDb } from "../../test/db.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import { DrizzleConnectionsRepository } from "../repository-db.js";

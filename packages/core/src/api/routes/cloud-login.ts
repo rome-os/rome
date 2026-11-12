@@ -378,7 +378,7 @@ export function cloudLoginRoutes(deps: ApiDeps, seams: CloudLoginSeams = {}): Ho
     if (oauthError || !code) {
       // `access_denied` is Rome Cloud's not-owner refusal: the human proved a
       // Rome Cloud identity, it just isn't the account that owns this box.
-      // The login UI has a single "Sign in with Rome Cloud" button, so this
+      // The login UI has a single "Continue with Rome Cloud" button, so this
       // callback owns the fork: when the guardian has invited emails to the
       // dashboard, re-route the browser into the visitor attestation flow
       // (they already hold a Rome Cloud session — one redirect hop, no second

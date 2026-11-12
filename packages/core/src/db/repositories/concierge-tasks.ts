@@ -1,13 +1,36 @@
 import { randomUUID } from "node:crypto";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
-import { and, asc, desc, eq, gte, inArray, isNull, ne, or, sql, type SQL } from "drizzle-orm";
+import {
+  and,
+  asc,
+  desc,
+  eq,
+  gte,
+  inArray,
+  isNotNull,
+  isNull,
+  ne,
+  notInArray,
+  or,
+  sql,
+  type SQL,
+} from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
 import type { DrizzleDb } from "../index.js";
 import type { ChatRef } from "../../chats/storage/place.js";
 import { MessageRepository } from "../../chats/storage/message-repository.js";
 import { MAIN_CHAT_NAME, mainChatIdOf } from "../../concierge/main-chat.js";
 import { GUARDIAN_OWNER, ownerOf } from "../../webchat/owner.js";
-import { conciergeTasks, romeSessions } from "../schema.js";
+import type { ConciergeStatusReaction } from "@rome/api-types/concierge";
+import { createLogger } from "../../logger.js";
+import {
+  conciergeTaskReactions,
+  conciergeTasks,
+  conciergeTurnReactions,
+  romeSessions,
+} from "../schema.js";
+
+const log = createLogger("concierge-tasks");
 
 export type ConciergeTaskRow = typeof conciergeTasks.$inferSelect;
 type ConciergeTaskState = ConciergeTaskRow["state"];
@@ -56,6 +79,52 @@ type ChangeListener = (task: ConciergeTaskWithChat, change: ChangeKind) => void;
 
 const isFinished = (state: ConciergeTaskState) => state === "done" || state === "dropped";
 
+/** A guardian message in a Concierge chat, by its key there. */
+export interface ReactionTarget {
+  chatId: string;
+  messageKey: string;
+}
+
+/**
+ * A task that ended, whose result the Concierge has not said yet: it still
+ * shows working, and turns done or failed once the turn that reports it ends.
+ */
+export type HeldTaskReaction = "done_unsaid" | "failed_unsaid";
+
+/**
+ * How one task's work for a message stands. A stopped task counts toward no
+ * reaction (docs/domains/chats.md#status-reaction).
+ */
+export type TaskReactionState = ConciergeStatusReaction | "done" | "stopped" | HeldTaskReaction;
+
+/** How a task's or a turn's work for its messages ends. */
+export type TaskReactionEnd = "done" | "failed" | "stopped";
+
+/** A task's chat thread in Concierge chat `chatId`, rooted at `root`, ended: its task left the chat. */
+export interface ChatThreadRetired {
+  chatId: string;
+  root: string;
+}
+
+/** A message's status reaction changed; null when it has none now. */
+export type ReactionListener = (
+  target: ReactionTarget,
+  reaction: ConciergeStatusReaction | null,
+) => void;
+
+/**
+ * One reaction for a message from its work that was not stopped: the turn
+ * that took it, and every task it started or was passed on to: working while any of them works, then
+ * failed when any failed. None once all of them are done, since the reply
+ * says so, nor when every one was stopped.
+ */
+export function reactionOf(states: readonly TaskReactionState[]): ConciergeStatusReaction | null {
+  const counted = states.filter((state) => state !== "stopped");
+  const unsaid = (state: TaskReactionState) => state === "done_unsaid" || state === "failed_unsaid";
+  if (counted.some((state) => state === "working" || unsaid(state))) return "working";
+  return counted.includes("failed") ? "failed" : null;
+}
+
 /**
  * The Concierge's todo list. Only the Concierge's tools write it; every write
  * tells the change listeners, which push the row to the panel and settle the
@@ -63,6 +132,8 @@ const isFinished = (state: ConciergeTaskState) => state === "done" || state === 
  */
 export class ConciergeTasksRepository {
   private listeners = new Set<ChangeListener>();
+  private reactionListeners = new Set<ReactionListener>();
+  private threadListeners = new Set<(retired: ChatThreadRetired) => void>();
 
   /** Where a task's source message is looked up: its Concierge chat's
    *  lines in Chats. */
@@ -84,6 +155,10 @@ export class ConciergeTasksRepository {
   async moveToMainChat(from: string, to: string | null = null): Promise<number> {
     // Every row of the chat is its main chat's from now on, the finished ones
     // too, and a chat thread stays in the chat it is in.
+    const retired = await this.db
+      .select({ root: conciergeTasks.threadRoot })
+      .from(conciergeTasks)
+      .where(and(eq(conciergeTasks.chatId, from), isNotNull(conciergeTasks.threadRoot)));
     await this.db
       .update(conciergeTasks)
       .set({ threadRoot: null })
@@ -100,7 +175,30 @@ export class ConciergeTasksRepository {
       )
       .returning({ id: conciergeTasks.id });
     for (const { id } of moved) await this.announce(id, "refresh");
+    for (const root of new Set(retired.map((row) => row.root))) {
+      if (root) this.retireThread({ chatId: from }, root);
+    }
     return moved.length;
+  }
+
+  /**
+   * Tells the listeners that task chat thread `root` ended in the chat `row`
+   * was in: its own, or with none, its owner's main chat.
+   */
+  private retireThread(
+    row: { chatId: string | null; ownerKey?: string | null },
+    root: string,
+  ): void {
+    const chatId = row.chatId ?? mainChatIdOf(ownerOf(row));
+    for (const listener of this.threadListeners) listener({ chatId, root });
+  }
+
+  /** Listens for task chat threads that end, as when their task moves to another chat. */
+  onThreadRetired(listener: (retired: ChatThreadRetired) => void): () => void {
+    this.threadListeners.add(listener);
+    return () => {
+      this.threadListeners.delete(listener);
+    };
   }
 
   onChange(listener: ChangeListener): () => void {
@@ -145,6 +243,41 @@ export class ConciergeTasksRepository {
       })
       .where(eq(conciergeTasks.id, id));
     await this.announce(id, "refresh");
+    if (existing?.threadRoot && existing.chatId !== stored) {
+      this.retireThread(existing, existing.threadRoot);
+    }
+  }
+
+  /**
+   * The title of the task whose chat thread each of `roots` names in
+   * Concierge chat `chatId`, for the roots a task's thread has. A task has
+   * its own thread; rows from before that share a root keep the name of the
+   * oldest.
+   */
+  async threadTitles(chatId: string, roots: readonly string[]): Promise<Map<string, string>> {
+    const titles = new Map<string, string>();
+    if (roots.length === 0) return titles;
+    for (const { row, conciergeChat } of await this.withChat(
+      inArray(conciergeTasks.threadRoot, [...new Set(roots)]),
+    )) {
+      // Oldest first, so the first title kept is the thread's own.
+      if (row.threadRoot && conciergeChat.id === chatId && !titles.has(row.threadRoot)) {
+        titles.set(row.threadRoot, row.title);
+      }
+    }
+    return titles;
+  }
+
+  /**
+   * The task whose chat thread starts with message `root` in Concierge chat
+   * `chatId`, or null: a thread no task has is no task's
+   * (docs/domains/chats.md#chat-thread).
+   */
+  async taskOfThread(chatId: string, root: string): Promise<{ id: string; title: string } | null> {
+    for (const { row, conciergeChat } of await this.withChat(eq(conciergeTasks.threadRoot, root))) {
+      if (conciergeChat.id === chatId) return { id: row.id, title: row.title };
+    }
+    return null;
   }
 
   /** The key of the message that names the row's chat thread, or null. */
@@ -154,13 +287,22 @@ export class ConciergeTasksRepository {
 
   /**
    * Names the row's chat thread by message `root`, unless it already has
-   * one: a root is written once. Answers the row's root after.
+   * one or another row holds that root: a root is written once, and a thread
+   * is one task's. One statement claims it, so of two tasks started at once
+   * for one message, one gets it and the other stays without. Answers the
+   * row's root after.
    */
   async setThreadRoot(id: string, root: string): Promise<string | null> {
     await this.db
       .update(conciergeTasks)
       .set({ threadRoot: root })
-      .where(and(eq(conciergeTasks.id, id), isNull(conciergeTasks.threadRoot)));
+      .where(
+        and(
+          eq(conciergeTasks.id, id),
+          isNull(conciergeTasks.threadRoot),
+          sql`not exists (select 1 from ${conciergeTasks} as other where other.thread_root = ${root} and other.id <> ${id})`,
+        ),
+      );
     return this.threadRoot(id);
   }
 
@@ -246,6 +388,13 @@ export class ConciergeTasksRepository {
   async upsertMany(writes: ConciergeTaskWrite[], now = new Date()): Promise<ConciergeTaskRow[]> {
     // `transaction` is synchronous on better-sqlite3, so the body uses `.run()`
     // and `.all()` and never awaits.
+    // Rows the Concierge marks done or dropped settle their messages: the
+    // ones still working, when the row just ended, as a task that ends does,
+    // and the ones a task that ended holds for its report, since writing the
+    // row is the Concierge taking the report in. A dropped task was called
+    // off, not failed, so it counts as stopped, and shows no mark.
+    const settled: { taskId: string; state: "done" | "dropped"; ended: boolean }[] = [];
+    const retired: { row: ConciergeTaskRow; root: string }[] = [];
     const written = await this.db.transaction((tx) => {
       const out: ConciergeTaskRow[] = [];
       for (const write of writes) {
@@ -268,6 +417,15 @@ export class ConciergeTasksRepository {
             throw new Error(`Chat ${write.sessionId} is already linked to task ${taken.id}`);
         }
         const state = write.state ?? existing?.state ?? "next";
+        // Only a write that sets the state: a title or notes write to a
+        // finished row settles nothing.
+        if (existing && (write.state === "done" || write.state === "dropped")) {
+          settled.push({
+            taskId: existing.id,
+            state: write.state,
+            ended: !isFinished(existing.state),
+          });
+        }
         const archivedAt =
           write.archived === undefined
             ? (existing?.archivedAt ?? null)
@@ -276,6 +434,12 @@ export class ConciergeTasksRepository {
               : null;
         const completedAt = isFinished(state) ? (existing?.completedAt ?? now) : null;
         const chatId = write.chatId !== undefined ? write.chatId : (existing?.chatId ?? null);
+        if (
+          existing?.threadRoot &&
+          (existing.chatId ?? null) !== (chatId === CONCIERGE_CHAT_ID ? null : chatId)
+        ) {
+          retired.push({ row: existing, root: existing.threadRoot });
+        }
         const fields = {
           title: write.title ?? existing?.title ?? "",
           state,
@@ -332,7 +496,395 @@ export class ConciergeTasksRepository {
       return out;
     });
     for (const row of written) await this.announce(row.id, "write");
+    for (const { row, root } of retired) this.retireThread(row, root);
+    // The rows are written; a reaction that fails to settle fails no write.
+    for (const { taskId, state, ended } of settled) {
+      await this.settleWrittenReactions(taskId, state, ended).catch((error: unknown) =>
+        log.warn("failed to settle status reactions", {
+          taskId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     return written;
+  }
+
+  /**
+   * Task `taskId`'s row was written `state`: its messages settle as
+   * {@link upsertMany} says. Answers how many changed.
+   */
+  private async settleWrittenReactions(
+    taskId: string,
+    state: "done" | "dropped",
+    ended: boolean,
+    now = new Date(),
+  ): Promise<number> {
+    const moves: [TaskReactionState, TaskReactionState][] =
+      state === "done"
+        ? [
+            ["done_unsaid", "done"],
+            ["failed_unsaid", "failed"],
+          ]
+        : [
+            ["done_unsaid", "stopped"],
+            ["failed_unsaid", "stopped"],
+            ["failed", "stopped"],
+          ];
+    if (ended) moves.unshift(["working", state === "done" ? "done" : "stopped"]);
+    const changed: ReactionTarget[] = [];
+    for (const [from, to] of moves) {
+      changed.push(
+        ...(await this.db
+          .update(conciergeTaskReactions)
+          .set({ state: to, updatedAt: now })
+          .where(
+            and(eq(conciergeTaskReactions.taskId, taskId), eq(conciergeTaskReactions.state, from)),
+          )
+          .returning({
+            chatId: conciergeTaskReactions.chatId,
+            messageKey: conciergeTaskReactions.messageKey,
+          })),
+      );
+    }
+    for (const target of changed) await this.announceReaction(target);
+    return changed.length;
+  }
+
+  onReaction(listener: ReactionListener): () => void {
+    this.reactionListeners.add(listener);
+    return () => {
+      this.reactionListeners.delete(listener);
+    };
+  }
+
+  /**
+   * Marks guardian message `target` as worked on by task `taskId`, as when the
+   * task starts for it or its words are passed on to the task. Marked again,
+   * it works again.
+   */
+  async markWorking(taskId: string, target: ReactionTarget, now = new Date()): Promise<void> {
+    await this.db
+      .insert(conciergeTaskReactions)
+      .values({ taskId, ...target, state: "working", updatedAt: now })
+      .onConflictDoUpdate({
+        target: [
+          conciergeTaskReactions.taskId,
+          conciergeTaskReactions.chatId,
+          conciergeTaskReactions.messageKey,
+        ],
+        set: { state: "working", updatedAt: now },
+      });
+    await this.announceReaction(target);
+  }
+
+  /** Takes back a mark whose work never reached the task. */
+  async unmark(taskId: string, target: ReactionTarget): Promise<void> {
+    await this.db
+      .delete(conciergeTaskReactions)
+      .where(
+        and(
+          eq(conciergeTaskReactions.taskId, taskId),
+          eq(conciergeTaskReactions.chatId, target.chatId),
+          eq(conciergeTaskReactions.messageKey, target.messageKey),
+        ),
+      );
+    await this.announceReaction(target);
+  }
+
+  /**
+   * Task `taskId` ended `outcome`, and its result is not said yet: the
+   * messages it works for stay working until {@link settleHeldReactions}.
+   */
+  async holdReactions(taskId: string, outcome: "done" | "failed", now = new Date()): Promise<void> {
+    await this.db
+      .update(conciergeTaskReactions)
+      .set({ state: outcome === "done" ? "done_unsaid" : "failed_unsaid", updatedAt: now })
+      .where(
+        and(eq(conciergeTaskReactions.taskId, taskId), eq(conciergeTaskReactions.state, "working")),
+      );
+  }
+
+  /**
+   * The result of each of `taskIds` was said, or its report turn ended: the
+   * messages they held settle as the tasks ended, or failed when the report
+   * itself failed. Answers how many changed.
+   */
+  async settleHeldReactions(
+    taskIds: readonly string[],
+    reportFailed = false,
+    now = new Date(),
+  ): Promise<number> {
+    if (taskIds.length === 0) return 0;
+    const changed: ReactionTarget[] = [];
+    for (const [from, to] of [
+      ["done_unsaid", reportFailed ? "failed" : "done"],
+      ["failed_unsaid", "failed"],
+    ] as const) {
+      changed.push(
+        ...(await this.db
+          .update(conciergeTaskReactions)
+          .set({ state: to, updatedAt: now })
+          .where(
+            and(
+              inArray(conciergeTaskReactions.taskId, [...taskIds]),
+              eq(conciergeTaskReactions.state, from),
+            ),
+          )
+          .returning({
+            chatId: conciergeTaskReactions.chatId,
+            messageKey: conciergeTaskReactions.messageKey,
+          })),
+      );
+    }
+    for (const target of changed) await this.announceReaction(target);
+    return changed.length;
+  }
+
+  /** Settles every message still working for task `taskId`. Answers how many changed. */
+  async settleReactions(taskId: string, state: TaskReactionEnd, now = new Date()): Promise<number> {
+    const changed = await this.db
+      .update(conciergeTaskReactions)
+      .set({ state, updatedAt: now })
+      .where(
+        and(eq(conciergeTaskReactions.taskId, taskId), eq(conciergeTaskReactions.state, "working")),
+      )
+      .returning({
+        chatId: conciergeTaskReactions.chatId,
+        messageKey: conciergeTaskReactions.messageKey,
+      });
+    for (const target of changed) await this.announceReaction(target);
+    return changed.length;
+  }
+
+  /**
+   * Marks guardian message `target` as taken by Concierge turn `turnId`: it
+   * works from now, before the Concierge starts any task for it.
+   */
+  async markTurnWorking(turnId: string, target: ReactionTarget, now = new Date()): Promise<void> {
+    await this.db
+      .insert(conciergeTurnReactions)
+      .values({ turnId, ...target, state: "working", updatedAt: now })
+      .onConflictDoUpdate({
+        target: [
+          conciergeTurnReactions.turnId,
+          conciergeTurnReactions.chatId,
+          conciergeTurnReactions.messageKey,
+        ],
+        set: { state: "working", updatedAt: now },
+      });
+    await this.announceReaction(target);
+  }
+
+  /**
+   * Settles the messages of Concierge chat `chatId` still working for a turn
+   * that no longer runs: every turn but `running`. A turn's work carried into
+   * the next turn stays working until that one ends, since the carried turn
+   * is settled only then. Answers how many changed.
+   */
+  async settleTurnReactions(
+    chatId: string,
+    state: TaskReactionEnd,
+    running: readonly string[],
+    now = new Date(),
+  ): Promise<number> {
+    const settling = and(
+      eq(conciergeTurnReactions.chatId, chatId),
+      eq(conciergeTurnReactions.state, "working"),
+      running.length > 0 ? notInArray(conciergeTurnReactions.turnId, [...running]) : undefined,
+    );
+    const returning = {
+      chatId: conciergeTurnReactions.chatId,
+      messageKey: conciergeTurnReactions.messageKey,
+    };
+    // A turn that ended well leaves no mark, so its rows go: a row that is
+    // missing already means no mark. Only a failed one is kept.
+    const changed =
+      state === "failed"
+        ? await this.db
+            .update(conciergeTurnReactions)
+            .set({ state, updatedAt: now })
+            .where(settling)
+            .returning(returning)
+        : await this.db.delete(conciergeTurnReactions).where(settling).returning(returning);
+    const targets = new Map(changed.map((target) => [target.messageKey, target]));
+    for (const target of targets.values()) await this.announceReaction(target);
+    return changed.length;
+  }
+
+  /**
+   * Settles guardian message `messageKey` of Concierge chat `chatId` as done
+   * for the turns working on it: the Concierge answered it. A task started for
+   * it keeps its own mark. Answers how many changed.
+   */
+  async settleAnsweredTurnReaction(chatId: string, messageKey: string): Promise<number> {
+    // Done leaves no mark, so the rows go.
+    const changed = await this.db
+      .delete(conciergeTurnReactions)
+      .where(
+        and(
+          eq(conciergeTurnReactions.chatId, chatId),
+          eq(conciergeTurnReactions.messageKey, messageKey),
+          eq(conciergeTurnReactions.state, "working"),
+        ),
+      )
+      .returning({ turnId: conciergeTurnReactions.turnId });
+    if (changed.length > 0) await this.announceReaction({ chatId, messageKey });
+    return changed.length;
+  }
+
+  /**
+   * After a restart, before any turn runs: a stopped process ends no turn, so
+   * the marks of the work it was running settle here. A Concierge chat's turn
+   * marks stay working only in `continuing`, the chats whose interrupted turn
+   * startup continues, and that turn settles them; every other one failed. A
+   * task's marks fail when its task chat is in `interrupted`, a chat whose
+   * running turn the restart ended. Answers how many changed.
+   */
+  async failInterruptedReactions(
+    continuing: ReadonlySet<string>,
+    interrupted: ReadonlySet<string>,
+    now = new Date(),
+  ): Promise<number> {
+    const changed: ReactionTarget[] = [];
+    const turnRows = await this.db
+      .select({
+        turnId: conciergeTurnReactions.turnId,
+        chatId: conciergeTurnReactions.chatId,
+        messageKey: conciergeTurnReactions.messageKey,
+      })
+      .from(conciergeTurnReactions)
+      .where(eq(conciergeTurnReactions.state, "working"));
+    for (const row of turnRows) {
+      if (continuing.has(row.chatId)) continue;
+      await this.db
+        .update(conciergeTurnReactions)
+        .set({ state: "failed", updatedAt: now })
+        .where(
+          and(
+            eq(conciergeTurnReactions.turnId, row.turnId),
+            eq(conciergeTurnReactions.chatId, row.chatId),
+            eq(conciergeTurnReactions.messageKey, row.messageKey),
+          ),
+        );
+      changed.push({ chatId: row.chatId, messageKey: row.messageKey });
+    }
+    const taskRows = await this.db
+      .select({
+        taskId: conciergeTaskReactions.taskId,
+        chatId: conciergeTaskReactions.chatId,
+        messageKey: conciergeTaskReactions.messageKey,
+        taskChat: conciergeTasks.sessionId,
+      })
+      .from(conciergeTaskReactions)
+      .innerJoin(conciergeTasks, eq(conciergeTasks.id, conciergeTaskReactions.taskId))
+      .where(eq(conciergeTaskReactions.state, "working"));
+    for (const row of taskRows) {
+      if (!row.taskChat || !interrupted.has(row.taskChat) || continuing.has(row.taskChat)) continue;
+      await this.db
+        .update(conciergeTaskReactions)
+        .set({ state: "failed", updatedAt: now })
+        .where(
+          and(
+            eq(conciergeTaskReactions.taskId, row.taskId),
+            eq(conciergeTaskReactions.chatId, row.chatId),
+            eq(conciergeTaskReactions.messageKey, row.messageKey),
+          ),
+        );
+      changed.push({ chatId: row.chatId, messageKey: row.messageKey });
+    }
+    for (const target of changed) await this.announceReaction(target);
+    return changed.length;
+  }
+
+  /**
+   * Turn `turnId` of Concierge chat `chatId` runs again, as when a usage
+   * limit cleared: its messages a failed end marked work again, and the
+   * turn that runs it settles them when it ends.
+   */
+  async reopenTurnReactions(chatId: string, turnId: string, now = new Date()): Promise<number> {
+    const changed = await this.db
+      .update(conciergeTurnReactions)
+      .set({ state: "working", updatedAt: now })
+      .where(
+        and(
+          eq(conciergeTurnReactions.chatId, chatId),
+          eq(conciergeTurnReactions.turnId, turnId),
+          eq(conciergeTurnReactions.state, "failed"),
+        ),
+      )
+      .returning({
+        chatId: conciergeTurnReactions.chatId,
+        messageKey: conciergeTurnReactions.messageKey,
+      });
+    for (const target of changed) await this.announceReaction(target);
+    return changed.length;
+  }
+
+  /** Forgets every status reaction in Concierge chat `chatId`, once the chat is deleted. */
+  async forgetReactions(chatId: string): Promise<void> {
+    await this.db.delete(conciergeTurnReactions).where(eq(conciergeTurnReactions.chatId, chatId));
+    await this.db.delete(conciergeTaskReactions).where(eq(conciergeTaskReactions.chatId, chatId));
+  }
+
+  /** The tasks that hold marks for a result not said yet (docs/domains/chats.md#status-reaction). */
+  async tasksHoldingReactions(): Promise<string[]> {
+    const rows = await this.db
+      .selectDistinct({ taskId: conciergeTaskReactions.taskId })
+      .from(conciergeTaskReactions)
+      .where(inArray(conciergeTaskReactions.state, ["done_unsaid", "failed_unsaid"]));
+    return rows.map((row) => row.taskId);
+  }
+
+  /** The status reaction of each of `messageKeys` in Concierge chat `chatId` that has one. */
+  async reactionsOf(
+    chatId: string,
+    messageKeys: readonly string[],
+  ): Promise<Map<string, ConciergeStatusReaction>> {
+    const out = new Map<string, ConciergeStatusReaction>();
+    if (messageKeys.length === 0) return out;
+    const keys = [...new Set(messageKeys)];
+    // A message's work is the turn that took it and every task it reached.
+    const taskRows = await this.db
+      .select({
+        messageKey: conciergeTaskReactions.messageKey,
+        state: conciergeTaskReactions.state,
+      })
+      .from(conciergeTaskReactions)
+      .where(
+        and(
+          eq(conciergeTaskReactions.chatId, chatId),
+          inArray(conciergeTaskReactions.messageKey, keys),
+        ),
+      );
+    const turnRows = await this.db
+      .select({
+        messageKey: conciergeTurnReactions.messageKey,
+        state: conciergeTurnReactions.state,
+      })
+      .from(conciergeTurnReactions)
+      .where(
+        and(
+          eq(conciergeTurnReactions.chatId, chatId),
+          inArray(conciergeTurnReactions.messageKey, keys),
+        ),
+      );
+    const rows = [...taskRows, ...turnRows];
+    const states = new Map<string, TaskReactionState[]>();
+    for (const row of rows) {
+      states.set(row.messageKey, [...(states.get(row.messageKey) ?? []), row.state]);
+    }
+    for (const [key, list] of states) {
+      const reaction = reactionOf(list);
+      if (reaction) out.set(key, reaction);
+    }
+    return out;
+  }
+
+  private async announceReaction(target: ReactionTarget): Promise<void> {
+    if (this.reactionListeners.size === 0) return;
+    const reaction =
+      (await this.reactionsOf(target.chatId, [target.messageKey])).get(target.messageKey) ?? null;
+    for (const listener of this.reactionListeners) listener(target, reaction);
   }
 
   private async announce(id: string, change: ChangeKind): Promise<void> {

@@ -5,6 +5,7 @@ import { MemoryRouter, Route, Routes, useLocation } from "react-router-dom";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import i18n from "@/i18n";
 import ConnectionDetailPage from "@/pages/ConnectionDetailPage";
+import SettingsDialog from "@/pages/SettingsDialog";
 import type { ApiConnection, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import { stateOfGrants } from "@/test/connection-state";
@@ -213,6 +214,56 @@ describe("ConnectionDetailPage — load failure", () => {
   });
 });
 
+describe("ConnectionDetailPage — Escape inside Settings", () => {
+  /** The page as Settings shows it, recording where the guardian ends up. */
+  function renderInSettings(serviceId: string) {
+    const queryClient = new QueryClient({
+      defaultOptions: { queries: { retry: false, gcTime: 0 } },
+    });
+    const closed = rs.fn();
+    let at = "";
+    function Where() {
+      at = useLocation().pathname;
+      return null;
+    }
+    render(
+      <QueryClientProvider client={queryClient}>
+        <MemoryRouter initialEntries={[`/settings/connections/${serviceId}`]}>
+          <Where />
+          <SettingsDialog onClose={closed}>
+            <Routes>
+              <Route path="/settings/connections/:serviceId" element={<ConnectionDetailPage />} />
+              <Route path="/settings/connections" element={<p>Grid</p>} />
+            </Routes>
+          </SettingsDialog>
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    return { closed, at: () => at };
+  }
+
+  it("goes back to the list while the connection is still loading", () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>(() => {}));
+    const { closed, at } = renderInSettings("github");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(at()).toBe("/settings/connections");
+    expect(closed).not.toHaveBeenCalled();
+  });
+
+  it("goes back to the list after the connection failed to load", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input) === "/api/connections"
+        ? new Response("", { status: 503 })
+        : new Response(JSON.stringify({ composio: null }), { status: 200 }),
+    );
+    const { closed, at } = renderInSettings("github");
+    await screen.findByRole("alert");
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(at()).toBe("/settings/connections");
+    expect(closed).not.toHaveBeenCalled();
+  });
+});
+
 describe("ConnectionDetailPage — OAuth service (github)", () => {
   it("renders the Connect button when github is not connected", async () => {
     mockApi([...minimalConnections(), oauth("github", "unauthorized")]);
@@ -317,7 +368,7 @@ describe("ConnectionDetailPage — several accounts", () => {
     mockApi([feishu(), secondFeishu()]);
     renderDetail("feishu");
 
-    const title = await screen.findByRole("heading", { level: 1 });
+    const title = await screen.findByRole("heading", { level: 2 });
     expect(title.textContent).toBe("Feishu");
   });
 

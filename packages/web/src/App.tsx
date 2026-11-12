@@ -9,6 +9,7 @@ import { RomeShellLayout } from "./shell/RomeShellLayout";
 import { useHostNavigation } from "./hooks/use-host-navigation";
 import { useAppRemixResume } from "./hooks/use-app-remix-resume";
 import { useCloudLoginReturn } from "./hooks/use-cloud-login-return";
+import { useSettingsBackdrop } from "./hooks/use-settings-backdrop";
 import FreePage, { MainChatRedirect } from "./pages/free/FreePage";
 import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import { DEV_ROUTES } from "./pages/dev/dev-routes";
@@ -48,6 +49,7 @@ const NamedDesktopPage = lazy(() =>
   import("./pages/DesktopPage").then((m) => ({ default: m.NamedDesktopPage })),
 );
 const SettingsPage = lazy(() => import("./pages/SettingsPage"));
+const SettingsDialog = lazy(() => import("./pages/SettingsDialog"));
 const SettingsTabPage = lazy(() => import("./pages/SettingsTabPage"));
 const ConnectionDetailPage = lazy(() => import("./pages/ConnectionDetailPage"));
 const DeviceActivityPage = lazy(() => import("./pages/DeviceActivityPage"));
@@ -70,6 +72,7 @@ export default function App() {
   // One root-level bridge turns SDK `navigateRome`/`startChat` events into
   // react-router navigations for every surface (shell, full-mode apps, auth).
   useHostNavigation();
+  const { backdrop, settingsOpen, close: closeSettings } = useSettingsBackdrop();
   const resumeRemix = useAppRemixResume();
   const cloudLoginReturn = useCloudLoginReturn();
   // Resume before mounting AuthGate so its login-to-home redirect cannot race us.
@@ -80,7 +83,9 @@ export default function App() {
     <SlotProvider>
       <Toaster position="top-right" />
       <Suspense fallback={null}>
-        <Routes>
+        {/* A route that only redirects also goes in REDIRECT_ONLY in
+            use-settings-backdrop.ts, or it would close Settings from behind. */}
+        <Routes location={backdrop}>
           <Route
             path="/login"
             element={
@@ -198,25 +203,35 @@ export default function App() {
             <Route path="/desktop/:name" element={<NamedDesktopPage />} />
             {/* Guide merged into the Showcases app; keep the old path working. */}
             <Route path="/guide" element={<Navigate to="/apps/showcases" replace />} />
-            <Route path="/settings" element={<SettingsPage />} />
-            {/* More-specific static-segment path must win over the wildcard
-                `:tab` route: `/settings/connections` (no id) still falls through
-                to SettingsTabPage. */}
-            {/* App keys moved from its own page into a sheet on the Advanced
-                tab; keep the old path working. The static segment outranks
-                `:serviceId`, so it never reaches ConnectionDetailPage's
-                unknown-id redirect. */}
-            <Route
-              path="/settings/connections/app-keys"
-              element={<Navigate to="/settings/advanced" replace />}
-            />
-            <Route path="/settings/connections/:serviceId" element={<ConnectionDetailPage />} />
-            <Route path="/settings/devices/:deviceId" element={<DeviceActivityPage />} />
-            <Route path="/settings/:tab" element={<SettingsTabPage />} />
           </Route>
 
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
+        {settingsOpen ? (
+          <AuthGate>
+            <SettingsDialog onClose={closeSettings}>
+              <Suspense fallback={null}>
+                <Routes>
+                  <Route path="/settings" element={<SettingsPage />} />
+                  {/* App keys moved from its own page into a sheet on the Advanced
+                      tab; keep the old path working. The static segment outranks
+                      `:serviceId`, so it never reaches ConnectionDetailPage's
+                      unknown-id redirect. */}
+                  <Route
+                    path="/settings/connections/app-keys"
+                    element={<Navigate to="/settings/advanced" replace />}
+                  />
+                  <Route
+                    path="/settings/connections/:serviceId"
+                    element={<ConnectionDetailPage />}
+                  />
+                  <Route path="/settings/devices/:deviceId" element={<DeviceActivityPage />} />
+                  <Route path="/settings/:tab" element={<SettingsTabPage />} />
+                </Routes>
+              </Suspense>
+            </SettingsDialog>
+          </AuthGate>
+        ) : null}
       </Suspense>
     </SlotProvider>
   );

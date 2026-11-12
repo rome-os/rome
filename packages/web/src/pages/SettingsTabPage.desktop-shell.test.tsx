@@ -8,7 +8,7 @@ import SettingsPage from "./SettingsTabPage";
 
 // Rendered for real — this suite is about whether it mounts at all.
 rs.mock("@/components/system-diagnosis-section", () => ({
-  SystemDiagnosisSection: () => null,
+  SystemDiagnosisRow: () => null,
 }));
 
 beforeAll(async () => {
@@ -45,15 +45,15 @@ function renderAdvanced() {
   );
 }
 
-describe("Advanced settings version and upgrade card", () => {
-  it("shows the version and upgrade card in a browser", async () => {
+describe("Advanced settings version row", () => {
+  it("shows the version row in a browser", async () => {
     renderAdvanced();
     expect(await screen.findByText("Current version")).toBeDefined();
   });
 
   it("shows it in the Mac app too, whose window is the hosted instance itself", async () => {
-    // The Mac app opens the hosted Rome's own origin, so the section's relay
-    // to Rome Cloud acts on the instance rendering this page.
+    // The Mac app opens the hosted Rome's own origin, so the row's relay to
+    // Rome Cloud acts on the instance rendering this page.
     window.rome = {};
     renderAdvanced();
 

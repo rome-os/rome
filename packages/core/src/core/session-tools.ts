@@ -1,5 +1,5 @@
 import type { RomeTool } from "../agent/index.js";
-import type { NotifyLevel } from "../lib/notify-client.js";
+import type { NotifyLevel } from "../instance/notify-client.js";
 import type { ThreadContext } from "./types.js";
 
 /** What a session-tools provider sees of the session it equips. */

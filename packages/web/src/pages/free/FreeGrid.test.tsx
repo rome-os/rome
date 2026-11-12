@@ -51,10 +51,17 @@ rs.mock("@/components/chat/use-session-identity", () => ({
 // messages page arrives; tests call it to play that arrival.
 const chatHost = rs.hoisted(() => ({
   onSessionLayout: undefined as ((id: string, layout: unknown[] | null) => void) | undefined,
+  // Every value the chat was handed, in order: the composer takes the first
+  // and the prefill is then consumed, so the last one is already empty.
+  initialProjectNames: [] as (string | undefined)[],
 }));
 rs.mock("@/components/chat/Chat", () => ({
-  Chat: (props: { onSessionLayout?: (id: string, layout: unknown[] | null) => void }) => {
+  Chat: (props: {
+    onSessionLayout?: (id: string, layout: unknown[] | null) => void;
+    initialProjectName?: string;
+  }) => {
     chatHost.onSessionLayout = props.onSessionLayout;
+    chatHost.initialProjectNames.push(props.initialProjectName);
     return null;
   },
 }));
@@ -139,6 +146,7 @@ beforeEach(() => {
     },
   );
   chatHost.onSessionLayout = undefined;
+  chatHost.initialProjectNames = [];
   localStorage.clear();
   setActiveSession("reset");
   setActiveSession(null);
@@ -201,6 +209,49 @@ describe("FreeGrid navigation seeds", () => {
     expect(JSON.parse(screen.getByTestId("location-state").textContent!)).toEqual({
       futureKey: { keep: true },
     });
+  });
+});
+
+describe("FreeGrid project from the address", () => {
+  function renderAtEntry(entry: string | { pathname: string; search?: string; state?: unknown }) {
+    const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    return render(
+      <MemoryRouter initialEntries={[entry]}>
+        <QueryClientProvider client={queryClient}>
+          <SlotProvider>
+            <FreeGrid />
+          </SlotProvider>
+        </QueryClientProvider>
+      </MemoryRouter>,
+    );
+  }
+
+  const firstProjectName = async () => {
+    await waitFor(() => expect(chatHost.initialProjectNames.length).toBeGreaterThan(0));
+    return chatHost.initialProjectNames[0];
+  };
+
+  it("opens the new chat in the project named by ?project=", async () => {
+    renderAtEntry(`/chat?project=${encodeURIComponent("work/alpha beta")}`);
+    expect(await firstProjectName()).toBe("work/alpha beta");
+  });
+
+  it("prefers the router state's project when both exist", async () => {
+    renderAtEntry({
+      pathname: "/chat",
+      search: "?project=from-url",
+      state: { projectPath: "alpha" },
+    });
+    expect(await firstProjectName()).toBe("alpha");
+  });
+
+  it("starts without a project when ?project= is empty or blank", async () => {
+    renderAtEntry("/chat?project=");
+    expect(await firstProjectName()).toBeUndefined();
+    cleanup();
+    chatHost.initialProjectNames = [];
+    renderAtEntry("/chat?project=%20%20");
+    expect(await firstProjectName()).toBeUndefined();
   });
 });
 

@@ -8,7 +8,7 @@ import {
   SectionTitle,
 } from "@rome-os/ui/page";
 import { useState, useEffect, useCallback, useId, useRef, type ReactNode } from "react";
-import { ComputerUseSection } from "@/components/computer-use-section";
+import { ComputerUseRow } from "@/components/computer-use-section";
 import { SpokenRecapsRows } from "@/components/spoken-recaps-section";
 import { Trans, useTranslation } from "react-i18next";
 import { Link, Navigate, useParams } from "react-router-dom";
@@ -62,14 +62,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
@@ -98,14 +91,13 @@ import {
   ADVANCED_EASTER_EGG_INITIAL_SEQUENCE,
   advanceAdvancedEasterEggSequence,
 } from "@/lib/advanced-easter-egg";
-import { AppKeysSection } from "@/components/app-keys-section";
+import { AppKeysRow } from "@/components/app-keys-section";
 import { ConnectionsSection } from "@/components/ConnectionsSection";
 import { ChannelsSettingsPage } from "@/components/channels/channels-settings-page";
 import { AiToolsPanel } from "@/components/ai-tools-panel";
-import { SystemUpgradeSection } from "@/components/system-upgrade-section";
-import { SystemDiagnosisSection } from "@/components/system-diagnosis-section";
+import { SystemVersionRow } from "@/components/system-upgrade-section";
+import { SystemDiagnosisRow } from "@/components/system-diagnosis-section";
 import { useInvalidateSettings } from "@/hooks/use-settings";
-import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useTheme } from "@/hooks/use-theme";
 import { parseEmailTextarea } from "@/lib/email-list";
 import { StatusIndicator } from "@/lib/connection-status";
@@ -116,7 +108,7 @@ import {
   DASHBOARD_ACCESS_MAX_EMAIL_LENGTH,
   DASHBOARD_ACCESS_MAX_EMAILS,
 } from "@rome/api-types/dashboard-access";
-import { Page, PageHeader, PageHeading, PageNav, PageNavLink, PageTitle } from "@rome-os/ui/page";
+import { Page } from "@rome-os/ui/page";
 import {
   CONNECTIONS_REFRESH_INTERVAL_MS,
   fetchConnections,
@@ -159,7 +151,7 @@ type Tab = (typeof TABS)[number];
 // request would strand a guardian on a healthy tab.
 const SETTINGS_BACKED_TABS: ReadonlySet<Tab> = new Set<Tab>(["AI Tools", "Advanced"]);
 
-function tabToSlug(tab: Tab): string {
+export function tabToSlug(tab: Tab): string {
   return tab.toLowerCase().replace(/\s+/g, "-");
 }
 
@@ -175,7 +167,6 @@ export default function SettingsPage() {
   const params = useParams<{ tab?: string }>();
   const normalizedTab = normalizeTab(params.tab ?? null);
   const activeTab = normalizedTab ?? TABS[0];
-  useDocumentTitle([t(`tabs.${activeTab}` as const), t("page.title")]);
 
   const invalidateSettings = useInvalidateSettings();
   const [settings, setSettings] = useState<SettingsData>({});
@@ -298,20 +289,6 @@ export default function SettingsPage() {
 
   return (
     <Page>
-      <PageHeader>
-        <PageHeading>
-          <PageTitle>{t("page.title")}</PageTitle>
-        </PageHeading>
-      </PageHeader>
-
-      <PageNav aria-label={t("page.title")}>
-        {TABS.map((tab) => (
-          <PageNavLink asChild key={tab} active={tab === activeTab}>
-            <Link to={`/settings/${tabToSlug(tab)}`}>{t(`tabs.${tab}` as const)}</Link>
-          </PageNavLink>
-        ))}
-      </PageNav>
-
       {tabNeedsSettings && loading ? (
         <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
       ) : tabNeedsSettings && loadError ? (
@@ -927,13 +904,14 @@ function AdvancedSection({
           <SectionHeader>
             <SectionTitle>{t("system.title")}</SectionTitle>
           </SectionHeader>
-          <SystemUpgradeSection />
-          <SystemDiagnosisSection details={<RelayHealthSection />} />
+          <FormRows>
+            <SystemVersionRow />
+            <SystemDiagnosisRow details={<RelayHealthSection />} />
+            <ComputerUseRow />
+          </FormRows>
         </Section>
-        <AppKeysSection />
         <FeaturesSection />
         <AccessControlSection settings={settings} onSave={onSave} saving={saving} />
-        <ComputerUseSection />
         <DeveloperSettingsSection settings={settings} onSave={onSave} saving={saving} />
         {showEasterEgg && <AdvancedEasterEggOverlay onClose={() => setShowEasterEgg(false)} />}
       </Section>
@@ -1520,8 +1498,8 @@ function AccessControlSection({
       <SectionHeader>
         <SectionTitle>{t("publicAccess.title")}</SectionTitle>
       </SectionHeader>
-      <AllowedCloudEmailsSection />
       <FormRows>
+        <AppKeysRow />
         <SettingsToggleRow
           title={t("advanced.feedback.agentReports.title")}
           description={t("advanced.feedback.agentReports.description")}
@@ -1530,6 +1508,7 @@ function AccessControlSection({
           onChange={(enabled) => void onSave({ "feedback.agentReportsEnabled": enabled })}
           disabled={saving}
         />
+        <AllowedCloudEmailsRows />
       </FormRows>
     </Section>
   );
@@ -1539,7 +1518,10 @@ interface DashboardAccessConfig {
   cloudEmailAccess: string[];
 }
 
-function AllowedCloudEmailsSection() {
+/** Allowed emails as rows of the Access and privacy group: a heading row with
+ * the count, the add field, then one row per address. Last in the group, so a
+ * long list grows at the bottom rather than pushing the other settings down. */
+function AllowedCloudEmailsRows() {
   const { t } = useTranslation("settings");
   const [emails, setEmails] = useState<string[]>([]);
   const [draft, setDraft] = useState("");
@@ -1637,19 +1619,19 @@ function AllowedCloudEmailsSection() {
   if (!loaded) return null;
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{t("publicAccess.dashboardEmails.title")}</CardTitle>
-        <CardDescription>{t("publicAccess.dashboardEmails.description")}</CardDescription>
-        <CardAction>
+    <>
+      <FormRow>
+        <FormRowHeading>
+          <FormRowLabel>{t("publicAccess.dashboardEmails.title")}</FormRowLabel>
+          <FormRowDescription>{t("publicAccess.dashboardEmails.description")}</FormRowDescription>
+        </FormRowHeading>
+        <FormRowControl>
           <Badge variant="muted">
-            {t("publicAccess.dashboardEmails.accountCount", {
-              count: emails.length,
-            })}
+            {t("publicAccess.dashboardEmails.accountCount", { count: emails.length })}
           </Badge>
-        </CardAction>
-      </CardHeader>
-      <CardContent>
+        </FormRowControl>
+      </FormRow>
+      <div className="px-4 py-3">
         <div className="flex gap-2">
           <div className="flex-1">
             <Input
@@ -1687,37 +1669,33 @@ function AllowedCloudEmailsSection() {
           </Button>
         </div>
         {draftError && <p className="mt-2 text-aux text-destructive-fg">{draftError}</p>}
-
-        {emails.length > 0 ? (
-          <ul className="mt-4 space-y-2">
-            {emails.map((email) => (
-              <li
-                key={email}
-                className="flex items-center gap-3 rounded-8 border border-border px-3 py-2"
-              >
-                <Avatar>
-                  <AvatarFallback className="bg-primary/15 text-primary">
-                    {email[0]?.toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-                <span className="min-w-0 flex-1 truncate text-ui text-foreground">{email}</span>
-                <IconButton
-                  size="sm"
-                  label={t("publicAccess.dashboardEmails.remove", { email })}
-                  icon={<X />}
-                  className="text-muted-foreground hover:text-foreground"
-                  disabled={saving}
-                  onClick={() => removeEmail(email)}
-                />
-              </li>
-            ))}
-          </ul>
-        ) : (
-          <p className="mt-4 rounded-12 border border-dashed border-border px-3 py-3 text-ui text-muted-foreground">
-            {t("publicAccess.dashboardEmails.empty")}
-          </p>
-        )}
-      </CardContent>
-    </Card>
+      </div>
+      {emails.length > 0 ? (
+        <ul aria-label={t("publicAccess.dashboardEmails.title")} className="divide-y divide-border">
+          {emails.map((email) => (
+            <li key={email} className="flex items-center gap-3 px-4 py-3">
+              <Avatar size="sm">
+                <AvatarFallback className="bg-primary/15 text-primary">
+                  {email[0]?.toUpperCase()}
+                </AvatarFallback>
+              </Avatar>
+              <span className="min-w-0 flex-1 truncate text-ui text-foreground">{email}</span>
+              <IconButton
+                size="sm"
+                label={t("publicAccess.dashboardEmails.remove", { email })}
+                icon={<X />}
+                className="text-muted-foreground hover:text-foreground"
+                disabled={saving}
+                onClick={() => removeEmail(email)}
+              />
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="px-4 py-3 text-ui text-muted-foreground">
+          {t("publicAccess.dashboardEmails.empty")}
+        </p>
+      )}
+    </>
   );
 }

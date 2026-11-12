@@ -2859,8 +2859,9 @@ describe("AgentRunner", () => {
             };
           },
         };
+        const lifecycle = createLifecycleRecorder();
         const manager = createSessions(
-          managerDeps(createTestModelResolver({ providers: [provider] })),
+          managerDeps(createTestModelResolver({ providers: [provider] }), lifecycle),
           { keepAliveAcrossTurns: true },
         );
         const session = await manager.open({
@@ -2880,8 +2881,13 @@ describe("AgentRunner", () => {
         await firstMessages;
         await collectMessages((await second.turn).events());
         await manager.shutdown();
+        const firstEnd = lifecycle.finishedEvents.find(
+          (event) => event.turn.turnId === firstTurn.id,
+        );
+        handedOn = (firstEnd as { handedOn?: boolean } | undefined)?.handedOn ?? false;
         return prompts[1];
       };
+      let handedOn = false;
 
       it("carries a superseded turn's request into the next prompt", async () => {
         const next = await follow("superseded");
@@ -2889,6 +2895,8 @@ describe("AgentRunner", () => {
         expect(next).toMatch(/previous turn was stopped before it finished/);
         expect(next).toContain("Start a task");
         expect(next).toContain("What is 6 times 9?");
+        // Rome hears that the work went on, so marks that follow it stay.
+        expect(handedOn).toBe(true);
       });
 
       it("carries nothing from a turn that completed before the stop reached it", async () => {
@@ -2897,6 +2905,7 @@ describe("AgentRunner", () => {
 
       it("carries nothing from a turn the guardian stopped", async () => {
         expect(await follow("stopped by the guardian")).toBe("What is 6 times 9?");
+        expect(handedOn).toBe(false);
       });
     });
 

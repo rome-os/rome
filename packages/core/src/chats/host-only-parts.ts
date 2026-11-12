@@ -5,12 +5,15 @@
  * `send_message`, `channels.send`, a People send — strips them, so a forged card
  * can't bind those controls to a routine or schedule an arbitrary action. A
  * connect card makes the dashboard open a link and call an API path it carries,
- * so only the Concierge's own tool may write one.
+ * so only the Concierge's own tool may write one. A widget mounts an app's code
+ * with the props it carries, so only the webchat drain writes one, for the app
+ * that owns the action that showed it.
  */
 const HOST_ONLY_PART_TYPES: ReadonlySet<string> = new Set([
   "routine_draft_card",
   "quota_switch",
   "connect_card",
+  "widget",
 ]);
 
 export function withoutHostOnlyParts<T extends { type: string }>(parts: readonly T[]): T[] {

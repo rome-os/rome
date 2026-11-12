@@ -11,8 +11,8 @@
 //               important turns in the last hour, counting each chat's turn,
 //               the rest of a batch's important items skip the Concierge
 //   digest      every item, important or not and told or not, goes to the
-//               Concierge at the guardian's digest times, in the main chat,
-//               grouped by the chat each item reports to, important ones first
+//               Concierge at the guardian's digest times, as one turn in each
+//               chat the items report to, important ones first
 //   quiet hours important items wait until the guardian's quiet window ends,
 //               then arrive as one turn marked as held
 //
@@ -22,7 +22,7 @@
 // and is tried again RETRY_MS later.
 
 import { withoutSessionActor } from "../access/session-actor.js";
-import type { ConciergeChatRef, ConciergeQuietHours } from "@rome/api-types/concierge";
+import type { ConciergeQuietHours } from "@rome/api-types/concierge";
 import type { ConciergeFollowItemRow } from "../db/repositories/concierge-follow-items.js";
 import { createLogger } from "../logger.js";
 import type { FollowEvent } from "./triage.js";
@@ -351,45 +351,25 @@ export function renderImportantTurn(
 }
 
 /**
- * The quiet turn of a digest: every item since the last one, grouped by the
- * Concierge chat each reports to when `chatOf` is given. Within a group
- * important items come first and are always listed, marked as such. A large
- * group shows a few lines of the rest per source and kind and counts the
- * others, so the conversation is not flooded.
+ * The quiet turn of a digest: the items of one Concierge chat. Important items
+ * come first and are always listed, marked as such. A large digest shows a few
+ * lines of the rest per source and kind and counts the others, so the
+ * conversation is not flooded.
  */
 export function renderDigestTurn(
   items: ConciergeFollowItemRow[],
   now: string,
-  chatOf?: (item: ConciergeFollowItemRow) => ConciergeChatRef | undefined,
   kindLabel?: KindLabelLookup,
 ): string {
-  const header = `<external_events untrusted="true" delivery="digest" count="${items.length}" now="${attr(now)}">`;
-  if (!chatOf)
-    return [header, FENCE_NOTE, ...digestLines(items, kindLabel), "</external_events>"].join("\n");
-  const groups = new Map<
-    string,
-    { chat: ConciergeChatRef | undefined; items: ConciergeFollowItemRow[] }
-  >();
-  for (const item of items) {
-    const chat = chatOf(item);
-    const key = chat?.id ?? "";
-    const group = groups.get(key) ?? { chat, items: [] };
-    group.items.push(item);
-    groups.set(key, group);
-  }
-  // The main chat's own items come first.
-  const ordered = [...groups.values()].sort(
-    (a, b) => Number(b.chat?.main ?? false) - Number(a.chat?.main ?? false),
-  );
-  const lines = ordered.flatMap(({ chat, items: group }) => [
-    `<chat${chat ? ` id="${attr(chat.id)}" name="${attr(chat.name)}" main="${chat.main}"` : ""}>`,
-    ...digestLines(group, kindLabel),
-    "</chat>",
-  ]);
-  return [header, FENCE_NOTE, ...lines, "</external_events>"].join("\n");
+  return [
+    `<external_events untrusted="true" delivery="digest" count="${items.length}" now="${attr(now)}">`,
+    FENCE_NOTE,
+    ...digestLines(items, kindLabel),
+    "</external_events>",
+  ].join("\n");
 }
 
-/** One group's digest lines: important first, then a bounded few per source and kind. */
+/** The digest lines of one chat: important first, then a bounded few per source and kind. */
 function digestLines(items: ConciergeFollowItemRow[], kindLabel?: KindLabelLookup): string[] {
   const important = items.filter((item) => item.decision === "important");
   const rest = items.filter((item) => item.decision !== "important");

@@ -92,6 +92,9 @@ import {
   useReplyDraftState,
 } from "@/components/chat/reply/reply-draft";
 import { findMessageAnchor } from "@/components/chat/reply/reply-source";
+import { chatFloorLayering } from "@/components/chat/chat-floor";
+import { isAnchorInView, LANDING_MS, playLanding } from "@/components/chat/reply/thread-anchor";
+import { useDesktop } from "@/hooks/use-desktop";
 import { buildTimelineQuestions } from "@/components/chat/chat-timeline";
 import { runningTurnIdOf, useStreamingSessions } from "@/hooks/use-streaming-sessions";
 import { useChatTabStatus } from "@/hooks/use-tab-status";
@@ -106,12 +109,16 @@ import {
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
 import { ChatThreadView } from "@/components/chat/ChatThreadView";
+import {
+  type LiveStatusReactions,
+  LiveStatusReactionsProvider,
+  messageStatusReactionSchema,
+} from "@/components/chat/status-reaction";
 import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
 import {
   ChatThreadsProvider,
   placeLive,
   type ThreadPlacement,
-  placed,
   useChatThreadsValue,
 } from "@/components/chat/reply/chat-threads";
 import {
@@ -177,8 +184,6 @@ import { DEFAULT_LARGE_MODEL_SELECTION } from "@/lib/chat-constants";
 // Leave a jumped-to question clear of the top edge — flush against it reads
 // as cut off.
 const TIMELINE_JUMP_OFFSET_PX = 24;
-// How long the landed-on question stays tinted.
-const TIMELINE_LANDING_MS = 900;
 /** How many older pages a jump to a Concierge message loads before it gives up. */
 const MAX_JUMP_PAGES = 20;
 
@@ -251,6 +256,14 @@ const messageChatThreadSchema = z.object({
   sessionId: z.string(),
   messageId: z.string(),
   chatThreadId: z.string(),
+  /** The task's title, when the thread is a task's. */
+  chatThreadTitle: z.string().optional(),
+});
+
+/** A task left the chat, and its chat thread with it. */
+const chatThreadRetiredSchema = z.object({
+  sessionId: z.string(),
+  chatThreadId: z.string(),
 });
 
 interface ChatSessionEventsProps {
@@ -258,6 +271,9 @@ interface ChatSessionEventsProps {
   onMessageInsert: (sessionId: string, message: ChatMessage) => void;
   /** The Concierge placed a message of the chat in a chat thread. */
   onMessageChatThread?: (event: z.infer<typeof messageChatThreadSchema>) => void;
+  onChatThreadRetired?: (event: z.infer<typeof chatThreadRetiredSchema>) => void;
+  /** Rome changed the status reaction on a guardian message of a Concierge chat. */
+  onMessageStatusReaction?: (event: z.infer<typeof messageStatusReactionSchema>) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
   onSessionRunning: (event: z.infer<typeof sessionRunningSchema>) => void;
   onReconnect: (sessionId: string) => void;
@@ -267,6 +283,8 @@ function ChatSessionEvents({
   sessionId,
   onMessageInsert,
   onMessageChatThread,
+  onChatThreadRetired,
+  onMessageStatusReaction,
   onSessionName,
   onSessionRunning,
   onReconnect,
@@ -286,6 +304,18 @@ function ChatSessionEvents({
         schema: messageChatThreadSchema,
         fn: (event) => {
           if (event.sessionId === sessionId) onMessageChatThread?.(event);
+        },
+      },
+      chat_thread_retired: {
+        schema: chatThreadRetiredSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onChatThreadRetired?.(event);
+        },
+      },
+      message_status_reaction: {
+        schema: messageStatusReactionSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onMessageStatusReaction?.(event);
         },
       },
       session_running: {
@@ -491,11 +521,39 @@ export function Chat({
   // a placement after a reload builds on what the reload said.
   const [rethreaded, setRethreaded] = useState<ReadonlyMap<string, ThreadPlacement>>(new Map());
   const loadedThreads = useRef<ReadonlyMap<string, string | null>>(new Map());
+  // Task titles live placements told, by the thread they name; null for a
+  // thread whose task left the chat, which is a task's no more.
+  const [liveThreadTitles, setLiveThreadTitles] = useState<ReadonlyMap<string, string | null>>(
+    new Map(),
+  );
+  const handleChatThreadRetired = useCallback(
+    ({ chatThreadId }: z.infer<typeof chatThreadRetiredSchema>) =>
+      setLiveThreadTitles((prev) =>
+        prev.get(chatThreadId) === null ? prev : new Map(prev).set(chatThreadId, null),
+      ),
+    [],
+  );
   const handleMessageChatThread = useCallback(
-    ({ messageId, chatThreadId }: { messageId: string; chatThreadId: string }) =>
+    ({ messageId, chatThreadId, chatThreadTitle }: z.infer<typeof messageChatThreadSchema>) => {
       setRethreaded((prev) =>
         placeLive(prev, messageId, chatThreadId, loadedThreads.current.get(messageId) ?? null),
-      ),
+      );
+      if (chatThreadTitle) {
+        setLiveThreadTitles((prev) =>
+          prev.get(chatThreadId) === chatThreadTitle
+            ? prev
+            : new Map(prev).set(chatThreadId, chatThreadTitle),
+        );
+      }
+    },
+    [],
+  );
+  // Status reactions live events changed since the messages loaded. A
+  // reconnect reloads the messages, which then say how each stands.
+  const [liveReactions, setLiveReactions] = useState<LiveStatusReactions>(new Map());
+  const handleMessageStatusReaction = useCallback(
+    ({ messageId, statusReaction }: z.infer<typeof messageStatusReactionSchema>) =>
+      setLiveReactions((prev) => new Map(prev).set(messageId, statusReaction)),
     [],
   );
   // Inline share flow: pick turns directly on the transcript.
@@ -672,6 +730,17 @@ export function Chat({
 
   const landingTimerRef = useRef<number | undefined>(undefined);
   useEffect(() => () => window.clearTimeout(landingTimerRef.current), []);
+  // Tints a message's row for a moment, so the eye finds it.
+  const landOn = useCallback((scroller: HTMLElement, anchor: HTMLElement) => {
+    window.clearTimeout(landingTimerRef.current);
+    for (const el of scroller.querySelectorAll("[data-timeline-landed]")) {
+      if (el !== anchor) el.removeAttribute("data-timeline-landed");
+    }
+    playLanding(anchor);
+    landingTimerRef.current = window.setTimeout(() => {
+      anchor.removeAttribute("data-timeline-landed");
+    }, LANDING_MS);
+  }, []);
 
   // Scrolls to a message and tints it. An anchor names one message id, or
   // every id of an agent turn separated by spaces.
@@ -706,16 +775,31 @@ export function Chat({
 
       // Every user bubble is the same tint, so without this you cannot tell
       // whether the jump landed on the question you picked.
-      window.clearTimeout(landingTimerRef.current);
-      for (const el of scroller.querySelectorAll("[data-timeline-landed]")) {
-        el.removeAttribute("data-timeline-landed");
-      }
-      anchor.setAttribute("data-timeline-landed", "");
-      landingTimerRef.current = window.setTimeout(() => {
-        anchor.removeAttribute("data-timeline-landed");
-      }, TIMELINE_LANDING_MS);
+      landOn(scroller, anchor);
     },
-    [scrollerEl],
+    [scrollerEl, landOn],
+  );
+
+  // Brings a message back into view after the thread view opened from it
+  // closes, and tints it, so the reader finds where they were. A message
+  // still in view only gets the tint.
+  const revealMessage = useCallback(
+    (messageId: string) => {
+      const scroller = scrollerEl;
+      const anchor = scroller ? findMessageAnchor(scroller, messageId) : null;
+      if (!scroller || !anchor) return;
+      const box = scroller.getBoundingClientRect();
+      const clear = Number.parseFloat(getComputedStyle(scroller).scrollPaddingTop) || 0;
+      const bottom = floorEl
+        ? Math.min(box.bottom, floorEl.getBoundingClientRect().top)
+        : box.bottom;
+      if (isAnchorInView(anchor.getBoundingClientRect(), { top: box.top + clear, bottom })) {
+        landOn(scroller, anchor);
+      } else {
+        jumpToMessage(messageId);
+      }
+    },
+    [scrollerEl, floorEl, landOn, jumpToMessage],
   );
 
   // A row of the task panel points to a Concierge message that may sit pages
@@ -768,7 +852,6 @@ export function Chat({
     return onConciergeJump((messageId) => void showSourceMessage(messageId));
   }, [concierge, showSourceMessage]);
 
-  const threadedRef = useRef<ReadonlySet<string>>(new Set());
   const displayedMessageIds = useMemo(
     () => new Set(displayMessages.map((message) => message.id)),
     [displayMessages],
@@ -779,10 +862,9 @@ export function Chat({
     messageIds: displayedMessageIds,
     jump: jumpToMessage,
     focusComposer: () => composerRef.current?.focus(),
-    // A Concierge chat keeps chat threads: Reply on a message in one, and a
-    // quote, open the thread view.
+    // A Concierge chat keeps chat threads. Only a thread label opens the
+    // thread view; Reply opens the reply bar alone.
     threads: concierge,
-    inThread: (messageId) => threadedRef.current.has(messageId),
   });
 
   // Share chat picks every turn in a common chat. A Concierge chat holds its
@@ -1017,6 +1099,12 @@ export function Chat({
       // Only mark loaded once we have data in hand. Marking before the await
       // permanently suppressed retries on any failure — the user would land in
       // a silently-empty chat with no recovery short of a page refresh.
+      // The local rows a fetch may stand in for are the ones sent before it
+      // asked. A row sent while it is on the way is newer than the page it
+      // brings, so it stays until a later fetch holds it.
+      const localBeforeFetch = options.dropLocalOptimistic
+        ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
+        : undefined;
       try {
         const fetchPage = () => listSessionMessagePage(id, { limit: pageTurns });
         let page = await fetchPage();
@@ -1037,9 +1125,7 @@ export function Chat({
         if (fetchedMessages.some((message) => message.traceArchived))
           traceArchivedSessionsRef.current.add(id);
         else traceArchivedSessionsRef.current.delete(id);
-        const dropMessageIds = options.dropLocalOptimistic
-          ? new Set(localOptimisticMessageIdsRef.current.get(id) ?? [])
-          : undefined;
+        const dropMessageIds = localBeforeFetch;
         const commitMessages = () =>
           setMessages((prev) => {
             const next = new Map(prev);
@@ -1067,8 +1153,10 @@ export function Chat({
         // A refetch of the newest page leaves older loaded pages, and the
         // cursor that reaches past them, as they are.
         if (!loadedSessionsRef.current.has(id) || restart) setOlderCursor(id, page.nextCursor);
-        if (options.dropLocalOptimistic) {
-          localOptimisticMessageIdsRef.current.delete(id);
+        if (localBeforeFetch) {
+          const local = localOptimisticMessageIdsRef.current.get(id);
+          for (const messageId of localBeforeFetch) local?.delete(messageId);
+          if (local?.size === 0) localOptimisticMessageIdsRef.current.delete(id);
         }
         loadedSessionsRef.current.add(id);
         if (isReadVisibleSession(id)) {
@@ -1526,6 +1614,7 @@ export function Chat({
   // Events missed while the stream was down may include a turn's start.
   const handleSessionEventsReconnect = useCallback(
     (sid: string) => {
+      setLiveReactions(new Map());
       resyncSessionMessages(sid);
       if (sid === mainSessionIdRef.current) kickTurnPoll();
     },
@@ -2297,18 +2386,40 @@ export function Chat({
       )
     : floatingHeader;
   const threadOpen = concierge && Boolean(mainSessionId) && replyDraft.thread !== null;
+  // The thread view stays on the message it opened from while it is open,
+  // a reply picked inside it included. It fades in, and closes at once: the
+  // backdrop's blur cannot fade out cleanly, and the composer and header
+  // return under a fading view, so a fade out flashes.
+  const draftThread = threadOpen ? replyDraft.thread : null;
+  const [threadView, setThreadView] = useState<string | null>(null);
+  if (draftThread && !threadView) setThreadView(draftThread);
+  else if (!draftThread && threadView) setThreadView(null);
+  const openedFromRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (draftThread) {
+      openedFromRef.current ??= draftThread;
+      return;
+    }
+    const from = openedFromRef.current;
+    openedFromRef.current = null;
+    if (from) revealMessage(from);
+  }, [draftThread, revealMessage]);
+  // On a desktop the thread view holds the message it opened from where it
+  // sat in the timeline; a phone keeps the thread on the composer.
+  const desktop = useDesktop();
+  const threadOrigin = useCallback(
+    (messageId: string) => () => {
+      if (!desktop || !scrollerEl) return null;
+      return findMessageAnchor(scrollerEl, messageId)?.getBoundingClientRect().top ?? null;
+    },
+    [desktop, scrollerEl],
+  );
   // The thread view's transcript feeds none of the chat's scroll measures.
   const ignoreThreadContent = useCallback(() => {}, []);
   loadedThreads.current = new Map(
     displayMessages.map((message) => [message.id, message.chatThreadId ?? null]),
   );
-  const chatThreads = useChatThreadsValue(displayMessages, rethreaded);
-  // Every message in a chat thread, roots included, as the timeline shows them now.
-  threadedRef.current = new Set(
-    placed(displayMessages, rethreaded).flatMap((message) =>
-      message.chatThreadId ? [message.id, message.chatThreadId] : [],
-    ),
-  );
+  const chatThreads = useChatThreadsValue(displayMessages, rethreaded, liveThreadTitles);
   const conciergeHeader = concierge ? (
     <>
       {threadOpen ? null : conciergeHeaderWith(navbarActions)}
@@ -2331,6 +2442,8 @@ export function Chat({
           sessionId={sid}
           onMessageInsert={handleMessageInsert}
           onMessageChatThread={handleMessageChatThread}
+          onChatThreadRetired={handleChatThreadRetired}
+          onMessageStatusReaction={handleMessageStatusReaction}
           onSessionName={handleSessionName}
           onSessionRunning={handleSessionRunning}
           onReconnect={handleSessionEventsReconnect}
@@ -2459,16 +2572,16 @@ export function Chat({
                 and bottom padding sit outside the box's blur, and on a phone a
                 transparent strip there shows table rows and text beside and
                 below the box, which reads as a second transcript. The floor
-                also takes pointer events there, so a tap on the canvas cannot
+                also takes pointer events there, while no thread view is open, so a tap on the canvas cannot
                 land on a link it hides. It stays inside the scroller, so the
                 scroll and keyboard geometry match the desktop layout. */}
               <div
                 ref={setFloorEl}
                 data-chat-floor
                 className={cn(
-                  "pointer-events-none sticky bottom-0 px-3 max-md:pointer-events-auto md:px-6",
-                  // Over the thread view, whose blur runs down behind it.
-                  threadOpen ? "z-30" : "z-10 max-md:bg-chat-canvas",
+                  "pointer-events-none sticky bottom-0 px-3 md:px-6",
+                  // Over an open thread view only the composer takes presses.
+                  chatFloorLayering(threadOpen),
                   // Presentation mode gives the draft's bottom gap 5x its normal
                   // size so a recording framed on the empty state keeps the
                   // composer clear of the capture's lower edge.
@@ -2559,6 +2672,8 @@ export function Chat({
                         isStreaming={displayedStreaming}
                         onStop={stopComposerTurn}
                         streamError={streamError}
+                        // An open topic chat names itself in its box.
+                        chatName={isMainChat ? null : sessionName?.trim() || null}
                         modelSelection={
                           chatModelPickable
                             ? { value: chatModelValue, onChange: pickChatModel }
@@ -2614,13 +2729,14 @@ export function Chat({
                 onJump={jumpToMessage}
               />
             )}
-            {threadOpen && mainSessionId && replyDraft.thread ? (
+            {threadView && mainSessionId ? (
               <ChatThreadView
-                key={replyDraft.thread}
+                key={threadView}
                 sessionId={mainSessionId}
-                messageId={replyDraft.thread}
+                messageId={threadView}
                 onClose={replyDraft.closeThread}
                 floor={floorEl}
+                originTop={threadOrigin(threadView)}
                 header={conciergeHeaderWith(
                   <IconButton
                     size={floating ? "md" : "sm"}
@@ -2631,27 +2747,31 @@ export function Chat({
                   />,
                 )}
                 renderMessages={(threadMessages) => (
-                  <ConciergeTranscript
-                    rows={buildRows(threadMessages, identityBySession, mainIdentity, {
-                      runningTurnId: null,
-                      isStreaming: false,
-                    })}
-                    live={{
-                      isStreaming: false,
-                      runningTurnId: null,
-                      snapshot: null,
-                      textStore: liveTextStore,
-                      identity: mainIdentity,
-                    }}
-                    actions={{
-                      ...blockActions,
-                      interactionResults: threadInteractionResults(threadMessages, {
-                        messages: displayMessages,
-                        results: blockActions.interactionResults,
-                      }),
-                    }}
-                    contentRef={ignoreThreadContent}
-                  />
+                  // The thread view offers Copy and Reply, not Share: a share
+                  // is made from the chat's own timeline.
+                  <MessageSharingContext.Provider value={null}>
+                    <ConciergeTranscript
+                      rows={buildRows(threadMessages, identityBySession, mainIdentity, {
+                        runningTurnId: null,
+                        isStreaming: false,
+                      })}
+                      live={{
+                        isStreaming: false,
+                        runningTurnId: null,
+                        snapshot: null,
+                        textStore: liveTextStore,
+                        identity: mainIdentity,
+                      }}
+                      actions={{
+                        ...blockActions,
+                        interactionResults: threadInteractionResults(threadMessages, {
+                          messages: displayMessages,
+                          results: blockActions.interactionResults,
+                        }),
+                      }}
+                      contentRef={ignoreThreadContent}
+                    />
+                  </MessageSharingContext.Provider>
                 )}
               />
             ) : null}
@@ -2691,7 +2811,7 @@ export function Chat({
   return (
     <ReplyDraftProvider value={replyDraft}>
       <MessageSharingContext.Provider value={shareMessageTurn}>
-        {page}
+        <LiveStatusReactionsProvider value={liveReactions}>{page}</LiveStatusReactionsProvider>
       </MessageSharingContext.Provider>
     </ReplyDraftProvider>
   );

@@ -37,7 +37,7 @@ import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
 import type { ConciergeTasks } from "./tasks.js";
 import type { ConciergeTaskRow } from "../db/repositories/concierge-tasks.js";
-import type { NotifyLevel } from "../lib/notify-client.js";
+import type { NotifyLevel } from "../instance/notify-client.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../webchat/owner.js";
 import { isMainConciergeChat, MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
@@ -195,12 +195,27 @@ export interface SystemTurnOptions {
   pushLevel?: NotifyLevel;
 }
 
+/** The task ids a turn's prompt names: `<task id="…">` lines and `task:<id>` names. */
+function namedTaskIds(prompt: string): Set<string> {
+  return new Set(
+    [...prompt.matchAll(/<task id="([^"]+)"|\btask:([\w-]+)/g)]
+      .map((match) => match[1] ?? match[2])
+      .filter((id): id is string => Boolean(id)),
+  );
+}
+
 export class ConciergeService {
   private readonly leftModels = new Map<string, number>();
   /** The main chat being created, per owner, so concurrent calls share one. */
   private readonly creating = new Map<ConciergeOwner, Promise<string>>();
   private attached: ConciergeDashboard | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
+  /** Per Concierge chat, the task whose report a newer input took over. */
+  private readonly carriedReports = new Map<string, readonly string[]>();
+  /** Per Concierge chat, the guardian messages superseded turns handed on. */
+  private readonly handedOnPrompts = new Map<string, string[]>();
+  /** Per Concierge turn, the tasks whose result it said. */
+  private readonly relayedInTurn = new Map<string, Set<string>>();
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
   private readonly push: ConciergePush | null;
@@ -496,10 +511,19 @@ export class ConciergeService {
 
   /**
    * A retired Concierge chat is archived or deleted now, and its tasks are
-   * `mainChatId`'s. Finished rows stay on the retired chat, so no row write
+   * `mainChatId`'s. A deleted one's status reactions go with it. Finished rows stay on the retired chat, so no row write
    * tells the activity that their task chats now move the main chat.
    */
-  async chatGone(chatId: string, mainChatId: string): Promise<void> {
+  async chatGone(chatId: string, mainChatId: string, deleted = false): Promise<void> {
+    // A deleted chat's messages are gone, and their marks with them.
+    if (deleted) {
+      await this.deps.tasks.repo.forgetReactions(chatId).catch((error: unknown) =>
+        log.warn("failed to forget a deleted chat's status reactions", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     await this.activity?.retired(chatId, mainChatId).catch((error: unknown) =>
       log.warn("concierge activity retire failed", {
         error: error instanceof Error ? error.message : String(error),
@@ -652,6 +676,16 @@ export class ConciergeService {
     };
   }
 
+  /** Every task row of `chatId` a turn's prompt names, as {@link reportedTaskOf} reads them. */
+  private async reportedTasksOf(prompt: string, chatId: string): Promise<string[]> {
+    const own: string[] = [];
+    for (const id of namedTaskIds(prompt)) {
+      const found = await this.deps.tasks.repo.getWithChat(id);
+      if (found && found.conciergeChat.id === chatId) own.push(found.row.id);
+    }
+    return own;
+  }
+
   /**
    * The one task row a turn reports on: the row its prompt names, when it is
    * `chatId`'s. A turn naming several rows reports on none that a line can be
@@ -660,15 +694,10 @@ export class ConciergeService {
    * instructions ask.
    */
   private async reportedTaskOf(prompt: string, chatId: string): Promise<string | undefined> {
-    const ids = [...prompt.matchAll(/<task id="([^"]+)"|\btask:([\w-]+)/g)].map(
-      (match) => match[1] ?? match[2],
-    );
     // Which of several tasks a line reports on is not ours to guess.
-    const named = new Set(ids.filter(Boolean));
-    if (named.size !== 1) return undefined;
-    const [id] = named;
-    const found = id ? await this.deps.tasks.repo.getWithChat(id) : null;
-    return found && found.conciergeChat.id === chatId ? found.row.id : undefined;
+    if (namedTaskIds(prompt).size !== 1) return undefined;
+    const [own] = await this.reportedTasksOf(prompt, chatId);
+    return own;
   }
 
   /**
@@ -711,7 +740,84 @@ export class ConciergeService {
       prompt,
     });
     if (!params.sessionId) return "failed";
-    return (await this.deps.runBackendTurn(params, options)) ?? "failed";
+    const outcome = (await this.deps.runBackendTurn(params, options)) ?? "failed";
+    // A newer input took a report over before the Concierge said it: the
+    // turn that took over also carries every task's news it held, one task's
+    // or a batch's.
+    if (outcome === "interrupted") {
+      const carried = await this.reportedTasksOf(prompt, params.threadId);
+      if (carried.length > 0) this.carriedReports.set(params.threadId, carried);
+    }
+    // The tasks this turn reported on have had their say: the messages they
+    // held working settle (docs/domains/chats.md#status-reaction). A turn
+    // cut short or failed is handed over again, so they wait for that one.
+    if (outcome === "completed" || outcome === "stopped") {
+      const reported = await this.reportedTasksOf(prompt, params.threadId);
+      if (reported.length > 0) {
+        await this.deps.tasks.repo.settleHeldReactions(reported).catch((error: unknown) =>
+          log.warn("failed to settle held status reactions", {
+            chatId: params.threadId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    }
+    return outcome;
+  }
+
+  /**
+   * Task `taskId`'s result was said in Concierge turn `turnId` of chat
+   * `chatId`, as by `say` naming it. It counts only when the Concierge had
+   * the task's news: news a failed or cut-short turn never brought it stays
+   * to be reported, and the messages it holds stay working, unless this turn
+   * took that report over.
+   */
+  noteRelayed(turnId: string, chatId: string, taskId: string): void {
+    const unseen = this.taskEvents?.unseen(taskId) === true;
+    if (unseen && !this.carriedReports.get(chatId)?.includes(taskId)) return;
+    const tasks = this.relayedInTurn.get(turnId) ?? new Set<string>();
+    tasks.add(taskId);
+    this.relayedInTurn.set(turnId, tasks);
+    // Its news is said: a report a newer input cut short is not run again.
+    this.taskEvents?.settle(taskId);
+  }
+
+  /** The tasks whose result Concierge turn `turnId` said, forgotten once read. */
+  takeRelayed(turnId: string): string[] {
+    const tasks = this.relayedInTurn.get(turnId);
+    this.relayedInTurn.delete(turnId);
+    return tasks ? [...tasks] : [];
+  }
+
+  /**
+   * The tasks whose report a newer input took over in Concierge chat
+   * `chatId`, until the turn that took it over ends. That turn is about the
+   * owner's message and these tasks, so what it says names its subject
+   * (docs/domains/chats.md#chat-thread).
+   */
+  carriedReport(chatId: string): readonly string[] | undefined {
+    return this.carriedReports.get(chatId);
+  }
+
+  /** A Concierge turn in `chatId` ended without handing its work on. */
+  turnSettled(chatId: string): void {
+    this.carriedReports.delete(chatId);
+    this.handedOnPrompts.delete(chatId);
+  }
+
+  /**
+   * A newer input took a Concierge turn in `chatId` over before it finished:
+   * the guardian messages it took are the next turn's too, until a turn there
+   * ends without handing its work on.
+   */
+  handOnPrompts(chatId: string, messageIds: readonly string[]): void {
+    const held = this.handedOnPrompts.get(chatId) ?? [];
+    this.handedOnPrompts.set(chatId, [...new Set([...held, ...messageIds])]);
+  }
+
+  /** The guardian messages earlier turns in `chatId` handed on to the running one. */
+  promptsHandedOn(chatId: string): readonly string[] {
+    return this.handedOnPrompts.get(chatId) ?? [];
   }
 
   /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */

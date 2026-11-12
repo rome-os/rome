@@ -4,7 +4,8 @@
   "senderAutomation": "Automation",
   "markdown": {
     "code": "Code",
-    "mermaid": "Mermaid diagram"
+    "mermaid": "Mermaid diagram",
+    "imageNotAvailable": "Image not available"
   },
   "title": "Rome",
   "concierge": {
@@ -77,6 +78,7 @@
     "removeFolder": "Remove folder",
     "composerMenu": "Add files or change the model",
     "placeholder": "Message",
+    "placeholderIn": "Message in {{name}}",
     "empty": {
       "title": "Just tell me what you want to get done",
       "prompts": {
@@ -114,6 +116,10 @@
         "searchingWeb": "Searching the web",
         "readingPage": "Reading a page"
       }
+    },
+    "statusReaction": {
+      "working": "Working on it",
+      "failed": "Did not finish"
     }
   },
   "reply": {
@@ -366,6 +372,7 @@
     "previewImage": "Preview",
     "playVideo": "Play",
     "closeImagePreview": "Close",
+    "downloadImage": "Download",
     "filePill": "#File {{index}}",
     "uploadProgressFor": "Upload progress for {{name}}",
     "cancelUpload": "Cancel",
@@ -583,8 +590,6 @@
     "title": "Chat thread",
     "close": "Close chat thread",
     "loadFailed": "Couldn't load this chat thread.",
-    "replies_one": "{{count}} reply",
-    "replies_other": "{{count}} replies",
     "replyPlaceholder": "Reply"
   },
   "sessionRenewal": {

@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { SystemNotifyContent } from "../lib/notify-client.js";
+import type { SystemNotifyContent } from "../instance/notify-client.js";
 import { actionCaller, callerNotifyService, sendForCaller } from "./caller-notify.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
 

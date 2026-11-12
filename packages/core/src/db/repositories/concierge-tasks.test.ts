@@ -2,7 +2,12 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
-import { chatMessages, romeSessions } from "../schema.js";
+import {
+  chatMessages,
+  conciergeTaskReactions,
+  conciergeTurnReactions,
+  romeSessions,
+} from "../schema.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
 import { ConciergeTasksRepository } from "./concierge-tasks.js";
 import { renderTaskEvents } from "../../concierge/events.js";
@@ -408,5 +413,63 @@ describe("ConciergeTasksRepository", () => {
     // A row looked at again is told apart from a row written.
     await repo.reannounce(first.id);
     expect(seen.at(-1)).toBe("A:doing:refresh");
+  });
+  describe("status reactions and chat threads", () => {
+    const conciergeChat = (id: string, ownerKey: string | null = null) =>
+      chats.createSession(
+        id,
+        id,
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+        "webchat",
+        null,
+        { ownerKey },
+      );
+    const turnRows = () => testDb.db.select().from(conciergeTurnReactions).all();
+    const taskRows = () => testDb.db.select().from(conciergeTaskReactions).all();
+
+    it("keeps no row for a turn's mark that ended well, and keeps a failed one", async () => {
+      await repo.markTurnWorking("t1", { chatId: "concierge", messageKey: "g1" });
+      await repo.markTurnWorking("t2", { chatId: "concierge", messageKey: "g2" });
+      await repo.settleAnsweredTurnReaction("concierge", "g1");
+      expect(turnRows().map((row) => row.messageKey)).toEqual(["g2"]);
+      await repo.settleTurnReactions("concierge", "failed", []);
+      expect(turnRows()).toMatchObject([{ messageKey: "g2", state: "failed" }]);
+      await repo.markTurnWorking("t3", { chatId: "concierge", messageKey: "g3" });
+      await repo.settleTurnReactions("concierge", "stopped", []);
+      expect(turnRows().map((row) => row.messageKey)).toEqual(["g2"]);
+      expect(await repo.reactionsOf("concierge", ["g1", "g2", "g3"])).toEqual(
+        new Map([["g2", "failed"]]),
+      );
+    });
+
+    it("forgets a deleted chat's marks, and no other chat's", async () => {
+      const [task] = await repo.upsertMany([{ title: "A", state: "doing" }]);
+      await repo.markWorking(task!.id, { chatId: "topic", messageKey: "g1" });
+      await repo.markWorking(task!.id, { chatId: "concierge", messageKey: "g2" });
+      await repo.markTurnWorking("t1", { chatId: "topic", messageKey: "g3" });
+      await repo.forgetReactions("topic");
+      expect(taskRows().map((row) => row.messageKey)).toEqual(["g2"]);
+      expect(turnRows()).toEqual([]);
+    });
+
+    it("tells a visitor's main chat, not the guardian's, when a task leaves it", async () => {
+      const owner = "visitor:acct-ann";
+      const main = mainChatIdOf(owner);
+      await conciergeChat(main, owner);
+      await conciergeChat("ann-topic", owner);
+      await conciergeChat("ann-other", owner);
+      const [row] = await repo.upsertMany([{ title: "A", chatId: "ann-topic", state: "doing" }]);
+      await repo.setThreadRoot(row!.id, "r1");
+      // The topic is deleted: the row is its owner's main chat's, unlinked.
+      await chats.deleteSession("ann-topic");
+      const retired: unknown[] = [];
+      repo.onThreadRetired((event) => retired.push(event));
+      await repo.upsertMany([{ id: row!.id, chatId: "ann-other" }]);
+      expect(retired).toEqual([{ chatId: main, root: "r1" }]);
+    });
   });
 });

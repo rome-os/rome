@@ -28,6 +28,7 @@ const REQUIRED_FIELDS = {
   },
   routine_draft_card: { toolUseId: "string", draft: "object" },
   pending_interaction: { toolUseId: "string", appId: "string", render: "object" },
+  widget: { toolUseId: "string", appId: "string", componentId: "string", text: "string" },
   interaction_result: { toolUseId: "string" },
   error: { error: "string" },
   quota_switch: { from: "string", to: "string", model: "string" },
