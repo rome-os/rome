@@ -186,15 +186,75 @@ describe("TaskChatCard with its task", () => {
   });
 });
 
-function show(isLatestForChat = true) {
+function show(isLatestForChat = true, as?: "task" | "ask") {
   return render(
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={["/chat/main-chat"]}>
-        <TaskChatCard chatId={chatId} title="Task" isLatestForChat={isLatestForChat} />
+        <TaskChatCard chatId={chatId} title="Task" isLatestForChat={isLatestForChat} show={as} />
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
+
+describe("TaskChatCard shown as one card or the other", () => {
+  it("shows a task's question alone under a header that opens the task chat, with no Stop, Open or status", async () => {
+    show(true, "ask");
+    expect(await screen.findByText("Which tone?")).toBeTruthy();
+    expect(
+      screen.getByRole("link", { name: "Open task chat Draft email" }).getAttribute("href"),
+    ).toBe(`/chat/${chatId}`);
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    expect(screen.queryByRole("link", { name: "Open" })).toBeNull();
+    expect(screen.queryByText(/Task chat ·/)).toBeNull();
+  });
+
+  it("folds an answered question to a short line", async () => {
+    postAction = () => {
+      waiting = false;
+    };
+    show(true, "ask");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Warm" }));
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    await waitFor(() => expect(screen.queryByText("Which tone?")).toBeNull());
+    expect(await screen.findByText("Answered")).toBeTruthy();
+  });
+
+  it("shows an approval the same way", async () => {
+    messages = [];
+    approvals = [approval()];
+    show(true, "ask");
+    expect(await screen.findByText("Email the final draft.")).toBeTruthy();
+    expect(screen.queryByText(/Task chat ·/)).toBeNull();
+  });
+
+  it("still says an expired question takes an answer", async () => {
+    taskRows = [
+      {
+        id: "task-9",
+        title: "Draft email",
+        state: "dropped",
+        status: "ended",
+        endReason: "no_response",
+        chat: { id: chatId, name: "Draft email" },
+        conciergeChat: { id: "concierge", name: "Concierge", main: true },
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    ];
+    show(true, "ask");
+    expect(await screen.findByText("Expired — answer to continue")).toBeTruthy();
+    expect(await screen.findByText("Which tone?")).toBeTruthy();
+  });
+
+  it("keeps the task card to its title, status, Stop and Open, with no question inside", async () => {
+    show(true, "task");
+    expect(await screen.findByText("Task chat · Needs you")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "Open" })).toBeTruthy();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(screen.queryByText("Which tone?")).toBeNull();
+  });
+});
 
 function TaskJumpHarness() {
   const [scroller, setScroller] = useState<HTMLDivElement | null>(null);

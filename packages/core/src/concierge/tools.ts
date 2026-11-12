@@ -820,12 +820,22 @@ export async function buildConciergeTools(
     return id;
   };
 
+  // How `chat_card` shows task chat `chatId`: its question or approval while
+  // the task waits on the guardian, an expired one included, since its card
+  // still takes an answer; else its task card.
+  const shownAs = async (chatId: string): Promise<"task" | "ask"> => {
+    const task = await tasks.repo.findBySession(chatId);
+    if (!task) return "task";
+    const status = (await tasks.statusOf([task])).get(task.id);
+    return status?.status === "needs_you" || status?.endReason === "no_response" ? "ask" : "task";
+  };
+
   // A card that opens the task chat; it reads the chat's live status itself.
-  const showCard = async (chatId: string, title: string) => {
+  const showCard = async (chatId: string, title: string, show: "task" | "ask") => {
     const { chatId: conciergeChatId, turnId } = currentTurn();
     const task = await tasks.repo.findBySession(chatId);
     const id = await addMessage(
-      [{ type: "task_chat", chatId, title }],
+      [{ type: "task_chat", chatId, title, show }],
       await placementFor(undefined, { taskId: task?.id ?? null }),
     );
     said(conciergeChatId, turnId, null);
@@ -1159,7 +1169,7 @@ export async function buildConciergeTools(
           } else {
             log.warn("task chat title too long to name the chat", { chatId });
           }
-          if (args.card === true) await showCard(chatId, title);
+          if (args.card === true) await showCard(chatId, title, "task");
           return { chatId, taskId: task.id };
         }),
     },
@@ -1411,8 +1421,7 @@ export async function buildConciergeTools(
     {
       name: "chat_card",
       description:
-        "Show the guardian a card that opens a task chat and shows its live status. " +
-        "Use it to show a task's question card or approval: the guardian answers on it, straight into the task chat, and the task waits for them until they do. Also use it to open or find a task chat instead of sending its id. " +
+        "Show the guardian a task chat as a card. While the task waits on them, the card is its question or approval alone: the guardian answers on it, straight into the task chat, and the task waits for them until they do. Otherwise it is the task's card, with its live status and a link that opens it: use it to open or find a task chat instead of sending its id. " +
         "An existing task row automatically points to this card in this Concierge chat, unless the task already has a chat thread.",
       inputSchema: {
         type: "object",
@@ -1424,7 +1433,9 @@ export async function buildConciergeTools(
           const chatId = requireString(args, "chatId");
           const chat = await requireTaskChat(chatId);
           currentTurn();
-          const messageId = await showCard(chatId, chat.name);
+          // A task waiting on the guardian shows its question or approval
+          // alone; any other shows its task card, to find it by.
+          const messageId = await showCard(chatId, chat.name, await shownAs(chatId));
           await pointTaskTo(chatId, messageId);
           return { sent: "Shown; the guardian sees the card.", messageId };
         }),

@@ -67,8 +67,23 @@ export function taskThreads(
 }
 
 /**
+ * Whether a message already names its task in one of its parts: a forwarded
+ * report, with its chip, or a task chat card. Such a message needs no label.
+ */
+function namesItsTask(message: ThreadTimelineMessage): boolean {
+  if (message.content === undefined) return false;
+  return parseMessageEntries({ id: message.id, content: message.content }).some(
+    (part) =>
+      part.type === "task_chat" ||
+      (part.type === "text" && "forwardedFrom" in part && part.forwardedFrom !== undefined),
+  );
+}
+
+/**
  * The labels of a loaded timeline: one under every agent message in a task's
- * thread, named by the task's title, and none under the guardian's.
+ * thread, named by the task's title, and none under the guardian's. A message
+ * that names its task in a part, a forward or a card, shows no label: one
+ * marker per message. It stays in its thread.
  */
 export function threadLabels(
   messages: readonly ThreadTimelineMessage[],
@@ -79,7 +94,7 @@ export function threadLabels(
   for (const message of messages) {
     const thread = threads.get(message.id);
     const title = thread ? titles.get(thread) : undefined;
-    if (message.role !== "assistant" || !thread || !title) continue;
+    if (message.role !== "assistant" || !thread || !title || namesItsTask(message)) continue;
     labels.set(message.id, { thread, title });
   }
   return labels;

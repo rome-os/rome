@@ -45,7 +45,9 @@ const BUBBLE_MAX_WIDTH = "max-w-[90%]";
  *
  * `side` is the edge the bubble aligns to: `start` for the agent, `end` for the
  * guardian. `reply` is what the Reply button quotes. `anchorId` makes
- * the bubble the target of a jump from a quote of it. `arrival` marks a bubble
+ * the bubble the target of a jump from a quote of it. `partOf` names the
+ * message every bubble of a message belongs to, so landing on the message
+ * tints all of them. `arrival` marks a bubble
  * that enters while the chat is open.
  */
 export const ConciergeBubble = memo(function ConciergeBubble({
@@ -55,6 +57,7 @@ export const ConciergeBubble = memo(function ConciergeBubble({
   feedbackTurn,
   reply = null,
   anchorId,
+  partOf,
   arrival,
   children,
 }: {
@@ -64,6 +67,7 @@ export const ConciergeBubble = memo(function ConciergeBubble({
   feedbackTurn: { sessionId: string; turnId: string } | null;
   reply?: ReplySource | null;
   anchorId?: string;
+  partOf?: string;
   arrival?: number;
   children: ReactNode;
 }) {
@@ -90,6 +94,7 @@ export const ConciergeBubble = memo(function ConciergeBubble({
       // counts a press on one as on its content.
       data-concierge-bubble-part
       data-timeline-anchor={anchorId}
+      data-message-part={partOf}
       data-arrival={arrival}
       className={cn(
         "flex min-w-0 flex-col",

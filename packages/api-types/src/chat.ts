@@ -45,6 +45,13 @@ export interface TaskChatPart {
   type: "task_chat";
   chatId: string;
   title: string;
+  /**
+   * What the card shows: `task`, the task card (its title, status, Stop and
+   * Open), or `ask`, the task's question or approval alone, under a header
+   * that opens the task chat. A card from before has none, and shows the task
+   * card with its waiting question or approval inside.
+   */
+  show?: "task" | "ask";
 }
 
 /** A card that connects a service for the guardian. `connect` is the service's

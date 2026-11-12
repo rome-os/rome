@@ -93,6 +93,25 @@ describe("threadLabels", () => {
     ]);
   });
 
+  it("shows none under a message that names its task in a part, which stays in its thread", () => {
+    const withParts = (id: string, parts: unknown[]): ThreadTimelineMessage => ({
+      ...a(id, "q1"),
+      content: JSON.stringify(parts),
+    });
+    const messages = [
+      g("q1"),
+      withParts("forward", [
+        { type: "text", content: "Here it is" },
+        { type: "text", content: "# Report", forwardedFrom: { chatId: "c1", title: "Flights" } },
+      ]),
+      withParts("card", [{ type: "task_chat", chatId: "c1", title: "Flights", show: "ask" }]),
+      withParts("said", [{ type: "text", content: "Two options so far." }]),
+    ];
+    expect(where(threadLabels(messages, tasks))).toEqual([["said", "q1"]]);
+    expect(taskThreads(messages, tasks).threads.get("card")).toBe("q1");
+    expect(taskThreads(messages, tasks).threads.get("forward")).toBe("q1");
+  });
+
   it("names a task's thread by its title, from any of its messages", () => {
     const labels = threadLabels([{ ...g("q1"), chatThreadTitle: "Tokyo weather" }, a("a1", "q1")]);
     expect(labels.get("a1")).toEqual({ thread: "q1", title: "Tokyo weather" });

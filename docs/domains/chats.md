@@ -39,7 +39,8 @@ One [task](#task)'s conversation inside a [Concierge chat](#concierge-chat), whi
 - Any other message is in no chat thread: an owner's message typed in the chat, the Concierge's answer to one, and every message of a thread from before that no task has, which every client shows as in none.
 - A task moved to another Concierge chat leaves its thread behind, and starts a new one there the same way.
 - The chat's timeline shows every message in the order it was said, whatever its thread. The thread view shows one task's thread on its own.
-- In the chat's timeline, every Concierge message in a task's thread shows the task's title under it, which opens the thread view. The owner's own messages show none, and neither does the thread view. A label shows no count.
+- In the chat's timeline, every Concierge message in a task's thread shows the task's title under it, which opens the thread view, unless the message already names its task: a forward, with its header, or a task's card. A message carries one such marker, and the label's absence never moves it out of its thread. The owner's own messages show none, and neither does the thread view. A label shows no count.
+- Opening the thread view tints the whole message it opened from, every bubble of it.
 - Only that label, or the quote in a reply that is in a task's thread, opens the thread view. The quote in any other reply goes to the original message and tints it. Reply on a message opens the reply bar alone. Reply inside an open thread view keeps it open. Closing the reply bar, or sending, closes an open view with it.
 
 ## Place
@@ -176,6 +177,7 @@ A chat the Concierge starts to hand one piece of work to another agent. It belon
 - Archiving a task chat stops its task: its running work stops, and its row is stopped and archived with the chat, so the task leaves the task list and the Concierge stops tracking it. Unarchiving the chat lists the row again, still stopped. A row archived before its chat stays archived. Deleting the chat stops and archives the row for good.
 - A task chat carries one piece of work. It gets no alerts and no digest.
 - A task chat is in the [chat list](#chat-list), under its project with the common chats, with a mark saying the Concierge started it. It also opens from its row in the task list and from its task card, and search finds it.
+- A task shows in a Concierge chat as one of two cards. Its **task card** names it with its status, a Stop and an Open: the Concierge shows it when it starts the task with a card, and when its owner looks for the task. Its **question or approval** shows alone, under a header that names the task and opens its chat, with no status, Stop or Open: the Concierge shows it while the task waits on its owner. Answered, it folds to a short line. An expired one still says it takes an answer. A card from before shows the task card with the question or approval inside.
 
 ## Chat list
 

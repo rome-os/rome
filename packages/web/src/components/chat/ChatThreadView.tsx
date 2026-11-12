@@ -14,7 +14,13 @@ import { listChatThreadMessages } from "@/lib/chat-api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 import { findMessageAnchor } from "./reply/reply-source";
-import { LANDING_MS, playLanding, THREAD_FADE_MS, threadAnchor } from "./reply/thread-anchor";
+import {
+  LANDING_MS,
+  messageBubbles,
+  playLanding,
+  THREAD_FADE_MS,
+  threadAnchor,
+} from "./reply/thread-anchor";
 
 /** The query key of one chat thread, named by any of its messages. */
 export function chatThreadQueryKey(sessionId: string, messageId: string) {
@@ -172,24 +178,27 @@ export function ChatThreadView({
     const list = listRef.current;
     if (!list || !shown || landed.current) return;
     const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    let copy: HTMLElement | null = null;
+    // The whole message lands, every bubble of it, not only its first.
+    let copies: HTMLElement[] = [];
     const start = window.setTimeout(
       () => {
-        copy = findMessageAnchor(list, messageId);
-        if (!copy) return;
+        copies = messageBubbles(list, messageId);
+        if (copies.length === 0) return;
         landed.current = true;
-        playLanding(copy);
+        for (const copy of copies) playLanding(copy);
       },
       still ? 0 : THREAD_FADE_MS,
     );
     const end = window.setTimeout(
-      () => copy?.removeAttribute("data-timeline-landed"),
+      () => {
+        for (const copy of copies) copy.removeAttribute("data-timeline-landed");
+      },
       (still ? 0 : THREAD_FADE_MS) + LANDING_MS,
     );
     return () => {
       window.clearTimeout(start);
       window.clearTimeout(end);
-      copy?.removeAttribute("data-timeline-landed");
+      for (const copy of copies) copy.removeAttribute("data-timeline-landed");
     };
   }, [shown, messageId]);
 

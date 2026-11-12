@@ -599,7 +599,7 @@ describe("Concierge tools", () => {
     }
     expect(upsert.description).toContain("Rome keeps each task's status");
     const card = tools.find((tool) => tool.name === "chat_card")!;
-    expect(card.description).toContain("show a task's question card or approval");
+    expect(card.description).toContain("the card is its question or approval alone");
     expect(card.description).toContain(
       "An existing task row automatically points to this card in this Concierge chat",
     );
@@ -1285,7 +1285,7 @@ describe("Concierge tools", () => {
       CONCIERGE_ACCOUNT,
     );
     expect(JSON.parse(s.messages.get(CONCIERGE_CHAT)?.[0].content ?? "")).toEqual([
-      { type: "task_chat", chatId: "task-1", title: "Flights" },
+      { type: "task_chat", chatId: "task-1", title: "Flights", show: "task" },
     ]);
   });
 
@@ -1338,7 +1338,7 @@ describe("Concierge tools", () => {
       taskId: expect.any(String),
     });
     expect(JSON.parse(s.messages.get(CONCIERGE_CHAT)?.[0].content ?? "")).toEqual([
-      { type: "task_chat", chatId: "task-1", title: "Flights" },
+      { type: "task_chat", chatId: "task-1", title: "Flights", show: "task" },
     ]);
   });
 
@@ -1676,7 +1676,31 @@ describe("Concierge tools", () => {
     const result = await s.tool("chat_card", { chatId: "task-1" });
     expect(result.isError).toBeFalsy();
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
-      [{ type: "task_chat", chatId: "task-1", title: "Flights" }],
+      [{ type: "task_chat", chatId: "task-1", title: "Flights", show: "task" }],
+    ]);
+  });
+
+  it("chat_card shows a task waiting on the guardian as its question or approval alone", async () => {
+    const s = setup();
+    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      waitingSince: async (ids) => new Map(ids.map((id) => [id, Date.now() - 60_000])),
+      reportPending: () => [],
+    });
+    await s.tool("chat_card", { chatId: "task-1" });
+    // Once it waits on nobody, the card to find it by is its task card again.
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      waitingSince: async () => new Map(),
+      reportPending: () => [],
+    });
+    await s.tool("chat_card", { chatId: "task-1" });
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [{ type: "task_chat", chatId: "task-1", title: "Flights", show: "ask" }],
+      [{ type: "task_chat", chatId: "task-1", title: "Flights", show: "task" }],
     ]);
   });
 

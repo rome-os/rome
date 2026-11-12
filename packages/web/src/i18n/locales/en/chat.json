@@ -32,6 +32,7 @@
       "blocked": "Pop-up blocked",
       "checkFailed": "Could not check the connection"
     },
+    "askAnswered": "Answered",
     "taskCardAlreadyAnswered": "This card was already answered. The task has been refreshed.",
     "openTaskChat": "Open",
     "tasks": {

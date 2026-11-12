@@ -12,6 +12,7 @@ import { useApprovals } from "@/hooks/use-approvals";
 import { listSessionMessagePage, postSessionTurnJson } from "@/lib/chat-api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { ApprovalCard } from "../approval/ApprovalCard";
+import { ForwardedChip } from "../ForwardedChip";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { QuestionCard } from "./QuestionCard";
@@ -28,14 +29,61 @@ type TaskStatus = "running" | "waiting" | "failed" | "idle";
 export const PublicTaskChatContext = createContext(false);
 
 /**
- * A task chat another agent started on the guardian's behalf: its title, its
- * live status, and a link that opens it. On a public page, its title alone.
+ * A task chat another agent started on the guardian's behalf. `show` is what
+ * the card is: `task`, the task card (its title, live status, Stop and a link
+ * that opens it), or `ask`, the task's question or approval alone under a
+ * header that opens the task chat. A card from before has none, and shows the
+ * task card with its waiting question or approval inside. On a public page,
+ * its title alone.
  */
-export function TaskChatCard(props: { chatId: string; title: string; isLatestForChat: boolean }) {
-  return useContext(PublicTaskChatContext) ? (
-    <StaticTaskChatCard title={props.title} />
-  ) : (
-    <LiveTaskChatCard {...props} />
+export function TaskChatCard(props: {
+  chatId: string;
+  title: string;
+  isLatestForChat: boolean;
+  show?: "task" | "ask";
+}) {
+  const { show, ...card } = props;
+  if (useContext(PublicTaskChatContext)) return <StaticTaskChatCard title={props.title} />;
+  if (show === "ask") return <TaskAskCard {...card} />;
+  return <LiveTaskChatCard {...card} embedWait={show === undefined} />;
+}
+
+/**
+ * A task's question or approval, shown in the Concierge chat on its own: a
+ * header that names the task and opens its chat, then the card. Answered, or
+ * superseded by a later one, it folds to a short line.
+ */
+function TaskAskCard({
+  chatId,
+  title,
+  isLatestForChat,
+}: {
+  chatId: string;
+  title: string;
+  isLatestForChat: boolean;
+}) {
+  const { t } = useTranslation("chat");
+  const { sessions, invalidate } = useChatSessions("all", "all");
+  const { tasks } = useConciergeTasks();
+  const session = sessions?.find((candidate) => candidate.id === chatId);
+  const task = tasks.find((candidate) => candidate.chat?.id === chatId);
+  const derived = task ? taskStatusOfDto(task) : null;
+  const waiting = isLatestForChat && session?.awaitingGuardian === true;
+  return (
+    <div className="flex w-full min-w-0 max-w-md flex-col">
+      <ForwardedChip chatId={chatId} title={session?.name ?? title} />
+      {waiting ? (
+        <div className="space-y-2">
+          {derived?.endReason === "no_response" ? (
+            // The wait ran out and the task ended, yet its card still takes an answer.
+            <p className="text-aux text-muted-foreground">{t("concierge.tasks.expired")}</p>
+          ) : null}
+          <WaitingTaskCard key={chatId} chatId={chatId} onRefresh={invalidate} />
+        </div>
+      ) : session ? (
+        <p className="px-1 text-aux text-muted-foreground">{t("concierge.askAnswered")}</p>
+      ) : null}
+    </div>
   );
 }
 
@@ -65,10 +113,13 @@ function LiveTaskChatCard({
   chatId,
   title,
   isLatestForChat,
+  embedWait,
 }: {
   chatId: string;
   title: string;
   isLatestForChat: boolean;
+  /** A card from before the question showed on its own carries it inside. */
+  embedWait: boolean;
 }) {
   const { t } = useTranslation("chat");
   const { sessions, invalidate } = useChatSessions("all", "all");
@@ -133,11 +184,14 @@ function LiveTaskChatCard({
           <Link to={`/chat/${chatId}`}>{t("concierge.openTaskChat")}</Link>
         </Button>
       </div>
-      {isLatestForChat && status === "waiting" && derived?.endReason === "no_response" ? (
+      {embedWait &&
+      isLatestForChat &&
+      status === "waiting" &&
+      derived?.endReason === "no_response" ? (
         // The wait ran out and the task ended, yet its card still takes an answer.
         <p className="text-aux text-muted-foreground">{t("concierge.tasks.expired")}</p>
       ) : null}
-      {isLatestForChat && status === "waiting" && (
+      {embedWait && isLatestForChat && status === "waiting" && (
         <WaitingTaskCard key={chatId} chatId={chatId} onRefresh={invalidate} />
       )}
     </div>

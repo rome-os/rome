@@ -129,6 +129,7 @@ const AgentEntry = memo(function AgentEntry({
           feedbackTurn={null}
           reply={replyTo(`[Task chat] ${part.title} (chat ${part.chatId})`)}
           anchorId={index === firstBubble ? message.id : undefined}
+          partOf={message.id}
         >
           {renderFlatEntries([part], {
             ...actions,
@@ -166,6 +167,7 @@ const AgentEntry = memo(function AgentEntry({
         }
         reply={replyTo(part.content)}
         anchorId={index === firstBubble ? message.id : undefined}
+        partOf={message.id}
       >
         <ChatBubble tone="received" data-concierge-bubble {...arrival(message.id)}>
           {forwardedFrom ? (

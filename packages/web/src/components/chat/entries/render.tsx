@@ -40,6 +40,7 @@ function TaskChatEntry({ block }: { block: Extract<ChatEntry, { type: "task_chat
       chatId={block.chatId}
       title={block.title}
       isLatestForChat={!latest || latest.get(block.chatId) === block}
+      show={block.show}
     />
   );
 }
