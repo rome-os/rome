@@ -1,6 +1,7 @@
 import CoreGraphics
 import Foundation
 import Testing
+import UIKit
 @testable import Rome
 
 private func task(_ id: String, _ state: TaskState, updated: Double, completed: Double? = nil, archived: Double? = nil, rank: Double? = nil) -> ConciergeTask {
@@ -617,6 +618,55 @@ final class StubBackend: RomeBackend {
         #expect(AppIdea.allCases.first == .own)
         #expect(AppIdea.allCases.count == 4)
         #expect(AppIdea.own.prompt.hasSuffix(" ") || AppIdea.own.prompt.hasSuffix("："))
+    }
+}
+
+/// The widget's icons, written by the app: SVGs drawn, a new icon replacing
+/// the old, and one missing filled in on the next pass.
+@MainActor
+@Suite struct WidgetShelfIconTests {
+    private let svg = Data(##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#d97757"/></svg>"##.utf8)
+    private func png(_ color: UIColor) -> Data {
+        UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
+            color.setFill()
+            context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
+        }.pngData()!
+    }
+    private func store() -> AppShelfStore {
+        AppShelfStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-shelf-\(UUID().uuidString)", directoryHint: .isDirectory), suite: "rome-shelf-test")
+    }
+    private func app(_ id: String, version: String = "1") -> InstalledApp {
+        InstalledApp(id: id, iconUrl: "/api/apps/\(id)/icon", version: version)
+    }
+
+    /// Fails before the fix: an SVG icon was dropped and the widget drew a letter.
+    @Test func anSVGIconIsDrawnForTheWidget() async {
+        let backend = FakeBackend()
+        backend.apiFiles = ["/apps/a/icon": svg]
+        let store = store()
+        defer { store.clear() }
+        await WidgetShelf.shelve([app("a")], instanceId: "i", backend: backend, store: store)
+        let written = try? Data(contentsOf: store.iconURL("a"))
+        #expect(written.flatMap(UIImage.init(data:)) != nil)
+    }
+
+    @Test func aNewIconReplacesTheOldAndAMissingOneIsFilled() async {
+        let backend = FakeBackend()
+        backend.apiFiles = ["/apps/a/icon": png(.red)]
+        let store = store()
+        defer { store.clear() }
+        await WidgetShelf.shelve([app("a")], instanceId: "i", backend: backend, store: store)
+        let first = try? Data(contentsOf: store.iconURL("a"))
+        #expect(first != nil)
+        // A new version brings a new icon: it is written over the old one.
+        backend.apiFiles["/apps/a/icon"] = png(.blue)
+        await WidgetShelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, store: store)
+        let second = try? Data(contentsOf: store.iconURL("a"))
+        #expect(second != nil && second != first)
+        // The same list again, with the icon gone from the group: it comes back.
+        try? FileManager.default.removeItem(at: store.iconURL("a"))
+        await WidgetShelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, store: store)
+        #expect(FileManager.default.fileExists(atPath: store.iconURL("a").path))
     }
 }
 

@@ -6,15 +6,19 @@ import WidgetKit
 /// redraw. A build with no App Group (Mac Catalyst) does nothing.
 @MainActor
 enum WidgetShelf {
-    static func shelve(_ apps: [InstalledApp], instanceId: String, backend: RomeBackend) async {
-        guard let store = AppShelfStore.shared else { return }
+    static func shelve(_ apps: [InstalledApp], instanceId: String, backend: RomeBackend, store: AppShelfStore? = .shared) async {
+        guard let store else { return }
         let shelf = Shelf(instanceId: instanceId, apps: apps.map { app in
             ShelfApp(id: app.id, name: app.name, opens: app.fullHref != nil, hasIcon: iconPath(app) != nil)
         })
         var changed = store.write(shelf)
         for app in apps {
-            guard let path = iconPath(app), let data = try? await backend.apiFile(path: path, query: nil) else { continue }
-            changed = store.writeIcon(data, for: app.id) || changed
+            // Decoded as the Apps page decodes it: many icons are SVGs, which
+            // only the app can draw.
+            guard let path = iconPath(app), let data = try? await backend.apiFile(path: path, query: nil),
+                  let image = await AppIconImage.decode(data, side: AppShelfStore.iconPixels)
+            else { continue }
+            changed = store.writeIcon(image, for: app.id) || changed
         }
         if changed { reload() }
     }

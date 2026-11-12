@@ -74,9 +74,11 @@ struct AppShelfStore: Sendable {
     }
 
     /// Keeps an icon, made small enough for a widget. True when it changed.
+    /// The app decodes it first (an SVG is drawn there), so the widget only
+    /// ever reads PNGs.
     @discardableResult
-    func writeIcon(_ data: Data, for appId: String) -> Bool {
-        guard let png = Self.smallPNG(data) else { return false }
+    func writeIcon(_ image: UIImage, for appId: String) -> Bool {
+        guard let png = Self.smallPNG(image) else { return false }
         let url = iconURL(appId)
         if (try? Data(contentsOf: url)) == png { return false }
         try? FileManager.default.createDirectory(at: iconsURL, withIntermediateDirectories: true)
@@ -99,8 +101,7 @@ struct AppShelfStore: Sendable {
         id.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? "_"
     }
 
-    private static func smallPNG(_ data: Data) -> Data? {
-        guard let image = UIImage(data: data) else { return nil }
+    private static func smallPNG(_ image: UIImage) -> Data? {
         let side = iconPixels
         let format = UIGraphicsImageRendererFormat()
         format.scale = 1
