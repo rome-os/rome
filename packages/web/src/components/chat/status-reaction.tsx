@@ -80,9 +80,9 @@ export function StatusReactionBadge({ reaction }: { reaction: ConciergeStatusRea
       title={label}
       data-status-reaction={shown}
       data-leaving={leaving || undefined}
-      className="pointer-events-none absolute right-3 -bottom-4.5 z-10 flex h-6 select-none items-center rounded-full bg-surface-muted px-2 text-composer"
+      className="pointer-events-none absolute right-3 -bottom-1.5 z-10 flex h-5 origin-bottom-right scale-85 select-none items-center rounded-full bg-surface-muted px-1 text-aux"
     >
-      {EMOJI[shown]}
+      <span className="opacity-75">{EMOJI[shown]}</span>
     </span>
   );
 }
