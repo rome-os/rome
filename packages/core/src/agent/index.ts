@@ -69,6 +69,7 @@ export type {
 export {
   endedTurn,
   type AgentTurnFailedBeforeStart,
+  type EndedAgentTurn,
   type TurnLifecycle,
   type TurnLifecycleListener,
 } from "./domain/turn-lifecycle.js";

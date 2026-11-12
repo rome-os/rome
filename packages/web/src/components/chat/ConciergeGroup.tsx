@@ -1,4 +1,4 @@
-import { ThreadRepliesLine } from "@/components/chat/reply/chat-threads";
+import { ThreadLabelLine } from "@/components/chat/reply/chat-threads";
 import { Fragment, memo, useMemo, type ReactNode } from "react";
 import type { ForwardedFrom } from "@rome/api-types/chat";
 import { UserMessage } from "./UserMessage";
@@ -8,6 +8,7 @@ import { CollapsibleBubbleContent } from "@/components/chat/CollapsibleBubbleCon
 import { ConciergeBubble } from "@/components/chat/ConciergeBubble";
 import { ForwardedChip } from "@/components/chat/ForwardedChip";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
+import { StatusReactionBadge, useStatusReaction } from "@/components/chat/status-reaction";
 import { renderFlatEntries } from "@/components/chat/entries";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { BlockActions, ShareSelection } from "@/components/chat/MessageList";
@@ -25,6 +26,7 @@ import { cn } from "@/lib/utils";
 const GuardianBubble = memo(
   function GuardianBubble({ msg, arrival }: { msg: ChatMessage; arrival?: number }) {
     const text = useMemo(() => userMessageText(msg.content), [msg.content]);
+    const reaction = useStatusReaction(msg);
     // The bubble is a direct child of the group, so its width cap is a share
     // of the column, as the agent's is.
     return (
@@ -48,7 +50,12 @@ const GuardianBubble = memo(
         anchorId={msg.id}
         arrival={arrival}
       >
-        <UserMessageBubble msg={msg} text={text} own />
+        <UserMessageBubble
+          msg={msg}
+          text={text}
+          own
+          badge={<StatusReactionBadge reaction={reaction} />}
+        />
       </ConciergeBubble>
     );
   },
@@ -56,6 +63,7 @@ const GuardianBubble = memo(
     prev.msg.id === next.msg.id &&
     prev.msg.content === next.msg.content &&
     prev.msg.inputState === next.msg.inputState &&
+    prev.msg.statusReaction === next.msg.statusReaction &&
     prev.arrival === next.arrival,
 );
 
@@ -238,7 +246,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
                 arrival={arrival}
               />
             )}
-            <ThreadRepliesLine message={entry.message} />
+            <ThreadLabelLine message={entry.message} />
           </>
         );
         if (!selection) return <Fragment key={entry.message.id}>{bubble}</Fragment>;

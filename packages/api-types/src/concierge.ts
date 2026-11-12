@@ -14,6 +14,22 @@ export const CONCIERGE_TASK_STATES = [
 ] as const;
 export type ConciergeTaskState = (typeof CONCIERGE_TASK_STATES)[number];
 
+/**
+ * How the work a guardian message started stands, as its status reaction in a
+ * Concierge chat shows it (docs/domains/chats.md#status-reaction): working,
+ * or failed. Work that finished shows none, since the reply says so. Rome
+ * sets it, never the Concierge.
+ */
+export const CONCIERGE_STATUS_REACTIONS = ["working", "failed"] as const;
+export type ConciergeStatusReaction = (typeof CONCIERGE_STATUS_REACTIONS)[number];
+
+/** A message's status reaction changed (`message_status_reaction`). Null: it has none. */
+export interface MessageStatusReactionEvent {
+  sessionId: string;
+  messageId: string;
+  statusReaction: ConciergeStatusReaction | null;
+}
+
 /** The panel actions. Each one sends the Concierge a message, and never writes the row. */
 export type ConciergeTaskAction = "stop" | "archive" | "done";
 

@@ -116,6 +116,10 @@
         "searchingWeb": "正在搜索网页",
         "readingPage": "正在阅读网页"
       }
+    },
+    "statusReaction": {
+      "working": "正在处理",
+      "failed": "未完成"
     }
   },
   "reply": {
@@ -586,8 +590,6 @@
     "title": "对话串",
     "close": "关闭对话串",
     "loadFailed": "无法加载这个对话串。",
-    "replies_one": "{{count}} 条回复",
-    "replies_other": "{{count}} 条回复",
     "replyPlaceholder": "回复"
   },
   "sessionRenewal": {

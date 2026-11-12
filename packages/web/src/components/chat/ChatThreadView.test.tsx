@@ -2,7 +2,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { type ReactNode, StrictMode } from "react";
 import { createPortal } from "react-dom";
 import type { ReplyToPart } from "@rome/api-types/chat";
 import { chatSessionTopicName } from "@rome/api-types/live-events";
@@ -20,6 +20,7 @@ import { ChatThreadView, chatThreadQueryKey } from "./ChatThreadView";
 import { ConciergeTranscript } from "./ConciergeTranscript";
 import { buildRows } from "./chat-view";
 import type { BlockActions } from "./MessageList";
+import { ChatThreadsProvider } from "./reply/chat-threads";
 import { QuotedReply } from "./reply/QuotedReply";
 import { ReplyBar } from "./reply/ReplyBar";
 import { ReplyDraftProvider, useReplyDraftState, type ReplyDraft } from "./reply/reply-draft";
@@ -80,12 +81,9 @@ function host(children: ReactNode) {
 function ThreadsDraft({
   onDraft,
   children,
-  threaded = ["a1"],
 }: {
   onDraft: (draft: ReplyDraft) => void;
   children: ReactNode;
-  /** The messages the timeline shows in a chat thread. */
-  threaded?: string[];
 }) {
   const draft = useReplyDraftState({
     chatId: "concierge",
@@ -94,18 +92,32 @@ function ThreadsDraft({
     jump: () => {},
     focusComposer: () => {},
     threads: true,
-    inThread: (messageId) => threaded.includes(messageId),
   });
   onDraft(draft);
   return <ReplyDraftProvider value={draft}>{children}</ReplyDraftProvider>;
 }
 
 describe("the reply draft of a chat that keeps chat threads", () => {
-  it("opens the thread view on Reply, and closing it clears the reply", () => {
+  it("opens only the reply bar on Reply, even to a message in a thread", () => {
+    let draft!: ReplyDraft;
+    render(
+      <ThreadsDraft onDraft={(next) => (draft = next)}>
+        <ReplyBar />
+      </ThreadsDraft>,
+    );
+
+    act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
+
+    expect(draft.thread).toBeNull();
+    expect(draft.target?.messageId).toBe("a1");
+    expect(document.querySelector("[data-reply-bar]")?.textContent).toContain("Which day?");
+  });
+
+  it("opens the thread view from its label, and closing it clears the reply", () => {
     let draft!: ReplyDraft;
     render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
 
-    act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
+    act(() => draft.openThread({ messageId: "a1", author: "agent", preview: "Which day?" }));
     expect(draft.thread).toBe("a1");
     expect(draft.target?.messageId).toBe("a1");
 
@@ -117,7 +129,7 @@ describe("the reply draft of a chat that keeps chat threads", () => {
   it("keeps the timeline on Reply to a message in no thread, with the quote bar on the main composer", () => {
     let draft!: ReplyDraft;
     render(
-      <ThreadsDraft onDraft={(next) => (draft = next)} threaded={[]}>
+      <ThreadsDraft onDraft={(next) => (draft = next)}>
         <ReplyBar />
       </ThreadsDraft>,
     );
@@ -132,14 +144,10 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     expect(draft.target).toBeNull();
   });
 
-  it("keeps the thread view open on Reply to a message older than the loaded timeline", () => {
+  it("keeps the thread view open on Reply inside it, to a message older than the loaded timeline too", () => {
     let draft!: ReplyDraft;
-    render(
-      <ThreadsDraft onDraft={(next) => (draft = next)} threaded={["a1"]}>
-        {null}
-      </ThreadsDraft>,
-    );
-    act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
+    render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
+    act(() => draft.openThread({ messageId: "a1", author: "agent", preview: "Which day?" }));
     // "old" is in the open thread, but not in the timeline's loaded pages.
     act(() => draft.set({ messageId: "old", author: "guardian", preview: "Move my 3pm" }));
 
@@ -147,7 +155,7 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     expect(draft.target?.messageId).toBe("old");
   });
 
-  it("opens the thread view from a reply's quote", () => {
+  it("opens the thread view from the quote of a reply in a task's thread", () => {
     let draft!: ReplyDraft;
     const part: ReplyToPart = {
       type: "reply_to",
@@ -157,35 +165,70 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     };
     render(
       <ThreadsDraft onDraft={(next) => (draft = next)}>
-        <QuotedReply part={part} />
+        <ChatThreadsProvider value={{ labels: new Map(), taskThreads: new Map([["r1", "m1"]]) }}>
+          <QuotedReply part={part} hostId="r1" />
+        </ChatThreadsProvider>
       </ThreadsDraft>,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Open the chat thread" }));
 
-    expect(draft.thread).toBe("a1");
+    // The view, and what is sent from it, follow the reply, which is in the
+    // task's thread: the original it quotes may be in none, as when the reply
+    // started the task.
+    expect(draft.thread).toBe("r1");
     // Opening either opens both: the quote also picks the reply.
     expect(draft.target).toMatchObject({ messageId: "a1", preview: "Which day?" });
   });
 
+  it("jumps to the original from the quote of a reply in no task, and opens no thread view", () => {
+    let draft!: ReplyDraft;
+    const jump = rs.fn();
+    const part: ReplyToPart = {
+      type: "reply_to",
+      messageId: "a1",
+      author: "agent",
+      text: "Which day?",
+    };
+    function Draft({ children }: { children: ReactNode }) {
+      draft = useReplyDraftState({
+        chatId: "concierge",
+        sessionId: "concierge",
+        messageIds: new Set(["a1"]),
+        jump,
+        focusComposer: () => {},
+        threads: true,
+      });
+      return <ReplyDraftProvider value={draft}>{children}</ReplyDraftProvider>;
+    }
+    render(
+      <Draft>
+        <ChatThreadsProvider value={{ labels: new Map(), taskThreads: new Map() }}>
+          <QuotedReply part={part} hostId="r1" />
+        </ChatThreadsProvider>
+      </Draft>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to the original message" }));
+
+    expect(jump).toHaveBeenCalledWith("a1");
+    expect(draft.thread).toBeNull();
+  });
+
   it("puts a failed send's reply and thread back only when nothing changed since the send", () => {
     let draft!: ReplyDraft;
-    render(
-      <ThreadsDraft onDraft={(next) => (draft = next)} threaded={["a1", "b1"]}>
-        {null}
-      </ThreadsDraft>,
-    );
+    render(<ThreadsDraft onDraft={(next) => (draft = next)}>{null}</ThreadsDraft>);
     const a = { messageId: "a1", author: "agent" as const, preview: "Which day?" };
     const b = { messageId: "b1", author: "agent" as const, preview: "Flights?" };
 
-    // Sent from thread A; the guardian picks B before A's send fails.
-    act(() => draft.set(a));
+    // Sent from thread A; the guardian opens B before A's send fails.
+    act(() => draft.openThread(a));
     let sentAt = 0;
     act(() => {
       sentAt = draft.clear();
     });
-    act(() => draft.set(b));
-    act(() => draft.restore(a, sentAt));
+    act(() => draft.openThread(b));
+    act(() => draft.restore(a, sentAt, "a1"));
     expect([draft.target?.messageId, draft.thread]).toEqual(["b1", "b1"]);
 
     // B picked and dropped again: the draft stays closed.
@@ -196,16 +239,24 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     act(() => {
       draft.clear();
     });
-    act(() => draft.restore(a, sentAt));
+    act(() => draft.restore(a, sentAt, "a1"));
     expect([draft.target, draft.thread]).toEqual([null, null]);
 
     // Nothing changed: A comes back with its thread.
+    act(() => draft.openThread(a));
+    act(() => {
+      sentAt = draft.clear();
+    });
+    act(() => draft.restore(a, sentAt, "a1"));
+    expect([draft.target?.messageId, draft.thread]).toEqual(["a1", "a1"]);
+
+    // A reply sent from the timeline comes back with the reply bar alone.
     act(() => draft.set(a));
     act(() => {
       sentAt = draft.clear();
     });
     act(() => draft.restore(a, sentAt));
-    expect([draft.target?.messageId, draft.thread]).toEqual(["a1", "a1"]);
+    expect([draft.target?.messageId, draft.thread]).toEqual(["a1", null]);
   });
 
   it("keeps the reply bar at every width while the thread is open, and closes the thread with its ✕", () => {
@@ -215,7 +266,7 @@ describe("the reply draft of a chat that keeps chat threads", () => {
         <ReplyBar />
       </ThreadsDraft>,
     );
-    act(() => draft.set({ messageId: "a1", author: "agent", preview: "Which day?" }));
+    act(() => draft.openThread({ messageId: "a1", author: "agent", preview: "Which day?" }));
     expect(draft.thread).toBe("a1");
     // The phone width is the same dashboard: no class hides the bar there.
     expect(container.querySelector("[data-reply-bar]")!.className).not.toMatch(/hidden/);
@@ -384,6 +435,86 @@ describe("ChatThreadView", () => {
     expect(onClose).toHaveBeenCalledTimes(1);
     fireEvent.keyDown(document, { key: "Escape" });
     await waitFor(() => expect(onClose).toHaveBeenCalledTimes(2));
+  });
+
+  it("tints the message it opened from once it has faded in, then lets it go", async () => {
+    render(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={() => {}}
+          renderMessages={paragraphs}
+        />,
+      ),
+    );
+    const copy = (await screen.findByText("Which day?")).closest("[data-timeline-anchor]")!;
+    expect(copy.hasAttribute("data-timeline-landed")).toBe(false);
+    await waitFor(() => expect(copy.hasAttribute("data-timeline-landed")).toBe(true));
+    await waitFor(() => expect(copy.hasAttribute("data-timeline-landed")).toBe(false), {
+      timeout: 2000,
+    });
+  });
+
+  it("tints the message again each time its thread opens, from the cache under StrictMode too", async () => {
+    // The dashboard runs under StrictMode, which runs a view's effects twice
+    // on mount; a reopened thread draws its cached messages at once.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (open: boolean) => (
+      <StrictMode>
+        <QueryClientProvider client={client}>
+          <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
+            {open ? (
+              <ChatThreadView
+                key="a1"
+                sessionId="concierge"
+                messageId="a1"
+                onClose={() => {}}
+                renderMessages={paragraphs}
+              />
+            ) : null}
+          </LiveEventsClientContext.Provider>
+        </QueryClientProvider>
+      </StrictMode>
+    );
+    const opensWithTint = async () => {
+      const copy = (await screen.findByText("Which day?")).closest("[data-timeline-anchor]")!;
+      await waitFor(() => expect(copy.hasAttribute("data-timeline-landed")).toBe(true));
+    };
+    const { rerender } = render(view(true));
+    await opensWithTint();
+    rerender(view(false));
+    expect(screen.queryByText("Which day?")).toBeNull();
+    rerender(view(true));
+    await opensWithTint();
+  });
+
+  it("reads where the message it opened from sat once, on open", async () => {
+    const originTop = rs.fn(() => 320);
+    const { rerender } = render(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={() => {}}
+          originTop={originTop}
+          renderMessages={paragraphs}
+        />,
+      ),
+    );
+    await screen.findByText("Which day?");
+    rerender(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={() => {}}
+          originTop={originTop}
+          renderMessages={paragraphs}
+        />,
+      ),
+    );
+    expect(originTop).toHaveBeenCalledTimes(1);
   });
 
   it("stays open on a press inside a layer its content opened in a portal", async () => {
