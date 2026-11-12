@@ -55,28 +55,7 @@ function withHostStrings(value: unknown, translate: (key: string) => string): un
   return Object.fromEntries(keys.map((k) => [k, withHostStrings(o[k], translate)]));
 }
 
-/**
- * The URL of `path` in the app's API, or null when it would reach anything
- * else: core checks every path, but a stored part is read back as data, so
- * the dashboard checks again with the URL a browser would request.
- */
-export function appApiUrl(appId: string, path: string): string | null {
-  const base = `/api/apps/${encodeURIComponent(appId)}/`;
-  const segments = path.split("/");
-  // Rome serves these itself, ahead of the app's API.
-  if (["publish", "icon", "manifest"].includes(segments[0] ?? "")) return null;
-  if (!segments.every((s) => /^[A-Za-z0-9_~.-]+$/.test(s) && s !== "." && s !== "..")) {
-    return null;
-  }
-  const url = new URL(base + path, "http://card.invalid");
-  return url.pathname.startsWith(base) ? url.pathname : null;
-}
-
-function appApi(appId: string, path: string): string {
-  const url = appApiUrl(appId, path);
-  if (!url) throw new Error("The card names a path outside its app");
-  return url;
-}
+const appApi = (appId: string, path: string) => `/api/apps/${encodeURIComponent(appId)}/${path}`;
 
 /** Each component's `clears`, taken out of the components, since A2UI's
  *  schemas have no such field. */
@@ -117,8 +96,6 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
   const uiKey = JSON.stringify(ui);
 
   const inFlight = useRef(false);
-  // A card the agent waits on is Rome's own; it reads and writes no app.
-  const appCalls = waiting === undefined;
   const parts = useMemo(
     () => splitClears(withHostStrings((JSON.parse(uiKey) as WidgetUi).components, t) as unknown[]),
     [uiKey, t],
@@ -126,7 +103,6 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
 
   const load = useCallback(
     async (processor: MessageProcessor) => {
-      if (!appCalls) return;
       const entries = Object.entries(JSON.parse(bindKey) as Record<string, string>);
       const values = await Promise.all(
         entries.map(([, path]) =>
@@ -140,7 +116,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
         })),
       );
     },
-    [appCalls, appId, bindKey, toolUseId],
+    [appId, bindKey, toolUseId],
   );
 
   const processor = useMemo(() => {
@@ -153,7 +129,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
         else host.onSubmit(toolUseId, (action.context ?? {}) as Record<string, unknown>);
         return;
       }
-      if (!appCalls || inFlight.current) return;
+      if (inFlight.current) return;
       inFlight.current = true;
       setBusy(true);
       try {
@@ -191,7 +167,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
       ]);
     }
     return p;
-  }, [appCalls, appId, load, toolUseId, uiKey, parts]);
+  }, [appId, load, toolUseId, uiKey, parts]);
 
   // An answered card shows what the guardian sent, which core keeps as `card`.
   const answeredKey = JSON.stringify(result?.card ?? null);

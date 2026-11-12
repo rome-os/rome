@@ -85,8 +85,6 @@ describe("checkWidgetUi", () => {
       "a//b",
       "",
       "a#b",
-      "publish",
-      "manifest",
     ]) {
       expect(checkWidgetUi(post(name))).not.toEqual([]);
     }

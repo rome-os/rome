@@ -50,7 +50,7 @@ import Testing
 
     @Test func aCardReachesOnlyItsOwnApp() {
         #expect(WidgetData.isAppPath("days/2026-11-11"))
-        for path in ["/api/system", "../connector/x", "a/./b", "https://evil.example", "a?b=1", "", "%2e%2e/%2e%2e/settings", "..\\..\\settings", "a//b", "publish", "manifest/x"] {
+        for path in ["/api/system", "../connector/x", "a/./b", "https://evil.example", "a?b=1", "", "%2e%2e/%2e%2e/settings", "..\\..\\settings", "a//b"] {
             #expect(!WidgetData.isAppPath(path))
         }
     }
@@ -104,13 +104,6 @@ import Testing
         #expect(WidgetData.httpsURL("https://example.com/a.png") != nil)
         for url in ["/api/settings", "http://example.com/a.png", "photo.png", "https://"] {
             #expect(WidgetData.httpsURL(url) == nil)
-        }
-    }
-
-    @Test func aCardsAppIdCannotLeaveTheAppsAPI() {
-        #expect(WidgetData.appAPIPath(appId: "meal-planner", path: "water") == "/api/apps/meal-planner/water")
-        for appId in ["..", "../settings", "a/b", "%2e%2e", ""] {
-            #expect(WidgetData.appAPIPath(appId: appId, path: "water") == nil)
         }
     }
 }

@@ -156,22 +156,6 @@ describe("a question card described as data", () => {
     expect(onSubmit.mock.calls[0]?.[1]).toEqual({ answers: [{ values: [], text: "Calm" }] });
   });
 
-  it("reaches no app from a card the agent waits on", async () => {
-    const fetch = rs.spyOn(globalThis, "fetch");
-    render(
-      <WidgetUiCard
-        toolUseId="q3"
-        appId="core"
-        ui={ui}
-        text=""
-        waiting={{ onSubmit: rs.fn(), onDismiss: rs.fn() }}
-      />,
-    );
-    fireEvent.click(await screen.findByRole("button", { name: "App post" }));
-    await new Promise((r) => setTimeout(r, 50));
-    expect(fetch).not.toHaveBeenCalled();
-  });
-
   it("keeps Send off for an answer of only spaces", async () => {
     render(
       <WidgetUiCard

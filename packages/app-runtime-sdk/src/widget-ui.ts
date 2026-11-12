@@ -334,16 +334,10 @@ const WidgetUiSchema = z
  *  `..`. Anything else, such as `%2e%2e`, a backslash, a scheme or a query,
  *  could resolve outside the app once a browser normalizes the URL. */
 export function isWidgetAppPath(path: string): boolean {
-  const segments = path.split("/");
-  if (HOST_APP_ROUTES.has(segments[0] ?? "")) return false;
-  return segments.every(
-    (segment) => /^[A-Za-z0-9_~.-]+$/.test(segment) && segment !== "." && segment !== "..",
-  );
+  return path
+    .split("/")
+    .every((segment) => /^[A-Za-z0-9_~.-]+$/.test(segment) && segment !== "." && segment !== "..");
 }
-
-/** Routes Rome serves itself under `/api/apps/<appId>/`, ahead of the app's
- *  own API. A card reaches none of them. */
-const HOST_APP_ROUTES: ReadonlySet<string> = new Set(["publish", "icon", "manifest"]);
 
 /**
  * Checks a described card and its bindings. Returns the problems, or an empty

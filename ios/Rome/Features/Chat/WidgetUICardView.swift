@@ -88,8 +88,7 @@ struct WidgetUICardView: View {
             else { waiting.answer(WidgetData.context(button["action"]?["event"]?["context"], in: data, scope: scope)) }
             return
         }
-        // A card the agent waits on is Rome's own; it reaches no app.
-        guard waiting == nil, WidgetData.isAppPath(name) else { return }
+        guard WidgetData.isAppPath(name) else { return }
         pressing = button.id
         defer { pressing = nil }
         let body = WidgetData.context(button["action"]?["event"]?["context"], in: data, scope: scope)

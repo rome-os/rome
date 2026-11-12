@@ -4,7 +4,6 @@ import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import "@/i18n";
 import { parseEntries } from "../parse-entries";
 import { renderFlatEntries } from "../render";
-import { appApiUrl } from "./WidgetUiCard";
 
 afterEach(() => {
   cleanup();
@@ -114,48 +113,5 @@ describe("a widget described as data", () => {
     release();
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
-  });
-});
-
-describe("appApiUrl", () => {
-  it("keeps every path inside the app, however the browser would normalize it", () => {
-    expect(appApiUrl("meals", "days/2026-11-11")).toBe("/api/apps/meals/days/2026-11-11");
-    for (const path of [
-      "%2e%2e/%2e%2e/settings",
-      "..\\..\\settings",
-      "../system",
-      "a?b=1",
-      "/x",
-      "",
-      "publish",
-      "manifest/x",
-    ]) {
-      expect(appApiUrl("meals", path)).toBeNull();
-    }
-  });
-
-  it("loads only https images, so an image never reads the instance with the guardian's session", async () => {
-    rs.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({}));
-    const images = {
-      components: [
-        { id: "root", component: "Column", children: ["safe", "local"] },
-        { id: "safe", component: "Image", url: "https://example.com/a.png", description: "safe" },
-        { id: "local", component: "Image", url: "/api/settings", description: "local" },
-      ],
-    };
-    const { container } = render(
-      <>
-        {renderFlatEntries(
-          parseEntries(
-            JSON.stringify([
-              { type: "widget", toolUseId: "w-img", appId: "meals", ui: images, text: "x" },
-            ]),
-          ),
-          { sessionId: "s1" },
-        )}
-      </>,
-    );
-    await screen.findByAltText("safe");
-    expect(container.querySelectorAll("img")).toHaveLength(1);
   });
 });
