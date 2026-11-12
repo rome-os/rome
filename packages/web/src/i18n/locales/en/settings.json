@@ -33,6 +33,7 @@
     }
   },
   "common": {
+    "close": "Close",
     "loading": "Loading...",
     "save": "Save",
     "saving": "Saving...",

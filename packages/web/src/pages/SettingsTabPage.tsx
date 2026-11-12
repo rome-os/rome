@@ -105,7 +105,6 @@ import { AiToolsPanel } from "@/components/ai-tools-panel";
 import { SystemUpgradeSection } from "@/components/system-upgrade-section";
 import { SystemDiagnosisSection } from "@/components/system-diagnosis-section";
 import { useInvalidateSettings } from "@/hooks/use-settings";
-import { useDocumentTitle } from "@/hooks/use-document-title";
 import { useTheme } from "@/hooks/use-theme";
 import { parseEmailTextarea } from "@/lib/email-list";
 import { StatusIndicator } from "@/lib/connection-status";
@@ -116,7 +115,7 @@ import {
   DASHBOARD_ACCESS_MAX_EMAIL_LENGTH,
   DASHBOARD_ACCESS_MAX_EMAILS,
 } from "@rome/api-types/dashboard-access";
-import { Page, PageHeader, PageHeading, PageNav, PageNavLink, PageTitle } from "@rome-os/ui/page";
+import { Page } from "@rome-os/ui/page";
 import {
   CONNECTIONS_REFRESH_INTERVAL_MS,
   fetchConnections,
@@ -159,7 +158,7 @@ type Tab = (typeof TABS)[number];
 // request would strand a guardian on a healthy tab.
 const SETTINGS_BACKED_TABS: ReadonlySet<Tab> = new Set<Tab>(["AI Tools", "Advanced"]);
 
-function tabToSlug(tab: Tab): string {
+export function tabToSlug(tab: Tab): string {
   return tab.toLowerCase().replace(/\s+/g, "-");
 }
 
@@ -175,7 +174,6 @@ export default function SettingsPage() {
   const params = useParams<{ tab?: string }>();
   const normalizedTab = normalizeTab(params.tab ?? null);
   const activeTab = normalizedTab ?? TABS[0];
-  useDocumentTitle([t(`tabs.${activeTab}` as const), t("page.title")]);
 
   const invalidateSettings = useInvalidateSettings();
   const [settings, setSettings] = useState<SettingsData>({});
@@ -298,20 +296,6 @@ export default function SettingsPage() {
 
   return (
     <Page>
-      <PageHeader>
-        <PageHeading>
-          <PageTitle>{t("page.title")}</PageTitle>
-        </PageHeading>
-      </PageHeader>
-
-      <PageNav aria-label={t("page.title")}>
-        {TABS.map((tab) => (
-          <PageNavLink asChild key={tab} active={tab === activeTab}>
-            <Link to={`/settings/${tabToSlug(tab)}`}>{t(`tabs.${tab}` as const)}</Link>
-          </PageNavLink>
-        ))}
-      </PageNav>
-
       {tabNeedsSettings && loading ? (
         <p className="text-ui text-muted-foreground">{t("page.loading")}</p>
       ) : tabNeedsSettings && loadError ? (

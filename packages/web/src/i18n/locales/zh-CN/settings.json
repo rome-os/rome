@@ -33,6 +33,7 @@
     }
   },
   "common": {
+    "close": "关闭",
     "loading": "加载中…",
     "save": "保存",
     "saving": "保存中…",
