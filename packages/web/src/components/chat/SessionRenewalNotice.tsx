@@ -95,7 +95,7 @@ function RenewalWithHandoff({
         aria-expanded={open}
         aria-controls={panelId}
         onClick={() => setOpen((value) => !value)}
-        className="rounded-sm text-center text-aux text-muted-foreground opacity-70 outline-1 outline-offset-0 outline-transparent transition-colors hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-solid focus-visible:outline-ring/50"
+        className="rounded-4 text-center text-aux text-muted-foreground opacity-70 outline-1 outline-offset-0 outline-transparent transition-colors hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-solid focus-visible:outline-ring/50"
       >
         {text} · {open ? t("sessionRenewal.hideHandoff") : t("sessionRenewal.showHandoff")}
       </button>
@@ -103,9 +103,9 @@ function RenewalWithHandoff({
         <div
           id={panelId}
           data-session-handoff
-          className="mt-2 w-full max-w-prose rounded-md border border-border bg-muted/40 px-3 py-2 text-left text-aux text-muted-foreground"
+          className="mt-2 w-full max-w-prose rounded-8 border border-border bg-muted/40 px-3 py-2 text-left text-aux text-muted-foreground"
         >
-          <p className="mb-1 font-medium text-foreground">{t("sessionRenewal.handoffTitle")}</p>
+          <p className="mb-1 text-foreground">{t("sessionRenewal.handoffTitle")}</p>
           <p className="whitespace-pre-wrap break-words">{note}</p>
         </div>
       ) : null}
