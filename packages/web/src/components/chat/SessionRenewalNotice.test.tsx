@@ -41,10 +41,12 @@ describe("SessionRenewalNotice", () => {
   it("opens to the handoff the renewal wrote", async () => {
     const requested = serve("- Agreed: dinner on Friday.");
     renderNotice({ chatId: "chat-1", sessionId: "s-2" });
-    const toggle = await screen.findByRole("button", { name: /New session · setup changed/ });
+    const toggle = await screen.findByRole("button", { name: /Context tidied up · setup updated/ });
     expect(requested).toEqual(["/api/chat/sessions/chat-1/renewals/s-2"]);
     expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(toggle.textContent).toContain("Show summary");
     fireEvent.click(toggle);
+    expect(screen.getByText("Summary carried over")).toBeTruthy();
     expect(toggle.getAttribute("aria-expanded")).toBe("true");
     expect(screen.getByText("- Agreed: dinner on Friday.")).toBeTruthy();
   });
@@ -55,7 +57,7 @@ describe("SessionRenewalNotice", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(requested).toHaveLength(1);
     expect(screen.queryByRole("button")).toBeNull();
-    expect(screen.getByRole("note").textContent).toBe("New session · setup changed");
+    expect(screen.getByRole("note").textContent).toBe("Context tidied up · setup updated");
   });
 
   it("reads nothing for a line that names no session", () => {

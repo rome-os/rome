@@ -594,13 +594,13 @@
     "replyPlaceholder": "Reply"
   },
   "sessionRenewal": {
-    "notice": "New session · {{reason}}",
-    "showHandoff": "show handoff",
-    "hideHandoff": "hide handoff",
-    "handoffTitle": "Handoff to the new session",
+    "notice": "Context tidied up · {{reason}}",
+    "showHandoff": "Show summary",
+    "hideHandoff": "Hide summary",
+    "handoffTitle": "Summary carried over",
     "reasons": {
-      "context": "context was full",
-      "setup": "setup changed",
+      "context": "conversation got long",
+      "setup": "setup updated",
       "idle": "after a quiet period",
       "daily": "daily reset",
       "working_dir": "working folder gone"
