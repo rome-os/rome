@@ -7030,12 +7030,16 @@ describe("Webchat API", () => {
               return id === "r-1";
             },
           },
+          // A check for a task names it.
+          tasks: {
+            repo: { get: async (id: string) => (id === "t-1" ? { title: "PR 42" } : null) },
+          },
         },
       } as never;
       await deps.webchatRepo.createSession("chat-a", "A");
       const app = createWebchatRuntime(deps).routes;
       expect(await (await app.request("/chat/sessions/chat-a/checks")).json()).toEqual({
-        checks: [check],
+        checks: [{ ...check, taskTitle: "PR 42" }],
       });
       const gone = await app.request("/chat/sessions/chat-a/checks/r-9", { method: "DELETE" });
       expect(gone.status).toBe(404);

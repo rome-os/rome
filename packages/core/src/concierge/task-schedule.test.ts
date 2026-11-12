@@ -141,6 +141,15 @@ describe("TaskSchedules", () => {
     expect(await schedules.remove("task-1")).toBe(false);
   });
 
+  it("skips only the next run when the task's checks are cancelled from its row", async () => {
+    await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
+
+    expect(await checks.cancelFor("task-1", "guardian", { keepSchedule: true })).toBe(1);
+    expect(await checks.inChat("concierge")).toMatchObject([
+      { at: at(14, 4, 25), recurring: true },
+    ]);
+  });
+
   it("fixes a visitor's schedule to their own zone", async () => {
     await schedules.set(
       { id: "task-2", title: "Morning", owner: "visitor:a", chatId: "visitor-main" },

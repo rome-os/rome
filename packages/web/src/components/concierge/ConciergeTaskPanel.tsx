@@ -1,4 +1,12 @@
-import { Archive, Check, ChevronDown, ListChecks, MessageSquare, RotateCcw } from "lucide-react";
+import {
+  AlarmClockOff,
+  Archive,
+  Check,
+  ChevronDown,
+  ListChecks,
+  MessageSquare,
+  RotateCcw,
+} from "lucide-react";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
@@ -38,15 +46,33 @@ import { useConciergeTasks } from "./use-concierge-tasks";
 /** How often a pending press asks whether its turn has ended. */
 const CHECK_PRESSES_MS = 2_000;
 
-/** The action a row offers: Stop on an active row with a chat, Done on one that needs the guardian, Archive on an ended one. */
-function rowAction(
-  task: ConciergeTaskDto,
-  status: ConciergeTaskStatusResult,
-): ConciergeTaskAction | null {
+/** What a row's button does: a press the Concierge hears, or cancelling its checks. */
+type RowAction = ConciergeTaskAction | "cancelCheck";
+
+/**
+ * The action a row offers: Stop on an active row with a chat, Done on one
+ * that needs the guardian, Archive on an ended one, and Cancel check on a
+ * later one waiting on a check.
+ */
+function rowAction(task: ConciergeTaskDto, status: ConciergeTaskStatusResult): RowAction | null {
   if (status.status === "active" && task.chat) return "stop";
   if (status.status === "needs_you") return "done";
   if (status.status === "ended") return "archive";
+  if (status.status === "later" && task.laterAt != null) return "cancelCheck";
   return null;
+}
+
+/** Cancels task `task`'s pending checks; the task stays, read again without them. */
+async function cancelTaskChecks(task: Pick<ConciergeTaskDto, "id">, failed: string) {
+  try {
+    const response = await fetch(`/api/concierge/tasks/${encodeURIComponent(task.id)}/checks`, {
+      method: "DELETE",
+      credentials: "include",
+    });
+    if (!response.ok) toast.error(failed);
+  } catch {
+    toast.error(failed);
+  }
 }
 
 function TaskRow({
@@ -81,8 +107,11 @@ function TaskRow({
     : [detail, task.notSynced ? t("concierge.tasks.notSynced") : null].filter(Boolean).join(" · ");
   const at = taskTime(task);
   const retry = pending !== undefined && pending.phase !== "pending";
-  const press = (kind: ConciergeTaskAction) => {
-    if (kind === "stop") {
+  const press = (kind: RowAction) => {
+    if (kind === "cancelCheck") {
+      // Only its checks go: the task stays, and Rome reads its status again.
+      void cancelTaskChecks(task, t("checks.cancelFailed"));
+    } else if (kind === "stop") {
       // A stop needs no turn of the Concierge: Rome stops the task at once.
       void stopTask(task);
     } else if (kind === "done") {
@@ -176,6 +205,8 @@ function TaskRow({
                     <StopGlyph />
                   ) : action === "done" ? (
                     <Check />
+                  ) : action === "cancelCheck" ? (
+                    <AlarmClockOff />
                   ) : (
                     <Archive />
                   )

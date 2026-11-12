@@ -1079,6 +1079,16 @@ export class ConciergeService {
     );
   }
 
+  /**
+   * Cancels task `taskId`'s pending checks from its row, and leaves the task
+   * in place: a wake-up is removed, its schedule skips only its next run.
+   */
+  async cancelPendingChecks(taskId: string): Promise<void> {
+    const row = await this.deps.tasks.repo.get(taskId);
+    if (!row) return;
+    await this.deps.checks?.cancelFor(taskId, ownerOf(row), { keepSchedule: true });
+  }
+
   /** Task chats whose scheduled run in flight reports only when it matters. */
   private readonly quietRuns = new Set<string>();
 

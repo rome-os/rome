@@ -55,6 +55,8 @@ const server = {
 const posts: Array<Record<string, unknown>> = [];
 /** The tasks a Stop press stopped directly. */
 const stops: string[] = [];
+/** The tasks whose checks a row's Cancel check cancelled. */
+const checkCancels: string[] = [];
 /** What a press on a topic chat's row posted to that chat. */
 const topicPosts: Array<Record<string, unknown>> = [];
 let postStatus = 200;
@@ -71,6 +73,11 @@ function mockServer() {
         headers: { "content-type": "application/json" },
       });
     if (url === "/api/settings") return json(server.settings);
+    const checks = url.match(/^\/api\/concierge\/tasks\/([^/]+)\/checks$/);
+    if (checks && init?.method === "DELETE") {
+      checkCancels.push(decodeURIComponent(checks[1]!));
+      return json({ ok: true });
+    }
     const stop = url.match(/^\/api\/concierge\/tasks\/([^/]+)\/stop$/);
     if (stop && init?.method === "POST") {
       stops.push(decodeURIComponent(stop[1]!));
@@ -146,6 +153,7 @@ beforeEach(() => {
   server.settings = {};
   posts.length = 0;
   stops.length = 0;
+  checkCancels.length = 0;
   postStatus = 200;
   toast.error.mockClear();
   FakeWebSocket.instances = [];
@@ -543,6 +551,31 @@ describe("ConciergeTaskPanel", () => {
     expect(buttonsOf("Watched")).toEqual([]);
     expect(buttonsOf("Finished")).toEqual([["Archive", ""]]);
     expect(buttonsOf("Called off")).toEqual([["Archive", ""]]);
+  });
+
+  it("cancels a later row's checks from the row, with no message to the Concierge", async () => {
+    const task = {
+      ...row("watching", { title: "PR 42", chat: { id: "c3", name: "c" } }),
+      status: "later",
+      laterAt: Date.now() + 3 * 60_000,
+    };
+    server.recent = [
+      task,
+      { ...row("next", { title: "Someday" }), status: "later", laterAt: null },
+    ];
+    mockServer();
+    const user = userEvent.setup();
+    renderPanel();
+    await user.click(
+      await within(await screen.findByText("PR 42").then(() => item("PR 42"))).findByRole(
+        "button",
+        { name: "Cancel check" },
+      ),
+    );
+    await waitFor(() => expect(checkCancels).toEqual([task.id]));
+    expect(posts).toEqual([]);
+    // A later row with no check pending has nothing to cancel.
+    expect(within(item("Someday")).queryByRole("button", { name: "Cancel check" })).toBeNull();
   });
 
   it("keeps the action out of sight until the row is hovered or focused, and always on touch", async () => {

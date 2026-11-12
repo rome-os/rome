@@ -312,6 +312,56 @@ describe("POST /concierge/tasks/:taskId/stop", () => {
   });
 });
 
+describe("DELETE /concierge/tasks/:taskId/checks", () => {
+  let testDb: TestDb;
+  let repo: ConciergeTasksRepository;
+  let cancelled: string[];
+
+  const app = () => {
+    const concierge = {
+      deps: { tasks: new ConciergeTasks(repo) },
+      cancelPendingChecks: async (taskId: string) => void cancelled.push(taskId),
+    } as unknown as ConciergeService;
+    return mount(testDb, concierge, new ChatsWebChatRepository(testDb.db));
+  };
+  const cancel = (taskId: string) =>
+    app().request(`/concierge/tasks/${taskId}/checks`, { ...guardian, method: "DELETE" });
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    repo = new ConciergeTasksRepository(testDb.db);
+    cancelled = [];
+  });
+  afterEach(() => testDb.close());
+
+  it("cancels only the checks of the caller's own task, which stays", async () => {
+    const [row] = await repo.upsertMany([{ title: "PR 42" }]);
+    expect((await cancel(row!.id)).status).toBe(200);
+    expect(cancelled).toEqual([row!.id]);
+    expect(await repo.get(row!.id)).toMatchObject({ title: "PR 42", stoppedAt: null });
+  });
+
+  it("cancels nothing for a task that is not there, or is another person's", async () => {
+    const chats = new ChatsWebChatRepository(testDb.db);
+    await chats.createSession(
+      "ann-main",
+      "Ann",
+      undefined,
+      undefined,
+      null,
+      undefined,
+      "core:concierge",
+      "webchat",
+      null,
+      { ownerKey: "visitor:acct-ann" },
+    );
+    const [theirs] = await repo.upsertMany([{ title: "Hers", chatId: "ann-main" }]);
+    expect((await cancel("nope")).status).toBe(404);
+    expect((await cancel(theirs!.id)).status).toBe(404);
+    expect(cancelled).toEqual([]);
+  });
+});
+
 describe("/concierge/connectors", () => {
   let testDb: TestDb;
   const listing = {
