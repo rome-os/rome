@@ -117,7 +117,10 @@ describe("WaitExpiry", () => {
     const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
     waiting.set("task-chat", NOW - 30 * HOUR);
     await expiry.expire(row!.id);
-    expect(await repo.takeNoResponseUnlisted([row!.id])).toEqual([row!.id]);
-    expect(await repo.takeNoResponseUnlisted([row!.id])).toEqual([]);
+    expect(await repo.noResponseUnlisted([row!.id])).toEqual([row!.id]);
+    // Still unlisted until a digest that lists it runs to its end.
+    expect(await repo.noResponseUnlisted([row!.id])).toEqual([row!.id]);
+    await repo.markNoResponseListed([row!.id]);
+    expect(await repo.noResponseUnlisted([row!.id])).toEqual([]);
   });
 });

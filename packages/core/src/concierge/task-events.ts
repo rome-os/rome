@@ -183,17 +183,25 @@ export class TaskEventCoalescer {
   }
 
   /**
-   * The rows of `taskIds` whose every change needs no word, taken out to go
-   * into a digest instead of a turn of their own.
+   * The rows of `taskIds` whose every change needs no word, which a digest
+   * lists instead of a turn of their own. Read only: the digest settles them
+   * with {@link settlePassive} once its turn ran to its end.
    */
-  takePassive(taskIds: readonly string[]): string[] {
-    const taken = taskIds.filter((taskId) => {
+  passiveOf(taskIds: readonly string[]): string[] {
+    return taskIds.filter((taskId) => {
       const entry = this.dirty.get(taskId);
       return entry?.passive === true && !this.inFlight.has(taskId);
     });
-    for (const taskId of taken) this.dirty.delete(taskId);
-    if (taken.length > 0) this.changed();
-    return taken;
+  }
+
+  /**
+   * Settles the rows of `taskIds` a digest listed. A row that got a change
+   * needing a word meanwhile stays, for a turn of its own.
+   */
+  settlePassive(taskIds: readonly string[]): void {
+    const settled = this.passiveOf(taskIds);
+    for (const taskId of settled) this.dirty.delete(taskId);
+    if (settled.length > 0) this.changed();
   }
 
   /** Drops a row's mark, such as when its row is gone. */

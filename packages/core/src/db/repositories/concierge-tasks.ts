@@ -853,17 +853,25 @@ export class ConciergeTasksRepository {
     return marked.length > 0;
   }
 
-  /** The tasks of `taskIds` that ended for no response and no digest listed yet; listed now. */
-  async takeNoResponseUnlisted(taskIds: readonly string[]): Promise<string[]> {
+  /** The tasks of `taskIds` that ended for no response and no digest listed yet. */
+  async noResponseUnlisted(taskIds: readonly string[]): Promise<string[]> {
     if (taskIds.length === 0) return [];
     const rows = await this.db
-      .update(conciergeTasks)
-      .set({ noResponseUnlisted: false })
+      .select({ id: conciergeTasks.id })
+      .from(conciergeTasks)
       .where(
         and(inArray(conciergeTasks.id, [...taskIds]), eq(conciergeTasks.noResponseUnlisted, true)),
-      )
-      .returning({ id: conciergeTasks.id });
+      );
     return rows.map((row) => row.id);
+  }
+
+  /** Tasks `taskIds` were listed in a digest that ran to its end, as ended for no response. */
+  async markNoResponseListed(taskIds: readonly string[]): Promise<void> {
+    if (taskIds.length === 0) return;
+    await this.db
+      .update(conciergeTasks)
+      .set({ noResponseUnlisted: false })
+      .where(inArray(conciergeTasks.id, [...taskIds]));
   }
 
   /**

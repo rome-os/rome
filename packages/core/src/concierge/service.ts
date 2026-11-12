@@ -56,6 +56,15 @@ import { ambiguousQuota, type FailoverReason } from "../agent/index.js";
 
 const log = createLogger("concierge");
 
+/** What a digest adds about a chat's tasks, and which notes it lists. */
+export interface DigestTaskNotes {
+  text: string;
+  /** Tasks whose scheduled run finished with nothing to say. */
+  passive: string[];
+  /** Tasks that ended for no response. */
+  noResponse: string[];
+}
+
 /** A task checked this many times and still waiting is flagged in the digest. */
 export const POSTPONED_CHECKS = 3;
 
@@ -941,14 +950,18 @@ export class ConciergeService {
   /**
    * What a digest of Concierge chat `chatId` adds about its tasks: each task
    * still waiting on a check it scheduled `POSTPONED_CHECKS` times or more,
-   * so the Concierge asks the guardian rather than check again. Empty when
-   * there is nothing to say.
+   * so the Concierge asks the guardian rather than check again, each
+   * scheduled run that finished with nothing to say, and each task that
+   * ended for no response. `text` is empty when there is nothing to say.
+   * Read only: {@link markTaskNotesListed} settles them once the digest's
+   * turn ran to its end, so a failed digest leaves them for the next one.
    */
-  async digestTaskNotes(chatId: string, owner: ConciergeOwner): Promise<string> {
+  async digestTaskNotes(chatId: string, owner: ConciergeOwner): Promise<DigestTaskNotes> {
     const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
     const rows = (await this.deps.tasks.repo.listForConciergeChat(chatId, owner, since)).map(
       (task) => task.row,
     );
+    const ids = rows.map((row) => row.id);
     const status = await this.deps.tasks.statusOf(rows);
     const later = rows.filter((row) => status.get(row.id)?.status === "later");
     const counts =
@@ -962,20 +975,30 @@ export class ConciergeService {
         : [];
     });
     // A scheduled run that finished with nothing to say goes here, not in a turn of its own.
-    for (const taskId of this.taskEvents?.takePassive(rows.map((row) => row.id)) ?? []) {
-      const row = rows.find((candidate) => candidate.id === taskId);
-      if (row) lines.push(`<ran_on_schedule task="${attr(row.id)}" title="${attr(row.title)}"/>`);
+    const passive = this.taskEvents?.passiveOf(ids) ?? [];
+    for (const row of rows) {
+      if (passive.includes(row.id)) {
+        lines.push(`<ran_on_schedule task="${attr(row.id)}" title="${attr(row.title)}"/>`);
+      }
     }
     // Each task that ended for no response is listed once, so it can be resumed.
-    const unanswered = new Set(
-      await this.deps.tasks.repo.takeNoResponseUnlisted(rows.map((row) => row.id)),
-    );
+    const noResponse = await this.deps.tasks.repo.noResponseUnlisted(ids);
     for (const row of rows) {
-      if (unanswered.has(row.id)) {
+      if (noResponse.includes(row.id)) {
         lines.push(`<ended_no_response task="${attr(row.id)}" title="${attr(row.title)}"/>`);
       }
     }
-    return lines.length > 0 ? `<task_review>\n${lines.join("\n")}\n</task_review>` : "";
+    return {
+      text: lines.length > 0 ? `<task_review>\n${lines.join("\n")}\n</task_review>` : "",
+      passive,
+      noResponse,
+    };
+  }
+
+  /** Settles the notes a digest listed, once its turn ran to its end. */
+  async markTaskNotesListed(notes: DigestTaskNotes): Promise<void> {
+    this.taskEvents?.settlePassive(notes.passive);
+    await this.deps.tasks.repo.markNoResponseListed(notes.noResponse);
   }
 
   /**

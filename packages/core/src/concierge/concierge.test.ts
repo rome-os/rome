@@ -3013,13 +3013,36 @@ describe("Concierge events", () => {
       lastOutcome: "succeeded",
       outcomeUnsaid: false,
     });
-    expect(await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).toContain(
-      `<ran_on_schedule task="${taskId}" title="Flights"/>`,
-    );
-    // Listed once.
-    expect(await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).not.toContain(
+    const notes = await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian");
+    expect(notes.text).toContain(`<ran_on_schedule task="${taskId}" title="Flights"/>`);
+    // Listed once, after a digest that listed it ran to its end.
+    await s.service.markTaskNotesListed(notes);
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).not.toContain(
       "ran_on_schedule",
     );
+  });
+
+  it("keeps a digest's no-response and scheduled-run notes until a digest that lists them runs to its end", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await s.finish({
+      turnId: "scheduled-turn",
+      agentName: "core:main",
+      chatId,
+      status: "completed",
+    });
+    await rs.advanceTimersByTimeAsync(10 * 60_000);
+    const [unanswered] = await s.taskRepo.upsertMany([{ title: "Pick a seat" }]);
+    await s.taskRepo.markWaitExpired(unanswered!.id, new Date(Date.now() - 2 * 86_400_000));
+    // A digest turn that failed marked nothing: the next digest reads the same notes.
+    const first = await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian");
+    const again = await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian");
+    expect(again).toEqual(first);
+    expect(first.text).toContain(`<ran_on_schedule task="${taskId}"`);
+    expect(first.text).toContain(`<ended_no_response task="${unanswered!.id}"`);
+    await s.service.markTaskNotesListed(again);
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toBe("");
   });
 
   it("tells the Concierge quietly that a task chat was deleted, and its row stays stopped and archived", async () => {
@@ -4275,11 +4298,11 @@ describe("Concierge chats", () => {
           [once.id, 1],
         ]),
     } as never;
-    expect(await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).toBe(
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toBe(
       `<task_review>\n<check_postponed task="${often.id}" title="CI run" checks="3"/>\n</task_review>`,
     );
     s.deps.checks = { timesScheduled: async () => new Map() } as never;
-    expect(await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).toBe("");
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toBe("");
   });
 
   it("switches a topic chat's provider when its quota runs out, as the main chat's", async () => {

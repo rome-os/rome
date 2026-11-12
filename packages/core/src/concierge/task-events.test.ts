@@ -350,7 +350,10 @@ describe("TaskEventCoalescer", () => {
       passive: true,
     });
     s.coalescer.mark(urgent("b", "approval"));
-    expect(s.coalescer.takePassive(["a", "b"])).toEqual(["a"]);
+    expect(s.coalescer.passiveOf(["a", "b"])).toEqual(["a"]);
+    // Read only, until the digest that listed them ran to its end.
+    expect(s.coalescer.pending).toEqual(["a", "b"]);
+    s.coalescer.settlePassive(["a", "b"]);
     expect(s.coalescer.pending).toEqual(["b"]);
   });
 
