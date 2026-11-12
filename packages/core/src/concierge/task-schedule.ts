@@ -4,6 +4,7 @@
 // routine on the routine engine, one per task, keyed by the task's id
 // (docs/adrs/scheduled-tasks.md).
 
+import { AsyncLocalStorage } from "node:async_hooks";
 import { Cron } from "croner";
 import type { ActionRegistry } from "../apps/actions/types.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
@@ -291,6 +292,10 @@ export function registerTaskRunAction(
   concierge: { runScheduledTask(taskId: string, firedAt: number): Promise<string> },
   now: () => number = Date.now,
 ): void {
+  // The action runs in main, inside its execution's async context, which may
+  // not call other actions. The run starts the task chat's turn, whose agent
+  // calls actions, so it runs in the context of boot instead.
+  const outsideAction = AsyncLocalStorage.snapshot();
   actions.register({
     config: {
       name: CONCIERGE_TASK_RUN_ACTION,
@@ -310,7 +315,10 @@ export function registerTaskRunAction(
         return { status: "error", error: `${CONCIERGE_TASK_RUN_ACTION} needs a taskId` };
       }
       try {
-        return { status: "ok", data: { run: await concierge.runScheduledTask(taskId, now()) } };
+        return {
+          status: "ok",
+          data: { run: await outsideAction(() => concierge.runScheduledTask(taskId, now())) },
+        };
       } catch (error) {
         return { status: "error", error: error instanceof Error ? error.message : String(error) };
       }
