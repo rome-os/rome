@@ -130,6 +130,15 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
         #expect(blocks == [.paragraph("Details."), .paragraph("Found 3 flights. Which one?")])
     }
 
+    @Test func aCommentSpanShowsNothingAndItsLineKeepsTheRest() {
+        #expect(MarkdownParser.parse("<!-- rome:conclusion -->Done.<!-- /rome:conclusion -->") == [.paragraph("Done.")])
+        #expect(MarkdownParser.parse("<!--rome:conclusion-->Done.") == [.paragraph("Done.")])
+    }
+
+    @Test func aCommentInsideACodeBlockStaysLiteral() {
+        #expect(MarkdownParser.parse("```\n<!-- keep -->\n```") == [.code(language: nil, text: "<!-- keep -->")])
+    }
+
     @Test func unterminatedCodeStillRenders() {
         #expect(MarkdownParser.parse("```\nabc") == [.code(language: nil, text: "abc")])
     }

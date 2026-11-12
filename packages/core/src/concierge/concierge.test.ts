@@ -1693,6 +1693,15 @@ describe("Concierge tools", () => {
       expect(body).not.toContain("rome:conclusion");
     });
 
+    it("sends the whole answer byte for byte but for the markers, code block blank lines included", async () => {
+      const code = "```py\nx = 1\n\n\n\ny = 2\n```";
+      const answer = `Intro.\n\n\n\n${code}\n\n${CONCLUSION_OPEN}\nDone.\n${CONCLUSION_CLOSE}\n`;
+      const s = await withAnswer(answer);
+      guardianAsked(s);
+      await s.tool("chat_forward", { chatId: "task-1", full: true });
+      expect(stored(s).at(-1)[0].content).toBe(`Intro.\n\n\n\n${code}\n\nDone.\n`);
+    });
+
     it("sends the whole answer even when it has no conclusion, in a guardian's turn", async () => {
       const s = await withAnswer(DETAILS);
       guardianAsked(s);
@@ -1709,6 +1718,8 @@ describe("Concierge tools", () => {
       expect(forward.description).toContain("explicitly asks for the full text");
       expect(forward.description).not.toContain("long content the guardian asked for");
       expect(forward.inputSchema).toHaveProperty("properties.full");
+      const start = tools.find((candidate) => candidate.name === "chat_start")!;
+      expect(JSON.stringify(start.inputSchema)).toContain("written in the guardian's language");
     });
   });
 

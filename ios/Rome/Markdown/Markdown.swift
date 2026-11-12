@@ -60,9 +60,9 @@ enum MarkdownParser {
         let lines = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         var next = 0
         while next < lines.count {
-            let line = lines[next]
+            var line = lines[next]
             next += 1
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            var trimmed = line.trimmingCharacters(in: .whitespaces)
 
             if var lines = code {
                 if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
@@ -82,13 +82,14 @@ enum MarkdownParser {
                 code = []
                 continue
             }
-            if trimmed.isEmpty {
-                flushAll()
-                continue
+            // HTML comments, such as the markers that bound a task's
+            // conclusion, show nothing. A line they leave empty ends the block
+            // below, and the rest of any other line is read as it stands.
+            if line.contains("<!--") {
+                line = line.replacingOccurrences(of: "<!--.*?-->", with: "", options: .regularExpression)
+                trimmed = line.trimmingCharacters(in: .whitespaces)
             }
-            // An HTML comment on a line of its own, such as the marker that
-            // bounds a task's conclusion, shows nothing and ends the block.
-            if trimmed.hasPrefix("<!--") && trimmed.hasSuffix("-->") {
+            if trimmed.isEmpty {
                 flushAll()
                 continue
             }

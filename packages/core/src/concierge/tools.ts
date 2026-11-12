@@ -998,7 +998,7 @@ export async function buildConciergeTools(
           brief: {
             type: "string",
             description:
-              "The full request for the other agent, with every detail it needs. It does not see this conversation.",
+              "The full request for the other agent, with every detail it needs, written in the guardian's language. It does not see this conversation.",
           },
           skill: {
             type: "string",

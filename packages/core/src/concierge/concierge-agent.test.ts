@@ -75,6 +75,15 @@ describe("the Concierge agent", () => {
       expect(concierge.systemPromptPrefix).not.toContain(obsolete);
   });
 
+  it("tells the Concierge to write a task's brief in the guardian's language", () => {
+    const rule =
+      concierge.systemPromptPrefix
+        .split("\n")
+        .find((line) => line.startsWith("- Everything else is a task")) ?? "";
+    expect(rule).toContain("Write it in the guardian's language");
+    expect(rule).toContain("writes its conclusion in the language of its brief");
+  });
+
   it("shows task questions and approvals as live cards without relaying card answers", () => {
     const rule = concierge.systemPromptPrefix
       .split("\n")
