@@ -10,6 +10,7 @@ enum InteractionCard: Equatable {
     /// Drawn only on the web dashboard; "Open" goes to this chat there.
     case webOnly
     case routineDraft
+    case widget
 
     init?(_ row: TranscriptRow) {
         switch row {
@@ -19,6 +20,7 @@ enum InteractionCard: Equatable {
         case .tools: self = .tools
         case .webOnly: self = .webOnly
         case .routineDraft: self = .routineDraft
+        case .widgetUI: self = .widget
         default: return nil
         }
     }
@@ -57,6 +59,10 @@ struct InteractionRow: View {
                 store.connect(part, rowId: id, chatId: sessionId)
             }
             .task(id: id) { await store.checkConnected(part, rowId: id) }
+        case .widgetUI(_, let part):
+            WidgetUICardView(part: part) { method, path, body in
+                try await store.appCall(appId: part.appId, method: method, path: path, body: body)
+            }
         case .webOnly(_, let kind, let done):
             WebOnlyCard(kind: kind, done: done, sessionId: store.sessionId)
         case .routineDraft(_, let part):
