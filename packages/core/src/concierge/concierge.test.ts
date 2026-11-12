@@ -444,13 +444,18 @@ function setup(
     await settle();
   };
   /** A turn in a chat that failed before it started, as an agent session tells it. */
-  const failBeforeStart = async (event: { turnId: string; chatId: string; error: string }) => {
+  const failBeforeStart = async (event: {
+    turnId: string;
+    chatId: string;
+    error: string;
+    agentName?: string;
+  }) => {
     for (const listener of failedBeforeStartListeners) {
       listener({
         turn: {
           sessionId: "runtime-x",
           turnId: event.turnId,
-          agentName: "core:main",
+          agentName: event.agentName ?? "core:main",
           threadContext: { channel: "webchat", threadId: event.chatId },
         },
         error: event.error,
@@ -702,7 +707,7 @@ describe("Concierge tools", () => {
       s.inTurn("follow-up-turn");
       guardianSays(s, { id: "g1", turnId: "follow-up-turn" });
       guardianSays(s, { id: "g2", turnId: "follow-up-turn", chatThread: "weather", settled: true });
-      await s.tool("chat_send", { chatId, text: "Make it Saturday" });
+      await s.tool("chat_send", { chatId, text: "Make it Saturday", answers: "g1" });
       const answer = saidId(await s.tool("say", { text: "Told it Saturday", answers: "g1" }));
 
       expect(threadOf(s, "g0")).toBe("g0");
@@ -2504,7 +2509,6 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(2_000);
     expect(ignored.backendTurns).toHaveLength(1);
     expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(false);
-    await ignored.tool("chat_forward", { chatId: quiet.chatId });
     await rs.advanceTimersByTimeAsync(10_000);
     expect(ignored.backendTurns).toHaveLength(2);
     expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(true);
@@ -3308,6 +3312,28 @@ describe("Concierge provider recovery", () => {
     await s.settle();
     expect(s.backendTurns).toHaveLength(0);
   });
+  it.each([
+    [false, null],
+    [true, "working"],
+  ] as const)("settles the failed turn's marks when its recovery ends, unless a newer input took the recovery over (%s)", async (handedOn, reaction) => {
+    const { s } = await prepared({ delay: async () => {} });
+    await s.taskRepo.markTurnWorking("failed", { chatId: CONCIERGE_CHAT, messageKey: "g1" });
+    s.onBackendTurn(() => {
+      void s.finish({
+        turnId: "recovery",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId: CONCIERGE_CHAT,
+        status: handedOn ? "interrupted" : "completed",
+        handedOn,
+        text: "done",
+      });
+    });
+    await finish(s, failure("Repeated 529 Overloaded errors"));
+    await s.settle();
+    expect(s.backendTurns).toHaveLength(1);
+    const marks = await s.taskRepo.reactionsOf(CONCIERGE_CHAT, ["g1"]);
+    expect(marks.get("g1") ?? null).toBe(reaction);
+  });
   it("waits about thirty seconds before one same-model retry, then stops on success", async () => {
     let release!: () => void;
     const delay = rs.fn(
@@ -3866,6 +3892,12 @@ describe("Concierge status reactions", () => {
     });
     if (reported && status !== "interrupted") await reportEnds(s, chatId);
   };
+  /** Task chat `chatId` wrote a reply, so its turn's end has news to report. */
+  const replies = (s: ReturnType<typeof setup>, chatId: string) =>
+    s.messages.get(chatId)?.push({
+      role: "assistant",
+      content: JSON.stringify([{ type: "text", content: "Sunny" }]),
+    });
   /** Every reaction change the dashboard is told of, in order. */
   const watch = (s: ReturnType<typeof setup>) => {
     const seen: [string, string | null][] = [];
@@ -4159,8 +4191,10 @@ describe("Concierge status reactions", () => {
       s.inTurn("turn-b");
       guardianSays(s, "b", "turn-b");
       await taken(s, "b", "turn-b");
-      // The turn carries both: naming none, nothing is marked or moved.
-      await s.tool("chat_send", { chatId, text: "Make it 3 fruits" });
+      // The turn carries both: naming none, the send is refused, not guessed.
+      expect(await s.tool("chat_send", { chatId, text: "Make it 3 fruits" })).toMatchObject({
+        isError: true,
+      });
       expect(await s.taskRepo.reactionsOf(CONCIERGE_CHAT, ["b"])).toEqual(
         new Map([["b", "working"]]),
       );
@@ -4212,6 +4246,43 @@ describe("Concierge status reactions", () => {
       await finishTask(s, chatId);
       // The task is done; the Concierge's own turn still runs.
       expect(await reactionOf(s, "g1")).toBe("working");
+    });
+
+    it("fails the messages handed on to a turn that never started, and hands none further", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "a", "turn-a");
+      await taken(s, "a", "turn-a");
+      await conciergeEnds(s, "interrupted", "turn-a", true);
+      await s.settle();
+      expect(s.service.promptsHandedOn(CONCIERGE_CHAT)).toEqual(["a"]);
+      await s.failBeforeStart({
+        turnId: "turn-b",
+        chatId: CONCIERGE_CHAT,
+        error: "no session",
+        agentName: "core:concierge",
+      });
+      expect(await reactionOf(s, "a")).toBe("failed");
+      expect(s.service.promptsHandedOn(CONCIERGE_CHAT)).toEqual([]);
+    });
+
+    it("refuses to send words on to a task when the turn carries several messages and names none", async () => {
+      const s = setup({ said: false });
+      s.inTurn("t0");
+      guardianSays(s, "g0", "t0");
+      const { chatId } = await started(s);
+      s.inTurn("concierge-turn-1");
+      guardianSays(s, "a");
+      guardianSays(s, "b");
+      replies(s, chatId);
+      for (const [tool, input] of [
+        ["chat_send", { chatId, text: "Make it 3" }],
+        ["chat_forward", { chatId }],
+      ] as const) {
+        const refused = await s.tool(tool, input);
+        expect(refused).toMatchObject({ isError: true });
+        expect(JSON.stringify(refused)).toContain("Pass answers");
+      }
+      expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, null]);
     });
 
     describe("once the Concierge answers it", () => {
@@ -4342,6 +4413,87 @@ describe("Concierge status reactions", () => {
         chatId: CONCIERGE_CHAT,
         text: "ok",
       });
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("settles when the Concierge writes the row done, though its report turn is then cut short", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      s.fakeTimers();
+      s.onBackendTurn(async () => {
+        await s.taskRepo.upsertMany([{ id: taskId, state: "done" }]);
+        return "interrupted" as const;
+      });
+      replies(s, chatId);
+      await finishTask(s, chatId, "completed", { reported: false });
+      // Nobody asked for this result, so it waits for the next batch.
+      await rs.advanceTimersByTimeAsync(60_000);
+      expect(s.backendTurns).toHaveLength(1);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it.each([
+      ["done", "completed", null],
+      ["done", "error", "failed"],
+      ["dropped", "completed", null],
+      ["dropped", "error", null],
+    ] as const)("a row written %s while a task that ended %s waits for its report shows %s", async (state, ended, reaction) => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      await finishTask(s, chatId, ended, { reported: false });
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await s.taskRepo.upsertMany([{ id: taskId, state }]);
+      expect(await reactionOf(s, "g1")).toBe(reaction);
+    });
+
+    it("clears a failed task's mark when the Concierge drops it", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      await finishTask(s, chatId, "error");
+      expect(await reactionOf(s, "g1")).toBe("failed");
+      await s.taskRepo.upsertMany([{ id: taskId, state: "dropped" }]);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("shows failed once Rome gives up on the report", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      await finishTask(s, chatId, "completed", { reported: false });
+      const coalescer = (
+        s.service as unknown as { taskEvents: { deps: { giveUp: (id: string) => void } } }
+      ).taskEvents;
+      coalescer.deps.giveUp(taskId);
+      await s.settle();
+      expect(await reactionOf(s, "g1")).toBe("failed");
+    });
+
+    it("runs no report again that a turn which took it over said", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      s.fakeTimers();
+      s.onBackendTurn(() => "interrupted");
+      replies(s, chatId);
+      await finishTask(s, chatId, "completed", { reported: false });
+      // Nobody asked for this result, so it waits for the next batch.
+      await rs.advanceTimersByTimeAsync(60_000);
+      expect(s.backendTurns).toHaveLength(1);
+      s.onBackendTurn(() => "completed");
+      s.inTurn("takeover");
+      guardianSays(s, "g2", "takeover");
+      await s.tool("say", { text: "Sunny all week", task: taskId });
+      await s.finish({
+        turnId: "takeover",
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        text: "",
+      });
+      await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
+      expect(s.backendTurns).toHaveLength(1);
       expect(await reactionOf(s, "g1")).toBeNull();
     });
 

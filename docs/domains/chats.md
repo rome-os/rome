@@ -111,11 +111,11 @@ A mark Rome puts on its owner's message in a [Concierge chat](#concierge-chat) t
   - It fails with an error, or ends with no end of its own, as when the process dies: failed.
   - Its owner stops it: stopped, which counts toward no reaction.
   - A newer input supersedes it and the work carries into the next turn: still working, until that turn ends.
-- A task that ends keeps the message working until the Concierge says its result: until the turn that reports the task ends, or a turn that says the result naming the task ends. Only then does it settle as the task ended. Until then the reply has not told the owner anything. A report turn that fails or is cut short keeps the mark working, since Rome hands the report over again. The mark turns failed only once Rome gives up on the report.
+- A task that ends keeps the message working until the Concierge says its result: until the turn that reports the task ends, a turn that says the result naming the task ends, or the Concierge marks the task done or drops it. Only then does it settle as the task ended. Until then the reply has not told the owner anything. A report turn that fails or is cut short keeps the mark working, since Rome hands the report over again. The mark turns failed only once Rome gives up on the report.
 - How a task's end sets the reaction, the same way:
   - It finishes, or the Concierge marks it done: done, which shows no mark.
   - It fails with an error, or its turn ends with no end of its own, as when the process dies: failed.
-  - Its owner stops it, or the Concierge drops it: stopped. A stopped task counts toward no reaction, so a message whose only task was stopped has none, and the mark goes away.
+  - Its owner stops it, or the Concierge drops it: stopped. A stopped task counts toward no reaction, so a message whose only task was stopped has none, and the mark goes away. A task the Concierge drops after it failed shows no mark either.
   - A newer input supersedes its turn and the work carries into the next turn: still working, until that turn ends.
 - A stopped task that is resumed or given more words is working again.
 - A message counts only the work not stopped: working while any of it works, then failed if any failed, else none. When all of it was stopped, it has none too.

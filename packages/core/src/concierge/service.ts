@@ -756,6 +756,8 @@ export class ConciergeService {
 
   /** Task `taskId`'s result was said in Concierge turn `turnId`, as by `say` naming it. */
   noteRelayed(turnId: string, taskId: string): void {
+    // Its news is said: a report a newer input cut short is not run again.
+    this.taskEvents?.settle(taskId);
     const tasks = this.relayedInTurn.get(turnId) ?? new Set<string>();
     tasks.add(taskId);
     this.relayedInTurn.set(turnId, tasks);

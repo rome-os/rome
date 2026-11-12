@@ -441,6 +441,21 @@ export async function buildConciergeTools(
     return prompts;
   };
 
+  /**
+   * This turn's guardian messages, once it is certain which one `answers`
+   * names or, with none named, that the turn has at most one: a message sent
+   * on to a task is never a guess.
+   */
+  const requireOnePrompt = async (answers: string | undefined, what: string) => {
+    const prompts = await requireTurnPrompt(answers);
+    if (answers === undefined && prompts.length > 1) {
+      throw new Error(
+        `This turn carries several guardian messages. Pass answers: the message_id of the one ${what}.`,
+      );
+    }
+    return prompts;
+  };
+
   /** The chat thread a message is in, or null when it is in none. */
   const threadOf = async (chatId: string, messageId: string) =>
     (await webchatRepo.getReplyTarget(chatId, messageId))?.chatThreadId ?? null;
@@ -1051,7 +1066,7 @@ export async function buildConciergeTools(
           const chat = await requireTaskChat(chatId);
           const answers = optionalString(args, "answers");
           // Checked before the task hears anything, so a retry never sends twice.
-          const prompts = await requireTurnPrompt(answers);
+          const prompts = await requireOnePrompt(answers, "whose words you pass on");
           await ensureTaskRow(chat);
           const task = await tasks.repo.findBySession(chatId);
           const text = requireString(args, "text");
@@ -1225,6 +1240,7 @@ export async function buildConciergeTools(
           const answer = latest?.body.text ?? null;
           if (!answer) throw new Error("The task chat has no answer yet");
           currentTurn();
+          await requireOnePrompt(optionalString(args, "answers"), "this answers");
           await relayToTaskThread(chatId, optionalString(args, "answers"));
           const messageId = await forward(
             answer,

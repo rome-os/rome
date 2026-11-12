@@ -329,10 +329,12 @@ export class ConciergeTasksRepository {
   async upsertMany(writes: ConciergeTaskWrite[], now = new Date()): Promise<ConciergeTaskRow[]> {
     // `transaction` is synchronous on better-sqlite3, so the body uses `.run()`
     // and `.all()` and never awaits.
-    // Rows the Concierge just marked done or dropped settle the messages
-    // still working for them, as a task that ends does. A dropped task was
-    // called off, not failed, so it counts as stopped.
-    const settled: { taskId: string; state: TaskReactionEnd }[] = [];
+    // Rows the Concierge marks done or dropped settle their messages: the
+    // ones still working, when the row just ended, as a task that ends does,
+    // and the ones a task that ended holds for its report, since writing the
+    // row is the Concierge taking the report in. A dropped task was called
+    // off, not failed, so it counts as stopped, and shows no mark.
+    const settled: { taskId: string; state: "done" | "dropped"; ended: boolean }[] = [];
     const written = await this.db.transaction((tx) => {
       const out: ConciergeTaskRow[] = [];
       for (const write of writes) {
@@ -355,8 +357,8 @@ export class ConciergeTasksRepository {
             throw new Error(`Chat ${write.sessionId} is already linked to task ${taken.id}`);
         }
         const state = write.state ?? existing?.state ?? "next";
-        if (existing && !isFinished(existing.state) && isFinished(state)) {
-          settled.push({ taskId: existing.id, state: state === "done" ? "done" : "stopped" });
+        if (existing && (state === "done" || state === "dropped")) {
+          settled.push({ taskId: existing.id, state, ended: !isFinished(existing.state) });
         }
         const archivedAt =
           write.archived === undefined
@@ -423,8 +425,8 @@ export class ConciergeTasksRepository {
     });
     for (const row of written) await this.announce(row.id, "write");
     // The rows are written; a reaction that fails to settle fails no write.
-    for (const { taskId, state } of settled) {
-      await this.settleReactions(taskId, state).catch((error: unknown) =>
+    for (const { taskId, state, ended } of settled) {
+      await this.settleWrittenReactions(taskId, state, ended).catch((error: unknown) =>
         log.warn("failed to settle status reactions", {
           taskId,
           error: error instanceof Error ? error.message : String(error),
@@ -432,6 +434,47 @@ export class ConciergeTasksRepository {
       );
     }
     return written;
+  }
+
+  /**
+   * Task `taskId`'s row was written `state`: its messages settle as
+   * {@link upsertMany} says. Answers how many changed.
+   */
+  private async settleWrittenReactions(
+    taskId: string,
+    state: "done" | "dropped",
+    ended: boolean,
+    now = new Date(),
+  ): Promise<number> {
+    const moves: [TaskReactionState, TaskReactionState][] =
+      state === "done"
+        ? [
+            ["done_unsaid", "done"],
+            ["failed_unsaid", "failed"],
+          ]
+        : [
+            ["done_unsaid", "stopped"],
+            ["failed_unsaid", "stopped"],
+            ["failed", "stopped"],
+          ];
+    if (ended) moves.unshift(["working", state === "done" ? "done" : "stopped"]);
+    const changed: ReactionTarget[] = [];
+    for (const [from, to] of moves) {
+      changed.push(
+        ...(await this.db
+          .update(conciergeTaskReactions)
+          .set({ state: to, updatedAt: now })
+          .where(
+            and(eq(conciergeTaskReactions.taskId, taskId), eq(conciergeTaskReactions.state, from)),
+          )
+          .returning({
+            chatId: conciergeTaskReactions.chatId,
+            messageKey: conciergeTaskReactions.messageKey,
+          })),
+      );
+    }
+    for (const target of changed) await this.announceReaction(target);
+    return changed.length;
   }
 
   onReaction(listener: ReactionListener): () => void {

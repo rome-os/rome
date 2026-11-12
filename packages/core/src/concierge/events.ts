@@ -203,7 +203,7 @@ export function startConciergeEvents(
   options: { delay?: (ms: number) => Promise<void> } = {},
 ): () => void {
   const remindersRunning = new Set<string>();
-  const recoveriesRunning = new Map<string, { finished?: AgentTurnFinishedEvent }>();
+  const recoveriesRunning = new Map<string, { finished?: EndedAgentTurn }>();
   const { tasks, webchatRepo, approvals } = service.deps;
 
   const coalescer = new TaskEventCoalescer({
@@ -305,7 +305,7 @@ export function startConciergeEvents(
     if (!reason) await settleTurnMarks(chatId, event.turn.turnId, event.status, event.handedOn);
     if (event.status === "error") {
       if (!reason || !failure) return;
-      const chain: { finished?: AgentTurnFinishedEvent } = {};
+      const chain: { finished?: EndedAgentTurn } = {};
       recoveriesRunning.set(chatId, chain);
       try {
         const recover = async (
@@ -346,6 +346,7 @@ export function startConciergeEvents(
           chatId,
           chain.finished?.turn.turnId ?? event.turn.turnId,
           chain.finished?.status ?? "error",
+          chain.finished?.handedOn,
         );
       }
       return;
@@ -489,7 +490,19 @@ export function startConciergeEvents(
   const onFailedBeforeStart = ({ turn, error }: AgentTurnFailedBeforeStart) => {
     const thread = turn.threadContext;
     if (turn.parent || thread?.channel !== "webchat" || !thread.threadId) return;
-    if (isConciergeAgent(turn.agentName)) return;
+    // A Concierge turn that never started answers nothing: the messages handed
+    // on to it settle as a failed turn's, and none is handed on further.
+    if (isConciergeAgent(turn.agentName)) {
+      // A turn that does run carries them on.
+      if (service.dashboard.chats.activeTurns(thread.threadId).some((id) => id !== turn.turnId)) {
+        return;
+      }
+      void guard(
+        `concierge turn failure (${turn.turnId})`,
+        settleTurnMarks(thread.threadId, turn.turnId, "error"),
+      );
+      return;
+    }
     const failed: AgentTurnFinishedEvent = {
       type: "agent-turn-finished",
       version: 1,
