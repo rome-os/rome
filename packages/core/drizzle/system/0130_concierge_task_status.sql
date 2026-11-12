@@ -45,11 +45,18 @@ UPDATE `concierge_tasks`
   SET `stopped_at` = coalesce(`completed_at`, `updated_at`), `stop_reason` = 'concierge'
   WHERE `state` = 'dropped' AND `stopped_at` IS NULL;
 --> statement-breakpoint
--- A watched row with no time ended done. A planned row with no task chat
--- stays later until the Concierge starts or stops it, one with a time stays
--- later until that time, and one whose task chat runs reads as active.
-UPDATE `concierge_tasks` SET `last_outcome` = 'succeeded'
-  WHERE `state` = 'watching' AND `due_at` IS NULL AND `last_outcome` IS NULL;
+-- A planned or watched row ends done: with no time when it was last
+-- written, with a time that passed at that time. One with a time ahead stays
+-- later until then, and one whose task chat runs reads as active. Only a row
+-- written from now on with no task chat reads as later until the Concierge
+-- starts or stops it.
+UPDATE `concierge_tasks`
+  SET `last_outcome` = 'succeeded',
+    `ended_at` = CASE
+      WHEN `due_at` IS NULL THEN coalesce(`completed_at`, `updated_at`)
+      WHEN `due_at` <= CAST(strftime('%s', 'now') AS INTEGER) * 1000 THEN `due_at`
+    END
+  WHERE `state` IN ('next', 'watching') AND `last_outcome` IS NULL;
 --> statement-breakpoint
 -- A check the Concierge scheduled for a task named it `task:<id>`. It now
 -- names its task in its args, so the task reads its "later" time from it and

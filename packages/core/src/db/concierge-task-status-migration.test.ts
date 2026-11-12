@@ -3,6 +3,7 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import Database from "better-sqlite3";
 import { describe, expect, it } from "@rstest/core";
+import { type ConciergeTaskOutcome, taskStatus } from "@rome/api-types/concierge-task-status";
 
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system");
 const TAG = "0130_concierge_task_status";
@@ -94,10 +95,21 @@ describe("the Concierge task status migration", () => {
       { id: "doing", last_outcome: null, stopped_at: null, stop_reason: null, note: null },
       { id: "done", last_outcome: "succeeded", stopped_at: null, stop_reason: null, note: null },
       { id: "dropped", last_outcome: null, stopped_at: 60, stop_reason: "concierge", note: null },
-      // A planned row with no time and no task chat stays later until the
-      // Concierge starts or stops it.
-      { id: "next-bare", last_outcome: null, stopped_at: null, stop_reason: null, note: null },
-      { id: "next-timed", last_outcome: null, stopped_at: null, stop_reason: null, note: null },
+      // A planned row with no time ended done when it was last written.
+      {
+        id: "next-bare",
+        last_outcome: "succeeded",
+        stopped_at: null,
+        stop_reason: null,
+        note: null,
+      },
+      {
+        id: "next-timed",
+        last_outcome: "succeeded",
+        stopped_at: null,
+        stop_reason: null,
+        note: null,
+      },
       {
         id: "watching-bare",
         last_outcome: "succeeded",
@@ -106,6 +118,59 @@ describe("the Concierge task status migration", () => {
         note: null,
       },
     ]);
+    sqlite.close();
+  });
+
+  it("ends a legacy planned row done, unless its time is still ahead", () => {
+    const sqlite = databaseBeforeMigration();
+    const now = Date.now();
+    const insert = sqlite.prepare(
+      "INSERT INTO concierge_tasks (id, title, state, due_at, created_at, updated_at) VALUES (?, ?, 'next', ?, 1, 500)",
+    );
+    insert.run("stale", "Someday", null);
+    insert.run("planned", "Friday", now + 60_000);
+    insert.run("missed", "Monday", now - 60_000);
+
+    for (const statement of migrationSql(TAG)) sqlite.exec(statement);
+
+    type Row = {
+      id: string;
+      due_at: number | null;
+      linked_at: number | null;
+      session_id: string | null;
+      last_outcome: ConciergeTaskOutcome | null;
+      ended_at: number | null;
+    };
+    const rows = sqlite
+      .prepare(
+        "SELECT id, due_at, linked_at, session_id, last_outcome, ended_at FROM concierge_tasks ORDER BY id",
+      )
+      .all() as Row[];
+    // The facts Rome reads off each row (ConciergeTasks.factsOf).
+    const statusOf = (row: Row) =>
+      taskStatus(
+        {
+          stoppedAt: null,
+          waitingSince: null,
+          running: false,
+          reportPending: false,
+          laterAt: row.due_at !== null && row.due_at > now ? row.due_at : null,
+          lastOutcome: row.last_outcome,
+          started: row.linked_at !== null || row.session_id !== null || row.last_outcome !== null,
+        },
+        now,
+      );
+    expect(rows.map((row) => [row.id, statusOf(row), row.ended_at])).toEqual([
+      ["missed", { status: "ended", endReason: "done" }, now - 60_000],
+      ["planned", { status: "later", endReason: null }, null],
+      ["stale", { status: "ended", endReason: "done" }, 500],
+    ]);
+    // Once its time passes, the planned row ends done too.
+    const planned = rows.find((row) => row.id === "planned")!;
+    expect(statusOf({ ...planned, due_at: now - 1 })).toEqual({
+      status: "ended",
+      endReason: "done",
+    });
     sqlite.close();
   });
 
