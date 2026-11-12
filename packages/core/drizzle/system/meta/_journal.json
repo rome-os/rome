@@ -904,6 +904,13 @@
       "when": 1794426948891,
       "tag": "0129_concierge_turn_reactions",
       "breakpoints": true
+    },
+    {
+      "idx": 130,
+      "version": "6",
+      "when": 1794466305636,
+      "tag": "0130_concierge_task_lifecycle",
+      "breakpoints": true
     }
   ]
 }

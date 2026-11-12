@@ -7,7 +7,6 @@ import {
   eq,
   gte,
   inArray,
-  isNotNull,
   isNull,
   ne,
   notInArray,
@@ -16,7 +15,7 @@ import {
   type SQL,
 } from "drizzle-orm";
 import { alias } from "drizzle-orm/sqlite-core";
-import type { DrizzleDb } from "../index.js";
+import type { DrizzleDb, DrizzleTx } from "../index.js";
 import type { ChatRef } from "../../chats/storage/place.js";
 import { MessageRepository } from "../../chats/storage/message-repository.js";
 import { MAIN_CHAT_NAME, mainChatIdOf } from "../../concierge/main-chat.js";
@@ -147,38 +146,122 @@ export class ConciergeTasksRepository {
   }
 
   /**
-   * Moves the unfinished rows of Concierge chat `from` to its owner's main
-   * chat `to` (null for the guardian's), as when that chat is archived or
-   * deleted. Finished rows keep their chat, and every row keeps its owner.
-   * Every row of the chat loses its chat thread. Answers how many moved.
+   * Concierge chat `chatId` is archived or deleted. Its rows stay its own,
+   * and read as its owner's main chat's from now on, so none is moved. Its
+   * open rows (neither finished, stopped nor archived) let go of their chat
+   * thread there, so their next report starts one in the main chat; an
+   * ended row keeps its thread. Answers how many rows are open.
    */
-  async moveToMainChat(from: string, to: string | null = null): Promise<number> {
-    // Every row of the chat is its main chat's from now on, the finished ones
-    // too, and a chat thread stays in the chat it is in.
-    const retired = await this.db
-      .select({ root: conciergeTasks.threadRoot })
+  async leaveChat(chatId: string, now = new Date()): Promise<number> {
+    const open = await this.db
+      .select({ id: conciergeTasks.id, root: conciergeTasks.threadRoot })
       .from(conciergeTasks)
-      .where(and(eq(conciergeTasks.chatId, from), isNotNull(conciergeTasks.threadRoot)));
-    await this.db
-      .update(conciergeTasks)
-      .set({ threadRoot: null })
-      .where(eq(conciergeTasks.chatId, from));
-    const moved = await this.db
-      .update(conciergeTasks)
-      .set({ chatId: to })
       .where(
         and(
-          eq(conciergeTasks.chatId, from),
-          ne(conciergeTasks.state, "done"),
-          ne(conciergeTasks.state, "dropped"),
+          eq(conciergeTasks.chatId, chatId),
+          notInArray(conciergeTasks.state, ["done", "dropped"]),
+          isNull(conciergeTasks.stoppedAt),
+          isNull(conciergeTasks.archivedAt),
         ),
-      )
-      .returning({ id: conciergeTasks.id });
-    for (const { id } of moved) await this.announce(id, "refresh");
-    for (const root of new Set(retired.map((row) => row.root))) {
-      if (root) this.retireThread({ chatId: from }, root);
+      );
+    const rooted = open.filter((row) => row.root);
+    if (rooted.length > 0) {
+      await this.db
+        .update(conciergeTasks)
+        .set({ threadRoot: null, updatedAt: now })
+        .where(
+          inArray(
+            conciergeTasks.id,
+            rooted.map((row) => row.id),
+          ),
+        );
     }
-    return moved.length;
+    for (const { id } of open) await this.announce(id, "refresh");
+    for (const root of new Set(rooted.map((row) => row.root))) {
+      if (root) this.retireThread({ chatId }, root);
+    }
+    return open.length;
+  }
+
+  /**
+   * Task chat `chatId` is archived or deleted, so its task is stopped: the
+   * row of `owner` that links the chat is stopped for that reason and
+   * archived, in the one transaction that `alsoIn` archives or deletes the
+   * chat in. Answers the row, or null when the chat links no row of `owner`;
+   * the chat is archived or deleted either way.
+   */
+  async endWithChat(
+    chatId: string,
+    owner: string,
+    end: "archived" | "deleted",
+    alsoIn: (tx: DrizzleTx) => void,
+    now = new Date(),
+  ): Promise<ConciergeTaskRow | null> {
+    const ended = this.db.transaction((tx) => {
+      const row = tx
+        .select()
+        .from(conciergeTasks)
+        .where(eq(conciergeTasks.sessionId, chatId))
+        .get();
+      const own = row && ownerOf(row) === owner ? row : null;
+      const [written] = own
+        ? tx
+            .update(conciergeTasks)
+            .set({
+              stoppedAt: own.stoppedAt ?? now,
+              stopReason: own.stopReason ?? end,
+              // Only a row archiving the chat archived comes back with it.
+              archivedAt: own.archivedAt ?? now,
+              archivedWithChat: own.archivedAt ? own.archivedWithChat : true,
+              updatedAt: now,
+            })
+            .where(eq(conciergeTasks.id, own.id))
+            .returning()
+            .all()
+        : [];
+      alsoIn(tx);
+      return written ?? null;
+    });
+    if (ended) await this.announce(ended.id, "refresh");
+    return ended;
+  }
+
+  /**
+   * Archived task chat `chatId` is back, and so is the row of `owner` that
+   * archiving it archived. It stays stopped. A row archived before its chat
+   * stays archived.
+   */
+  async restoreWithChat(chatId: string, owner: string, now = new Date()): Promise<void> {
+    const row = await this.findBySession(chatId);
+    if (!row || ownerOf(row) !== owner || !row.archivedWithChat) return;
+    await this.db
+      .update(conciergeTasks)
+      .set({ archivedAt: null, archivedWithChat: false, updatedAt: now })
+      .where(eq(conciergeTasks.id, row.id));
+    await this.announce(row.id, "refresh");
+  }
+
+  /** Task `id` was stopped by `by`. A stop is kept: a later one changes nothing. */
+  async stop(id: string, by: "concierge" | "guardian", now = new Date()): Promise<void> {
+    const stopped = await this.db
+      .update(conciergeTasks)
+      .set({ stoppedAt: now, stopReason: by, updatedAt: now })
+      .where(and(eq(conciergeTasks.id, id), isNull(conciergeTasks.stoppedAt)))
+      .returning({ id: conciergeTasks.id });
+    if (stopped.length > 0) await this.announce(id, "refresh");
+  }
+
+  /**
+   * Task `id` never started: its first message did not reach its task chat,
+   * and that chat is gone. The row stays, failed, so the task does not start
+   * again unseen.
+   */
+  async markStartFailed(id: string, now = new Date()): Promise<void> {
+    await this.db
+      .update(conciergeTasks)
+      .set({ lastOutcome: "failed", state: "dropped", completedAt: now, updatedAt: now })
+      .where(eq(conciergeTasks.id, id));
+    await this.announce(id, "refresh");
   }
 
   /**
@@ -402,6 +485,11 @@ export class ConciergeTasksRepository {
           ? (tx.select().from(conciergeTasks).where(eq(conciergeTasks.id, write.id)).get() ?? null)
           : null;
         if (write.id && !existing) throw new Error(`No task ${write.id}`);
+        // A row links one task chat in its life: the chat it ran in is its
+        // history, so another chat is another task.
+        if (existing?.linkedAt && write.sessionId && write.sessionId !== existing.sessionId) {
+          throw new Error(`Task ${existing.id} already had a task chat. Start a new task instead.`);
+        }
         if (write.sessionId) {
           const taken = tx
             .select({ id: conciergeTasks.id })
@@ -465,6 +553,7 @@ export class ConciergeTasksRepository {
           updatedAt: now,
           completedAt,
           archivedAt,
+          linkedAt: existing?.linkedAt ?? (write.sessionId ? now : null),
         };
         if (existing) {
           const [row] = tx
@@ -477,14 +566,19 @@ export class ConciergeTasksRepository {
         } else {
           if (!fields.title) throw new Error("A new task needs a title");
           // A row is the owner's of the chat it is made in, for good: it stays
-          // theirs after that chat is archived or deleted.
-          const ownerKey = fields.chatId
-            ? (tx
-                .select({ ownerKey: romeSessions.ownerKey })
-                .from(romeSessions)
-                .where(eq(romeSessions.id, fields.chatId))
-                .get()?.ownerKey ?? GUARDIAN_OWNER)
-            : GUARDIAN_OWNER;
+          // theirs after that chat is archived or deleted. A chat that cannot
+          // be found names no owner, so the row is not made: it never
+          // defaults to the guardian's list.
+          let ownerKey = GUARDIAN_OWNER;
+          if (fields.chatId) {
+            const origin = tx
+              .select({ ownerKey: romeSessions.ownerKey })
+              .from(romeSessions)
+              .where(eq(romeSessions.id, fields.chatId))
+              .get();
+            if (!origin) throw new Error(`No Concierge chat ${fields.chatId}`);
+            ownerKey = ownerOf(origin);
+          }
           const [row] = tx
             .insert(conciergeTasks)
             .values({ id: randomUUID(), createdAt: now, ownerKey, ...fields })

@@ -152,7 +152,7 @@ A Concierge chat its owner starts for one topic, such as the calendar or a proje
 
 - A topic chat starts when its owner **starts** one, from the dashboard or by asking the Concierge. The Concierge never starts one on its own. It starts on the model the main chat uses.
 - One started from the dashboard opens blank, like a new chat, and exists from its first message, which names it. One the Concierge starts with a name keeps it, and the main chat's name never changes on its own.
-- Its owner can **rename**, **archive** and **delete** it. Archiving or deleting it moves its follows and tasks to its owner's main chat, and the Concierge says so there.
+- Its owner can **rename**, **archive** and **delete** it. Archiving or deleting it moves its follows to its owner's main chat, and its tasks report there while it is archived or gone. The Concierge says so there.
 - An owner may have any number of topic chats.
 
 ## Task
@@ -163,7 +163,8 @@ One piece of work the Concierge keeps on its owner's task list, with a title, a 
 - The Concierge **writes** a task: it creates it, moves it between states and marks it done or dropped. Starting a task chat for one makes it in progress. Nothing else sets a task's state.
 - Rome tells the Concierge what a task's chat does, and marks a task not synced when the Concierge never takes in what it was told.
 - A task has at most one [chat thread](#chat-thread), and its root is kept for good.
-- A task moves to its owner's main chat when its Concierge chat is archived or deleted. Its thread stays behind and is a task's no more, so its label goes.
+- A task reports to its owner's main chat while its Concierge chat is archived or deleted. Nothing moves it: it reads as the main chat's, and as its own chat's again once that chat is unarchived. An open task's thread stays behind and is a task's no more, so its label goes and the task starts a new thread in the main chat. An ended task keeps its thread.
+- A task links one task chat in its life. A task whose task chat could not be started leaves no chat behind, and stays on the list as failed.
 - A message a task works for shows a [status reaction](#status-reaction) until the Concierge says the task's result, marks it done, or drops it.
 
 ## Task chat
@@ -171,7 +172,7 @@ One piece of work the Concierge keeps on its owner's task list, with a title, a 
 A chat the Concierge starts to hand one piece of work to another agent. It belongs to the Concierge chat that started it, and its result comes back there.
 
 - A task chat has a row in its owner's task list. It is private to the owner of the Concierge chat that started it, who alone can open it and write in it.
-- Archiving a task chat archives its row too, so the task leaves the task list and the Concierge stops tracking it. Unarchiving the chat brings the row back. Deleting the chat archives the row for good.
+- Archiving a task chat stops its task: its running work stops, and its row is stopped and archived with the chat, so the task leaves the task list and the Concierge stops tracking it. Unarchiving the chat lists the row again, still stopped. A row archived before its chat stays archived. Deleting the chat stops and archives the row for good.
 - A task chat carries one piece of work. It gets no alerts and no digest.
 - A task chat is in the [chat list](#chat-list), under its project with the common chats, with a mark saying the Concierge started it. It also opens from its row in the task list and from its task card, and search finds it.
 

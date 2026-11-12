@@ -48,7 +48,7 @@ Solid lines carry something said to the Concierge or by it. Dashed lines are wha
 - **A follow reports to one Concierge chat.** A new follow reports to the chat that asked for it. It moves only when a change names another chat, so following the same thing from a second chat answers where it reports and leaves it there.
 - **A task row reports to the Concierge chat it was written in.** Its task chat's results, questions and approvals go there as task events, and the panel's buttons for the row send there.
 - **A task chat turn is the Concierge's unless the owner typed it.** A turn the Concierge started, or one the owner started by answering the task's own card or approval, is reported at once when it ends. A turn the owner started with a message they typed in the task chat is theirs, and the Concierge hears of it quietly, a minute later.
-- **A Concierge chat's task panel shows that chat's rows only,** the main chat's included. There is no view of every chat's rows. A row moves to the main chat's panel when its chat is archived or deleted.
+- **A Concierge chat's task panel shows that chat's rows only,** the main chat's included. There is no view of every chat's rows. A row shows on the main chat's panel while its chat is archived or deleted; the row itself never moves.
 - **A Concierge turn's chat is decided when it is sent, in one place.** Alerts, digests, task events, recoveries and the wake-ups of `defer` all pass through it, and a chat that is archived or gone resolves to the main chat, so nothing waits on a chat the guardian closed and nothing stored is rewritten when one closes. A chat that never had a turn gets its runtime first, after the same quota check a message makes.
 - **One chat's failed delivery never holds back another's.** Each chat's turn is kept owed and tried again on its own.
 - **One delivery is one Concierge turn per chat.** A batch of important items or task events that spans chats becomes one turn in each, and each turn counts against the hourly cap of important turns.
@@ -57,7 +57,7 @@ Solid lines carry something said to the Concierge or by it. Dashed lines are wha
 ### The main chat stays
 
 - **Each owner has exactly one main chat, and it is never archived or deleted.** The dashboard refuses both.
-- **Archiving or deleting a topic chat moves its follows, its unfinished task rows and the events still owed to it to its owner's main chat,** and the Concierge says so there. Finished rows keep their chat. Nothing that was one owner's ever becomes another's. Restoring the chat moves nothing back. An archived topic chat is listed with the other archived chats, where it can be restored.
+- **Archiving or deleting a topic chat moves its follows and the events still owed to it to its owner's main chat,** and the Concierge says so there. Its task rows stay its own and are read as the main chat's while it is archived or gone, which is the one way a row changes chat. Nothing that was one owner's ever becomes another's. Restoring the chat moves no follow back, and its rows read as its own again. An archived topic chat is listed with the other archived chats, where it can be restored.
 - **A topic chat starts on the model the main chat uses,** and keeps its own selection after that.
 - **A topic chat started without a name is named from its first message, as an ordinary chat is.** One started with a name, and the main chat, keep theirs.
 

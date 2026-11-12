@@ -753,6 +753,18 @@ export const conciergeTasks = sqliteTable(
     /** Set while the state is `done` or `dropped`. */
     completedAt: integer("completed_at", { mode: "timestamp_ms" }),
     archivedAt: integer("archived_at", { mode: "timestamp_ms" }),
+    /**
+     * Set when archiving the task chat archived the row too, so unarchiving
+     * the chat brings back only that row, not one archived before.
+     */
+    archivedWithChat: integer("archived_with_chat", { mode: "boolean" }).notNull().default(false),
+    /** When a task chat was first linked. A row links one task chat in its life. */
+    linkedAt: integer("linked_at", { mode: "timestamp_ms" }),
+    /** When the task was stopped, and who or what stopped it. Never cleared. */
+    stoppedAt: integer("stopped_at", { mode: "timestamp_ms" }),
+    stopReason: text("stop_reason", { enum: ["concierge", "guardian", "archived", "deleted"] }),
+    /** How the task chat's latest turn ended, or its start failed. Rome writes it. */
+    lastOutcome: text("last_outcome", { enum: ["succeeded", "failed", "stopped"] }),
   },
   (table) => [
     // A chat belongs to at most one row, so a chat event maps to exactly one row.

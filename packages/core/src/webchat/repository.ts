@@ -1222,7 +1222,12 @@ export class WebChatRepository {
     // resolves on the same tick, but the postgres adapter returns a real
     // Promise — dropping the await would silently turn this into a fire-
     // and-forget delete.
-    await this.db.transaction((tx) => this.deleteSessionRows(tx, [id]));
+    await this.db.transaction((tx) => this.deleteSessionIn(tx, id));
+  }
+
+  /** {@link deleteSession} inside `tx`, so the delete lands with the writes that go with it. */
+  deleteSessionIn(tx: DrizzleTx, id: string): void {
+    this.deleteSessionRows(tx, [id]);
   }
 
   /**
@@ -1449,13 +1454,17 @@ export class WebChatRepository {
   }
 
   async archiveSession(id: string, options: { now?: Date } = {}) {
+    await this.db.transaction((tx) => this.archiveSessionIn(tx, id, options.now));
+  }
+
+  /** {@link archiveSession} inside `tx`, so the archive lands with the writes that go with it. */
+  archiveSessionIn(tx: DrizzleTx, id: string, now = new Date()): void {
     // Scoped to top-level webchat rows: no other session type ever carries the
     // archive flag, so the type guard lives in the WHERE.
-    const now = options.now ?? new Date();
-    await this.db
-      .update(romeSessions)
+    tx.update(romeSessions)
       .set({ archivedAt: now })
-      .where(and(eq(romeSessions.id, id), isWebchatChat));
+      .where(and(eq(romeSessions.id, id), isWebchatChat))
+      .run();
   }
 
   async unarchiveSession(id: string, _options: { now?: Date } = {}) {

@@ -631,8 +631,12 @@ export async function buildConciergeTools(
   const rootOf = async (taskId: string): Promise<string | null> => {
     const { chatId } = currentTurn();
     const found = await tasks.repo.getWithChat(taskId);
-    if (!found || found.conciergeChat.id !== chatId) return null;
-    return found.row.threadRoot ?? null;
+    if (!found || found.conciergeChat.id !== chatId || !found.row.threadRoot) return null;
+    // A row whose Concierge chat is gone reads as the main chat's, and keeps
+    // its root, which names a message only that gone chat had.
+    return (await webchatRepo.getReplyTarget(chatId, found.row.threadRoot))
+      ? found.row.threadRoot
+      : null;
   };
 
   // Where a message the Concierge says goes (docs/domains/chats.md#chat-thread).
@@ -1061,7 +1065,14 @@ export async function buildConciergeTools(
                 ? ((await tasks.repo.getWithChat(taskId))?.sourceMessageId ?? undefined)
                 : undefined),
           );
-          const { chatId: conciergeChatId } = currentTurn();
+          const { chatId: conciergeChatId, turnId } = currentTurn();
+          const startKey = taskId ?? title;
+          const failedBefore = service.failedStart(conciergeChatId, turnId, startKey);
+          if (failedBefore) {
+            throw new Error(
+              `Task ${failedBefore} already failed to start this turn and is marked failed. Do not start it again; tell the guardian.`,
+            );
+          }
           // The task chat is the owner's, private to them as their Concierge is.
           const chatId = await service.dashboard.chats.startChat(
             {
@@ -1070,30 +1081,51 @@ export async function buildConciergeTools(
             },
             await ownerHere(),
           );
-          // Marked before the first turn, so that turn's event already sees it.
-          await webchatRepo.setSessionTrigger(chatId, {
-            triggerKind: TASK_CHAT_TRIGGER_KIND,
-            triggerName: title,
-          });
-          // Linked before the first turn, so that turn's events find the row.
-          const [task] = await tasks.repo.upsertMany([
-            taskId
-              ? {
-                  id: taskId,
-                  sessionId: chatId,
-                  state: "doing",
-                  waitingOn: null,
-                  ...(sourceMessageId ? { sourceMessageId, chatId: conciergeChatId } : {}),
-                }
-              : {
-                  title,
-                  state: "doing",
-                  sessionId: chatId,
-                  sourceMessageId,
-                  chatId: conciergeChatId,
-                },
-          ]);
-          await sendMarked(task.id, start?.answered, () => sendInput(chatId, brief, skill?.name));
+          // The chat, its row and its first message start together: a start
+          // that fails leaves no empty chat, and its row failed, so a retry
+          // makes no second task.
+          let task: { id: string } | undefined;
+          try {
+            // Marked before the first turn, so that turn's event already sees it.
+            await webchatRepo.setSessionTrigger(chatId, {
+              triggerKind: TASK_CHAT_TRIGGER_KIND,
+              triggerName: title,
+            });
+            // Linked before the first turn, so that turn's events find the row.
+            [task] = await tasks.repo.upsertMany([
+              taskId
+                ? {
+                    id: taskId,
+                    sessionId: chatId,
+                    state: "doing",
+                    waitingOn: null,
+                    ...(sourceMessageId ? { sourceMessageId, chatId: conciergeChatId } : {}),
+                  }
+                : {
+                    title,
+                    state: "doing",
+                    sessionId: chatId,
+                    sourceMessageId,
+                    chatId: conciergeChatId,
+                  },
+            ]);
+            const started = task.id;
+            await sendMarked(started, start?.answered, () => sendInput(chatId, brief, skill?.name));
+          } catch (error) {
+            await webchatRepo.deleteSession(chatId).catch((cleanup: unknown) =>
+              log.warn("failed to remove a task chat that did not start", {
+                chatId,
+                error: cleanup instanceof Error ? cleanup.message : String(cleanup),
+              }),
+            );
+            if (!task) throw error;
+            await tasks.repo.markStartFailed(task.id);
+            service.noteFailedStart(conciergeChatId, turnId, startKey, task.id);
+            const reason = error instanceof Error ? error.message : String(error);
+            throw new Error(
+              `${reason} Task ${task.id} did not start and is marked failed. Do not start it again; tell the guardian.`,
+            );
+          }
           if (start) await rootTaskAt(task.id, start);
           // Named after the first turn: the first message would rename it.
           if (conversationTitleLength(title) <= CONVERSATION_TITLE_MAX_LENGTH) {
@@ -1209,6 +1241,9 @@ export async function buildConciergeTools(
         runTool("chat_stop", input, async (args) => {
           const chatId = requireString(args, "chatId");
           await requireTaskChat(chatId);
+          // The task ends stopped, whether or not it was running.
+          const task = await tasks.repo.findBySession(chatId);
+          if (task) await tasks.repo.stop(task.id, "concierge");
           const { chats } = service.dashboard;
           const turns = chats.activeTurns(chatId);
           for (const turnId of turns) await chats.interruptTurn(turnId);

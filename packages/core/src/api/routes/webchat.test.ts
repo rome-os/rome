@@ -6692,7 +6692,7 @@ describe("Webchat API", () => {
 
       // A task that leaves the chat takes its thread's label with it.
       const retired = readSseUntil(events, "event: chat_thread_retired");
-      await repo.moveToMainChat("topic");
+      await repo.upsertMany([{ id: task.id, chatId: null }]);
       expect(await retired).toContain(
         `data: ${JSON.stringify({ sessionId: "topic", chatThreadId: "g1" })}`,
       );
@@ -6773,7 +6773,7 @@ describe("Webchat API", () => {
         app = createWebchatRuntime(deps).routes;
       });
 
-      it("leaves the task list with the chat when it is archived, and comes back with it", async () => {
+      it("stops the task and takes it off the task list when its chat is archived, and lists it again unarchived", async () => {
         const row = await taskChat("task-chat");
         expect(await panel()).toEqual(["Task of task-chat"]);
         upserts = [];
@@ -6781,19 +6781,23 @@ describe("Webchat API", () => {
         expect((await archive("task-chat")).status).toBe(200);
         expect(await panel()).toEqual([]);
         expect(upserts).toEqual([{ id: row.id, archivedAt: expect.any(Number) }]);
-        // A repeated archive keeps the chat's first archive time, so the row still comes back.
-        rs.setSystemTime(Date.now() + 5_000);
+        expect(await repo.get(row.id)).toMatchObject({ stopReason: "archived" });
+        // A repeated archive changes nothing, so the row still comes back.
         expect((await archive("task-chat")).status).toBe(200);
 
         expect((await archive("task-chat", false)).status).toBe(200);
         expect(await panel()).toEqual(["Task of task-chat"]);
         expect(upserts.at(-1)).toEqual({ id: row.id, archivedAt: null });
+        // Back on the list, the task stays stopped.
+        expect(await repo.get(row.id)).toMatchObject({
+          stoppedAt: expect.any(Date),
+          stopReason: "archived",
+        });
       });
 
       it("keeps a row the Concierge archived before its chat was archived", async () => {
         const row = await taskChat("task-chat");
         await repo.upsertMany([{ id: row.id, archived: true }]);
-        rs.setSystemTime(Date.now() + 5_000);
         expect((await archive("task-chat")).status).toBe(200);
         expect((await archive("task-chat", false)).status).toBe(200);
         expect((await repo.get(row.id))?.archivedAt).not.toBeNull();
@@ -6808,8 +6812,12 @@ describe("Webchat API", () => {
         expect(await panel()).toEqual([]);
         expect(upserts).toEqual([{ id: row.id, archivedAt: expect.any(Number) }]);
         expect(deleted).toEqual([row.id]);
-        expect(await repo.get(row.id)).toMatchObject({ state: "doing", sessionId: null });
-        expect(await repo.get(row.id)).not.toMatchObject({ archivedAt: null });
+        expect(await repo.get(row.id)).toMatchObject({
+          sessionId: null,
+          stopReason: "deleted",
+          stoppedAt: expect.any(Date),
+          archivedAt: expect.any(Date),
+        });
       });
 
       it("leaves the rows alone when a common chat is archived or deleted", async () => {
@@ -6835,7 +6843,7 @@ describe("Webchat API", () => {
           .where(eq(conciergeTasks.id, row.id))
           .run();
         expect((await archive("task-chat")).status).toBe(200);
-        expect((await repo.get(row.id))?.archivedAt).toBeNull();
+        expect(await repo.get(row.id)).toMatchObject({ archivedAt: null, stoppedAt: null });
       });
     });
 
@@ -6843,8 +6851,6 @@ describe("Webchat API", () => {
       const retired: [string, string][] = [];
       const gone: [string, boolean][] = [];
       deps.concierge = {
-        retireTaskChat: async () => null,
-        restoreTaskChat: async () => undefined,
         retireChat: async (chatId: string, how: string) => {
           retired.push([chatId, how]);
           return "concierge";
@@ -6852,6 +6858,12 @@ describe("Webchat API", () => {
         // The activity hears of a deleted chat once it is gone, as an archive.
         chatGone: async (chatId: string) =>
           void gone.push([chatId, (await deps.webchatRepo.getSession(chatId)) === null]),
+        endTaskChat: async (chatId: string, end: "archived" | "deleted") => {
+          if (end === "archived") await deps.webchatRepo.archiveSession(chatId);
+          else await deps.webchatRepo.deleteSession(chatId);
+          return null;
+        },
+        restoreTaskChat: async () => undefined,
       } as never;
       const topic = (id: string) =>
         deps.webchatRepo.createSession(

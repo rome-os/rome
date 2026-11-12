@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import type { DrizzleTx } from "../db/index.js";
 import type {
   Account,
   AgentTurnFinishedEvent,
@@ -320,6 +321,18 @@ function setup(
         },
       ),
       createSession: rs.fn(async () => {}),
+      archiveSessionIn: (tx: DrizzleTx, id: string) => {
+        storedChats.archiveSessionIn(tx, id);
+        if (sessions.has(id)) sessions.set(id, { ...sessions.get(id), archivedAt: new Date() });
+      },
+      deleteSessionIn: (tx: DrizzleTx, id: string) => {
+        storedChats.deleteSessionIn(tx, id);
+        sessions.delete(id);
+      },
+      deleteSession: rs.fn(async (id: string) => {
+        await storedChats.deleteSession(id);
+        sessions.delete(id);
+      }),
       listProjects: async () => [{ path: "default" }, { path: "rome-oss" }],
       // The activity's own sources (activity.test.ts covers it).
       onMessageInserted: () => () => {},
@@ -1035,6 +1048,7 @@ describe("Concierge tools", () => {
       );
       expect(await s.tasks.repo.threadRoot(taskId)).toBe("t0");
 
+      await s.storedChats.archiveSession(TOPIC_CHAT);
       await s.service.retireChat(TOPIC_CHAT, "archived");
       expect(await s.tasks.repo.threadRoot(taskId)).toBeNull();
 
@@ -1429,14 +1443,43 @@ describe("Concierge tools", () => {
     ]);
   });
 
-  it("chat_stop stops each of the task chat's turns", async () => {
+  it("chat_stop stops each of the task chat's turns, and its task", async () => {
     const s = setup();
-    await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    const { taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find flights" })).content[0].text,
+    );
     s.chats.activeTurns = () => ["t1", "t2"];
     const result = await s.tool("chat_stop", { chatId: "task-1" });
     expect(JSON.parse(result.content[0].text)).toEqual({ stopped: 2 });
     expect(s.chats.interruptTurn).toHaveBeenCalledWith("t1");
     expect(s.chats.interruptTurn).toHaveBeenCalledWith("t2");
+    expect(await s.taskRepo.get(taskId)).toMatchObject({
+      stoppedAt: expect.any(Date),
+      stopReason: "concierge",
+    });
+  });
+
+  it("chat_start that cannot send its brief leaves no chat, a failed row, and no second task on retry", async () => {
+    const s = setup();
+    const error = "The chat cannot take a message";
+    s.refuseSends({ ok: false, error, delivery: { state: "failed", error, at: new Date(0) } });
+    const result = await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("is marked failed");
+    expect(await s.storedChats.getSession("task-1")).toBeNull();
+    const [row] = await s.tasks.repo.listForAgent(true);
+    expect(row.row).toMatchObject({
+      title: "Flights",
+      sessionId: null,
+      lastOutcome: "failed",
+      state: "dropped",
+    });
+
+    const retry = await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
+    expect(retry.isError).toBe(true);
+    expect(retry.content[0].text).toContain(`Task ${row.row.id} already failed to start`);
+    expect(s.chats.startChat).toHaveBeenCalledTimes(1);
+    expect(await s.tasks.repo.listForAgent(true)).toHaveLength(1);
   });
 
   it("chat_list labels each chat with its kind, and a task chat with the Concierge chat it came from", async () => {
@@ -2012,6 +2055,7 @@ describe("Concierge task anchors", () => {
       const { chatId, taskId } = text(
         await s.tool("chat_start", { title: "Agenda", brief: "Read the calendar" }),
       );
+      await s.storedChats.archiveSession(TOPIC_CHAT);
       await s.service.retireChat(TOPIC_CHAT, "archived");
       const sent = s.posted.length;
 
@@ -2740,13 +2784,13 @@ describe("Concierge events", () => {
     expectFailedTurn(cold, second.chatId, second.taskId);
   });
 
-  it("tells the Concierge quietly that a task chat was deleted, and its row stays archived", async () => {
+  it("tells the Concierge quietly that a task chat was deleted, and its row stays stopped and archived", async () => {
     const s = setup();
     const { chatId, taskId } = await startTask(s);
     s.fakeTimers();
-    const linked = await s.service.retireTaskChat(chatId);
+    const linked = await s.service.endTaskChat(chatId, "deleted");
     expect(linked).toBe(taskId);
-    await s.storedChats.deleteSession(chatId);
+    expect(await s.storedChats.getSession(chatId)).toBeNull();
     s.service.chatDeleted(taskId);
     await rs.advanceTimersByTimeAsync(59_000);
     expect(s.backendTurns).toEqual([]);
@@ -2758,6 +2802,8 @@ describe("Concierge events", () => {
       sessionId: null,
       title: "Flights",
       archivedAt: expect.any(Date),
+      stoppedAt: expect.any(Date),
+      stopReason: "deleted",
     });
   });
 
@@ -3950,18 +3996,21 @@ describe("Concierge chats", () => {
     expect(await s.service.deliveryChat(TOPIC_CHAT, "guardian")).toBe(CONCIERGE_CHAT);
   });
 
-  it("retiring a topic chat moves its open tasks to the main chat and says so there; the main chat cannot be retired", async () => {
+  it("retiring a topic chat hands its open tasks to the main chat and says so there; the main chat cannot be retired", async () => {
     const s = setup({ startEvents: false });
     await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
     s.turnIn(TOPIC_CHAT);
     await s.tool("task_upsert", { tasks: [{ title: "Book dentist" }] });
     await s.tool("task_upsert", { tasks: [{ title: "Old", state: "done" }] });
+    await s.storedChats.archiveSession(TOPIC_CHAT);
     await s.service.retireChat(TOPIC_CHAT, "archived");
     await new Promise((resolve) => setTimeout(resolve, 20));
     const rows = await s.tasks.listForPanel();
+    // Every row reads as the main chat's, and none is moved.
     expect(rows.find((row) => row.title === "Book dentist")?.conciergeChat.main).toBe(true);
-    // A finished row keeps its chat, and its owner with it.
-    expect(rows.find((row) => row.title === "Old")?.conciergeChat.id).toBe(TOPIC_CHAT);
+    const old = rows.find((row) => row.title === "Old");
+    expect(old?.conciergeChat.main).toBe(true);
+    expect((await s.taskRepo.get(old!.id))?.chatId).toBe(TOPIC_CHAT);
     expect(s.backendTurns.at(-1)).toMatchObject({ threadId: CONCIERGE_CHAT });
     expect(s.backendTurns.at(-1)?.prompt).toContain(
       '<concierge_chat_retired name="Calendar" how="archived" follows="0" tasks="1"/>',

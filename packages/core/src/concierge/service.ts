@@ -36,7 +36,6 @@ import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
 import type { ConciergeTasks } from "./tasks.js";
-import type { ConciergeTaskRow } from "../db/repositories/concierge-tasks.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../webchat/owner.js";
@@ -161,6 +160,9 @@ export interface ConciergeDeps {
     | "onMessageInserted"
     | "awaitingGuardianSince"
     | "ownerSpokeAt"
+    | "archiveSessionIn"
+    | "deleteSessionIn"
+    | "deleteSession"
   >;
   /** The todo list. */
   tasks: ConciergeTasks;
@@ -209,6 +211,7 @@ export class ConciergeService {
   /** The main chat being created, per owner, so concurrent calls share one. */
   private readonly creating = new Map<ConciergeOwner, Promise<string>>();
   private attached: ConciergeDashboard | null = null;
+  private failedStarts = new Map<string, { turnId: string; starts: Map<string, string> }>();
   private taskEvents: TaskEventCoalescer | null = null;
   /** Per Concierge chat, the task whose report a newer input took over. */
   private readonly carriedReports = new Map<string, readonly string[]>();
@@ -398,7 +401,10 @@ export class ConciergeService {
    * the person it serves, who may not be the guardian.
    */
   async turnHeader(chat: ConciergeChatRef): Promise<string> {
-    const owner = await this.owners.profileOf((await this.ownerOfChat(chat.id)) ?? GUARDIAN_OWNER);
+    // A chat whose owner cannot be found serves no one: never the guardian by default.
+    const ownerKey = await this.ownerOfChat(chat.id);
+    if (ownerKey === null) throw new Error(`No Concierge chat ${chat.id}`);
+    const owner = await this.owners.profileOf(ownerKey);
     return `${conciergeChatLine(chat)}\n${conciergeOwnerLine(owner)}`;
   }
 
@@ -491,7 +497,9 @@ export class ConciergeService {
     const owner = ownerOf(chat);
     const main = await this.ensureChatId(owner);
     const follows = (await this.attachedFollowing?.moveToMainChat(chatId, storedChatId(main))) ?? 0;
-    const tasks = await this.deps.tasks.repo.moveToMainChat(chatId, storedChatId(main));
+    // Its rows are its owner's main chat's from now on, as rows are read:
+    // none is moved. Open ones start a new thread there.
+    const tasks = await this.deps.tasks.repo.leaveChat(chatId);
     log.info("concierge chat retired", { chatId, how, follows, tasks });
     // A deleted chat is still there now: its caller tells the activity once
     // it is gone, so finished rows read as the main chat's by then.
@@ -836,35 +844,55 @@ export class ConciergeService {
   }
 
   /**
-   * A task chat is being archived or deleted, so its row leaves the task list
-   * with it: the row is archived, and the Concierge stops tracking it. Call it
-   * before a delete, while the row still links the chat. Answers the row's id,
-   * or null when the chat links no row of its owner.
+   * Archives or deletes dashboard chat `chatId`. A task chat's task stops
+   * with it: its running work is interrupted, and its row is stopped and
+   * archived in the same transaction as the chat (docs/domains/chats.md#task-chat).
+   * Answers the row's id, or null when the chat links no row of its owner.
    */
-  async retireTaskChat(chatId: string): Promise<string | null> {
-    const row = await this.taskRowOf(chatId);
-    if (!row) return null;
-    await this.deps.tasks.repo.upsertMany([{ id: row.id, archived: true }]);
-    return row.id;
+  async endTaskChat(chatId: string, end: "archived" | "deleted"): Promise<string | null> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    if (!chat) return null;
+    const { webchatRepo } = this.deps;
+    const row = await this.deps.tasks.repo.endWithChat(chatId, ownerOf(chat), end, (tx) =>
+      end === "archived"
+        ? webchatRepo.archiveSessionIn(tx, chatId)
+        : webchatRepo.deleteSessionIn(tx, chatId),
+    );
+    if (row && end === "archived" && this.attached) {
+      const { chats } = this.attached;
+      for (const turnId of chats.activeTurns(chatId)) {
+        await chats.interruptTurn(turnId).catch((error: unknown) =>
+          log.warn("failed to stop an archived task chat's turn", {
+            chatId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+      }
+    }
+    return row?.id ?? null;
   }
 
   /**
-   * An archived task chat is back, and so is its row, when the row was
-   * archived with the chat (`chatArchivedAt` or later). A row the Concierge
-   * archived before stays archived.
+   * The task that failed to start in Concierge chat `chatId`'s turn `turnId`
+   * as `key` (its title, or the row it linked), or null. A retry of that
+   * start in the same turn makes no second task.
    */
-  async restoreTaskChat(chatId: string, chatArchivedAt: Date): Promise<void> {
-    const row = await this.taskRowOf(chatId);
-    if (!row?.archivedAt || row.archivedAt.getTime() < chatArchivedAt.getTime()) return;
-    await this.deps.tasks.repo.upsertMany([{ id: row.id, archived: false }]);
+  failedStart(chatId: string, turnId: string, key: string): string | null {
+    const failed = this.failedStarts.get(chatId);
+    return failed?.turnId === turnId ? (failed.starts.get(key) ?? null) : null;
   }
 
-  /** The todo row that links a chat, when it is the row of the chat's own owner. */
-  private async taskRowOf(chatId: string): Promise<ConciergeTaskRow | null> {
+  /** Task `taskId` failed to start as `key` in Concierge chat `chatId`'s turn `turnId`. Only that turn's are kept. */
+  noteFailedStart(chatId: string, turnId: string, key: string, taskId: string): void {
+    const failed = this.failedStarts.get(chatId);
+    if (failed?.turnId === turnId) failed.starts.set(key, taskId);
+    else this.failedStarts.set(chatId, { turnId, starts: new Map([[key, taskId]]) });
+  }
+
+  /** Unarchived task chat `chatId` brings back the row archiving it archived; the task stays stopped. */
+  async restoreTaskChat(chatId: string): Promise<void> {
     const chat = await this.deps.webchatRepo.getSession(chatId);
-    if (!chat) return null;
-    const row = await this.deps.tasks.repo.findBySession(chatId);
-    return row && row.ownerKey === ownerOf(chat) ? row : null;
+    if (chat) await this.deps.tasks.repo.restoreWithChat(chatId, ownerOf(chat));
   }
 
   /** A task chat was deleted. Its row stays, unlinked; the Concierge hears of it quietly. */

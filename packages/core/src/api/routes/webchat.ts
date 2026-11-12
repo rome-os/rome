@@ -2843,10 +2843,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (sess) {
       await sess.close("user").catch(() => undefined);
     }
-    // A task chat's row is archived while it still links the chat, and stays
-    // archived once the chat is gone; the Concierge hears of it quietly.
-    const taskId = (await deps.concierge?.retireTaskChat(sessionId)) ?? null;
-    await deps.webchatRepo.deleteSession(sessionId);
+    // A task chat's task stops with it: its row is stopped and archived in
+    // the delete's own transaction, and the Concierge hears of it quietly.
+    let taskId: string | null = null;
+    if (deps.concierge) taskId = await deps.concierge.endTaskChat(sessionId, "deleted");
+    else await deps.webchatRepo.deleteSession(sessionId);
     // Told after the delete, as an archive is, so the activity reads the
     // chat's finished rows as the main chat's.
     if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo, true);
@@ -2879,16 +2880,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (body.archived && isMainConciergeChat(lookup.session)) {
       return c.json({ error: "The main Concierge chat cannot be archived" }, 409);
     }
-    const archivedAt = lookup.session.archivedAt;
-    // A repeated archive keeps the first archive time, which tells a task
-    // chat's unarchive which archived row came with the chat.
-    if (body.archived && !archivedAt) {
-      await deps.webchatRepo.archiveSession(sessionId);
+    // A repeated archive changes nothing, so a topic chat is not retired twice.
+    if (body.archived && !lookup.session.archivedAt) {
+      // Archiving a task chat stops its task, in the archive's own transaction.
+      if (deps.concierge) await deps.concierge.endTaskChat(sessionId, "archived");
+      else await deps.webchatRepo.archiveSession(sessionId);
       if (isConciergeChat(lookup.session)) await deps.concierge?.retireChat(sessionId, "archived");
-      else await deps.concierge?.retireTaskChat(sessionId);
     } else if (!body.archived) {
       await deps.webchatRepo.unarchiveSession(sessionId);
-      if (archivedAt) await deps.concierge?.restoreTaskChat(sessionId, archivedAt);
+      await deps.concierge?.restoreTaskChat(sessionId);
     }
     const session = await deps.webchatRepo.getSession(sessionId);
     if (!session) return c.json({ error: "Session not found" }, 404);
