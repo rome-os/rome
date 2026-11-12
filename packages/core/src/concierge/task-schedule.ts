@@ -193,25 +193,18 @@ export class TaskSchedules {
     this.now = deps.now ?? Date.now;
   }
 
-  /**
-   * Sets task `taskId`'s schedule, replacing any it had. `chatId` is the
-   * Concierge chat the task reports to, where its next run shows as a check.
-   */
+  /** Sets task `taskId`'s schedule, replacing any it had. */
   async set(
-    task: { id: string; title: string; owner: ConciergeOwner; chatId: string },
+    task: { id: string; title: string; owner: ConciergeOwner },
     schedule: TaskSchedule,
   ): Promise<void> {
     // The guardian's floats with the guardian's zone, as every floating
     // routine does; a visitor's is fixed to their own.
     const floating = task.owner === "guardian";
     const trigger = triggerOf(schedule, await this.deps.timezoneOf(task.owner), floating);
-    const args = {
-      taskId: task.id,
-      ownerKey: task.owner,
-      chatId: task.chatId,
-      report: schedule.report,
-      brief: schedule.brief,
-    };
+    // The task is the one source of truth for where a run goes: its task
+    // chat and the Concierge chat it reports to are read from its row.
+    const args = { taskId: task.id, report: schedule.report, brief: schedule.brief };
     const key = taskScheduleKey(task.id);
     const existing = await this.deps.routines.findByKey(key);
     const id = existing

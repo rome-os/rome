@@ -5495,7 +5495,7 @@ describe("scheduled tasks", () => {
 
     expect(s.posted).toEqual([]);
     expect(schedules.set).toHaveBeenCalledWith(
-      { id: started.taskId, title: "Daily summary", owner: "guardian", chatId: CONCIERGE_CHAT },
+      { id: started.taskId, title: "Daily summary", owner: "guardian" },
       { at: "12:25", report: "every_run", brief: "Sum up my last day" },
     );
     expect(started.scheduled).toContain("2026-11-13T04:25:00.000Z");
@@ -5555,7 +5555,7 @@ describe("scheduled tasks", () => {
       tasks: [{ id: taskId, schedule: { at: "08:00", days: ["mon"] } }],
     });
     expect(schedules.set).toHaveBeenLastCalledWith(
-      { id: taskId, title: "Daily summary", owner: "guardian", chatId: CONCIERGE_CHAT },
+      { id: taskId, title: "Daily summary", owner: "guardian" },
       { at: "08:00", days: ["mon"], report: "every_run", brief: "Sum up my last day" },
     );
     await s.tool("task_upsert", { tasks: [{ id: taskId, schedule: null }] });

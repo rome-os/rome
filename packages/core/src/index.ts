@@ -1185,6 +1185,7 @@ async function main() {
       }
     },
   });
+  const conciergeTasksRepo = new ConciergeTasksRepository(db);
   const concierge: ConciergeService = new ConciergeService({
     skillCatalog,
     settingsRepo,
@@ -1200,12 +1201,18 @@ async function main() {
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { find: (continuityKey) => agentSessionManager.find(continuityKey) },
     // Created before the routine engine runs any wake-up, which it reads.
-    checks: new TaskChecks({ routines: routinesRepo, routineEngine, schedules: taskSchedules }),
+    checks: new TaskChecks({
+      routines: routinesRepo,
+      routineEngine,
+      schedules: taskSchedules,
+      // A schedule names only its task: the chat it reports to comes from the row.
+      placeOf: async (taskId) => {
+        const found = await conciergeTasksRepo.getWithChat(taskId);
+        return found ? { chatId: found.conciergeChat.id, owner: found.owner } : null;
+      },
+    }),
     schedules: taskSchedules,
-    tasks: new ConciergeTasks(
-      new ConciergeTasksRepository(db),
-      config.conciergeTaskWaitExpiryMinutes * 60_000,
-    ),
+    tasks: new ConciergeTasks(conciergeTasksRepo, config.conciergeTaskWaitExpiryMinutes * 60_000),
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
     notify: notifyClient,

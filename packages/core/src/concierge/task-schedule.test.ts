@@ -69,11 +69,19 @@ describe("TaskSchedules", () => {
       timezoneOf: async (owner) => (owner === "guardian" ? "Asia/Shanghai" : "UTC"),
       now: () => NOW,
     });
-    checks = new TaskChecks({ routines, routineEngine, schedules, now: () => NOW });
+    checks = new TaskChecks({
+      routines,
+      routineEngine,
+      schedules,
+      // The task's row says where it reports, never its schedule.
+      placeOf: async (taskId) =>
+        taskId === "task-1" ? { chatId: "concierge", owner: "guardian" } : null,
+      now: () => NOW,
+    });
   });
   afterEach(() => testDb.close());
 
-  const task = { id: "task-1", title: "Daily summary", owner: "guardian", chatId: "concierge" };
+  const task = { id: "task-1", title: "Daily summary", owner: "guardian" };
 
   it("keeps one routine per task, in the owner's zone, and reads it back", async () => {
     await schedules.set(task, { at: "12:25", report: "every_run", brief: "Sum up my day" });
@@ -96,7 +104,12 @@ describe("TaskSchedules", () => {
         localTime: "12:25",
         rrule: "FREQ=WEEKLY;BYDAY=MO,FR",
       },
-      args: { taskId: "task-1", ownerKey: "guardian", chatId: "concierge" },
+    });
+    // Only the task: its chats are read from its row.
+    expect(routine?.args).toEqual({
+      taskId: "task-1",
+      report: "when_it_matters",
+      brief: "Sum up my week",
     });
     expect(active.has(routine!.id)).toBe(true);
     // Friday 13 November, 12:25 in Shanghai.
@@ -150,9 +163,21 @@ describe("TaskSchedules", () => {
     ]);
   });
 
+  it("shows no check for a schedule whose task is gone", async () => {
+    await schedules.set(
+      { id: "gone", title: "Gone", owner: "guardian" },
+      {
+        at: "12:25",
+        report: "every_run",
+        brief: "b",
+      },
+    );
+    expect(await checks.laterOf(["gone"])).toEqual(new Map());
+  });
+
   it("fixes a visitor's schedule to their own zone", async () => {
     await schedules.set(
-      { id: "task-2", title: "Morning", owner: "visitor:a", chatId: "visitor-main" },
+      { id: "task-2", title: "Morning", owner: "visitor:a" },
       { at: "07:30", report: "every_run", brief: "b" },
     );
     expect((await routines.findByKey(taskScheduleKey("task-2")))?.trigger).toMatchObject({

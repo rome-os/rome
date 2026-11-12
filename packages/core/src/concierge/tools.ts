@@ -1041,7 +1041,6 @@ export async function buildConciergeTools(
                   id: row.id,
                   title: rows.find((written) => written.id === row.id)?.title ?? row.title,
                   owner: ownerOf(row),
-                  chatId: row.chatId ?? currentTurn().chatId,
                 },
                 schedule,
               );
@@ -1249,7 +1248,7 @@ export async function buildConciergeTools(
             const started = task.id;
             if (schedule) {
               await service.deps.schedules?.set(
-                { id: started, title, owner: await ownerHere(), chatId: conciergeChatId },
+                { id: started, title, owner: await ownerHere() },
                 schedule,
               );
             } else {

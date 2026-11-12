@@ -150,8 +150,9 @@ describe("the Concierge's rules for what cannot be followed", () => {
   it("prefers Rome's own means, and asks before a change to many outside items", () => {
     const rules = section();
     expect(rules).toContain("Prefer Rome's own means over changing the outside service's settings");
-    expect(rules).toContain("a one-off with `defer`");
-    expect(rules).toContain("something recurring as a scheduled task");
+    expect(rules).toContain("a one-off check with `defer`");
+    expect(rules).toContain("recurring work for the guardian as a scheduled task");
+    expect(rules).toContain("A generic routine is only for automation outside your own chats");
     expect(rules).toContain(
       "Change the outside service's settings only when the guardian asks for that, or when Rome cannot do it",
     );
