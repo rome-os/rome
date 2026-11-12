@@ -35,6 +35,18 @@ describe("the Concierge agent", () => {
     }
   });
 
+  it("reads an automated input as a standing request, not the guardian's words", () => {
+    const prompt = concierge.systemPromptPrefix;
+    expect(prompt).toContain("An `<automated_input source=");
+    expect(prompt).toContain("The guardian did not write it and does not see it");
+  });
+
+  it("makes recurring work a scheduled task, never a routine posting into this chat", () => {
+    const prompt = concierge.systemPromptPrefix;
+    expect(prompt).toContain("is a scheduled task: `chat_start` with a `schedule`");
+    expect(prompt).toContain("Never set up a generic routine that posts into this chat");
+  });
+
   it("never tells the Concierge a forward needs `answers` or passes the guardian's words on", () => {
     const prompt = concierge.systemPromptPrefix;
     expect(prompt).not.toMatch(/`chat_forward` (?:are|is) refused/);
