@@ -1,4 +1,5 @@
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
+import { askQuestionToolOutput } from "../../agent/index.js";
 import { testReceipt, testTurnHandle } from "../../test/turn-handle.js";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -4682,6 +4683,61 @@ describe("Webchat API", () => {
         .filter((m) => m.role === "user")
         .flatMap((m) => JSON.parse(m.content) as Array<Record<string, unknown>>);
     }
+
+    it("stores what a described question card sends as the answers the card has always sent", async () => {
+      const questions = [
+        { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
+      ] as const;
+      const ctl = mockScriptedManager();
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-ask-ui",
+          tool: "ask_question",
+          output: askQuestionToolOutput([...questions], true),
+        };
+        yield { type: "result", content: "" };
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "help me write" }),
+        }),
+      );
+      const card = await findCard(sessionId, "tu-ask-ui");
+      expect((card as { render?: { ui?: unknown } }).render?.ui).toBeDefined();
+
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      const res = await app.request(`/chat/sessions/${sessionId}/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          parts: [
+            {
+              type: "interaction_result",
+              toolUseId: "tu-ask-ui",
+              output: { answers: [{ values: ["Plain"], text: "" }] },
+            },
+          ],
+        }),
+      });
+      expect(res.status).toBe(200);
+
+      const answers = { answers: [{ questionId: "tone", value: "Plain" }] };
+      expect(await userPartsIn(sessionId)).toContainEqual({
+        type: "interaction_result",
+        toolUseId: "tu-ask-ui",
+        output: { ...answers, card: [{ values: ["Plain"], text: "" }] },
+      });
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").not.toContain('"card"');
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain('"questionId": "tone"');
+    });
 
     it("closes an open question card when the guardian types a reply instead", async () => {
       const ctl = mockScriptedManager();

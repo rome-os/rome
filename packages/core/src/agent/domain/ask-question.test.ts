@@ -1,5 +1,12 @@
 import { describe, expect, it } from "@rstest/core";
-import { askQuestionToolOutput, parseAskQuestionInput, type Question } from "./ask-question.js";
+import { checkWidgetUi } from "@rome-os/app-runtime";
+import {
+  answersFromQuestionCard,
+  askQuestionToolOutput,
+  parseAskQuestionInput,
+  type Question,
+  questionCardUi,
+} from "./ask-question.js";
 
 const single = (options: unknown) => ({
   questions: [{ id: "q1", question: "Pick one", type: "single", options }],
@@ -188,5 +195,65 @@ describe("askQuestionToolOutput", () => {
     expect(output).toContain("Ask the guardian the following as a plain message");
     expect(output).toContain("Which day?\n- Mon\n- Tue\n- (or describe your own)");
     expect(output).toContain("Anything else? (optional)");
+  });
+});
+
+describe("the question card described as data", () => {
+  const questions: Question[] = [
+    {
+      id: "tone",
+      question: "Which tone?",
+      type: "single",
+      options: ["Warm", "Plain"],
+      freeText: true,
+      defaults: ["Warm"],
+    },
+    { id: "parts", question: "Which parts?", type: "multi", options: ["Intro", "A, B"] },
+    { id: "note", question: "Anything else?", type: "text", optional: true },
+  ];
+
+  it("is a card every reader can draw, and only as one the agent waits on", () => {
+    const ui = questionCardUi(questions);
+    expect(checkWidgetUi(ui, {}, { waits: true })).toEqual([]);
+    expect(checkWidgetUi(ui)).not.toEqual([]);
+    expect(ui.data).toEqual({
+      answers: [
+        { values: ["Warm"], text: "" },
+        { values: [], text: "" },
+        { values: [], text: "" },
+      ],
+    });
+  });
+
+  it("rides along on the question card the readers already know", () => {
+    const output = askQuestionToolOutput(questions, true) as {
+      render: { componentId: string; props: unknown; ui: unknown };
+    };
+    expect(output.render.componentId).toBe("question-card");
+    expect(output.render.props).toEqual({ questions });
+    expect(output.render.ui).toEqual(questionCardUi(questions));
+  });
+
+  it("turns what the card sends into the answers the card has always sent", () => {
+    const sent = {
+      answers: [
+        { values: ["Warm"], text: "Friendly" },
+        { values: ["Intro", "A, B", "Not an option"], text: "" },
+        { values: [], text: "  " },
+      ],
+    };
+    expect(answersFromQuestionCard(questions, sent)).toEqual({
+      answers: [
+        { questionId: "tone", value: "Friendly" },
+        { questionId: "parts", value: "Intro, A, B", values: ["Intro", "A, B"] },
+      ],
+    });
+  });
+
+  it("leaves answers already in the card's own shape alone", () => {
+    expect(
+      answersFromQuestionCard(questions, { answers: [{ questionId: "tone", value: "Warm" }] }),
+    ).toBeNull();
+    expect(answersFromQuestionCard(questions, { dismissed: true })).toBeNull();
   });
 });

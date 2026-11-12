@@ -52,6 +52,12 @@ export {
   type ProviderSessionResetDecision,
 } from "./domain/session-reset.js";
 export { projectPath, type AgentFolders } from "./domain/agent-folders.js";
+export {
+  answersFromQuestionCard,
+  askQuestionToolOutput,
+  parseAskQuestionInput,
+  type Question,
+} from "./domain/ask-question.js";
 export type { PromptFacts, PromptMessage, UnseenMessage } from "./domain/prompt-facts.js";
 export {
   currentMessageSection,
