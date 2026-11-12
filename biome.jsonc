@@ -64,6 +64,9 @@
     }
   },
   "overrides": [
+    // Rule: code outside a layered context imports it only through its index.ts.
+    // Editor feedback only; `pnpm lint:imports` (lint/rules/layers.ts) is the full check.
+    // See DEVELOPMENT.md#established-patterns.
     {
       "includes": ["packages/**"],
       "linter": {
@@ -88,6 +91,7 @@
         }
       }
     },
+    // Rule: packaging/ depends on nothing else in core. The caller passes values in.
     {
       "includes": ["**/src/apps/packaging/**/*.ts"],
       "linter": {
@@ -115,6 +119,10 @@
         }
       }
     },
+    // Rule 7 of the code layout rules: an app in rome_apps/ reaches core only through
+    // @rome-os/app-runtime and @rome-os/app-web-sdk, since an app ships outside this repo.
+    // The `!` entries are app tests that still import core. Each leaves the list once
+    // apps can test against core through the SDK; add no new ones.
     {
       "includes": [
         "rome_apps/**",
