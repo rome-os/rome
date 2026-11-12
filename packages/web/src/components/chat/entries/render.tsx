@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, lazy, Suspense, useContext } from "react";
 import type { ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
@@ -8,7 +8,6 @@ import { ApprovalCard } from "../approval/ApprovalCard";
 import { AgentCallView } from "./AgentCallView";
 import { SystemInputView } from "./SystemInputView";
 import { AiToolsCard } from "./AiToolsCard";
-import { WidgetUiCard } from "./widget-ui/WidgetUiCard";
 import { AppComponentView } from "./AppComponentView";
 import { ConnectCard } from "./ConnectCard";
 import { ErrorRunView } from "./ErrorEventView";
@@ -23,6 +22,12 @@ import { ToolCallView, type ToolCallStatus } from "./ToolCallView";
 import { ToolUseBlock } from "./ToolUseBlock";
 import { TurnRecapView } from "./TurnRecapView";
 import { UsageSummaryView } from "./UsageSummaryView";
+
+// Cards described as data bring in the A2UI renderer, which most chats never
+// need, so it loads with the first such card.
+const WidgetUiCard = lazy(() =>
+  import("./widget-ui/WidgetUiCard").then((m) => ({ default: m.WidgetUiCard })),
+);
 
 /** Latest parsed task_chat block per task in the Concierge transcript. */
 export const LatestTaskChatsContext = createContext<ReadonlyMap<string, ChatEntry> | null>(null);
@@ -211,14 +216,15 @@ export function renderSingleEntry(
       }
       if (block.render.builtin && block.render.componentId === "question-card" && block.render.ui) {
         return (
-          <WidgetUiCard
-            key={`question-card-${block.toolUseId}`}
-            toolUseId={block.toolUseId}
-            appId={block.appId}
-            ui={block.render.ui}
-            text=""
-            waiting={{ result: resultFor(block.toolUseId), onSubmit: submit, onDismiss: dismiss }}
-          />
+          <Suspense key={`question-card-${block.toolUseId}`} fallback={null}>
+            <WidgetUiCard
+              toolUseId={block.toolUseId}
+              appId={block.appId}
+              ui={block.render.ui}
+              text=""
+              waiting={{ result: resultFor(block.toolUseId), onSubmit: submit, onDismiss: dismiss }}
+            />
+          </Suspense>
         );
       }
       if (block.render.builtin && block.render.componentId === "question-card") {
@@ -249,14 +255,15 @@ export function renderSingleEntry(
     case "widget":
       if ("ui" in block) {
         return (
-          <WidgetUiCard
-            key={`app-widget-${block.toolUseId}`}
-            toolUseId={block.toolUseId}
-            appId={block.appId}
-            ui={block.ui}
-            bind={block.bind}
-            text={block.text}
-          />
+          <Suspense key={`app-widget-${block.toolUseId}`} fallback={null}>
+            <WidgetUiCard
+              toolUseId={block.toolUseId}
+              appId={block.appId}
+              ui={block.ui}
+              bind={block.bind}
+              text={block.text}
+            />
+          </Suspense>
         );
       }
       // Nothing answers a widget, so the card gets no submit or dismiss.

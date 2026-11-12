@@ -58,6 +58,7 @@ export {
   parseAskQuestionInput,
   type Question,
   questionCardFromAnswers,
+  questionCardUi,
 } from "./domain/ask-question.js";
 export type { PromptFacts, PromptMessage, UnseenMessage } from "./domain/prompt-facts.js";
 export {

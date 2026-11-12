@@ -192,6 +192,13 @@ enum WidgetData {
         resolve(value, in: root, scope: scope)?.number
     }
 
+    /// An image URL a card may load: `https:` only, so it never reads the
+    /// instance, and loads the same as on the dashboard.
+    static func httpsURL(_ text: String) -> URL? {
+        guard text.hasPrefix("https://"), let url = URL(string: text), url.host() != nil else { return nil }
+        return url
+    }
+
     /// A button's context with its paths read, as the POST body.
     static func context(_ value: JSONValue?, in root: JSONValue, scope: String) -> JSONValue {
         guard let object = value?.object else { return .object([:]) }
@@ -203,6 +210,8 @@ enum WidgetData {
     /// or `..`. Anything else, such as `%2e%2e` or a backslash, could resolve
     /// outside the app once the URL is normalized.
     static func isAppPath(_ path: String) -> Bool {
+        // Rome serves these itself, ahead of the app's API.
+        if ["publish", "icon", "manifest"].contains(path.split(separator: "/", omittingEmptySubsequences: false).first.map(String.init) ?? "") { return false }
         let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_.~")
         return path.split(separator: "/", omittingEmptySubsequences: false).allSatisfy { segment in
             !segment.isEmpty && segment != "." && segment != ".."

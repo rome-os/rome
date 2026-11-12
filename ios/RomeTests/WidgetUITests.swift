@@ -50,7 +50,7 @@ import Testing
 
     @Test func aCardReachesOnlyItsOwnApp() {
         #expect(WidgetData.isAppPath("days/2026-11-11"))
-        for path in ["/api/system", "../connector/x", "a/./b", "https://evil.example", "a?b=1", "", "%2e%2e/%2e%2e/settings", "..\\..\\settings", "a//b"] {
+        for path in ["/api/system", "../connector/x", "a/./b", "https://evil.example", "a?b=1", "", "%2e%2e/%2e%2e/settings", "..\\..\\settings", "a//b", "publish", "manifest/x"] {
             #expect(!WidgetData.isAppPath(path))
         }
     }
@@ -98,5 +98,12 @@ import Testing
         #expect(picked == .object(["answers": .array([.object(["values": .array([.string("Plain")]), "text": .string("")])])]))
         let retyped = WidgetData.editing(.string("Calm"), at: "/answers/0/text", clears: .object(["path": .string("/answers/0/values")]), scope: "", in: picked)
         #expect(retyped == .object(["answers": .array([.object(["values": .array([]), "text": .string("Calm")])])]))
+    }
+
+    @Test func onlyHttpsImagesLoad() {
+        #expect(WidgetData.httpsURL("https://example.com/a.png") != nil)
+        for url in ["/api/settings", "http://example.com/a.png", "photo.png", "https://"] {
+            #expect(WidgetData.httpsURL(url) == nil)
+        }
     }
 }

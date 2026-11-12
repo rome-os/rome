@@ -226,13 +226,13 @@ describe("the question card described as data", () => {
     });
   });
 
-  it("rides along on the question card the readers already know", () => {
+  it("stays out of the tool result the agent reads", () => {
     const output = askQuestionToolOutput(questions, true) as {
-      render: { componentId: string; props: unknown; ui: unknown };
+      render: { componentId: string; props: unknown };
     };
     expect(output.render.componentId).toBe("question-card");
     expect(output.render.props).toEqual({ questions });
-    expect(output.render.ui).toEqual(questionCardUi(questions));
+    expect(output.render).not.toHaveProperty("ui");
   });
 
   it("turns what the card sends into the answers the card has always sent", () => {

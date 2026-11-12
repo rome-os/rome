@@ -171,4 +171,21 @@ describe("a question card described as data", () => {
     await new Promise((r) => setTimeout(r, 50));
     expect(fetch).not.toHaveBeenCalled();
   });
+
+  it("keeps Send off for an answer of only spaces", async () => {
+    render(
+      <WidgetUiCard
+        toolUseId="q4"
+        appId="core"
+        ui={ui}
+        text=""
+        waiting={{ onSubmit: rs.fn(), onDismiss: rs.fn() }}
+      />,
+    );
+    fireEvent.change(await screen.findByRole("textbox", { name: "Which tone?" }), {
+      target: { value: "   " },
+    });
+    await new Promise((r) => setTimeout(r, 50));
+    expect((screen.getByRole("button", { name: "Send" }) as HTMLButtonElement).disabled).toBe(true);
+  });
 });

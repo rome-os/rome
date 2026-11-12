@@ -116,6 +116,7 @@ import {
   parseAskQuestionInput,
   type Question,
   questionCardFromAnswers,
+  questionCardUi,
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import type { ChatThreadPlacement } from "../../webchat/repository.js";
@@ -419,8 +420,6 @@ type Suspension = {
   builtin?: boolean;
   /** The card is the only way to answer (see MessagePart.render). */
   requiresCard?: boolean;
-  /** The card described as data, already checked. */
-  ui?: WidgetUi;
 };
 
 type PendingInteractionPart = Extract<MessagePart, { type: "pending_interaction" }>;
@@ -577,11 +576,6 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
         props: asRecord(r.props),
         builtin: r.builtin === true,
         requiresCard: r.requiresCard === true,
-        // A description every reader cannot draw is dropped; the card's
-        // component still shows.
-        ...(r.ui !== undefined && checkWidgetUi(r.ui, {}, { waits: true }).length === 0
-          ? { ui: r.ui as WidgetUi }
-          : {}),
       };
     }
     return null;
@@ -617,6 +611,12 @@ function buildBuiltinCard(
   const toolName = typeof msg.tool === "string" ? msg.tool : "";
   const card = BUILTIN_CARDS.find((c) => c.componentId === suspension.componentId);
   if (card && suspension.appId === "core" && card.emittedBy(toolName)) {
+    // The question card described as data, built here from its questions so
+    // the agent never carries it in its context and no tool can supply one.
+    // Readers that know `ui` draw it; older ones draw their own question card
+    // from `props`.
+    const questions =
+      suspension.componentId === "question-card" ? parseAskQuestionInput(suspension.props) : null;
     return {
       type: "pending_interaction",
       toolUseId: msg.toolUseId,
@@ -627,7 +627,7 @@ function buildBuiltinCard(
         props: suspension.props,
         builtin: true,
         ...(suspension.requiresCard ? { requiresCard: true } : {}),
-        ...(suspension.ui ? { ui: suspension.ui } : {}),
+        ...(questions?.ok ? { ui: questionCardUi(questions.questions) } : {}),
       },
     };
   }

@@ -1627,8 +1627,7 @@ export type MessagePart =
        * it returned `show_widget` without `waits`. The host draws it on every
        * load, from the app's component (`componentId`, `props`) or from its
        * description (`ui`, `bind`), so the card always shows its app's
-       * current data. Nothing
-       * answers it, so the chat never waits on it. A widget that waits stores
+       * current data. Nothing answers it, so the chat never waits on it. A widget that waits stores
        * a `pending_interaction` part instead.
        */
       type: "widget";
@@ -1646,24 +1645,6 @@ export type MessagePart =
           bind?: Record<string, string>;
         }
     ))
-  | {
-      /**
-       * An app's card the agent showed without waiting: the action that showed
-       * it returned `show_widget` without `waits`. The host mounts the app's
-       * component in the message from `componentId` and `props`, on every
-       * load, so the card always shows its app's current data. Nothing
-       * answers it, so the chat never waits on it. A widget that waits stores
-       * a `pending_interaction` part instead.
-       */
-      type: "widget";
-      toolUseId: string;
-      appId: string;
-      componentId: string;
-      props?: Record<string, unknown>;
-      /** The widget's plain-text line, the `text` its action wrote, for a
-       *  reader that draws no card. */
-      text: string;
-    }
   | {
       /**
        * Resolution of an inline interaction. Lives in a user-role

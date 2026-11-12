@@ -181,9 +181,6 @@ export function askQuestionToolOutput(
       kind: "inline",
       componentId: ASK_QUESTION_COMPONENT_ID,
       props: { questions },
-      // The same card described as data. Readers that know `ui` draw it;
-      // older ones draw their own question card from `props`.
-      ui: questionCardUi(questions),
       builtin: true,
     },
     message: ASK_QUESTION_PARK_DIRECTIVE,

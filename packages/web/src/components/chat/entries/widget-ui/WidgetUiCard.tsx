@@ -63,6 +63,8 @@ function withHostStrings(value: unknown, translate: (key: string) => string): un
 export function appApiUrl(appId: string, path: string): string | null {
   const base = `/api/apps/${encodeURIComponent(appId)}/`;
   const segments = path.split("/");
+  // Rome serves these itself, ahead of the app's API.
+  if (["publish", "icon", "manifest"].includes(segments[0] ?? "")) return null;
   if (!segments.every((s) => /^[A-Za-z0-9_~.-]+$/.test(s) && s !== "." && s !== "..")) {
     return null;
   }

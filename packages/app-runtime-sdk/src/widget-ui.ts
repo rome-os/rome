@@ -72,8 +72,6 @@ export interface WidgetUiAction {
 
 interface Common {
   id: string;
-  /** Share of the free space in a `Row` or `Column`, as CSS `flex-grow`. */
-  weight?: number;
 }
 
 /**
@@ -114,6 +112,9 @@ export type WidgetUiComponent =
     })
   | (Common & {
       component: "Image";
+      /** An `https:` URL, or a path to one. Readers draw nothing for any
+       *  other value, so an image never reads the instance with the
+       *  guardian's session. */
       url: WidgetUiString;
       description?: WidgetUiString;
       fit?: "contain" | "cover" | "fill" | "none" | "scaleDown";
@@ -210,7 +211,7 @@ const Children = z.union([
   z.array(z.string()),
   z.object({ componentId: z.string(), path: z.string() }).strict(),
 ]);
-const common = { id: z.string().min(1), weight: z.number().optional() };
+const common = { id: z.string().min(1) };
 
 // A2UI's function calls (`{ call }`) are left out on purpose: the iOS app
 // does not evaluate them, and a card must draw the same on every reader.
@@ -246,7 +247,7 @@ const ComponentSchema = z.discriminatedUnion("component", [
     .object({
       ...common,
       component: z.literal("Image"),
-      url: Str,
+      url: z.union([z.string().regex(/^https:\/\/[^/]/, "must be an https: URL"), PathSchema]),
       description: Str.optional(),
       fit: z.enum(["contain", "cover", "fill", "none", "scaleDown"]).optional(),
       variant: z
@@ -333,10 +334,16 @@ const WidgetUiSchema = z
  *  `..`. Anything else, such as `%2e%2e`, a backslash, a scheme or a query,
  *  could resolve outside the app once a browser normalizes the URL. */
 export function isWidgetAppPath(path: string): boolean {
-  return path
-    .split("/")
-    .every((segment) => /^[A-Za-z0-9_~.-]+$/.test(segment) && segment !== "." && segment !== "..");
+  const segments = path.split("/");
+  if (HOST_APP_ROUTES.has(segments[0] ?? "")) return false;
+  return segments.every(
+    (segment) => /^[A-Za-z0-9_~.-]+$/.test(segment) && segment !== "." && segment !== "..",
+  );
 }
+
+/** Routes Rome serves itself under `/api/apps/<appId>/`, ahead of the app's
+ *  own API. A card reaches none of them. */
+const HOST_APP_ROUTES: ReadonlySet<string> = new Set(["publish", "icon", "manifest"]);
 
 /**
  * Checks a described card and its bindings. Returns the problems, or an empty

@@ -1,5 +1,5 @@
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
-import { askQuestionToolOutput, type Question } from "../../agent/index.js";
+import { askQuestionToolOutput, type Question, questionCardUi } from "../../agent/index.js";
 import { testReceipt, testTurnHandle } from "../../test/turn-handle.js";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -4712,7 +4712,8 @@ describe("Webchat API", () => {
         }),
       );
       const card = await findCard(sessionId, "tu-ask-ui");
-      expect((card as { render?: { ui?: unknown } }).render?.ui).toBeDefined();
+      // Core builds the description from the questions; the tool result has none.
+      expect((card as { render?: { ui?: unknown } }).render?.ui).toEqual(questionCardUi(questions));
 
       ctl.setEvents(async function* () {
         yield { type: "result", content: "" };
@@ -7028,7 +7029,7 @@ describe("Webchat API", () => {
       await deps.webchatRepo.createSession(sessionId, "Deferred Question");
       const { runtime } = createWebchatRuntime(deps);
       const toolUseId = "deferred-ask-1";
-      const questions = [
+      const questions: Question[] = [
         {
           id: "scope",
           question: "Which scope?",
@@ -7077,6 +7078,7 @@ describe("Webchat API", () => {
           componentId: "question-card",
           props: { questions },
           builtin: true,
+          ui: questionCardUi(questions),
         },
       });
       expect(assistantParts).toContainEqual({

@@ -84,11 +84,28 @@ describe("checkWidgetUi", () => {
       "..\\..\\settings",
       "a//b",
       "",
+      "a#b",
+      "publish",
+      "manifest",
     ]) {
       expect(checkWidgetUi(post(name))).not.toEqual([]);
     }
     expect(checkWidgetUi(mealCard, { "/today": "../connector/tokens" })).not.toEqual([]);
     expect(checkWidgetUi(mealCard, { today: "days/1" })).not.toEqual([]);
     expect(checkWidgetUi(mealCard, { "/today": "%2E%2E/connector/tokens" })).not.toEqual([]);
+  });
+
+  it("draws only https images, which every reader loads the same way", () => {
+    const card = (url: unknown) => ({ components: [{ id: "root", component: "Image", url }] });
+    expect(checkWidgetUi(card("https://example.com/a.png"))).toEqual([]);
+    expect(checkWidgetUi(card({ path: "/today/photo" }))).toEqual([]);
+    for (const url of ["/api/settings", "http://example.com/a.png", "photo.png", "data:x"]) {
+      expect(checkWidgetUi(card(url))).not.toEqual([]);
+    }
+  });
+
+  it("refuses fields no reader draws", () => {
+    const ui = { components: [{ id: "root", component: "Text", text: "a", weight: 1 }] };
+    expect(checkWidgetUi(ui)).not.toEqual([]);
   });
 });

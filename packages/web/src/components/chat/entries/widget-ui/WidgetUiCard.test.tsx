@@ -127,8 +127,35 @@ describe("appApiUrl", () => {
       "a?b=1",
       "/x",
       "",
+      "publish",
+      "manifest/x",
     ]) {
       expect(appApiUrl("meals", path)).toBeNull();
     }
+  });
+
+  it("loads only https images, so an image never reads the instance with the guardian's session", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({}));
+    const images = {
+      components: [
+        { id: "root", component: "Column", children: ["safe", "local"] },
+        { id: "safe", component: "Image", url: "https://example.com/a.png", description: "safe" },
+        { id: "local", component: "Image", url: "/api/settings", description: "local" },
+      ],
+    };
+    const { container } = render(
+      <>
+        {renderFlatEntries(
+          parseEntries(
+            JSON.stringify([
+              { type: "widget", toolUseId: "w-img", appId: "meals", ui: images, text: "x" },
+            ]),
+          ),
+          { sessionId: "s1" },
+        )}
+      </>,
+    );
+    await screen.findByAltText("safe");
+    expect(container.querySelectorAll("img")).toHaveLength(1);
   });
 });

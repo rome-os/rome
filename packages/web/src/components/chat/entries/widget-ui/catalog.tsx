@@ -12,8 +12,9 @@ import {
   type ComponentApi,
   ImageApi,
   ListApi,
+  createFunctionImplementation,
   OrImplementation,
-  RequiredImplementation,
+  RequiredApi,
   RowApi,
   TextApi,
   TextFieldApi,
@@ -159,18 +160,36 @@ const Progress = createComponentImplementation(ProgressApi, ({ props }) => {
   );
 });
 
-const Image = createComponentImplementation(ImageApi, ({ props }) => (
-  <img
-    src={props.url}
-    alt={props.description ?? ""}
-    className={cn(
-      "max-w-full rounded-8",
-      props.variant === "icon" && "size-5",
-      props.variant === "avatar" && "size-8 rounded-full",
-    )}
-    style={{ objectFit: props.fit === "scaleDown" ? "scale-down" : (props.fit ?? "cover") }}
-  />
-));
+// A2UI's `required` passes a string of spaces; the question card and the iOS
+// app have always treated that as no answer.
+const Required = createFunctionImplementation(RequiredApi, ({ value }) =>
+  typeof value === "string"
+    ? value.trim().length > 0
+    : Array.isArray(value)
+      ? value.length > 0
+      : value !== null && value !== undefined,
+);
+
+/** An image URL a card may load: `https:` only, so it never reads the
+ *  instance with the guardian's session, and loads the same on iOS. */
+function httpsUrl(value: unknown): string | undefined {
+  return typeof value === "string" && /^https:\/\/[^/]/.test(value) ? value : undefined;
+}
+
+const Image = createComponentImplementation(ImageApi, ({ props }) =>
+  httpsUrl(props.url) === undefined ? null : (
+    <img
+      src={httpsUrl(props.url)}
+      alt={props.description ?? ""}
+      className={cn(
+        "max-w-full rounded-8",
+        props.variant === "icon" && "size-5",
+        props.variant === "avatar" && "size-8 rounded-full",
+      )}
+      style={{ objectFit: props.fit === "scaleDown" ? "scale-down" : (props.fit ?? "cover") }}
+    />
+  ),
+);
 
 const Row = createComponentImplementation(RowApi, ({ props, buildChild }) => (
   <div
@@ -345,7 +364,7 @@ export const romeWidgetCatalog = new Catalog(
   ] as unknown as ComponentApi[],
   [
     // The only functions a card may call, in its `checks`.
-    RequiredImplementation,
+    Required,
     OrImplementation,
   ],
 );

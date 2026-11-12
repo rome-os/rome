@@ -136,7 +136,7 @@ struct WidgetUICardView: View {
                     .tint(Palette.primary)
             })
         case .image:
-            let url = URL(string: text("url"))
+            guard let url = WidgetData.httpsURL(text("url")) else { return AnyView(EmptyView()) }
             return AnyView(AsyncImage(url: url) { image in
                 image.resizable().aspectRatio(contentMode: c["fit"]?.string == "contain" ? .fit : .fill)
             } placeholder: {
