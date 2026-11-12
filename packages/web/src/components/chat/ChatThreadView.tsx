@@ -162,19 +162,23 @@ export function ChatThreadView({
     if (following.current) list.scrollTop = list.scrollHeight;
   }, [count, floorHeight, lift, messageId]);
   // The thread's copy of the message it opened from gets the same brief tint
-  // a jump gives, once the view has faded in, so the eye finds it.
+  // a jump gives, once the view has faded in, so the eye finds it. It counts
+  // as given only once it shows: a cleanup before then, as when the thread
+  // comes from the cache and the view's effects run twice on mount, leaves it
+  // to the next run.
   const landed = useRef(false);
   const shown = count > 0;
   useEffect(() => {
     const list = listRef.current;
     if (!list || !shown || landed.current) return;
-    landed.current = true;
     const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
     let copy: HTMLElement | null = null;
     const start = window.setTimeout(
       () => {
         copy = findMessageAnchor(list, messageId);
-        copy?.setAttribute("data-timeline-landed", "");
+        if (!copy) return;
+        landed.current = true;
+        copy.setAttribute("data-timeline-landed", "");
       },
       still ? 0 : THREAD_FADE_MS,
     );

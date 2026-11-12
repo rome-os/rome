@@ -2,7 +2,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import type { ReactNode } from "react";
+import { type ReactNode, StrictMode } from "react";
 import { createPortal } from "react-dom";
 import type { ReplyToPart } from "@rome/api-types/chat";
 import { chatSessionTopicName } from "@rome/api-types/live-events";
@@ -414,6 +414,39 @@ describe("ChatThreadView", () => {
     await waitFor(() => expect(copy.hasAttribute("data-timeline-landed")).toBe(false), {
       timeout: 2000,
     });
+  });
+
+  it("tints the message again each time its thread opens, from the cache under StrictMode too", async () => {
+    // The dashboard runs under StrictMode, which runs a view's effects twice
+    // on mount; a reopened thread draws its cached messages at once.
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const view = (open: boolean) => (
+      <StrictMode>
+        <QueryClientProvider client={client}>
+          <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
+            {open ? (
+              <ChatThreadView
+                key="a1"
+                sessionId="concierge"
+                messageId="a1"
+                onClose={() => {}}
+                renderMessages={paragraphs}
+              />
+            ) : null}
+          </LiveEventsClientContext.Provider>
+        </QueryClientProvider>
+      </StrictMode>
+    );
+    const opensWithTint = async () => {
+      const copy = (await screen.findByText("Which day?")).closest("[data-timeline-anchor]")!;
+      await waitFor(() => expect(copy.hasAttribute("data-timeline-landed")).toBe(true));
+    };
+    const { rerender } = render(view(true));
+    await opensWithTint();
+    rerender(view(false));
+    expect(screen.queryByText("Which day?")).toBeNull();
+    rerender(view(true));
+    await opensWithTint();
   });
 
   it("reads where the message it opened from sat once, on open", async () => {
