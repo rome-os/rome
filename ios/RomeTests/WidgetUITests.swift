@@ -106,4 +106,11 @@ import Testing
             #expect(WidgetData.httpsURL(url) == nil)
         }
     }
+
+    @Test func aCardsAppIdCannotLeaveTheAppsAPI() {
+        #expect(WidgetData.appAPIPath(appId: "meal-planner", path: "water") == "/api/apps/meal-planner/water")
+        for appId in ["..", "../settings", "a/b", "%2e%2e", ""] {
+            #expect(WidgetData.appAPIPath(appId: appId, path: "water") == nil)
+        }
+    }
 }

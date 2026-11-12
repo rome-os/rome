@@ -192,6 +192,13 @@ enum WidgetData {
         resolve(value, in: root, scope: scope)?.number
     }
 
+    /// `/api/apps/<appId>/<path>`, or nil when either would reach outside the
+    /// app: a stored part is read back as data, so its app id is checked too.
+    static func appAPIPath(appId: String, path: String) -> String? {
+        guard !appId.contains("/"), isAppPath(appId), isAppPath(path) else { return nil }
+        return "/api/apps/\(appId)/\(path)"
+    }
+
     /// An image URL a card may load: `https:` only, so it never reads the
     /// instance, and loads the same as on the dashboard.
     static func httpsURL(_ text: String) -> URL? {
