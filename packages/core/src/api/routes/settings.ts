@@ -61,6 +61,13 @@ export function settingsRoutes(deps: ApiDeps): Hono {
       return c.json({ error: "feedback.agentReportsEnabled must be a boolean" }, 400);
     }
 
+    if (
+      "aiTools.codex.allowCredits" in body &&
+      typeof body["aiTools.codex.allowCredits"] !== "boolean"
+    ) {
+      return c.json({ error: "aiTools.codex.allowCredits must be a boolean" }, 400);
+    }
+
     for (const [key, route] of Object.entries(DEDICATED_ROUTE_KEYS)) {
       if (key in body) {
         return c.json({ error: `${key} is managed by PUT ${route}, not /api/settings.` }, 400);
@@ -91,6 +98,7 @@ export function settingsRoutes(deps: ApiDeps): Hono {
       await deps.settingsRepo.set(key, value);
     }
 
+    if ("aiTools.codex.allowCredits" in body) await deps.modelAccounts.refresh("openai");
     return c.json({ ok: true });
   });
 

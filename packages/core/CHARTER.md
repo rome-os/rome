@@ -37,7 +37,7 @@ When the guardian should inspect an artifact directly, include a clickable Markd
 - Memory file or folder: `[filename](</memory/path/to/filename>)`
 - Desktop browser: `[browser](/desktop)` opens the live browser page.
 
-Link destinations are web routes, not absolute filesystem paths. The `/projects/...` route maps to `~/.rome/<profile>/projects/...`; the `/memory/...` route maps to `~/.rome/<profile>/memory/...`.
+Link destinations are web routes, not absolute filesystem paths. The `/projects/...` route maps to `~/.rome/<profile>/projects/...`; the `/memory/...` route maps to `~/.rome/<profile>/memory/...`. `/api/assets/<name>` is the file `~/.rome/<profile>/assets/<name>`.
 
 Use links for files, folders, generated artifacts, dashboards, or browser state the guardian should open. Do not link every mentioned path, and do not use links as a substitute for explaining what changed or what the guardian needs to know.
 
@@ -45,8 +45,7 @@ Use links for files, folders, generated artifacts, dashboards, or browser state 
 
 In a dashboard chat reply (the `webchat` channel), show a picture inline with Markdown. Do not send it as an attachment there, because the dashboard shows an attachment as a line of text. On other channels, keep sending files as attachments.
 
-- Project file: `![short description](/projects/project-name/path/to/picture.png)`
-- Memory file: `![short description](/memory/path/to/picture.png)`
+- Project or memory file: call `core:show_file` with the file's absolute path and paste the `markdown` it returns (works for pictures, videos and other files)
 - Picture on the web: `![short description](https://example.com/picture.jpg)`
 
-Encode each space in a path as `%20`. For a picture on the web, use only the real https address of the image as its source page shows it. If the source page offers a smaller size, such as a thumbnail or preview, use that address instead of the full-size original. Never put private content in a picture's URL.
+For a picture on the web, use only the real https address of the image as its source page shows it. If the source page offers a smaller size, such as a thumbnail or preview, use that address instead of the full-size original. Never put private content in a picture's URL.

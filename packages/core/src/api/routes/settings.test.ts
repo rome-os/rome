@@ -32,6 +32,17 @@ describe("Settings API", () => {
 
   afterEach(() => testDb.close());
 
+  it("validates and persists the Codex credits preference and refreshes availability", async () => {
+    const refresh = rs.spyOn(deps.modelAccounts, "refresh").mockResolvedValue(true);
+    expect((await putSettings(app, { "aiTools.codex.allowCredits": "true" })).status).toBe(400);
+    expect(await deps.settingsRepo.get("aiTools.codex.allowCredits")).toBeNull();
+    for (const enabled of [true, false]) {
+      expect((await putSettings(app, { "aiTools.codex.allowCredits": enabled })).status).toBe(200);
+      expect(await deps.settingsRepo.get("aiTools.codex.allowCredits")).toBe(enabled);
+      expect(refresh).toHaveBeenLastCalledWith("openai");
+    }
+  });
+
   it("defaults agent reports ON, reads the current boolean and leaves guardian reports enabled", async () => {
     expect(
       await deps.feedback.send({

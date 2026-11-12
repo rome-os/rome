@@ -176,6 +176,14 @@ describe("/api/auth/verify", () => {
     expect(res.status).toBe(401);
   });
 
+  it("keeps stored chat files behind the guardian cookie", async () => {
+    const host = buildHost(await stubDeps([]));
+    const uri = "/api/assets/0123456789abcdef0123456789abcdef.png";
+    expect((await verifyRequest(host, uri)).status).toBe(401);
+    expect((await verifyRequest(host, `${uri}?w=900`)).status).toBe(401);
+    expect((await verifyRequest(host, uri, validCookieHeader())).status).toBe(204);
+  });
+
   it("returns 204 for the connect return leg without a cookie", async () => {
     const host = buildHost(await stubDeps([]));
     const res = await verifyRequest(host, "/api/setups/return");

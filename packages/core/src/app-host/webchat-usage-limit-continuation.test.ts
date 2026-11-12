@@ -970,6 +970,12 @@ describe("usage-limit continuation", () => {
   });
 
   describe("the prompt", () => {
+    it("describes availability without claiming the subscription limit reset", () => {
+      const prompt = usageLimitContinuationPrompt("Continue the work", false);
+      expect(prompt).toContain("the provider is available again");
+      expect(prompt).not.toContain("the limit has since reset");
+    });
+
     it("omits the excerpt, and the cut notice, when no request is known", () => {
       const prompt = usageLimitContinuationPrompt("", false);
       expect(prompt).not.toContain("request (may");

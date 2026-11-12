@@ -19,6 +19,10 @@ import Testing
         #expect(ImageFetch.assetQuery(query, path: "/projects/assets/a.png", width: 900) == query)
         #expect(ImageFetch.assetQuery(query, path: "/share/t/projects/asset/a.png", width: 900) == query)
         #expect(ImageFetch.assetQuery(nil, path: "/projects/asset/a.png", width: 900) == nil)
+        // A stored upload's URL has no query, so the width is the whole query.
+        #expect(ImageFetch.assetQuery(nil, path: "/assets/0123456789abcdef0123456789abcdef.png", width: 600) == "w=600")
+        #expect(ImageFetch.assetQuery(nil, path: "/assets/0123456789abcdef0123456789abcdef.png", width: nil) == nil)
+        #expect(ImageFetch.assetQuery("w=900", path: "/assets/0123456789abcdef0123456789abcdef.png", width: 600) == "w=900")
     }
 
     @Test func publicHttpsImagesLoadWithoutTheSession() {

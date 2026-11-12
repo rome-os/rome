@@ -1,6 +1,6 @@
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
 import { testReceipt, testTurnHandle } from "../../test/turn-handle.js";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { context as otelContext } from "@opentelemetry/api";
@@ -903,6 +903,105 @@ describe("Webchat API", () => {
       expect(interrupt).not.toHaveBeenCalled();
     } finally {
       for (const finish of finishers) finish();
+    }
+  });
+
+  it("stores uploads in the asset store, naming the local file to the model only", async () => {
+    const home = mkdtempSync(join(tmpdir(), "rome-webchat-assets-"));
+    rs.stubEnv("HOME", home);
+    rs.stubEnv("ROME_PROFILE", "webchat-assets-test");
+    const prompts: string[] = [];
+    const agent: FakeSession = {
+      key: { agentName: "main", channelThreadKey: "webchat:test" },
+      sessionId: "agent-session",
+      status: "running",
+      runningTurn: testTurnHandle({ turnId: "upload-turn", events: (async function* () {})() }),
+      startTurn: (input) => {
+        prompts.push(input.prompt);
+        return testTurnHandle({
+          turnId: `upload-${prompts.length}`,
+          turnContext: otelContext.active(),
+          events: (async function* () {
+            yield { type: "result" as const, content: "" };
+          })(),
+        });
+      },
+      onStatusChange: () => () => {},
+      stop: async () => {},
+      close: async () => {},
+    };
+    deps.agentSessionManager = fakeSessionManager(() => agent);
+    const app = createWebchatRuntime(deps).routes;
+    const created = await app.request("/chat/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Uploads" }),
+    });
+    const { id } = (await created.json()) as { id: string };
+    const file = (data: string) => ({
+      name: "image.png",
+      mimeType: "image/png",
+      dataBase64: Buffer.from(data).toString("base64"),
+    });
+    const send = (files: unknown[]) =>
+      app.request(`/chat/sessions/${id}/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "look", files }),
+      });
+    try {
+      expect((await send([file("first"), file("second")])).status).toBe(200);
+
+      const [shown] = (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user");
+      const links = [
+        ...shown.content.matchAll(/\[image\.png\]\(<(\/api\/assets\/[0-9a-f]{32}\.png)>\)/g),
+      ];
+      // The same name twice makes two assets, and the persisted text has no local path.
+      expect(links.map((link) => link[1])).toHaveLength(2);
+      expect(links[0][1]).not.toBe(links[1][1]);
+      expect(shown.content).not.toContain("local file");
+      expect(shown.content).not.toContain(home);
+      const assetsDir = join(home, ".rome", "webchat-assets-test", "assets");
+      // The model's turn carries each file's local path too.
+      expect(prompts).toHaveLength(1);
+      for (const [index, [, url]] of links.entries()) {
+        const local = join(assetsDir, url.replace("/api/assets/", ""));
+        expect(prompts[0]).toContain(`(<${url}>) — local file: ${local}`);
+        expect(readFileSync(local, "utf-8")).toBe(index === 0 ? "first" : "second");
+      }
+      // Nothing was written into the project.
+      expect(existsSync(join(projectsRoot, "default", String(new Date().getFullYear())))).toBe(
+        false,
+      );
+    } finally {
+      rs.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an upload over the size cap with 413", async () => {
+    const home = mkdtempSync(join(tmpdir(), "rome-webchat-assets-"));
+    rs.stubEnv("HOME", home);
+    rs.stubEnv("ROME_PROFILE", "webchat-assets-test");
+    const app = createWebchatRuntime(deps).routes;
+    await deps.webchatRepo.createSession("big-upload", "Big");
+    try {
+      // Over 100 MB of base64 text, refused before it is decoded.
+      const res = await app.request("/chat/sessions/big-upload/turns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          files: [
+            { name: "big.bin", dataBase64: "A".repeat(Math.ceil((100 * 1024 * 1024 + 4) / 3) * 4) },
+          ],
+        }),
+      });
+      expect(res.status).toBe(413);
+      expect(((await res.json()) as { error: string }).error).toMatch(/big\.bin.*100 MB/);
+      expect(await deps.webchatRepo.getMessageCount("big-upload")).toBe(0);
+    } finally {
+      rs.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
     }
   });
 

@@ -49,6 +49,7 @@ import {
 } from "../../webchat/projects.js";
 import { DEFAULT_WEBCHAT_PROJECT_NAME } from "../../webchat/constants.js";
 import { sessionTraceCutoff } from "../../webchat/trace-retention.js";
+import { AssetTooLargeError, MAX_ASSET_BYTES } from "../../assets/store.js";
 import { appendUploadPathsToPrompt, saveWebchatUploads } from "../../webchat/uploads.js";
 import {
   TURN_BRANCH_PROMPT_MAX_LENGTH,
@@ -3820,13 +3821,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     let savedUploads;
     try {
       savedUploads = await saveWebchatUploads(
-        workingDir,
-        projectsRoot,
         uploadedFiles.map((file, index) => {
           const fileName = typeof file.name === "string" ? file.name.trim() : "";
           const dataBase64 = typeof file.dataBase64 === "string" ? file.dataBase64 : "";
           if (!fileName) throw new Error(`Uploaded file ${index + 1} is missing a name`);
           if (!dataBase64) throw new Error(`Uploaded file ${fileName} is empty`);
+          // Refuse before decoding: base64 is 4 bytes of text per 3 of data.
+          if ((dataBase64.length / 4) * 3 > MAX_ASSET_BYTES + 3) {
+            throw new AssetTooLargeError(`Uploaded file ${fileName}`, MAX_ASSET_BYTES);
+          }
           return {
             name: fileName,
             mimeType: typeof file.mimeType === "string" ? file.mimeType : undefined,
@@ -3836,7 +3839,12 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       );
     } catch (err) {
       const message = err instanceof Error ? err.message : "Internal error";
-      const status = /unavailable|required|missing|empty/.test(message) ? 400 : 500;
+      const status =
+        err instanceof AssetTooLargeError
+          ? 413
+          : /unavailable|required|missing|empty/.test(message)
+            ? 400
+            : 500;
       return answer({ error: message }, status);
     }
 
@@ -3846,6 +3854,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const basePrompt = resolution
       ? resolution.prompt
       : appendUploadPathsToPrompt(body.text ?? "", savedUploads);
+    // The model's copy of the turn also names each upload's local file; the
+    // persisted text (`displayText`) keeps only the URL.
+    const modelBasePrompt = resolution
+      ? basePrompt
+      : appendUploadPathsToPrompt(body.text ?? "", savedUploads, { localPaths: true });
     // Concierge delegates skill invocations; other agents read the skill.
     // A structured selection (body.skillName, from the composer chip)
     // wins; a typed `/<skill-name> task` first token is parsed out of the text
@@ -3854,14 +3867,14 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const skillInvocation = resolution
       ? null
       : skillName
-        ? { skillName, task: basePrompt.trim() }
-        : parseSlashSkillInvocation(basePrompt, deps.skillCatalog);
+        ? { skillName, task: modelBasePrompt.trim() }
+        : parseSlashSkillInvocation(modelBasePrompt, deps.skillCatalog);
     const slashSkillPrompt = skillInvocation
       ? isConciergeChat(session)
         ? buildConciergeSkillPrompt(skillInvocation)
         : buildSlashSkillPrompt(skillInvocation)
       : null;
-    const modelPrompt = slashSkillPrompt ?? basePrompt;
+    const modelPrompt = slashSkillPrompt ?? modelBasePrompt;
     const displayText = skillName
       ? `/${artifactLocalName(skillName)}${basePrompt.trim() ? ` ${basePrompt.trim()}` : ""}`
       : basePrompt;

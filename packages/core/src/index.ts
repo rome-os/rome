@@ -206,6 +206,7 @@ import {
 import { chatPromptFacts } from "./core/chat-prompt-facts.js";
 import { ROME_AGENT_TRAITS } from "./concierge/agent-traits.js";
 import { registerAgentNameAction } from "./people/agent-name.js";
+import { registerShowFileAction } from "./assets/show-file-action.js";
 import { ConciergeService } from "./concierge/service.js";
 import { chatsTaskChatMessages } from "./concierge/task-chat.js";
 import { openChannelChat } from "./connections/open-chat.js";
@@ -948,7 +949,10 @@ async function main() {
   // The "openai" provider runs over the codex app-server JSON-RPC surface
   // (agentMessage `phase` → turnPhase + streaming deltas).
   const codexAppServerManager = new CodexAppServerManager();
-  const codexAccountService = new SharedCodexAccountService(codexAppServerManager);
+  const codexAccountService = new SharedCodexAccountService(codexAppServerManager, {
+    allowChatgptCredits: async () =>
+      (await settingsRepo.get("aiTools.codex.allowCredits")) === true,
+  });
   const claudeAccount = new ClaudeAccount({ settingsRepo });
   const modelAccounts = createModelAccounts({
     accounts: { openai: codexAccountService, anthropic: claudeAccount },
@@ -1327,6 +1331,7 @@ async function main() {
     },
   });
 
+  registerShowFileAction(actionRegistry);
   const agentNameEvents = registerAgentNameAction(actionRegistry, {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
