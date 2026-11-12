@@ -883,9 +883,10 @@ export class ConciergeTasksRepository {
         .where(and(inArray(conciergeTasks.id, [...ended]), isNull(conciergeTasks.endedAt)));
     }
     if (open.length > 0) {
+      // A task that opens again ended for no response no more, so no digest lists it.
       await this.db
         .update(conciergeTasks)
-        .set({ endedAt: null })
+        .set({ endedAt: null, noResponseUnlisted: false })
         .where(and(inArray(conciergeTasks.id, [...open]), isNotNull(conciergeTasks.endedAt)));
     }
   }

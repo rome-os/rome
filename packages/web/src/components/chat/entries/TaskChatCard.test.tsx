@@ -75,6 +75,8 @@ let postAction: () => void;
 let fetchMock: ReturnType<typeof rs.fn<typeof fetch>>;
 /** The task rows the list answers, and the tasks a Stop on the card stopped. */
 let taskRows: Record<string, unknown>[] = [];
+/** When the task chat was archived, or null. */
+let archivedAt: string | null = null;
 let stopped: string[] = [];
 
 beforeEach(async () => {
@@ -90,6 +92,7 @@ beforeEach(async () => {
   postAction = () => {};
   taskRows = [];
   stopped = [];
+  archivedAt = null;
   fetchMock = rs.fn<typeof fetch>(async (input, init) => {
     const url = String(input);
     if (url.startsWith("/api/concierge/tasks?")) return Response.json({ tasks: taskRows });
@@ -109,7 +112,7 @@ beforeEach(async () => {
     }
     if (url.startsWith("/api/chat/sessions?"))
       return Response.json([
-        { id: chatId, name: "Draft email", awaitingGuardian: waiting, running },
+        { id: chatId, name: "Draft email", awaitingGuardian: waiting, running, archivedAt },
       ]);
     if (url === `/api/chat/sessions/${chatId}/messages?limit=2`)
       return Response.json({ messages, nextCursor: "older-turn" });
@@ -166,6 +169,12 @@ describe("TaskChatCard with its task", () => {
     show();
     expect(await screen.findByText("Expired — answer to continue")).toBeTruthy();
     expect(await screen.findByText("Task chat · No response")).toBeTruthy();
+  });
+
+  it("says an archived task chat's task was stopped, though the list holds no archived row", async () => {
+    archivedAt = new Date().toISOString();
+    show();
+    expect(await screen.findByText("Task chat · Stopped")).toBeTruthy();
   });
 
   it("offers no Stop once its task ended, and says why it ended", async () => {

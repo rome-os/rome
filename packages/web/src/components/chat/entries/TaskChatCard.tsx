@@ -97,13 +97,18 @@ function LiveTaskChatCard({
   const { tasks } = useConciergeTasks();
   const task = tasks.find((candidate) => candidate.chat?.id === chatId);
   const derived = task ? taskStatusOfDto(task) : null;
-  const label = derived
-    ? derived.status === "ended"
-      ? derived.endReason === "done"
-        ? t("concierge.taskStatus.idle")
-        : t(`concierge.tasks.ended.${derived.endReason}`)
-      : t(`concierge.taskStatus.${DERIVED_LABEL[derived.status]}`)
-    : t(`concierge.taskStatus.${status}`);
+  // An archived task chat's task was stopped with it, and the list holds no
+  // archived row to read it from.
+  const label =
+    !derived && session?.archivedAt
+      ? t("concierge.tasks.ended.stopped")
+      : derived
+        ? derived.status === "ended"
+          ? derived.endReason === "done"
+            ? t("concierge.taskStatus.idle")
+            : t(`concierge.tasks.ended.${derived.endReason}`)
+          : t(`concierge.taskStatus.${DERIVED_LABEL[derived.status]}`)
+        : t(`concierge.taskStatus.${status}`);
   return (
     <div className="w-full min-w-0 max-w-md space-y-3 rounded-16 border border-border bg-surface px-3 py-2">
       <div className="flex min-w-0 items-center gap-3">

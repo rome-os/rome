@@ -157,9 +157,11 @@ describe("ConciergeTasks status", () => {
     const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
     await tasks.statusOf([row!]);
     expect((await repo.get(row!.id))?.endedAt).toEqual(new Date(NOW));
+    await repo.markWaitExpired(row!.id, new Date(NOW - HOUR));
     running.add("task-chat");
     await tasks.statusOf([(await repo.get(row!.id))!]);
-    expect((await repo.get(row!.id))?.endedAt).toBeNull();
+    // Open again, it ended for no response no more: no digest lists it.
+    expect(await repo.get(row!.id)).toMatchObject({ endedAt: null, noResponseUnlisted: false });
   });
 
   it("tells a task's changes in the order they happened", async () => {
