@@ -9,7 +9,7 @@
  * tree, untracked files included. `<ref>` defaults to the merge base with
  * origin/main. The checks are:
  *
- * - Biome over the changed files, or the whole repo when `biome.json` changed.
+ * - Biome over the changed files, or the whole repo when `biome.jsonc` changed.
  * - `pnpm lint:imports`, and `pnpm typecheck:lint` when lint/ changed.
  * - Type checks of every workspace package that changed and every package
  *   that depends on one, incremental between runs. A changed package that
