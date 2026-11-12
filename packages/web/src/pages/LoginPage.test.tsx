@@ -180,4 +180,28 @@ describe("one sign-in method at a time", () => {
       fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/auth/cloud/start").length,
     ).toBe(1);
   });
+
+  it.each([
+    "/login",
+    "/login?via=cloud",
+  ])("keeps a pending cloud start across a method swap (%s)", async (url) => {
+    const fetchSpy = rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((() => new Promise<Response>(() => {})) as typeof fetch);
+    renderLogin(url);
+
+    if (url === "/login") {
+      fireEvent.click(screen.getByRole("button", { name: "Continue with Rome Cloud" }));
+    }
+    await screen.findByRole("button", { name: "Opening Rome Cloud…" });
+
+    fireEvent.click(screen.getByRole("button", { name: "Use local password" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use Rome Cloud" }));
+
+    const busy = await screen.findByRole("button", { name: "Opening Rome Cloud…" });
+    fireEvent.click(busy);
+    expect(
+      fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/auth/cloud/start").length,
+    ).toBe(1);
+  });
 });

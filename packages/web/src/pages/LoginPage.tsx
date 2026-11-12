@@ -208,25 +208,35 @@ export default function LoginPage() {
   );
 
   let body: ReactNode;
-  if (cloudPrimary && !showLocalForm) {
+  if (cloudPrimary) {
     // One Rome Cloud button for guardian and invited emails alike — the cloud
-    // callback dispatches a non-owner into the visitor flow.
+    // callback dispatches a non-owner into the visitor flow. The password form
+    // swaps in by hiding the cloud block, not unmounting it: a start still in
+    // flight keeps its busy state and auto-start guard, so swapping back can
+    // never begin a second attempt that overwrites the first one's state cookie.
     body = (
       <>
-        <CloudLoginButton onStartError={setCloudError} autoStart={autoStartCloud} />
-        {cloudErrorMessage && <AuthError>{cloudErrorMessage}</AuthError>}
-        {localPasswordAvailable &&
-          switchMethod(t("login.useLocalPassword"), () => setShowLocalForm(true))}
+        <div hidden={showLocalForm} className="w-full">
+          <CloudLoginButton onStartError={setCloudError} autoStart={autoStartCloud} />
+          {cloudErrorMessage && <AuthError>{cloudErrorMessage}</AuthError>}
+          {localPasswordAvailable &&
+            switchMethod(t("login.useLocalPassword"), () => setShowLocalForm(true))}
+        </div>
+        {showLocalForm && (
+          <>
+            {passwordForm}
+            {switchMethod(t("login.useCloud"), () => setShowLocalForm(false))}
+          </>
+        )}
       </>
     );
   } else {
     body = (
       <>
         {passwordForm}
-        {cloudPrimary && switchMethod(t("login.useCloud"), () => setShowLocalForm(false))}
         {/* The explicit visitor button survives only for the local-method arm,
             which has no cloud button to dispatch from. */}
-        {!cloudPrimary && dashboardVisitorAccess && (
+        {dashboardVisitorAccess && (
           <>
             <AuthActionButton
               variant="outline"
