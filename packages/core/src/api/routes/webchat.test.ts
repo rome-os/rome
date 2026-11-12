@@ -6928,6 +6928,14 @@ describe("Webchat API", () => {
         rs.setSystemTime(new Date());
         repo = new ConciergeTasksRepository(testDb.db);
         const tasks = new ConciergeTasks(repo);
+        // The task chat's work runs, so its task is open: archiving or
+        // deleting its chat stops it.
+        tasks.attachFacts({
+          now: () => Date.now(),
+          running: (chatId) => chatId === "task-chat",
+          waitingSince: async () => new Map(),
+          reportPending: () => [],
+        });
         const service = new ConciergeService({
           webchatRepo: deps.webchatRepo,
           tasks,
