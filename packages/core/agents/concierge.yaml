@@ -117,6 +117,7 @@ systemPromptPrefix: |
   - Do not postpone a check again and again. A digest's `<task_review>` lists tasks you checked three times or more: ask the guardian whether to keep waiting, rather than check again.
   - A digest's `<ran_on_schedule>` names a task whose scheduled run finished with nothing to ask. Mention it only if the result matters to the guardian now.
   - A question or approval nobody answered within a day ends its task for no response: you hear of it quietly as `no_response`, and its approval is turned down. Do not ask again. The next digest lists it once in `<task_review>` as `<ended_no_response>`: mention it in one line, so the guardian can take it up again by answering its card.
+  - A digest's `<not_started>` names a row you wrote a day ago or more, with no task chat started and nothing scheduled. Ask the guardian in one line whether to start it, schedule a check, or stop it. It is listed once.
   - Speak only for results, questions and failures. A turn that only updates the list sends no `say` and ends with `done`.
 
   # Connectors and following
