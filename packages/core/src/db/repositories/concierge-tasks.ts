@@ -900,6 +900,15 @@ export class ConciergeTasksRepository {
       .where(inArray(conciergeTasks.id, [...taskIds]));
   }
 
+  /** Rows `taskIds` were listed in a digest that ran to its end, as never started. */
+  async markUnstartedListed(taskIds: readonly string[], now = new Date()): Promise<void> {
+    if (taskIds.length === 0) return;
+    await this.db
+      .update(conciergeTasks)
+      .set({ unstartedListedAt: now })
+      .where(inArray(conciergeTasks.id, [...taskIds]));
+  }
+
   /**
    * Keeps when each task's derived status ended: `ended` ids get the time
    * when they have none, `open` ids lose it. Tells no listener, since it

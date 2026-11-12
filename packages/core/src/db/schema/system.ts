@@ -786,6 +786,12 @@ export const conciergeTasks = sqliteTable(
       .notNull()
       .default(false),
     /**
+     * When a digest of its chat listed the row as a day old with no task chat
+     * started and nothing scheduled, so the Concierge asked its owner. A row
+     * is listed so once.
+     */
+    unstartedListedAt: integer("unstarted_listed_at", { mode: "timestamp_ms" }),
+    /**
      * Set when Rome gave up telling the Concierge the task chat's result, so
      * its owner was never told; cleared by the next result.
      */
