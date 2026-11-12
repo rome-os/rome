@@ -92,7 +92,7 @@ import {
   resolveChatSenders,
   resolveAutomatedSender,
   automatedMessageNotice,
-} from "../../webchat/chat-senders.js";
+} from "./chat-senders.js";
 import { artifactLocalName, isCoreMainAgentId } from "../../apps/artifact-id.js";
 import { automatedSenderId } from "../../webchat/automated-source.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
@@ -105,7 +105,7 @@ import type {
 } from "../../app-host/backend-turn.js";
 import { z } from "zod";
 import { withReplyContext } from "../../agent/index.js";
-import { resolveReply, type ReplyResolution } from "../../webchat/reply.js";
+import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import type { ChatThreadPlacement } from "../../webchat/repository.js";
 import { messageContentText } from "../../chats/history/messages-agent.js";
 

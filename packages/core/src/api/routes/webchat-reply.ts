@@ -1,14 +1,10 @@
 // Builds the snapshot a WebChat reply stores and quotes to the agent.
 
 import { REPLY_TO_TEXT_MAX_LENGTH, type ReplyToPart } from "@rome/api-types/chat";
-import { replyContextLine } from "../agent/index.js";
-import type { AgentCatalog } from "../agent/index.js";
-import type { AppCatalog } from "../apps/catalog.js";
-import type { DrizzleDb } from "../db/index.js";
-import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { WebChatRepository } from "./repository.js";
+import { replyContextLine } from "../../agent/index.js";
+import type { ApiDeps } from "../deps.js";
 import { resolveChatSenders } from "./chat-senders.js";
-import { promptSafeSourceName } from "./automated-source.js";
+import { promptSafeSourceName } from "../../webchat/automated-source.js";
 
 export type ReplyResolution =
   | { ok: true; part: ReplyToPart; promptLine: string }
@@ -62,13 +58,7 @@ function truncate(text: string): string {
  * normalization, is rejected.
  */
 export async function resolveReply(
-  deps: {
-    db: DrizzleDb;
-    settingsRepo: SettingsRepository;
-    webchatRepo: WebChatRepository;
-    agentLoader: AgentCatalog;
-    appCatalog: AppCatalog;
-  },
+  deps: Pick<ApiDeps, "db" | "settingsRepo" | "webchatRepo" | "agentLoader" | "appCatalog">,
   input: { sessionId: string; messageId: string; quote?: string; ownRowOnly: boolean },
 ): Promise<ReplyResolution> {
   const { sessionId, messageId } = input;

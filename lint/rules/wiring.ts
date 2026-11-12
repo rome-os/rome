@@ -26,6 +26,27 @@ export const wiringRules: ImportRule[] = [
 export const wiringCrossings: ListedCrossing[] = [
   {
     rule: "contexts-never-import-wiring",
+    from: "concierge/connectors.ts",
+    to: "api/routes/connections.ts",
+    ticket: "ZHA-173",
+    why: "The Concierge's list of services starts from the GET /connections response, until it reads connection state from Connections.",
+  },
+  {
+    rule: "contexts-never-import-wiring",
+    from: "concierge/following.ts",
+    to: "api/routes/connections.ts",
+    ticket: "ZHA-173",
+    why: "The Concierge's list of services starts from the GET /connections response, until it reads connection state from Connections.",
+  },
+  {
+    rule: "contexts-never-import-wiring",
+    from: "concierge/following.test.ts",
+    to: "api/routes/connections.ts",
+    ticket: "ZHA-173",
+    why: "The Concierge's list of services starts from the GET /connections response, until it reads connection state from Connections.",
+  },
+  {
+    rule: "contexts-never-import-wiring",
     from: "app-host/worker-runtime.ts",
     to: "chats-wiring.ts",
     ticket: "ZHA-172",

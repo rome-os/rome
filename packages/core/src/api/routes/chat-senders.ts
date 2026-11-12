@@ -3,17 +3,18 @@ import {
   prettyAgentName,
   type ChatMessageSender,
 } from "@rome/api-types/chat";
-import { isCoreMainAgentId } from "../apps/artifact-id.js";
-import { isConciergeAgent } from "./privacy.js";
-import { guardianAuth } from "../db/schema.js";
-import { VisitorProfilesRepository } from "../access/visitor-profiles.js";
-import type { SessionActor } from "../access/session-actor.js";
-import type { AgentCatalog } from "../agent/index.js";
-import type { AppCatalog } from "../apps/catalog.js";
-import type { DrizzleDb } from "../db/index.js";
-import type { SettingsRepository } from "../db/repositories/settings.js";
-import { appIdToPathSegment } from "../apps/packaging/app-id.js";
-import { automatedSource, speaksForGuardian, promptSafeSourceName } from "./automated-source.js";
+import { isCoreMainAgentId } from "../../apps/artifact-id.js";
+import { isConciergeAgent } from "../../webchat/privacy.js";
+import { guardianAuth } from "../../db/schema.js";
+import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
+import type { SessionActor } from "../../access/session-actor.js";
+import type { ApiDeps } from "../deps.js";
+import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
+import {
+  automatedSource,
+  speaksForGuardian,
+  promptSafeSourceName,
+} from "../../webchat/automated-source.js";
 
 /**
  * Resolve each message's source or actor into the sender the dashboard shows. The
@@ -21,12 +22,7 @@ import { automatedSource, speaksForGuardian, promptSafeSourceName } from "./auto
  * picture shows on old messages too.
  */
 export async function resolveChatSenders(
-  deps: {
-    db: DrizzleDb;
-    settingsRepo: SettingsRepository;
-    agentLoader: AgentCatalog;
-    appCatalog: AppCatalog;
-  },
+  deps: Pick<ApiDeps, "db" | "settingsRepo" | "agentLoader" | "appCatalog">,
   actors: ReadonlyMap<string, SessionActor>,
   sources: ReadonlyMap<string, string> = new Map(),
 ): Promise<Map<string, ChatMessageSender>> {
@@ -85,7 +81,7 @@ export async function resolveChatSenders(
 }
 
 export async function resolveAutomatedSender(
-  deps: { agentLoader: AgentCatalog; appCatalog: AppCatalog; settingsRepo: SettingsRepository },
+  deps: Pick<ApiDeps, "agentLoader" | "appCatalog" | "settingsRepo">,
   senderId: string,
 ): Promise<Extract<ChatMessageSender, { kind: "automated" }> | null> {
   const source = automatedSource(senderId);

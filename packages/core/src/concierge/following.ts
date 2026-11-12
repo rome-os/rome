@@ -24,7 +24,7 @@ import {
   type ConciergeFollowOptionDto,
   type ConciergeFollowRules,
 } from "@rome/api-types/concierge";
-import type { ConnectionView } from "../connections/views.js";
+import type { ConnectionView } from "../api/routes/connections.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { Action } from "../apps/actions/types.js";
 import type { AgentRunnerInterface } from "../core/types.js";
