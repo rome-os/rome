@@ -552,6 +552,21 @@
     }
   },
   "aiTools": {
+    "codexCredits": {
+      "balanceLabel": "ChatGPT 额度",
+      "remaining": "剩余 {{balance}} 积分",
+      "unlimited": "不限额",
+      "empty": "暂无可用积分",
+      "balanceUnavailable": "余额暂不可用",
+
+      "confirmTitle": "启用额度使用？",
+      "enable": "启用",
+      "manageCredits": "查看 ChatGPT 使用情况",
+      "settingsButton": "设置",
+      "label": "允许使用额度",
+      "description": "订阅配额耗尽时，允许使用 ChatGPT / Codex 账户中的可用积分。开启后，Rome 会自动继续符合恢复条件、此前因配额耗尽而暂停的对话，可能立即消耗积分；不会自动购买积分。",
+      "saveFailed": "无法读取或保存积分设置，请重试。"
+    },
     "title": "AI 工具",
     "refresh": "刷新",
     "refreshing": "正在刷新…",

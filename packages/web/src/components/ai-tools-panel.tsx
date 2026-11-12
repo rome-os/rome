@@ -1,7 +1,8 @@
+import { useMutation } from "@tanstack/react-query";
 import { Measure, Section } from "@rome-os/ui/page";
 import { Fragment, lazy, Suspense, useCallback, useEffect, useId, useState } from "react";
 import { Trans, useTranslation } from "react-i18next";
-import { Plus, RefreshCw, Trash2 } from "lucide-react";
+import { ChevronDown, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { Spinner } from "@rome-os/ui/spinner";
 
 import {
@@ -38,6 +39,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { SegmentedControl } from "@/components/ui/segmented-control";
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { useSettings, useInvalidateSettings } from "@/hooks/use-settings";
+import { fetchJson } from "@/lib/fetch-json";
 import { Textarea } from "@/components/ui/textarea";
 import { getApiErrorMessage } from "@/lib/api-error";
 import {
@@ -80,6 +89,7 @@ interface UsageWindowStatus {
 }
 
 interface AIToolUsageStatus {
+  credits?: { hasCredits: boolean; unlimited: boolean; balance?: string };
   checkedAt: string;
   source: string;
   fiveHour?: UsageWindowStatus;
@@ -215,6 +225,131 @@ export function hasConnectedAiProvider(
 ): boolean {
   return AI_TOOL_PROVIDERS.filter((provider) => !hiddenProviders.includes(provider.statusKey)).some(
     (provider) => status[provider.statusKey]?.loggedIn === true,
+  );
+}
+
+function ChatgptCreditsUsage({ usage }: { usage: AIToolUsageStatus | undefined }) {
+  const { t, i18n } = useTranslation("settings");
+  const settings = useSettings();
+  if (settings.data?.["aiTools.codex.allowCredits"] !== true) return null;
+  const credits = usage?.error ? undefined : usage?.credits;
+  const value = credits?.unlimited
+    ? t("aiTools.codexCredits.unlimited")
+    : credits?.balance !== undefined
+      ? t("aiTools.codexCredits.remaining", {
+          balance: new Intl.NumberFormat(i18n.language, { maximumFractionDigits: 0 }).format(
+            Number(credits.balance),
+          ),
+        })
+      : credits?.hasCredits === false
+        ? t("aiTools.codexCredits.empty")
+        : t("aiTools.codexCredits.balanceUnavailable");
+  return (
+    <div
+      role="group"
+      aria-label={t("aiTools.codexCredits.balanceLabel")}
+      className="mb-3 flex flex-wrap items-baseline gap-x-2 gap-y-1"
+    >
+      <span className="text-aux text-muted-foreground">
+        {t("aiTools.codexCredits.balanceLabel")}
+      </span>
+      <span className="text-ui text-foreground tabular-nums">{value}</span>
+    </div>
+  );
+}
+
+function ChatgptSettingsDropdown() {
+  const { t } = useTranslation("settings");
+  const settings = useSettings();
+  const invalidate = useInvalidateSettings();
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [confirmOpen, setConfirmOpen] = useState(false);
+  const save = useMutation({
+    mutationFn: (enabled: boolean) =>
+      fetchJson("/api/settings", {
+        method: "PUT",
+        json: { "aiTools.codex.allowCredits": enabled },
+        fallback: t("aiTools.codexCredits.saveFailed"),
+      }),
+    onSuccess: async () => {
+      await invalidate();
+      setConfirmOpen(false);
+    },
+  });
+  function closeConfirmation() {
+    if (save.isPending) return;
+    setConfirmOpen(false);
+    save.reset();
+  }
+  return (
+    <>
+      <DropdownMenu modal={false} open={menuOpen} onOpenChange={setMenuOpen}>
+        <DropdownMenuTrigger asChild>
+          <Button variant="outline" size="sm" className={AI_TOOL_ACTION_BUTTON_CLASS}>
+            {t("aiTools.codexCredits.settingsButton")}
+            <ChevronDown data-icon="inline-end" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent
+          align="end"
+          className="w-56 max-w-[calc(100vw-2rem)]"
+          onCloseAutoFocus={(event) => {
+            if (confirmOpen) event.preventDefault();
+          }}
+        >
+          <DropdownMenuCheckboxItem
+            checked={settings.data?.["aiTools.codex.allowCredits"] === true}
+            disabled={!settings.isSuccess || save.isPending}
+            onSelect={(event) => event.preventDefault()}
+            onCheckedChange={(enabled) => {
+              save.reset();
+              if (enabled) {
+                setMenuOpen(false);
+                setConfirmOpen(true);
+              } else {
+                save.mutate(false);
+              }
+            }}
+          >
+            {t("aiTools.codexCredits.label")}
+          </DropdownMenuCheckboxItem>
+          {(save.isError || settings.isError) && (
+            <p role="alert" className="px-2 py-1 text-aux text-destructive">
+              {t("aiTools.codexCredits.saveFailed")}
+            </p>
+          )}
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <Dialog open={confirmOpen} onClose={closeConfirmation} modal={save.isPending} size="sm">
+        <DialogHeader onClose={closeConfirmation} closeLabel={t("common.cancel")}>
+          <DialogTitle>{t("aiTools.codexCredits.confirmTitle")}</DialogTitle>
+        </DialogHeader>
+        <DialogBody className="space-y-3">
+          <DialogDescription>{t("aiTools.codexCredits.description")}</DialogDescription>
+          <a
+            href="https://chatgpt.com/settings/usage"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-ui text-primary underline underline-offset-4"
+          >
+            {t("aiTools.codexCredits.manageCredits")}
+          </a>
+          {save.isError && (
+            <p role="alert" className="text-ui text-destructive">
+              {t("aiTools.codexCredits.saveFailed")}
+            </p>
+          )}
+        </DialogBody>
+        <DialogFooter>
+          <Button variant="outline" onClick={closeConfirmation} disabled={save.isPending}>
+            {t("common.cancel")}
+          </Button>
+          <Button onClick={() => save.mutate(true)} disabled={save.isPending}>
+            {t("aiTools.codexCredits.enable")}
+          </Button>
+        </DialogFooter>
+      </Dialog>
+    </>
   );
 }
 
@@ -996,6 +1131,9 @@ export function AiToolsPanel({
                               {t("aiTools.otherProviders.apiKey")}
                             </Button>
                           )}
+                          {provider.statusKey === "codex" && isLoggedIn && !usesApiKey && (
+                            <ChatgptSettingsDropdown />
+                          )}
                           {!usesApiKey &&
                             (isLoggedIn ? (
                               <Button
@@ -1050,6 +1188,9 @@ export function AiToolsPanel({
                       <p role="alert" className="mb-3 text-ui text-destructive">
                         {t("aiTools.usage.unavailable")}
                       </p>
+                    )}
+                    {provider.statusKey === "codex" && !usesApiKey && (
+                      <ChatgptCreditsUsage usage={status.usage} />
                     )}
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1px_1fr] sm:gap-4">
                       <UsageBar

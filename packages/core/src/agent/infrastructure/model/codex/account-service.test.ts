@@ -82,6 +82,94 @@ function createService(
 }
 
 describe("SharedCodexAccountService", () => {
+  it.each([
+    [false, true, false, undefined, "usage_limit_reached"],
+    [true, true, false, undefined, "available"],
+    [true, false, false, undefined, "usage_limit_reached"],
+    [true, false, true, undefined, "available"],
+    [true, true, false, "workspaceOwnerUsageLimitReached", "usage_limit_reached"],
+  ])("gates exhausted subscription windows with credits enabled=%s, available=%s, unlimited=%s, limit=%s", async (enabled, hasCredits, unlimited, rateLimitReachedType, state) => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue("account/read", { account: { type: "chatgpt", planType: "plus" } });
+    rpc.queue("account/rateLimits/read", {
+      rateLimits: {
+        primary: { usedPercent: 100 },
+        secondary: { usedPercent: 100 },
+        credits: { hasCredits, unlimited },
+        rateLimitReachedType,
+      },
+    });
+    const service = createService(rpc, { allowChatgptCredits: async () => enabled });
+    try {
+      const report = await service.report();
+      expect(report.state).toBe(state);
+      expect(report.usage?.fiveHour?.usedPercent).toBe(100);
+    } finally {
+      service.close();
+    }
+  });
+
+  it.each([
+    ["125.75", "125.75"],
+    ["0", "0"],
+    [null, undefined],
+    ["", undefined],
+    ["not-a-number", undefined],
+    ["Infinity", undefined],
+  ])("retains a reported credit balance %s without requiring usage windows", async (balance, expected) => {
+    const rpc = new FakeAccountRpc();
+    rpc.queue("account/rateLimits/read", {
+      rateLimits: {
+        credits: { hasCredits: true, unlimited: false, balance },
+      },
+    });
+    const service = createService(rpc);
+    try {
+      const usage = await service.usage();
+      expect(usage?.error).toBeUndefined();
+      expect(usage?.credits).toEqual({
+        hasCredits: true,
+        unlimited: false,
+        ...(expected !== undefined ? { balance: expected } : {}),
+      });
+    } finally {
+      service.close();
+    }
+  });
+
+  it("keeps a real usage refusal even with credits, and applies disabling immediately", async () => {
+    const rpc = new FakeAccountRpc();
+    let enabled = true;
+    let now = Date.now();
+    const service = createService(rpc, {
+      allowChatgptCredits: async () => enabled,
+      now: () => now,
+    });
+    const read = async () => {
+      rpc.queue("account/read", { account: { type: "chatgpt", planType: "plus" } });
+      rpc.queue("account/rateLimits/read", {
+        rateLimits: {
+          primary: { usedPercent: 100 },
+          credits: { hasCredits: true, unlimited: false },
+        },
+      });
+      return service.report();
+    };
+    try {
+      expect((await read()).state).toBe("available");
+      enabled = false;
+      expect((await read()).state).toBe("usage_limit_reached");
+      enabled = true;
+      expect((await read()).state).toBe("available");
+      service.refusedTurn({ kind: "usage" });
+      expect((await read()).state).toBe("usage_limit_reached");
+      now += USAGE_REFUSAL_HOLD_MS + 1;
+      expect((await read()).state).toBe("available");
+    } finally {
+      service.close();
+    }
+  });
+
   it("reads account status and rate limits through process-global shared RPCs", async () => {
     const rpc = new FakeAccountRpc();
     rpc.queue("account/read", {
