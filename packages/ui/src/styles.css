@@ -730,6 +730,16 @@
   --spacing-16: var(--rome-space-16);
   --spacing-20: var(--rome-space-20);
   --spacing-24: var(--rome-space-24);
+
+  /* ── Motion. The scales and their steps:
+     docs/ui/primitive-token/motion-duration-primitives.md and
+     motion-easing-primitives.md. A duration step off the scale, such as
+     `duration-100`, keeps Tailwind's bare-number value. ───────────────────── */
+  --transition-duration-150: var(--rome-duration-150);
+  --transition-duration-200: var(--rome-duration-200);
+  --transition-duration-300: var(--rome-duration-300);
+  --ease-out-expo: var(--rome-ease-out-expo);
+  --ease-in-out-travel: var(--rome-ease-in-out-travel);
 }
 
 /* ─────────────────────── CONTROL GEOMETRY REFERENCE ───────────────────────
