@@ -1,6 +1,6 @@
-import { announceInterrupted, conciergeNoticeSender } from "./webchat/interrupted-notice.js";
+import { announceInterrupted, conciergeNotifier } from "./webchat/interrupted-notice.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
-import { startUsageLimitNotice } from "./webchat/usage-limit-continuation.js";
+import { startUsageLimitNotice } from "./webchat/usage-limit-notice.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
 import { AgentRecordedSessions } from "./sessions/agent-recorded-sessions.js";
 import { SessionRecords } from "./sessions/session-records.js";
@@ -2377,16 +2377,12 @@ async function main() {
   // the next boot's upgrade comparison runs against it.
   await commitBootVersion(settingsRepo, getBuildInfo());
 
-  // The API, actions and agents are ready. The Concierge is told once what the
+  // The API, actions and agents are ready. The Concierge is told what the
   // restart cut off, and decides what to continue (docs/concepts/sessions.md).
-  const tellConcierge = conciergeNoticeSender({ db, concierge, actions: actionEngine });
-  void announceInterrupted(db, webchatRepo, endedTurns, tellConcierge);
-  // Subscribes after the first account read may have settled, so it also reads the
-  // remembered state: a limit that ended while Rome was down is announced now.
+  const tellConcierge = conciergeNotifier({ db, concierge, actions: actionEngine });
+  void announceInterrupted(endedTurns, tellConcierge);
   const stopUsageLimitNotice = startUsageLimitNotice({
     accounts: modelAccounts,
-    db,
-    repo: webchatRepo,
     notify: tellConcierge,
   });
 
