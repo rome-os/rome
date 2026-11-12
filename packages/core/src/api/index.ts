@@ -1,3 +1,4 @@
+import { widgetAnswerRoutes } from "./routes/widget-answers.js";
 import { devicesRoutes } from "./routes/devices.js";
 import type { Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
@@ -235,6 +236,15 @@ export function buildApp(
 
   const { routes: webchatRoutesApp, runtime: webchatRuntime } = createWebchatRuntime(deps);
   api.route("/", webchatRoutesApp);
+  // A widget's answer goes back through the API, so the turn or the app call
+  // it becomes passes every check a direct call would.
+  api.route(
+    "/",
+    widgetAnswerRoutes({
+      webchatRepo: deps.webchatRepo,
+      forward: (request, env) => app.fetch(request, env),
+    }),
+  );
   // The backend-turn orchestrator is the single holder of the webchat runtime
   // for all backend session tasks (defer + approvals). It's constructed before
   // buildApp runs, so the runtime is bound after the fact, like the rest of the
