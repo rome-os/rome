@@ -257,7 +257,10 @@ export function FreeGrid({ sessionId }: { sessionId?: string }) {
     skill?: string;
     widgets?: WidgetSeed[];
   } | null;
-  const initialProjectName = locState?.projectPath?.trim() || undefined;
+  // A new tab opened by the sidebar's project plus has no router state, so the
+  // project arrives as `?project=` instead. State wins when both exist.
+  const queryProjectName = new URLSearchParams(location.search).get("project");
+  const initialProjectName = locState?.projectPath?.trim() || queryProjectName?.trim() || undefined;
   const initialDeviceFolder = locState?.deviceFolder;
   const initialAgentMention = useMemo<AgentMention | null>(() => {
     if (locState?.agentMention) return locState.agentMention;
