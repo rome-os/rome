@@ -2,7 +2,7 @@
 
 A primitive token doc for the motion easing dimension. [ui-primitive-tokens.md](../../authoring/ui-primitive-tokens.md) is the rulebook.
 
-The values live in `packages/ui/src/styles.css`. Where this doc and the file disagree, the file is right and the doc updates.
+The values live in `packages/ui/src/styles.css`. Where this doc and the file disagree, the file is right and the doc updates. `packages/web/src/lib/motion.ts` mirrors them as arrays for `motion`, which cannot read a CSS variable, and a test holds the two equal.
 
 ## Tokens
 
