@@ -60,9 +60,9 @@ enum MarkdownParser {
         let lines = source.replacingOccurrences(of: "\r\n", with: "\n").components(separatedBy: "\n")
         var next = 0
         while next < lines.count {
-            let line = lines[next]
+            var line = lines[next]
             next += 1
-            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            var trimmed = line.trimmingCharacters(in: .whitespaces)
 
             if var lines = code {
                 if trimmed.hasPrefix("```") || trimmed.hasPrefix("~~~") {
@@ -81,6 +81,15 @@ enum MarkdownParser {
                 codeLanguage = language.isEmpty ? nil : language
                 code = []
                 continue
+            }
+            // The two markers that bound a task's conclusion show nothing, as
+            // on the web. A line they leave empty ends the block below, and the
+            // rest of any other line is read as it stands. Any other HTML
+            // comment is text like the rest.
+            if line.contains("<!--") {
+                line = line.replacingOccurrences(
+                    of: "<!--\\s*/?rome:conclusion\\s*-->", with: "", options: .regularExpression)
+                trimmed = line.trimmingCharacters(in: .whitespaces)
             }
             if trimmed.isEmpty {
                 flushAll()

@@ -3574,6 +3574,70 @@ describe("AgentRunner", () => {
         expect(second).toBe(first);
       });
 
+      describe("what the chat adds to its session's context", () => {
+        const INSTRUCTION = "## Your conclusion\nEnd every final answer with one.";
+        const taskChat = { channel: "webchat", threadId: "task-chat" };
+        const chatInstructions = async (thread: { threadId?: string } | undefined) =>
+          thread?.threadId === "task-chat" ? INSTRUCTION : null;
+        const system = (provider: MockModelProvider) =>
+          provider.sessions.at(-1)?.config.systemPrompt ?? "";
+        /** A turn that opens the chat's session cold, as a defer's wake-up or an approval's continuation does: by id, with no context of its own. */
+        const continuation = async (runner: AgentRunner, sessionId: string, thread = taskChat) => {
+          await evict(runner);
+          await collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: "Continue",
+              sessionId,
+              threadContext: thread,
+              initiatedBy: "system",
+            }),
+          );
+        };
+
+        it("adds it to a task chat's session when the chat opens it", async () => {
+          const provider = new MockModelProvider(replies(1));
+          const runner = renewingRunner(provider, undefined, { chatInstructions });
+          await collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: "Hello",
+              channelThreadKey: key,
+              threadContext: taskChat,
+              contextSuffix: "## Guardian\n\nLikes tea.",
+            }),
+          );
+          expect(system(provider)).toContain(INSTRUCTION);
+          expect(system(provider)).toContain("Likes tea.");
+        });
+
+        it("adds it again when the session is evicted and resumed by id with no context of its own", async () => {
+          const provider = new MockModelProvider(replies(2));
+          const runner = renewingRunner(provider, undefined, { chatInstructions });
+          const first = await turn(runner);
+          await continuation(runner, first!);
+          expect(provider.sessions).toHaveLength(2);
+          expect(system(provider)).toContain(INSTRUCTION);
+        });
+
+        it("resumes the same session, since the instruction is no part of the setup", async () => {
+          const provider = new MockModelProvider(replies(3));
+          const runner = renewingRunner(provider, undefined, { chatInstructions });
+          const first = await turn(runner);
+          await continuation(runner, first!);
+          const second = await turn(runner, { sessionId: first! });
+          expect(second).toBe(first);
+        });
+
+        it("adds nothing to another chat's session, resumed or not", async () => {
+          const provider = new MockModelProvider(replies(2));
+          const runner = renewingRunner(provider, undefined, { chatInstructions });
+          const first = await turn(runner);
+          await continuation(runner, first!, { channel: "webchat", threadId: "plain-chat" });
+          expect(system(provider)).not.toContain(INSTRUCTION);
+        });
+      });
+
       it("renews the session when a declared MCP server's command or arguments change", async () => {
         const definition = agentLoader.find("test-renewing")!.definition as {
           mcpServers?: Record<string, { command: string; args: string[] }>;

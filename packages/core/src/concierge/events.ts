@@ -19,6 +19,7 @@ import { type DirtyTask, TaskEventCoalescer, type TaskEventDelivery } from "./ta
 import { ConciergeActivityTracker } from "./activity.js";
 import { isConciergeChat } from "../webchat/privacy.js";
 import { openQuestion } from "./transcript.js";
+import { conclusionOf, withoutConclusion, withoutMarkers } from "./conclusion.js";
 
 import { failoverReason } from "../agent/index.js";
 
@@ -169,7 +170,18 @@ export async function renderTaskEvents(
         1,
         (message) => message.direction === "fromRome" && hasText(message),
       );
-      if (latest) lines.push(`reply: ${replyExcerpt(latest.body.text)}`);
+      if (latest) {
+        // The task's own conclusion comes whole, so the Concierge can tell
+        // whether the task waits on the guardian. The rest keeps its excerpt.
+        const conclusion = conclusionOf(latest.body.text);
+        if (conclusion.kind === "found") {
+          lines.push(`conclusion: ${conclusion.text}`);
+          const rest = withoutConclusion(latest.body.text);
+          if (rest) lines.push(`reply: ${replyExcerpt(rest)}`);
+        } else {
+          lines.push(`reply: ${replyExcerpt(withoutMarkers(latest.body.text))}`);
+        }
+      }
     }
     for (const change of task.changes) {
       if (change.detail) lines.push(change.detail);
