@@ -23,12 +23,12 @@
 // for as long as that exact token is still in auth.json, and self-clears once a
 // re-login rotates it.
 
-import type { ModelPlanType } from "../agent/index.js";
+import type { ModelPlanType } from "../../../domain/model-account.js";
 import { createHash } from "node:crypto";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createLogger } from "../logger.js";
+import { createLogger } from "../../../../logger.js";
 
 const log = createLogger("codex-cli-auth");
 

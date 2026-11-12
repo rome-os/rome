@@ -43,7 +43,7 @@ const {
   },
 }));
 
-rs.mock("../../../../lib/codex-cli-auth.js", () => ({
+rs.mock("./cli-auth.js", () => ({
   getCodexCliStatus: getCodexCliStatusMock,
   markCodexAuthRevoked: markCodexAuthRevokedMock,
 }));

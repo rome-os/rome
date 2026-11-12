@@ -1,6 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { generateCaddyfile, resolveWebRoot } from "./caddyfile-generator.js";
-import { normalizeAppPermissionsSetting } from "../apps/app-permissions.js";
 
 const RUNTIME_CONFIG_HANDLE = "handle /runtime-config.js {";
 
@@ -106,21 +105,6 @@ describe("canonical path guard", () => {
 // the dashboard and login stay reachable, and per-app sharing is decided per
 // request by the `/api/auth/verify` probe behind `forward_auth`.
 describe("generateCaddyfile with a persisted legacy enableAccessControl flag", () => {
-  const persisted = {
-    enableAccessControl: true,
-    allowedApps: ["morning-brief"],
-    cloudEmailAccess: { "night-brief": ["a@b.co"] },
-  };
-
-  it("normalizes without the flag and keeps the app policy", () => {
-    const config = normalizeAppPermissionsSetting(persisted);
-    expect(config).toEqual({
-      allowedApps: ["morning-brief"],
-      cloudEmailAccess: { "night-brief": ["a@b.co"] },
-    });
-    expect("enableAccessControl" in config).toBe(false);
-  });
-
   it("still produces the normal dashboard-reachable Caddyfile", () => {
     const caddyfile = generateCaddyfile();
     expect(caddyfile).toContain("forward_auth 127.0.0.1:4141 {");

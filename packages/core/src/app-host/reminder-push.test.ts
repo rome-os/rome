@@ -13,7 +13,7 @@ import { ownerOfChat } from "../webchat/owner.js";
 import { RoutineRunsRepository } from "../db/repositories/routine-runs.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { guardianAuth, routines as routinesTable, visitorProfiles } from "../db/schema.js";
-import type { SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
+import type { SendOutcome, SystemNotifyContent } from "../instance/notify-client.js";
 import { systemClock } from "../lib/clock.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";

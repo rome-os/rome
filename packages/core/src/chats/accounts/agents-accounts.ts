@@ -21,7 +21,7 @@ import {
   type AgentMessagingClient,
   agentLabel,
   isAgentId,
-} from "../../lib/rome-cloud-agents.js";
+} from "../../connections/integrations/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
 import type { Account, AccountId, Accounts } from "./accounts.js";
 import { pageAccounts } from "./account-paging.js";

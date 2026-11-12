@@ -136,7 +136,7 @@ import {
 import { createAppStoreService } from "../apps/store-service.js";
 import { type CatalogEvent, isResolvedApp } from "../apps/state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
-import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../lib/feedback-client.js";
+import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../instance/feedback-client.js";
 import { assembleDiagnosticBundle } from "../instance/diagnostics.js";
 import type { ApiDeps } from "../api/deps.js";
 import type { FavorService } from "../favors/index.js";

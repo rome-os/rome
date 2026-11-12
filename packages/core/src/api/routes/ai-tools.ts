@@ -20,7 +20,7 @@ import {
   summarizeAnthropicCompatibleCredentialsForEditing,
 } from "../../agent/index.js";
 import { closeAuthTabs, openServerBrowserTab } from "./desktop.js";
-import { getErrorMessage } from "../../lib/provider-usage.js";
+import { getErrorMessage } from "../../lib/error-message.js";
 import { fetchRomeCredits } from "../../agent/index.js";
 import type { RomeCreditsResponse } from "@rome/api-types/rome-credits";
 
