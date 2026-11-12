@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "47147b38-ca92-4177-baba-a83acdfba25c",
+  "id": "f705ea35-2c5b-4c5d-a025-900f9d23c888",
   "prevId": "d3c8d8d3-3bf6-4adf-b55d-463b3013f66b",
   "tables": {
     "account_profiles": {
@@ -1559,6 +1559,13 @@
           "notNull": true,
           "autoincrement": false,
           "default": false
+        },
+        "unstarted_listed_at": {
+          "name": "unstarted_listed_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         },
         "report_given_up": {
           "name": "report_given_up",
@@ -3841,20 +3848,6 @@
         "superseded_for": {
           "name": "superseded_for",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "handoff": {
-          "name": "handoff",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "context_tokens": {
-          "name": "context_tokens",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

@@ -63,6 +63,8 @@ export interface DigestTaskNotes {
   passive: string[];
   /** Tasks that ended for no response. */
   noResponse: string[];
+  /** Rows a day old with no task chat started and nothing scheduled. */
+  unstarted: string[];
 }
 
 /** A task checked this many times and still waiting is flagged in the digest. */
@@ -972,8 +974,10 @@ export class ConciergeService {
    * What a digest of Concierge chat `chatId` adds about its tasks: each task
    * still waiting on a check it scheduled `POSTPONED_CHECKS` times or more,
    * so the Concierge asks the guardian rather than check again, each
-   * scheduled run that finished with nothing to say, and each task that
-   * ended for no response. `text` is empty when there is nothing to say.
+   * scheduled run that finished with nothing to say, each task that ended
+   * for no response, and each row left a day with no task chat started and
+   * nothing scheduled, so the Concierge asks the guardian about it. Each of
+   * the last two is listed once. `text` is empty when there is nothing to say.
    * Read only: {@link markTaskNotesListed} settles them once the digest's
    * turn ran to its end, so a failed digest leaves them for the next one.
    */
@@ -1009,10 +1013,30 @@ export class ConciergeService {
         lines.push(`<ended_no_response task="${attr(row.id)}" title="${attr(row.title)}"/>`);
       }
     }
+    // A row the Concierge wrote and never started stays later: after a day
+    // with nothing scheduled, the guardian is asked about it, once.
+    const dayAgo = Date.now() - this.deps.tasks.waitExpiry;
+    const unstarted = later
+      .filter(
+        (row) =>
+          !row.linkedAt &&
+          !row.sessionId &&
+          !row.lastOutcome &&
+          !row.unstartedListedAt &&
+          status.get(row.id)?.laterAt === null &&
+          row.updatedAt.getTime() <= dayAgo,
+      )
+      .map((row) => row.id);
+    for (const row of rows) {
+      if (unstarted.includes(row.id)) {
+        lines.push(`<not_started task="${attr(row.id)}" title="${attr(row.title)}"/>`);
+      }
+    }
     return {
       text: lines.length > 0 ? `<task_review>\n${lines.join("\n")}\n</task_review>` : "",
       passive,
       noResponse,
+      unstarted,
     };
   }
 
@@ -1020,6 +1044,7 @@ export class ConciergeService {
   async markTaskNotesListed(notes: DigestTaskNotes): Promise<void> {
     this.taskEvents?.settlePassive(notes.passive);
     await this.deps.tasks.repo.markNoResponseListed(notes.noResponse);
+    await this.deps.tasks.repo.markUnstartedListed(notes.unstarted);
   }
 
   /**

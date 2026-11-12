@@ -4486,6 +4486,36 @@ describe("Concierge chats", () => {
     await expect(s.service.retireChat(CONCIERGE_CHAT, "deleted")).rejects.toThrow("main");
   });
 
+  it("asks once in the digest about a row left a day with no task chat and nothing scheduled", async () => {
+    const s = setup({ startEvents: false });
+    const day = s.tasks.waitExpiry;
+    const aged = new Date(Date.now() - day - 1_000);
+    const [old, checked] = await s.taskRepo.upsertMany(
+      [
+        { title: "Follow up hiring", chatId: CONCIERGE_CHAT },
+        { title: "Checked", chatId: CONCIERGE_CHAT },
+      ],
+      aged,
+    );
+    // Written just now: not a day old yet.
+    await s.taskRepo.upsertMany([{ title: "Fresh", chatId: CONCIERGE_CHAT }]);
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      waitingSince: async () => new Map(),
+      reportPending: () => [],
+      laterOf: async () => new Map([[checked!.id, Date.now() + 60_000]]),
+    });
+    const notes = await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian");
+    expect(notes.text).toBe(
+      `<task_review>\n<not_started task="${old!.id}" title="Follow up hiring"/>\n</task_review>`,
+    );
+    expect(notes.unstarted).toEqual([old!.id]);
+    // Listed once: after a digest that ran to its end, it is not listed again.
+    await s.service.markTaskNotesListed(notes);
+    expect((await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).text).toBe("");
+  });
+
   it("flags in the digest a task still waiting on a check it scheduled three times", async () => {
     const s = setup({ startEvents: false });
     const [often, once] = await s.taskRepo.upsertMany([{ title: "CI run" }, { title: "Reply" }]);
