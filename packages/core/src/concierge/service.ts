@@ -210,7 +210,7 @@ export class ConciergeService {
   private attached: ConciergeDashboard | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
   /** Per Concierge chat, the task whose report a newer input took over. */
-  private readonly carriedReports = new Map<string, string>();
+  private readonly carriedReports = new Map<string, readonly string[]>();
   /** Per Concierge chat, the guardian messages superseded turns handed on. */
   private readonly handedOnPrompts = new Map<string, string[]>();
   /** Per Concierge turn, the tasks whose result it said. */
@@ -741,9 +741,11 @@ export class ConciergeService {
     if (!params.sessionId) return "failed";
     const outcome = (await this.deps.runBackendTurn(params, options)) ?? "failed";
     // A newer input took a report over before the Concierge said it: the
-    // turn that took over also carries that task's news.
-    if (outcome === "interrupted" && params.reportedTask) {
-      this.carriedReports.set(params.threadId, params.reportedTask);
+    // turn that took over also carries every task's news it held, one task's
+    // or a batch's.
+    if (outcome === "interrupted") {
+      const carried = await this.reportedTasksOf(prompt, params.threadId);
+      if (carried.length > 0) this.carriedReports.set(params.threadId, carried);
     }
     // The tasks this turn reported on have had their say: the messages they
     // held working settle (docs/domains/chats.md#status-reaction). A turn
@@ -771,7 +773,7 @@ export class ConciergeService {
    */
   noteRelayed(turnId: string, chatId: string, taskId: string): void {
     const unseen = this.taskEvents?.unseen(taskId) === true;
-    if (unseen && this.carriedReports.get(chatId) !== taskId) return;
+    if (unseen && !this.carriedReports.get(chatId)?.includes(taskId)) return;
     const tasks = this.relayedInTurn.get(turnId) ?? new Set<string>();
     tasks.add(taskId);
     this.relayedInTurn.set(turnId, tasks);
@@ -787,12 +789,12 @@ export class ConciergeService {
   }
 
   /**
-   * The task whose report a newer input took over in Concierge chat
+   * The tasks whose report a newer input took over in Concierge chat
    * `chatId`, until the turn that took it over ends. That turn is about the
-   * owner's message and this task both, so what it says names its subject
+   * owner's message and these tasks, so what it says names its subject
    * (docs/domains/chats.md#chat-thread).
    */
-  carriedReport(chatId: string): string | undefined {
+  carriedReport(chatId: string): readonly string[] | undefined {
     return this.carriedReports.get(chatId);
   }
 

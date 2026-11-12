@@ -71,6 +71,13 @@ const ANSWERS_PARAMETER = {
     "The message_id of the guardian message this answers, from its <chat_thread> line. Required when the turn carries several guardian messages, its own or ones an interrupted turn handed on, or a guardian message and another task's news, so the answer goes where that message is; without it such an answer goes in no thread.",
 };
 
+/** The parameter that names the guardian message a forward is the content of. */
+const FORWARD_ANSWERS_PARAMETER = {
+  type: "string",
+  description:
+    "The message_id of the guardian message, from its <chat_thread> line, that asked for this content. Set it only when this forward is what that message asked for: that message then joins the task's thread for good. A forward that only reports a task's news names none.",
+};
+
 function requireString(args: Record<string, unknown>, field: string): string {
   const value = args[field];
   if (typeof value !== "string" || !value.trim()) throw new Error(`${field} is required`);
@@ -1246,7 +1253,7 @@ export async function buildConciergeTools(
         properties: {
           chatId: { type: "string" },
           intro: { type: "string", description: "Optional short line sent before it." },
-          answers: ANSWERS_PARAMETER,
+          answers: FORWARD_ANSWERS_PARAMETER,
         },
       },
       handler: (input) =>

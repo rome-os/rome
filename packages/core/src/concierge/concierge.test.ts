@@ -583,6 +583,21 @@ describe("Concierge tools", () => {
     );
   });
 
+  it("asks chat_forward to name a guardian message only when the forward is what it asked for", async () => {
+    const s = setup();
+    const tools = await buildConciergeTools(s.service, s.context());
+    const answersOf = (name: string) =>
+      (
+        tools.find((tool) => tool.name === name)?.inputSchema as {
+          properties: { answers: { description: string } };
+        }
+      ).properties.answers.description;
+    expect(answersOf("chat_forward")).toContain(
+      "only when this forward is what that message asked for",
+    );
+    expect(answersOf("chat_forward")).not.toContain("Required");
+  });
+
   it("say posts one message under the running turn", async () => {
     const s = setup();
     await s.tool("say", { text: "on it" });
@@ -4735,6 +4750,38 @@ describe("Concierge status reactions", () => {
       expect(await reactionOf(s, "g1")).toBe("working");
       await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
       expect(s.backendTurns.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("runs no report again for two tasks a takeover turn said, after their batch was cut short", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const weather = await started(s, { title: "Weather" });
+      const traffic = await started(s, { title: "Traffic" });
+      replies(s, weather.chatId);
+      replies(s, traffic.chatId);
+      s.fakeTimers();
+      s.onBackendTurn(() => "interrupted");
+      await finishTask(s, weather.chatId, "completed", { reported: false });
+      await finishTask(s, traffic.chatId, "completed", { reported: false });
+      await rs.advanceTimersByTimeAsync(60_000);
+      // One batch named both tasks, and a newer message cut it short.
+      expect(s.backendTurns).toHaveLength(1);
+      expect(s.backendTurns[0]?.prompt).toContain(weather.taskId);
+      expect(s.backendTurns[0]?.prompt).toContain(traffic.taskId);
+      s.onBackendTurn(() => "completed");
+      s.inTurn("takeover");
+      guardianSays(s, "g2", "takeover");
+      await s.tool("say", { text: "Sunny all week", task: weather.taskId });
+      await s.tool("say", { text: "Roads are clear", task: traffic.taskId });
+      await s.finish({
+        turnId: "takeover",
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        text: "",
+      });
+      expect(await reactionOf(s, "g1")).toBeNull();
+      await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
+      expect(s.backendTurns).toHaveLength(1);
     });
 
     it("clears a stopped task at once, with nothing to report", async () => {
