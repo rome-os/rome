@@ -69,7 +69,7 @@ export const WrappedSubmission: Story = {
   args: { ...NarrowQuestion.args, onSubmitAppComponent: fn() },
   play: async ({ canvas, args }) => {
     const answer = "要，中文 + 英文，默认跟随 Rome 界面语言";
-    const option = canvas.getByRole("button", { name: answer });
+    const option = await canvas.findByRole("button", { name: answer });
     option.focus();
     await userEvent.keyboard(" ");
     await expect(option).toHaveAttribute("aria-pressed", "true");
@@ -77,8 +77,13 @@ export const WrappedSubmission: Story = {
     await expect(args.onSubmitAppComponent).toHaveBeenCalledWith(
       "storybook-chat-entries",
       "dev-ask-cjk",
-      { answers: [{ questionId: "i18n", value: answer }] },
-      answer,
+      {
+        answers: [
+          { values: [answer], text: "" },
+          { values: [], text: "" },
+        ],
+      },
+      undefined,
     );
     await expect(option).toBeDisabled();
   },
