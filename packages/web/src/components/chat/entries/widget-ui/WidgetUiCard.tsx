@@ -1,6 +1,6 @@
 import { MessageProcessor } from "@a2ui/web_core/v0_9";
 import { A2uiSurface } from "@a2ui/react/v0_9";
-import type { TranscriptPart } from "@rome/api-types/chat";
+import { checkWidgetUi, type TranscriptPart } from "@rome/api-types/chat";
 import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { fetchJson } from "@/lib/fetch-json";
@@ -21,6 +21,17 @@ export interface WidgetUiCardProps {
 const appApi = (appId: string, path: string) => `/api/apps/${encodeURIComponent(appId)}/${path}`;
 
 /**
+ * Whether a stored card may be drawn and may call its app. A stored part is
+ * read back as data, so the dashboard runs core's check again rather than
+ * trust it: every component drawable, every path inside the app, and an app
+ * id that stays one path segment once the browser normalizes the URL.
+ */
+export function isDrawableCard(appId: string, ui: unknown, bind: unknown): boolean {
+  if (!appId || appId === "." || appId === "..") return false;
+  return checkWidgetUi(ui, bind ?? {}).length === 0;
+}
+
+/**
  * A card an app described as data (`ui`), drawn with Rome's A2UI catalog.
  * Each `bind` is read from the app's API when the card mounts, so the card
  * shows the app's data as it stands. A button POSTs its event's context to
@@ -35,9 +46,14 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text }: WidgetUiCardP
   const bindKey = JSON.stringify(bind ?? {});
   const uiKey = JSON.stringify(ui);
   const inFlight = useRef(false);
+  const valid = useMemo(
+    () => isDrawableCard(appId, JSON.parse(uiKey), JSON.parse(bindKey)),
+    [appId, uiKey, bindKey],
+  );
 
   const load = useCallback(
     async (processor: MessageProcessor) => {
+      if (!valid) return;
       const entries = Object.entries(JSON.parse(bindKey) as Record<string, string>);
       const values = await Promise.all(
         entries.map(([, path]) =>
@@ -51,7 +67,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text }: WidgetUiCardP
         })),
       );
     },
-    [appId, bindKey, toolUseId],
+    [appId, bindKey, toolUseId, valid],
   );
 
   const { processor, drawable } = useMemo(() => {
@@ -79,6 +95,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text }: WidgetUiCardP
     // components; such a card shows its fallback line instead of throwing
     // out of the transcript.
     try {
+      if (!valid) throw new Error("The card fails core's check");
       const components = (JSON.parse(uiKey) as Partial<WidgetUi> | null)?.components;
       if (!Array.isArray(components)) throw new Error("The card has no components");
       p.processMessages([
@@ -95,7 +112,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text }: WidgetUiCardP
       return { processor: p, drawable: false };
     }
     return { processor: p, drawable: true };
-  }, [appId, load, toolUseId, uiKey]);
+  }, [appId, load, toolUseId, uiKey, valid]);
 
   useEffect(() => {
     let live = true;
