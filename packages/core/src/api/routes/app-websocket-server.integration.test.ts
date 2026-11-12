@@ -4,11 +4,11 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { AddressInfo } from "node:net";
 import { WebSocket } from "ws";
-import { attachAppWebSocket, type AppWebSocketDeps } from "./websocket-server.js";
-import type { AppCatalog } from "../apps/catalog.js";
-import type { ResolvedApp } from "../apps/state.js";
-import type { CatalogEvent, SubscriberHandler } from "../apps/state.js";
-import { createTestDb } from "../test/db.js";
+import { attachAppWebSocket, type AppWebSocketDeps } from "./app-websocket-server.js";
+import type { AppCatalog } from "../../apps/catalog.js";
+import type { ResolvedApp } from "../../apps/state.js";
+import type { CatalogEvent, SubscriberHandler } from "../../apps/state.js";
+import { createTestDb } from "../../test/db.js";
 
 const fixturePath = join(dirname(fileURLToPath(import.meta.url)), "__fixtures__/ws-echo-api.mjs");
 

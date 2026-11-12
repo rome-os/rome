@@ -14,7 +14,7 @@ import { describe, it, expect } from "@rstest/core";
 import { ActionEngine, type ApprovalCreatedEvent } from "../apps/actions/engine.js";
 import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { ApprovalHandler } from "../apps/actions/approval-handler.js";
-import { createBackendTurnRunner } from "./backend-turn.js";
+import { createBackendTurnRunner } from "../app-host/backend-turn.js";
 import { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import { ExecutionJournalRepository } from "../apps/repositories/execution-journal.js";
 import { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
@@ -24,7 +24,7 @@ import {
   FakeTransport,
   createMockAgentRunner,
 } from "../test/helpers.js";
-import { buildApp } from "../api/index.js";
+import { buildApp } from "./index.js";
 import { COOKIE_NAME, createSession } from "../access/auth.js";
 import type { Action, ActionConfig, ActionResult } from "../apps/actions/types.js";
 import type { ChatId } from "@rome-os/app-runtime";
