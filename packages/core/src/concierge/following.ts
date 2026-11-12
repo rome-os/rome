@@ -7,8 +7,8 @@
 // follows and one event-bus routine per raw event a follow listens on. Events
 // are batched, triaged by the `concierge-triage` agent (triage.ts), and what
 // triage kept reaches the Concierge as quiet system turns: important ones after
-// each batch, in the Concierge chat each follow reports to, and digest ones at
-// the guardian's digest times, in the main chat (alerts.ts).
+// each batch, and digest ones at the guardian's digest times, each in the
+// Concierge chat its follow reports to (alerts.ts).
 
 import { withoutSessionActor } from "../access/session-actor.js";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -28,7 +28,10 @@ import type { ConnectionView } from "../api/routes/connections.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { Action } from "../apps/actions/types.js";
 import type { AgentRunnerInterface } from "../core/types.js";
-import type { ConciergeFollowItemsRepository } from "../db/repositories/concierge-follow-items.js";
+import type {
+  ConciergeFollowItemRow,
+  ConciergeFollowItemsRepository,
+} from "../db/repositories/concierge-follow-items.js";
 import { type RoutinesRepository, toRoutine } from "../db/repositories/routines.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { RoutineEngine } from "../routines/engine.js";
@@ -731,45 +734,59 @@ export function startConciergeFollowing(
     flush: (events) => outsideAction(() => triageBatch(events)),
   });
 
-  /** Hands the owed digest to the Concierge as one turn, an empty one included. */
-  /** Hands an owner's owed digest to their main chat as one turn, an empty one included. */
+  /**
+   * Hands an owner's owed digest to the Concierge as one turn in each chat that
+   * has items, and an empty one in the main chat when nothing is owed at all.
+   * A chat's items are marked once its own turn ran to its end, so one chat's
+   * failure leaves only its items owed.
+   */
   const deliverDigest = async (owner: ConciergeOwner): Promise<{ items: number }> => {
     if (!(await service.isServed(owner))) return { items: 0 };
-    // An empty digest still runs, with count="0", so the person hears that
-    // nothing new came in.
     const owed = await deps.items.owedToDigest(owner);
-    const chatId = await service.findChatId(owner);
     const at = guardianNow(now(), await timezoneOf(owner));
     const kindLabel = kindLabelsOf(await readSources().catch(() => [] as WatchSource[]));
-    // The digest goes to the main chat and groups every chat's items under it.
-    const chats = new Map<string, ConciergeChatRef>();
+    // A chat that is gone or archived hands its items to the main chat.
+    const resolved = new Map<string, string | null>();
+    const perChat = new Map<string | null, ConciergeFollowItemRow[]>();
     for (const item of owed) {
       const key = item.chatId ?? "";
-      if (!chats.has(key)) chats.set(key, await chatRefOf(item.chatId, owner));
+      if (!resolved.has(key)) resolved.set(key, await service.deliveryChat(item.chatId, owner));
+      const chatId = resolved.get(key) ?? null;
+      perChat.set(chatId, [...(perChat.get(chatId) ?? []), item]);
     }
-    const ran =
-      chatId !== null &&
-      (await outsideAction(() =>
-        service.runSystemTurn(
-          chatId,
-          renderDigestTurn(owed, at, (item) => chats.get(item.chatId ?? ""), kindLabel),
-          {
-            quiet: true,
-            inputLabel: `Following · digest (${owed.length})`,
-            // A digest is expected at its time, so it arrives without an alert.
-            pushLevel: "passive",
-          },
-        ),
-      ));
-    log.info("following digest", { items: owed.length, delivered: ran });
-    // A digest that did not run to its end leaves its items for the next one.
-    if (!ran) return { items: 0 };
-    await deps.items.markDigested(
-      owed.map((item) => item.id),
-      new Date(now()),
-    );
-    await deps.items.prune(new Date(now() - KEEP_DELIVERED_MS));
-    return { items: owed.length };
+    // An empty digest still runs, with count="0", so the person hears that
+    // nothing new came in anywhere.
+    if (owed.length === 0) perChat.set(await service.findChatId(owner), []);
+    let delivered = 0;
+    let turns = 0;
+    for (const [chatId, items] of perChat) {
+      let ok = false;
+      try {
+        ok =
+          chatId !== null &&
+          (await outsideAction(() =>
+            service.runSystemTurn(chatId, renderDigestTurn(items, at, kindLabel), {
+              quiet: true,
+              inputLabel: `Following · digest (${items.length})`,
+              // A digest is expected at its time, so it arrives without an alert.
+              pushLevel: "passive",
+            }),
+          ));
+      } catch (error) {
+        log.warn("digest turn threw; its items stay owed", { chatId, error: messageOf(error) });
+      }
+      log.info("following digest", { chatId, items: items.length, delivered: ok });
+      // A digest that did not run to its end leaves its items for the next one.
+      if (!ok) continue;
+      await deps.items.markDigested(
+        items.map((item) => item.id),
+        new Date(now()),
+      );
+      delivered += items.length;
+      turns++;
+    }
+    if (turns > 0) await deps.items.prune(new Date(now() - KEEP_DELIVERED_MS));
+    return { items: delivered };
   };
 
   /** Follow routines made before they kept no payload stop keeping it. */

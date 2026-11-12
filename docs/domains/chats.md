@@ -116,7 +116,7 @@ The one Concierge chat each owner always has.
 - The main chat exists while the Concierge is on, and it is never archived or deleted. The dashboard offers neither.
 - The dashboard's Chat entry and its home page open the main chat. When it cannot be loaded, the dashboard says so rather than opening a blank chat.
 - The dashboard opens it at `/message`, for the guardian and for each visitor alike. A topic chat is at `/chat/<id>`. The old `/chat/concierge` address redirects to `/message`.
-- The digest goes to the main chat and lists every Concierge chat's items, grouped by chat.
+- Each Concierge chat gets the digest of its own follows. The main chat also gets one when nothing is new anywhere.
 - Alerts and tasks whose Concierge chat is archived or deleted come here.
 - In the header of every Concierge chat, a topic chat's included, and in the Concierge's own copy, the dashboard calls the Concierge by the name the guardian gave their agent (else "Rome", as the main agent). A topic chat's own name shows in the chat list. An open topic chat also names itself in its message box, whose placeholder reads "Message in …" with the chat's name. The header keeps the Concierge's name, and the main chat's message box is unchanged. The main chat is stored as "Main chat", and the chat list labels it "Main chat" in the dashboard's language. Product copy never names it "Concierge".
 

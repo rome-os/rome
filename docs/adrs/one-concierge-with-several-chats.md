@@ -1,6 +1,6 @@
 # One Concierge with several chats, not several Concierges
 
-- **Status**: Accepted
+- **Status**: Superseded for the digest by [A followed chat's digest goes to that chat](digest-to-the-chat-its-follow-reports-to.md)
 - **Date**: 2026-11-05
 
 ## Context
