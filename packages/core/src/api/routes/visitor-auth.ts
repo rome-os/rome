@@ -170,7 +170,7 @@ function beginVisitorFlow(entry: PendingVisitorLoginDraft): string | null {
 // Start a dashboard-scoped visitor attempt outside the POST route. Used by the
 // cloud-login callback's not-owner dispatch: a Rome Cloud account that isn't
 // the guardian gets re-routed here so an invited email still lands a visitor
-// session from the single "Sign in with Rome Cloud" button. The caller gates
+// session from the single "Continue with Rome Cloud" button. The caller gates
 // on the dashboard allow-list; the visitor callback re-checks it regardless.
 export function beginDashboardVisitorFlow(next?: string): string | null {
   return beginVisitorFlow({ scope: "dashboard", next: normalizeDashboardNext(next) });

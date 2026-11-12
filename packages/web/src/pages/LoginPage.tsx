@@ -1,11 +1,10 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useForm } from "@tanstack/react-form";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 import { useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { z } from "zod";
-import { LanguageSwitcher } from "@/components/language-switcher";
-import { Alert, AlertDescription } from "@/components/ui/alert";
+import { AuthActionButton, AuthError, AuthScreen } from "@/components/auth-screen";
 import { Button } from "@/components/ui/button";
 import { CloudLoginButton, cloudErrorReasonKey } from "@/components/cloud-login-button";
 import { Field, FieldError, FieldGroup, FieldLabel, FormError } from "@/components/ui/field";
@@ -38,9 +37,10 @@ export default function LoginPage() {
 
   // The sign-in view is driven entirely by the bootstrap state's
   // needs-signin arm. Cloud-primary boxes show the cloud button; the local
-  // password form is the fallback (offline / Rome Cloud unreachable), tucked behind
-  // a link — and that link only appears when a real local password actually
+  // password form is the fallback (offline / Rome Cloud unreachable), swapped in
+  // by a link — and that link only appears when a real local password actually
   // exists (`localPasswordAvailable`). Local-first boxes show the form outright.
+  // Either way one method shows at a time, so the page has one primary action.
   const signin = bootstrap?.phase === "needs-signin" ? bootstrap : null;
   const cloudPrimary = signin?.method === "cloud";
   const localPasswordAvailable = signin?.method === "cloud" ? signin.localPasswordAvailable : true;
@@ -121,192 +121,137 @@ export default function LoginPage() {
     }
   }
 
-  return (
-    <main className="relative flex min-h-dvh items-center justify-center bg-surface-muted px-4 pb-safe pt-safe">
-      <div className="absolute right-4 top-[calc(1rem+var(--rome-safe-area-top))]">
-        <LanguageSwitcher />
-      </div>
-      <div className="w-full max-w-sm">
-        <h1 className="mb-2 text-center text-title text-foreground">{t("login.title")}</h1>
-        <p className="mb-8 text-center text-ui text-muted-foreground">
-          {t(dashboardVisitorAccess ? "login.descriptionShared" : "login.description")}
-        </p>
+  const passwordForm = (
+    <form
+      noValidate
+      className="w-full text-left"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void form.handleSubmit();
+      }}
+    >
+      <FieldGroup>
+        <form.Field name="userId">
+          {(field) => {
+            const invalid = field.state.meta.isTouched && field.state.meta.errors.length > 0;
+            return (
+              <Field data-invalid={invalid || undefined}>
+                <FieldLabel htmlFor={field.name}>{t("login.username")}</FieldLabel>
+                <Input
+                  id={field.name}
+                  name={field.name}
+                  type="text"
+                  autoComplete="username"
+                  value={field.state.value}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                  onBlur={field.handleBlur}
+                  aria-invalid={invalid || undefined}
+                  aria-describedby={invalid ? `${field.name}-error` : undefined}
+                />
+                <FieldError
+                  id={`${field.name}-error`}
+                  errors={invalid ? field.state.meta.errors : undefined}
+                />
+              </Field>
+            );
+          }}
+        </form.Field>
 
-        <div className="rounded-12 border border-border bg-surface p-6 shadow-1 sm:p-8">
-          {/* On a cloud-primary box there is one Rome Cloud button for guardian
-              and invited emails alike — the cloud callback dispatches a
-              non-owner into the visitor flow. This explicit visitor button
-              survives only for the local-method arm, which has no cloud button
-              to dispatch from. */}
-          {!cloudPrimary && dashboardVisitorAccess && (
-            <div className="mb-6">
-              {visitorErrorMessage && (
-                <Alert variant="destructive" className="mb-4">
-                  <AlertDescription className="break-words">{visitorErrorMessage}</AlertDescription>
-                </Alert>
-              )}
-              <Button
-                type="button"
-                size="md"
-                variant="outline"
-                className="w-full touch-target"
-                disabled={visitorStarting}
-                onClick={() => void startDashboardVisitorLogin()}
-              >
-                {visitorStarting ? t("visitorDashboard.connecting") : t("visitorDashboard.signIn")}
-              </Button>
-            </div>
+        <form.Field name="password">
+          {(field) => {
+            const invalid = field.state.meta.isTouched && field.state.meta.errors.length > 0;
+            return (
+              <Field data-invalid={invalid || undefined}>
+                <FieldLabel htmlFor={field.name}>{t("login.password")}</FieldLabel>
+                <Input
+                  id={field.name}
+                  name={field.name}
+                  type="password"
+                  autoComplete="current-password"
+                  value={field.state.value}
+                  onChange={(event) => field.handleChange(event.target.value)}
+                  onBlur={field.handleBlur}
+                  aria-invalid={invalid || undefined}
+                  aria-describedby={invalid ? `${field.name}-error` : undefined}
+                />
+                <FieldError
+                  id={`${field.name}-error`}
+                  errors={invalid ? field.state.meta.errors : undefined}
+                />
+              </Field>
+            );
+          }}
+        </form.Field>
+
+        {serverError && <FormError>{serverError}</FormError>}
+
+        <form.Subscribe<boolean> selector={(state) => state.isSubmitting}>
+          {(isSubmitting) => (
+            <Button type="submit" size="md" disabled={isSubmitting} className="w-full touch-target">
+              {isSubmitting ? t("login.submitting") : t("login.submit")}
+            </Button>
           )}
+        </form.Subscribe>
+      </FieldGroup>
+    </form>
+  );
 
-          {!cloudPrimary && dashboardVisitorAccess && showLocalForm && (
-            <div className="relative mb-6">
-              <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                <div className="w-full border-t border-border" />
-              </div>
-              <div className="relative flex justify-center">
-                <span className="bg-surface px-3 text-aux text-muted-foreground">
-                  {t("login.or")}
-                </span>
-              </div>
-            </div>
-          )}
+  // The quiet link that swaps between the cloud button and the password form.
+  const switchMethod = (label: string, onClick: () => void) => (
+    <button
+      type="button"
+      onClick={onClick}
+      className="mt-4 text-ui text-muted-foreground hover:text-foreground focus:outline-none focus-visible:underline"
+    >
+      {label}
+    </button>
+  );
 
-          {cloudPrimary && (
-            <div className="mb-6">
-              {cloudErrorMessage && (
-                <Alert variant="destructive" className="mb-4">
-                  <AlertDescription className="break-words">{cloudErrorMessage}</AlertDescription>
-                </Alert>
-              )}
-              <CloudLoginButton onStartError={setCloudError} autoStart={autoStartCloud} />
-              {localPasswordAvailable && !showLocalForm && (
-                <button
-                  type="button"
-                  onClick={() => setShowLocalForm(true)}
-                  className="mt-4 w-full text-center text-ui text-muted-foreground hover:text-foreground focus:outline-none focus:underline"
-                >
-                  {t("login.useLocalPassword")}
-                </button>
-              )}
-            </div>
-          )}
-
-          {cloudPrimary && showLocalForm && (
-            <div className="relative mb-6">
-              <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                <div className="w-full border-t border-border" />
-              </div>
-              <div className="relative flex justify-center">
-                <span className="bg-surface px-3 text-aux text-muted-foreground">
-                  {t("login.or")}
-                </span>
-              </div>
-            </div>
-          )}
-
-          {showLocalForm && (
-            <form
-              noValidate
-              onSubmit={(event) => {
-                event.preventDefault();
-                void form.handleSubmit();
-              }}
+  let body: ReactNode;
+  if (cloudPrimary && !showLocalForm) {
+    // One Rome Cloud button for guardian and invited emails alike — the cloud
+    // callback dispatches a non-owner into the visitor flow.
+    body = (
+      <>
+        <CloudLoginButton onStartError={setCloudError} autoStart={autoStartCloud} />
+        {cloudErrorMessage && <AuthError>{cloudErrorMessage}</AuthError>}
+        {localPasswordAvailable &&
+          switchMethod(t("login.useLocalPassword"), () => setShowLocalForm(true))}
+      </>
+    );
+  } else {
+    body = (
+      <>
+        {passwordForm}
+        {cloudPrimary && switchMethod(t("login.useCloud"), () => setShowLocalForm(false))}
+        {/* The explicit visitor button survives only for the local-method arm,
+            which has no cloud button to dispatch from. */}
+        {!cloudPrimary && dashboardVisitorAccess && (
+          <>
+            <AuthActionButton
+              variant="outline"
+              className="mt-3"
+              busy={visitorStarting}
+              busyLabel={t("visitorDashboard.connecting")}
+              onClick={() => void startDashboardVisitorLogin()}
             >
-              <FieldGroup>
-                <form.Field name="userId">
-                  {(field) => {
-                    const invalid =
-                      field.state.meta.isTouched && field.state.meta.errors.length > 0;
-                    return (
-                      <Field data-invalid={invalid || undefined}>
-                        <FieldLabel htmlFor={field.name}>{t("login.username")}</FieldLabel>
-                        <Input
-                          id={field.name}
-                          name={field.name}
-                          type="text"
-                          autoComplete="username"
-                          value={field.state.value}
-                          onChange={(event) => field.handleChange(event.target.value)}
-                          onBlur={field.handleBlur}
-                          aria-invalid={invalid || undefined}
-                          aria-describedby={invalid ? `${field.name}-error` : undefined}
-                        />
-                        <FieldError
-                          id={`${field.name}-error`}
-                          errors={invalid ? field.state.meta.errors : undefined}
-                        />
-                      </Field>
-                    );
-                  }}
-                </form.Field>
+              {t("visitorDashboard.signIn")}
+            </AuthActionButton>
+            {visitorErrorMessage && <AuthError>{visitorErrorMessage}</AuthError>}
+          </>
+        )}
+      </>
+    );
+  }
 
-                <form.Field name="password">
-                  {(field) => {
-                    const invalid =
-                      field.state.meta.isTouched && field.state.meta.errors.length > 0;
-                    return (
-                      <Field data-invalid={invalid || undefined}>
-                        <FieldLabel htmlFor={field.name}>{t("login.password")}</FieldLabel>
-                        <Input
-                          id={field.name}
-                          name={field.name}
-                          type="password"
-                          autoComplete="current-password"
-                          value={field.state.value}
-                          onChange={(event) => field.handleChange(event.target.value)}
-                          onBlur={field.handleBlur}
-                          aria-invalid={invalid || undefined}
-                          aria-describedby={invalid ? `${field.name}-error` : undefined}
-                        />
-                        <FieldError
-                          id={`${field.name}-error`}
-                          errors={invalid ? field.state.meta.errors : undefined}
-                        />
-                      </Field>
-                    );
-                  }}
-                </form.Field>
-
-                {serverError && <FormError>{serverError}</FormError>}
-
-                <form.Subscribe<boolean> selector={(state) => state.isSubmitting}>
-                  {(isSubmitting) => (
-                    <Button
-                      type="submit"
-                      size="md"
-                      disabled={isSubmitting}
-                      className="w-full touch-target"
-                    >
-                      {isSubmitting ? t("login.submitting") : t("login.submit")}
-                    </Button>
-                  )}
-                </form.Subscribe>
-              </FieldGroup>
-            </form>
-          )}
-
-          {showGoogleOAuth && (
-            <div className="mt-6">
-              <div className="relative">
-                <div className="absolute inset-0 flex items-center" aria-hidden="true">
-                  <div className="w-full border-t border-border" />
-                </div>
-                <div className="relative flex justify-center">
-                  <span className="bg-surface px-3 text-aux text-muted-foreground">
-                    {t("login.or")}
-                  </span>
-                </div>
-              </div>
-              <a
-                href="/api/oauth/google/start?intent=sign-in"
-                className="mt-4 flex w-full items-center justify-center rounded-8 border border-border-strong bg-surface px-4 py-2 text-ui text-foreground shadow-1 hover:bg-surface-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-              >
-                {t("login.google")}
-              </a>
-            </div>
-          )}
-        </div>
-      </div>
-    </main>
+  return (
+    <AuthScreen title={t("login.title")}>
+      {body}
+      {showGoogleOAuth && (
+        <Button asChild variant="outline" size="md" className="mt-3 w-full touch-target">
+          <a href="/api/oauth/google/start?intent=sign-in">{t("login.google")}</a>
+        </Button>
+      )}
+    </AuthScreen>
   );
 }

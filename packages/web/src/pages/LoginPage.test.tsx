@@ -1,6 +1,6 @@
 // @rstest-environment jsdom
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import i18n from "@/i18n";
@@ -125,7 +125,7 @@ describe("auto sign-in from Rome Cloud", () => {
 
     renderLogin("/login");
 
-    await screen.findByRole("button", { name: "Sign in with Rome Cloud" });
+    await screen.findByRole("button", { name: "Continue with Rome Cloud" });
     expect(cloudStartCalls(fetchSpy)).toBe(0);
   });
 
@@ -145,5 +145,39 @@ describe("auto sign-in from Rome Cloud", () => {
 
     await screen.findByLabelText("Password");
     expect(cloudStartCalls(fetchSpy)).toBe(0);
+  });
+});
+
+describe("one sign-in method at a time", () => {
+  it("swaps the cloud button and the local password form in place", () => {
+    renderLogin("/login");
+
+    expect(screen.getByRole("button", { name: "Continue with Rome Cloud" })).toBeTruthy();
+    expect(screen.queryByLabelText("Password")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Use local password" }));
+    expect(screen.getByLabelText("Password")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Continue with Rome Cloud" })).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Use Rome Cloud" }));
+    expect(screen.getByRole("button", { name: "Continue with Rome Cloud" })).toBeTruthy();
+    expect(screen.queryByLabelText("Password")).toBeNull();
+  });
+
+  it("ignores a second click while the cloud sign-in is starting", async () => {
+    const fetchSpy = rs
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((() => new Promise<Response>(() => {})) as typeof fetch);
+    renderLogin("/login");
+
+    const button = screen.getByRole("button", { name: "Continue with Rome Cloud" });
+    fireEvent.click(button);
+    const busy = await screen.findByRole("button", { name: "Opening Rome Cloud…" });
+    expect(busy.getAttribute("aria-busy")).toBe("true");
+    fireEvent.click(busy);
+
+    expect(
+      fetchSpy.mock.calls.filter(([input]) => String(input) === "/api/auth/cloud/start").length,
+    ).toBe(1);
   });
 });
