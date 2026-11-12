@@ -682,6 +682,39 @@ final class StubBackend: RomeBackend {
         #expect(store.hasIconFile("a"))
     }
 
+    /// An icon fetch cut short by the next pass, or one that failed, is
+    /// tried again: its new key is kept only once its file is written.
+    /// Fails before the fix: the key was saved with the list.
+    @Test(arguments: ["cancelled", "failed"])
+    func anIconNotWrittenIsFetchedAgain(_ how: String) async {
+        let backend = FakeBackend()
+        backend.apiFiles = ["/apps/a/icon": png(.red)]
+        let shelf = shelf(), owner = Owner()
+        let store = shelf.store!
+        defer { shelf.clear() }
+        shelf.hand(to: owner, instanceId: "i")
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        let first = try? Data(contentsOf: store.iconURL("a"))
+        // Version 2 does not land: its fetch is cut short, or fails.
+        if how == "cancelled" {
+            backend.apiFiles["/apps/a/icon"] = png(.blue)
+            backend.duringApiFile = { shelf.hand(to: owner, instanceId: "i") }
+        } else {
+            backend.apiFiles["/apps/a/icon"] = nil
+        }
+        shelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        #expect((try? Data(contentsOf: store.iconURL("a"))) == first)
+        // The next pass fetches it again and writes it.
+        backend.duringApiFile = nil
+        backend.apiFiles["/apps/a/icon"] = png(.blue)
+        shelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        let second = try? Data(contentsOf: store.iconURL("a"))
+        #expect(second != nil && second != first)
+    }
+
     /// A list from the workspace left behind, after a switch or a sign-out,
     /// writes nothing.
     @Test func aLateListIsDropped() {

@@ -13,9 +13,6 @@ struct ShelfApp: Codable, Equatable, Hashable, Sendable, Identifiable {
     let opens: Bool
     /// The app has an icon file beside the list.
     let hasIcon: Bool
-    /// The icon the file was drawn from (its URL and the app's version): an
-    /// unchanged one is not fetched again. Nil in lists written before it.
-    var iconKey: String? = nil
 }
 
 /// The open instance's apps, in the Apps page's order.
@@ -50,6 +47,8 @@ struct AppShelfStore: Sendable {
 
     private var listURL: URL { root.appending(path: "apps.json") }
     private var iconsURL: URL { root.appending(path: "icons", directoryHint: .isDirectory) }
+    /// Which icon each file was drawn from, beside the files: gone with them.
+    private var iconKeysURL: URL { iconsURL.appending(path: "keys.json") }
 
     func read() -> Shelf? {
         guard let data = try? Data(contentsOf: listURL) else { return nil }
@@ -83,17 +82,32 @@ struct AppShelfStore: Sendable {
         iconsURL.appending(path: "\(Self.fileName(appId)).png")
     }
 
-    /// Keeps an icon, made small enough for a widget. True when it changed.
+    /// Keeps an icon, made small enough for a widget, and `key`, what it was
+    /// drawn from, once the file is written. True when the picture changed.
     /// The app decodes it first (an SVG is drawn there), so the widget only
     /// ever reads PNGs.
     @discardableResult
-    func writeIcon(_ image: UIImage, for appId: String) -> Bool {
+    func writeIcon(_ image: UIImage, for appId: String, key: String? = nil) -> Bool {
         guard let png = Self.smallPNG(image) else { return false }
         let url = iconURL(appId)
-        if (try? Data(contentsOf: url)) == png { return false }
-        try? FileManager.default.createDirectory(at: iconsURL, withIntermediateDirectories: true)
-        try? png.write(to: url, options: .atomic)
-        return true
+        let changed = (try? Data(contentsOf: url)) != png
+        if changed {
+            try? FileManager.default.createDirectory(at: iconsURL, withIntermediateDirectories: true)
+            guard (try? png.write(to: url, options: .atomic)) != nil else { return false }
+        }
+        var keys = iconKeys()
+        keys[appId] = key
+        if let data = try? JSONEncoder().encode(keys) { try? data.write(to: iconKeysURL, options: .atomic) }
+        return changed
+    }
+
+    /// The icon this app's file was drawn from, while the file is there.
+    func iconKey(_ appId: String) -> String? {
+        FileManager.default.fileExists(atPath: iconURL(appId).path) ? iconKeys()[appId] : nil
+    }
+
+    private func iconKeys() -> [String: String] {
+        (try? Data(contentsOf: iconKeysURL)).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
     }
 
     func recent(instanceId: String) -> [String] {
@@ -149,6 +163,12 @@ enum WidgetLink: Equatable, Sendable {
     case apps
     /// Chat with "Make an app: " in the composer, unsent.
     case newApp
+
+    /// The instance the link is for; Apps and Make an app are for any.
+    var instanceId: String? {
+        if case .app(let instanceId, _) = self { return instanceId }
+        return nil
+    }
 
     /// `rome` for Release, `rome-dev` for Debug: each build on one phone gets its own links.
     static let schemes: Set<String> = ["rome", "rome-dev"]

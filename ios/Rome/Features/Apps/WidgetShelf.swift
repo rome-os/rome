@@ -45,16 +45,16 @@ final class WidgetShelf {
             guard let self else { return false }
             return self.generation == ticket && self.owner === workspace && self.ownerInstance == instanceId && account.isCurrent
         }
-        let before = store.read()
         let shelf = Shelf(instanceId: instanceId, apps: apps.map { app in
-            ShelfApp(id: app.id, name: app.name, opens: app.fullHref != nil, hasIcon: Self.iconPath(app) != nil, iconKey: Self.iconKey(app))
+            ShelfApp(id: app.id, name: app.name, opens: app.fullHref != nil, hasIcon: Self.iconPath(app) != nil)
         })
+        // Another instance's icons, and what they were drawn from, go here.
         if store.write(shelf) { Self.reload() }
-        let kept = before?.instanceId == instanceId ? before : nil
+        // An icon is fetched unless its file is there, drawn from this very
+        // icon: the key is kept only once its file is written, so a fetch
+        // that was cut short or failed is tried again next time.
         let wanted = apps.filter { app in
-            guard Self.iconPath(app) != nil else { return false }
-            let known = kept?.apps.first { $0.id == app.id }?.iconKey
-            return known == nil || known != Self.iconKey(app) || !store.hasIconFile(app.id)
+            Self.iconPath(app) != nil && store.iconKey(app.id) != Self.iconKey(app)
         }
         icons?.cancel()
         guard !wanted.isEmpty else {
@@ -71,7 +71,7 @@ final class WidgetShelf {
                       let image = await AppIconImage.decode(data, side: AppShelfStore.iconPixels),
                       !Task.isCancelled, current()
                 else { continue }
-                changed = store.writeIcon(image, for: app.id) || changed
+                changed = store.writeIcon(image, for: app.id, key: Self.iconKey(app)) || changed
             }
             if changed, current() { Self.reload() }
         }

@@ -564,6 +564,21 @@ final class AppModel {
     private(set) var widgetRequest: WidgetRequest?
     /// A widget link waiting for an instance to open.
     private var pendingLink: WidgetLink?
+    /// The instance a waiting push or widget link is for, if any.
+    private var pendingInstanceID: String? { pendingPush?.instanceId ?? pendingLink?.instanceId }
+
+    /// An instance just opened: a push or link still waiting for another
+    /// one this account lists (its switch failed, or another was opened
+    /// meanwhile) is dropped, so it never pulls the guardian away later. One
+    /// for an instance no longer listed stays, for its usual fallback here.
+    private func dropPendingForOtherInstances() {
+        func elsewhere(_ id: String?) -> Bool {
+            guard let id else { return false }
+            return id != currentInstanceID && instances.contains { $0.id == id }
+        }
+        if elsewhere(pendingPush?.instanceId) { pendingPush = nil }
+        if elsewhere(pendingLink?.instanceId) { pendingLink = nil }
+    }
 
     let cloud: CloudAuth
     let push: PushCenter
@@ -650,11 +665,11 @@ final class AppModel {
             // The instance opened last, with its kept session, opens at once
             // and catches up after. A tap that launched the app for another
             // instance opens that one first, as does a phone with nothing kept.
-            if let instance = Self.rememberedInstance(), pendingPush.map({ $0.instanceId == instance.id }) ?? true,
+            if let instance = Self.rememberedInstance(), pendingInstanceID.map({ $0 == instance.id }) ?? true,
                let session = cloud.storedSession(for: instance) {
                 await openCached(instance, session: session)
             } else {
-                await openInstance(preferring: pendingPush?.instanceId)
+                await openInstance(preferring: pendingInstanceID)
             }
         } else {
             phase = .signedOut
@@ -700,6 +715,7 @@ final class AppModel {
             if self.workspace === workspace { KeptIdentity.save(workspace.kept, for: instanceID) }
         }
         Task { await update.attach(backend: workspace.backend, instanceID: instanceID) }
+        dropPendingForOtherInstances()
         if pendingPush != nil {
             await routePendingPush()
             // The push was for another instance, now open in its place.
@@ -870,10 +886,11 @@ final class AppModel {
             // Signed out or into another account meanwhile: that one decides.
             guard account.isCurrent else { return }
             take(list)
-            // A tapped push for a stopped instance: its stopped page at once.
-            if let push = pendingPush, push.instanceId == id,
-               let target = list.first(where: { $0.id == push.instanceId }), !target.isRunning {
+            // A tapped push or widget link for a stopped instance: its stopped page at once.
+            if let wanted = pendingInstanceID, wanted == id,
+               let target = list.first(where: { $0.id == wanted }), !target.isRunning {
                 pendingPush = nil
+                pendingLink = nil
                 showStopped(target)
                 return
             }
@@ -1197,6 +1214,7 @@ final class AppModel {
             guard self.workspace === workspace else { return }
         }
         phase = .ready
+        dropPendingForOtherInstances()
         if pendingPush != nil {
             await routePendingPush()
             // The push was for another instance, now open in its place.
@@ -1371,7 +1389,17 @@ final class AppModel {
     /// A tap on the widget: an app on its instance, the Apps page, or Chat
     /// to make an app. It waits while no instance is open, as a push does.
     func openFromWidget(_ link: WidgetLink) async {
+        // The tapped app shows, not the game over it.
+        stackGame = nil
         pendingLink = link
+        // As a push does: the stopped page waits on this instance's upgrade,
+        // and a page with no instance open opens the link's (or any).
+        if workspace == nil, let id = link.instanceId, update.waitingInstanceID == id { return }
+        if workspace == nil, phase.waitsOnAnInstance {
+            signInError = nil
+            await openInstance(preferring: link.instanceId)
+            return
+        }
         await routePendingLink()
     }
 

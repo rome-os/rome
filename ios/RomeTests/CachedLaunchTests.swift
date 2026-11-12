@@ -320,6 +320,43 @@ extension LastInstanceDefaults {
             }
         }
 
+        /// On a stopped page, a widget tap opens its app's instance, then the
+        /// app, as a push tap opens its chat. Fails before the fix: the link
+        /// only waited, and nothing showed.
+        @Test func aWidgetTapOnAStoppedPageOpensItsInstance() async {
+            await clean {
+                LaunchProtocol.answers["/v1/instances"] = (200, #"{"items":[{"id":"b","name":"B","slug":"b","origin":"https://b.example","status":"running"},{"id":"c","name":"C","slug":"c","origin":"https://c.example","status":"stopped"}]}"#)
+                let (app, _) = model(session: fresh)
+                await app.openFromPush(PushTarget(instanceId: "c", chatId: "concierge"))
+                await app.launch(skipSnapshot: true)
+                #expect(app.phase == .stopped(instanceName: "C"))
+                await app.openFromWidget(.app(instanceId: "b", appId: "habits"))
+                #expect(await eventually { app.widgetRequest != nil })
+                #expect(app.currentInstance?.id == "b")
+                #expect(app.takeWidgetLink(for: "b") == .app(instanceId: "b", appId: "habits"))
+            }
+        }
+
+        /// A widget tap whose instance switch failed does not pull the
+        /// guardian away from the instance they open next. Fails before the
+        /// fix: opening B switched to C again.
+        @Test func aTapWhoseSwitchFailedDoesNotFollowTheNextInstance() async {
+            await clean {
+                LaunchProtocol.answers["/v1/instances"] = (200, #"{"items":[{"id":"b","name":"B","slug":"b","origin":"https://b.example","status":"running"},{"id":"c","name":"C","slug":"c","origin":"https://c.example","status":"running"}]}"#)
+                let (app, _) = model(session: fresh)
+                await app.launch(skipSnapshot: true)
+                #expect(await eventually { app.instances.count == 2 })
+                // C has no session to open with: its switch fails.
+                await app.openFromWidget(.app(instanceId: "c", appId: "habits"))
+                #expect(await eventually { app.workspace == nil && app.phase != .ready })
+                await app.openInstance(preferring: "b")
+                #expect(app.phase == .ready && app.currentInstance?.id == "b")
+                try? await Task.sleep(for: .milliseconds(200))
+                #expect(app.currentInstance?.id == "b" && app.workspace != nil)
+                #expect(app.widgetRequest == nil)
+            }
+        }
+
         /// A push tap for another instance opens that one, not the kept one.
         @Test func aPushTapForAnotherInstanceOpensIt() async {
             await clean {
