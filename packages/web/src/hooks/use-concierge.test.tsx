@@ -2,7 +2,13 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { CONCIERGE_SESSION_QUERY_KEY, useConciergeChat, useConciergeName } from "./use-concierge";
+import {
+  CONCIERGE_CHATS_QUERY_KEY,
+  CONCIERGE_SESSION_QUERY_KEY,
+  fetchConciergeUnread,
+  useConciergeChat,
+  useConciergeName,
+} from "./use-concierge";
 
 function Name() {
   return <output>{useConciergeName()}</output>;
@@ -81,5 +87,42 @@ describe("useConciergeName", () => {
     renderName(settings);
     await new Promise((resolve) => setTimeout(resolve, 20));
     expect(screen.getByRole("status").textContent).toBe("Rome");
+  });
+});
+
+describe("fetchConciergeUnread", () => {
+  const chat = (id: string, main: boolean, unread: number) => ({ id, main, name: id, unread });
+  const client = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+  it("reads a chat's count from the server, whatever the cache holds", async () => {
+    const queryClient = client();
+    queryClient.setQueryData(CONCIERGE_CHATS_QUERY_KEY, {
+      chats: [chat("concierge", true, 0), chat("topic-1", false, 0)],
+    });
+    rs.spyOn(globalThis, "fetch").mockImplementation((async () =>
+      Response.json({
+        chats: [chat("concierge", true, 4), chat("topic-1", false, 2)],
+      })) as typeof fetch);
+
+    expect(await fetchConciergeUnread(queryClient, "concierge")).toBe(4);
+    expect(await fetchConciergeUnread(queryClient, "topic-1")).toBe(2);
+  });
+
+  it("finds the main chat by its fixed id before its real id is known", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async () =>
+      Response.json({ chats: [chat("real-main-id", true, 3)] })) as typeof fetch);
+    expect(await fetchConciergeUnread(client(), "concierge")).toBe(3);
+  });
+
+  it("counts 0 for a chat outside the Concierge", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async () =>
+      Response.json({ chats: [chat("concierge", true, 3)] })) as typeof fetch);
+    expect(await fetchConciergeUnread(client(), "ordinary-chat")).toBe(0);
+  });
+
+  it("counts 0 when the server cannot answer", async () => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async () =>
+      Response.json({ error: "down" }, { status: 500 })) as typeof fetch);
+    expect(await fetchConciergeUnread(client(), "concierge")).toBe(0);
   });
 });

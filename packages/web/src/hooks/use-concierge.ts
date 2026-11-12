@@ -23,6 +23,12 @@ interface ConciergeSession {
   unread: number;
 }
 
+const conciergeChatsQuery = {
+  queryKey: CONCIERGE_CHATS_QUERY_KEY,
+  queryFn: ({ signal }: { signal: AbortSignal }) =>
+    fetchJson<ConciergeChatsResponse>("/api/concierge/chats", { signal, fallback: "" }),
+};
+
 let timeZoneReported = false;
 
 /**
@@ -133,13 +139,30 @@ export function useConciergeUnread(chatId: string | null): number {
  */
 export function useConciergeChats(): ConciergeChatDto[] {
   const { data } = useQuery({
-    queryKey: CONCIERGE_CHATS_QUERY_KEY,
-    queryFn: ({ signal }) =>
-      fetchJson<ConciergeChatsResponse>("/api/concierge/chats", { signal, fallback: "" }),
+    ...conciergeChatsQuery,
     staleTime: 0,
     gcTime: Number.POSITIVE_INFINITY,
   });
   return data?.chats ?? [];
+}
+
+/**
+ * How many agent messages Concierge chat `chatId` has unread right now, from a
+ * fresh request and never the cache. Capped at {@link CONCIERGE_UNREAD_CAP}.
+ * Resolves 0 when the server cannot say, so a caller can wait on it before
+ * marking the chat read without a failure holding it up.
+ */
+export async function fetchConciergeUnread(
+  queryClient: QueryClient,
+  chatId: string,
+): Promise<number> {
+  try {
+    const { chats } = await queryClient.fetchQuery({ ...conciergeChatsQuery, staleTime: 0 });
+    const chat = chats.find((c) => c.id === chatId || (c.main && chatId === CONCIERGE_CHAT_ID));
+    return chat?.unread ?? 0;
+  } catch {
+    return 0;
+  }
 }
 
 /**

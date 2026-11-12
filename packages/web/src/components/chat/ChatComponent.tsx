@@ -17,6 +17,7 @@ import { useSettings } from "@/hooks/use-settings";
 import {
   CONCIERGE_CHAT_ID,
   ensureConciergeChat,
+  fetchConciergeUnread,
   refreshTopicChats,
   startConciergeTopicChat,
   useConciergeChat,
@@ -282,6 +283,10 @@ export function ChatComponent({
     void refreshTopicChats(queryClient);
     return chat.id;
   }, [queryClient]);
+  const countUnread = useCallback(
+    (chatId: string) => fetchConciergeUnread(queryClient, chatId),
+    [queryClient],
+  );
   const recoverMissingSession = useCallback(
     async (missingSessionId: string) => {
       try {
@@ -311,6 +316,7 @@ export function ChatComponent({
         composerRef={composerRef}
         navbarSlot={navbarSlot}
         recoverMissingSession={isConcierge ? recoverMissingSession : undefined}
+        countUnread={countUnread}
         variant={isConcierge ? "concierge" : "default"}
         conciergeMainChatId={concierge.chatId ?? CONCIERGE_CHAT_ID}
         conciergeName={conciergeName}

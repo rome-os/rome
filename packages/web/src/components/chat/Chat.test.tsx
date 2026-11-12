@@ -39,6 +39,7 @@ import {
   listSessionMessagePage,
   listSessionMessages,
   listSessionTurns,
+  markSessionRead,
   openTurnStream,
   postSessionTurn,
 } from "@/lib/chat-api";
@@ -226,7 +227,9 @@ rs.mock("@/components/chat/MessageList", () => ({
     live,
     rows,
     onOpenStoredTrace,
+    unreadFrom,
   }: {
+    unreadFrom?: string | null;
     onOpenStoredTrace: (target: unknown) => void;
     live: {
       identity: { name: string };
@@ -244,7 +247,9 @@ rs.mock("@/components/chat/MessageList", () => ({
     }[];
   }) => (
     <>
-      <div data-testid="message-list">{live.identity.name}</div>
+      <div data-testid="message-list" data-unread-from={unreadFrom ?? ""}>
+        {live.identity.name}
+      </div>
       {live.snapshot ? (
         <div
           data-testid="live-snapshot"
@@ -689,6 +694,85 @@ describe("Chat read marking", () => {
     } finally {
       delete (document as { visibilityState?: unknown }).visibilityState;
     }
+  });
+});
+
+describe("Chat unread divider", () => {
+  const agentMessage = (id: string, minute: number) => ({
+    id,
+    sessionId: "concierge",
+    turnId: `turn-${id}`,
+    role: "assistant" as const,
+    content: JSON.stringify([{ type: "text", content: id }]),
+    createdAt: `2026-10-27T12:0${minute}:00.000Z`,
+  });
+  const transcript = [
+    agentMessage("a1", 0),
+    agentMessage("a2", 1),
+    agentMessage("a3", 2),
+    agentMessage("a4", 3),
+  ];
+  const unreadFrom = () => screen.getByTestId("message-list").getAttribute("data-unread-from");
+  const idle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  beforeEach(() => {
+    rs.mocked(listSessionTurns).mockResolvedValue([]);
+    rs.mocked(markSessionRead).mockClear();
+    rs.mocked(listSessionMessages).mockResolvedValue(transcript);
+  });
+  afterEach(() => {
+    rs.mocked(listSessionTurns).mockResolvedValue([{ turnId: "turn-1", status: "running" }]);
+    rs.mocked(listSessionMessages).mockResolvedValue([]);
+  });
+
+  it("marks the chat read only after the unread count is in, and divides at the first unread message", async () => {
+    let resolveCount!: (count: number) => void;
+    const countUnread = rs.fn(() => new Promise<number>((resolve) => (resolveCount = resolve)));
+    renderChat(<Chat sessionId="concierge" variant="concierge" countUnread={countUnread} />);
+    await screen.findByTestId("message-list");
+    await act(idle);
+    expect(countUnread).toHaveBeenCalledWith("concierge");
+    expect(markSessionRead).not.toHaveBeenCalled();
+    expect(unreadFrom()).toBe("");
+
+    await act(async () => resolveCount(2));
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("concierge"));
+    expect(unreadFrom()).toBe("a3");
+  });
+
+  it("keeps the divider after the chat is read, and gives a message that arrives none", async () => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    renderChat(
+      <Chat sessionId="concierge" variant="concierge" countUnread={() => Promise.resolve(3)} />,
+    );
+    await waitFor(() => expect(unreadFrom()).toBe("a2"));
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalled());
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      MockEventSource.instances[0]?.emit("message_insert", agentMessage("a5", 4));
+    });
+    await act(idle);
+    expect(unreadFrom()).toBe("a2");
+  });
+
+  it("draws no divider for a chat with nothing unread, and still marks it read", async () => {
+    renderChat(
+      <Chat sessionId="concierge" variant="concierge" countUnread={() => Promise.resolve(0)} />,
+    );
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("concierge"));
+    expect(unreadFrom()).toBe("");
+  });
+
+  it("counts nothing for a draft that a first send turns into a chat", async () => {
+    const countUnread = rs.fn(() => Promise.resolve(2));
+    const { rerender } = renderChat(<Chat variant="concierge" countUnread={countUnread} />);
+    rerender(
+      <MemoryRouter>
+        {pane(<Chat sessionId="concierge" variant="concierge" countUnread={countUnread} />)}
+      </MemoryRouter>,
+    );
+    await act(idle);
+    expect(countUnread).not.toHaveBeenCalled();
   });
 });
 

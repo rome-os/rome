@@ -10,6 +10,9 @@
   "title": "Rome",
   "concierge": {
     "typing": "Typing",
+    "newMessages": "New messages",
+    "newMessagesPill_one": "{{label}} new message",
+    "newMessagesPill_other": "{{label}} new messages",
     "taskChat": "Task chat",
     "taskStatus": {
       "running": "Working",
