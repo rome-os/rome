@@ -38,6 +38,7 @@
       "dismissed": "已忽略",
       "approved": "已批准",
       "rejected": "已拒绝",
+      "waitingBelow": "等待回答：见下方卡片",
       "turnedDown": "已自动拒绝：一天内没有回应"
     },
     "taskCardAlreadyAnswered": "这张卡片已在别处回复，任务状态已刷新。",

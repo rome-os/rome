@@ -127,8 +127,9 @@ function FoldedAskLine({ chatId }: { chatId: string }) {
         approvalPayloadSchema.safeParse(row.payload).data?.channelContext.threadId === chatId,
     )
     .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
-  // The latest answer to a question, and when it came.
+  // The latest answer to a question, and when it came, and the latest question asked.
   let answer: { at: string; output: Record<string, unknown> } | null = null;
+  let asked: string | null = null;
   for (const message of messages.data?.messages ?? []) {
     let parts: unknown;
     try {
@@ -140,21 +141,29 @@ function FoldedAskLine({ chatId }: { chatId: string }) {
     for (const raw of parts) {
       const parsed = resultSchema.safeParse(raw);
       if (parsed.success) answer = { at: message.createdAt, output: parsed.data.output ?? {} };
+      if (interactionSchema.safeParse(raw).data?.type === "pending_interaction") {
+        asked = message.createdAt;
+      }
     }
   }
   const approvalIsLatest =
     approval !== undefined &&
     (answer === null || Date.parse(approval.createdAt) > Date.parse(answer.at));
+  // A copy shown again later still waits: the newer card below takes the answer.
+  const questionOpen =
+    !approvalIsLatest &&
+    asked !== null &&
+    (answer === null || Date.parse(asked) > Date.parse(answer.at));
   let line: string;
-  if (approvalIsLatest) {
+  if ((approvalIsLatest && approval.status === "pending") || questionOpen) {
+    line = t("concierge.ask.waitingBelow");
+  } else if (approvalIsLatest) {
     line =
       approval.resolvedBy === "rome:task-ended"
         ? t("concierge.ask.turnedDown")
         : approval.status === "rejected"
           ? t("concierge.ask.rejected")
-          : approval.status === "pending"
-            ? t("concierge.ask.answered")
-            : t("concierge.ask.approved");
+          : t("concierge.ask.approved");
   } else if (answer?.output.dismissed === true) {
     line = t("concierge.ask.dismissed");
   } else {

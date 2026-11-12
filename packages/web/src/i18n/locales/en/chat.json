@@ -38,6 +38,7 @@
       "dismissed": "Dismissed",
       "approved": "Approved",
       "rejected": "Rejected",
+      "waitingBelow": "Waiting: answer the card below",
       "turnedDown": "Turned down: no answer within a day"
     },
     "taskCardAlreadyAnswered": "This card was already answered. The task has been refreshed.",

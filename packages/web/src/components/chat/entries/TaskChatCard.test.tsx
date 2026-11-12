@@ -215,13 +215,24 @@ describe("TaskChatCard shown as one card or the other", () => {
   it("folds an answered question to a short line", async () => {
     postAction = () => {
       waiting = false;
+      // The task chat now holds the answer.
+      messages = [
+        ...messages,
+        message("answer", [
+          {
+            type: "interaction_result",
+            toolUseId: "item_0",
+            output: { answers: [{ questionId: "tone", value: "Warm" }] },
+          },
+        ]),
+      ];
     };
     show(true, "ask");
     const user = userEvent.setup();
     await user.click(await screen.findByRole("button", { name: "Warm" }));
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(screen.queryByText("Which tone?")).toBeNull());
-    expect(await screen.findByText("Answered")).toBeTruthy();
+    expect(await screen.findByText("Answered: Warm")).toBeTruthy();
   });
 
   it("shows an approval the same way", async () => {
@@ -311,6 +322,14 @@ describe("TaskChatCard shown as one card or the other", () => {
     it("says an approval the guardian rejected", async () => {
       allApprovals = [decided("rejected", "dev")];
       await folded("Rejected");
+    });
+
+    it("says a copy shown again still waits, for the card below, rather than claim an answer", async () => {
+      allApprovals = [decided("pending", "")];
+      waiting = true;
+      show(false, "ask");
+      expect(await screen.findByText("Waiting: answer the card below")).toBeTruthy();
+      expect(screen.queryByText(/^Answered/)).toBeNull();
     });
 
     it("says an approval Rome turned down when the wait ran out", async () => {
