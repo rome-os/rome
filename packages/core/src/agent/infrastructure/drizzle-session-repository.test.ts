@@ -351,7 +351,7 @@ describe("DrizzleSessionRepository", () => {
   });
 });
 
-describe("DrizzleSessionRepository.save() under another connection's write lock", () => {
+describe("DrizzleSessionRepository under another connection's write lock", () => {
   let dir: string;
 
   beforeEach(() => {
@@ -360,8 +360,16 @@ describe("DrizzleSessionRepository.save() under another connection's write lock"
 
   afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-  it("waits for the lock instead of failing with 'database is locked'", async () => {
-    // A file-backed WAL database, as the live one is.
+  /**
+   * Runs `act` against a repository on a file-backed WAL database, as the live
+   * one is, while another connection holds the write lock for a moment. The
+   * repository blocks this thread while it waits, so the other connection
+   * lives in its own process. It takes the write lock, then lets go.
+   */
+  async function whileLocked(
+    act: (repo: DrizzleSessionRepository) => Promise<void>,
+    prepare: (repo: DrizzleSessionRepository) => Promise<void> = async () => undefined,
+  ): Promise<void> {
     const template = createTestDb();
     const file = join(dir, "rome.db");
     writeFileSync(
@@ -372,12 +380,8 @@ describe("DrizzleSessionRepository.save() under another connection's write lock"
     const sqlite = new Database(file);
     sqlite.pragma("journal_mode = WAL");
     const repo = new DrizzleSessionRepository(drizzle(sqlite, { schema }) as unknown as DrizzleDb);
-    const session = Session.create("main");
-    await repo.add(session);
-    session.touch();
+    await prepare(repo);
 
-    // The save blocks this thread while it waits, so the other connection
-    // lives in its own process. It takes the write lock, then lets go.
     const driver = createRequire(import.meta.url).resolve("better-sqlite3");
     const holder = spawn(
       process.execPath,
@@ -399,12 +403,36 @@ describe("DrizzleSessionRepository.save() under another connection's write lock"
         holder.on("error", reject);
         holder.stdout.once("data", () => resolve());
       });
-
-      await expect(repo.save(session)).resolves.toBeUndefined();
+      await act(repo);
     } finally {
       holder.kill();
       await exited;
       sqlite.close();
     }
+  }
+
+  it("save() waits for the lock instead of failing with 'database is locked'", async () => {
+    const session = Session.create("main");
+    await whileLocked(
+      async (repo) => {
+        await expect(repo.save(session)).resolves.toBeUndefined();
+      },
+      async (repo) => {
+        await repo.add(session);
+        session.touch();
+      },
+    );
+  });
+
+  it("add() waits for the lock instead of failing with 'database is locked'", async () => {
+    const session = Session.create("main", { continuityKey: "k" });
+    await whileLocked(async (repo) => {
+      await expect(repo.add(session)).resolves.toBeUndefined();
+      expect((await repo.session(session.id))?.snapshot().id).toBe(session.id);
+      // The active-session check still runs once the lock is won.
+      await expect(repo.add(Session.create("main", { continuityKey: "k" }))).rejects.toBeInstanceOf(
+        ActiveSessionExistsError,
+      );
+    });
   });
 });
