@@ -947,7 +947,10 @@ async function main() {
   // The "openai" provider runs over the codex app-server JSON-RPC surface
   // (agentMessage `phase` → turnPhase + streaming deltas).
   const codexAppServerManager = new CodexAppServerManager();
-  const codexAccountService = new SharedCodexAccountService(codexAppServerManager);
+  const codexAccountService = new SharedCodexAccountService(codexAppServerManager, {
+    allowChatgptCredits: async () =>
+      (await settingsRepo.get("aiTools.codex.allowCredits")) === true,
+  });
   const claudeAccount = new ClaudeAccount({ settingsRepo });
   const modelAccounts = createModelAccounts({
     accounts: { openai: codexAccountService, anthropic: claudeAccount },
