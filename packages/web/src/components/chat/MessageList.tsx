@@ -38,6 +38,13 @@ export interface BlockActions {
     summary?: string,
   ) => void | Promise<void>;
   onDismissAppComponent: (sessionId: string, toolUseId: string) => void | Promise<void>;
+  /** A press on a widget the agent waits on, which answers it as a turn. */
+  onAnswerWidget?: (
+    sessionId: string,
+    toolUseId: string,
+    name: string,
+    context: Record<string, unknown>,
+  ) => void | Promise<void>;
   interactionResults: Map<string, Record<string, unknown>>;
 }
 

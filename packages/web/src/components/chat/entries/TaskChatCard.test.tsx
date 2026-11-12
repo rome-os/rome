@@ -81,7 +81,7 @@ beforeEach(async () => {
   postAction = () => {};
   fetchMock = rs.fn<typeof fetch>(async (input, init) => {
     const url = String(input);
-    if (url.endsWith("/turns") && init?.method === "POST") {
+    if (url.endsWith("/answers") && init?.method === "POST") {
       postAction();
       return Response.json(
         postStatus === 400
@@ -318,9 +318,10 @@ describe("TaskChatCard", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Yes" }));
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(posts()).toHaveLength(2));
-    expect(JSON.parse(String(posts()[1][1]?.body)).parts[0]).toMatchObject({
-      toolUseId: "item_1",
-      output: { answers: [{ values: ["Yes"], text: "" }] },
+    expect(posts()[1][0]).toBe(`/api/chat/sessions/${chatId}/widgets/item_1/answers`);
+    expect(JSON.parse(String(posts()[1][1]?.body))).toMatchObject({
+      name: "rome:answer",
+      context: { answers: [{ values: ["Yes"], text: "" }] },
     });
   });
 
@@ -331,15 +332,10 @@ describe("TaskChatCard", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(posts()).toHaveLength(1));
     const [url, init] = posts()[0];
-    expect(url).toBe(`/api/chat/sessions/${chatId}/turns`);
+    expect(url).toBe(`/api/chat/sessions/${chatId}/widgets/item_0/answers`);
     expect(JSON.parse(String(init?.body))).toMatchObject({
-      parts: [
-        {
-          type: "interaction_result",
-          toolUseId: "item_0",
-          output: { answers: [{ values: ["Warm"], text: "" }] },
-        },
-      ],
+      name: "rome:answer",
+      context: { answers: [{ values: ["Warm"], text: "" }] },
     });
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
     expect(screen.getByText("Answered")).toBeTruthy();
@@ -366,7 +362,7 @@ describe("TaskChatCard", () => {
     show();
     await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(posts()).toHaveLength(1));
-    expect(JSON.parse(String(posts()[0][1]?.body)).parts[0].output).toEqual({ dismissed: true });
+    expect(JSON.parse(String(posts()[0][1]?.body)).name).toBe("rome:dismiss");
     expect(screen.getByText("Dismissed")).toBeTruthy();
   });
 

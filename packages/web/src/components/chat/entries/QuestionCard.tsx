@@ -7,6 +7,8 @@ const WidgetUiCard = lazy(() =>
 );
 
 export interface QuestionCardProps {
+  /** The chat the question is in. */
+  sessionId: string;
   toolUseId: string;
   appId: string;
   /** The card core described from the questions (`render.ui`). */
@@ -15,8 +17,8 @@ export interface QuestionCardProps {
   props?: Record<string, unknown>;
   /** Prior submitted output when this instance already resolved. */
   result?: Record<string, unknown>;
-  onSubmit: (toolUseId: string, output: Record<string, unknown>, summary?: string) => void;
-  onDismiss: (toolUseId: string) => void;
+  /** Sends Send or Dismiss, which core turns into the answer. */
+  onAnswer: (toolUseId: string, name: string, context: Record<string, unknown>) => void;
 }
 
 /**
@@ -26,13 +28,13 @@ export interface QuestionCardProps {
  * as a line.
  */
 export function QuestionCard({
+  sessionId,
   toolUseId,
   appId,
   ui,
   props,
   result,
-  onSubmit,
-  onDismiss,
+  onAnswer,
 }: QuestionCardProps) {
   const line = <QuestionLine props={props} />;
   if (!ui || !isDrawableCard(appId, ui, {}, true)) return line;
@@ -40,11 +42,12 @@ export function QuestionCard({
     <CardBoundary fallback={line}>
       <Suspense fallback={null}>
         <WidgetUiCard
+          sessionId={sessionId}
           toolUseId={toolUseId}
           appId={appId}
           ui={ui as never}
           text=""
-          waiting={{ result, onSubmit, onDismiss }}
+          waiting={{ result, onAnswer }}
         />
       </Suspense>
     </CardBoundary>

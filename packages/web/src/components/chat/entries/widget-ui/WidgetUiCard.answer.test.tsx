@@ -81,14 +81,15 @@ const ui = {
 
 describe("a question card described as data", () => {
   it("answers the waiting turn with what the guardian picked, once a required question has an answer", async () => {
-    const onSubmit = rs.fn();
+    const onAnswer = rs.fn();
     render(
       <WidgetUiCard
+        sessionId="s1"
         toolUseId="q1"
         appId="core"
         ui={ui}
         text=""
-        waiting={{ onSubmit, onDismiss: rs.fn() }}
+        waiting={{ onAnswer }}
       />,
     );
 
@@ -100,14 +101,15 @@ describe("a question card described as data", () => {
     await waitFor(() => expect((send as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(send);
 
-    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(onSubmit.mock.calls[0]?.[0]).toBe("q1");
-    expect(onSubmit.mock.calls[0]?.[1]).toEqual({ answers: [{ values: ["Plain"], text: "" }] });
+    await waitFor(() => expect(onAnswer).toHaveBeenCalled());
+    expect(onAnswer.mock.calls[0]?.slice(0, 2)).toEqual(["q1", "rome:answer"]);
+    expect(onAnswer.mock.calls[0]?.[2]).toEqual({ answers: [{ values: ["Plain"], text: "" }] });
   });
 
   it("shows an answered card read-only with what was sent", async () => {
     const { container } = render(
       <WidgetUiCard
+        sessionId="s1"
         toolUseId="q1"
         appId="core"
         ui={ui}
@@ -117,8 +119,7 @@ describe("a question card described as data", () => {
             answers: [{ questionId: "tone", value: "Warm" }],
             card: [{ values: ["Warm"], text: "" }],
           },
-          onSubmit: rs.fn(),
-          onDismiss: rs.fn(),
+          onAnswer: rs.fn(),
         }}
       />,
     );
@@ -132,14 +133,15 @@ describe("a question card described as data", () => {
   });
 
   it("lets the last of a pick and typed text win on a single choice", async () => {
-    const onSubmit = rs.fn();
+    const onAnswer = rs.fn();
     render(
       <WidgetUiCard
+        sessionId="s1"
         toolUseId="q2"
         appId="core"
         ui={ui}
         text=""
-        waiting={{ onSubmit, onDismiss: rs.fn() }}
+        waiting={{ onAnswer }}
       />,
     );
     const own = await screen.findByRole("textbox", { name: "Which tone?" });
@@ -154,18 +156,19 @@ describe("a question card described as data", () => {
       ),
     );
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(onSubmit.mock.calls[0]?.[1]).toEqual({ answers: [{ values: [], text: "Calm" }] });
+    await waitFor(() => expect(onAnswer).toHaveBeenCalled());
+    expect(onAnswer.mock.calls[0]?.[2]).toEqual({ answers: [{ values: [], text: "Calm" }] });
   });
 
   it("keeps Send off for an answer of only spaces", async () => {
     render(
       <WidgetUiCard
+        sessionId="s1"
         toolUseId="q4"
         appId="core"
         ui={ui}
         text=""
-        waiting={{ onSubmit: rs.fn(), onDismiss: rs.fn() }}
+        waiting={{ onAnswer: rs.fn() }}
       />,
     );
     fireEvent.change(await screen.findByRole("textbox", { name: "Which tone?" }), {
@@ -182,11 +185,12 @@ describe("a question card described as data", () => {
     } as never;
     render(
       <WidgetUiCard
+        sessionId="s1"
         toolUseId="q5"
         appId="core"
         ui={withDefault}
         text=""
-        waiting={{ result: { dismissed: true }, onSubmit: rs.fn(), onDismiss: rs.fn() }}
+        waiting={{ result: { dismissed: true }, onAnswer: rs.fn() }}
       />,
     );
     await screen.findByText("Dismissed");
@@ -209,7 +213,7 @@ describe("a question card described as data", () => {
       ],
       data: { hint: "Friendly and short", picked: [] },
     } as never;
-    render(<WidgetUiCard toolUseId="q6" appId="core" ui={bound} text="" />);
+    render(<WidgetUiCard sessionId="s1" toolUseId="q6" appId="core" ui={bound} text="" />);
     expect(await screen.findByText("Friendly and short")).toBeTruthy();
   });
 
@@ -240,7 +244,7 @@ describe("a question card described as data", () => {
   });
 
   it("sends a button's context as written, even an object with only a string key", async () => {
-    const onSubmit = rs.fn();
+    const onAnswer = rs.fn();
     const card = {
       components: [
         {
@@ -254,15 +258,16 @@ describe("a question card described as data", () => {
     } as never;
     render(
       <WidgetUiCard
+        sessionId="s1"
         toolUseId="q8"
         appId="core"
         ui={card}
         text=""
-        waiting={{ onSubmit, onDismiss: rs.fn() }}
+        waiting={{ onAnswer }}
       />,
     );
     fireEvent.click(await screen.findByRole("button", { name: "Send" }));
-    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
-    expect(onSubmit.mock.calls[0]?.[1]).toEqual({ tag: ["a", { string: "send" }] });
+    await waitFor(() => expect(onAnswer).toHaveBeenCalled());
+    expect(onAnswer.mock.calls[0]?.[2]).toEqual({ tag: ["a", { string: "send" }] });
   });
 });

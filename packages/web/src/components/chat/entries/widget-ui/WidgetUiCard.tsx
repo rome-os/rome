@@ -3,6 +3,7 @@ import { A2uiSurface } from "@a2ui/react/v0_9";
 import type { TranscriptPart } from "@rome/api-types/chat";
 import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
+import { widgetAnswerPath } from "@/lib/chat-api";
 import { fetchJson } from "@/lib/fetch-json";
 import { CardBoundary } from "./CardBoundary";
 import { isDrawableCard } from "./drawable";
@@ -17,19 +18,20 @@ import {
 type WidgetUi = Extract<TranscriptPart, { type: "widget"; ui: unknown }>["ui"];
 
 export interface WidgetUiCardProps {
+  /** The chat the widget is in, where its buttons are answered. */
+  sessionId: string;
   toolUseId: string;
   appId: string;
   ui: WidgetUi;
   bind?: Record<string, string>;
   /** The widget's line, shown when the card's data cannot be read. */
   text: string;
-  /** Set for a card the agent waits on: its `rome:answer` and `rome:dismiss`
-   *  buttons answer the interaction, and `result` is the stored answer once
-   *  there is one, which locks the card. */
+  /** Set for a card the agent waits on. Its `rome:answer` and `rome:dismiss`
+   *  buttons start a turn in the chat, which `onAnswer` sends and follows;
+   *  `result` is the stored answer once there is one, which locks the card. */
   waiting?: {
     result?: Record<string, unknown>;
-    onSubmit: (toolUseId: string, output: Record<string, unknown>, summary?: string) => void;
-    onDismiss: (toolUseId: string) => void;
+    onAnswer: (toolUseId: string, name: string, context: Record<string, unknown>) => void;
   };
 }
 
@@ -60,6 +62,10 @@ function withHostStrings(value: unknown, translate: (key: string) => string): un
   );
 }
 
+/** Whether a press answers the interaction the agent waits on, so it starts
+ *  a turn the chat follows. Where the press goes is core's to decide. */
+const startsATurn = (name: string) => name === "rome:answer" || name === "rome:dismiss";
+
 const appApi = (appId: string, path: string) => `/api/apps/${encodeURIComponent(appId)}/${path}`;
 
 /** Each component's `clears`, taken out of the components, since A2UI's
@@ -82,10 +88,19 @@ function splitClears(components: unknown[]): {
 /**
  * A card an app described as data (`ui`), drawn with Rome's A2UI catalog.
  * Each `bind` is read from the app's API when the card mounts, so the card
- * shows the app's data as it stands. A button POSTs its event's context to
- * the app's API and reads every `bind` again; nothing is said in the chat.
+ * shows the app's data as it stands. A press sends its event to core, which
+ * calls the app; the card then reads every `bind` again, and nothing is said
+ * in the chat.
  */
-export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: WidgetUiCardProps) {
+export function WidgetUiCard({
+  sessionId,
+  toolUseId,
+  appId,
+  ui,
+  bind,
+  text,
+  waiting,
+}: WidgetUiCardProps) {
   const { t } = useTranslation("chat");
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -144,21 +159,21 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
 
   const { processor, drawable } = useMemo(() => {
     const p = new MessageProcessor([romeWidgetCatalog], async (action) => {
+      // Core decides what every press means. A press that answers the agent
+      // starts a turn, which the chat sends so it can follow it.
       const host = waitingRef.current;
-      if (action.name === "rome:answer" || action.name === "rome:dismiss") {
-        if (!host) return;
+      if (host && startsATurn(action.name)) {
         setSent(true);
-        if (action.name === "rome:dismiss") host.onDismiss(toolUseId);
-        else host.onSubmit(toolUseId, (action.context ?? {}) as Record<string, unknown>);
+        host.onAnswer(toolUseId, action.name, (action.context ?? {}) as Record<string, unknown>);
         return;
       }
       if (inFlight.current) return;
       inFlight.current = true;
       setBusy(true);
       try {
-        await fetchJson<unknown>(appApi(appId, action.name), {
+        await fetchJson<unknown>(widgetAnswerPath(sessionId, toolUseId), {
           method: "POST",
-          json: action.context ?? {},
+          json: { name: action.name, context: action.context ?? {} },
           fallback: "The card's button failed",
         });
         await load(p);
@@ -198,7 +213,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
       return { processor: p, drawable: false };
     }
     return { processor: p, drawable: true };
-  }, [appId, load, toolUseId, uiKey, parts, valid]);
+  }, [load, sessionId, toolUseId, uiKey, parts, valid]);
 
   // An answered card shows what the guardian sent, which core keeps as `card`.
   // A dismissed card was never answered, so it shows nothing picked rather

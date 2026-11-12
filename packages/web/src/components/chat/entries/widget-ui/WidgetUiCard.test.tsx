@@ -84,8 +84,12 @@ describe("a widget described as data", () => {
     fireEvent.click(screen.getByRole("button", { name: "Log a glass of water" }));
     await waitFor(() => expect(fetch.mock.calls.length).toBe(3));
     const post = fetch.mock.calls.find(([, init]) => init?.method === "POST");
-    expect(String(post?.[0])).toBe("/api/apps/meals/water");
-    expect(JSON.parse(String(post?.[1]?.body))).toEqual({ date: "2026-11-11" });
+    // The press goes to core, which calls the app.
+    expect(String(post?.[0])).toBe("/api/chat/sessions/s1/widgets/w-ui/answers");
+    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+      name: "water",
+      context: { date: "2026-11-11" },
+    });
   });
 
   it("keeps a widget part with neither a component nor a description out of the transcript", () => {

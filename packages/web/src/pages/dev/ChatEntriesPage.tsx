@@ -243,6 +243,7 @@ export default function ChatEntriesGalleryPage() {
  */
 type SubmitAppComponent = NonNullable<RenderEntryOptions["onSubmitAppComponent"]>;
 type DismissAppComponent = NonNullable<RenderEntryOptions["onDismissAppComponent"]>;
+type AnswerWidget = NonNullable<RenderEntryOptions["onAnswerWidget"]>;
 
 export interface ChatEntryPreviewProps {
   block: ChatEntry;
@@ -250,6 +251,7 @@ export interface ChatEntryPreviewProps {
   sessionId: string;
   onSubmitAppComponent: SubmitAppComponent;
   onDismissAppComponent: DismissAppComponent;
+  onAnswerWidget: AnswerWidget;
 }
 
 /** Renders a ChatEntry through the transcript's production dispatcher. */
@@ -259,6 +261,7 @@ export function ChatEntryPreview({
   sessionId,
   onSubmitAppComponent,
   onDismissAppComponent,
+  onAnswerWidget,
 }: ChatEntryPreviewProps) {
   const toolUseId = "toolUseId" in block ? block.toolUseId : undefined;
   const results =
@@ -271,6 +274,7 @@ export function ChatEntryPreview({
     interactionResults: results,
     onSubmitAppComponent,
     onDismissAppComponent,
+    onAnswerWidget,
   });
 }
 
@@ -288,6 +292,7 @@ function SpecimenFrame({ specimen }: { specimen: Specimen }) {
           sessionId={SESSION_ID}
           onSubmitAppComponent={noop}
           onDismissAppComponent={noop}
+          onAnswerWidget={noop}
         />
       </div>
     </section>

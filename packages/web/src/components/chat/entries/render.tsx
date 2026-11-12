@@ -68,6 +68,13 @@ export interface RenderEntryOptions {
   ) => void | Promise<void>;
   /** Invoked when an inline app component dismisses without a result. */
   onDismissAppComponent?: (sessionId: string, toolUseId: string) => void | Promise<void>;
+  /** Invoked when a press on a widget the agent waits on answers it, as a turn. */
+  onAnswerWidget?: (
+    sessionId: string,
+    toolUseId: string,
+    name: string,
+    context: Record<string, unknown>,
+  ) => void | Promise<void>;
   /** Set by the chat transcript: each text block renders as its own bubble,
    * and every entry comes in once while `live` (its turn is running). */
   transcript?: { live: boolean };
@@ -86,6 +93,7 @@ export function renderSingleEntry(
     interactionResults,
     onSubmitAppComponent,
     onDismissAppComponent,
+    onAnswerWidget,
     transcript,
   } = options;
   // The blocks of one message all share its session; submissions/lookups use it.
@@ -96,6 +104,8 @@ export function renderSingleEntry(
     ? (toolUseId: string, output: Record<string, unknown>, summary?: string) =>
         onSubmitAppComponent(sid, toolUseId, output, summary)
     : () => {};
+  const answerWidget = (toolUseId: string, name: string, context: Record<string, unknown>) =>
+    void onAnswerWidget?.(sid, toolUseId, name, context);
   const dismiss = onDismissAppComponent
     ? (toolUseId: string) => onDismissAppComponent(sid, toolUseId)
     : () => {};
@@ -220,13 +230,13 @@ export function renderSingleEntry(
         return (
           <QuestionCard
             key={`question-card-${block.toolUseId}`}
+            sessionId={sid}
             toolUseId={block.toolUseId}
             appId={block.appId}
             ui={block.render.ui}
             props={block.render.props}
             result={resultFor(block.toolUseId)}
-            onSubmit={submit}
-            onDismiss={dismiss}
+            onAnswer={answerWidget}
           />
         );
       }
@@ -252,6 +262,7 @@ export function renderSingleEntry(
           >
             <Suspense fallback={null}>
               <WidgetUiCard
+                sessionId={sid}
                 toolUseId={block.toolUseId}
                 appId={block.appId}
                 ui={block.ui}

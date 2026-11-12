@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { useApprovals } from "@/hooks/use-approvals";
-import { listSessionMessagePage, postSessionTurnJson } from "@/lib/chat-api";
+import { listSessionMessagePage, postWidgetAnswerTurn, widgetAnswerOutput } from "@/lib/chat-api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { ApprovalCard } from "../approval/ApprovalCard";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
@@ -207,15 +207,13 @@ function WaitingTaskCard({
     await Promise.all([messages.refetch(), approvals.refetch(), onRefresh()]);
   }
 
-  async function submit(toolUseId: string, output: Record<string, unknown>) {
+  async function answer(toolUseId: string, name: string, context: Record<string, unknown>) {
     if (!interaction || submitted?.key === interaction.key) return;
-    setSubmitted({ key: interaction.key, output });
+    setSubmitted({ key: interaction.key, output: widgetAnswerOutput(name, context) });
     setError(null);
     try {
       // This turn belongs to the task, never to the main Chat's stream state.
-      const result = await postSessionTurnJson(chatId, {
-        parts: [{ type: "interaction_result", toolUseId, output }],
-      });
+      const result = await postWidgetAnswerTurn(chatId, toolUseId, { name, context });
       if (!result.ok) {
         setError(
           result.status === 400
@@ -261,17 +259,15 @@ function WaitingTaskCard({
       ) : interaction?.part.render?.builtin &&
         interaction.part.render.componentId === "question-card" ? (
         <QuestionCard
+          sessionId={chatId}
           key={`${interaction.key}:${attempt}`}
           toolUseId={interaction.part.toolUseId}
           appId={interaction.part.appId ?? "core"}
           ui={interaction.part.render.ui}
           props={interaction.part.render.props}
           result={submitted?.key === interaction.key ? submitted.output : undefined}
-          onSubmit={(toolUseId, output) => {
-            void submit(toolUseId, output);
-          }}
-          onDismiss={(toolUseId) => {
-            void submit(toolUseId, { dismissed: true });
+          onAnswer={(toolUseId, name, context) => {
+            void answer(toolUseId, name, context);
           }}
         />
       ) : null}

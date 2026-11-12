@@ -185,7 +185,25 @@ export async function openWaitingCard(
             success: true,
           });
         }
-        if (path === `/api/chat/sessions/${sessionId}/turns` && method === "POST") {
+        // Core answers a widget the agent waits on with the turn below.
+        const answered = path.match(/^\/api\/chat\/sessions\/[^/]+\/widgets\/([^/]+)\/answers$/);
+        if (answered && method === "POST") {
+          const { name, context, turn } = JSON.parse(String(init?.body));
+          init = {
+            ...init,
+            body: JSON.stringify({
+              ...turn,
+              parts: [
+                {
+                  type: "interaction_result",
+                  toolUseId: decodeURIComponent(answered[1]),
+                  output: name === "rome:dismiss" ? { dismissed: true } : context,
+                },
+              ],
+            }),
+          };
+        }
+        if ((path === `/api/chat/sessions/${sessionId}/turns` || answered) && method === "POST") {
           const body = JSON.parse(String(init?.body));
           messages.push({
             id: body.inputId,
