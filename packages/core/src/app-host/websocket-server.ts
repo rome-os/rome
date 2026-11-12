@@ -12,7 +12,7 @@ import type { AppCatalog } from "../apps/catalog.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
 import type { DrizzleDb } from "../db/index.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
-import { decodeAppApiPath, decodeAppIdPathSegment } from "../api/helpers.js";
+import { decodeAppApiPath, decodeAppIdPathSegment } from "../apps/route-path.js";
 import { isSameOriginMutationRequest } from "../lib/mutation-origin.js";
 import { stripInternalHeaders } from "../relay/protocol.js";
 import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "../access/auth.js";

@@ -13,7 +13,7 @@ import type {
   ConciergeFollowOptionDto,
   ConciergeWatchCapability,
 } from "@rome/api-types/concierge";
-import type { ConnectionView } from "../api/routes/connections.js";
+import type { ConnectionView } from "../connections/views.js";
 
 /** A service a watch provider connects itself, such as a Composio toolkit. */
 export interface ProviderService {

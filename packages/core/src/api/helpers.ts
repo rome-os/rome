@@ -5,7 +5,6 @@ import type { ActionResult } from "../apps/actions/types.js";
 import type { ConnectionRegistry } from "../connections/index.js";
 import type { WebhookInvocationRecord } from "../apps/repositories/webhook-invocations.js";
 import type { ApiDeps } from "./deps.js";
-import { isValidAppId } from "../apps/packaging/app-id.js";
 import type { TransientDeltaType } from "../agent/index.js";
 
 /** Connections and channels are owned by the ConnectionRegistry. The
@@ -27,46 +26,6 @@ export function requireSetupManager(
     throw new Error("setupManager is not wired");
   }
   return deps.setupManager;
-}
-
-export class InvalidAppApiPathError extends Error {}
-
-export function decodeAppApiPathSegment(segment: string): string {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(segment);
-  } catch {
-    throw new InvalidAppApiPathError(`Invalid app API route segment "${segment}"`);
-  }
-
-  if (decoded === "." || decoded === ".." || decoded.includes("/") || decoded.includes("\\")) {
-    throw new InvalidAppApiPathError(`Invalid app API route segment "${segment}"`);
-  }
-
-  return decoded;
-}
-
-/** Decode one route segment that must contain a complete canonical app id. */
-export function decodeAppIdPathSegment(segment: string): string {
-  let decoded: string;
-  try {
-    decoded = decodeURIComponent(segment);
-  } catch {
-    throw new InvalidAppApiPathError(`Invalid app id route segment "${segment}"`);
-  }
-
-  if (!isValidAppId(decoded)) {
-    throw new InvalidAppApiPathError(`Invalid app id route segment "${segment}"`);
-  }
-  return decoded;
-}
-
-export function decodeAppApiPath(path: string | undefined): string[] {
-  if (!path) return [];
-  return path
-    .split("/")
-    .filter((segment) => segment.length > 0)
-    .map((segment) => decodeAppApiPathSegment(segment));
 }
 
 export function toWebhookInvocationStatus(

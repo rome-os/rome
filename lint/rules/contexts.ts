@@ -110,7 +110,7 @@ function describe(from: string, to: string, name: string): string {
   return `${from}/ may import only ${may}, so no file in ${from}/ imports ${to}/.`;
 }
 
-const contexts = Object.keys(ALLOWED_IMPORTS);
+export const contexts = Object.keys(ALLOWED_IMPORTS);
 
 export const contextRules: ImportRule[] = contexts.flatMap((from) =>
   contexts

@@ -17,22 +17,26 @@ import { createHmac } from "node:crypto";
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { ApprovalsRepository } from "../../apps/repositories/approvals.js";
-import { connectionsRoutes } from "../../api/routes/connections.js";
-import { setupsRoutes } from "../../api/routes/setups.js";
-import type { ApiDeps } from "../../api/deps.js";
+import { connectionsRoutes } from "./connections.js";
+import { setupsRoutes } from "./setups.js";
+import type { ApiDeps } from "../deps.js";
 import { SettingsRepository } from "../../db/repositories/settings.js";
 import { createTestDb } from "../../test/db.js";
 import type {
   MailProvider,
   RomeMailEvent,
   RomeMailMessage,
-} from "../kinds/email/rome-cloud-mail.js";
-import { ConnectionRegistry } from "../registry.js";
-import { DrizzleConnectionsRepository } from "../repository-db.js";
-import { SetupManager } from "../setup/manager.js";
-import { SetupSession } from "../setup/session.js";
-import type { SetupGrant } from "../setup/types.js";
-import { autoConnectEmail, makeEmailDescriptor, makeEmailSetup } from "./email.js";
+} from "../../connections/kinds/email/rome-cloud-mail.js";
+import { ConnectionRegistry } from "../../connections/registry.js";
+import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
+import { SetupManager } from "../../connections/setup/manager.js";
+import { SetupSession } from "../../connections/setup/session.js";
+import type { SetupGrant } from "../../connections/setup/types.js";
+import {
+  autoConnectEmail,
+  makeEmailDescriptor,
+  makeEmailSetup,
+} from "../../connections/integrations/email.js";
 
 const EMAIL_ADDRESS = "slug@mail.romeos.cc";
 const EMAIL_SECRET = "setup-inbound-secret";

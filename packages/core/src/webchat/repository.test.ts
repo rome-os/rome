@@ -1,5 +1,5 @@
-import { resolveChatSenders } from "../api/routes/chat-senders.js";
-import { resolveReply } from "../api/routes/webchat-reply.js";
+import { resolveChatSenders } from "./chat-senders.js";
+import { resolveReply } from "./reply.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq, sql } from "drizzle-orm";
 import { buildAgent, createTestDb, testChatsWiring, type TestDb } from "../test/helpers.js";

@@ -8,16 +8,19 @@
 
 import { Hono } from "hono";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { setupsRoutes } from "../../api/routes/setups.js";
-import type { ApiDeps } from "../../api/deps.js";
-import { WhatsAppAdapter, type WhatsAppSocketFactory } from "../kinds/whatsapp/whatsapp.js";
+import { setupsRoutes } from "./setups.js";
+import type { ApiDeps } from "../deps.js";
+import {
+  WhatsAppAdapter,
+  type WhatsAppSocketFactory,
+} from "../../connections/kinds/whatsapp/whatsapp.js";
 import type { PeopleRepository } from "../../db/repositories/people.js";
 import { createTestDb } from "../../test/db.js";
-import { DrizzleConnectionsRepository } from "../repository-db.js";
-import { ConnectionRegistry } from "../registry.js";
-import { SetupManager } from "../setup/manager.js";
-import type { SetupState } from "../setup/types.js";
-import { createWhatsAppDescriptor } from "./whatsapp.js";
+import { DrizzleConnectionsRepository } from "../../connections/repository-db.js";
+import { ConnectionRegistry } from "../../connections/registry.js";
+import { SetupManager } from "../../connections/setup/manager.js";
+import type { SetupState } from "../../connections/setup/types.js";
+import { createWhatsAppDescriptor } from "../../connections/integrations/whatsapp.js";
 
 const SAME_ORIGIN = { "content-type": "application/json", "sec-fetch-site": "same-origin" };
 

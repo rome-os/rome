@@ -1,6 +1,6 @@
 import { Hono } from "hono";
 import type { ApiDeps } from "../deps.js";
-import { decodeAppIdPathSegment, InvalidAppApiPathError } from "../helpers.js";
+import { decodeAppIdPathSegment, InvalidAppApiPathError } from "../../apps/route-path.js";
 
 const PATH_RE = /^\/app-og\/([^/]+)\.png$/;
 

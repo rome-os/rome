@@ -3,7 +3,7 @@ import { renderHomeScreenIcon } from "../../apps/og/home-screen-icon.js";
 import { buildAppWebManifest } from "../app-home-screen.js";
 import { isResolvedWebApp } from "../app-social-card.js";
 import type { ApiDeps } from "../deps.js";
-import { decodeAppIdPathSegment, InvalidAppApiPathError } from "../helpers.js";
+import { decodeAppIdPathSegment, InvalidAppApiPathError } from "../../apps/route-path.js";
 
 const MANIFEST_PATH_RE = /^\/app-manifest\/([^/]+)\.webmanifest$/;
 const ICON_PATH_RE = /^\/app-icon\/([^/]+)\.png$/;

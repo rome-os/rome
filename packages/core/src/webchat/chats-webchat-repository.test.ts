@@ -1,7 +1,7 @@
 import { WebChatRepository } from "./repository.js";
 import { backfillLegacyChats } from "../db/chats-backfill.js";
-import { resolveChatSenders } from "../api/routes/chat-senders.js";
-import { resolveReply } from "../api/routes/webchat-reply.js";
+import { resolveChatSenders } from "./chat-senders.js";
+import { resolveReply } from "./reply.js";
 import type { ChatId } from "@rome-os/app-runtime";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq } from "drizzle-orm";

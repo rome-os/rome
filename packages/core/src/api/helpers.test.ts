@@ -1,15 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import { decodeAppIdPathSegment, toTraceEvent } from "./helpers.js";
-
-describe("decodeAppIdPathSegment", () => {
-  it("decodes a complete scoped app id from one route segment", () => {
-    expect(decodeAppIdPathSegment("%40foo%2Fbar")).toBe("@foo/bar");
-  });
-
-  it("rejects a slash that is not a valid scoped app id", () => {
-    expect(() => decodeAppIdPathSegment("foo%2Fbar")).toThrow(/Invalid app id route segment/);
-  });
-});
+import { toTraceEvent } from "./helpers.js";
 
 describe("toTraceEvent", () => {
   it("keeps a tool result's isError flag, including false", () => {
