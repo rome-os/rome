@@ -3138,6 +3138,27 @@ describe("Concierge events", () => {
     expect(s.backendTurns[1].prompt).toContain(`id="${taskId}"`);
   });
 
+  it("still reports a result whose report turn wrote the row and then failed", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    // The report turn renames the row, then fails before it says the result.
+    s.onBackendTurn(async () => {
+      await s.taskRepo.upsertMany([{ id: taskId, title: "Flights to Rome" }]);
+      return "failed";
+    });
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    s.onBackendTurn(() => "completed");
+    await rs.advanceTimersByTimeAsync(RETRY_MS + 1_000);
+    expect(s.backendTurns).toHaveLength(2);
+    expect(s.backendTurns[1].prompt).toContain(`id="${taskId}"`);
+    // Once a report ran to its end, the result is said.
+    await s.settle();
+    expect((await s.taskRepo.get(taskId))?.outcomeUnsaid).toBe(false);
+  });
+
   it("hands a task's result over again when a newer message, not a Stop, cut the turn short", async () => {
     const s = setup();
     const { chatId } = await startTask(s);

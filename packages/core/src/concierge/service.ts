@@ -802,7 +802,7 @@ export class ConciergeService {
       if (reported.length > 0) {
         // The Concierge has had their news: none of it is owed any more. A
         // row whose news came after the payload was built still owes that.
-        for (const taskId of reported) this.taskEvents?.settle(taskId);
+        for (const taskId of reported) this.taskEvents?.settle(taskId, { delivered: true });
         const settled = reported.filter((taskId) => !this.taskEvents?.waiting(taskId));
         await this.deps.tasks.repo.markReported(settled).catch((error: unknown) =>
           log.warn("failed to settle reported results", {

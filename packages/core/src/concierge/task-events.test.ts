@@ -389,22 +389,33 @@ describe("TaskEventCoalescer", () => {
     expect(s.coalescer.pending).toEqual(["b"]);
   });
 
-  it("does not hand back changes a write settled while a failing turn ran", async () => {
+  it("hands back what a failing turn carried though it wrote the row before it failed", async () => {
     const s = setup();
     s.turnsRun(false);
     s.holdTurns();
     s.coalescer.mark(urgent("a", "turn_end:completed question by=concierge"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
-    // The Concierge wrote the row from the turn's input; then a new change came.
+    // The report turn wrote the row (a title, a note), then failed before it
+    // said the result: the result is still owed, with the change after it.
     s.coalescer.settle("a");
     await rs.advanceTimersByTimeAsync(1_000);
     s.coalescer.mark(urgent("a", "approval"));
     await s.endTurn();
 
     s.turnsRun(true);
-    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
     await s.endTurn();
-    expect(s.rendered.at(-1)).toEqual(["approval"]);
+    expect(s.rendered.at(-1)).toEqual(["turn_end:completed question by=concierge", "approval"]);
+  });
+
+  it("settles a row's news once the turn that carried it ran to its end, though it wrote the row", async () => {
+    const s = setup();
+    s.holdTurns();
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    s.coalescer.settle("a");
+    await s.endTurn();
+    expect(s.coalescer.pending).toEqual([]);
   });
 
   it("never hands the changes of a turn the guardian stopped over again, but still delivers one that came while it ran", async () => {

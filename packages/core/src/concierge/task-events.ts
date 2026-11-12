@@ -189,9 +189,13 @@ export class TaskEventCoalescer {
   /**
    * The Concierge wrote the row, or said its news. Clears its mark unless a
    * change came after the build, or the turn built to carry it never reached
-   * the Concierge: that news is still owed, and its retry goes ahead.
+   * the Concierge: that news is still owed, and its retry goes ahead. While
+   * the turn carrying it runs, how that turn ends decides: a write in a
+   * report that then fails settles nothing. `delivered` is that turn ending
+   * complete.
    */
-  settle(taskId: string): void {
+  settle(taskId: string, options: { delivered?: boolean } = {}): void {
+    if (!options.delivered && this.inFlight.has(taskId)) return;
     const entry = this.dirty.get(taskId);
     if (
       entry &&
