@@ -153,6 +153,11 @@ const CODEX_TOOL_SWITCHES: ReadonlyArray<
   ["features.multi_agent", false, ["Task"]],
   ["features.image_generation", false, ["ImageGeneration"]],
   ["web_search", "disabled", ["WebSearch"]],
+  // ChatGPT's apps (the `codex_apps` MCP server) carry their own web search,
+  // which `web_search` does not switch off, and the accounts linked in
+  // ChatGPT. Code mode lists them all, so an agent reached the web through
+  // them without declaring WebSearch.
+  ["features.apps", false, ["WebSearch"]],
 ];
 
 // The app-server turns Codex's bundled skills off (codexAppServerConfigArgs).

@@ -331,6 +331,7 @@ describe("CodexAppServerProvider", () => {
     "features.multi_agent": false,
     "features.image_generation": false,
     web_search: "disabled",
+    "features.apps": false,
   };
   const threadRequest = (method: string) =>
     requestMock.mock.calls.find((call) => call[0] === method)?.[1] as
@@ -347,7 +348,7 @@ describe("CodexAppServerProvider", () => {
       label: "Read, Glob, and Grep",
       builtinTools: ["Read", "Glob", "Grep"],
       sandbox: "danger-full-access",
-      off: ["features.multi_agent", "features.image_generation", "web_search"],
+      off: ["features.multi_agent", "features.image_generation", "web_search", "features.apps"],
     },
     {
       label: "Bash",
@@ -358,6 +359,7 @@ describe("CodexAppServerProvider", () => {
         "features.multi_agent",
         "features.image_generation",
         "web_search",
+        "features.apps",
       ],
     },
     {
