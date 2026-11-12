@@ -171,6 +171,12 @@ describe("ChatImage", () => {
     );
   });
 
+  it("asks the server for a 900 px thumbnail of a stored picture", () => {
+    const src = "/api/assets/0123456789abcdef0123456789abcdef.png";
+    render(<Message text={`![Shot](${src})`} />);
+    expect(screen.getByRole("img", { name: "Shot" }).getAttribute("src")).toBe(`${src}?w=900`);
+  });
+
   it.each([
     "https://example.com/sky.jpg?w=1",
     "/api/share/token/projects/asset/a.png?path=projects%2Fa.png",

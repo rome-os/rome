@@ -153,6 +153,32 @@ function WorkspaceLink({
   );
 }
 
+// A link to a stored file (`/api/assets/<id>.<ext>`, relative or same-origin)
+// is a plain anchor in a new tab. It is a file, not a route, so a react-router
+// `<Link>` would navigate the SPA to it.
+function isAssetHref(href: string): boolean {
+  if (!isInternalHref(href)) return false;
+  const rawPath = getInternalRawPath(href);
+  return rawPath !== null && rawPath.startsWith("/api/assets/");
+}
+
+function AssetLink({
+  children,
+  href,
+  node: _node,
+  target: _target,
+  rel: _rel,
+  className: _className,
+  ref: _ref,
+  ...rest
+}: MarkdownLinkProps) {
+  return (
+    <a href={href} target="_blank" rel="noopener" className={MARKDOWN_LINK_CLASS} {...rest}>
+      {children}
+    </a>
+  );
+}
+
 // A picture inside the link leaves the tap to the link.
 export function ChatLink(props: MarkdownLinkProps) {
   return (
@@ -169,6 +195,8 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
   const store = useContext(WorkspaceStoreContext);
   const eventBus = useWorkspaceEventBus();
   const href = props.href;
+
+  if (href && isAssetHref(href)) return <AssetLink {...props} />;
 
   if (store && href) {
     const projectsHref = getProjectsRouteHref(href);

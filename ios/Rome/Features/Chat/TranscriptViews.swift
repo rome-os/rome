@@ -168,6 +168,7 @@ private struct UserImageTile: View {
     /// A width the server offers; the tile only needs a small thumbnail.
     private static let assetWidth = 600
     @Environment(\.assetLoader) private var assetLoader
+    @Environment(\.apiFileLoader) private var apiLoader
     @State private var loaded: CGImage?
     @State private var failed = false
 
@@ -184,7 +185,7 @@ private struct UserImageTile: View {
             if let loaded {
                 Image(decorative: loaded, scale: 1).resizable().scaledToFill()
                     .accessibilityLabel("Photo")
-            } else if !upload.isImage || assetLoader == nil {
+            } else if !upload.isImage || (assetLoader == nil && apiLoader == nil) {
                 attachmentLabel(upload.name)
             } else if failed {
                 // Offline for a moment, say: a tap, or the next time it scrolls in, tries again.
@@ -200,14 +201,13 @@ private struct UserImageTile: View {
     }
 
     private func load(_ upload: UploadLines.Upload) async {
-        guard let assetLoader else { return }
         let key = StoredImageCache.shared.key(upload.assetPath)
         if let cached = StoredImageCache.shared.image(key) {
             loaded = cached
             return
         }
         do {
-            let data = try await assetLoader(upload.assetPath, Self.assetWidth)
+            let data = try await ImageFetch.data(upload.source, assetLoader: assetLoader, apiLoader: apiLoader, width: Self.assetWidth)
             // Decoded small and off the main actor: an upload from the web may be huge.
             let thumbnail = await Task.detached(priority: .userInitiated) {
                 ImageCompressor.thumbnail(from: data, maxPixel: ComposerImage.thumbnailPixels)

@@ -393,4 +393,36 @@ describe("ChatLink", () => {
     const link = screen.getByText("x") as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe("/projects/default/x.png");
   });
+
+  it("renders a link to a stored file as a plain anchor in a new tab", () => {
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+    const href = "/api/assets/0123456789abcdef0123456789abcdef.png";
+
+    renderInWorkspace(<ChatLink href={href}>image.png</ChatLink>, { store, bus });
+    const link = screen.getByText("image.png") as HTMLAnchorElement;
+
+    expect(link.tagName).toBe("A");
+    expect(link.getAttribute("href")).toBe(href);
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener");
+    // Not intercepted: a click leaves the default (open the file) to the browser.
+    expect(fireEvent.click(link)).toBe(true);
+    expect(store.get("followTargetPath")).toBeUndefined();
+  });
+
+  it("keeps a same-origin absolute stored-file link a plain anchor", () => {
+    stubOrigin("https://staging.romeos.cc");
+    const href = "https://staging.romeos.cc/api/assets/0123456789abcdef0123456789abcdef.pdf";
+
+    render(
+      <MemoryRouter>
+        <ChatLink href={href}>report.pdf</ChatLink>
+      </MemoryRouter>,
+    );
+    const link = screen.getByText("report.pdf") as HTMLAnchorElement;
+
+    expect(link.getAttribute("href")).toBe(href);
+    expect(link.getAttribute("target")).toBe("_blank");
+  });
 });

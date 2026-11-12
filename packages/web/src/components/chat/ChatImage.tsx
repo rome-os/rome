@@ -18,7 +18,7 @@ export const InsideLinkContext = createContext(false);
 // A picture on this instance's asset routes loads as a thumbnail this wide.
 // The viewer and Download use the original.
 const THUMBNAIL_WIDTH = 900;
-const ASSET_SRC = /^\/api\/(?:projects|memory)\/asset(?:[/?]|$)/;
+const ASSET_SRC = /^\/api\/(?:(?:projects|memory)\/asset(?:[/?]|$)|assets\/)/;
 
 // Space around an open picture. A phone gives it little, so a picture as wide
 // as the column still opens larger than its thumbnail.

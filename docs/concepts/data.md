@@ -35,6 +35,17 @@ Projects are working directories where the agent does its work — writing code,
 
 - **[App](apps.md#rome-apps)** — an app is an installed extension package. A project is a working directory the agent operates in.
 
+## Chat uploads
+
+A file the guardian attaches in chat is copied into the profile's `assets` folder under a new random name, so it never overwrites or replaces another file.
+
+**Contracts:**
+
+- The copy is read-only and never changes. The dashboard serves it at `/api/assets/<id>.<ext>` behind the same session check as the rest of `/api`, and the browser may cache it for a year.
+- The message links to that URL. The agent's copy of the turn also names the file's local path, so it can read the file.
+- Only images, audio, video, and PDFs open in the browser. Every other type downloads.
+- One file may be at most 100 MB.
+
 ## Routines
 
 A routine is a durable binding from a trigger to an [action](actions.md): when the trigger fires, Rome runs the named action with the routine's stored arguments. Trigger kinds are schedule, event-bus, and manual ("run now" only). Agents create routines when the guardian asks to automate or schedule something.
