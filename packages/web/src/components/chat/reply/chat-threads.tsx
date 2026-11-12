@@ -160,7 +160,7 @@ export function ThreadLabelLine({ message }: { message: ChatMessage }) {
           preview: replyPreview(wordsOf(message)),
         })
       }
-      className="-mt-1 max-w-full truncate rounded-4 px-1 text-left text-aux text-muted-foreground outline-1 outline-offset-0 outline-transparent hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
+      className="-mt-2 max-w-full truncate rounded-4 px-1 text-left text-aux text-muted-foreground/60 outline-1 outline-offset-0 outline-transparent transition-colors hover:text-muted-foreground focus-visible:outline-solid focus-visible:outline-ring/50 motion-reduce:transition-none"
     >
       <span aria-hidden="true">↳ </span>
       {name}
