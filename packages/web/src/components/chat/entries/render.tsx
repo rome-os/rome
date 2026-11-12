@@ -13,6 +13,7 @@ import { ConnectCard } from "./ConnectCard";
 import { ErrorRunView } from "./ErrorEventView";
 import { QuestionCard } from "./QuestionCard";
 import { CardBoundary } from "./widget-ui/CardBoundary";
+import { isDrawableCard } from "./widget-ui/drawable";
 import { RoutineDraftCard } from "./RoutineDraftCard";
 import { SubagentCallView } from "./SubagentCallView";
 import { TaskChatCard } from "./TaskChatCard";
@@ -215,7 +216,14 @@ export function renderSingleEntry(
           />
         );
       }
-      if (block.render.builtin && block.render.componentId === "question-card" && block.render.ui) {
+      // A described question card that cannot be drawn falls back to the
+      // question card, which still answers from `props`.
+      if (
+        block.render.builtin &&
+        block.render.componentId === "question-card" &&
+        block.render.ui &&
+        isDrawableCard(block.appId, block.render.ui, {}, true)
+      ) {
         return (
           <CardBoundary
             key={`question-card-${block.toolUseId}`}

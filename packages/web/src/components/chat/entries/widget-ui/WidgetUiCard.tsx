@@ -1,10 +1,11 @@
 import { MessageProcessor } from "@a2ui/web_core/v0_9";
 import { A2uiSurface } from "@a2ui/react/v0_9";
-import { checkWidgetUi, type TranscriptPart } from "@rome/api-types/chat";
+import type { TranscriptPart } from "@rome/api-types/chat";
 import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { fetchJson } from "@/lib/fetch-json";
 import { CardBoundary } from "./CardBoundary";
+import { isDrawableCard } from "./drawable";
 import {
   ROME_WIDGET_CATALOG_ID,
   romeWidgetCatalog,
@@ -53,7 +54,10 @@ function withHostStrings(value: unknown, translate: (key: string) => string): un
   if (keys.length === 1 && typeof o.string === "string") {
     return HOST_STRINGS[o.string] ? translate(HOST_STRINGS[o.string]) : "";
   }
-  return Object.fromEntries(keys.map((k) => [k, withHostStrings(o[k], translate)]));
+  // A button's `action` is sent to the app or the agent as it is written.
+  return Object.fromEntries(
+    keys.map((k) => [k, k === "action" ? o[k] : withHostStrings(o[k], translate)]),
+  );
 }
 
 const appApi = (appId: string, path: string) => `/api/apps/${encodeURIComponent(appId)}/${path}`;
@@ -73,17 +77,6 @@ function splitClears(components: unknown[]): {
     return component;
   });
   return { components: rest, clears };
-}
-
-/**
- * Whether a stored card may be drawn and may call its app. A stored part is
- * read back as data, so the dashboard runs core's check again rather than
- * trust it: every component drawable, every path inside the app, and an app
- * id that stays one path segment once the browser normalizes the URL.
- */
-export function isDrawableCard(appId: string, ui: unknown, bind: unknown, waits = false): boolean {
-  if (!appId || appId === "." || appId === "..") return false;
-  return checkWidgetUi(ui, bind ?? {}, { waits }).length === 0;
 }
 
 /**

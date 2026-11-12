@@ -2,6 +2,8 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import "@/i18n";
+import { parseEntries } from "../parse-entries";
+import { renderFlatEntries } from "../render";
 import { WidgetUiCard } from "./WidgetUiCard";
 
 afterEach(() => {
@@ -209,5 +211,58 @@ describe("a question card described as data", () => {
     } as never;
     render(<WidgetUiCard toolUseId="q6" appId="core" ui={bound} text="" />);
     expect(await screen.findByText("Friendly and short")).toBeTruthy();
+  });
+
+  it("falls back to the question card when the description cannot be drawn", async () => {
+    const blocks = parseEntries(
+      JSON.stringify([
+        {
+          type: "pending_interaction",
+          toolUseId: "q7",
+          appId: "core",
+          render: {
+            kind: "inline",
+            componentId: "question-card",
+            builtin: true,
+            props: {
+              questions: [
+                { id: "tone", question: "Which tone?", type: "single", options: ["Warm"] },
+              ],
+            },
+            ui: { components: [{ id: "root", component: "Modal" }] },
+          },
+        },
+      ]),
+    );
+    render(<>{renderFlatEntries(blocks, { sessionId: "s1" })}</>);
+    expect(await screen.findByText("Which tone?")).toBeTruthy();
+    expect(screen.queryByText(/Could not show this card/)).toBeNull();
+  });
+
+  it("sends a button's context as written, even an object with only a string key", async () => {
+    const onSubmit = rs.fn();
+    const card = {
+      components: [
+        {
+          id: "root",
+          component: "Button",
+          child: "l",
+          action: { event: { name: "rome:answer", context: { tag: ["a", { string: "send" }] } } },
+        },
+        { id: "l", component: "Text", text: { string: "send" } },
+      ],
+    } as never;
+    render(
+      <WidgetUiCard
+        toolUseId="q8"
+        appId="core"
+        ui={card}
+        text=""
+        waiting={{ onSubmit, onDismiss: rs.fn() }}
+      />,
+    );
+    fireEvent.click(await screen.findByRole("button", { name: "Send" }));
+    await waitFor(() => expect(onSubmit).toHaveBeenCalled());
+    expect(onSubmit.mock.calls[0]?.[1]).toEqual({ tag: ["a", { string: "send" }] });
   });
 });
