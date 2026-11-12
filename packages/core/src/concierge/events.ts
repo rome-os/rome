@@ -362,8 +362,12 @@ export function startConciergeEvents(
     }
     // The tasks whose result this turn said have been reported: their news
     // waits for no other turn.
-    const relayed = service.takeRelayed(event.turn.turnId);
-    for (const taskId of relayed) coalescer.forget(taskId);
+    // News that came after the turn said it stays for a turn of its own, and
+    // so does the result it brought.
+    const relayed = service
+      .takeRelayed(event.turn.turnId)
+      .filter(({ taskId, said }) => coalescer.forgetSaid(taskId, said))
+      .map(({ taskId }) => taskId);
     if (relayed.length > 0) {
       void tasks.repo.markReported(relayed).catch((error: unknown) =>
         log.warn("failed to settle reported results", {

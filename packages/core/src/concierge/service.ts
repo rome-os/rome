@@ -33,7 +33,7 @@ import {
 import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
 import type { ConciergeFollowing } from "./following.js";
-import type { TaskEventCoalescer } from "./task-events.js";
+import type { SaidNews, TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
 import type { ConciergeTasks } from "./tasks.js";
 import type { TaskChecks } from "./task-checks.js";
@@ -244,7 +244,8 @@ export class ConciergeService {
   /** Per Concierge chat, the guardian messages superseded turns handed on. */
   private readonly handedOnPrompts = new Map<string, string[]>();
   /** Per Concierge turn, the tasks whose result it said. */
-  private readonly relayedInTurn = new Map<string, Set<string>>();
+  /** The tasks each Concierge turn said the news of, and which news. */
+  private readonly relayedInTurn = new Map<string, Map<string, SaidNews>>();
   /** What each Concierge turn said, by its parts, task and answered messages: a repeat is the same message. */
   private readonly saidByKey = new Map<string, Map<string, string>>();
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
@@ -799,9 +800,11 @@ export class ConciergeService {
     if (outcome === "completed") {
       const reported = await this.reportedTasksOf(prompt, params.threadId);
       if (reported.length > 0) {
-        // The Concierge has had their news: none of it is owed any more.
+        // The Concierge has had their news: none of it is owed any more. A
+        // row whose news came after the payload was built still owes that.
         for (const taskId of reported) this.taskEvents?.settle(taskId);
-        await this.deps.tasks.repo.markReported(reported).catch((error: unknown) =>
+        const settled = reported.filter((taskId) => !this.taskEvents?.waiting(taskId));
+        await this.deps.tasks.repo.markReported(settled).catch((error: unknown) =>
           log.warn("failed to settle reported results", {
             chatId: params.threadId,
             error: error instanceof Error ? error.message : String(error),
@@ -822,11 +825,12 @@ export class ConciergeService {
   noteRelayed(turnId: string, chatId: string, taskId: string): void {
     const unseen = this.taskEvents?.unseen(taskId) === true;
     if (unseen && !this.carriedReports.get(chatId)?.includes(taskId)) return;
-    const tasks = this.relayedInTurn.get(turnId) ?? new Set<string>();
-    tasks.add(taskId);
-    this.relayedInTurn.set(turnId, tasks);
     // Its news is said: a report a newer input cut short is not run again.
     this.taskEvents?.settle(taskId);
+    const tasks = this.relayedInTurn.get(turnId) ?? new Map<string, SaidNews>();
+    // What is left is what this turn says; news that comes later is not.
+    if (!tasks.has(taskId)) tasks.set(taskId, this.taskEvents?.snapshot(taskId) ?? null);
+    this.relayedInTurn.set(turnId, tasks);
   }
 
   /** The message Concierge turn `turnId` said as `key` already, if it did. */
@@ -842,11 +846,11 @@ export class ConciergeService {
   }
 
   /** The tasks whose result Concierge turn `turnId` said, forgotten once read. */
-  takeRelayed(turnId: string): string[] {
+  takeRelayed(turnId: string): { taskId: string; said: SaidNews }[] {
     const tasks = this.relayedInTurn.get(turnId);
     this.relayedInTurn.delete(turnId);
     this.saidByKey.delete(turnId);
-    return tasks ? [...tasks] : [];
+    return tasks ? [...tasks].map(([taskId, said]) => ({ taskId, said })) : [];
   }
 
   /**
@@ -925,7 +929,6 @@ export class ConciergeService {
       ? (await this.deps.tasks.statusOf([owned], { asReported: true })).get(owned.id)?.status !==
         "ended"
       : false;
-    if (owned) await this.turnDownForStop(chatId, Date.now());
     const row = await this.deps.tasks.repo.endWithChat(
       chatId,
       ownerOf(chat),
@@ -950,6 +953,9 @@ export class ConciergeService {
         );
       }
     }
+    // Turned down once its work has stopped, so one its turn asked for while
+    // stopping is too.
+    if (owned) await this.turnDownForStop(chatId, Date.now());
     return row?.id ?? null;
   }
 
@@ -1077,15 +1083,13 @@ export class ConciergeService {
     await this.cancelChecks(taskId);
     if (by === "guardian")
       this.taskEvents?.mark({ taskId, kind: "stopped_by_owner", urgent: false });
-    const row = await this.deps.tasks.repo.get(taskId);
-    const chatId = row?.sessionId;
+    const chatId = (await this.deps.tasks.repo.get(taskId))?.sessionId;
     if (!chatId) return 0;
-    // Nothing approved later runs for a stopped task.
-    await this.turnDownForStop(chatId, row.stoppedAt?.getTime() ?? Date.now());
-    if (!this.attached) return 0;
-    const { chats } = this.attached;
-    const turns = chats.activeTurns(chatId);
-    for (const turnId of turns) await chats.interruptTurn(turnId);
+    const turns = this.attached?.chats.activeTurns(chatId) ?? [];
+    for (const turnId of turns) await this.attached?.chats.interruptTurn(turnId);
+    // Nothing approved later runs for a stopped task: turned down once its
+    // work has stopped, so one its turn asked for while stopping is too.
+    await this.turnDownForStop(chatId, Date.now());
     return turns.length;
   }
 
@@ -1110,7 +1114,11 @@ export class ConciergeService {
       });
       return [] as { chatId: string; stoppedAt: number }[];
     });
-    for (const { chatId, stoppedAt } of chats) await this.turnDownForStop(chatId, stoppedAt);
+    // Nothing runs for a stopped task at start: every approval pending in its
+    // chat was its stopped work's, one asked for while it stopped included.
+    for (const { chatId } of chats) {
+      await this.turnDownForStop(chatId, Number.POSITIVE_INFINITY);
+    }
   }
 
   /**
@@ -1135,7 +1143,8 @@ export class ConciergeService {
       if (row && (!row.stoppedAt || row.stoppedAt.getTime() > stoppedAt)) return;
     }
     try {
-      // Only approvals that began by the stop: they were the stopped work's.
+      // Only approvals that began by the time its work stopped: they were the
+      // stopped work's.
       await this.expireApprovals(chatId, {
         until: stoppedAt,
         reason: "The task was stopped",

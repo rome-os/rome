@@ -1528,6 +1528,28 @@ describe("Concierge tools", () => {
     expect(turnedDown.every(([, until]) => Number.isFinite(until))).toBe(true);
   });
 
+  it("turns down an approval the stopped task's turn asked for while it was being stopped", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    s.chats.activeTurns = (id: string) => (id === chatId ? ["t1"] : []);
+    let askedAt = 0;
+    s.chats.interruptTurn = async () => {
+      // The turn asks for an approval just before it stops.
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      askedAt = Date.now();
+    };
+    const cutoffs: number[] = [];
+    s.service.attachApprovalExpiry(async (_chat, turnDown) => {
+      cutoffs.push(turnDown.until);
+      return 1;
+    });
+    await s.service.stopTask(taskId, "guardian");
+    expect(cutoffs).toHaveLength(1);
+    expect(cutoffs[0]).toBeGreaterThanOrEqual(askedAt);
+  });
+
   it("drops a stop's turn-down retry once the task is taken up again", async () => {
     const s = setup();
     s.fakeTimers();
@@ -5600,6 +5622,39 @@ describe("Concierge status reactions", () => {
       await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
       expect(s.backendTurns).toHaveLength(1);
       expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("keeps a task's news that came after the turn said its result, with the result it brought", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      s.fakeTimers();
+      s.onBackendTurn(() => "interrupted");
+      replies(s, chatId);
+      guardianTyped(s, chatId);
+      await finishTask(s, chatId, "completed", { reported: false });
+      await rs.advanceTimersByTimeAsync(60_000);
+      s.onBackendTurn(() => "completed");
+      s.inTurn("takeover");
+      guardianSays(s, "g2", "takeover");
+      await s.tool("say", { text: "Sunny all week", task: taskId });
+      // The task chat gives a new result before the Concierge's turn ends.
+      await s.taskRepo.setLastOutcome(taskId, "succeeded");
+      const coalescer = (
+        s.service as unknown as {
+          taskEvents: { mark: (change: unknown) => void; pending: string[] };
+        }
+      ).taskEvents;
+      coalescer.mark({ taskId, kind: "turn_end:completed by=system", urgent: true });
+      await s.finish({
+        turnId: "takeover",
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        text: "",
+      });
+      await s.settle();
+      expect(coalescer.pending).toContain(taskId);
+      expect((await s.taskRepo.get(taskId))?.outcomeUnsaid).toBe(true);
     });
 
     it("keeps a report the Concierge never got, though a turn names its task, and reports it again", async () => {

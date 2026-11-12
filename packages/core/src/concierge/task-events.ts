@@ -100,6 +100,9 @@ interface Dirty {
   notBefore?: number;
 }
 
+/** The news a turn said for one row, as {@link TaskEventCoalescer.snapshot} took it. */
+export type SaidNews = { readonly entry: object; readonly changes: number } | null;
+
 export class TaskEventCoalescer {
   private dirty = new Map<string, Dirty>();
   private timer: ReturnType<typeof setTimeout> | null = null;
@@ -216,6 +219,36 @@ export class TaskEventCoalescer {
   /** Drops a row's mark, such as when its row is gone. */
   forget(taskId: string): void {
     if (this.dirty.delete(taskId)) this.changed();
+  }
+
+  /**
+   * The news waiting for row `taskId` now, as a turn that says it carries
+   * it: what {@link forgetSaid} later forgets, and no more.
+   */
+  snapshot(taskId: string): SaidNews {
+    const entry = this.dirty.get(taskId);
+    return entry ? { entry, changes: entry.changes.length } : null;
+  }
+
+  /**
+   * A turn said row `taskId`'s news as it stood at `said`: it waits for no
+   * other turn. News that came after stays. Answers whether nothing is left
+   * waiting for the row.
+   */
+  forgetSaid(taskId: string, said: SaidNews): boolean {
+    const entry = this.dirty.get(taskId);
+    if (!entry) return true;
+    if (said && entry === said.entry && entry.changes.length === said.changes) {
+      this.dirty.delete(taskId);
+      this.changed();
+      return true;
+    }
+    return false;
+  }
+
+  /** Whether news waits for row `taskId`. */
+  waiting(taskId: string): boolean {
+    return this.dirty.has(taskId);
   }
 
   /** The rows waiting for a flush. */
