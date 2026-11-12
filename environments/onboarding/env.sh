@@ -143,7 +143,7 @@ in_runner() {
 }
 
 # A value already in the env file, so secrets survive a rewrite.
-kept() { sed -n "s/^$1=//p" "$ENV_FILE" 2>/dev/null; }
+kept() { [ ! -f "$ENV_FILE" ] || sed -n "s/^$1=//p" "$ENV_FILE"; }
 
 # Rewritten on every up, so a change to this script reaches Rome Cloud. The
 # secrets are made once and kept.
