@@ -6,6 +6,7 @@ import { MemoryRouter } from "react-router-dom";
 import { ChatPendingCardJump } from "./ChatPendingCardJump";
 import { RoutineDraftCard } from "./entries/RoutineDraftCard";
 import { AiToolsCard } from "./entries/AiToolsCard";
+import { type Question, questionCardUi } from "@rome/api-types/question-card";
 import { QuestionCard } from "./entries/QuestionCard";
 import { createRoutine, listRoutineRefs } from "@/lib/chat-api";
 import i18n from "@/i18n";
@@ -19,6 +20,8 @@ rs.mock("@/hooks/use-routines", () => ({
   useRoutines: () => ({ routines: [], refetch: () => Promise.resolve() }),
   useRunRoutineNow: () => () => Promise.resolve({ runId: "run", status: "success" }),
 }));
+
+const question: Question[] = [{ id: "q", question: "When?", type: "text" }];
 
 let cardTop = -200;
 const scrollTo = rs.fn();
@@ -52,7 +55,9 @@ function Harness({
             ) : kind === "question" || questionResult ? (
               <QuestionCard
                 toolUseId="question"
-                props={{ questions: [{ id: "q", question: "When?", type: "text" }] }}
+                appId="core"
+                ui={questionCardUi(question)}
+                props={{ questions: question }}
                 result={questionResult?.resolved as Record<string, unknown> | undefined}
                 onSubmit={() => {}}
                 onDismiss={() => {}}

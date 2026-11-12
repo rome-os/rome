@@ -107,11 +107,13 @@ function LiveTaskChatCard({
 const interactionSchema = z.object({
   type: z.enum(["pending_interaction", "interaction_result"]),
   toolUseId: z.string(),
+  appId: z.string().optional(),
   render: z
     .object({
       builtin: z.boolean().optional(),
       componentId: z.string(),
       props: z.record(z.string(), z.unknown()).optional(),
+      ui: z.unknown().optional(),
     })
     .optional(),
 });
@@ -261,6 +263,8 @@ function WaitingTaskCard({
         <QuestionCard
           key={`${interaction.key}:${attempt}`}
           toolUseId={interaction.part.toolUseId}
+          appId={interaction.part.appId ?? "core"}
+          ui={interaction.part.render.ui}
           props={interaction.part.render.props}
           result={submitted?.key === interaction.key ? submitted.output : undefined}
           onSubmit={(toolUseId, output) => {

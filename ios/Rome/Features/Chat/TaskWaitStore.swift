@@ -109,9 +109,8 @@ final class TaskWaitStore {
 
     /// Sends the answer to the task chat. One the server already has
     /// refreshes the card; a network failure lets the guardian try again.
-    func answer(_ part: MessagePart.QuestionPart, key: String, answers: [JSONValue]) async {
+    func answer(_ part: MessagePart.QuestionPart, key: String, output: JSONValue) async {
         guard answering == nil, sent[key] == nil else { return }
-        let output: JSONValue = .object(["answers": .array(answers)])
         answering = key
         sent[key] = output
         error = nil

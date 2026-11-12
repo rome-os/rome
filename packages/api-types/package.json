@@ -36,7 +36,8 @@
     "./devices": "./src/devices.ts",
     "./node-console": "./src/node-console.ts",
     "./wechat-app": "./src/wechat-app.ts",
-    "./live-events": "./src/live-events.ts"
+    "./live-events": "./src/live-events.ts",
+    "./question-card": "./src/question-card.ts"
   },
   "scripts": {
     "typecheck": "tsc --noEmit"

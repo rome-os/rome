@@ -653,13 +653,8 @@ final class TranscriptStore {
 
     // MARK: Questions
 
-    /// `sessionId`: the question's own chat, this one unless it says otherwise.
-    func answer(_ part: MessagePart.QuestionPart, answers: [JSONValue], sessionId: String? = nil) {
-        // An empty list is an answer too: a card of only optional questions left blank.
-        answer(toolUseId: part.toolUseId, output: .object(["answers": .array(answers)]), sessionId: sessionId)
-    }
-
-    /// Answers the interaction a card waits on with `output`, as the card sent it.
+    /// Answers the interaction a card waits on with `output`, as the card sent
+    /// it. `sessionId`: the question's own chat, this one unless it says otherwise.
     func answer(toolUseId: String, output: JSONValue, sessionId: String? = nil) {
         guard !answering.contains(toolUseId) else { return }
         answering.insert(toolUseId)

@@ -114,23 +114,14 @@ enum MessagePart: Hashable, Sendable {
     struct QuestionPart: Hashable, Sendable {
         let toolUseId: String
         let questions: [Question]
-        /// The same card described as data, drawn instead when set.
+        /// The card core described from the questions, which both apps draw.
         var ui: WidgetUIPart? = nil
 
+        /// A question as the agent asked it; a card stored before cards were
+        /// described shows these as a line.
         struct Question: Hashable, Sendable {
             let id: String
             let text: String
-            let multi: Bool
-            let freeTextOnly: Bool
-            let options: [String]
-            /// Options chosen before the guardian touches anything; still editable.
-            var defaults: [String] = []
-            /// A text question's prefilled answer; still editable.
-            var defaultText: String? = nil
-            /// A muted line under an option's label, by label. Answers send labels only.
-            var optionDescriptions: [String: String] = [:]
-            /// May be left blank without blocking Submit.
-            var optional = false
         }
     }
 
@@ -332,31 +323,7 @@ enum MessagePart: Hashable, Sendable {
     private static func question(_ props: JSONValue?, toolUseId: String) -> QuestionPart {
         let questions: [QuestionPart.Question] = (props?["questions"]?.array ?? []).compactMap { item in
             guard let id = item["id"]?.string, let text = item["question"]?.string else { return nil }
-            let type = item["type"]?.string
-            let options = (item["options"]?.array ?? []).compactMap(\.string)
-            // Every field from #1793 is optional, and only what names a real option counts.
-            var defaults: [String] = []
-            for value in item["defaults"]?.array?.compactMap(\.string) ?? [] where options.contains(value) && !defaults.contains(value) {
-                defaults.append(value)
-            }
-            if type != "multi" { defaults = Array(defaults.prefix(1)) }
-            var descriptions: [String: String] = [:]
-            if case .object(let map) = item["optionDescriptions"] {
-                for (label, text) in map where options.contains(label) {
-                    if let text = text.string, !text.isEmpty { descriptions[label] = text }
-                }
-            }
-            return .init(
-                id: id,
-                text: text,
-                multi: type == "multi",
-                freeTextOnly: type == "text",
-                options: options,
-                defaults: type == "text" ? [] : defaults,
-                defaultText: type == "text" ? item["defaultText"]?.string : nil,
-                optionDescriptions: type == "text" ? [:] : descriptions,
-                optional: item["optional"]?.bool ?? false
-            )
+            return .init(id: id, text: text)
         }
         return QuestionPart(toolUseId: toolUseId, questions: questions)
     }
@@ -384,81 +351,4 @@ func displayActionName(_ name: String?) -> String {
     guard let name, !name.isEmpty else { return String(localized: "Run action") }
     let local = name.split(separator: ":").last.map(String.init) ?? name
     return local.replacingOccurrences(of: "_", with: " ")
-}
-
-/// A question card's answers, as the web's QuestionCard builds them. A multi
-/// answer joins its chosen options, then any typed extra, with `", "`, and
-/// keeps the parts as `values` when a label holds that separator, so nothing
-/// is lost splitting it back. Answers carry labels, never descriptions.
-enum QuestionAnswers {
-    static let separator = ", "
-
-    typealias Question = MessagePart.QuestionPart.Question
-
-    /// The card before the guardian touches it: defaults chosen, default text typed.
-    static func initial(_ questions: [Question]) -> (choices: [String: [String]], typed: [String: String]) {
-        var choices: [String: [String]] = [:]
-        var typed: [String: String] = [:]
-        for question in questions {
-            if !question.defaults.isEmpty { choices[question.id] = question.multi ? question.defaults : [question.defaults[0]] }
-            if let text = question.defaultText { typed[question.id] = text }
-        }
-        return (choices, typed)
-    }
-
-    /// A required question needs an option chosen or something typed; a default counts.
-    static func isAnswered(_ question: Question, choices: [String: [String]], typed: [String: String]) -> Bool {
-        let text = (typed[question.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return !(choices[question.id] ?? []).isEmpty || !text.isEmpty
-    }
-
-    static func complete(_ questions: [Question], choices: [String: [String]], typed: [String: String]) -> Bool {
-        questions.allSatisfy { $0.optional || isAnswered($0, choices: choices, typed: typed) }
-    }
-
-    /// What the send arrow beside a lone single-answer question sends, or nil
-    /// when it does not show: once something is typed, or at once for an
-    /// optional question, which may go blank (`[]`).
-    static func inlineSend(_ question: Question, choices: [String: [String]], typed: [String: String]) -> [JSONValue]? {
-        let text = (typed[question.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || question.optional else { return nil }
-        return answers([question], choices: choices, typed: typed)
-    }
-
-    /// The `answers` the card sends; blank ones (optional questions) are left out.
-    static func answers(_ questions: [Question], choices: [String: [String]], typed: [String: String]) -> [JSONValue] {
-        questions.compactMap { question in
-            let text = (typed[question.id] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            if question.multi {
-                let picked = question.options.filter { (choices[question.id] ?? []).contains($0) }
-                let parts = picked + (text.isEmpty ? [] : [text])
-                guard !parts.isEmpty else { return nil }
-                var answer: [String: JSONValue] = [
-                    "questionId": .string(question.id),
-                    "value": .string(parts.joined(separator: separator)),
-                ]
-                if parts.contains(where: { $0.contains(separator) }) { answer["values"] = .array(parts.map(JSONValue.string)) }
-                return .object(answer)
-            }
-            // A single choice or a text answer: what was typed wins over a choice.
-            let value = text.isEmpty ? (choices[question.id]?.first ?? "") : text
-            guard !value.isEmpty else { return nil }
-            return .object(["questionId": .string(question.id), "value": .string(value)])
-        }
-    }
-
-    /// A stored answer read back: the options it chose and any typed extra.
-    static func picked(_ answer: JSONValue?, question: Question) -> (options: Set<String>, extra: [String]) {
-        guard let answer else { return ([], []) }
-        let parts: [String]
-        if let values = answer["values"]?.array?.compactMap(\.string) {
-            parts = values
-        } else {
-            let value = answer["value"]?.string ?? ""
-            parts = question.multi
-                ? value.components(separatedBy: separator).map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-                : (value.isEmpty ? [] : [value])
-        }
-        return (Set(parts.filter(question.options.contains)), parts.filter { !question.options.contains($0) })
-    }
 }

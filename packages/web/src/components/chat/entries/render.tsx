@@ -216,48 +216,13 @@ export function renderSingleEntry(
           />
         );
       }
-      // A described question card that cannot be drawn falls back to the
-      // question card, which still answers from `props`.
-      if (
-        block.render.builtin &&
-        block.render.componentId === "question-card" &&
-        block.render.ui &&
-        isDrawableCard(block.appId, block.render.ui, {}, true)
-      ) {
-        return (
-          <CardBoundary
-            key={`question-card-${block.toolUseId}`}
-            fallback={
-              <QuestionCard
-                toolUseId={block.toolUseId}
-                props={block.render.props}
-                result={resultFor(block.toolUseId)}
-                onSubmit={submit}
-                onDismiss={dismiss}
-              />
-            }
-          >
-            <Suspense fallback={null}>
-              <WidgetUiCard
-                toolUseId={block.toolUseId}
-                appId={block.appId}
-                ui={block.render.ui}
-                text=""
-                waiting={{
-                  result: resultFor(block.toolUseId),
-                  onSubmit: submit,
-                  onDismiss: dismiss,
-                }}
-              />
-            </Suspense>
-          </CardBoundary>
-        );
-      }
       if (block.render.builtin && block.render.componentId === "question-card") {
         return (
           <QuestionCard
             key={`question-card-${block.toolUseId}`}
             toolUseId={block.toolUseId}
+            appId={block.appId}
+            ui={block.render.ui}
             props={block.render.props}
             result={resultFor(block.toolUseId)}
             onSubmit={submit}
