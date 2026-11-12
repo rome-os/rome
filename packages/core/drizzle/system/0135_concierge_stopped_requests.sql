@@ -1,1 +1,0 @@
-ALTER TABLE `concierge_message_turns` ADD `stopped_untold` integer DEFAULT false NOT NULL;

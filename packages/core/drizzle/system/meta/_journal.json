@@ -908,64 +908,8 @@
     {
       "idx": 130,
       "version": "6",
-      "when": 1794466305636,
-      "tag": "0130_concierge_task_lifecycle",
-      "breakpoints": true
-    },
-    {
-      "idx": 131,
-      "version": "6",
-      "when": 1794468236465,
-      "tag": "0131_concierge_task_facts",
-      "breakpoints": true
-    },
-    {
-      "idx": 132,
-      "version": "6",
-      "when": 1794469555061,
-      "tag": "0132_concierge_task_checks",
-      "breakpoints": true
-    },
-    {
-      "idx": 133,
-      "version": "6",
-      "when": 1794470670848,
-      "tag": "0133_concierge_message_marks",
-      "breakpoints": true
-    },
-    {
-      "idx": 134,
-      "version": "6",
-      "when": 1794470686840,
-      "tag": "0134_concierge_drop_reaction_ledgers",
-      "breakpoints": true
-    },
-    {
-      "idx": 135,
-      "version": "6",
-      "when": 1794472143819,
-      "tag": "0135_concierge_stopped_requests",
-      "breakpoints": true
-    },
-    {
-      "idx": 136,
-      "version": "6",
-      "when": 1794472978694,
-      "tag": "0136_concierge_wait_expiry",
-      "breakpoints": true
-    },
-    {
-      "idx": 137,
-      "version": "6",
-      "when": 1794473470225,
-      "tag": "0137_concierge_failed_marks",
-      "breakpoints": true
-    },
-    {
-      "idx": 138,
-      "version": "6",
-      "when": 1794474734686,
-      "tag": "0138_concierge_task_ended_at",
+      "when": 1794503215776,
+      "tag": "0130_concierge_task_status",
       "breakpoints": true
     }
   ]
