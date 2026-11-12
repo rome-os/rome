@@ -194,7 +194,11 @@ export {
   type Subagents,
 } from "./domain/subagent.js";
 export { NO_ROME_TOOLS, ROME_TOOL_GROUPS } from "./domain/rome-tools.js";
-export { forkSessionTools, type SessionTools } from "./domain/session-tools.js";
+export {
+  forkSessionTools,
+  ROUTINE_PROPOSAL_TOOL,
+  type SessionTools,
+} from "./domain/session-tools.js";
 export {
   createSessions,
   type AgentSession,

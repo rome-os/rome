@@ -288,9 +288,10 @@ export interface ConciergeConnectorDto {
 }
 
 /**
- * `GET /api/concierge/connectors`, and what the Concierge's following list
- * returns: one structure for every client and the agent. Which connectors are
- * listed is decided here, not by the client.
+ * `GET /api/concierge/connectors`: one structure for every client. The
+ * Concierge's following list answers the same entries, without what only a
+ * client draws with (`agentViewOf`). Which connectors are listed is decided
+ * here, not by the client.
  */
 export interface ConciergeConnectorsResponse {
   connectors: ConciergeConnectorDto[];

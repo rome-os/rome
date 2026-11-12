@@ -37,6 +37,13 @@ export interface AgentPolicy {
    * neither, as for every other agent.
    */
   taskChecks: boolean;
+  /**
+   * Whether the agent hands its work to other chats rather than doing it, as
+   * the Concierge does. Its prompt then leaves out what only an agent doing
+   * the work reads: the command line tools, and the runtime context beyond
+   * where memory and the docs are. Nor does it get `propose_routine`.
+   */
+  delegatesWork: boolean;
 }
 
 export function resolveAgentPolicy(agent: {
@@ -50,5 +57,6 @@ export function resolveAgentPolicy(agent: {
     freshSessionOnSetupChange: agent.policy?.freshSessionOnSetupChange ?? false,
     handoffOnRenewal: agent.policy?.handoffOnRenewal ?? false,
     taskChecks: agent.policy?.taskChecks ?? false,
+    delegatesWork: agent.policy?.delegatesWork ?? false,
   };
 }

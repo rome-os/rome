@@ -1637,14 +1637,14 @@ describe("Concierge tools", () => {
         chatId: "task-1",
         title: "Flights",
         kind: "task chat",
-        from: { chatId: CONCIERGE_CHAT, title: "Main chat" },
+        from: CONCIERGE_CHAT,
         status: "idle",
       },
       {
         chatId: "task-2",
         title: "Agenda",
         kind: "task chat",
-        from: { chatId: TOPIC_CHAT, title: "Calendar" },
+        from: TOPIC_CHAT,
         status: "idle",
       },
     ]);
@@ -1662,6 +1662,21 @@ describe("Concierge tools", () => {
       "task chat",
       "task chat",
     ]);
+  });
+
+  it("chat_list leaves out an ended task's chat unless asked", async () => {
+    const s = setup();
+    const { taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find flights" })).content[0].text,
+    );
+    await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" });
+    await s.tool("task_upsert", { tasks: [{ id: taskId, stop: true }] });
+    const titles = async (input: Record<string, unknown>) =>
+      JSON.parse((await s.tool("chat_list", input)).content[0].text).map(
+        (chat: { title: string }) => chat.title,
+      );
+    expect(await titles({})).toEqual(["Calendar", "Hotels"]);
+    expect(await titles({ includeEnded: true })).toEqual(["Calendar", "Flights", "Hotels"]);
   });
 
   it("chat_read reads another Concierge chat, and refuses a chat that is neither kind", async () => {
@@ -2107,12 +2122,16 @@ describe("Concierge task list tools", () => {
     s.chats.activeTurns = () => ["t1"];
     const open = text(await s.tool("task_list", {}));
     expect(open.tasks).toEqual([
+      { id: taskId, title: "Flights", status: "active", chatId: "task-1" },
+    ]);
+    const detailed = text(await s.tool("task_list", { details: true })).tasks;
+    expect(detailed).toEqual([
       {
         id: taskId,
         title: "Flights",
         status: "active",
-        note: "Fly Friday",
         chatId: "task-1",
+        note: "Fly Friday",
         updatedAt: expect.any(String),
       },
     ]);

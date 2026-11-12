@@ -3567,6 +3567,26 @@ describe("AgentRunner", () => {
         );
       });
 
+      it("offers no propose_routine to an agent that delegates its work", async () => {
+        const proposal = { ...tool("Propose a routine."), name: "propose_routine" };
+        sessionTools = [tool("Send one message."), proposal];
+        const found = agentLoader.find("test-renewing")! as { definition: AgentDefinition };
+        const original = found.definition;
+        const provider = new MockModelProvider(replies(2));
+        const runner = renewingRunner(provider);
+        try {
+          await turn(runner);
+          expect(toolNames(provider.sessions[0]!.tools, "ask_user")).toContain("propose_routine");
+          found.definition = { ...original, policy: { ...original.policy, delegatesWork: true } };
+          await turn(runner);
+          const names = toolNames(provider.sessions.at(-1)!.tools, "ask_user");
+          expect(names).toContain("say");
+          expect(names).not.toContain("propose_routine");
+        } finally {
+          found.definition = original;
+        }
+      });
+
       it("keeps the session when only the guardian's profile in the context changes", async () => {
         const runner = renewingRunner(new MockModelProvider(replies(2)));
         const first = await turn(runner, { contextSuffix: "## Guardian\n\nLikes tea." });

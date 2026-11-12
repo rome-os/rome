@@ -7,6 +7,7 @@ import { parse as parseYaml } from "yaml";
 const here = dirname(fileURLToPath(import.meta.url));
 const concierge = parseYaml(readFileSync(resolve(here, "../../agents/concierge.yaml"), "utf8")) as {
   actions: string[];
+  tools: string[];
   systemPromptPrefix: string;
 };
 const actionName = (action: string) =>
@@ -45,7 +46,7 @@ describe("the Concierge agent", () => {
   it("reports a finished task by forwarding its conclusion, never its whole report", () => {
     const lines = concierge.systemPromptPrefix.split("\n");
     const rule = (start: string) => lines.find((line) => line.startsWith(start)) ?? "";
-    const finished = rule('- `task_finished` with initiator="concierge"');
+    const finished = rule("- A turn that ended `by=concierge`");
     for (const text of [
       "forward the task chat's conclusion with `chat_forward`",
       "the forwarded message shows its source chat, which opens the details",
@@ -87,7 +88,7 @@ describe("the Concierge agent", () => {
   it("shows task questions and approvals as live cards without relaying card answers", () => {
     const rule = concierge.systemPromptPrefix
       .split("\n")
-      .find((line) => line.startsWith("- `task_needs_input`"));
+      .find((line) => line.startsWith("- `turn_end:completed question` or `approval`"));
     for (const text of [
       "turn_end:completed question",
       "`approval`",
@@ -104,6 +105,32 @@ describe("the Concierge agent", () => {
     expect(taskList).toContain("You never set a status");
     // Only a card makes a task wait for the guardian.
     expect(taskList).toContain("with a card, never in plain text");
+  });
+
+  it("shows a task's pending card once, and never calls a turned-down approval waiting", () => {
+    const taskEvents = concierge.systemPromptPrefix.split("# Task events\n")[1] ?? "";
+    expect(taskEvents).toContain("Show a task's pending card once");
+    expect(taskEvents).toContain("never show it again, even when a later batch names the task");
+    expect(taskEvents).toContain("When the guardian turns an approval down");
+    expect(taskEvents).toContain("never say it is still waiting");
+    // The single `<task_event>` input is gone; batches are the only kind.
+    expect(concierge.systemPromptPrefix).not.toContain("<task_event .../>");
+    expect(concierge.systemPromptPrefix).not.toContain("initiator=");
+  });
+
+  it("starts one task chat per request", () => {
+    expect(concierge.systemPromptPrefix).toContain(
+      "one `chat_start` per request, never several requests in one brief or one task chat",
+    );
+  });
+
+  it("looks up quick facts itself, a few searches at most, and never scrapes with the shell", () => {
+    expect(concierge.tools).toContain("WebSearch");
+    expect(concierge.tools).not.toContain("WebFetch");
+    const prompt = concierge.systemPromptPrefix;
+    expect(prompt).toContain("At most three searches in a turn");
+    expect(prompt).toContain("Research, comparisons, and anything that needs more searches");
+    expect(prompt).toContain("Never fetch web pages with the shell");
   });
 
   it("can find and delete the routine that watches a task row", () => {
@@ -146,7 +173,8 @@ describe("the Concierge agent", () => {
       "show the guardian `connect_card` with the `service` name",
       'After `<service_connected service="…"/>`, use this card flow when the guardian asked to follow the service',
       "do not save a follow before their answer",
-      "ask with ONE `ask_question` card built from the list's watch catalog",
+      "ask with ONE `ask_question` card built from the service's watch catalog",
+      "call the list with that `service` to get it",
       "Ask first when the target names something the guardian has not, such as which repositories",
       "Include that target question in the card when its settings are known",
       "otherwise ask for the target before building the settings card",

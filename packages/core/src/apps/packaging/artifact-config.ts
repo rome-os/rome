@@ -135,6 +135,7 @@ export const AgentConfigSchema = z
         freshSessionOnSetupChange: z.boolean().optional(),
         handoffOnRenewal: z.boolean().optional(),
         taskChecks: z.boolean().optional(),
+        delegatesWork: z.boolean().optional(),
       })
       .strict()
       .optional(),

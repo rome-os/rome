@@ -34,7 +34,11 @@ import { writeRenewalHandoff } from "./session-handoff.js";
 import { type PromptFacts, type PromptMessage } from "../domain/prompt-facts.js";
 import { type AgentLog } from "../domain/agent-log.js";
 import { type DeferTool } from "./ask-user-tools.js";
-import { type SessionTools, forkSessionTools } from "../domain/session-tools.js";
+import {
+  ROUTINE_PROPOSAL_TOOL,
+  type SessionTools,
+  forkSessionTools,
+} from "../domain/session-tools.js";
 import { type ForkOpening, type ForkRequest, keepsFork, openFork } from "../domain/fork.js";
 import { type TurnFacts, type PushLevel, type TurnActor } from "../domain/turn-facts.js";
 import {
@@ -68,7 +72,7 @@ import {
   type SentHeaders,
   withoutRepeatedHeaders,
 } from "../domain/prompt.js";
-import { resolveAgentPolicy } from "../domain/agent-policy.js";
+import { type AgentPolicy, resolveAgentPolicy } from "../domain/agent-policy.js";
 import { createRomeTools } from "./rome-tools.js";
 import { showsWidgets, widgetDrawingFor, type WidgetDrawing } from "../domain/widget-drawing.js";
 import { type AgentAction, type AgentActions } from "../domain/agent-action.js";
@@ -1029,7 +1033,7 @@ function sessionSetupOf(
         },
         {
           hasSpeaker: true,
-          sessionTools: await deps.sessionTools.forTurn(turn, true),
+          sessionTools: await sessionToolsOf(deps, policy)(turn, true),
           defers: true,
         },
       );
@@ -1149,6 +1153,22 @@ async function renewForContext(deps: ManagerDeps, closed: AgentSessionImpl): Pro
   });
 }
 
+/**
+ * Where an agent's session tools come from: an agent that hands its work to
+ * other chats proposes no routine, so its sessions carry no `propose_routine`.
+ */
+function sessionToolsOf(
+  deps: ManagerDeps,
+  policy: Pick<AgentPolicy, "delegatesWork">,
+): SessionTools["forTurn"] {
+  return async (turn, hasSpeaker) => {
+    const tools = await deps.sessionTools.forTurn(turn, hasSpeaker);
+    return policy.delegatesWork
+      ? tools.filter((tool) => tool.name !== ROUTINE_PROPOSAL_TOOL)
+      : tools;
+  };
+}
+
 async function openSession(
   deps: ManagerDeps,
   key: AgentSessionKey,
@@ -1159,6 +1179,10 @@ async function openSession(
   const agent = requireAgent(deps.agentLoader, key.agentName);
   const config = agent.definition;
   const owningAppId = agent.ownerType === "app" ? agent.ownerId : undefined;
+  const sessionToolsFor = sessionToolsOf(
+    deps,
+    resolveAgentPolicy({ name: agent.localName, policy: config.policy }),
+  );
 
   // Try to resume an existing SDK session through the stable channelThreadKey.
   // Scoping by agentName is load-bearing: subagents reuse the parent's key, so
@@ -1523,7 +1547,7 @@ async function openSession(
     resumeThreadId?: string,
     setup: PreparedSetup = active,
   ): Promise<ModelSession> => {
-    const sessionTools = await deps.sessionTools.forTurn(liveTurn, true);
+    const sessionTools = await sessionToolsFor(liveTurn, true);
     const params = buildSessionParams(
       setup,
       resolution,
@@ -1675,7 +1699,7 @@ async function openSession(
           hasSpeaker: false,
           sessionTools: forkSessionTools(
             sourceSessionTools,
-            await deps.sessionTools.forTurn(turnFacts(refs), false),
+            await sessionToolsFor(turnFacts(refs), false),
           ),
           // A continuable fork holds no scheduled wake-ups: its wake-up would
           // resume the fork session while delivering under the thread context
@@ -1752,7 +1776,7 @@ async function openSession(
           },
           model: "code-backed",
         },
-        liveRomeTools(await deps.sessionTools.forTurn(liveTurn, true)),
+        liveRomeTools(await sessionToolsFor(liveTurn, true)),
       ),
     });
   } else {

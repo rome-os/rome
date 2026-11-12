@@ -376,9 +376,15 @@ describe("CodexAppServerProvider", () => {
     },
     {
       label: "every switch",
-      builtinTools: ["Read", "Write", "Bash", "WebSearch", "Task", "ImageGeneration"],
+      builtinTools: ["Read", "Write", "Bash", "WebSearch", "WebFetch", "Task", "ImageGeneration"],
       sandbox: "danger-full-access",
       off: [],
+    },
+    {
+      label: "WebSearch without WebFetch",
+      builtinTools: ["Read", "WebSearch"],
+      sandbox: "danger-full-access",
+      off: ["features.multi_agent", "features.image_generation", "features.apps"],
     },
   ])("limits Codex's own tools to the declared builtins: $label", async ({
     builtinTools,
