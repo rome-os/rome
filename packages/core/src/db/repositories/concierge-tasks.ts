@@ -866,6 +866,19 @@ export class ConciergeTasksRepository {
     return marked.length > 0;
   }
 
+  /**
+   * Task `id` was written to after its wait ended for no response, and that
+   * wait is over: it ends for no response no more.
+   */
+  async clearWaitExpired(id: string): Promise<void> {
+    const cleared = await this.db
+      .update(conciergeTasks)
+      .set({ expiredWaitAt: null, noResponseUnlisted: false })
+      .where(and(eq(conciergeTasks.id, id), isNotNull(conciergeTasks.expiredWaitAt)))
+      .returning({ id: conciergeTasks.id });
+    if (cleared.length > 0) await this.announce(id, "refresh");
+  }
+
   /** The tasks of `taskIds` that ended for no response and no digest listed yet. */
   async noResponseUnlisted(taskIds: readonly string[]): Promise<string[]> {
     if (taskIds.length === 0) return [];

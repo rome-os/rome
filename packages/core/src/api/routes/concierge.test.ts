@@ -316,11 +316,15 @@ describe("DELETE /concierge/tasks/:taskId/checks", () => {
   let testDb: TestDb;
   let repo: ConciergeTasksRepository;
   let cancelled: string[];
+  let failing: string | null = null;
 
   const app = () => {
     const concierge = {
       deps: { tasks: new ConciergeTasks(repo) },
-      cancelChecks: async (taskId: string) => void cancelled.push(taskId),
+      cancelChecksByOwner: async (taskId: string) => {
+        if (taskId === failing) throw new Error("database is locked");
+        cancelled.push(taskId);
+      },
     } as unknown as ConciergeService;
     return mount(testDb, concierge, new ChatsWebChatRepository(testDb.db));
   };
@@ -339,6 +343,16 @@ describe("DELETE /concierge/tasks/:taskId/checks", () => {
     expect((await cancel(row!.id)).status).toBe(200);
     expect(cancelled).toEqual([row!.id]);
     expect(await repo.get(row!.id)).toMatchObject({ title: "PR 42", stoppedAt: null });
+  });
+
+  it("answers a failure as one, not as cancelled", async () => {
+    const [row] = await repo.upsertMany([{ title: "PR 42" }]);
+    failing = row!.id;
+    try {
+      expect((await cancel(row!.id)).status).toBe(500);
+    } finally {
+      failing = null;
+    }
   });
 
   it("cancels nothing for a task that is not there, or is another person's", async () => {

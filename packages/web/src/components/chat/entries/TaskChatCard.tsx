@@ -2,7 +2,7 @@ import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { useQuery } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { taskStatusOfDto } from "@rome/api-types/concierge-task-status";
 import { stopTask } from "@/components/concierge/send-task-action";
@@ -15,7 +15,7 @@ import { ApprovalCard } from "../approval/ApprovalCard";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { QuestionCard } from "./QuestionCard";
-import { answerOutcome, SettledCard } from "./SettledCard";
+import { answerOutcome, approvalOutcome, SettledCard } from "./SettledCard";
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
 
@@ -194,12 +194,7 @@ function FoldedAskCard({ chatId }: { chatId: string }) {
   if ((approvalIsLatest && approval.row.status === "pending") || questionOpen) {
     outcome = t("concierge.ask.waitingBelow");
   } else if (approvalIsLatest) {
-    outcome =
-      approval.row.resolvedBy === "rome:task-ended"
-        ? t("concierge.ask.turnedDown")
-        : approval.row.status === "rejected"
-          ? t("concierge.ask.rejected")
-          : t("concierge.ask.approved");
+    outcome = approvalOutcome(t, approval.row.status, approval.row.resolvedBy);
   } else {
     outcome = answerOutcome(t, answer?.output ?? {});
   }
@@ -430,6 +425,7 @@ function WaitingTaskCard({
   countsAsWaiting?: boolean;
 }) {
   const { t } = useTranslation("chat");
+  const navigate = useNavigate();
   const messages = useQuery({
     queryKey: ["task-chat-cards", chatId],
     // Waiting questions follow the last user prompt. Pages contain whole turns,
@@ -514,6 +510,18 @@ function WaitingTaskCard({
           onResolved={() => {
             void refresh();
           }}
+        />
+      ) : interaction &&
+        !(
+          interaction.part.render?.builtin &&
+          interaction.part.render.componentId === "question-card"
+        ) ? (
+        // An app's own card, such as a sign-in, is answered in its task chat.
+        <SettledCard
+          title={null}
+          outcome={t("concierge.ask.openToAnswer")}
+          onOpen={() => navigate(`/chat/${chatId}`)}
+          chevron
         />
       ) : interaction?.part.render?.builtin &&
         interaction.part.render.componentId === "question-card" ? (

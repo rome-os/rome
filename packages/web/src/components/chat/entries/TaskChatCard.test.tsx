@@ -257,6 +257,23 @@ describe("TaskChatCard shown as one card or the other", () => {
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
   });
 
+  it("shows an app's own waiting card as a card that opens the task chat, not an empty block", async () => {
+    messages = [
+      message("ask", [
+        {
+          type: "pending_interaction",
+          toolUseId: "item_1",
+          appId: "connector",
+          render: { kind: "inline", componentId: "login-card", props: {} },
+        },
+      ]),
+    ];
+    show(true, "ask");
+    const card = await screen.findByRole("button", { name: "Open the task chat to answer" });
+    // It is what the "Needs you" jump lands on.
+    expect(card.closest("[data-chat-task-waiting]")).toBeTruthy();
+  });
+
   it("folds an expired question to a card that waits on no one, and opens to the form", async () => {
     taskRows = [expiredRow];
     show(true, "ask");
@@ -316,6 +333,11 @@ describe("TaskChatCard shown as one card or the other", () => {
     it("says an approval Rome turned down when the wait ran out", async () => {
       allApprovals = [decided("rejected", "rome:task-ended")];
       await folded("Turned down: no answer within a day");
+    });
+
+    it("says an approval Rome turned down because its task was stopped", async () => {
+      allApprovals = [decided("rejected", "rome:task-stopped")];
+      await folded("Turned down: task stopped");
     });
 
     it("says a copy shown again still waits, for the card below, rather than claim an answer", async () => {

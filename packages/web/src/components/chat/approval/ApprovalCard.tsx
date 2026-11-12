@@ -4,7 +4,7 @@ import type { ApprovalCardStatus, PreviewPayload } from "@/lib/chat-types";
 import { Button } from "@/components/ui/button";
 import { useTabStatus } from "@/hooks/use-tab-status";
 import { artifactLocalName } from "@/lib/artifact-name";
-import { SettledCard } from "@/components/chat/entries/SettledCard";
+import { approvalOutcome, SettledCard } from "@/components/chat/entries/SettledCard";
 import { ApprovalPreviewBody } from "./ApprovalPreviewBody";
 import { useApprovalCard } from "./use-approval-card";
 
@@ -56,18 +56,10 @@ export function ApprovalCard({
     status === "pending" ? t("approvals.headerPending") : t("approvals.headerResolved");
 
   if (settled === "fold" && status !== "pending") {
-    const outcome =
-      status === "rejected"
-        ? record?.resolvedBy === "rome:task-ended"
-          ? t("concierge.ask.turnedDown")
-          : t("concierge.ask.rejected")
-        : status === "failed"
-          ? statusLabel
-          : t("concierge.ask.approved");
     return (
       <SettledCard
         title={preview.kind === "generic" ? preview.title : resolvedActionName}
-        outcome={outcome}
+        outcome={approvalOutcome(t, status, record?.resolvedBy)}
         full={
           <ApprovalCard
             approvalId={approvalId}

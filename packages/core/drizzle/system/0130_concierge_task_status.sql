@@ -45,19 +45,6 @@ UPDATE `concierge_tasks`
   SET `stopped_at` = coalesce(`completed_at`, `updated_at`), `stop_reason` = 'concierge'
   WHERE `state` = 'dropped' AND `stopped_at` IS NULL;
 --> statement-breakpoint
--- A planned or watched row ends done: with no time when it was last
--- written, with a time that passed at that time. One with a time ahead stays
--- later until then, and one whose task chat runs reads as active. Only a row
--- written from now on with no task chat reads as later until the Concierge
--- starts or stops it.
-UPDATE `concierge_tasks`
-  SET `last_outcome` = 'succeeded',
-    `ended_at` = CASE
-      WHEN `due_at` IS NULL THEN coalesce(`completed_at`, `updated_at`)
-      WHEN `due_at` <= CAST(strftime('%s', 'now') AS INTEGER) * 1000 THEN `due_at`
-    END
-  WHERE `state` IN ('next', 'watching') AND `last_outcome` IS NULL;
---> statement-breakpoint
 -- A check the Concierge scheduled for a task named it `task:<id>`. It now
 -- names its task in its args, so the task reads its "later" time from it and
 -- stopping the task cancels it. Only a pending wake-up of a Concierge chat
@@ -70,6 +57,25 @@ UPDATE `routines`
     AND json_extract(`args`, '$.taskId') IS NULL
     AND instr(`name`, 'task:') > 0
     AND substr(`name`, instr(`name`, 'task:') + 5, 36) IN (SELECT `id` FROM `concierge_tasks`);
+--> statement-breakpoint
+-- A planned or watched row ends done: with no time when it was last
+-- written, with a time that passed at that time. One with a time ahead, or
+-- a check linked above still pending, stays later until then, and one whose
+-- task chat runs reads as active. Only a row written from now on with no
+-- task chat reads as later until the Concierge starts or stops it.
+UPDATE `concierge_tasks`
+  SET `last_outcome` = 'succeeded',
+    `ended_at` = CASE
+      WHEN EXISTS (
+        SELECT 1 FROM `routines`
+        WHERE `action_name` = 'resume_session'
+          AND `enabled` = 1
+          AND json_extract(`args`, '$.taskId') = `concierge_tasks`.`id`
+      ) THEN NULL
+      WHEN `due_at` IS NULL THEN coalesce(`completed_at`, `updated_at`)
+      WHEN `due_at` <= CAST(strftime('%s', 'now') AS INTEGER) * 1000 THEN `due_at`
+    END
+  WHERE `state` IN ('next', 'watching') AND `last_outcome` IS NULL;
 --> statement-breakpoint
 -- The marks keep only facts now. A message's turn: the newest one that took
 -- it, answered unless it still worked, failed if the ledger had failed it.

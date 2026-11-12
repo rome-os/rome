@@ -42,6 +42,11 @@ export interface ConciergeTaskFacts {
    * is not started.
    */
   started: boolean;
+  /**
+   * A wait on its owner ran out and Rome handled it, and nobody wrote to its
+   * task chat since: Rome's own turn-down of an approval does not reopen it.
+   */
+  waitExpired?: boolean;
 }
 
 /** How long a wait on the owner keeps a task waiting for them, by default: a day. */
@@ -52,8 +57,8 @@ export const CONCIERGE_TASK_WAIT_EXPIRY_MS = 24 * 60 * 60 * 1000;
  * then a wait on its owner younger than `waitExpiryMs` (needs you); then a
  * running or queued turn, or a result waiting to be reported (active); then a
  * pending check, or no task chat started yet (later); else ended, with its
- * reason. A wait older than
- * `waitExpiryMs` with nothing running ends the task for no response.
+ * reason. A wait older than `waitExpiryMs`, or one Rome ended so, with
+ * nothing running ends the task for no response.
  */
 export function taskStatus(
   facts: ConciergeTaskFacts,
@@ -67,7 +72,7 @@ export function taskStatus(
   }
   if (facts.running || facts.reportPending) return { status: "active", endReason: null };
   if (facts.laterAt !== null || !facts.started) return { status: "later", endReason: null };
-  if (waiting) return { status: "ended", endReason: "no_response" };
+  if (waiting || facts.waitExpired === true) return { status: "ended", endReason: "no_response" };
   if (facts.lastOutcome === "failed") return { status: "ended", endReason: "failed" };
   if (facts.lastOutcome === "stopped") return { status: "ended", endReason: "stopped" };
   return { status: "ended", endReason: "done" };
@@ -158,14 +163,18 @@ export interface MessageMarkFacts {
  * A guardian message's status reaction (docs/domains/chats.md#status-reaction):
  * working while its turn has not answered it, or a task made for it waits
  * for its owner, is active or is checked later; failed when its turn failed,
- * a task made for it ended failed, or Rome gave up telling a task's result;
- * else none. A task that ended for no response shows none.
+ * a task made for it ended failed, or Rome gave up telling the result of a
+ * task not stopped since; else none. A task that ended for no response shows
+ * none.
  */
 export function messageStatusReaction(facts: MessageMarkFacts): ConciergeStatusReaction | null {
   const open = (task: ConciergeTaskStatusResult) => task.status !== "ended";
   if (facts.answered === false || facts.tasks.some(open)) return "working";
   const failed =
     facts.turnFailed === true ||
-    facts.tasks.some((task) => task.endReason === "failed" || task.reportLost === true);
+    facts.tasks.some(
+      (task) =>
+        task.endReason === "failed" || (task.reportLost === true && task.endReason !== "stopped"),
+    );
   return failed ? "failed" : null;
 }

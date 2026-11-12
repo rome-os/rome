@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { RESOLVED_BY_EXPIRY } from "./approval-expiry.js";
 import type { DrizzleTx } from "../db/index.js";
 import { POSTPONED_CHECKS } from "./service.js";
 import type {
@@ -27,7 +28,8 @@ import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js"
 import { createTestDb, type TestDb } from "../test/db.js";
 import { readWebchatMessages } from "../webchat/adapter.js";
 import type { AgentTurnFailedBeforeStart, TurnLifecycleListener } from "../agent/index.js";
-import { startConciergeEvents } from "./events.js";
+import { CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
+import { resultSummary, startConciergeEvents } from "./events.js";
 import { MIN_FLUSH_SPACING_MS, RETRY_MS } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
 import { mainChatIdOf } from "./main-chat.js";
@@ -646,6 +648,22 @@ describe("Concierge tools", () => {
       [{ type: "text", content: "apple.txt is made." }],
       [{ type: "text", content: "pear.txt is made." }],
     ]);
+  });
+
+  it("says the same words about two tasks as two messages, one for each", async () => {
+    const s = setup();
+    const idOf = (result: unknown) =>
+      JSON.parse((result as { content: { text: string }[] }).content[0]!.text).messageId as string;
+    const [apple, pear] = await s.taskRepo.upsertMany([
+      { title: "Apple", state: "doing", chatId: CONCIERGE_CHAT },
+      { title: "Pear", state: "doing", chatId: CONCIERGE_CHAT },
+    ]);
+    const first = idOf(await s.tool("say", { text: "Done ✅", task: apple!.id }));
+    const second = idOf(await s.tool("say", { text: "Done ✅", task: pear!.id }));
+    expect(second).not.toBe(first);
+    expect(s.messages.get(CONCIERGE_CHAT)).toHaveLength(2);
+    // The same words about the same task are still one message.
+    expect(idOf(await s.tool("say", { text: "Done ✅", task: pear!.id }))).toBe(second);
   });
 
   describe("chat threads", () => {
@@ -1508,6 +1526,44 @@ describe("Concierge tools", () => {
     ]);
   });
 
+  it("lets a failed turn-down reach the expiry, and a stop go ahead anyway", async () => {
+    const s = setup();
+    s.service.attachApprovalExpiry(async () => {
+      throw new Error("database is locked");
+    });
+    await expect(
+      s.service.expireApprovals("task-1", {
+        until: 0,
+        reason: "No response",
+        resolvedBy: RESOLVED_BY_EXPIRY,
+        continueTurn: true,
+      }),
+    ).rejects.toThrow("database is locked");
+    const { taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.service.stopTask(taskId, "guardian");
+    expect((await s.taskRepo.get(taskId))?.stoppedAt).toEqual(expect.any(Date));
+  });
+
+  it("tells the Concierge quietly when the owner cancels a task's checks, and lets a failure through", async () => {
+    const s = setup();
+    const [row] = await s.taskRepo.upsertMany([{ title: "PR 42", chatId: CONCIERGE_CHAT }]);
+    const pending = () =>
+      (s.service as unknown as { taskEvents: { pending: string[] } }).taskEvents.pending;
+    s.deps.checks = {
+      cancelFor: async () => {
+        throw new Error("database is locked");
+      },
+      laterOf: async () => new Map(),
+    } as never;
+    await expect(s.service.cancelChecksByOwner(row!.id)).rejects.toThrow("database is locked");
+    expect(pending()).not.toContain(row!.id);
+    s.deps.checks = { cancelFor: async () => 1, laterOf: async () => new Map() } as never;
+    await s.service.cancelChecksByOwner(row!.id);
+    expect(pending()).toContain(row!.id);
+  });
+
   it("archiving a task that is still open stops it, and leaves an ended one's outcome alone", async () => {
     const s = setup();
     const { taskId } = JSON.parse(
@@ -2023,6 +2079,23 @@ describe("Concierge task list tools", () => {
     s.taskRepo.onChange(({ row }) => seen.push(row.title));
     await s.tool("task_upsert", { tasks: [{ title: "A" }, { title: "B" }] });
     expect(seen).toEqual(["A", "B"]);
+  });
+
+  it("task_list lists a task whose check waits on an event with no deadline, with no time", async () => {
+    const s = setup({ startEvents: false });
+    const [row] = await s.taskRepo.upsertMany([{ title: "CI run", chatId: CONCIERGE_CHAT }]);
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      waitingSince: async () => new Map(),
+      reportPending: () => [],
+      laterOf: async () => new Map([[row!.id, Number.POSITIVE_INFINITY]]),
+    });
+    const listed = text(await s.tool("task_list", {})).tasks;
+    expect(listed).toEqual([expect.objectContaining({ id: row!.id, status: "later" })]);
+    expect(listed[0]).not.toHaveProperty("laterAt");
+    const [dto] = await s.tasks.toDtos([(await s.taskRepo.getWithChat(row!.id))!]);
+    expect(dto?.laterAt).toBeNull();
   });
 
   it("task_list answers compact rows with their status, and the ended ones on request", async () => {
@@ -2633,6 +2706,16 @@ describe("Concierge events", () => {
     // A summary the Concierge writes after the result wins.
     await s.tool("task_upsert", { tasks: [{ id: taskId, summary: "Booked the 9am" }] });
     expect((await s.taskRepo.get(taskId))?.summary).toBe("Booked the 9am");
+  });
+
+  it("takes a result's first sentence in Chinese too, no longer than a summary the Concierge writes", () => {
+    expect(resultSummary("我订好了明天的机票。航班号是CA123，早上八点起飞。")).toBe(
+      "我订好了明天的机票。",
+    );
+    expect(resultSummary("Done. Next step.")).toBe("Done.");
+    const long = resultSummary(`${"word ".repeat(60)}end.`);
+    expect(long?.length).toBe(CONCIERGE_TASK_SUMMARY_MAX_LENGTH);
+    expect(long?.endsWith("…")).toBe(true);
   });
 
   it("keeps a failed task's line as it was", async () => {

@@ -205,6 +205,15 @@ describe("the Concierge task status migration", () => {
     expect(taskOf("fired")).toBeNull();
     expect(taskOf("unknown")).toBeNull();
     expect(taskOf("other-agent")).toBeNull();
+    // Its task waits on that check, so it is not stamped ended: the panel
+    // keeps it in Later however long ago it was written.
+    expect(
+      (
+        sqlite.prepare("SELECT ended_at FROM concierge_tasks WHERE id = ?").get(task) as {
+          ended_at: number | null;
+        }
+      ).ended_at,
+    ).toBeNull();
     sqlite.close();
   });
 

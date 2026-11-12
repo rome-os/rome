@@ -120,7 +120,10 @@ export interface ApprovalRecord {
   status: "pending" | "approved" | "rejected" | "auto_approved";
   executionState?: "idle" | "queued" | "running" | "succeeded" | "failed" | null;
   executionError?: string | null;
-  /** Who resolved it: `rome:task-ended` when Rome turned it down as its task's wait ran out. */
+  /**
+   * Who resolved it: `rome:task-ended` when Rome turned it down as its task's
+   * wait ran out, `rome:task-stopped` as its task was stopped.
+   */
   resolvedBy?: string | null;
 }
 

@@ -188,11 +188,11 @@ export function ThreadLabelLine({ message }: { message: ChatMessage }) {
           preview: replyPreview(wordsOf(message)),
         })
       }
-      // About 2px from its own bubble and 12px before the next message, so it
+      // About 4px (a spacing step) from its own bubble and 12px before the next message, so it
       // reads as its bubble's. Regular weight and faint until hovered or
       // focused; a long title is cut at a fixed width, whole in the tooltip
       // and the accessible name.
-      className="-mt-1.5 mb-1 flex max-w-full min-w-0 rounded-4 px-1 text-left text-aux text-subtle-foreground/70 outline-1 outline-offset-0 outline-transparent transition-colors hover:text-muted-foreground focus-visible:text-muted-foreground focus-visible:outline-solid focus-visible:outline-ring/50 motion-reduce:transition-none"
+      className="-mt-1 mb-1 flex max-w-full min-w-0 rounded-4 px-1 text-left text-aux text-subtle-foreground/70 outline-1 outline-offset-0 outline-transparent transition-colors hover:text-muted-foreground focus-visible:text-muted-foreground focus-visible:outline-solid focus-visible:outline-ring/50 motion-reduce:transition-none"
     >
       <span aria-hidden="true" className="shrink-0">
         ↳&nbsp;

@@ -43,6 +43,8 @@ export interface TaskFactSources {
 export interface TaskStatusView extends ConciergeTaskStatusResult {
   waitingSince: number | null;
   laterAt: number | null;
+  /** When the wait Rome last ended for no response began, or null. */
+  expiredWaitAt: number | null;
 }
 
 export class ConciergeTasks {
@@ -101,6 +103,7 @@ export class ConciergeTasks {
           laterAt: later.get(row.id) ?? legacyLaterOf(row, this.now()),
           lastOutcome: row.lastOutcome ?? null,
           started: row.linkedAt !== null || row.sessionId !== null || row.lastOutcome !== null,
+          waitExpired: row.expiredWaitAt !== null,
         },
       ]),
     );
@@ -130,6 +133,7 @@ export class ConciergeTasks {
             ...taskStatus(of, now, this.waitExpiryMs),
             waitingSince: of.waitingSince,
             laterAt: of.laterAt,
+            expiredWaitAt: row.expiredWaitAt?.getTime() ?? null,
           },
         ];
       }),
@@ -196,7 +200,7 @@ export class ConciergeTasks {
       status: status.status,
       endReason: status.endReason,
       waitingSince: status.waitingSince,
-      laterAt: status.laterAt,
+      laterAt: finiteOrNull(status.laterAt),
       summary: row.summary,
       waitingOn: row.waitingOn,
       dueAt: row.dueAt?.getTime() ?? null,
@@ -365,6 +369,14 @@ function legacyLaterOf(row: ConciergeTaskRow, now: number): number | null {
   return (row.state === "next" || row.state === "watching") && due !== null && due > now
     ? due
     : null;
+}
+
+/**
+ * A check time as it goes out: an event wait with no deadline is due at
+ * Infinity, which has no date, so it goes out as none.
+ */
+export function finiteOrNull(at: number | null): number | null {
+  return at !== null && Number.isFinite(at) ? at : null;
 }
 
 function keyOf(status: TaskStatusView): string {

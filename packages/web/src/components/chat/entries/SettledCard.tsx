@@ -19,6 +19,22 @@ export function answerOutcome(t: TFunction<"chat">, output: Record<string, unkno
     : t("concierge.ask.answered");
 }
 
+/**
+ * How a decided approval reads folded: approved, rejected by its owner, or
+ * turned down by Rome as its task's wait ran out or as its task was stopped.
+ */
+export function approvalOutcome(
+  t: TFunction<"chat">,
+  status: string,
+  resolvedBy: string | null | undefined,
+): string {
+  if (resolvedBy === "rome:task-ended") return t("concierge.ask.turnedDown");
+  if (resolvedBy === "rome:task-stopped") return t("concierge.ask.turnedDownStopped");
+  if (status === "rejected") return t("concierge.ask.rejected");
+  if (status === "failed") return t("approvals.status.failed");
+  return t("concierge.ask.approved");
+}
+
 const CARD =
   "flex w-full min-w-0 flex-col rounded-12 border border-border bg-surface px-4 py-2 text-left";
 

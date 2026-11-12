@@ -108,6 +108,14 @@ describe("ApprovalCard tab status", () => {
     expect(await screen.findByText("concierge.ask.turnedDown")).toBeTruthy();
   });
 
+  it("folds an approval Rome turned down as its task was stopped to say so", async () => {
+    mockFetchApproval.mockResolvedValue(
+      record({ status: "rejected", resolvedBy: "rome:task-stopped" }),
+    );
+    mountCard("fold");
+    expect(await screen.findByText("concierge.ask.turnedDownStopped")).toBeTruthy();
+  });
+
   it("releases the claim once the guardian approves", async () => {
     mockFetchApproval.mockResolvedValue(record({ status: "pending" }));
     mockResolveApproval.mockResolvedValue({ ok: true });
