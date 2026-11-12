@@ -42,7 +42,7 @@ struct ChatScreen: View {
                     // The keyboard would stay up over the drawer.
                     composerFocused = false
                     onMenu()
-                }, onAgent: onAgent, zoomSource: AgentZoom.source(conciergeChatID))
+                }, onAgent: onAgent, zoomSource: AgentZoom.source(conciergeChatID), showsMenu: false)
                 .shareModeHeader(store.share)
                 banners
             }
@@ -280,12 +280,12 @@ private extension View {
     }
 }
 
-/// The floating header: menu, title, tasks.
+/// The floating header: the drawer button, the Agent's identity and, in a
+/// topic chat, the "…" menu.
 struct ChatHeader: View {
     /// The Concierge's name, in the main chat and in topic chats alike.
     let name: String
-    /// The chat's own title, atop the "…" menu: a topic chat's name. The
-    /// main Chat's menu has no title.
+    /// The chat's own title, atop the "…" menu: a topic chat's name.
     var menuTitle: String? = nil
     /// What the Concierge is doing here; nil shows the name alone.
     var activity: ConciergeActivity? = nil
@@ -296,6 +296,9 @@ struct ChatHeader: View {
     let onAgent: () -> Void
     /// The avatar the Agent page zooms out of.
     var zoomSource: String? = nil
+    /// The "…" menu; the main Chat has none, its right slot stays clear so
+    /// the identity keeps the middle.
+    var showsMenu = true
     /// A topic chat's options in the "…" menu.
     var onRename: (() -> Void)? = nil
     var onArchive: (() -> Void)? = nil
@@ -310,7 +313,11 @@ struct ChatHeader: View {
                 MenuGlyph()
             }
             ChatIdentity.Slot { ChatIdentity(name: name, activity: activity, announces: announces, zoomSource: zoomSource, onTap: onAgent) }
-            ChatMoreMenu(title: menuTitle ?? "", onRename: onRename, onArchive: onArchive, onDelete: onDelete)
+            if showsMenu {
+                ChatMoreMenu(title: menuTitle ?? "", onRename: onRename, onArchive: onArchive, onDelete: onDelete)
+            } else {
+                Color.clear.frame(width: 44, height: 44)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.top, 4)
@@ -522,9 +529,9 @@ enum MenuTitle {
     }
 }
 
-/// A Concierge chat's "…" button: a topic chat's title in small grey text
-/// on top, then the chat's own options and Shared links. Tasks are on the
-/// Agent page, from the mascot.
+/// A topic chat's "…" button: its title in small grey text on top, then
+/// the chat's own options and Shared links. The main Chat has no "…"
+/// button; tasks are on the Agent page, from the mascot.
 struct ChatMoreMenu: View {
     let title: String
     var onRename: (() -> Void)? = nil
