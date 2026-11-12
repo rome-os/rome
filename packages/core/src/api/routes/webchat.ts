@@ -4042,7 +4042,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         inputId,
         targetRoot && threadTask ? { root: targetRoot, task: threadTask } : null,
       );
-      promptText = `${conciergeHeader}\n${line}\n\n${noticedPrompt}`;
+      // Messages the owner stopped before an answer are named once, so this
+      // turn does not pick them up from the history.
+      const stopped = (await deps.concierge?.stoppedRequestLines(sessionId)) ?? "";
+      promptText = `${conciergeHeader}\n${stopped ? `${stopped}\n` : ""}${line}\n\n${noticedPrompt}`;
     }
 
     let agentSess;

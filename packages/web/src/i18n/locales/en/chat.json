@@ -15,7 +15,8 @@
       "running": "Working",
       "waiting": "Needs you",
       "failed": "Stopped with an error",
-      "idle": "Done"
+      "idle": "Done",
+      "later": "Later"
     },
     "openForwardedChat": "Open task chat {{title}}",
     "showFullText": "Show full text",

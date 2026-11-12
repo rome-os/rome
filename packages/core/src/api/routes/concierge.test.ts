@@ -259,6 +259,55 @@ describe("GET /concierge/tasks", () => {
   });
 });
 
+describe("POST /concierge/tasks/:taskId/stop", () => {
+  let testDb: TestDb;
+  let repo: ConciergeTasksRepository;
+  let stopped: [string, string][];
+
+  const app = () => {
+    const concierge = {
+      deps: { tasks: new ConciergeTasks(repo) },
+      stopTask: async (taskId: string, by: string) => void stopped.push([taskId, by]),
+    } as unknown as ConciergeService;
+    return mount(testDb, concierge, new ChatsWebChatRepository(testDb.db));
+  };
+  const stop = (taskId: string) =>
+    app().request(`/concierge/tasks/${taskId}/stop`, { ...guardian, method: "POST" });
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    repo = new ConciergeTasksRepository(testDb.db);
+    stopped = [];
+  });
+  afterEach(() => testDb.close());
+
+  it("stops the caller's own task, as its owner", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights" }]);
+    expect((await stop(row!.id)).status).toBe(200);
+    expect(stopped).toEqual([[row!.id, "guardian"]]);
+  });
+
+  it("stops no task that is not there, or is another person's", async () => {
+    const chats = new ChatsWebChatRepository(testDb.db);
+    await chats.createSession(
+      "ann-main",
+      "Ann",
+      undefined,
+      undefined,
+      null,
+      undefined,
+      "core:concierge",
+      "webchat",
+      null,
+      { ownerKey: "visitor:acct-ann" },
+    );
+    const [theirs] = await repo.upsertMany([{ title: "Hers", chatId: "ann-main" }]);
+    expect((await stop("nope")).status).toBe(404);
+    expect((await stop(theirs!.id)).status).toBe(404);
+    expect(stopped).toEqual([]);
+  });
+});
+
 describe("/concierge/connectors", () => {
   let testDb: TestDb;
   const listing = {

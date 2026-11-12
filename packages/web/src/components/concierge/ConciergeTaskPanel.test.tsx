@@ -53,6 +53,8 @@ const server = {
   settings: {} as Record<string, unknown>,
 };
 const posts: Array<Record<string, unknown>> = [];
+/** The tasks a Stop press stopped directly. */
+const stops: string[] = [];
 /** What a press on a topic chat's row posted to that chat. */
 const topicPosts: Array<Record<string, unknown>> = [];
 let postStatus = 200;
@@ -69,6 +71,11 @@ function mockServer() {
         headers: { "content-type": "application/json" },
       });
     if (url === "/api/settings") return json(server.settings);
+    const stop = url.match(/^\/api\/concierge\/tasks\/([^/]+)\/stop$/);
+    if (stop && init?.method === "POST") {
+      stops.push(decodeURIComponent(stop[1]!));
+      return json({ ok: true });
+    }
     if (url === "/api/concierge/session") return json({ id: "concierge", unread: 0 });
     if (url.startsWith("/api/concierge/tasks")) {
       return json({
@@ -138,6 +145,7 @@ beforeEach(() => {
   server.turns = [];
   server.settings = {};
   posts.length = 0;
+  stops.length = 0;
   postStatus = 200;
   toast.error.mockClear();
   FakeWebSocket.instances = [];
@@ -247,11 +255,12 @@ describe("ConciergeTaskPanel", () => {
     ).toBeTruthy();
     empty.unmount();
 
-    server.recent = [row("doing", { title: "Fix flaky test", chat: { id: "c1", name: "c" } })];
+    server.recent = [row("done", { title: "Fix flaky test", completedAt: Date.now() - DAY })];
     const user = userEvent.setup();
     renderPanel();
-    await user.click(await screen.findByRole("button", { name: "Stop" }));
-    await screen.findByText("Stopping…");
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
+    await user.click(await screen.findByRole("button", { name: "Archive" }));
+    await screen.findByText("Archiving…");
     server.messages = [consumed(posts[0].inputId)];
     expect(await screen.findByText("Milo did not change it", {}, { timeout: 4_000 })).toBeTruthy();
   });
@@ -432,14 +441,15 @@ describe("ConciergeTaskPanel", () => {
   it("sends a topic chat's buttons to that chat", async () => {
     const topic = { id: "topic-1", name: "Calendar", main: false };
     server.recent = [
-      row("doing", { title: "Agenda", chat: { id: "c1", name: "c" }, conciergeChat: topic }),
+      row("done", { title: "Agenda", completedAt: Date.now() - DAY, conciergeChat: topic }),
     ];
     mockServer();
     topicPosts.length = 0;
     const user = userEvent.setup();
     renderPanel({ chatId: "topic-1" });
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
     await screen.findByText("Agenda");
-    await user.click(screen.getByRole("button", { name: "Stop" }));
+    await user.click(screen.getByRole("button", { name: "Archive" }));
     await waitFor(() => expect(topicPosts).toHaveLength(1));
     expect(posts).toEqual([]);
   });
@@ -552,7 +562,7 @@ describe("ConciergeTaskPanel", () => {
     }
   });
 
-  it("sends Stop to the Concierge as a plain message with priority next, and waits for the row", async () => {
+  it("stops a task directly, with no message to the Concierge, and waits for the row", async () => {
     const task = row("doing", { title: "Fix flaky test", chat: { id: "c1", name: "c" } });
     server.recent = [task];
     mockServer();
@@ -560,10 +570,8 @@ describe("ConciergeTaskPanel", () => {
     const { socket } = renderPanel();
     await user.click(await screen.findByRole("button", { name: "Stop" }));
 
-    await waitFor(() => expect(posts).toHaveLength(1));
-    // The same words the guardian could type, as a plain message and nothing else.
-    expect(posts[0]).toMatchObject({ text: 'Stop "Fix flaky test"', priority: "next" });
-    expect(posts[0]).not.toHaveProperty("parts");
+    await waitFor(() => expect(stops).toEqual([task.id]));
+    expect(posts).toEqual([]);
     // The row says so quietly under its title, with no action to press again.
     const status = await screen.findByText("Stopping…");
     expect(item("Fix flaky test").contains(status)).toBe(true);
@@ -571,10 +579,12 @@ describe("ConciergeTaskPanel", () => {
       within(item("Fix flaky test")).queryByRole("button", { name: /Stop|Try again/ }),
     ).toBeNull();
 
-    // The Concierge stops it and writes the row: the pending state is gone.
+    // Rome stops it and tells the row: the pending state is gone.
     upsert(socket, {
       ...task,
       state: "dropped",
+      status: "ended",
+      endReason: "stopped",
       completedAt: Date.now(),
       updatedAt: task.updatedAt + 5_000,
     });
@@ -682,32 +692,34 @@ describe("ConciergeTaskPanel", () => {
   });
 
   it("names the short id only when another open row has the same title", async () => {
-    const same = row("doing", { title: "Fix flaky test", chat: { id: "c1", name: "c" } });
-    const twin = row("doing", { title: "Fix flaky test", chat: { id: "c2", name: "c" } });
-    const alone = row("doing", { title: "Plan next week", chat: { id: "c3", name: "c" } });
+    const same = row("done", { title: "Fix flaky test", completedAt: Date.now() - DAY });
+    const twin = row("done", { title: "Fix flaky test", completedAt: Date.now() - DAY });
+    const alone = row("done", { title: "Plan next week", completedAt: Date.now() - DAY });
     server.recent = [same, twin, alone];
     mockServer();
     const user = userEvent.setup();
     renderPanel();
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
     await screen.findByText("Plan next week");
-    const stops = screen.getAllByRole("button", { name: "Stop" });
+    const stops = screen.getAllByRole("button", { name: "Archive" });
     // Rows list by recency: press each row's own button and read what was sent.
     for (const stop of stops) await user.click(stop);
     await waitFor(() => expect(posts).toHaveLength(3));
     const texts = posts.map((post) => post.text);
-    expect(texts).toContain('Stop "Plan next week"');
-    expect(texts).toContain(`Stop "Fix flaky test" (task ${same.id.slice(0, 6)})`);
-    expect(texts).toContain(`Stop "Fix flaky test" (task ${twin.id.slice(0, 6)})`);
+    expect(texts).toContain('Archive "Plan next week"');
+    expect(texts).toContain(`Archive "Fix flaky test" (task ${same.id.slice(0, 6)})`);
+    expect(texts).toContain(`Archive "Fix flaky test" (task ${twin.id.slice(0, 6)})`);
   });
 
   it("says the Concierge didn't change the row when the turn that took the press in ends without a write, and lets the press repeat", async () => {
-    const task = row("doing", { title: "Fix flaky test", chat: { id: "c1", name: "c" } });
+    const task = row("done", { title: "Fix flaky test", completedAt: Date.now() - DAY });
     server.recent = [task];
     mockServer();
     const user = userEvent.setup();
     renderPanel();
-    await user.click(await screen.findByRole("button", { name: "Stop" }));
-    await screen.findByText("Stopping…");
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
+    await user.click(await screen.findByRole("button", { name: "Archive" }));
+    await screen.findByText("Archiving…");
     expect(typeof posts[0].inputId).toBe("string");
 
     server.messages = [consumed(posts[0].inputId)];
@@ -715,22 +727,23 @@ describe("ConciergeTaskPanel", () => {
     expect(await screen.findByText("Rome did not change it", {}, { timeout: 4_000 })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Try again" }));
     await waitFor(() => expect(posts).toHaveLength(2));
-    expect(await screen.findByText("Stopping…")).toBeTruthy();
+    expect(await screen.findByText("Archiving…")).toBeTruthy();
     expect(screen.queryByText("Rome did not change it")).toBeNull();
   });
 
   it("with two presses pending, a turn that ended handling only the first leaves the second pending", async () => {
     server.recent = [
-      row("doing", { title: "First task", chat: { id: "c1", name: "c" } }),
-      row("doing", { title: "Second task", chat: { id: "c2", name: "c" } }),
+      row("done", { title: "First task", completedAt: Date.now() - DAY }),
+      row("done", { title: "Second task", completedAt: Date.now() - DAY }),
     ];
     mockServer();
     const user = userEvent.setup();
     renderPanel();
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
     const li = (title: string) => screen.getByText(title).closest("li")!;
     await screen.findByText("First task");
-    await user.click(within(li("First task")).getByRole("button", { name: "Stop" }));
-    await user.click(within(li("Second task")).getByRole("button", { name: "Stop" }));
+    await user.click(within(li("First task")).getByRole("button", { name: "Archive" }));
+    await user.click(within(li("Second task")).getByRole("button", { name: "Archive" }));
     await waitFor(() => expect(posts).toHaveLength(2));
 
     // Turn 1 took the first press in and ended; turn 2 is queued and has not
@@ -742,19 +755,21 @@ describe("ConciergeTaskPanel", () => {
       await within(li("First task")).findByText("Rome did not change it", {}, { timeout: 4_000 }),
     ).toBeTruthy();
     expect(within(li("Second task")).queryByText("Rome did not change it")).toBeNull();
-    expect(within(li("Second task")).getByText("Stopping…")).toBeTruthy();
+    expect(within(li("Second task")).getByText("Archiving…")).toBeTruthy();
   });
 
   it("says the Concierge hasn't handled it after 60 s, with a retry", async () => {
-    const task = row("doing", { title: "Fix flaky test", chat: { id: "c1", name: "c" } });
+    const task = row("done", { title: "Fix flaky test", completedAt: Date.now() - DAY });
     server.recent = [task];
     mockServer();
     const user = userEvent.setup({ advanceTimers: (ms) => rs.advanceTimersByTime(ms) });
     renderPanel();
-    const stop = await screen.findByRole("button", { name: "Stop" });
+    // Opened before the clock is faked, which this press's user needs.
+    await userEvent.setup().click(await screen.findByRole("button", { name: /^Ended \d/ }));
+    const stop = await screen.findByRole("button", { name: "Archive" });
     rs.useFakeTimers({ toFake: ["Date", "setInterval", "clearInterval"] });
     await user.click(stop);
-    await screen.findByText("Stopping…");
+    await screen.findByText("Archiving…");
 
     act(() => {
       rs.advanceTimersByTime(PENDING_TIMEOUT_MS - 2_000);
@@ -769,12 +784,13 @@ describe("ConciergeTaskPanel", () => {
   });
 
   it("says so when the message could not be sent", async () => {
-    server.recent = [row("doing", { title: "Fix", chat: { id: "c1", name: "c" } })];
+    server.recent = [row("done", { title: "Fix", completedAt: Date.now() - DAY })];
     postStatus = 500;
     mockServer();
     const user = userEvent.setup();
     renderPanel();
-    await user.click(await screen.findByRole("button", { name: "Stop" }));
+    await user.click(await screen.findByRole("button", { name: /^Ended \d/ }));
+    await user.click(await screen.findByRole("button", { name: "Archive" }));
     expect(await screen.findByText("Could not send")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Try again" })).toBeTruthy();
   });
@@ -831,5 +847,8 @@ describe("ConciergeTaskPanel", () => {
     upsert(socket, row("needs_user", { title: "Fresh question", summary: "an answer" }));
     expect(await screen.findByRole("button", { name: /^Waiting for you\b/ })).toBeTruthy();
     expect(screen.getByText("an answer")).toBeTruthy();
+    // A live row keeps the status Rome derived, over the state it carries.
+    upsert(socket, row("doing", { title: "Gave up", status: "ended", endReason: "failed" }));
+    expect(await screen.findByRole("button", { name: /^Ended \d/ })).toBeTruthy();
   });
 });

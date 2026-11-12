@@ -418,16 +418,7 @@ export async function buildConciergeTools(
   };
 
   // Stops a task: Rome keeps it stopped, and its task chat's running work stops.
-  const stopTask = async (taskId: string) => {
-    await tasks.repo.stop(taskId, "concierge");
-    await service.cancelChecks(taskId);
-    const chatId = (await tasks.repo.get(taskId))?.sessionId;
-    if (!chatId) return 0;
-    const { chats } = service.dashboard;
-    const turns = chats.activeTurns(chatId);
-    for (const turnId of turns) await chats.interruptTurn(turnId);
-    return turns.length;
-  };
+  const stopTask = (taskId: string) => service.stopTask(taskId, "concierge");
 
   const findListEntry = async (chatId: string) =>
     (await webchatRepo.listSessions("all")).find((chat) => chat.id === chatId);

@@ -804,6 +804,11 @@ export const conciergeMessageTurns = sqliteTable(
     takenAt: integer("taken_at", { mode: "timestamp_ms" }).notNull(),
     /** Null while its turn has not answered it. */
     answeredAt: integer("answered_at", { mode: "timestamp_ms" }),
+    /**
+     * Set when its owner stopped the turn before it answered, until the next
+     * Concierge turn in the chat is told not to act on it.
+     */
+    stoppedUntold: integer("stopped_untold", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     primaryKey({ columns: [table.chatId, table.messageKey] }),

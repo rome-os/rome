@@ -3,6 +3,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useCallback } from "react";
 import { z } from "zod";
 import {
+  CONCIERGE_TASK_END_REASONS,
+  CONCIERGE_TASK_STATUSES,
+} from "@rome/api-types/concierge-task-status";
+import {
   CONCIERGE_DONE_DAYS,
   CONCIERGE_TASK_STATES,
   type ConciergeTaskDto,
@@ -27,6 +31,12 @@ const taskSchema = z.object({
   id: z.string(),
   title: z.string(),
   state: z.enum(CONCIERGE_TASK_STATES),
+  // Rome's derived status. A value this client does not know reads as none,
+  // so the row falls back to its state. A server from before it sends none.
+  status: z.enum(CONCIERGE_TASK_STATUSES).optional().catch(undefined),
+  endReason: z.enum(CONCIERGE_TASK_END_REASONS).nullable().optional().catch(null),
+  waitingSince: z.number().nullable().optional(),
+  laterAt: z.number().nullable().optional(),
   summary: z.string().nullable(),
   waitingOn: z.string().nullable(),
   dueAt: z.number().nullable(),

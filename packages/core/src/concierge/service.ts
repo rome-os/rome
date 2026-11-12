@@ -685,10 +685,11 @@ export class ConciergeService {
     // current one, and its note carries what it needs.
     const sessionId = (await this.runtimeOf(chatId)) || params.sessionId;
     const chat = await this.conciergeChat(chatId);
-    const prompt =
-      chat && !params.prompt.startsWith("<concierge_chat ")
-        ? `${await this.turnHeader(chat)}\n\n${params.prompt}`
-        : params.prompt;
+    const opening = [
+      chat && !params.prompt.startsWith("<concierge_chat ") ? await this.turnHeader(chat) : "",
+      chat ? await this.stoppedRequestLines(chatId) : "",
+    ].filter(Boolean);
+    const prompt = opening.length > 0 ? `${opening.join("\n")}\n\n${params.prompt}` : params.prompt;
     const reportedTask = await this.reportedTaskOf(params.prompt, chatId);
     return {
       ...params,
@@ -909,6 +910,26 @@ export class ConciergeService {
   }
 
   /**
+   * The lines that tell a Concierge turn in chat `chatId` which of its
+   * owner's messages they stopped before an answer, so the turn does not
+   * act on them unless asked again (rome-os/rome#2044). Told once. Empty
+   * when there are none.
+   */
+  async stoppedRequestLines(chatId: string): Promise<string> {
+    // Only a hint for the turn: a failure to read them never holds a turn up.
+    const stopped = await Promise.resolve()
+      .then(() => this.deps.tasks.repo.takeStoppedRequests(chatId))
+      .catch((error: unknown) => {
+        log.warn("failed to read stopped requests", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return [] as string[];
+      });
+    return stopped.map((key) => `<stopped_request message_id="${attr(key)}"/>`).join("\n");
+  }
+
+  /**
    * What a digest of Concierge chat `chatId` adds about its tasks: each task
    * still waiting on a check it scheduled `POSTPONED_CHECKS` times or more,
    * so the Concierge asks the guardian rather than check again. Empty when
@@ -932,6 +953,24 @@ export class ConciergeService {
         : [];
     });
     return lines.length > 0 ? `<task_review>\n${lines.join("\n")}\n</task_review>` : "";
+  }
+
+  /**
+   * Stops task `taskId`, as `by` asked: it ends stopped, its task chat's
+   * running work stops, and its checks are cancelled. A stop by its owner is
+   * told to the Concierge quietly. Answers how many turns it stopped.
+   */
+  async stopTask(taskId: string, by: "concierge" | "guardian"): Promise<number> {
+    await this.deps.tasks.repo.stop(taskId, by);
+    await this.cancelChecks(taskId);
+    if (by === "guardian")
+      this.taskEvents?.mark({ taskId, kind: "stopped_by_owner", urgent: false });
+    const chatId = (await this.deps.tasks.repo.get(taskId))?.sessionId;
+    if (!chatId || !this.attached) return 0;
+    const { chats } = this.attached;
+    const turns = chats.activeTurns(chatId);
+    for (const turnId of turns) await chats.interruptTurn(turnId);
+    return turns.length;
   }
 
   /** Cancels every check scheduled for task `taskId`, as when it is stopped or archived. */

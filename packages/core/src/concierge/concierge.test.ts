@@ -4389,6 +4389,25 @@ describe("Concierge status reactions", () => {
     expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, null]);
   });
 
+  it("stops a task its owner stops, cancels its checks, and tells the Concierge quietly", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { taskId } = await started(s);
+    const cancelled: string[] = [];
+    s.deps.checks = {
+      cancelFor: async (id: string) => (cancelled.push(id), 0),
+      laterOf: async () => new Map(),
+    } as never;
+    s.chats.activeTurns = () => ["task-turn-1"];
+    expect(await s.service.stopTask(taskId, "guardian")).toBe(1);
+    expect(s.chats.interruptTurn).toHaveBeenCalledWith("task-turn-1");
+    expect(cancelled).toEqual([taskId]);
+    expect(await s.taskRepo.get(taskId)).toMatchObject({ stopReason: "guardian" });
+    const coalescer = (s.service as unknown as { taskEvents: { pending: string[] } }).taskEvents;
+    expect(coalescer.pending).toContain(taskId);
+    expect(await reactionOf(s, "g1")).toBeNull();
+  });
+
   it("clears the reaction when the Concierge stops the task", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
@@ -4569,6 +4588,22 @@ describe("Concierge status reactions", () => {
       await finishTask(s, chatId);
       // The task is done; the Concierge's own turn still runs.
       expect(await reactionOf(s, "g1")).toBe("working");
+    });
+
+    it("tells the next turn once of a message its owner stopped before an answer, and not of one handed on", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await conciergeEnds(s, "interrupted");
+      expect(await s.service.stoppedRequestLines(CONCIERGE_CHAT)).toBe(
+        '<stopped_request message_id="g1"/>',
+      );
+      expect(await s.service.stoppedRequestLines(CONCIERGE_CHAT)).toBe("");
+      // A turn a newer input took over was not stopped: its work goes on.
+      guardianSays(s, "g2", "turn-b");
+      await taken(s, "g2", "turn-b");
+      await conciergeEnds(s, "interrupted", "turn-b", true);
+      expect(await s.service.stoppedRequestLines(CONCIERGE_CHAT)).toBe("");
     });
 
     it("answers the messages handed on to a turn that never started, so none stays marked, and hands none further", async () => {

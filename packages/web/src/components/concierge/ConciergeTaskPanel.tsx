@@ -28,7 +28,7 @@ import { useConciergeName } from "@/hooks/use-concierge";
 import { cn } from "@/lib/utils";
 import { checkPresses } from "./check-presses";
 import { requestConciergeJump } from "./concierge-jump";
-import { doneMessage, pressText, sendTaskAction } from "./send-task-action";
+import { doneMessage, pressText, sendTaskAction, stopTask } from "./send-task-action";
 import { StopGlyph } from "./StopGlyph";
 import { TaskGlyph } from "./TaskGlyph";
 import { formatTaskTime, groupTasks, taskTime, tasksOfChat, type TaskGroupKey } from "./tasks";
@@ -82,7 +82,10 @@ function TaskRow({
   const at = taskTime(task);
   const retry = pending !== undefined && pending.phase !== "pending";
   const press = (kind: ConciergeTaskAction) => {
-    if (kind === "done") {
+    if (kind === "stop") {
+      // A stop needs no turn of the Concierge: Rome stops the task at once.
+      void stopTask(task);
+    } else if (kind === "done") {
       const { text, replyToMessageId } = doneMessage(t, task, rows);
       void sendTaskAction(task, kind, text, replyToMessageId);
     } else {

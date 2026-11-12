@@ -183,6 +183,7 @@ export async function renderTaskEvents(
       if (change.detail) lines.push(change.detail);
     }
     if (changes.includes("chat_deleted")) lines.push("The task chat was deleted.");
+    if (changes.includes("stopped_by_owner")) lines.push("The guardian stopped this task.");
     const attrs = [
       `id="${attr(row.id)}"`,
       row.sessionId ? `chat_id="${attr(row.sessionId)}"` : null,
@@ -260,12 +261,16 @@ export function startConciergeEvents(
     // ends, so the session says whether a newer input took it over.
     if (status === "interrupted" && (handedOn || running.length > 0)) return;
     service.turnSettled(chatId);
-    await tasks.repo.answerTurns(chatId, running).catch((error: unknown) =>
-      log.warn("failed to settle turn status reactions", {
-        chatId,
-        error: error instanceof Error ? error.message : String(error),
-      }),
-    );
+    // A turn cut short with nothing carrying it on was stopped by its owner:
+    // the messages it took stay stopped, and the next turn is told so.
+    await tasks.repo
+      .answerTurns(chatId, running, new Date(), { stopped: status === "interrupted" })
+      .catch((error: unknown) =>
+        log.warn("failed to settle turn status reactions", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
   };
 
   const onConciergeTurn = async (event: EndedAgentTurn, chatId: string) => {

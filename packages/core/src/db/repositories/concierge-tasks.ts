@@ -623,10 +623,16 @@ export class ConciergeTasksRepository {
    * running took is answered. A message handed on to a turn in `running`
    * stays open until that one ends. Answers how many changed.
    */
-  async answerTurns(chatId: string, running: readonly string[], now = new Date()): Promise<number> {
+  async answerTurns(
+    chatId: string,
+    running: readonly string[],
+    now = new Date(),
+    options: { stopped?: boolean } = {},
+  ): Promise<number> {
     const changed = await this.db
       .update(conciergeMessageTurns)
-      .set({ answeredAt: now })
+      // A turn its owner stopped answered nothing: the next turn is told so.
+      .set({ answeredAt: now, ...(options.stopped ? { stoppedUntold: true } : {}) })
       .where(
         and(
           eq(conciergeMessageTurns.chatId, chatId),
@@ -640,6 +646,25 @@ export class ConciergeTasksRepository {
       });
     this.messageChanged(changed);
     return changed.length;
+  }
+
+  /**
+   * The guardian messages of Concierge chat `chatId` whose turn their owner
+   * stopped before it answered them, and that no turn was told of yet. Told
+   * once: answering clears them.
+   */
+  async takeStoppedRequests(chatId: string): Promise<string[]> {
+    const rows = await this.db
+      .update(conciergeMessageTurns)
+      .set({ stoppedUntold: false })
+      .where(
+        and(
+          eq(conciergeMessageTurns.chatId, chatId),
+          eq(conciergeMessageTurns.stoppedUntold, true),
+        ),
+      )
+      .returning({ messageKey: conciergeMessageTurns.messageKey });
+    return rows.map((row) => row.messageKey);
   }
 
   /** The Concierge answered guardian message `messageKey` of chat `chatId`, as with `say`. */

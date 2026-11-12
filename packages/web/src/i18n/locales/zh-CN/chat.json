@@ -15,7 +15,8 @@
       "running": "进行中",
       "waiting": "等你处理",
       "failed": "出错停止了",
-      "idle": "已完成"
+      "idle": "已完成",
+      "later": "稍后"
     },
     "openForwardedChat": "打开任务对话：{{title}}",
     "showFullText": "展开全文",

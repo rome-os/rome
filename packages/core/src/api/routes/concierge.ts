@@ -136,6 +136,20 @@ export function conciergeRoutes(
     return c.json({ tasks } satisfies ConciergeTasksResponse);
   });
 
+  // Its owner stops one task, from its card or the task list: its task chat's
+  // work stops, its checks are cancelled, and the Concierge hears of it.
+  app.post("/concierge/tasks/:taskId/stop", async (c) => {
+    const owner = await callerOwner();
+    if (!owner) return c.json({ error: "Not authenticated" }, 401);
+    const concierge = deps.concierge;
+    if (!concierge) return c.json({ error: "Concierge is not available" }, 404);
+    const taskId = c.req.param("taskId");
+    const found = await concierge.deps.tasks.repo.getWithChat(taskId);
+    if (!found || found.owner !== owner) return c.json({ error: "No such task" }, 404);
+    await concierge.stopTask(taskId, "guardian");
+    return c.json({ ok: true });
+  });
+
   // The same `task_upsert` events as the `concierge.tasks` topic of the live
   // events socket, for a tab that cannot open the socket: the caller's rows
   // only, and the gate runs before the stream opens.

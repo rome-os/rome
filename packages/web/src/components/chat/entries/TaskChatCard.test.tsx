@@ -73,6 +73,9 @@ let running: boolean;
 let postStatus: number;
 let postAction: () => void;
 let fetchMock: ReturnType<typeof rs.fn<typeof fetch>>;
+/** The task rows the list answers, and the tasks a Stop on the card stopped. */
+let taskRows: Record<string, unknown>[] = [];
+let stopped: string[] = [];
 
 beforeEach(async () => {
   await i18n.changeLanguage("en");
@@ -85,8 +88,16 @@ beforeEach(async () => {
   running = false;
   postStatus = 202;
   postAction = () => {};
+  taskRows = [];
+  stopped = [];
   fetchMock = rs.fn<typeof fetch>(async (input, init) => {
     const url = String(input);
+    if (url.startsWith("/api/concierge/tasks?")) return Response.json({ tasks: taskRows });
+    const stop = url.match(/^\/api\/concierge\/tasks\/([^/]+)\/stop$/);
+    if (stop && init?.method === "POST") {
+      stopped.push(stop[1]!);
+      return Response.json({ ok: true });
+    }
     if (url.endsWith("/turns") && init?.method === "POST") {
       postAction();
       return Response.json(
@@ -118,6 +129,45 @@ afterEach(() => {
   rs.useRealTimers();
   rs.unstubAllGlobals();
   rs.restoreAllMocks();
+});
+
+describe("TaskChatCard with its task", () => {
+  const taskRow = (status: string, endReason: string | null = null) => ({
+    id: "task-9",
+    title: "Draft email",
+    state: "doing",
+    status,
+    endReason,
+    summary: null,
+    waitingOn: null,
+    dueAt: null,
+    rank: null,
+    chat: { id: chatId, name: "Draft email" },
+    conciergeChat: { id: "concierge", name: "Concierge", main: true },
+    sourceMessageId: null,
+    createdAt: 1,
+    updatedAt: 2,
+    completedAt: null,
+    archivedAt: null,
+    notSynced: false,
+  });
+
+  it("says its task's status, as the task list does, and stops the task from the card", async () => {
+    waiting = false;
+    taskRows = [taskRow("later")];
+    show();
+    expect(await screen.findByText("Task chat · Later")).toBeTruthy();
+    await userEvent.setup().click(screen.getByRole("button", { name: "Stop" }));
+    await waitFor(() => expect(stopped).toEqual(["task-9"]));
+  });
+
+  it("offers no Stop once its task ended, and says why it ended", async () => {
+    waiting = false;
+    taskRows = [taskRow("ended", "no_response")];
+    show();
+    expect(await screen.findByText("Task chat · No response")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+  });
 });
 
 function show(isLatestForChat = true) {
@@ -244,7 +294,10 @@ describe("TaskChatCard", () => {
     cardTop = -200;
     fireEvent.scroll(scroller);
     await screen.findByRole("button", { name: "Needs you: jump to waiting card" });
-    const handlers = rs.mocked(useLiveEvents).mock.calls.at(-1)?.[1];
+    const handlers = rs
+      .mocked(useLiveEvents)
+      .mock.calls.filter(([, handlers]) => "session_running" in (handlers ?? {}))
+      .at(-1)?.[1];
     act(() => {
       handlers?.session_running.fn({ sessionId: chatId, running: true });
     });
@@ -280,7 +333,10 @@ describe("TaskChatCard", () => {
     show();
     await screen.findByText("Which tone?");
     const notify = (running: boolean) => {
-      const handlers = rs.mocked(useLiveEvents).mock.calls.at(-1)?.[1];
+      const handlers = rs
+        .mocked(useLiveEvents)
+        .mock.calls.filter(([, handlers]) => "session_running" in (handlers ?? {}))
+        .at(-1)?.[1];
       act(() => {
         handlers?.session_running.fn({ sessionId: chatId, running });
       });
@@ -435,7 +491,10 @@ describe("TaskChatCard", () => {
   it("collapses when the task starts running live", async () => {
     show();
     await screen.findByText("Which tone?");
-    const handlers = rs.mocked(useLiveEvents).mock.calls.at(-1)?.[1];
+    const handlers = rs
+      .mocked(useLiveEvents)
+      .mock.calls.filter(([, handlers]) => "session_running" in (handlers ?? {}))
+      .at(-1)?.[1];
     act(() => {
       handlers?.session_running.fn({ sessionId: chatId, running: true });
     });

@@ -4410,6 +4410,7 @@ describe("Webchat API", () => {
           id === "topic-1" ? { id, name: "Calendar", main: false } : null,
         turnHeader: async (chat: { id: string; name: string; main: boolean }) =>
           `<concierge_chat id="${chat.id}" name="${chat.name}" main="${chat.main}"/>\n<concierge_owner role="visitor" email="ann@example.com"/>`,
+        stoppedRequestLines: async () => "",
       } as never;
       await deps.webchatRepo.createSession(
         "topic-1",

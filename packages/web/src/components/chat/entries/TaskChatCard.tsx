@@ -4,6 +4,9 @@ import { createContext, useContext, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { z } from "zod";
+import { taskStatusOfDto } from "@rome/api-types/concierge-task-status";
+import { stopTask } from "@/components/concierge/send-task-action";
+import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
 import { Button } from "@/components/ui/button";
 import { useApprovals } from "@/hooks/use-approvals";
 import { listSessionMessagePage, postSessionTurnJson } from "@/lib/chat-api";
@@ -51,6 +54,13 @@ function StaticTaskChatCard({ title }: { title: string }) {
   );
 }
 
+/** The card's word for each open status, by its key under `concierge.taskStatus`. */
+const DERIVED_LABEL = {
+  needs_you: "waiting",
+  active: "running",
+  later: "later",
+} as const;
+
 function LiveTaskChatCard({
   chatId,
   title,
@@ -83,6 +93,17 @@ function LiveTaskChatCard({
       : session?.lastTurnFailed
         ? "failed"
         : "idle";
+  // The card says what the task list says: its task's status, when it has one.
+  const { tasks } = useConciergeTasks();
+  const task = tasks.find((candidate) => candidate.chat?.id === chatId);
+  const derived = task ? taskStatusOfDto(task) : null;
+  const label = derived
+    ? derived.status === "ended"
+      ? derived.endReason === "done"
+        ? t("concierge.taskStatus.idle")
+        : t(`concierge.tasks.ended.${derived.endReason}`)
+      : t(`concierge.taskStatus.${DERIVED_LABEL[derived.status]}`)
+    : t(`concierge.taskStatus.${status}`);
   return (
     <div className="w-full min-w-0 max-w-md space-y-3 rounded-16 border border-border bg-surface px-3 py-2">
       <div className="flex min-w-0 items-center gap-3">
@@ -90,9 +111,19 @@ function LiveTaskChatCard({
         <div className="flex min-w-0 flex-1 flex-col">
           <span className="truncate text-ui text-foreground">{session?.name ?? title}</span>
           <span className="text-aux text-muted-foreground">
-            {t("concierge.taskChat")} · {t(`concierge.taskStatus.${status}`)}
+            {t("concierge.taskChat")} · {label}
           </span>
         </div>
+        {task && derived && derived.status !== "ended" ? (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="shrink-0"
+            onClick={() => void stopTask(task)}
+          >
+            {t("concierge.tasks.stop")}
+          </Button>
+        ) : null}
         <Button asChild variant="ghost" size="sm" className="shrink-0">
           <Link to={`/chat/${chatId}`}>{t("concierge.openTaskChat")}</Link>
         </Button>
