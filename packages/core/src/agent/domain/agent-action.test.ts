@@ -148,4 +148,62 @@ describe("actionToolOutput", () => {
     expect(output).not.toHaveProperty("placeWidget");
     expect(output.message).toContain("could not be shown");
   });
+
+  describe("show_widget", () => {
+    const shown = (waits?: boolean): ActionResult => ({
+      status: "show_widget",
+      widget: {
+        componentId: "today",
+        props: { date: "2026-11-11" },
+        text: "Showing today's meals as a card.",
+        ...(waits === undefined ? {} : { waits }),
+      },
+    });
+
+    it("shows the owner app's card and lets the turn go on", () => {
+      const output = actionToolOutput(shown(), true, "meals") as Record<string, unknown>;
+
+      expect(output).toMatchObject({
+        showWidget: true,
+        appId: "meals",
+        componentId: "today",
+        props: { date: "2026-11-11" },
+        text: "Showing today's meals as a card.",
+      });
+      expect(output).not.toHaveProperty("pendingInteraction");
+      expect(output.message).toContain("Showing today's meals as a card.");
+      expect(output.message).not.toContain("do not call any further tools");
+    });
+
+    it("gives a widget that waits the same output as a pending interaction", () => {
+      const legacy: ActionResult = {
+        status: "pending_interaction",
+        interaction: {
+          appId: "meals",
+          promptText: "Showing today's meals as a card.",
+          render: { kind: "inline", componentId: "today", props: { date: "2026-11-11" } },
+        },
+      };
+
+      expect(actionToolOutput(shown(true), true, "meals")).toEqual(actionToolOutput(legacy, true));
+      expect(actionToolOutput(shown(true), false, "meals")).toEqual(
+        actionToolOutput(legacy, false),
+      );
+    });
+
+    it("tells the model no card showed where none can", () => {
+      const output = actionToolOutput(shown(), false, "meals") as Record<string, unknown>;
+
+      expect(output).not.toHaveProperty("showWidget");
+      expect(output.message).toContain("could not be shown");
+      expect(output.message).toContain("Showing today's meals as a card.");
+    });
+
+    it("shows no card for an action no app owns", () => {
+      const output = actionToolOutput(shown(), true, undefined) as Record<string, unknown>;
+
+      expect(output).not.toHaveProperty("showWidget");
+      expect(output).not.toHaveProperty("appId");
+    });
+  });
 });

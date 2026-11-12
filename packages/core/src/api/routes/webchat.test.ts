@@ -4085,11 +4085,15 @@ describe("Webchat API", () => {
       // The drain loop fail-closes a suspension unless its owning app is
       // installed (and, for an inline component, declares the component id). Wire
       // a minimal catalog resolving the apps these tests park onto.
+      const resolved = [
+        { appId: "workflow-studio", manifest: { components: [] } },
+        { appId: "ask-user", manifest: { components: ["question-card"] } },
+        { appId: "meals", manifest: { components: ["today"] } },
+      ];
       deps.appCatalog = {
-        listResolved: () => [
-          { appId: "workflow-studio", manifest: { components: [] } },
-          { appId: "ask-user", manifest: { components: ["question-card"] } },
-        ],
+        listResolved: () => resolved,
+        // The trace names an app-owned action's app, so it looks the app up.
+        get: (appId: string) => resolved.find((app) => app.appId === appId),
       } as unknown as typeof deps.appCatalog;
       let scripted: () => AsyncGenerator<unknown> = async function* () {
         yield { type: "result", content: "" };
@@ -4791,6 +4795,213 @@ describe("Webchat API", () => {
         };
         yield { type: "result", content: "" };
       };
+
+    // The output `actionToolOutput` hands the drain for a widget that does not
+    // wait.
+    const widgetOutput = (appId: string, componentId: string) => [
+      {
+        type: "text",
+        text: JSON.stringify({
+          showWidget: true,
+          appId,
+          componentId,
+          props: { date: "2026-11-11" },
+          text: "Showing today's meals as a card.",
+          message: "Showing today's meals as a card. The card is shown in your message.",
+        }),
+      },
+    ];
+
+    // Registers an action owned by `ownerId`, the way an installed app's
+    // actions are registered.
+    const registerAppAction = (name: string, ownerId: string) =>
+      deps.actionRegistry.register(
+        {
+          config: {
+            name,
+            type: "system",
+            description: name,
+            complexity: "simple",
+            speed: "fast",
+            reliability: "high",
+            sideEffects: "read-only",
+          },
+          inputSchema: { type: "object", properties: {} },
+          execute: async () => ({ status: "ok", data: {} }),
+        },
+        {
+          kind: "action",
+          ownerType: "app",
+          ownerId,
+          publicName: name,
+          aliases: [],
+          sourcePath: "",
+        },
+      );
+
+    // A widget shown by the `execute_action` call that ran `actionName`.
+    const widgetEvents = (
+      toolUseId: string,
+      appId: string,
+      componentId: string,
+      { actionName = "show_today", tool = "execute_action" } = {},
+    ) =>
+      async function* () {
+        yield { type: "tool_use", id: toolUseId, tool, input: { action_name: actionName } };
+        yield { type: "tool_result", toolUseId, tool, output: widgetOutput(appId, componentId) };
+        yield { type: "result", content: "" };
+      };
+
+    async function assistantPartsIn(sessionId: string) {
+      return (await deps.webchatRepo.getMessages(sessionId))
+        .filter((m) => m.role === "assistant")
+        .flatMap((m) => {
+          try {
+            const parts = JSON.parse(m.content);
+            return Array.isArray(parts) ? (parts as Array<Record<string, unknown>>) : [];
+          } catch {
+            return [];
+          }
+        });
+    }
+
+    it("stores a widget that does not wait as its own part, not a pending card", async () => {
+      registerAppAction("show_today", "meals");
+      const ctl = mockScriptedManager();
+      ctl.setEvents(widgetEvents("tu-widget-1", "meals", "today"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "what did I eat today?" }),
+        }),
+      );
+
+      const parts = await assistantPartsIn(sessionId);
+      expect(parts).toContainEqual({
+        type: "widget",
+        toolUseId: "tu-widget-1",
+        appId: "meals",
+        componentId: "today",
+        props: { date: "2026-11-11" },
+        text: "Showing today's meals as a card.",
+      });
+      expect(parts.some((p) => p.type === "pending_interaction")).toBe(false);
+    });
+
+    it("stores no widget for a component its app does not declare", async () => {
+      registerAppAction("show_today", "meals");
+      const ctl = mockScriptedManager();
+      ctl.setEvents(widgetEvents("tu-widget-2", "meals", "undeclared"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "what did I eat today?" }),
+        }),
+      );
+
+      expect((await assistantPartsIn(sessionId)).some((p) => p.type === "widget")).toBe(false);
+    });
+
+    it("stores no widget for an app that is not installed", async () => {
+      registerAppAction("show_today", "not-installed");
+      const ctl = mockScriptedManager();
+      ctl.setEvents(widgetEvents("tu-widget-3", "not-installed", "today"));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "what did I eat today?" }),
+        }),
+      );
+
+      expect((await assistantPartsIn(sessionId)).some((p) => p.type === "widget")).toBe(false);
+    });
+
+    // Tool output is not proof of where it came from, so a widget naming one
+    // app is refused from another app's action and from any other tool.
+    it.each([
+      {
+        case: "another app's action",
+        setup: () => registerAppAction("rogue_action", "rogue"),
+        options: { actionName: "rogue_action" },
+      },
+      {
+        case: "an action Rome does not have",
+        setup: () => undefined,
+        options: { actionName: "unregistered_action" },
+      },
+      {
+        case: "a tool other than execute_action",
+        setup: () => registerAppAction("show_today", "meals"),
+        options: { tool: "Bash" },
+      },
+    ])("stores no widget for $case that prints a widget's output", async ({ setup, options }) => {
+      setup();
+      const ctl = mockScriptedManager();
+      ctl.setEvents(widgetEvents("tu-forged", "meals", "today", options));
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "what did I eat today?" }),
+        }),
+      );
+
+      expect((await assistantPartsIn(sessionId)).some((p) => p.type === "widget")).toBe(false);
+    });
+
+    it("stores a widget shown in a turn that runs without the dashboard open", async () => {
+      // A defer wake-up, a resumed turn and an approval continuation all run
+      // through enqueueSessionTask, not the foreground turn drain.
+      registerAppAction("show_today", "meals");
+      mockScriptedManager();
+      const sessionId = "sess-backend-widget";
+      await deps.webchatRepo.createSession(sessionId, "Backend Widget");
+      const { runtime } = createWebchatRuntime(deps);
+
+      await runtime.enqueueSessionTask(sessionId, async ({ emit }) => {
+        emit({
+          type: "tool_use",
+          id: "tu-backend-widget",
+          tool: "execute_action",
+          input: { action_name: "show_today" },
+        });
+        emit({
+          type: "tool_result",
+          toolUseId: "tu-backend-widget",
+          tool: "execute_action",
+          output: widgetOutput("meals", "today"),
+        });
+        emit({ type: "result", content: "Here is today." });
+      });
+
+      expect(await assistantPartsIn(sessionId)).toContainEqual({
+        type: "widget",
+        toolUseId: "tu-backend-widget",
+        appId: "meals",
+        componentId: "today",
+        props: { date: "2026-11-11" },
+        text: "Showing today's meals as a card.",
+      });
+    });
 
     it("keeps requiresCard on the stored card, and only when the payload set it", async () => {
       const ctl = mockScriptedManager();
