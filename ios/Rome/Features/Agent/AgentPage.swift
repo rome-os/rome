@@ -38,7 +38,7 @@ struct AgentPage: View {
     /// The stacking game, opened from the big mascot over this page.
     @State private var game: StackGameLaunch?
 
-    static let mascotWidth: CGFloat = 80
+    static let discSize: CGFloat = 96
 
     var body: some View {
         VStack(spacing: 0) {
@@ -81,9 +81,14 @@ struct AgentPage: View {
     private var header: some View {
         VStack(spacing: 12) {
             // A tap pokes it; ten quick ones open the stacking game.
+            // The header avatar's disc, grown: the mascot keeps its share.
             Mascot(blinks: !reduceMotion, pokes: pokes)
-                .frame(width: Self.mascotWidth)
-                .contentShape(Rectangle())
+                .frame(height: Self.discSize * 28 / ChatIdentity.avatarSize)
+                .frame(width: Self.discSize, height: Self.discSize)
+                .background(Palette.elevated, in: Circle())
+                .overlay(Circle().strokeBorder(Palette.hair, lineWidth: 0.5))
+                .shadow(color: Palette.avatarShadow, radius: 6, x: 0, y: 2)
+                .contentShape(Circle())
                 .onTapGesture {
                     haptic.impactOccurred()
                     haptic.prepare()
@@ -106,25 +111,14 @@ struct AgentPage: View {
 
     private var uses: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 18) {
-                ForEach(AgentUseGroup.all) { group in
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text(verbatim: group.title)
-                            .romeFont(13, .semibold)
-                            .foregroundStyle(Palette.sub)
-                            .padding(.horizontal, 6)
-                            .accessibilityAddTraits(.isHeader)
-                        VStack(spacing: 0) {
-                            ForEach(Array(group.prompts.enumerated()), id: \.offset) { index, prompt in
-                                useRow(prompt, last: index == group.prompts.count - 1)
-                            }
-                        }
-                        .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
-                        .clipShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
-                        .hairline(radius: Metrics.groupRadius)
-                    }
+            VStack(spacing: 0) {
+                ForEach(Array(AgentUse.all.enumerated()), id: \.element.id) { index, use in
+                    useRow(use, last: index == AgentUse.all.count - 1)
                 }
             }
+            .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))
+            .hairline(radius: Metrics.groupRadius)
             .padding(.horizontal, 16)
             .padding(.top, 4)
             .padding(.bottom, 24)
@@ -132,20 +126,26 @@ struct AgentPage: View {
         .scrollIndicators(.hidden)
     }
 
-    private func useRow(_ prompt: String, last: Bool) -> some View {
-        Button { onUse(prompt) } label: {
-            Text(verbatim: prompt)
-                .romeFont(16)
-                .foregroundStyle(Palette.fg)
-                .lineLimit(2)
-                .multilineTextAlignment(.leading)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .padding(.vertical, 12)
-                .padding(.horizontal, 16)
-                .overlay(alignment: .bottom) {
-                    if !last { Rectangle().fill(Palette.hair).frame(height: 0.5).padding(.leading, 16) }
-                }
-                .contentShape(Rectangle())
+    private func useRow(_ use: AgentUse, last: Bool) -> some View {
+        Button { onUse(use.prompt) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: use.symbol)
+                    .romeFont(17)
+                    .foregroundStyle(Palette.sub)
+                    .frame(width: 24)
+                    .accessibilityHidden(true)
+                Text(verbatim: use.title)
+                    .romeFont(16)
+                    .foregroundStyle(Palette.fg)
+                    .lineLimit(1)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 13)
+            .padding(.horizontal, 16)
+            .overlay(alignment: .bottom) {
+                if !last { Rectangle().fill(Palette.hair).frame(height: 0.5).padding(.leading, 52) }
+            }
+            .contentShape(Rectangle())
         }
         .buttonStyle(RowPressStyle())
         .accessibilityHint(Text("Puts it in the message box."))
