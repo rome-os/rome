@@ -105,6 +105,27 @@ function outcomeOf(status: AgentTurnFinishedEvent["status"]): "succeeded" | "fai
   return end === "done" ? "succeeded" : end;
 }
 
+/** The longest summary Rome writes from a result. */
+const RESULT_SUMMARY_CHARS = 140;
+
+/**
+ * A finished task's one line, from the result its task chat gave: the first
+ * sentence of its conclusion, else of its reply, cut short. Null for none.
+ */
+export function resultSummary(text: string): string | null {
+  const conclusion = conclusionOf(text);
+  const body = (conclusion.kind === "found" ? conclusion.text : withoutMarkers(text))
+    .replace(/\[([^\]]*)\]\([^)]*\)/g, "$1")
+    .replace(/[`*_#>]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!body) return null;
+  const sentence = body.match(/^.+?[.!?。！？](?=\s|$)/)?.[0] ?? body;
+  return sentence.length <= RESULT_SUMMARY_CHARS
+    ? sentence
+    : `${sentence.slice(0, RESULT_SUMMARY_CHARS - 1).trimEnd()}…`;
+}
+
 function userText(content: string): string {
   try {
     const parts: unknown = JSON.parse(content);
@@ -442,12 +463,27 @@ export function startConciergeEvents(
     // The task reads as running until its outcome is written, so its status
     // does not flicker to ended while the turn's stream drains.
     const release = tasks.holdRunning(chatId);
+    let summary: string | null = null;
     try {
-      await onTaskChatTurnHeld(event, chatId, taskId, carriesApproval);
+      summary = await onTaskChatTurnHeld(event, chatId, taskId, carriesApproval);
     } finally {
       release();
       await guard("task status after a turn", tasks.chatChanged(chatId));
     }
+    if (summary) await guard("task result summary", writeResultSummary(taskId, summary));
+  };
+
+  // A task chat that gave its result keeps its row's line current: the
+  // result's first sentence, until the Concierge writes another. Only a
+  // result that ends the task counts, read once its turn no longer holds it
+  // running: a turn that left an approval or a check pending did not end it.
+  // A failed or stopped task keeps its line, since the row says why it ended.
+  const writeResultSummary = async (taskId: string, summary: string) => {
+    const row = await tasks.repo.get(taskId);
+    if (!row) return;
+    const status = (await tasks.statusOf([row], { asReported: true })).get(taskId);
+    if (status?.status !== "ended" || status.endReason !== "done") return;
+    await tasks.repo.setResultSummary(taskId, summary);
   };
 
   const onTaskChatTurnHeld = async (
@@ -455,7 +491,7 @@ export function startConciergeEvents(
     chatId: string,
     taskId: string,
     carriesApproval: boolean,
-  ) => {
+  ): Promise<string | null> => {
     await waitForTurnStream(service, chatId, event.turn.turnId);
     const rows = await webchatRepo.getTurnChatMessages(chatId, event.turn.turnId);
     const userRows = rows.filter((row) => row.role === "user");
@@ -492,6 +528,17 @@ export function startConciergeEvents(
           }),
         );
     }
+    // A task chat that gave its result keeps its row's line current: the
+    // result's first sentence, until the Concierge writes another. A failed
+    // or stopped task keeps its line, since the row says why it ended.
+    // The result's first sentence, for the row's line once the task ended.
+    let summary: string | null = null;
+    if (event.status === "completed" && !question && stillRunning.length === 0) {
+      // The turn's final answer, else its last reply in the chat.
+      const reply = rows.filter((row) => row.role === "assistant").at(-1);
+      const text = event.output.text?.trim() || (reply ? userText(reply.content) : "");
+      summary = text ? resultSummary(text) : null;
+    }
     if (question) {
       const options = question.options?.length ? ` (options: ${question.options.join(" | ")})` : "";
       coalescer.mark({
@@ -500,7 +547,7 @@ export function startConciergeEvents(
         urgent: true,
         detail: [said, `question: ${question.question}${options}`].filter(Boolean).join("\n"),
       });
-      return;
+      return null;
     }
     // The guardian messages the task worked for read the task's status: its
     // outcome, written above, waits for the Concierge's report, so they
@@ -522,6 +569,7 @@ export function startConciergeEvents(
       ...(passive ? { passive: true } : {}),
       ...(detail.length ? { detail: detail.join("\n") } : {}),
     });
+    return summary;
   };
 
   const onApproval = async (approval: {

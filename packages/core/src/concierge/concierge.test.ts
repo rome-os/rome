@@ -2616,6 +2616,40 @@ describe("Concierge events", () => {
       text: "x",
     });
 
+  it("keeps a finished task's line current: the result's first sentence, until the Concierge writes another", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await s.taskRepo.upsertMany([{ id: taskId, summary: "Waiting for the airline" }]);
+    await s.finish({
+      turnId: "task-turn-1",
+      agentName: "core:main",
+      chatId,
+      text: concluded(
+        "Saved [flights.md](/projects/default/flights.md) with three options. Prices change daily.",
+      ),
+    });
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Saved flights.md with three options.");
+    // A summary the Concierge writes after the result wins.
+    await s.tool("task_upsert", { tasks: [{ id: taskId, summary: "Booked the 9am" }] });
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Booked the 9am");
+  });
+
+  it("keeps a failed task's line as it was", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await s.taskRepo.upsertMany([{ id: taskId, summary: "Searching flights" }]);
+    await s.finish({
+      turnId: "task-turn-1",
+      agentName: "core:main",
+      chatId,
+      status: "error",
+      text: "Something broke.",
+    });
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Searching flights");
+  });
+
   it("tells the Concierge of a result it asked for two seconds after the turn ends, as one batch", async () => {
     const s = setup();
     const { chatId, taskId } = await startTask(s);

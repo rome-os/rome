@@ -107,6 +107,16 @@ describe("PendingChecks", () => {
     expect(deleted).toEqual(["ci"]);
   });
 
+  it("drops a check from the strip once its time has passed", async () => {
+    serve([
+      { id: "soon", name: "Soon", at: Date.now() + 1_500, waitingFor: null, taskId: null },
+      later("Later", 2),
+    ]);
+    renderChecks();
+    expect(await screen.findByText(/^2 checks · next: Soon/)).toBeTruthy();
+    expect(await screen.findByText("Later · in 2 hr", undefined, { timeout: 5_000 })).toBeTruthy();
+  });
+
   it("shows nothing when no check is pending", async () => {
     serve([]);
     const { container } = renderChecks();

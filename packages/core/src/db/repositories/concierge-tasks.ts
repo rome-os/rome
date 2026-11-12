@@ -218,6 +218,19 @@ export class ConciergeTasksRepository {
     await this.announce(row.id, "refresh");
   }
 
+  /**
+   * Task `id`'s summary, from the result its task chat just gave: Rome keeps
+   * a finished task's line current. A summary the Concierge writes after
+   * this replaces it, as any write does.
+   */
+  async setResultSummary(id: string, summary: string, now = new Date()): Promise<void> {
+    await this.db
+      .update(conciergeTasks)
+      .set({ summary, updatedAt: now })
+      .where(eq(conciergeTasks.id, id));
+    await this.announce(id, "refresh");
+  }
+
   /** How task `id`'s task chat's latest work ended. Rome writes it; the Concierge never does. */
   async setLastOutcome(
     id: string,
