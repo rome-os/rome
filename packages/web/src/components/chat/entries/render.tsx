@@ -234,6 +234,14 @@ export function renderSingleEntry(
       );
     }
     case "widget":
+      // A card described as data shows its line until the dashboard draws it.
+      if ("ui" in block) {
+        return (
+          <p key={`app-widget-${block.toolUseId}`} className="text-ui text-muted-foreground">
+            {block.text}
+          </p>
+        );
+      }
       // Nothing answers a widget, so the card gets no submit or dismiss.
       return (
         <AppComponentView
