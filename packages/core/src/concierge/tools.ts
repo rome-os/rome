@@ -169,6 +169,23 @@ export async function buildConciergeTools(
     return chat;
   };
 
+  // A task chat this Concierge chat started, which it may send into or
+  // forward. A task another Concierge chat started is refused: its result and
+  // thread belong to that chat. A task chat with no row yet counts as ours.
+  const requireOwnTaskChat = async (chatId: string) => {
+    const chat = await requireTaskChat(chatId);
+    const { chatId: here } = currentTurn();
+    const task = await tasks.repo.findBySession(chatId);
+    const found = task ? await tasks.repo.getWithChat(task.id) : null;
+    if (found && found.conciergeChat.id !== here) {
+      throw new Error(
+        `Task chat ${chatId} belongs to another Concierge chat (${found.conciergeChat.name}). ` +
+          "Start a task here with chat_start; read that chat with chat_read first to reuse what it found.",
+      );
+    }
+    return chat;
+  };
+
   // A chat the Concierge may read: one of its task chats, or another of its
   // Concierge chats.
   const requireReadableChat = async (chatId: string) => {
@@ -907,7 +924,7 @@ export async function buildConciergeTools(
     {
       name: "chat_send",
       description:
-        "Send a follow-up to a task chat: more detail, a correction, or the guardian's answer to its question. " +
+        "Send a follow-up to a task chat started from this Concierge chat: more detail, a correction, or the guardian's answer to its question. " +
         "A running task takes it as input, so it does not restart.",
       inputSchema: {
         type: "object",
@@ -922,7 +939,7 @@ export async function buildConciergeTools(
         runTool("chat_send", input, async (args) => {
           currentTurn();
           const chatId = requireString(args, "chatId");
-          const chat = await requireTaskChat(chatId);
+          const chat = await requireOwnTaskChat(chatId);
           const answers = optionalString(args, "answers");
           // Checked before the task hears anything, so a retry never sends twice.
           await requireTurnPrompt(answers);
@@ -1069,7 +1086,7 @@ export async function buildConciergeTools(
     {
       name: "chat_forward",
       description:
-        "Send the guardian a task chat's latest answer as one long message, word for word, without retyping it. " +
+        "Send the guardian the latest answer of a task chat started from this Concierge chat as one long message, word for word, without retyping it. " +
         "Use it for long content the guardian asked for. An existing task row automatically points to the forwarded message in this Concierge chat, unless the task already has a chat thread.",
       inputSchema: {
         type: "object",
@@ -1083,7 +1100,7 @@ export async function buildConciergeTools(
       handler: (input) =>
         runTool("chat_forward", input, async (args) => {
           const chatId = requireString(args, "chatId");
-          const chat = await requireTaskChat(chatId);
+          const chat = await requireOwnTaskChat(chatId);
           const [latest] = await latestSaid(
             messages,
             taskChatPlace(chatId),

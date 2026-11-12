@@ -1603,8 +1603,6 @@ describe("Concierge task anchors", () => {
   it.each([
     [CONCIERGE_CHAT, CONCIERGE_CHAT],
     [TOPIC_CHAT, TOPIC_CHAT],
-    [CONCIERGE_CHAT, TOPIC_CHAT],
-    [TOPIC_CHAT, CONCIERGE_CHAT],
   ] as const)("anchors a task created in %s to its result forwarded in %s before completion", async (createdIn, forwardedIn) => {
     const s = setup({ said: false });
     await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
@@ -1667,6 +1665,83 @@ describe("Concierge task anchors", () => {
       conciergeChat: expect.objectContaining({ id: forwardedIn }),
       sourceMessageId: forwarded.messageId,
       notSynced: false,
+    });
+  });
+
+  describe("a task chat another Concierge chat started", () => {
+    // The main chat starts "Flights" on the guardian's message g0.
+    const startInMain = async () => {
+      const s = setup({ said: false });
+      await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+      s.messages.set(CONCIERGE_CHAT, [
+        { id: "g0", role: "user", content: "[]", turnId: "concierge-turn-1" },
+      ]);
+      await s.tool("say", { text: "On it" });
+      const started = text(await s.tool("chat_start", { title: "Flights", brief: "Find flights" }));
+      s.messages.set(started.chatId, [
+        { role: "assistant", content: JSON.stringify([{ type: "text", content: "3 options" }]) },
+      ]);
+      const row = await s.taskRepo.get(started.taskId);
+      s.messages.set(TOPIC_CHAT, [{ id: "t0", role: "user", content: "[]", turnId: "ask" }]);
+      s.turnIn(TOPIC_CHAT);
+      s.inTurn("ask");
+      return { s, ...(started as { chatId: string; taskId: string }), row };
+    };
+
+    it("refuses chat_send from a topic chat, and nothing reaches the task", async () => {
+      const { s, chatId, taskId, row } = await startInMain();
+      const sent = s.posted.length;
+      const messagesHere = s.messages.get(TOPIC_CHAT)?.length;
+
+      const result = await s.tool("chat_send", { chatId, text: "Make it Saturday", answers: "t0" });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("belongs to another Concierge chat");
+      expect(result.content[0].text).toContain("chat_start");
+      expect(s.posted).toHaveLength(sent);
+      expect(s.messages.get(TOPIC_CHAT)).toHaveLength(messagesHere ?? 0);
+      expect(await s.taskRepo.get(taskId)).toEqual(row);
+      expect(await s.tasks.repo.threadRoot(taskId)).toBe("g0");
+    });
+
+    it("refuses chat_forward from a topic chat, and nothing is posted or moved", async () => {
+      const { s, chatId, taskId, row } = await startInMain();
+      const messagesHere = s.messages.get(TOPIC_CHAT)?.length;
+
+      const result = await s.tool("chat_forward", { chatId, answers: "t0" });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("belongs to another Concierge chat");
+      expect(s.messages.get(TOPIC_CHAT)).toHaveLength(messagesHere ?? 0);
+      expect(await s.taskRepo.get(taskId)).toEqual(row);
+    });
+
+    it("still lets the topic chat read it", async () => {
+      const { s, chatId } = await startInMain();
+      expect((await s.tool("chat_read", { chatId })).isError).toBeFalsy();
+    });
+
+    it("lets the main chat send to a task its retired topic chat started", async () => {
+      const s = setup({ said: false });
+      await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+      s.turnIn(TOPIC_CHAT);
+      s.messages.set(TOPIC_CHAT, [{ id: "t0", role: "user", content: "[]", turnId: "ask" }]);
+      s.inTurn("ask");
+      await s.tool("say", { text: "On it" });
+      const { chatId, taskId } = text(
+        await s.tool("chat_start", { title: "Agenda", brief: "Read the calendar" }),
+      );
+      await s.service.retireChat(TOPIC_CHAT, "archived");
+      const sent = s.posted.length;
+
+      s.turnIn(CONCIERGE_CHAT);
+      const result = await s.tool("chat_send", { chatId, text: "Add Friday" });
+
+      expect(result.isError).toBeFalsy();
+      expect(s.posted).toHaveLength(sent + 1);
+      expect((await s.tasks.listForPanel()).find((row) => row.id === taskId)).toMatchObject({
+        conciergeChat: { id: CONCIERGE_CHAT },
+      });
     });
   });
 
