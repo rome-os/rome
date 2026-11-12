@@ -45,7 +45,7 @@ export const WECHAT_CANONICAL_PREFIX = "/opt/wechat";
 /** The image's AT-SPI bus launcher (Debian `at-spi2-core`). */
 export const ACCESSIBILITY_LAUNCHER = "/usr/libexec/at-spi-bus-launcher";
 
-/** The desktop driver, a sibling asset (scripts/copy-build-assets.mjs). It also
+/** The desktop driver, a sibling asset (scripts/bundle-docker-core.mjs copies it into dist/). It also
  *  locates the sign-in button, by reading the accessibility tree only. */
 const DESKTOP_DRIVER = fileURLToPath(new URL("./wechat-user-send-driver.py", import.meta.url));
 const signInTargetSchema = z.object({

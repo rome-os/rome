@@ -1,9 +1,13 @@
 #!/usr/bin/env node
-import { cp, mkdir, readdir, stat } from "node:fs/promises";
+import { cp, mkdir, readdir, rm, stat } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
+// Builds what Node runs from core in the compiled runtime: every entry point
+// Node starts is bundled by esbuild, and nothing else lands in core/dist. tsc
+// only type-checks. esbuild inlines workspace packages that export TypeScript
+// source and resolves the `@/` alias, neither of which plain Node can do.
 const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // Static files and trees copied into core/dist so the published runtime can find
 // them. The app templates back `op: "create"`; the memory template seeds a fresh
@@ -12,7 +16,7 @@ const projectRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 // getMemoryTemplateDir() in profile-memory.ts.
 //
 // The WeChat send driver is read at runtime relative to `import.meta.url`, which
-// is src/connected-accounts/ under tsx and dist/ in the image, so a compiled runtime finds
+// is its own folder under tsx and dist/ in the image, so a compiled runtime finds
 // it only if it is copied to the path below.
 export const bundledAssets = [
   ["packages/app-template/template", "dist/app-template", "app template"],
@@ -100,37 +104,41 @@ export function dockerBundleOptions(format = "esm") {
 }
 
 /** Options for an ESM entry whose dynamic imports load their packages only when called. */
-export function splitBundleOptions(entry, outdir) {
+export function splitBundleOptions(entry, outdir, entryName = "index") {
   return {
     ...dockerBundleOptions("esm"),
     entryPoints: [entry],
     outdir,
     splitting: true,
-    entryNames: "index",
+    entryNames: entryName,
     chunkNames: "chunks/[name]-[hash]",
   };
 }
 
-const entrypoints = [
+export const entrypoints = [
   ["packages/core/src/index.ts", "packages/core/dist/index.js", "esm"],
-  ["packages/core/src/app-host/worker.ts", "packages/core/dist/app-host/worker.js", "esm"],
+  ["packages/core/src/db/migrate.ts", "packages/core/dist/db/migrate.js", "esm"],
   ["scripts/generate-caddyfile.ts", "dist/scripts/generate-caddyfile.js", "cjs"],
 ];
 
 // Without splitting, esbuild hoists every external import to the top of the
 // bundle, including those of dynamically imported modules. The daemon loads
-// telemetry after it spawns Rome, so its bundle splits that import into a chunk.
+// telemetry after it spawns Rome, and the action worker installs telemetry
+// before it loads the runtime, so each bundle splits its later import into a
+// chunk.
 export const splitEntrypoints = [
-  ["packages/core/src/instance/daemon/index.ts", "packages/core/dist/daemon"],
+  ["packages/core/src/instance/daemon/index.ts", "packages/core/dist/daemon", "index"],
+  [
+    "packages/core/src/app-host/worker-bootstrap.ts",
+    "packages/core/dist/app-host",
+    "worker-bootstrap",
+  ],
 ];
 
 async function main() {
-  if (process.env.ROME_DOCKER_APP_CODE_MODE !== "compiled") {
-    console.log("Skipping Docker runtime bundling; ROME_DOCKER_APP_CODE_MODE is not compiled.");
-    return;
-  }
-
   const { build } = await loadEsbuild();
+  // Nothing from an earlier build may stay behind for Node to load.
+  await rm(resolve(projectRoot, "packages/core/dist"), { recursive: true, force: true });
 
   await Promise.all([
     ...entrypoints.map(([entry, outfile, format]) =>
@@ -140,8 +148,10 @@ async function main() {
         outfile: resolve(projectRoot, outfile),
       }),
     ),
-    ...splitEntrypoints.map(([entry, outdir]) =>
-      build(splitBundleOptions(resolve(projectRoot, entry), resolve(projectRoot, outdir))),
+    ...splitEntrypoints.map(([entry, outdir, entryName]) =>
+      build(
+        splitBundleOptions(resolve(projectRoot, entry), resolve(projectRoot, outdir), entryName),
+      ),
     ),
   ]);
 
@@ -156,7 +166,9 @@ async function main() {
     console.log(`Copied ${label} → ${dest}`);
   }
 
-  console.log(`Bundled Docker runtime entrypoints (${entrypoints.length} files).`);
+  console.log(
+    `Bundled core runtime entrypoints (${entrypoints.length + splitEntrypoints.length} files).`,
+  );
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {

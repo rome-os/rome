@@ -57,6 +57,23 @@ test("the daemon bundle loads the OpenTelemetry SDK only from its telemetry chun
   assert.match(entry, /import\("\.\/chunks\/telemetry-[A-Z0-9]+\.js"\)/);
 });
 
+test("the action worker bundle installs telemetry before it loads the runtime", async (t) => {
+  const outdir = await mkdtemp(join(tmpdir(), "rome-compiled-worker-"));
+  t.after(() => rm(outdir, { recursive: true, force: true }));
+  await build({
+    ...splitBundleOptions(
+      join(root, "packages/core/src/app-host/worker-bootstrap.ts"),
+      outdir,
+      "worker-bootstrap",
+    ),
+    logLevel: "silent",
+  });
+
+  const entry = await readFile(join(outdir, "worker-bootstrap.js"), "utf8");
+  assert.match(entry, /initTelemetry\(\);\s*await import\("\.\/chunks\/worker-[A-Z0-9]+\.js"\)/);
+  assert.doesNotMatch(entry, /from "pg"/);
+});
+
 test("the main bundle loads no chat channel SDK at startup", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "rome-compiled-main-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
