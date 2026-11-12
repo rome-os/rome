@@ -4,7 +4,7 @@
 // Server, web and iOS read it through `taskStatus`, as they read a chat's
 // activity through `conciergeActivity`. docs/domains/chats.md#task
 
-import type { ConciergeTaskState } from "./concierge.js";
+import type { ConciergeStatusReaction, ConciergeTaskState } from "./concierge.js";
 
 /** The four states a task is in, one at a time. */
 export const CONCIERGE_TASK_STATUSES = ["needs_you", "active", "later", "ended"] as const;
@@ -132,4 +132,24 @@ export function taskStatusOfDto(task: {
     default:
       return { status: "ended", endReason: "done" };
   }
+}
+
+/** What a guardian message's status reaction follows from. */
+export interface MessageMarkFacts {
+  /** Whether the turn that took the message answered it; null when no turn took it. */
+  answered: boolean | null;
+  /** The status of each task made for the message. */
+  tasks: readonly ConciergeTaskStatusResult[];
+}
+
+/**
+ * A guardian message's status reaction (docs/domains/chats.md#status-reaction):
+ * working while its turn has not answered it, or a task made for it waits
+ * for its owner, is active or is checked later; failed when a task made for
+ * it ended failed; else none. A task that ended for no response shows none.
+ */
+export function messageStatusReaction(facts: MessageMarkFacts): ConciergeStatusReaction | null {
+  const open = (task: ConciergeTaskStatusResult) => task.status !== "ended";
+  if (facts.answered === false || facts.tasks.some(open)) return "working";
+  return facts.tasks.some((task) => task.endReason === "failed") ? "failed" : null;
 }

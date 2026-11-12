@@ -784,8 +784,9 @@ describe("Webchat API", () => {
       shutdown: async () => {},
     };
     const repo = new ConciergeTasksRepository(testDb.db);
+    const tasks = new ConciergeTasks(repo);
     deps.concierge = {
-      deps: { tasks: { repo } },
+      deps: { tasks },
       conciergeChat: async () => null,
       switchIfExhausted: async () => {},
     } as never;
@@ -811,7 +812,7 @@ describe("Webchat API", () => {
         }),
       );
     const reaction = async (key: string) =>
-      (await repo.reactionsOf("topic", [key])).get(key) ?? null;
+      (await tasks.reactionsOf("topic", [key])).get(key) ?? null;
     const a = "00000000-0000-4000-8000-00000000000a";
     const b = "00000000-0000-4000-8000-00000000000b";
     try {
@@ -6576,7 +6577,16 @@ describe("Webchat API", () => {
 
     it("shows a status reaction on the guardian's message in a Concierge chat, and streams its changes", async () => {
       const repo = new ConciergeTasksRepository(testDb.db);
-      deps.concierge = { deps: { tasks: { repo } } } as never;
+      const tasks = new ConciergeTasks(repo);
+      // The task chat runs while `running` says so.
+      let running = true;
+      tasks.attachFacts({
+        now: () => Date.now(),
+        running: () => running,
+        waitingSince: async () => new Map(),
+        reportPending: () => [],
+      });
+      deps.concierge = { deps: { tasks } } as never;
       await deps.webchatRepo.createSession(
         "topic",
         "Topic",
@@ -6600,22 +6610,27 @@ describe("Webchat API", () => {
         JSON.stringify([{ type: "text", content: "Thanks" }]),
         "turn-2",
       );
-      const [task] = await repo.upsertMany([{ title: "Weather", state: "doing" }]);
+      await deps.webchatRepo.createSession("task-chat", "Weather");
+      const [task] = await repo.upsertMany([{ title: "Weather", sessionId: "task-chat" }]);
       const app = createWebchatRuntime(deps).routes;
       const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
       const working = readSseUntil(events, "event: message_status_reaction");
-      await repo.markWorking(task.id, { chatId: "topic", messageKey: "g1" });
+      await repo.linkMessage(task.id, { chatId: "topic", messageKey: "g1" });
       expect(await working).toContain(
         `data: ${JSON.stringify({ sessionId: "topic", messageId: "g1", statusReaction: "working" })}`,
       );
-      // Finished work shows none: the event carries null.
+      // Finished and reported work shows none: the event carries null.
       const cleared = readSseUntil(events, '"statusReaction":null');
-      await repo.settleReactions(task.id, "done");
+      running = false;
+      await repo.setLastOutcome(task.id, "succeeded");
+      await repo.markReported([task.id]);
       expect(await cleared).toContain('"messageId":"g1"');
-      const [retry] = await repo.upsertMany([{ title: "Retry", state: "doing" }]);
-      await repo.markWorking(retry.id, { chatId: "topic", messageKey: "g1" });
+      await deps.webchatRepo.createSession("retry-chat", "Retry");
+      const [retry] = await repo.upsertMany([{ title: "Retry", sessionId: "retry-chat" }]);
+      await repo.linkMessage(retry.id, { chatId: "topic", messageKey: "g1" });
       const failed = readSseUntil(events, '"statusReaction":"failed"');
-      await repo.settleReactions(retry.id, "failed");
+      await repo.setLastOutcome(retry.id, "failed");
+      await repo.markReported([retry.id]);
       expect(await failed).toContain('"messageId":"g1"');
       await events.cancel();
 
@@ -6630,7 +6645,7 @@ describe("Webchat API", () => {
 
     it("names a task's chat thread on its messages and on a live placement, and no other thread", async () => {
       const repo = new ConciergeTasksRepository(testDb.db);
-      deps.concierge = { deps: { tasks: { repo } } } as never;
+      deps.concierge = { deps: { tasks: new ConciergeTasks(repo) } } as never;
       await deps.webchatRepo.createSession(
         "topic",
         "Topic",

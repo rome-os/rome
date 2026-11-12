@@ -229,9 +229,10 @@ export function startConciergeEvents(
     },
     giveUp: (taskId) => {
       tasks.markNotSynced(taskId);
-      // Its result will not be said: the messages it held show it failed.
-      void tasks.repo.settleHeldReactions([taskId], true).catch((error: unknown) =>
-        log.warn("failed to settle held status reactions", {
+      // Its result will not be said: it waits for no report any more, so the
+      // task and its messages show how its chat's work ended.
+      void tasks.repo.markReported([taskId]).catch((error: unknown) =>
+        log.warn("failed to settle a task's unsaid result", {
           taskId,
           error: error instanceof Error ? error.message : String(error),
         }),
@@ -259,14 +260,12 @@ export function startConciergeEvents(
     // ends, so the session says whether a newer input took it over.
     if (status === "interrupted" && (handedOn || running.length > 0)) return;
     service.turnSettled(chatId);
-    await tasks.repo
-      .settleTurnReactions(chatId, reactionEndOf(status), running)
-      .catch((error: unknown) =>
-        log.warn("failed to settle turn status reactions", {
-          chatId,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
+    await tasks.repo.answerTurns(chatId, running).catch((error: unknown) =>
+      log.warn("failed to settle turn status reactions", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   };
 
   const onConciergeTurn = async (event: EndedAgentTurn, chatId: string) => {
@@ -291,11 +290,11 @@ export function startConciergeEvents(
           }),
         );
     }
-    // The tasks whose result this turn said settle the messages they held.
+    // The tasks whose result this turn said have been reported.
     const relayed = service.takeRelayed(event.turn.turnId);
     if (relayed.length > 0) {
-      void tasks.repo.settleHeldReactions(relayed).catch((error: unknown) =>
-        log.warn("failed to settle held status reactions", {
+      void tasks.repo.markReported(relayed).catch((error: unknown) =>
+        log.warn("failed to settle reported results", {
           chatId,
           error: error instanceof Error ? error.message : String(error),
         }),
@@ -438,28 +437,9 @@ export function startConciergeEvents(
       });
       return;
     }
-    // The guardian messages the task worked for settle once the task chat
-    // has nothing left to run. A stop clears their reaction at once. A task
-    // that completed or failed keeps them working until the Concierge's turn
-    // that reports it ends, since only that reply tells the guardian. A task
-    // that asks a question is still working.
-    const handedOn = (event as EndedAgentTurn).handedOn === true;
-    // The ended turn's stream may still be draining, so it is left out.
-    const running = service.dashboard.chats
-      .activeTurns(chatId)
-      .filter((id) => id !== event.turn.turnId);
-    if (running.length === 0 && !handedOn) {
-      const end = reactionEndOf(event.status);
-      await (end === "stopped"
-        ? tasks.repo.settleReactions(taskId, "stopped")
-        : tasks.repo.holdReactions(taskId, end)
-      ).catch((error: unknown) =>
-        log.warn("failed to settle status reactions", {
-          taskId,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
+    // The guardian messages the task worked for read the task's status: its
+    // outcome, written above, waits for the Concierge's report, so they
+    // stay working until the turn that reports it ends.
     // A failed turn says why, so the Concierge can tell the guardian.
     const { failure, error } = event.output;
     const cause = event.status === "error" ? (failure?.message ?? error) : undefined;
@@ -507,7 +487,7 @@ export function startConciergeEvents(
   // and its marks settle once that report is said.
   void guard(
     "task catch-up",
-    Promise.all([tasks.repo.listBehindTheirChat(), tasks.repo.tasksHoldingReactions()]).then(
+    Promise.all([tasks.repo.listBehindTheirChat(), tasks.repo.tasksWithUnsaidOutcome()]).then(
       ([rows, holding]) => {
         for (const taskId of new Set([...rows.map((row) => row.id), ...holding])) {
           coalescer.mark({ taskId, kind: "catch_up", urgent: false });

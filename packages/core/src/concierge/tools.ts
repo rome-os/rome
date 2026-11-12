@@ -347,11 +347,11 @@ export async function buildConciergeTools(
   ) => {
     if (!messageKey) return send();
     const target = { chatId: currentTurn().chatId, messageKey };
-    await writeReaction("mark", () => tasks.repo.markWorking(taskId, target));
+    await writeReaction("mark", () => tasks.repo.linkMessage(taskId, target));
     try {
       await send();
     } catch (error) {
-      await writeReaction("take back", () => tasks.repo.unmark(taskId, target));
+      await writeReaction("take back", () => tasks.repo.unlinkMessage(taskId, target));
       throw error;
     }
   };
@@ -755,7 +755,7 @@ export async function buildConciergeTools(
     said(chatId, turnId, text, isPrivate);
     const answered = answers ?? (await certainlyAnswered(taskId));
     if (answered) {
-      await tasks.repo.settleAnsweredTurnReaction(chatId, answered).catch((error: unknown) =>
+      await tasks.repo.answerMessage(chatId, answered).catch((error: unknown) =>
         log.warn("failed to settle an answered message's status reaction", {
           chatId,
           error: error instanceof Error ? error.message : String(error),

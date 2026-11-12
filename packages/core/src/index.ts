@@ -2404,8 +2404,7 @@ async function main() {
     actorOf: continuationActorOf,
     // A Concierge turn a limit stopped shows its messages failed; run again,
     // they work again until the continuation ends.
-    onContinue: (turn) =>
-      concierge.deps.tasks.repo.reopenTurnReactions(turn.sessionId, turn.turnId),
+    onContinue: (turn) => concierge.deps.tasks.repo.reopenTurn(turn.sessionId, turn.turnId),
   });
 
   // Best-effort instance-identity check. Fire-and-forget: announces

@@ -167,6 +167,10 @@ describe("ConciergeTasks status", () => {
 
     running.delete("task-chat");
     await repo.setLastOutcome(row.id, "failed");
+    // Active until the Concierge reports the result.
+    await flush();
+    expect(told.at(-1)).toMatchObject({ status: "active" });
+    await repo.markReported([row.id]);
     await flush();
     expect(told.at(-1)).toMatchObject({ status: "ended", endReason: "failed", state: "dropped" });
   });

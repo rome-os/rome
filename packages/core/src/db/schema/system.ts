@@ -771,6 +771,11 @@ export const conciergeTasks = sqliteTable(
     stopReason: text("stop_reason", { enum: ["concierge", "guardian", "archived", "deleted"] }),
     /** How the task chat's latest turn ended, or its start failed. Rome writes it. */
     lastOutcome: text("last_outcome", { enum: ["succeeded", "failed", "stopped"] }),
+    /**
+     * Set when the task chat's work ends, cleared once the Concierge reported
+     * it. Kept here so a restart still knows a result was never said.
+     */
+    outcomeUnsaid: integer("outcome_unsaid", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     // A chat belongs to at most one row, so a chat event maps to exactly one row.
@@ -781,61 +786,47 @@ export const conciergeTasks = sqliteTable(
 );
 
 /**
- * Which guardian messages each task works for, and how that work stands: one
- * row per task a message started or was passed on to. A message's status
- * reaction (docs/domains/chats.md#status-reaction) is read from its rows, so
- * a message that started several tasks has one. A row goes with its task.
+ * Which Concierge turn took each guardian message of a Concierge chat, and
+ * when that turn answered it: its turn ended, or the Concierge answered it
+ * with `say`. A message handed on to a newer turn is that turn's from then
+ * on. A message's status reaction (docs/domains/chats.md#status-reaction)
+ * is derived from this and from the status of the tasks made for it.
  */
-export const conciergeTaskReactions = sqliteTable(
-  "concierge_task_reactions",
+export const conciergeMessageTurns = sqliteTable(
+  "concierge_message_turns",
   {
-    taskId: text("task_id")
-      .notNull()
-      .references(() => conciergeTasks.id, { onDelete: "cascade" }),
     /** The Concierge chat the message is in. */
     chatId: text("chat_id").notNull(),
     /** The message's key in that chat, as the dashboard names it. */
     messageKey: text("message_key").notNull(),
-    /**
-     * `stopped`: the task was stopped and counts toward no reaction.
-     * `done_unsaid` / `failed_unsaid`: it ended, and its result is not said
-     * yet, so it still works.
-     */
-    state: text("state", {
-      enum: ["working", "done", "failed", "stopped", "done_unsaid", "failed_unsaid"],
-    }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
+    /** The turn that took it last. */
+    turnId: text("turn_id").notNull(),
+    takenAt: integer("taken_at", { mode: "timestamp_ms" }).notNull(),
+    /** Null while its turn has not answered it. */
+    answeredAt: integer("answered_at", { mode: "timestamp_ms" }),
   },
   (table) => [
-    primaryKey({ columns: [table.taskId, table.chatId, table.messageKey] }),
-    index("idx_concierge_task_reactions_message").on(table.chatId, table.messageKey),
+    primaryKey({ columns: [table.chatId, table.messageKey] }),
+    index("idx_concierge_message_turns_turn").on(table.chatId, table.turnId),
   ],
 );
 
 /**
- * Which guardian messages each Concierge turn took as input, and how that
- * turn ended: one row per message a turn took. The message shows working
- * from the moment the turn takes it, before the Concierge starts any task,
- * and its status reaction (docs/domains/chats.md#status-reaction) is read
- * from these rows together with its task rows.
+ * The tasks made for each guardian message of a Concierge chat: the tasks it
+ * started, and the ones its words were passed on to. A row goes with its task.
  */
-export const conciergeTurnReactions = sqliteTable(
-  "concierge_turn_reactions",
+export const conciergeMessageTasks = sqliteTable(
+  "concierge_message_tasks",
   {
-    /** The Concierge chat's turn that took the message. */
-    turnId: text("turn_id").notNull(),
-    /** The Concierge chat the message is in. */
+    taskId: text("task_id")
+      .notNull()
+      .references(() => conciergeTasks.id, { onDelete: "cascade" }),
     chatId: text("chat_id").notNull(),
-    /** The message's key in that chat, as the dashboard names it. */
     messageKey: text("message_key").notNull(),
-    /** `stopped`: the turn was stopped and counts toward no reaction. */
-    state: text("state", { enum: ["working", "done", "failed", "stopped"] }).notNull(),
-    updatedAt: integer("updated_at", { mode: "timestamp_ms" }).notNull(),
   },
   (table) => [
-    primaryKey({ columns: [table.turnId, table.chatId, table.messageKey] }),
-    index("idx_concierge_turn_reactions_message").on(table.chatId, table.messageKey),
-    index("idx_concierge_turn_reactions_chat_state").on(table.chatId, table.state),
+    primaryKey({ columns: [table.taskId, table.chatId, table.messageKey] }),
+    index("idx_concierge_message_tasks_message").on(table.chatId, table.messageKey),
   ],
 );
 

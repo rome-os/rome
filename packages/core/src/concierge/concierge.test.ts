@@ -218,6 +218,8 @@ function setup(
   const posted: string[] = [];
   /** What the next send answers when it is refused. */
   let refuseWith: Exclude<SendResult, { ok: true }> | null = null;
+  /** The task chats whose turn runs: from a message sent in until it finishes. */
+  const runningTaskChats = new Set<string>();
   const backendTurns: BackendTurnParams[] = [];
   const order: string[] = [];
   let startedChats = 0;
@@ -235,11 +237,16 @@ function setup(
     isBusy: rs.fn(() => false),
     openTool: rs.fn(() => null),
     onTurnChange: rs.fn(() => () => {}),
-    activeTurns: rs.fn(() => []),
+    // A task chat runs from the message that starts its turn until that
+    // turn finishes, as the dashboard's runtime reports it.
+    activeTurns: rs.fn((chatId: string) =>
+      runningTaskChats.has(chatId) ? [`task-turn-${chatId}`] : [],
+    ),
     interruptTurn: rs.fn(async () => {}),
   };
   const send = rs.fn(async (place: Place, body: Body, as: Account): Promise<SendResult> => {
     if (refuseWith) return refuseWith;
+    if (place.chat.id.startsWith("task-")) runningTaskChats.add(place.chat.id);
     order.push("post");
     const id = `input-${posted.length + 1}`;
     const list = messages.get(place.chat.id) ?? [];
@@ -434,6 +441,7 @@ function setup(
     /** A newer input cut the turn short and took its work on. */
     handedOn?: boolean;
   }) => {
+    if (!isConciergeChatId(event.chatId) && !event.handedOn) runningTaskChats.delete(event.chatId);
     for (const listener of listeners) {
       listener({
         ...(event.handedOn ? { handedOn: true } : {}),
@@ -464,6 +472,7 @@ function setup(
     error: string;
     agentName?: string;
   }) => {
+    runningTaskChats.delete(event.chatId);
     for (const listener of failedBeforeStartListeners) {
       listener({
         turn: {
@@ -1116,9 +1125,7 @@ describe("Concierge tools", () => {
       );
       expect(await s.tasks.repo.threadRoot(taskId)).toBeNull();
       expect(threadOf(s, "reply")).toBe("g0");
-      expect((await s.taskRepo.reactionsOf(CONCIERGE_CHAT, ["reply"])).get("reply")).toBe(
-        "working",
-      );
+      expect((await s.tasks.reactionsOf(CONCIERGE_CHAT, ["reply"])).get("reply")).toBe("working");
     });
 
     it("roots a task started for a reply to a message in no task at that reply", async () => {
@@ -2717,6 +2724,8 @@ describe("Concierge events", () => {
     // No agent session opened: the dashboard tells the Concierge itself.
     const cold = setup();
     const second = await startTask(cold);
+    // The turn never started, so the chat runs none.
+    cold.chats.activeTurns = () => [];
     cold.fakeTimers();
     cold.service.turnFailedBeforeStart({
       turn: {
@@ -2783,31 +2792,17 @@ describe("Concierge events", () => {
     expect(s.quietFlags).toEqual([true]);
   });
 
-  it("stops asking once the Concierge writes the row, and marks the row not synced when it never does", async () => {
-    const answered = setup();
-    const task = await startTask(answered);
-    answered.fakeTimers();
-    await finishTask(answered, task.chatId);
+  it("settles a task's news once the Concierge's turn that reports it completes, with no row write", async () => {
+    const s = setup();
+    const task = await startTask(s);
+    s.fakeTimers();
+    await finishTask(s, task.chatId);
     await rs.advanceTimersByTimeAsync(2_000);
-    await answered.taskRepo.upsertMany([{ id: task.taskId, state: "done", summary: "3 options" }]);
+    expect(s.backendTurns).toHaveLength(1);
     await rs.advanceTimersByTimeAsync(120_000);
-    expect(answered.backendTurns).toHaveLength(1);
-
-    const ignored = setup();
-    const quiet = await startTask(ignored);
-    ignored.fakeTimers();
-    await finishTask(ignored, quiet.chatId);
-    await rs.advanceTimersByTimeAsync(2_000);
-    expect(ignored.backendTurns).toHaveLength(1);
-    expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(false);
-    await rs.advanceTimersByTimeAsync(10_000);
-    expect(ignored.backendTurns).toHaveLength(2);
-    expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(true);
-    await rs.advanceTimersByTimeAsync(120_000);
-    expect(ignored.backendTurns).toHaveLength(2);
-    // A later write by the Concierge clears the mark.
-    await ignored.taskRepo.upsertMany([{ id: quiet.taskId, summary: "ok" }]);
-    expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(false);
+    // No retry, and the row stays synced: the Concierge had the news.
+    expect(s.backendTurns).toHaveLength(1);
+    expect((await s.tasks.listForPanel())[0].notSynced).toBe(false);
   });
 
   it("does not report a task chat the list does not know", async () => {
@@ -3608,7 +3603,7 @@ describe("Concierge provider recovery", () => {
     [true, "working"],
   ] as const)("settles the failed turn's marks when its recovery ends, unless a newer input took the recovery over (%s)", async (handedOn, reaction) => {
     const { s } = await prepared({ delay: async () => {} });
-    await s.taskRepo.markTurnWorking("failed", { chatId: CONCIERGE_CHAT, messageKey: "g1" });
+    await s.taskRepo.takeMessage("failed", { chatId: CONCIERGE_CHAT, messageKey: "g1" });
     s.onBackendTurn(() => {
       void s.finish({
         turnId: "recovery",
@@ -3622,7 +3617,7 @@ describe("Concierge provider recovery", () => {
     await finish(s, failure("Repeated 529 Overloaded errors"));
     await s.settle();
     expect(s.backendTurns).toHaveLength(1);
-    const marks = await s.taskRepo.reactionsOf(CONCIERGE_CHAT, ["g1"]);
+    const marks = await s.tasks.reactionsOf(CONCIERGE_CHAT, ["g1"]);
     expect(marks.get("g1") ?? null).toBe(reaction);
   });
   it("waits about thirty seconds before one same-model retry, then stops on success", async () => {
@@ -4183,7 +4178,7 @@ describe("Concierge status reactions", () => {
     s.messages.set(CONCIERGE_CHAT, list);
   };
   const reactionOf = async (s: ReturnType<typeof setup>, messageKey: string) =>
-    (await s.taskRepo.reactionsOf(CONCIERGE_CHAT, [messageKey])).get(messageKey) ?? null;
+    (await s.tasks.reactionsOf(CONCIERGE_CHAT, [messageKey])).get(messageKey) ?? null;
   const started = async (s: ReturnType<typeof setup>, args: Record<string, unknown> = {}) =>
     JSON.parse(
       (await s.tool("chat_start", { title: "Weather", brief: "Check the weather", ...args }))
@@ -4196,6 +4191,10 @@ describe("Concierge status reactions", () => {
     outcome: "completed" | "failed" | "interrupted" | "stopped" = "completed",
   ) => {
     const task = await s.taskRepo.findBySession(chatId);
+    // The event delivery took the task's news into this turn, as its flush does.
+    (
+      s.service as unknown as { taskEvents: { forget(taskId: string): void } | null }
+    ).taskEvents?.forget(task!.id);
     s.onBackendTurn(() => outcome);
     await s.service.systemTurnOutcome(
       CONCIERGE_CHAT,
@@ -4228,7 +4227,7 @@ describe("Concierge status reactions", () => {
   /** Every reaction change the dashboard is told of, in order. */
   const watch = (s: ReturnType<typeof setup>) => {
     const seen: [string, string | null][] = [];
-    s.taskRepo.onReaction((target, reaction) => seen.push([target.messageKey, reaction]));
+    s.tasks.onReaction((target, reaction) => seen.push([target.messageKey, reaction]));
     return seen;
   };
 
@@ -4270,11 +4269,14 @@ describe("Concierge status reactions", () => {
     s.chats.activeTurns = () => ["task-turn-1"];
     s.inTurn("call-off");
     guardianSays(s, "g2", "call-off");
-    await s.tool("chat_stop", { chatId });
-    s.chats.activeTurns = () => [];
     const seen = watch(s);
-    await finishTask(s, chatId, "interrupted");
+    // The stop ends the task at once, so its message's mark goes then.
+    await s.tool("chat_stop", { chatId });
+    await s.settle();
     expect(await reactionOf(s, "g1")).toBeNull();
+    expect(seen).toEqual([["g1", null]]);
+    s.chats.activeTurns = () => [];
+    await finishTask(s, chatId, "interrupted");
     expect(seen).toEqual([["g1", null]]);
     // The call-off is answered in its own turn and gets none.
     expect(await reactionOf(s, "g2")).toBeNull();
@@ -4292,7 +4294,7 @@ describe("Concierge status reactions", () => {
     expect(await reactionOf(s, "g1")).toBeNull();
   });
 
-  it("marks a message passed on to a task, and settles only the work still open", async () => {
+  it("marks a message passed on to a task, and shows each message made for the task its latest outcome", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
     const { chatId } = await started(s);
@@ -4305,8 +4307,9 @@ describe("Concierge status reactions", () => {
     expect(await reactionOf(s, "g2")).toBe("working");
     expect(seen).toEqual([["g2", "working"]]);
 
+    // A task made for both messages ended failed, so both show it.
     await finishTask(s, chatId, "error");
-    expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, "failed"]);
+    expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual(["failed", "failed"]);
   });
 
   it("marks only the message chat_send names when the guardian sent several", async () => {
@@ -4386,26 +4389,18 @@ describe("Concierge status reactions", () => {
     expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, null]);
   });
 
-  it("settles when the Concierge closes the row, as after a question the guardian answered", async () => {
+  it("clears the reaction when the Concierge stops the task", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
     const { taskId } = await started(s);
-    await s.taskRepo.upsertMany([{ id: taskId, state: "done" }]);
-    expect(await reactionOf(s, "g1")).toBeNull();
-  });
-
-  it("clears the reaction when the Concierge drops the row, as a stop does", async () => {
-    const s = setup({ said: false });
-    guardianSays(s, "g1");
-    const { taskId } = await started(s);
-    await s.taskRepo.upsertMany([{ id: taskId, state: "dropped" }]);
+    await s.tool("task_upsert", { tasks: [{ id: taskId, stop: true }] });
     expect(await reactionOf(s, "g1")).toBeNull();
   });
 
   describe("from the turn that takes the message", () => {
     // The send route marks a message once a Concierge turn takes it.
     const taken = (s: ReturnType<typeof setup>, key: string, turnId = "concierge-turn-1") =>
-      s.taskRepo.markTurnWorking(turnId, { chatId: CONCIERGE_CHAT, messageKey: key });
+      s.taskRepo.takeMessage(turnId, { chatId: CONCIERGE_CHAT, messageKey: key });
     const conciergeEnds = (
       s: ReturnType<typeof setup>,
       status?: AgentTurnFinishedEvent["status"],
@@ -4522,9 +4517,7 @@ describe("Concierge status reactions", () => {
       expect(await s.tool("chat_send", { chatId, text: "Make it 3 fruits" })).toMatchObject({
         isError: true,
       });
-      expect(await s.taskRepo.reactionsOf(CONCIERGE_CHAT, ["b"])).toEqual(
-        new Map([["b", "working"]]),
-      );
+      expect(await s.tasks.reactionsOf(CONCIERGE_CHAT, ["b"])).toEqual(new Map([["b", "working"]]));
       await s.tool("chat_send", { chatId, text: "Make it 3 fruits", answers: "a" });
       await s.tool("say", { text: "I'm well, thanks.", answers: "b" });
       expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual(["working", null]);
@@ -4546,12 +4539,15 @@ describe("Concierge status reactions", () => {
       expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, null]);
     });
 
-    it.each(["error", "stopped"] as const)("fails when the turn ends %s", async (status) => {
+    it.each([
+      "error",
+      "stopped",
+    ] as const)("shows none when the turn ends %s: only a failed task shows ⚠️", async (status) => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       await taken(s, "g1");
       await conciergeEnds(s, status);
-      expect(await reactionOf(s, "g1")).toBe("failed");
+      expect(await reactionOf(s, "g1")).toBeNull();
     });
 
     it("marks each message a turn takes, and settles them together", async () => {
@@ -4575,7 +4571,7 @@ describe("Concierge status reactions", () => {
       expect(await reactionOf(s, "g1")).toBe("working");
     });
 
-    it("fails the messages handed on to a turn that never started, and hands none further", async () => {
+    it("answers the messages handed on to a turn that never started, so none stays marked, and hands none further", async () => {
       const s = setup({ said: false });
       guardianSays(s, "a", "turn-a");
       await taken(s, "a", "turn-a");
@@ -4588,7 +4584,8 @@ describe("Concierge status reactions", () => {
         error: "no session",
         agentName: "core:concierge",
       });
-      expect(await reactionOf(s, "a")).toBe("failed");
+      // Only a task that failed shows ⚠️; a turn that failed shows none.
+      expect(await reactionOf(s, "a")).toBeNull();
       expect(s.service.promptsHandedOn(CONCIERGE_CHAT)).toEqual([]);
     });
 
@@ -4760,49 +4757,17 @@ describe("Concierge status reactions", () => {
       expect(await reactionOf(s, "g1")).toBeNull();
     });
 
-    it("settles when the Concierge writes the row done, though its report turn is then cut short", async () => {
-      const s = setup({ said: false });
-      guardianSays(s, "g1");
-      const { chatId, taskId } = await started(s);
-      s.fakeTimers();
-      s.onBackendTurn(async () => {
-        await s.taskRepo.upsertMany([{ id: taskId, state: "done" }]);
-        return "interrupted" as const;
-      });
-      replies(s, chatId);
-      await finishTask(s, chatId, "completed", { reported: false });
-      // Nobody asked for this result, so it waits for the next batch.
-      await rs.advanceTimersByTimeAsync(60_000);
-      expect(s.backendTurns).toHaveLength(1);
-      expect(await reactionOf(s, "g1")).toBeNull();
-    });
-
-    it.each([
-      ["done", "completed", null],
-      ["done", "error", "failed"],
-      ["dropped", "completed", null],
-      ["dropped", "error", null],
-    ] as const)("a row written %s while a task that ended %s waits for its report shows %s", async (state, ended, reaction) => {
-      const s = setup({ said: false });
-      guardianSays(s, "g1");
-      const { chatId, taskId } = await started(s);
-      await finishTask(s, chatId, ended, { reported: false });
-      expect(await reactionOf(s, "g1")).toBe("working");
-      await s.taskRepo.upsertMany([{ id: taskId, state }]);
-      expect(await reactionOf(s, "g1")).toBe(reaction);
-    });
-
-    it("clears a failed task's mark when the Concierge drops it", async () => {
+    it("clears a failed task's mark when the Concierge stops it", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const { chatId, taskId } = await started(s);
       await finishTask(s, chatId, "error");
       expect(await reactionOf(s, "g1")).toBe("failed");
-      await s.taskRepo.upsertMany([{ id: taskId, state: "dropped" }]);
+      await s.tool("task_upsert", { tasks: [{ id: taskId, stop: true }] });
       expect(await reactionOf(s, "g1")).toBeNull();
     });
 
-    it("shows failed once Rome gives up on the report", async () => {
+    it("shows the task's own outcome once Rome gives up on the report, and marks the row not synced", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const { chatId, taskId } = await started(s);
@@ -4812,7 +4777,9 @@ describe("Concierge status reactions", () => {
       ).taskEvents;
       coalescer.deps.giveUp(taskId);
       await s.settle();
-      expect(await reactionOf(s, "g1")).toBe("failed");
+      // The task succeeded: no mark stays working on a report that will not come.
+      expect(await reactionOf(s, "g1")).toBeNull();
+      expect((await s.tasks.listForPanel()).find((row) => row.id === taskId)?.notSynced).toBe(true);
     });
 
     it("runs no report again that a turn which took it over said", async () => {
@@ -4891,7 +4858,8 @@ describe("Concierge status reactions", () => {
       const { chatId, taskId } = await started(s);
       replies(s, chatId);
       // The stopped process held the result; its pending report died with it.
-      await s.taskRepo.holdReactions(taskId, "done");
+      await s.taskRepo.setLastOutcome(taskId, "succeeded");
+      s.chats.activeTurns = () => [];
       s.fakeTimers();
       s.startEvents();
       await rs.advanceTimersByTimeAsync(60_000);
@@ -4909,6 +4877,9 @@ describe("Concierge status reactions", () => {
       await finishTask(s, chatId, "completed", { reported: false });
       // Past the wait for the stream, which never ends here.
       await rs.advanceTimersByTimeAsync(11_000);
+      expect(await reactionOf(s, "g1")).toBe("working");
+      // The stream ends, and the turn that reports the result.
+      s.chats.activeTurns = () => [];
       await reportEnds(s, chatId);
       expect(await reactionOf(s, "g1")).toBeNull();
     });
@@ -4987,7 +4958,9 @@ describe("Concierge status reactions", () => {
     const s = setup({ said: false, startEvents: false });
     guardianSays(s, "g1");
     const { taskId } = await started(s);
-    await s.taskRepo.settleReactions(taskId, "done");
+    s.chats.activeTurns = () => [];
+    await s.taskRepo.setLastOutcome(taskId, "succeeded");
+    await s.taskRepo.markReported([taskId]);
     expect(await reactionOf(s, "g1")).toBeNull();
     expect(s.pushes).toEqual([]);
   });

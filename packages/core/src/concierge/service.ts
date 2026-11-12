@@ -539,7 +539,7 @@ export class ConciergeService {
   async chatGone(chatId: string, mainChatId: string, deleted = false): Promise<void> {
     // A deleted chat's messages are gone, and their marks with them.
     if (deleted) {
-      await this.deps.tasks.repo.forgetReactions(chatId).catch((error: unknown) =>
+      await this.deps.tasks.repo.forgetMessages(chatId).catch((error: unknown) =>
         log.warn("failed to forget a deleted chat's status reactions", {
           chatId,
           error: error instanceof Error ? error.message : String(error),
@@ -777,8 +777,10 @@ export class ConciergeService {
     if (outcome === "completed" || outcome === "stopped") {
       const reported = await this.reportedTasksOf(prompt, params.threadId);
       if (reported.length > 0) {
-        await this.deps.tasks.repo.settleHeldReactions(reported).catch((error: unknown) =>
-          log.warn("failed to settle held status reactions", {
+        // The Concierge has had their news: none of it is owed any more.
+        for (const taskId of reported) this.taskEvents?.settle(taskId);
+        await this.deps.tasks.repo.markReported(reported).catch((error: unknown) =>
+          log.warn("failed to settle reported results", {
             chatId: params.threadId,
             error: error instanceof Error ? error.message : String(error),
           }),

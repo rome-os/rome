@@ -2,12 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { eq } from "drizzle-orm";
 import { createTestDb, type TestDb } from "../../test/db.js";
 import { ChatsWebChatRepository } from "../../webchat/chats-webchat-repository.js";
-import {
-  chatMessages,
-  conciergeTaskReactions,
-  conciergeTurnReactions,
-  romeSessions,
-} from "../schema.js";
+import { chatMessages, romeSessions } from "../schema.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
 import { ConciergeTasksRepository } from "./concierge-tasks.js";
 import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
@@ -554,32 +549,65 @@ describe("ConciergeTasksRepository", () => {
         null,
         { ownerKey },
       );
-    const turnRows = () => testDb.db.select().from(conciergeTurnReactions).all();
-    const taskRows = () => testDb.db.select().from(conciergeTaskReactions).all();
-
-    it("keeps no row for a turn's mark that ended well, and keeps a failed one", async () => {
-      await repo.markTurnWorking("t1", { chatId: "concierge", messageKey: "g1" });
-      await repo.markTurnWorking("t2", { chatId: "concierge", messageKey: "g2" });
-      await repo.settleAnsweredTurnReaction("concierge", "g1");
-      expect(turnRows().map((row) => row.messageKey)).toEqual(["g2"]);
-      await repo.settleTurnReactions("concierge", "failed", []);
-      expect(turnRows()).toMatchObject([{ messageKey: "g2", state: "failed" }]);
-      await repo.markTurnWorking("t3", { chatId: "concierge", messageKey: "g3" });
-      await repo.settleTurnReactions("concierge", "stopped", []);
-      expect(turnRows().map((row) => row.messageKey)).toEqual(["g2"]);
-      expect(await repo.reactionsOf("concierge", ["g1", "g2", "g3"])).toEqual(
-        new Map([["g2", "failed"]]),
+    it("keeps which turn took a message and whether it answered it, and which tasks were made for it", async () => {
+      const told: string[] = [];
+      repo.onMessageChange(({ messageKey }) => told.push(messageKey));
+      await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
+      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
+      const [task] = await repo.upsertMany([{ title: "A" }]);
+      await repo.linkMessage(task!.id, { chatId: "concierge", messageKey: "g2" });
+      expect(await repo.messageMarks("concierge", ["g1", "g2", "g3"])).toEqual(
+        new Map([
+          ["g1", { answered: false, taskIds: [] }],
+          ["g2", { answered: false, taskIds: [task!.id] }],
+        ]),
       );
+      // Saying an answer answers that message; the end of every turn not running, the rest.
+      await repo.answerMessage("concierge", "g1");
+      await repo.takeMessage("t3", { chatId: "concierge", messageKey: "g3" });
+      expect(await repo.answerTurns("concierge", ["t3"])).toBe(1);
+      expect((await repo.messageMarks("concierge", ["g2", "g3"])).get("g2")?.answered).toBe(true);
+      expect((await repo.messageMarks("concierge", ["g3"])).get("g3")?.answered).toBe(false);
+      expect(told).toEqual(["g1", "g2", "g2", "g1", "g3", "g2"]);
+    });
+
+    it("hands a message on to the turn that takes it over, and reopens it all when that turn runs again", async () => {
+      await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
+      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g2" });
+      // A newer turn took g1 over.
+      await repo.takeMessage("t2", { chatId: "concierge", messageKey: "g1" });
+      await repo.answerTurns("concierge", []);
+      expect(await repo.reopenTurn("concierge", "t2")).toBe(2);
+      const marks = await repo.messageMarks("concierge", ["g1", "g2"]);
+      expect([marks.get("g1")?.answered, marks.get("g2")?.answered]).toEqual([false, false]);
+    });
+
+    it("answers every open message after a restart, except in a chat whose turn continues", async () => {
+      await repo.takeMessage("t1", { chatId: "concierge", messageKey: "g1" });
+      await repo.takeMessage("t2", { chatId: "topic", messageKey: "g2" });
+      expect(await repo.answerInterrupted(new Set(["topic"]))).toBe(1);
+      expect((await repo.messageMarks("concierge", ["g1"])).get("g1")?.answered).toBe(true);
+      expect((await repo.messageMarks("topic", ["g2"])).get("g2")?.answered).toBe(false);
     });
 
     it("forgets a deleted chat's marks, and no other chat's", async () => {
-      const [task] = await repo.upsertMany([{ title: "A", state: "doing" }]);
-      await repo.markWorking(task!.id, { chatId: "topic", messageKey: "g1" });
-      await repo.markWorking(task!.id, { chatId: "concierge", messageKey: "g2" });
-      await repo.markTurnWorking("t1", { chatId: "topic", messageKey: "g3" });
-      await repo.forgetReactions("topic");
-      expect(taskRows().map((row) => row.messageKey)).toEqual(["g2"]);
-      expect(turnRows()).toEqual([]);
+      const [task] = await repo.upsertMany([{ title: "A" }]);
+      await repo.linkMessage(task!.id, { chatId: "topic", messageKey: "g1" });
+      await repo.linkMessage(task!.id, { chatId: "concierge", messageKey: "g2" });
+      await repo.takeMessage("t1", { chatId: "topic", messageKey: "g3" });
+      await repo.forgetMessages("topic");
+      expect(await repo.messagesOfTask(task!.id)).toEqual([
+        { chatId: "concierge", messageKey: "g2" },
+      ]);
+      expect(await repo.messageMarks("topic", ["g3"])).toEqual(new Map());
+    });
+
+    it("keeps a task's result unsaid from the end of its chat's work until it is reported", async () => {
+      const [task] = await repo.upsertMany([{ title: "A" }]);
+      await repo.setLastOutcome(task!.id, "succeeded");
+      expect(await repo.tasksWithUnsaidOutcome()).toEqual([task!.id]);
+      await repo.markReported([task!.id]);
+      expect(await repo.tasksWithUnsaidOutcome()).toEqual([]);
     });
 
     it("tells a visitor's main chat, not the guardian's, when a task leaves it", async () => {

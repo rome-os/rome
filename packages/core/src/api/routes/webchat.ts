@@ -1031,7 +1031,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
     // A status reaction is no message, so it only changes the bubble and
     // never pushes (docs/domains/chats.md#status-reaction).
-    const unsubscribeReaction = deps.concierge?.deps.tasks.repo.onReaction((target, reaction) => {
+    const unsubscribeReaction = deps.concierge?.deps.tasks.onReaction((target, reaction) => {
       if (target.chatId !== sessionId) return;
       const event: MessageStatusReactionEvent = {
         sessionId,
@@ -1462,10 +1462,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     sessionId: string,
     messages: T[],
   ): Promise<(T & { statusReaction?: ConciergeStatusReaction })[]> => {
-    const repo = deps.concierge?.deps.tasks.repo;
+    const tasks = deps.concierge?.deps.tasks;
     const asked = messages.filter((message) => message.role === "user").map((m) => m.id);
-    if (!repo || asked.length === 0) return messages;
-    const reactions = await repo.reactionsOf(sessionId, asked);
+    if (!tasks || asked.length === 0) return messages;
+    const reactions = await tasks.reactionsOf(sessionId, asked);
     if (reactions.size === 0) return messages;
     return messages.map((message) => {
       const statusReaction = reactions.get(message.id);
@@ -4575,7 +4575,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         // (docs/domains/chats.md#status-reaction).
         if (status.state === "consumed" && status.turnId && isConciergeChat(session)) {
           await deps.concierge?.deps.tasks.repo
-            .markTurnWorking(status.turnId, { chatId: sessionId, messageKey: status.inputId })
+            .takeMessage(status.turnId, { chatId: sessionId, messageKey: status.inputId })
             .catch((error: unknown) =>
               log.warn("failed to mark a status reaction", {
                 sessionId,
