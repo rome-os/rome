@@ -1,6 +1,7 @@
 import { ArrowLeft } from "lucide-react";
 import { type ReactNode, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
+import { useSettingsBack } from "@/hooks/use-settings-back";
 
 /**
  * One service's detail, drilled into from the Connections grids. It replaces the
@@ -26,6 +27,7 @@ export function DetailPane({
   // The card that opened this has just been hidden, which would drop focus.
   const pane = useRef<HTMLDivElement>(null);
   useEffect(() => pane.current?.focus(), []);
+  useSettingsBack(onClose);
 
   return (
     <div
@@ -33,11 +35,7 @@ export function DetailPane({
       role="dialog"
       aria-label={label}
       tabIndex={-1}
-      data-detail-pane
       className="flex w-full max-w-2xl flex-col gap-5 outline-none"
-      onKeyDown={(event) => {
-        if (event.key === "Escape" && event.currentTarget.contains(event.target as Node)) onClose();
-      }}
     >
       <Button
         type="button"

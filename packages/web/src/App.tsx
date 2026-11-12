@@ -1,7 +1,7 @@
 import { hasSession, useAuthStateSnapshot } from "./lib/auth-state";
 import { invalidateNewChatDrafts } from "./lib/new-chat-draft-storage";
-import { lazy, Suspense, useEffect, useRef } from "react";
-import { type Location, Navigate, Route, Routes, useLocation } from "react-router-dom";
+import { lazy, Suspense, useEffect } from "react";
+import { Navigate, Route, Routes } from "react-router-dom";
 import { Toaster } from "./components/ui/sonner";
 import { SlotProvider } from "./components/slot";
 import { AuthGate } from "./shell/AuthGate";
@@ -9,6 +9,7 @@ import { RomeShellLayout } from "./shell/RomeShellLayout";
 import { useHostNavigation } from "./hooks/use-host-navigation";
 import { useAppRemixResume } from "./hooks/use-app-remix-resume";
 import { useCloudLoginReturn } from "./hooks/use-cloud-login-return";
+import { useSettingsBackdrop } from "./hooks/use-settings-backdrop";
 import FreePage, { MainChatRedirect } from "./pages/free/FreePage";
 import { MAIN_CHAT_PATH } from "@/lib/chat-session";
 import { DEV_ROUTES } from "./pages/dev/dev-routes";
@@ -62,29 +63,6 @@ const DevIndexPage = import.meta.env.DEV
   ? lazy(() => import("./pages/dev/DevIndexPage"))
   : () => null;
 
-const SETTINGS_FALLBACK_BACKDROP = "/chat";
-
-/**
- * Settings opens as a dialog over the page the guardian came from, so while a
- * `/settings` address is showing, the app's routes keep rendering that page. A
- * fresh load has none, and falls back to chat.
- */
-function useSettingsBackdrop() {
-  const location = useLocation();
-  const settingsOpen =
-    location.pathname === "/settings" || location.pathname.startsWith("/settings/");
-  const lastOutside = useRef<Location | null>(null);
-  if (!settingsOpen) lastOutside.current = location;
-  const behind = lastOutside.current;
-  return {
-    settingsOpen,
-    backdrop: settingsOpen ? (behind ?? SETTINGS_FALLBACK_BACKDROP) : location,
-    closeTo: behind
-      ? `${behind.pathname}${behind.search}${behind.hash}`
-      : SETTINGS_FALLBACK_BACKDROP,
-  };
-}
-
 export default function App() {
   const auth = useAuthStateSnapshot();
   useEffect(() => {
@@ -94,7 +72,7 @@ export default function App() {
   // One root-level bridge turns SDK `navigateRome`/`startChat` events into
   // react-router navigations for every surface (shell, full-mode apps, auth).
   useHostNavigation();
-  const { backdrop, settingsOpen, closeTo } = useSettingsBackdrop();
+  const { backdrop, settingsOpen, close: closeSettings } = useSettingsBackdrop();
   const resumeRemix = useAppRemixResume();
   const cloudLoginReturn = useCloudLoginReturn();
   // Resume before mounting AuthGate so its login-to-home redirect cannot race us.
@@ -229,7 +207,7 @@ export default function App() {
         </Routes>
         {settingsOpen ? (
           <AuthGate>
-            <SettingsDialog closeTo={closeTo}>
+            <SettingsDialog onClose={closeSettings}>
               <Suspense fallback={null}>
                 <Routes>
                   <Route path="/settings" element={<SettingsPage />} />

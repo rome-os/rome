@@ -45,7 +45,7 @@ export function Dialog({
       }}
     >
       <AutoPortal portal={DialogPrimitive.Portal}>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-foreground/35 backdrop-blur-sm dark:bg-black/60" />
+        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-foreground/35 backdrop-blur-sm dark:bg-overlay" />
         <DialogPrimitive.Content
           aria-label={ariaLabel}
           onEscapeKeyDown={(event) => {
@@ -53,6 +53,12 @@ export function Dialog({
           }}
           onPointerDownOutside={(event) => {
             if (modal) event.preventDefault();
+          }}
+          onInteractOutside={(event) => {
+            // Toasts render outside every dialog, but act for what is open.
+            if ((event.target as Element | null)?.closest?.("[data-sonner-toaster]")) {
+              event.preventDefault();
+            }
           }}
           onOpenAutoFocus={(event) => {
             if (initialFocusRef) {

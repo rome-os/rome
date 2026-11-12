@@ -6,18 +6,16 @@ import { type CDPSession, expect, type Page, test } from "@playwright/test";
  * through the browser's own touch pipeline (CDP `Input.dispatchTouchEvent`),
  * so passive listeners, `preventDefault` and hit testing are the real ones.
  *
- * /settings/appearance is the stage because it scrolls the document and keeps
- * still: chat scrolls itself to the newest turn, which would move a point
- * between measuring it and touching it.
+ * /apps is the stage because it keeps still: chat scrolls itself to the
+ * newest turn, which would move a point between measuring it and touching it.
  */
 const PHONE = { width: 390, height: 844 };
 
 test.use({ viewport: PHONE, isMobile: true, hasTouch: true });
 
 async function open(page: Page) {
-  await page.goto("/settings/appearance");
+  await page.goto("/apps");
   // The page's heading, not the mobile header: from 768px up there is none.
-  // Its text is left alone, since a phone titles a settings section by name.
   await expect(page.locator("main h1")).toBeVisible({ timeout: 30_000 });
   await page.evaluate(() => document.fonts.ready);
   return page.context().newCDPSession(page);

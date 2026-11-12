@@ -11,13 +11,14 @@ for (const width of [390, 1440]) {
     let headerLeft: number | undefined;
     for (const tab of tabs) {
       await page.goto(`/settings/${tab}`);
-      const heading = page.getByRole("heading", { name: "Settings", exact: true });
+      const dialog = page.getByRole("dialog", { name: "Settings" });
+      const heading = dialog.getByRole("heading", { name: "Settings", exact: true });
       await expect(heading).toBeVisible();
-      await expect(page.locator("main h1")).toHaveCount(1);
-      await expect(
-        page.locator('[data-slot="page-nav-link"][aria-current="page"]'),
-      ).toHaveAttribute("href", `/settings/${tab}`);
-      const body = page.locator('[data-slot="page"]').first();
+      await expect(dialog.locator('nav a[aria-current="page"]')).toHaveAttribute(
+        "href",
+        `/settings/${tab}`,
+      );
+      const body = dialog.locator('[data-slot="page"]').first();
       await expect(
         body
           .getByRole("combobox")
@@ -25,7 +26,7 @@ for (const width of [390, 1440]) {
           .or(body.getByRole("switch"))
           .first(),
       ).toBeVisible();
-      if (tab === "channels") await expect(page.locator("main article").first()).toBeVisible();
+      if (tab === "channels") await expect(dialog.locator("article").first()).toBeVisible();
       if (tab === "advanced") {
         // Developer settings is always open, so its switches show without a click.
         await expect(
@@ -50,18 +51,19 @@ for (const width of [390, 1440]) {
 }
 
 for (const width of [390, 1440]) {
-  test(`Settings detail routes retain navigation and contain wide content at ${width}px`, async ({
+  test(`Settings detail routes keep a way back and contain wide content at ${width}px`, async ({
     page,
   }) => {
     await page.setViewportSize({ width, height: 900 });
     await page.addInitScript(() => localStorage.setItem("i18nextLng", "en"));
     await page.goto("/settings/connections/github");
-    await expect(page.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
-    await expect(page.locator("main h1")).toHaveCount(1);
-    const back = page.locator("main").getByRole("link", { name: "Connections", exact: true });
-    await expect(back).toHaveAttribute("href", "/settings/connections");
+    const dialog = page.getByRole("dialog", { name: "Settings" });
+    await expect(dialog.getByRole("heading", { name: "GitHub", exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "Connections", exact: true }).click();
+    await expect(page).toHaveURL(/\/settings\/connections$/);
+    await page.goBack();
     expect(
-      await page.locator('[data-slot="page"]').evaluate((el) => el.getBoundingClientRect().right),
+      await dialog.locator('[data-slot="page"]').evaluate((el) => el.getBoundingClientRect().right),
     ).toBeLessThanOrEqual(width);
   });
 }
