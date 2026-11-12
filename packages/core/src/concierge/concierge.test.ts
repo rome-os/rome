@@ -4431,6 +4431,42 @@ describe("Concierge status reactions", () => {
       expect(await reactionOf(s, "g1")).toBeNull();
     });
 
+    /** An input of the report turn that an automation or an agent wrote, stored as a user message. */
+    const automatedSays = (s: ReturnType<typeof setup>, id: string, senderId: string) => {
+      const list = s.messages.get(CONCIERGE_CHAT) ?? [];
+      list.push({ id, role: "user", content: "[]", turnId: "report-turn", senderId });
+      s.messages.set(CONCIERGE_CHAT, list);
+    };
+
+    it.each([
+      ["a tagged routine", "automated::0::routine:Morning briefing"],
+      ["a tagged app on the guardian's behalf", "automated::1::app:daily-report"],
+      ["a tagged agent", "automated::0::agent:coding:coding"],
+      ["an agent's own account", "core:concierge"],
+    ])("refuses the full text in a turn only %s started, such as a continuation after a quota reset", async (_who, senderId) => {
+      const { s, chatId } = await finishedWith(concluded("Done."));
+      automatedSays(s, "auto", senderId);
+      const refused = await s.tool("chat_forward", { chatId, full: true });
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0].text).toContain("only in a turn they started");
+    });
+
+    it("allows the full text when the guardian's own message is in the turn beside an automated input", async () => {
+      const { s, chatId } = await finishedWith(concluded("Done."));
+      automatedSays(s, "auto", "automated::0::routine:Morning briefing");
+      guardianSays(s, "g2", "report-turn");
+      const allowed = await s.tool("chat_forward", { chatId, full: true });
+      expect(allowed.isError).toBeFalsy();
+    });
+
+    it("still takes an automated input as a message the turn answers, whatever the full-text gate says", async () => {
+      const { s } = await finishedWith(concluded("Done."));
+      automatedSays(s, "auto", "automated::0::routine:Morning briefing");
+      // `answers` may name it, as it may name any message of the turn.
+      const said = await s.tool("say", { text: "Noted.", answers: "auto" });
+      expect(said.isError).toBeFalsy();
+    });
+
     it("does not count a message an earlier, cut-short turn handed on as the guardian starting this turn", async () => {
       const { s, chatId } = await finishedWith(concluded("Done."));
       s.service.handOnPrompts(CONCIERGE_CHAT, ["g1"]);

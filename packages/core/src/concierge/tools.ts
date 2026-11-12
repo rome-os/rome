@@ -34,6 +34,7 @@ import {
 } from "./service.js";
 import { hasText, latestSaid, MAX_READ_LIMIT, taskChatPlace } from "./task-chat.js";
 import { CONCLUSION_MAX_CHARS, conclusionOf, withoutMarkers } from "./conclusion.js";
+import { automatedSource } from "../webchat/automated-source.js";
 
 const log = createLogger("concierge-tools");
 const runTool = romeToolRunner(log);
@@ -455,28 +456,32 @@ export async function buildConciergeTools(
       level: context.getTurnPushLevel(),
     });
 
-  // Only the guardian's messages this turn has taken: one still queued
-  // behind it belongs to the turn that takes it.
-  // This turn's guardian messages: the ones it took, and the ones a turn a
-  // newer input superseded handed on to it, which it answers too.
-  const turnPrompts = async () => {
+  // The user-role messages this turn took: one still queued behind it belongs
+  // to the turn that takes it. An automation's or an agent's input is stored
+  // as one too, its source in `senderId`.
+  const ownPrompts = async () => {
     const { chatId, turnId } = currentTurn();
-    const own = (await webchatRepo.getTurnChatMessages(chatId, turnId))
-      .filter((row) => row.role === "user" && row.inputState !== "queued")
-      .map((row) => row.id);
+    return (await webchatRepo.getTurnChatMessages(chatId, turnId)).filter(
+      (row) => row.role === "user" && row.inputState !== "queued",
+    );
+  };
+
+  // The messages this turn answers: the ones it took, and the ones a turn a
+  // newer input superseded handed on to it. An automated input counts: the
+  // reply to it is placed and its status reaction settled like any other's.
+  const turnPrompts = async () => {
+    const { chatId } = currentTurn();
+    const own = (await ownPrompts()).map((row) => row.id);
     const handedOn = service.promptsHandedOn(chatId).filter((id) => !own.includes(id));
     return [...handedOn, ...own];
   };
 
   // Whether the guardian started this turn: one of the messages it took is
-  // its own. A message an earlier, cut-short turn handed on does not count,
-  // so a turn that only reports on tasks never counts either.
-  const guardianStartedTurn = async () => {
-    const { chatId, turnId } = currentTurn();
-    return (await webchatRepo.getTurnChatMessages(chatId, turnId)).some(
-      (row) => row.role === "user" && row.inputState !== "queued",
-    );
-  };
+  // not an automation's or an agent's. A message an earlier, cut-short turn
+  // handed on does not count, so a turn that only reports on tasks, or only
+  // continues work on its own, never counts either.
+  const guardianStartedTurn = async () =>
+    (await ownPrompts()).some((row) => automatedSource(row.senderId) === null);
 
   /** This turn's guardian messages, once `answers`, when given, is one of them. */
   const requireTurnPrompt = async (answers: string | undefined) => {
