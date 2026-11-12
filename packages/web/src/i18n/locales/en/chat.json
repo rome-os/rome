@@ -32,7 +32,15 @@
       "blocked": "Pop-up blocked",
       "checkFailed": "Could not check the connection"
     },
-    "askAnswered": "Answered",
+    "ask": {
+      "answered": "Answered",
+      "answeredWith": "Answered: {{answer}}",
+      "dismissed": "Dismissed",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "waitingBelow": "Waiting: answer the card below",
+      "turnedDown": "Turned down: no answer within a day"
+    },
     "taskCardAlreadyAnswered": "This card was already answered. The task has been refreshed.",
     "openTaskChat": "Open",
     "tasks": {

@@ -32,7 +32,15 @@
       "blocked": "弹窗被拦截",
       "checkFailed": "无法检查连接状态"
     },
-    "askAnswered": "已回答",
+    "ask": {
+      "answered": "已回答",
+      "answeredWith": "已回答：{{answer}}",
+      "dismissed": "已忽略",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "waitingBelow": "等待回答：见下方卡片",
+      "turnedDown": "已自动拒绝：一天内没有回应"
+    },
     "taskCardAlreadyAnswered": "这张卡片已在别处回复，任务状态已刷新。",
     "openTaskChat": "打开",
     "tasks": {
