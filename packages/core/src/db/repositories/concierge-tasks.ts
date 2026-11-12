@@ -734,14 +734,12 @@ export class ConciergeTasksRepository {
 
   /**
    * After a restart, before any turn runs: a stopped process ends no turn, so
-   * the marks of the work it was running settle here. A Concierge chat's turn
-   * marks stay working only in `continuing`, the chats whose interrupted turn
-   * startup continues, and that turn settles them; every other one failed. A
-   * task's marks fail when its task chat is in `interrupted`, a chat whose
-   * running turn the restart ended. Answers how many changed.
+   * the marks of the work it was running settle here: every Concierge turn
+   * mark still working failed. A task's marks fail when its task chat is in
+   * `interrupted`, a chat whose running turn the restart ended. Answers how
+   * many changed.
    */
   async failInterruptedReactions(
-    continuing: ReadonlySet<string>,
     interrupted: ReadonlySet<string>,
     now = new Date(),
   ): Promise<number> {
@@ -755,7 +753,6 @@ export class ConciergeTasksRepository {
       .from(conciergeTurnReactions)
       .where(eq(conciergeTurnReactions.state, "working"));
     for (const row of turnRows) {
-      if (continuing.has(row.chatId)) continue;
       await this.db
         .update(conciergeTurnReactions)
         .set({ state: "failed", updatedAt: now })
@@ -779,7 +776,7 @@ export class ConciergeTasksRepository {
       .innerJoin(conciergeTasks, eq(conciergeTasks.id, conciergeTaskReactions.taskId))
       .where(eq(conciergeTaskReactions.state, "working"));
     for (const row of taskRows) {
-      if (!row.taskChat || !interrupted.has(row.taskChat) || continuing.has(row.taskChat)) continue;
+      if (!row.taskChat || !interrupted.has(row.taskChat)) continue;
       await this.db
         .update(conciergeTaskReactions)
         .set({ state: "failed", updatedAt: now })
@@ -792,30 +789,6 @@ export class ConciergeTasksRepository {
         );
       changed.push({ chatId: row.chatId, messageKey: row.messageKey });
     }
-    for (const target of changed) await this.announceReaction(target);
-    return changed.length;
-  }
-
-  /**
-   * Turn `turnId` of Concierge chat `chatId` runs again, as when a usage
-   * limit cleared: its messages a failed end marked work again, and the
-   * turn that runs it settles them when it ends.
-   */
-  async reopenTurnReactions(chatId: string, turnId: string, now = new Date()): Promise<number> {
-    const changed = await this.db
-      .update(conciergeTurnReactions)
-      .set({ state: "working", updatedAt: now })
-      .where(
-        and(
-          eq(conciergeTurnReactions.chatId, chatId),
-          eq(conciergeTurnReactions.turnId, turnId),
-          eq(conciergeTurnReactions.state, "failed"),
-        ),
-      )
-      .returning({
-        chatId: conciergeTurnReactions.chatId,
-        messageKey: conciergeTurnReactions.messageKey,
-      });
     for (const target of changed) await this.announceReaction(target);
     return changed.length;
   }

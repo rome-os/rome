@@ -57,28 +57,18 @@ describe("status reactions after a restart", () => {
     (await tasks.reactionsOf(chatId, [key])).get(key) ?? null;
 
   /** A stopped process, then the next boot's first steps. */
-  async function boot(now = Date.now()) {
+  async function boot() {
     const ended = await chats.endInterruptedTurns(DAY);
-    return settleMarksAfterRestart(tasks, chats, ended, now);
+    return settleMarksAfterRestart(tasks, ended);
   }
 
-  it("keeps a Concierge turn's marks working when startup continues that turn", async () => {
+  it("fails a Concierge turn's marks: the Concierge decides what to continue", async () => {
     await running("concierge");
     await tasks.markTurnWorking("concierge-turn", {
       chatId: "concierge",
       messageKey: "concierge-input",
     });
-    await boot();
-    expect(await reaction("concierge", "concierge-input")).toBe("working");
-  });
-
-  it("fails a Concierge turn's marks when startup does not continue it, as after a day", async () => {
-    await running("concierge");
-    await tasks.markTurnWorking("concierge-turn", {
-      chatId: "concierge",
-      messageKey: "concierge-input",
-    });
-    expect(await boot(Date.now() + 2 * DAY)).toBe(1);
+    expect(await boot()).toBe(1);
     expect(await reaction("concierge", "concierge-input")).toBe("failed");
   });
 
@@ -101,7 +91,6 @@ describe("status reactions after a restart", () => {
     await tasks.markWorking(cut!.id, { chatId: "concierge", messageKey: "cut-ask" });
     await tasks.markWorking(idle!.id, { chatId: "concierge", messageKey: "idle-ask" });
     await boot();
-    // A task chat is never continued after a restart, so its work failed.
     expect(await reaction("concierge", "cut-ask")).toBe("failed");
     // A task waiting on its owner had no turn running: it still works.
     expect(await reaction("concierge", "idle-ask")).toBe("working");
@@ -112,7 +101,7 @@ describe("status reactions after a restart", () => {
     const [task] = await tasks.upsertMany([{ title: "Done", state: "doing", chatId: "concierge" }]);
     await tasks.markWorking(task!.id, { chatId: "concierge", messageKey: "done-ask" });
     await tasks.holdReactions(task!.id, "done");
-    await boot(Date.now() + 2 * DAY);
+    await boot();
     expect(await reaction("concierge", "done-ask")).toBe("working");
     expect(await tasks.tasksHoldingReactions()).toEqual([task!.id]);
   });
@@ -125,6 +114,6 @@ describe("status reactions after a restart", () => {
         throw new Error("database is locked");
       },
     };
-    await expect(settleMarksAfterRestart(broken, chats, ended)).resolves.toBe(0);
+    await expect(settleMarksAfterRestart(broken, ended)).resolves.toBe(0);
   });
 });
