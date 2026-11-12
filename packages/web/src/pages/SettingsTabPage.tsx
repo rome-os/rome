@@ -1673,7 +1673,7 @@ function AllowedCloudEmailsRows() {
       {emails.length > 0 ? (
         <ul aria-label={t("publicAccess.dashboardEmails.title")} className="divide-y divide-border">
           {emails.map((email) => (
-            <li key={email} className="flex items-center gap-3 px-4 py-2.5">
+            <li key={email} className="flex items-center gap-3 px-4 py-3">
               <Avatar size="sm">
                 <AvatarFallback className="bg-primary/15 text-primary">
                   {email[0]?.toUpperCase()}

@@ -266,7 +266,7 @@ final class LiveBackend: RomeBackend {
     }
 
     func appCall(appId: String, method: String, path: String, body: JSONValue?) async throws -> ConnectReply {
-        guard let apiPath = WidgetData.appAPIPath(appId: appId, path: path) else { throw APIError.notFound }
+        guard let apiPath = WidgetPaths.appAPIPath(appId: appId, path: path) else { throw APIError.notFound }
         return try await client.exchange(method: method, apiPath: apiPath, json: body)
     }
 

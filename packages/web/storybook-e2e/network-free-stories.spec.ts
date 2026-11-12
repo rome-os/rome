@@ -43,7 +43,7 @@ test("network-free stories stay isolated and issue no service requests", async (
   await expect(
     page.getByText("This connection will let your agent", { exact: true }),
   ).toBeVisible();
-  await expect(page.getByRole("button", { name: "Connect" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeVisible();
 
   await page.goto("/iframe.html?id=dev-connections-channel-status--connected&viewMode=story");
   await expect(page.getByText("Working", { exact: true })).toBeVisible();

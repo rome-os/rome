@@ -74,6 +74,11 @@ export interface UsageLimitContinuationOptions {
   runner: ContinuationRunner;
   /** Who a continuation acts for: the person whose turn it continues. Absent, no one. */
   actorOf?: (turn: ErroredTurn["turn"]) => Promise<SessionActor | undefined>;
+  /**
+   * A stopped turn is about to run again, as its continuation. What its end
+   * settled as failed works again, until the continuation ends.
+   */
+  onContinue?: (turn: ErroredTurn["turn"]) => Promise<unknown> | void;
 }
 
 /**
@@ -129,6 +134,7 @@ export function startUsageLimitContinuation(options: UsageLimitContinuationOptio
             shouldRun: () => {
               const run = !stopped && available(provider) && repo.canContinueAfterRestart(turn);
               if (!run) dropped = true;
+              else void Promise.resolve(options.onContinue?.(turn)).catch(() => undefined);
               return run;
             },
           },

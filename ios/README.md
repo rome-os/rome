@@ -10,6 +10,8 @@ Open `Rome.xcodeproj` in Xcode and run the `Rome` scheme on an iPhone simulator,
 xcodebuild -project Rome.xcodeproj -scheme Rome -destination 'platform=iOS Simulator,name=iPhone 17' build
 ```
 
+Chat cards are drawn with Google's A2UI Swift package, which runs a build plugin and uses Swift macros. Xcode asks once to trust them. On the command line, add `-skipPackagePluginValidation -skipMacroValidation` to any `xcodebuild` command, or it fails before compiling.
+
 If Xcode reports that CoreSimulator is out of date, finish Xcode's first launch once: `sudo xcodebuild -runFirstLaunch`, then `xcodebuild -downloadPlatform iOS` if no iOS runtime is installed.
 
 Device builds need a team: copy `Config/Local.xcconfig.example` to `Config/Local.xcconfig`, which sets `DEVELOPMENT_TEAM` to Rome's own team, Amantru, Inc (`4YWXB26F39`). Debug and Release both sign with it, because pushes are sent with that team's APNs key and reach only apps it signed. Debug builds use the bundle id `cc.romeos.mobile.dev` and the name "Rome Dev"; Release builds are the TestFlight app (see "Release to TestFlight").

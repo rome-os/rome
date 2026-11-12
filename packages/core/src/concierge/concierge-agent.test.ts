@@ -35,6 +35,13 @@ describe("the Concierge agent", () => {
     }
   });
 
+  it("never tells the Concierge a forward needs `answers` or passes the guardian's words on", () => {
+    const prompt = concierge.systemPromptPrefix;
+    expect(prompt).not.toMatch(/`chat_forward` (?:are|is) refused/);
+    expect(prompt).not.toContain("with `chat_send` or `chat_forward`");
+    expect(prompt).toContain("`chat_forward` passes nothing on");
+  });
+
   it("shows task questions and approvals as live cards without relaying card answers", () => {
     const rule = concierge.systemPromptPrefix
       .split("\n")

@@ -1,41 +1,52 @@
+import A2UICore
+import A2UISwiftUI
 import SwiftUI
 
-/// A card described as data, drawn natively. Each `bind` is read from the
-/// app's API when the card appears, so it shows the app's data as it stands.
-/// A button POSTs its context to the app's API and reads every `bind` again;
-/// nothing is said in the chat. On a card the agent waits on, `rome:answer`
-/// and `rome:dismiss` answer the interaction instead.
+/// A card described as data, drawn natively. Google's A2UI engine reads the
+/// card, resolves its paths and keeps its data; `WidgetCatalog` draws it.
+/// Each `bind` is read from the app's API when the card appears, so it shows
+/// the app's data as it stands. A button POSTs its context to the app's API
+/// and reads every `bind` again; nothing is said in the chat. On a card the
+/// agent waits on, `rome:answer` and `rome:dismiss` answer the interaction
+/// instead.
 struct WidgetUICardView: View {
     /// What a card the agent waits on needs: the stored answer once there is
     /// one, which locks the card, and how to answer or dismiss it.
     struct Waiting {
-        let answered: JSONValue?
+        let answered: Rome.JSONValue?
         let sending: Bool
-        let answer: (JSONValue) -> Void
+        let answer: (Rome.JSONValue) -> Void
         let dismiss: () -> Void
     }
 
     let part: WidgetUIPart
     /// A call on the card's own app: method, path in its API, JSON body.
-    let call: (String, String, JSONValue?) async throws -> ConnectReply
+    let call: (String, String, Rome.JSONValue?) async throws -> ConnectReply
     var waiting: Waiting? = nil
-
-    @State private var data: JSONValue = .object([:])
-    @State private var loaded = false
-    @State private var failed = false
-    @State private var pressing: String?
 
     private var locked: Bool { waiting.map { $0.answered != nil || $0.sending } ?? false }
 
+    @StateObject private var surface = WidgetSurface()
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            node("root", scope: "", depth: 0)
-            if let waiting, waiting.answered != nil {
-                Text(waiting.answered?["dismissed"]?.bool == true ? "Dismissed" : "Answered")
+            if let viewModel = surface.viewModel {
+                Surface(viewModel: viewModel, catalog: WidgetCatalog.catalog)
+                    .environment(\.widgetBusy, surface.busy || !surface.loaded)
+                    .environment(\.widgetLocked, locked)
+                    .environment(\.widgetClears, surface.clears)
+            } else if surface.undrawable {
+                Text("Could not show this card. \(part.text)")
+                    .romeFont(CardScale.caption)
+                    .foregroundStyle(Palette.destructive)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let answered = waiting?.answered {
+                Text(answered["dismissed"]?.bool == true ? "Dismissed" : "Answered")
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.sub)
             }
-            if failed {
+            if surface.failed {
                 Text("Could not read this card's data. \(part.text)")
                     .romeFont(CardScale.caption)
                     .foregroundStyle(Palette.destructive)
@@ -47,54 +58,143 @@ struct WidgetUICardView: View {
         .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.cardRadius, style: .continuous))
         .hairline(radius: Metrics.cardRadius)
         .padding(.top, 4)
-        .redacted(reason: loaded || failed ? [] : .placeholder)
-        .task(id: part) { await load() }
-        .onChange(of: waiting?.answered) { showAnswered() }
+        .redacted(reason: surface.loaded || surface.failed || surface.undrawable ? [] : .placeholder)
+        .task(id: part) {
+            surface.waiting = waiting
+            surface.locked = locked
+            surface.show(part, call: call)
+            surface.showAnswered(waiting?.answered)
+            await surface.load()
+        }
+        .onChange(of: locked) { surface.locked = locked }
+        .onChange(of: waiting?.answered) {
+            surface.waiting = waiting
+            surface.showAnswered(waiting?.answered)
+        }
     }
+}
 
-    /// An answered card shows what the guardian sent, which core keeps as `card`.
-    private func showAnswered() {
-        // A dismissed card was never answered, so it shows nothing picked
-        // rather than its defaults.
-        let dismissed = waiting?.answered?["dismissed"]?.bool == true
-        if let card = waiting?.answered?["card"] ?? (dismissed ? .array([]) : nil) {
-            data = WidgetData.storing(card, at: "/answers", in: data)
+/// One card's A2UI surface: the engine that holds it, the reads that fill it,
+/// and the presses it posts.
+@MainActor
+final class WidgetSurface: ObservableObject, ActionHandling {
+    @Published private(set) var viewModel: SurfaceViewModel?
+    @Published private(set) var loaded = false
+    @Published private(set) var failed = false
+    @Published private(set) var undrawable = false
+    @Published private(set) var busy = false
+    @Published private(set) var clears = WidgetClears()
+    /// How a card the agent waits on answers, and whether it is answered.
+    var waiting: WidgetUICardView.Waiting?
+    var locked = false
+
+    private var processor: MessageProcessor?
+    private var part: WidgetUIPart?
+    private var call: ((String, String, Rome.JSONValue?) async throws -> ConnectReply)?
+    /// Only the newest read writes the data: a slow read must not land after
+    /// a newer one and put back an older value.
+    private var reads = 0
+
+    func show(_ part: WidgetUIPart, call: @escaping (String, String, Rome.JSONValue?) async throws -> ConnectReply) {
+        guard self.part != part else { return }
+        self.part = part
+        self.call = call
+        loaded = false
+        failed = false
+        // A stored part is read back as data, so it is checked again here.
+        guard part.isDrawable else {
+            undrawable = true
+            return
+        }
+        let processor = MessageProcessor(catalogs: [WidgetCatalog.catalog], actionHandler: self)
+        self.processor = processor
+        let surfaceId = Rome.JSONValue.string(part.toolUseId)
+        var targets: [String: String] = [:]
+        let components = part.components.map { component -> Rome.JSONValue in
+            guard case .object(var fields) = Self.withHostStrings(component) else { return component }
+            if let id = fields["id"]?.string, let target = fields["clears"]?["path"]?.string { targets[id] = target }
+            fields["clears"] = nil
+            return .object(fields)
+        }
+        let created = send("createSurface", [
+            "surfaceId": surfaceId, "catalogId": .string(WidgetCatalog.id),
+        ]) && send("updateComponents", [
+            "surfaceId": surfaceId, "components": .array(components),
+        ]) && (part.data.object ?? [:]).allSatisfy { key, value in
+            send("updateDataModel", ["surfaceId": surfaceId, "path": .string("/\(key)"), "value": value])
+        }
+        viewModel = created ? processor.surfaceGroupModel.surfacesMap[part.toolUseId] : nil
+        undrawable = viewModel == nil
+        clears = WidgetClears(targets: targets) { [weak self] path, list in
+            self?.viewModel?.dataModel.set(path, value: list ? .array([]) : .string(""))
         }
     }
 
-    private func load() async {
-        if !loaded {
-            data = part.data
-            showAnswered()
+    /// An answered card shows what the guardian sent, which core keeps as
+    /// `card`. A dismissed card was never answered, so it shows nothing
+    /// picked rather than its defaults.
+    func showAnswered(_ answered: Rome.JSONValue?) {
+        guard let part, viewModel != nil else { return }
+        let dismissed = answered?["dismissed"]?.bool == true
+        guard let card = answered?["card"] ?? (dismissed ? .array([]) : nil) else { return }
+        _ = send("updateDataModel", ["surfaceId": .string(part.toolUseId), "path": .string("/answers"), "value": card])
+    }
+
+    /// The card's components with each `{ string }` replaced by Rome's own
+    /// string in the guardian's language.
+    private static func withHostStrings(_ value: Rome.JSONValue) -> Rome.JSONValue {
+        switch value {
+        case .object(let fields):
+            if fields.count == 1, let name = fields["string"]?.string { return .string(WidgetPaths.hostString(name)) }
+            return .object(fields.mapValues(withHostStrings))
+        case .array(let items):
+            return .array(items.map(withHostStrings))
+        default:
+            return value
         }
-        var next = data
+    }
+
+    func load() async {
+        guard let part, let call, viewModel != nil else { return }
+        reads += 1
+        let read = reads
+        var values: [(String, Rome.JSONValue)] = []
         do {
             for (pointer, path) in part.bind.sorted(by: { $0.key < $1.key }) {
-                guard WidgetData.isAppPath(path) else { throw APIError.notFound }
                 let reply = try await call("GET", path, nil)
                 guard reply.ok else { throw APIError.server(status: 500, message: nil) }
-                next = WidgetData.storing(reply.body, at: pointer, in: next)
+                values.append((pointer, reply.body))
             }
-            data = next
+            guard read == reads else { return }
+            for (pointer, value) in values {
+                _ = send("updateDataModel", [
+                    "surfaceId": .string(part.toolUseId), "path": .string(pointer), "value": value,
+                ])
+            }
             failed = false
         } catch {
-            failed = true
+            if read == reads { failed = true }
         }
         loaded = true
     }
 
-    private func press(_ button: WidgetComponent, scope: String) async {
-        let name = button["action"]?["event"]?["name"]?.string ?? ""
-        if name == "rome:answer" || name == "rome:dismiss" {
-            guard let waiting, !locked else { return }
-            if name == "rome:dismiss" { waiting.dismiss() }
-            else { waiting.answer(WidgetData.context(button["action"]?["event"]?["context"], in: data, scope: scope)) }
+    nonisolated func handle(action: ResolvedAction, from surfaceID: String) {
+        guard case .event(let name, let context, _) = action.identity else { return }
+        let body = Self.romeJSON(context ?? [:])
+        Task { @MainActor in await self.press(name, body: body) }
+    }
+
+    nonisolated func handle(error: RendererError, from surfaceID: String) {}
+
+    private func press(_ name: String, body: Rome.JSONValue) async {
+        if WidgetPaths.answersTheCard(name) {
+            guard part?.waits == true, let waiting, !locked else { return }
+            if name == "rome:dismiss" { waiting.dismiss() } else { waiting.answer(body) }
             return
         }
-        guard WidgetData.isAppPath(name) else { return }
-        pressing = button.id
-        defer { pressing = nil }
-        let body = WidgetData.context(button["action"]?["event"]?["context"], in: data, scope: scope)
+        guard let call, !busy, WidgetPaths.isAppPath(name) else { return }
+        busy = true
+        defer { busy = false }
         do {
             let reply = try await call("POST", name, body)
             if !reply.ok { failed = true; return }
@@ -104,193 +204,21 @@ struct WidgetUICardView: View {
         }
     }
 
-    // A card is a tree of a few dozen components at most; `depth` stops a
-    // malformed one that slipped past the server's cycle check.
-    private func node(_ id: String, scope: String, depth: Int, inButton: Bool = false) -> AnyView {
-        guard depth < 24, let c = part.components[id] else { return AnyView(EmptyView()) }
-        let text = { (key: String) in WidgetData.text(c[key], in: data, scope: scope) }
-        let kids = c.children(in: data, scope: scope)
-        switch c.kind {
-        case .text:
-            return AnyView(textView(text("text"), variant: c["variant"]?.string, inButton: inButton))
-        case .stat:
-            return AnyView(VStack(alignment: .leading, spacing: 2) {
-                Text(verbatim: text("label")).romeFont(CardScale.caption).foregroundStyle(Palette.sub)
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(verbatim: text("value")).romeFont(22, .semibold, monospacedDigits: true).foregroundStyle(Palette.fg)
-                    if c["unit"] != nil {
-                        Text(verbatim: text("unit")).romeFont(CardScale.caption).foregroundStyle(Palette.sub)
-                    }
-                }
-                if c["caption"] != nil {
-                    Text(verbatim: text("caption")).romeFont(CardScale.caption).foregroundStyle(Palette.sub)
-                }
-            }
-            .accessibilityElement(children: .combine))
-        case .progress:
-            let max = WidgetData.number(c["max"], in: data, scope: scope).flatMap { $0 > 0 ? $0 : nil } ?? 1
-            let value = WidgetData.number(c["value"], in: data, scope: scope) ?? 0
-            return AnyView(VStack(alignment: .leading, spacing: 4) {
-                if c["label"] != nil {
-                    Text(verbatim: text("label")).romeFont(CardScale.caption).foregroundStyle(Palette.sub)
-                }
-                ProgressView(value: Swift.min(Swift.max(value, 0), max), total: max)
-                    .tint(Palette.primary)
-            })
-        case .image:
-            guard let url = WidgetData.httpsURL(text("url")) else { return AnyView(EmptyView()) }
-            let fit = ["contain", "scaleDown", "none"].contains(c["fit"]?.string ?? "")
-            let image = AsyncImage(url: url) { image in
-                image.resizable().aspectRatio(contentMode: fit ? .fit : .fill)
-            } placeholder: {
-                Palette.fill
-            }
-            // As the dashboard draws them: an icon is a 20 pt tile, an avatar a
-            // 32 pt circle, any other variant fills the card's width.
-            switch c["variant"]?.string {
-            case "icon":
-                return AnyView(image.frame(width: 20, height: 20).clipShape(RoundedRectangle(cornerRadius: 4, style: .continuous)).accessibilityLabel(text("description")))
-            case "avatar":
-                return AnyView(image.frame(width: 32, height: 32).clipShape(Circle()).accessibilityLabel(text("description")))
-            default:
-                return AnyView(image
-                    .frame(maxWidth: .infinity, maxHeight: 180)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-                    .accessibilityLabel(text("description")))
-            }
-        case .row:
-            // A2UI's `justify` as spacers: before the first child, between
-            // children, and after the last.
-            let justify = c["justify"]?.string ?? "start"
-            let lead = ["end", "center", "spaceAround", "spaceEvenly"].contains(justify)
-            let between = ["spaceBetween", "spaceAround", "spaceEvenly"].contains(justify)
-            let trail = ["start", "stretch", "center", "spaceAround", "spaceEvenly"].contains(justify)
-            let align: VerticalAlignment = switch c["align"]?.string {
-            case "start": .top
-            case "end": .bottom
-            default: .center
-            }
-            return AnyView(HStack(alignment: align, spacing: 12) {
-                if lead { Spacer(minLength: 0) }
-                ForEach(Array(kids.enumerated()), id: \.offset) { index, kid in
-                    if between && index > 0 { Spacer(minLength: 8) }
-                    node(kid.id, scope: kid.scope, depth: depth + 1)
-                }
-                if trail { Spacer(minLength: 0) }
-            })
-        case .column, .list:
-            let horizontal = c.kind == .list && c["direction"]?.string == "horizontal"
-            let stack = ForEach(Array(kids.enumerated()), id: \.offset) { _, kid in
-                node(kid.id, scope: kid.scope, depth: depth + 1)
-            }
-            if horizontal {
-                return AnyView(ScrollView(.horizontal, showsIndicators: false) { HStack(spacing: 8) { stack } })
-            }
-            let align: HorizontalAlignment = switch c["align"]?.string {
-            case "center": .center
-            case "end": .trailing
-            default: .leading
-            }
-            let frame: Alignment = align == .center ? .center : align == .trailing ? .trailing : .leading
-            return AnyView(VStack(alignment: align, spacing: c.kind == .list ? 4 : 8) { stack }
-                .frame(maxWidth: .infinity, alignment: frame))
-        case .choicePicker:
-            return AnyView(choicePicker(c, scope: scope))
-        case .textField:
-            let pointer = WidgetData.absolute(c["value"]?["path"]?.string ?? "", scope: scope)
-            let placeholder = c["placeholder"] != nil ? text("placeholder") : text("label")
-            let field = Binding(
-                get: { WidgetData.read(data, pointer: pointer)?.string ?? "" },
-                set: { data = WidgetData.editing(.string($0), at: pointer, clears: c["clears"], scope: scope, in: data) }
-            )
-            return AnyView(TextField(placeholder, text: field, axis: .vertical)
-                .lineLimit(c["variant"]?.string == "longText" ? 3...6 : 1...4)
-                .romeFont(CardScale.body)
-                .foregroundStyle(Palette.fg)
-                .padding(.horizontal, 12)
-                .padding(.vertical, 9)
-                .background(Palette.fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .disabled(locked)
-                .accessibilityLabel(text("label")))
-        case .button:
-            if waiting != nil && locked { return AnyView(EmptyView()) }
-            let primary = c["variant"]?.string == "primary"
-            let borderless = c["variant"]?.string == "borderless"
-            let checked = (c["checks"]?.array ?? []).allSatisfy { WidgetData.passes($0["condition"], in: data, scope: scope) }
-            return AnyView(Button {
-                Task { await press(c, scope: scope) }
-            } label: {
-                HStack(spacing: 6) {
-                    if pressing == c.id { Spinner(size: 12, color: primary ? .white : Palette.sub) }
-                    ForEach(Array(kids.enumerated()), id: \.offset) { _, kid in
-                        node(kid.id, scope: kid.scope, depth: depth + 1, inButton: true)
-                    }
-                }
-                .foregroundStyle(primary ? Color.white : borderless ? Palette.sub : Palette.primaryText)
-                .padding(.horizontal, 14)
-                .frame(minHeight: CardScale.actionHeight)
-                .background(primary ? Palette.primary : borderless ? Color.clear : Palette.primarySoft, in: Capsule())
-                .opacity(checked ? 1 : 0.45)
-            }
-            .buttonStyle(PressScaleStyle())
-            .disabled(pressing != nil || !checked))
-        case .unknown:
-            return AnyView(EmptyView())
-        }
+    /// Hands one A2UI v0.9 message to the engine; false when it refuses it.
+    private func send(_ kind: String, _ body: [String: Rome.JSONValue]) -> Bool {
+        let message = Rome.JSONValue.object(["version": .string("v0.9"), kind: .object(body)])
+        guard let processor,
+              let data = try? JSONEncoder().encode(message),
+              let text = String(data: data, encoding: .utf8),
+              let parsed = try? MessageParser().parse(jsonString: text) else { return false }
+        processor.process(message: parsed)
+        return true
     }
 
-    /// Options read as the question card's chips: a picked chip is filled.
-    private func choicePicker(_ c: WidgetComponent, scope: String) -> some View {
-        let pointer = WidgetData.absolute(c["value"]?["path"]?.string ?? "", scope: scope)
-        let picked = (WidgetData.read(data, pointer: pointer)?.array ?? []).compactMap(\.string)
-        let multi = c["variant"]?.string == "multipleSelection"
-        let options = c["options"]?.array ?? []
-        return VStack(alignment: .leading, spacing: 8) {
-            ForEach(Array(options.enumerated()), id: \.offset) { _, option in
-                let value = option["value"]?.string ?? ""
-                let selected = picked.contains(value)
-                Button {
-                    let next = multi ? (selected ? picked.filter { $0 != value } : picked + [value]) : [value]
-                    data = WidgetData.editing(.array(next.map(JSONValue.string)), at: pointer, clears: c["clears"], scope: scope, in: data)
-                } label: {
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(verbatim: WidgetData.text(option["label"], in: data, scope: scope))
-                            .romeFont(CardScale.body, .medium)
-                            .foregroundStyle(selected ? Color.white : Palette.fg)
-                        if option["description"] != nil {
-                            Text(verbatim: WidgetData.text(option["description"], in: data, scope: scope))
-                                .romeFont(CardScale.caption)
-                                .foregroundStyle(selected ? Color.white.opacity(0.8) : Palette.sub)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 9)
-                    .background(selected ? Palette.primary : Palette.fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                }
-                .buttonStyle(PressScaleStyle())
-                .disabled(locked)
-                .accessibilityAddTraits(selected ? .isSelected : [])
-            }
-        }
-    }
-
-    private func textView(_ text: String, variant: String?, inButton: Bool) -> some View {
-        let size: CGFloat
-        let weight: Font.Weight
-        switch variant {
-        case "h1", "h2": size = 20; weight = .semibold
-        case "h3", "h4": size = CardScale.title; weight = .semibold
-        case "h5": size = CardScale.title; weight = .medium
-        case "caption": size = CardScale.caption; weight = .regular
-        default: size = CardScale.body; weight = .regular
-        }
-        // A button's label takes the button's own color.
-        let label = Text(verbatim: text)
-            .romeFont(inButton ? CardScale.actionFont : size, inButton ? .medium : weight)
-            .fixedSize(horizontal: false, vertical: true)
-        return Group {
-            if inButton { label } else { label.foregroundStyle(variant == "caption" ? Palette.sub : Palette.fg) }
-        }
+    /// The engine's JSON as the app's, through their shared encoding.
+    private nonisolated static func romeJSON<T: Encodable>(_ value: T) -> Rome.JSONValue {
+        guard let data = try? JSONEncoder().encode(value),
+              let json = try? JSONDecoder().decode(Rome.JSONValue.self, from: data) else { return .object([:]) }
+        return json
     }
 }

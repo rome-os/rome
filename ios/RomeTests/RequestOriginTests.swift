@@ -44,7 +44,7 @@ final class OriginRecorder: URLProtocol, @unchecked Sendable {
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [OriginRecorder.self]
         let client = APIClient(origin: URL(string: "http://127.0.0.1:4141")!, token: { "t" }, configuration: configuration)
-        let path = try #require(WidgetData.appAPIPath(appId: "@alice/meals", path: "water"))
+        let path = try #require(WidgetPaths.appAPIPath(appId: "@alice/meals", path: "water"))
         _ = try await client.exchange(method: "POST", apiPath: path, json: .object([:]))
         #expect(OriginRecorder.requests.first?.url?.absoluteString == "http://127.0.0.1:4141/api/apps/@alice%2Fmeals/water")
     }

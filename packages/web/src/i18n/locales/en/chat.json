@@ -116,6 +116,10 @@
         "searchingWeb": "Searching the web",
         "readingPage": "Reading a page"
       }
+    },
+    "statusReaction": {
+      "working": "Working on it",
+      "failed": "Did not finish"
     }
   },
   "reply": {
@@ -588,8 +592,6 @@
     "title": "Chat thread",
     "close": "Close chat thread",
     "loadFailed": "Couldn't load this chat thread.",
-    "replies_one": "{{count}} reply",
-    "replies_other": "{{count}} replies",
     "replyPlaceholder": "Reply"
   },
   "sessionRenewal": {

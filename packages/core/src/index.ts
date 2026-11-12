@@ -219,6 +219,7 @@ import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
 import { startConciergeEvents } from "./concierge/events.js";
+import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
 import { listConnectionViews } from "./api/routes/connections.js";
 import { ConciergeFollowItemsRepository } from "./db/repositories/concierge-follow-items.js";
@@ -1319,6 +1320,17 @@ async function main() {
     settingsRepo,
     ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
   });
+  // The marks the stopped process left working settle before any turn runs.
+  const settledMarks = await settleMarksAfterRestart(
+    concierge.deps.tasks.repo,
+    webchatRepo,
+    endedTurns,
+  );
+  if (settledMarks > 0) {
+    log.warn("Settled status reactions a stopped Rome process left working", {
+      reactions: settledMarks,
+    });
+  }
   startConciergeEvents(concierge, turnListeners);
   // The Concierge reaches the connector's watch actions as itself.
   startConciergeFollowing(concierge, {
@@ -2384,6 +2396,10 @@ async function main() {
     repo: webchatRepo,
     runner: backendTurnRunner,
     actorOf: continuationActorOf,
+    // A Concierge turn a limit stopped shows its messages failed; run again,
+    // they work again until the continuation ends.
+    onContinue: (turn) =>
+      concierge.deps.tasks.repo.reopenTurnReactions(turn.sessionId, turn.turnId),
   });
 
   // Best-effort instance-identity check. Fire-and-forget: announces

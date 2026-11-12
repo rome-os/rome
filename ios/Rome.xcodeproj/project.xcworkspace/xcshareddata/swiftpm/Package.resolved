@@ -1,0 +1,42 @@
+{
+  "originHash" : "79a9fc50a0fa02aa1ab056eb3e89b14c4970dd58bb077a044cf97a11cf4836c4",
+  "pins" : [
+    {
+      "identity" : "a2ui",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/a2ui-project/a2ui",
+      "state" : {
+        "revision" : "ae2b6baaeca1dd02ebb21f7543aab5d823737cc4",
+        "version" : "0.10.0+swift"
+      }
+    },
+    {
+      "identity" : "swift-collections",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/apple/swift-collections.git",
+      "state" : {
+        "revision" : "88754449ab766a739610b660e117762115fabc9c",
+        "version" : "1.7.6"
+      }
+    },
+    {
+      "identity" : "swift-json-schema",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/ajevans99/swift-json-schema",
+      "state" : {
+        "revision" : "c0a9375ea9cd3fd47d875c98ed7f027ea61c03cb",
+        "version" : "0.13.2"
+      }
+    },
+    {
+      "identity" : "swift-syntax",
+      "kind" : "remoteSourceControl",
+      "location" : "https://github.com/swiftlang/swift-syntax.git",
+      "state" : {
+        "revision" : "050f1a346fbbac0ca2cfb15a95274f7bd1cf0ccf",
+        "version" : "604.0.0"
+      }
+    }
+  ],
+  "version" : 3
+}

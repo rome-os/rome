@@ -1,17 +1,27 @@
+import A2UICore
 import Foundation
 import Testing
 @testable import Rome
 
-/// A card an app described as data: parsed from its `widget` part and read
-/// from its data model as the dashboard reads it.
-@Suite struct WidgetUITests {
-    private let model: JSONValue = .object([
-        "today": .object([
-            "calories": .number(1240),
-            "meals": .array([.object(["name": .string("Oatmeal")]), .object(["name": .string("Ramen")])]),
-            "a/b": .string("slash"),
-        ]),
-    ])
+/// A card an app described as data: parsed from its `widget` part, checked
+/// again on read, and drawn through Google's A2UI engine as the dashboard's.
+@MainActor @Suite struct WidgetUITests {
+    private func card(_ ui: String, bind: String = "{}", appId: String = "meals") -> WidgetUIPart? {
+        let json = #"[{"type":"widget","toolUseId":"w","appId":"\#(appId)","text":"t","ui":{"components":\#(ui)},"bind":\#(bind)}]"#
+        guard case .widgetUI(let part) = MessagePart.parse(json).first else { return nil }
+        return part
+    }
+
+    /// A surface for `part` whose reads return `body`; `posts` records each press.
+    private func surface(_ part: WidgetUIPart, body: Rome.JSONValue, posts: Box<[String]> = Box([])) async -> WidgetSurface {
+        let surface = WidgetSurface()
+        surface.show(part) { method, path, _ in
+            if method == "POST" { posts.value.append(path) }
+            return ConnectReply(ok: true, body: body)
+        }
+        await surface.load()
+        return surface
+    }
 
     @Test func aDescribedWidgetIsDrawnHereAndAComponentWidgetOpensTheWeb() {
         let parsed = MessagePart.parse(#"""
@@ -21,7 +31,6 @@ import Testing
         guard case .widgetUI(let card) = parsed.first else { Issue.record("not drawn natively"); return }
         #expect(card.appId == "meals")
         #expect(card.bind == ["/today": "days/1"])
-        #expect(card.components["root"]?.kind == .text)
         #expect(parsed.last == .webOnly(.app("meals")))
     }
 
@@ -30,85 +39,167 @@ import Testing
         #expect(parsed == [.webOnly(.app("a"))])
     }
 
-    @Test func pathsReadTheModelAndListItemsReadTheirOwnItem() {
-        #expect(WidgetData.text(.object(["path": .string("/today/calories")]), in: model, scope: "") == 1240.formatted())
-        #expect(WidgetData.text(.string("plain"), in: model, scope: "") == "plain")
-        #expect(WidgetData.text(.object(["path": .string("/today/a~1b")]), in: model, scope: "") == "slash")
-
-        let list = WidgetComponent(id: "l", kind: .list, props: .object([
-            "children": .object(["componentId": .string("meal"), "path": .string("/today/meals")]),
-        ]))
-        let kids = list.children(in: model, scope: "")
-        #expect(kids.map(\.scope) == ["/today/meals/0", "/today/meals/1"])
-        #expect(WidgetData.text(.object(["path": .string("name")]), in: model, scope: kids[1].scope) == "Ramen")
+    @Test func aStoredCardIsCheckedAgainBeforeItCallsItsApp() async throws {
+        let text = #"[{"id":"root","component":"Text","text":"a"}]"#
+        let post = #"[{"id":"root","component":"Button","child":"l","action":{"event":{"name":"../../settings"}}},{"id":"l","component":"Text","text":"Go"}]"#
+        #expect(try #require(card(text, bind: #"{"/a":"days/1"}"#)).isDrawable)
+        #expect(try #require(card(text, bind: #"{"/a":"../../settings"}"#)).isDrawable == false)
+        #expect(try #require(card(post)).isDrawable == false)
+        #expect(try #require(card(text, appId: "..")).isDrawable == false)
+        let refused = await surface(try #require(card(post)), body: .object([:]))
+        #expect(refused.undrawable)
     }
 
-    @Test func aButtonPostsItsContextWithItsPathsRead() {
-        let context = WidgetData.context(.object(["kcal": .object(["path": .string("/today/calories")]), "date": .string("2026-11-11")]), in: model, scope: "")
-        #expect(context == .object(["kcal": .number(1240), "date": .string("2026-11-11")]))
+    @Test func theEngineFillsTheCardFromItsBindings() async throws {
+        let part = try #require(card(#"""
+        [{"id":"root","component":"Column","children":["kcal","meals"]},
+         {"id":"kcal","component":"Stat","label":"Calories","value":{"path":"/today/calories"}},
+         {"id":"meals","component":"List","children":{"componentId":"meal","path":"/today/meals"}},
+         {"id":"meal","component":"Text","text":{"path":"name"}}]
+        """#, bind: #"{"/today":"days/today"}"#))
+        let model = await surface(part, body: .object([
+            "calories": .number(1240),
+            "meals": .array([.object(["name": .string("Oatmeal")]), .object(["name": .string("Ramen")])]),
+        ]))
+        let root = try #require(model.viewModel?.rootNode)
+        let kids = root.children(for: "children")
+        #expect(kids.first?.double(for: "value") == 1240)
+        let meals = try #require(kids.last).children(for: "children")
+        #expect(meals.map { $0.string(for: "text") } == ["Oatmeal", "Ramen"])
+    }
+
+    @Test func aListOfPlainValuesReadsEachItem() async throws {
+        let part = try #require(card(#"""
+        [{"id":"root","component":"List","children":{"componentId":"item","path":"/items"}},
+         {"id":"item","component":"Text","text":{"path":""}}]
+        """#, bind: #"{"/items":"tags"}"#))
+        let model = await surface(part, body: .array([.string("spicy"), .string("seafood")]))
+        let items = try #require(model.viewModel?.rootNode).children(for: "children")
+        #expect(items.map { $0.string(for: "text") } == ["spicy", "seafood"])
+    }
+
+    @Test func aPressPostsToTheAppAndReadsAgain() async throws {
+        let part = try #require(card(#"""
+        [{"id":"root","component":"Button","child":"l","action":{"event":{"name":"water","context":{"cups":1}}}},
+         {"id":"l","component":"Text","text":"Water"}]
+        """#))
+        let posts = Box<[String]>([])
+        let model = await surface(part, body: .object([:]), posts: posts)
+        let button = try #require(model.viewModel?.rootNode)
+        button.action(for: "action", userActivation: true)?()
+        for _ in 0..<50 where posts.value.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(posts.value == ["water"])
     }
 
     @Test func aCardReachesOnlyItsOwnApp() {
-        #expect(WidgetData.isAppPath("days/2026-11-11"))
+        #expect(WidgetPaths.isAppPath("days/2026-11-11"))
         for path in ["/api/system", "../connector/x", "a/./b", "https://evil.example", "a?b=1", "", "%2e%2e/%2e%2e/settings", "..\\..\\settings", "a//b"] {
-            #expect(!WidgetData.isAppPath(path))
+            #expect(!WidgetPaths.isAppPath(path))
         }
     }
 
-    @MainActor @Test func theDemoMealCardParses() {
+    @Test func theDemoMealCardParses() {
         guard case .widgetUI(let card) = MessagePart.parse(JSONValue.array([DemoBackend.mealCard]).prettyText).first else { Issue.record("demo card did not parse"); return }
         #expect(card.components.count == 12)
+        #expect(card.isDrawable)
     }
 
-    @MainActor @Test func aQuestionCardDescribedAsDataIsDrawnFromItsDescription() {
+    // MARK: A card the agent waits on
+
+    private func questionCard() throws -> WidgetUIPart {
         guard case .question(let part) = MessagePart.parse(JSONValue.array([DemoBackend.dinnerQuestion]).prettyText).first else {
-            Issue.record("not a question card"); return
+            throw CardError.notAQuestion
         }
-        #expect(part.questions.count == 2)
-        let card = part.ui
-        #expect(card?.components["q0-pick"]?.kind == .choicePicker)
-        #expect(card?.components["q0-own"]?.kind == .textField)
-        #expect(card?.data["answers"]?.array?.count == 2)
+        return try #require(part.ui)
     }
 
-    @Test func inputsWriteIntoTheModelAndChecksReadIt() {
-        let start: JSONValue = .object(["answers": .array([.object(["values": .array([]), "text": .string("")])])])
-        let required: JSONValue = .object(["call": .string("required"), "args": .object(["value": .object(["path": .string("/answers/0/values")])])])
-        let either: JSONValue = .object(["call": .string("or"), "args": .object(["values": .array([
-            required,
-            .object(["call": .string("required"), "args": .object(["value": .object(["path": .string("/answers/0/text")])])]),
-        ])])])
-        #expect(!WidgetData.passes(either, in: start, scope: ""))
-        let typed = WidgetData.storing(.string("Spicy"), at: "/answers/0/text", in: start)
-        #expect(WidgetData.passes(either, in: typed, scope: ""))
-        #expect(!WidgetData.passes(required, in: typed, scope: ""))
-        let picked = WidgetData.storing(.array([.string("Warm")]), at: "/answers/0/values", in: start)
-        #expect(WidgetData.passes(required, in: picked, scope: ""))
-        #expect(WidgetData.storing(.string("x"), at: "/answers/5/text", in: start) == start)
+    private enum CardError: Error { case notAQuestion }
+
+    /// The question card on the engine; `answers` records what it sends.
+    private func waitingSurface(_ part: WidgetUIPart, answered: JSONValue? = nil, answers: Box<[JSONValue]> = Box([])) async -> WidgetSurface {
+        let surface = WidgetSurface()
+        surface.waiting = .init(answered: answered, sending: false, answer: { answers.value.append($0) }, dismiss: { answers.value.append(.string("dismissed")) })
+        surface.locked = answered != nil
+        surface.show(part) { _, _, _ in throw APIError.notFound }
+        surface.showAnswered(answered)
+        await surface.load()
+        return surface
     }
 
-    @Test func romeStringsAreTranslatedByTheReader() {
-        #expect(WidgetData.text(.object(["string": .string("send")]), in: .null, scope: "") == String(localized: "Send"))
+    private func find(_ id: String, in node: Node?) -> Node? {
+        guard let node else { return nil }
+        if node.id == id { return node }
+        for kid in node.children(for: "children") + [node.child(for: "child")].compactMap({ $0 }) {
+            if let found = find(id, in: kid) { return found }
+        }
+        return nil
     }
 
-    @Test func theLastOfAPickAndTypedTextWins() {
-        let start: JSONValue = .object(["answers": .array([.object(["values": .array([]), "text": .string("")])])])
-        let typed = WidgetData.editing(.string("Friendly"), at: "/answers/0/text", clears: .object(["path": .string("/answers/0/values")]), scope: "", in: start)
-        let picked = WidgetData.editing(.array([.string("Plain")]), at: "/answers/0/values", clears: .object(["path": .string("/answers/0/text")]), scope: "", in: typed)
-        #expect(picked == .object(["answers": .array([.object(["values": .array([.string("Plain")]), "text": .string("")])])]))
-        let retyped = WidgetData.editing(.string("Calm"), at: "/answers/0/text", clears: .object(["path": .string("/answers/0/values")]), scope: "", in: picked)
-        #expect(retyped == .object(["answers": .array([.object(["values": .array([]), "text": .string("Calm")])])]))
+    @Test func aQuestionCardDescribedAsDataIsDrawnFromItsDescription() throws {
+        let card = try questionCard()
+        #expect(card.waits)
+        #expect(card.isDrawable)
+        #expect(card.data["answers"]?.array?.count == 2)
+    }
+
+    @Test func sendWaitsForAnAnswerAndSpacesAreNone() async throws {
+        let surface = await waitingSurface(try questionCard())
+        let root = surface.viewModel?.rootNode
+        #expect(find("send", in: root)?.isValid == false)
+        surface.viewModel?.dataModel.set("/answers/0/text", value: .string("   "))
+        #expect(find("send", in: surface.viewModel?.rootNode)?.isValid == false)
+        surface.viewModel?.dataModel.set("/answers/0/text", value: .string("Soup"))
+        #expect(find("send", in: surface.viewModel?.rootNode)?.isValid == true)
+    }
+
+    @Test func romeStringsAreTranslatedByTheReader() async throws {
+        let surface = await waitingSurface(try questionCard())
+        #expect(find("send-label", in: surface.viewModel?.rootNode)?.string(for: "text") == String(localized: "Send"))
+    }
+
+    @Test func anInputEmptiesWhatItClears() async throws {
+        let surface = await waitingSurface(try questionCard())
+        #expect(surface.clears.targets["q0-pick"] == "/answers/0/text")
+        surface.viewModel?.dataModel.set("/answers/0/text", value: .string("Soup"))
+        surface.clears.clear("/answers/0/text", false)
+        #expect(surface.viewModel?.dataModel.get("/answers/0/text")?.stringValue == "")
+    }
+
+    @Test func sendAnswersTheInteractionWithTheCardsAnswers() async throws {
+        let answers = Box<[JSONValue]>([])
+        let surface = await waitingSurface(try questionCard(), answers: answers)
+        surface.viewModel?.dataModel.set("/answers/0/values", value: .array([.string("高蛋白")]))
+        find("send", in: surface.viewModel?.rootNode)?.action(for: "action", userActivation: true)?()
+        for _ in 0..<50 where answers.value.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(answers.value.first?["answers"]?.array?.first?["values"] == .array([.string("高蛋白")]))
+    }
+
+    @Test func anAnsweredCardShowsWhatWasSentAndTakesNoPress() async throws {
+        let sent: JSONValue = .array([.object(["values": .array([.string("清淡一点")]), "text": .string("")]), .object(["values": .array([]), "text": .string("")])])
+        let answers = Box<[JSONValue]>([])
+        let surface = await waitingSurface(try questionCard(), answered: .object(["answers": sent, "card": sent]), answers: answers)
+        #expect(surface.viewModel?.dataModel.get("/answers/0/values/0")?.stringValue == "清淡一点")
+        find("dismiss", in: surface.viewModel?.rootNode)?.action(for: "action", userActivation: true)?()
+        try await Task.sleep(for: .milliseconds(100))
+        #expect(answers.value.isEmpty)
     }
 
     @Test func onlyHttpsImagesLoad() {
-        #expect(WidgetData.httpsURL("https://example.com/a.png") != nil)
+        #expect(WidgetPaths.httpsURL("https://example.com/a.png") != nil)
         for url in ["/api/settings", "http://example.com/a.png", "photo.png", "https://"] {
-            #expect(WidgetData.httpsURL(url) == nil)
+            #expect(WidgetPaths.httpsURL(url) == nil)
         }
     }
 
     @Test func aStoreAppsScopedIdIsOnePathSegment() {
-        #expect(WidgetData.appAPIPath(appId: "meal-planner", path: "water") == "/api/apps/meal-planner/water")
-        #expect(WidgetData.appAPIPath(appId: "@alice/meals", path: "days/today") == "/api/apps/@alice%2Fmeals/days/today")
+        #expect(WidgetPaths.appAPIPath(appId: "meal-planner", path: "water") == "/api/apps/meal-planner/water")
+        #expect(WidgetPaths.appAPIPath(appId: "@alice/meals", path: "days/today") == "/api/apps/@alice%2Fmeals/days/today")
+        #expect(WidgetPaths.appAPIPath(appId: "..", path: "water") == nil)
     }
+}
+
+/// A value a closure can change and a test can read.
+final class Box<T>: @unchecked Sendable {
+    var value: T
+    init(_ value: T) { self.value = value }
 }

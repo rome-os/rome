@@ -50,4 +50,6 @@ jobs:
             -project Rome.xcodeproj \
             -scheme Rome \
             -destination "platform=iOS Simulator,name=${{ steps.sim.outputs.name }}" \
+            -skipPackagePluginValidation \
+            -skipMacroValidation \
             CODE_SIGNING_ALLOWED=NO

@@ -1,5 +1,9 @@
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
+import type {
+  ConciergeStatusReaction,
+  MessageStatusReactionEvent,
+} from "@rome/api-types/concierge";
 import { randomBytes, randomUUID } from "node:crypto";
 import { v7 as uuidv7 } from "uuid";
 import { existsSync, readFileSync } from "node:fs";
@@ -120,7 +124,6 @@ import {
 } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import type { ChatThreadPlacement } from "../../webchat/repository.js";
-import { messageContentText } from "../../chats/history/messages-agent.js";
 
 /** The agent of a chat that saved no agent, under the name its sessions are saved by. */
 const MAIN_AGENT = "core:main";
@@ -130,29 +133,19 @@ const log = createLogger("api:webchat");
 const inputPrioritySchema = z.enum(["now", "next"]).optional();
 
 // Client-sent parts never carry a reply: only `replyToMessageId` builds one.
-/** How much of a chat thread's first message the Concierge reads to know what it is about. */
-const CHAT_THREAD_ABOUT_LIMIT = 80;
-
 /**
  * The line that names the guardian's message to the Concierge, so an answer
- * can say which one it answers, and, when the message is in a chat thread,
- * which thread and what it is about (its first message, shortened). A
- * message that starts its own thread is about nothing else.
+ * can say which one it answers, and, when the message is in a task's chat
+ * thread, which task it belongs to.
  */
 function chatThreadLine(
   messageId: string,
-  thread: string | null,
-  firstMessage: string | null,
+  thread: { root: string; task: { id: string; title: string } } | null,
 ): string {
-  const about =
-    thread && thread !== messageId && firstMessage
-      ? ` about="${xmlAttr(
-          firstMessage.length > CHAT_THREAD_ABOUT_LIMIT
-            ? `${firstMessage.slice(0, CHAT_THREAD_ABOUT_LIMIT - 1)}…`
-            : firstMessage,
-        )}"`
-      : "";
-  return `<chat_thread message_id="${messageId}"${thread ? ` thread="${thread}"` : ""}${about}/>`;
+  const task = thread
+    ? ` thread="${thread.root}" task="${xmlAttr(thread.task.id)}" task_title="${xmlAttr(thread.task.title)}"`
+    : "";
+  return `<chat_thread message_id="${messageId}"${task}/>`;
 }
 
 function xmlAttr(value: string): string {
@@ -1062,14 +1055,40 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const unsubscribeSessionName = deps.webchatRepo.onSessionNameChanged((event) => {
       if (event.sessionId === sessionId) emit("session_name", event);
     });
+    // A task's thread carries its title, so the label under the message can
+    // name it. Only a task has a thread, so a placement in none is not told.
     const unsubscribeChatThread = deps.webchatRepo.onChatThreadPlaced((event) => {
-      if (event.sessionId === sessionId) emit("message_chat_thread", event);
+      if (event.sessionId !== sessionId) return;
+      void threadTitlesOf(sessionId, [event.chatThreadId])
+        .catch(() => new Map<string, string>())
+        .then((titles) => {
+          const chatThreadTitle = titles.get(event.chatThreadId);
+          if (chatThreadTitle) emit("message_chat_thread", { ...event, chatThreadTitle });
+        });
+    });
+    // A task that leaves the chat takes its thread with it: its label goes.
+    const unsubscribeThreadRetired = deps.concierge?.deps.tasks.repo.onThreadRetired((retired) => {
+      if (retired.chatId !== sessionId) return;
+      emit("chat_thread_retired", { sessionId, chatThreadId: retired.root });
+    });
+    // A status reaction is no message, so it only changes the bubble and
+    // never pushes (docs/domains/chats.md#status-reaction).
+    const unsubscribeReaction = deps.concierge?.deps.tasks.repo.onReaction((target, reaction) => {
+      if (target.chatId !== sessionId) return;
+      const event: MessageStatusReactionEvent = {
+        sessionId,
+        messageId: target.messageKey,
+        statusReaction: reaction,
+      };
+      emit("message_status_reaction", event);
     });
     return () => {
       runningListeners.delete(runningListener);
+      unsubscribeThreadRetired?.();
       unsubscribeMessages();
       unsubscribeSessionName();
       unsubscribeChatThread();
+      unsubscribeReaction?.();
     };
   };
 
@@ -1453,8 +1472,53 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
         : message;
     });
   };
+  // The title of the task each chat thread of `roots` is, in a Concierge chat.
+  const threadTitlesOf = async (sessionId: string, roots: readonly string[]) =>
+    (await deps.concierge?.deps.tasks.repo.threadTitles(sessionId, roots)) ??
+    new Map<string, string>();
+  // The title of the task whose thread each message is in, when it is a
+  // task's. Only a task has a chat thread, so a thread from before that no
+  // task has is sent as none (docs/domains/chats.md#chat-thread).
+  const attachChatThreadTitles = async <T extends StoredMessages[number]>(
+    sessionId: string,
+    messages: T[],
+  ): Promise<(T & { chatThreadTitle?: string })[]> => {
+    // Only a transcript line has a chat thread; a trace row has none.
+    const threadOf = (message: T) =>
+      "chatThreadId" in message && typeof message.chatThreadId === "string"
+        ? message.chatThreadId
+        : null;
+    const roots = messages.flatMap((message) => threadOf(message) ?? []);
+    if (roots.length === 0) return messages;
+    const titles = await threadTitlesOf(sessionId, roots);
+    return messages.map((message) => {
+      const thread = threadOf(message);
+      if (!thread) return message;
+      const chatThreadTitle = titles.get(thread);
+      return chatThreadTitle ? { ...message, chatThreadTitle } : { ...message, chatThreadId: null };
+    });
+  };
+  // The status reaction on each guardian message that has one, which only a
+  // Concierge chat's can.
+  const attachStatusReactions = async <T extends StoredMessages[number]>(
+    sessionId: string,
+    messages: T[],
+  ): Promise<(T & { statusReaction?: ConciergeStatusReaction })[]> => {
+    const repo = deps.concierge?.deps.tasks.repo;
+    const asked = messages.filter((message) => message.role === "user").map((m) => m.id);
+    if (!repo || asked.length === 0) return messages;
+    const reactions = await repo.reactionsOf(sessionId, asked);
+    if (reactions.size === 0) return messages;
+    return messages.map((message) => {
+      const statusReaction = reactions.get(message.id);
+      return statusReaction ? { ...message, statusReaction } : message;
+    });
+  };
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
-    const withTraces = await attachTraceSummaries(sessionId, messages);
+    const withTraces = await attachChatThreadTitles(
+      sessionId,
+      await attachStatusReactions(sessionId, await attachTraceSummaries(sessionId, messages)),
+    );
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
     const shownIds = new Set(messages.map((m) => m.id));
     const actors = new Map([...allActors].filter(([id]) => shownIds.has(id)));
@@ -2828,7 +2892,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     await deps.webchatRepo.deleteSession(sessionId);
     // Told after the delete, as an archive is, so the activity reads the
     // chat's finished rows as the main chat's.
-    if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo);
+    if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo, true);
     if (taskId) deps.concierge?.chatDeleted(taskId);
     // Durable audit signal for guardian-initiated chat deletion. Keep the
     // payload free of chat titles and message content because the OTLP
@@ -3983,16 +4047,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (body.chatThread !== undefined && typeof body.chatThread !== "string") {
       return answer({ error: "chatThread must be a message id" }, 400);
     }
-    // In a Concierge chat a message sent into a chat thread, or as a reply,
-    // stays in that thread. Any other is in none
-    // (docs/domains/chats.md#chat-thread).
-    const chatThread: ChatThreadPlacement | undefined = !isConciergeChat(session)
+    // In a Concierge chat a message sent into a task's chat thread, or as a
+    // reply to a message in one, stays in that thread. Only a task has a
+    // thread, so any other is in none, a reply to a message in no task
+    // included (docs/domains/chats.md#chat-thread).
+    const threadTarget = !isConciergeChat(session)
       ? undefined
-      : body.chatThread
-        ? { in: body.chatThread, settle: true }
-        : reply
-          ? { in: body.replyToMessageId as string, settle: true }
-          : undefined;
+      : (body.chatThread ?? (reply ? (body.replyToMessageId as string) : undefined));
+    const targetRoot = threadTarget
+      ? ((await deps.webchatRepo.getReplyTarget(sessionId, threadTarget))?.chatThreadId ?? null)
+      : null;
+    const threadTask = targetRoot
+      ? ((await deps.concierge?.deps.tasks.repo.taskOfThread(sessionId, targetRoot)) ?? null)
+      : null;
+    const chatThread: ChatThreadPlacement | undefined =
+      targetRoot && threadTask ? { in: targetRoot, settle: true } : undefined;
     if (
       !(await deps.webchatRepo.recordUserInput(
         inputId,
@@ -4020,14 +4089,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       messageId: inputId,
       text: displayText,
     });
-    // The Concierge reads which message this is, and the thread it is in.
+    // The Concierge reads which message this is, and the task it belongs to.
     if (conciergeHeader) {
-      const placedIn = chatThread ? await deps.webchatRepo.chatThreadOf(sessionId, inputId) : null;
-      const first = placedIn ? await deps.webchatRepo.getReplyTarget(sessionId, placedIn) : null;
       const line = chatThreadLine(
         inputId,
-        placedIn,
-        first ? messageContentText(first.content) : null,
+        targetRoot && threadTask ? { root: targetRoot, task: threadTask } : null,
       );
       promptText = `${conciergeHeader}\n${line}\n\n${noticedPrompt}`;
     }
@@ -4557,6 +4623,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       romeSessionId: sessionId,
       onInputStatus: async (status: import("@rome-os/app-runtime").InputStatusEvent) => {
         await deps.webchatRepo.updateUserInput(sessionId, status);
+        // A Concierge turn that takes its owner's message marks it working at
+        // once, before the Concierge says or starts anything
+        // (docs/domains/chats.md#status-reaction).
+        if (status.state === "consumed" && status.turnId && isConciergeChat(session)) {
+          await deps.concierge?.deps.tasks.repo
+            .markTurnWorking(status.turnId, { chatId: sessionId, messageKey: status.inputId })
+            .catch((error: unknown) =>
+              log.warn("failed to mark a status reaction", {
+                sessionId,
+                error: error instanceof Error ? error.message : String(error),
+              }),
+            );
+        }
         const stream = status.turnId ? streamsByTurnId.get(status.turnId) : undefined;
         if (stream) emitToStream(stream, "input_status", status, `input:${status.inputId}`);
       },

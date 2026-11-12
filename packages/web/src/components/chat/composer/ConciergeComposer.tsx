@@ -273,7 +273,7 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
           setPendingUploads(uploads);
           setFolder(pickedFolder);
           setDraftSkill(skill);
-          if (replyTo) replyDraft?.restore(replyTo, clearedAt);
+          if (replyTo) replyDraft?.restore(replyTo, clearedAt, chatThread);
         }
       }
     }, [inputText, pendingUploads, folder, draftSkill, invokeOnSend, snapshotOf, replyDraft]);

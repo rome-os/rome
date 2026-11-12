@@ -8,7 +8,7 @@ export function ReplyDraftHarness({
   children,
 }: {
   initial?: ReplyTarget;
-  /** The chat keeps chat threads, so the reply also opens its thread view. */
+  /** The chat keeps chat threads, and the reply is picked from its thread view, open on it. */
   threads?: boolean;
   children: ReactNode;
 }) {
@@ -20,9 +20,9 @@ export function ReplyDraftHarness({
     focusComposer: () => {},
     threads,
   });
-  const { set } = draft;
+  const { set, openThread } = draft;
   useEffect(() => {
-    if (initial) set(initial);
-  }, [initial, set]);
+    if (initial) (threads ? openThread : set)(initial);
+  }, [initial, set, openThread, threads]);
   return <ReplyDraftProvider value={draft}>{children}</ReplyDraftProvider>;
 }

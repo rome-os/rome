@@ -417,9 +417,12 @@ function setup(
     status?: AgentTurnFinishedEvent["status"];
     failure?: AgentTurnFailure;
     startedAt?: string;
+    /** A newer input cut the turn short and took its work on. */
+    handedOn?: boolean;
   }) => {
     for (const listener of listeners) {
       listener({
+        ...(event.handedOn ? { handedOn: true } : {}),
         type: "agent-turn-finished",
         version: 1,
         turn: {
@@ -441,13 +444,18 @@ function setup(
     await settle();
   };
   /** A turn in a chat that failed before it started, as an agent session tells it. */
-  const failBeforeStart = async (event: { turnId: string; chatId: string; error: string }) => {
+  const failBeforeStart = async (event: {
+    turnId: string;
+    chatId: string;
+    error: string;
+    agentName?: string;
+  }) => {
     for (const listener of failedBeforeStartListeners) {
       listener({
         turn: {
           sessionId: "runtime-x",
           turnId: event.turnId,
-          agentName: "core:main",
+          agentName: event.agentName ?? "core:main",
           threadContext: { channel: "webchat", threadId: event.chatId },
         },
         error: event.error,
@@ -575,6 +583,21 @@ describe("Concierge tools", () => {
     );
   });
 
+  it("asks chat_forward to name a guardian message only when the forward is what it asked for", async () => {
+    const s = setup();
+    const tools = await buildConciergeTools(s.service, s.context());
+    const answersOf = (name: string) =>
+      (
+        tools.find((tool) => tool.name === name)?.inputSchema as {
+          properties: { answers: { description: string } };
+        }
+      ).properties.answers.description;
+    expect(answersOf("chat_forward")).toContain(
+      "only when this forward is what that message asked for",
+    );
+    expect(answersOf("chat_forward")).not.toContain("Required");
+  });
+
   it("say posts one message under the running turn", async () => {
     const s = setup();
     await s.tool("say", { text: "on it" });
@@ -595,6 +618,9 @@ describe("Concierge tools", () => {
     };
     const saidId = (result: unknown) =>
       JSON.parse((result as { content: { text: string }[] }).content[0]!.text).messageId as string;
+    /** A task whose chat thread starts at message `root`: only a task has a thread. */
+    const taskOwns = (s: ReturnType<typeof setup>, root: string, title = "Flights") =>
+      s.taskRepo.upsertMany([{ title, state: "doing", chatId: CONCIERGE_CHAT, threadRoot: root }]);
 
     it("leaves a plain question and its answer in no thread", async () => {
       const s = setup({ said: false });
@@ -606,28 +632,31 @@ describe("Concierge tools", () => {
       expect(threadOf(s, said)).toBeUndefined();
     });
 
-    it("answers a message in a thread in that thread, and one in none in none", async () => {
+    it("answers a message in a task's thread in that thread, and one in none in none", async () => {
       const s = setup({ said: false });
+      await taskOwns(s, "flights");
       guardianSays(s, { id: "g1" });
       guardianSays(s, { id: "g2", chatThread: "flights", settled: true });
+      // A thread from before that no task has counts as none.
+      guardianSays(s, { id: "g3", chatThread: "old", settled: true });
 
       const first = saidId(await s.tool("say", { text: "About the first" }));
       const second = saidId(await s.tool("say", { text: "Flights update", answers: "g2" }));
+      const third = saidId(await s.tool("say", { text: "About that", answers: "g3" }));
 
       expect(threadOf(s, first)).toBeUndefined();
       expect(threadOf(s, second)).toBe("flights");
+      expect(threadOf(s, third)).toBeUndefined();
       expect(threadOf(s, "g1")).toBeUndefined();
       await expect(s.tool("say", { text: "x", answers: "elsewhere" })).resolves.toMatchObject({
         isError: true,
       });
-      // In a turn the guardian started, a named thread changes nothing.
-      const ignored = saidId(await s.tool("say", { text: "Still here", thread: "flights" }));
-      expect(threadOf(s, ignored)).toBeUndefined();
     });
 
     it("puts an answer in no thread when the turn holds several guardian messages and names none", async () => {
       const s = setup({ said: false });
-      // Three tasks started from one message, which is now their thread's root.
+      // A task started from one message, which is now its thread's root.
+      await taskOwns(s, "tasks");
       guardianSays(s, { id: "tasks", chatThread: "tasks", settled: true, turnId: "older" });
       // Taken by one turn: the Nile follow-up, already relayed into the tasks' thread, and an unrelated question.
       guardianSays(s, { id: "nile", chatThread: "tasks", settled: true });
@@ -638,18 +667,6 @@ describe("Concierge tools", () => {
 
       expect(threadOf(s, answer)).toBeUndefined();
       expect(threadOf(s, relayed)).toBe("tasks");
-    });
-
-    it("lets a turn about several tasks name the thread a message reports on, never a new one", async () => {
-      const s = setup({ said: false });
-      guardianSays(s, { id: "g0", chatThread: "g0", settled: true, turnId: "older" });
-      s.inTurn("task-events-turn");
-
-      const named = saidId(await s.tool("say", { text: "Both done", thread: "g0" }));
-      expect(threadOf(s, named)).toBe("g0");
-      await expect(s.tool("say", { text: "x", thread: "new" })).resolves.toMatchObject({
-        isError: true,
-      });
     });
 
     it("sends on only the guardian message it names, or the turn's only one", async () => {
@@ -671,21 +688,6 @@ describe("Concierge tools", () => {
       expect([threadOf(s, "saturday"), threadOf(s, "squared")]).toEqual(["g0", undefined]);
     });
 
-    it("lets a report name the thread a guardian's reply started", async () => {
-      const s = setup({ said: false });
-      guardianSays(s, { id: "answer", role: "assistant", turnId: "older" });
-      guardianSays(s, { id: "reply", turnId: "older" });
-      await s.deps.webchatRepo.placeInChatThread(CONCIERGE_CHAT, "reply", {
-        in: "answer",
-        settle: true,
-      });
-      expect(threadOf(s, "answer")).toBe("answer");
-
-      s.inTurn("task-events-turn");
-      const said = saidId(await s.tool("say", { text: "Update", thread: "answer" }));
-      expect(threadOf(s, said)).toBe("answer");
-    });
-
     it("takes the guardian's words sent on to a task into the task's thread, but never a reply", async () => {
       const s = setup({ said: false });
       guardianSays(s, { id: "g0", turnId: "start-turn" });
@@ -699,7 +701,7 @@ describe("Concierge tools", () => {
       s.inTurn("follow-up-turn");
       guardianSays(s, { id: "g1", turnId: "follow-up-turn" });
       guardianSays(s, { id: "g2", turnId: "follow-up-turn", chatThread: "weather", settled: true });
-      await s.tool("chat_send", { chatId, text: "Make it Saturday" });
+      await s.tool("chat_send", { chatId, text: "Make it Saturday", answers: "g1" });
       const answer = saidId(await s.tool("say", { text: "Told it Saturday", answers: "g1" }));
 
       expect(threadOf(s, "g0")).toBe("g0");
@@ -777,6 +779,63 @@ describe("Concierge tools", () => {
       (s.messages.get(CONCIERGE_CHAT) ?? []).filter(
         (row) => row.chatThread === root && row.id !== root,
       ).length;
+
+    /** Task `taskId`'s report turn, which a newer guardian message took over before it said anything. */
+    const reportTakenOver = async (s: ReturnType<typeof setup>, taskId: string) => {
+      s.onBackendTurn(() => "interrupted");
+      await s.service.systemTurnOutcome(
+        CONCIERGE_CHAT,
+        `<task_events>\n<task id="${taskId}" title="Flights">\n</task>\n</task_events>`,
+      );
+      s.onBackendTurn(() => "completed");
+    };
+
+    it("puts a report a guardian message took over in its task's thread, and the new task's row on that message", async () => {
+      const s = setup({ said: false });
+      const short = await startTaskFor(s, "ask-short", ["g0"]);
+      await reportTakenOver(s, short.taskId);
+      // The guardian's new request is the turn's only prompt.
+      s.inTurn("notes");
+      guardianSays(s, { id: "g1", turnId: "notes" });
+      const report = saidId(await s.tool("say", { text: "Updated short.txt", task: short.taskId }));
+      const notes = JSON.parse(
+        (await s.tool("chat_start", { title: "Notes", brief: "Write notes", answers: "g1" }))
+          .content[0].text,
+      ) as { taskId: string };
+      expect(threadOf(s, report)).toBe("g0");
+      const row = await s.tasks.repo.getWithChat(notes.taskId);
+      expect(row?.sourceMessageId).toBe("g1");
+      expect(await s.tasks.repo.threadRoot(notes.taskId)).toBe("g1");
+    });
+
+    it("puts a message naming nothing in no thread, in a turn that also carries another task's report", async () => {
+      const s = setup({ said: false });
+      const short = await startTaskFor(s, "ask-short", ["g0"]);
+      await reportTakenOver(s, short.taskId);
+      await taskOwns(s, "g1", "Notes");
+      s.inTurn("notes");
+      guardianSays(s, { id: "g1", turnId: "notes", chatThread: "g1" });
+      const unnamed = saidId(await s.tool("say", { text: "Updated short.txt" }));
+      expect(threadOf(s, unnamed)).toBeUndefined();
+      // Once that turn ends, the next turn has one subject again.
+      await s.finish({
+        turnId: "notes",
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        text: "ok",
+      });
+      s.inTurn("next");
+      guardianSays(s, { id: "g2", turnId: "next", chatThread: "g1" });
+      expect(threadOf(s, saidId(await s.tool("say", { text: "Sure" })))).toBe("g1");
+    });
+
+    it("puts a message naming nothing in its turn's one guardian message's thread", async () => {
+      const s = setup({ said: false });
+      await taskOwns(s, "g0");
+      s.inTurn("ask");
+      guardianSays(s, { id: "g1", turnId: "ask", chatThread: "g0" });
+      expect(threadOf(s, saidId(await s.tool("say", { text: "Sunny" })))).toBe("g0");
+    });
 
     it("(a) keeps a plain task's story under the guardian's message: result, follow-up, second result", async () => {
       const s = setup({ said: false });
@@ -862,7 +921,8 @@ describe("Concierge tools", () => {
       expect([threadOf(s, "eiffel"), threadOf(s, ack)]).toEqual(["eiffel", "eiffel"]);
       expect([threadOf(s, "times"), threadOf(s, fiftySix)]).toEqual([undefined, undefined]);
 
-      // Naming A's message with answers from turn B works too.
+      // A's message is now the Eiffel task's: a second task for it takes no
+      // root from it, as a task has one thread and a thread one task.
       const named = JSON.parse(
         (
           await s.tool("chat_start", {
@@ -872,10 +932,10 @@ describe("Concierge tools", () => {
           })
         ).content[0].text,
       );
-      expect(await s.tasks.repo.threadRoot(named.taskId)).toBe("eiffel");
+      expect(await s.tasks.repo.threadRoot(named.taskId)).toBeNull();
     });
 
-    it("1. roots a task at the thread its guardian message is in, or at that message", async () => {
+    it("1. roots a task at its guardian message, never at a thread from before that no task has", async () => {
       const s = setup({ said: false });
       guardianSays(s, { id: "weather", chatThread: "weather", settled: true, turnId: "older" });
       guardianSays(s, { id: "g0", turnId: "ask", chatThread: "weather", settled: true });
@@ -884,9 +944,13 @@ describe("Concierge tools", () => {
       const { taskId } = JSON.parse(
         (await s.tool("chat_start", { title: "Flights", brief: "Find flights" })).content[0].text,
       );
-      expect(await s.tasks.repo.threadRoot(taskId)).toBe("weather");
-      // The guardian's message is not made the root of a second thread.
+      // The message is settled in the old thread: the task roots at the
+      // first thing it brings back instead.
+      expect(await s.tasks.repo.threadRoot(taskId)).toBeNull();
       expect(threadOf(s, "g0")).toBe("weather");
+      reportTurn(s, "result", taskId);
+      const first = saidId(await s.tool("say", { text: "Found 3" }));
+      expect(await s.tasks.repo.threadRoot(taskId)).toBe(first);
 
       const other = await startTaskFor(s, "ask-2", ["g9"]);
       expect(await s.tasks.repo.threadRoot(other.taskId)).toBe("g9");
@@ -945,7 +1009,7 @@ describe("Concierge tools", () => {
       expect(placements).not.toContain("chosen");
     });
 
-    it("5. gives the tasks one guardian message starts one shared root, and its acknowledgement joins it once", async () => {
+    it("5. roots only the first task one guardian message starts there, and its acknowledgement joins it once", async () => {
       const s = setup({ said: false });
       const first = await startTaskFor(s, "ask", ["g0"]);
       const second = JSON.parse(
@@ -953,7 +1017,8 @@ describe("Concierge tools", () => {
       ) as { taskId: string };
 
       expect(await s.tasks.repo.threadRoot(first.taskId)).toBe("g0");
-      expect(await s.tasks.repo.threadRoot(second.taskId)).toBe("g0");
+      // One thread per task: the second roots at the first thing it brings back.
+      expect(await s.tasks.repo.threadRoot(second.taskId)).toBeNull();
       expect(threadOf(s, first.ack)).toBe("g0");
       expect(inThread(s, "g0")).toBe(1);
     });
@@ -991,7 +1056,7 @@ describe("Concierge tools", () => {
       expect(threadOf(s, "show")).toBeUndefined();
     });
 
-    it("(g) gives a task from before stored roots the thread its message is in, once", async () => {
+    it("(g) roots a task from before stored roots at its first report, not at a thread no task had", async () => {
       const s = setup({ said: false });
       guardianSays(s, { id: "old", chatThread: "old", settled: true, turnId: "older" });
       s.messages.get(CONCIERGE_CHAT)?.push({
@@ -1007,8 +1072,143 @@ describe("Concierge tools", () => {
       expect(await s.tasks.repo.threadRoot(row!.id)).toBeNull();
 
       reportTurn(s, "result", row!.id);
-      expect(threadOf(s, saidId(await s.tool("say", { text: "Done" })))).toBe("old");
-      expect(await s.tasks.repo.threadRoot(row!.id)).toBe("old");
+      const done = saidId(await s.tool("say", { text: "Done" }));
+      expect(threadOf(s, done)).toBe(done);
+      expect(await s.tasks.repo.threadRoot(row!.id)).toBe(done);
+    });
+
+    it("sends a message in a task's thread on to that task only, never to another", async () => {
+      const s = setup({ said: false });
+      const flights = await startTaskFor(s, "ask", ["g0"]);
+      const hotels = await startTaskFor(s, "ask-2", ["h0"]);
+      s.inTurn("reply-turn");
+      guardianSays(s, { id: "reply", turnId: "reply-turn", chatThread: "g0", settled: true });
+
+      const refused = await s.tool("chat_send", { chatId: hotels.chatId, text: "Saturday" });
+      expect(refused).toMatchObject({ isError: true });
+      expect(JSON.stringify(refused)).toContain(`thread of task ${flights.taskId}`);
+      const sent = await s.tool("chat_send", { chatId: flights.chatId, text: "Saturday" });
+      expect(sent.isError).toBeFalsy();
+      expect(threadOf(s, "reply")).toBe("g0");
+    });
+
+    it("starts a task for a message in another task's thread with no root, so each task keeps one thread", async () => {
+      const s = setup({ said: false });
+      await startTaskFor(s, "ask", ["g0"]);
+      s.inTurn("reply-turn");
+      guardianSays(s, { id: "reply", turnId: "reply-turn", chatThread: "g0", settled: true });
+      const { taskId } = JSON.parse(
+        (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+      );
+      expect(await s.tasks.repo.threadRoot(taskId)).toBeNull();
+      expect(threadOf(s, "reply")).toBe("g0");
+      expect((await s.taskRepo.reactionsOf(CONCIERGE_CHAT, ["reply"])).get("reply")).toBe(
+        "working",
+      );
+    });
+
+    it("roots a task started for a reply to a message in no task at that reply", async () => {
+      const s = setup({ said: false });
+      s.inTurn("reply-turn");
+      // A reply to a plain answer is only a quote: it is in no thread.
+      guardianSays(s, { id: "reply", turnId: "reply-turn" });
+      const { taskId } = JSON.parse(
+        (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+      );
+      expect(await s.tasks.repo.threadRoot(taskId)).toBe("reply");
+      expect(threadOf(s, "reply")).toBe("reply");
+    });
+
+    it("never moves a message settled in a thread from before into a task's, nor roots a task there", async () => {
+      const s = setup({ said: false });
+      const { chatId, taskId } = await startTaskFor(s, "routine", []);
+      s.inTurn("follow-up");
+      guardianSays(s, { id: "old-reply", turnId: "follow-up", chatThread: "old", settled: true });
+      await s.tool("chat_send", { chatId, text: "Make it Saturday" });
+      expect(threadOf(s, "old-reply")).toBe("old");
+      expect(await s.tasks.repo.threadRoot(taskId)).toBeNull();
+    });
+
+    it("lets each of the rows from before that share a root take that thread's messages", async () => {
+      const s = setup({ said: false });
+      await startTaskFor(s, "ask", ["g0"]);
+      const second = await startTaskFor(s, "ask-2", []);
+      // Rows from before one thread per task: the newer shares the older's root.
+      await s.taskRepo.upsertMany([{ id: second.taskId, threadRoot: "g0" }]);
+      s.inTurn("reply-turn");
+      guardianSays(s, { id: "reply", turnId: "reply-turn", chatThread: "g0", settled: true });
+      const sent = await s.tool("chat_send", { chatId: second.chatId, text: "Saturday" });
+      expect(sent.isError).toBeFalsy();
+    });
+
+    it("forwards another task's result asked for in a task's thread, and leaves the message there", async () => {
+      const s = setup({ said: false });
+      await startTaskFor(s, "ask", ["g0"]);
+      const hotels = await startTaskFor(s, "ask-2", ["h0"]);
+      s.messages.get(hotels.chatId)?.push({
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "2 hotels" }]),
+      });
+      s.inTurn("reply-turn");
+      guardianSays(s, { id: "show", turnId: "reply-turn", chatThread: "g0", settled: true });
+      const shown = await s.tool("chat_forward", { chatId: hotels.chatId });
+      expect(shown.isError).toBeFalsy();
+      expect(threadOf(s, "show")).toBe("g0");
+      expect(threadOf(s, saidId(shown))).toBe("h0");
+    });
+
+    it("forwards a report a newer message took over without guessing that message into its thread", async () => {
+      const s = setup({ said: false });
+      const short = await startTaskFor(s, "routine", []);
+      s.messages.get(short.chatId)?.push({
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "# Report" }]),
+      });
+      await reportTakenOver(s, short.taskId);
+      s.inTurn("notes");
+      guardianSays(s, { id: "g1", turnId: "notes" });
+      const shown = await s.tool("chat_forward", { chatId: short.chatId });
+      expect(shown.isError).toBeFalsy();
+      expect(threadOf(s, "g1")).toBeUndefined();
+      expect(await s.tasks.repo.threadRoot(short.taskId)).not.toBe("g1");
+    });
+
+    it("roots only one of two tasks started at once for one message", async () => {
+      const s = setup({ said: false });
+      s.inTurn("ask");
+      guardianSays(s, { id: "g0", turnId: "ask" });
+      const [first, second] = await Promise.all(
+        ["Flights", "Hotels"].map(
+          async (title) =>
+            JSON.parse(
+              (await s.tool("chat_start", { title, brief: `Find ${title}` })).content[0].text,
+            ) as { taskId: string },
+        ),
+      );
+      const roots = [
+        await s.tasks.repo.threadRoot(first!.taskId),
+        await s.tasks.repo.threadRoot(second!.taskId),
+      ];
+      expect(roots.filter((root) => root === "g0")).toHaveLength(1);
+      expect(roots).toContain(null);
+    });
+
+    it("forwards in a turn of several messages, placing none it was not told", async () => {
+      const s = setup({ said: false });
+      await startTaskFor(s, "ask", ["g0"]);
+      const hotels = await startTaskFor(s, "ask-2", []);
+      s.messages.get(hotels.chatId)?.push({
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "2 hotels" }]),
+      });
+      s.inTurn("two");
+      // One message is in the flights thread, the other in none.
+      guardianSays(s, { id: "in-thread", turnId: "two", chatThread: "g0", settled: true });
+      guardianSays(s, { id: "free", turnId: "two" });
+      const shown = await s.tool("chat_forward", { chatId: hotels.chatId });
+      expect(shown.isError).toBeFalsy();
+      expect([threadOf(s, "in-thread"), threadOf(s, "free")]).toEqual(["g0", undefined]);
+      expect(await s.tasks.repo.threadRoot(hotels.taskId)).not.toBe("free");
     });
 
     it("checks the named guardian message before chat_send reaches the task", async () => {
@@ -2602,7 +2802,6 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(2_000);
     expect(ignored.backendTurns).toHaveLength(1);
     expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(false);
-    await ignored.tool("chat_forward", { chatId: quiet.chatId });
     await rs.advanceTimersByTimeAsync(10_000);
     expect(ignored.backendTurns).toHaveLength(2);
     expect((await ignored.tasks.listForPanel())[0].notSynced).toBe(true);
@@ -3406,6 +3605,28 @@ describe("Concierge provider recovery", () => {
     await s.settle();
     expect(s.backendTurns).toHaveLength(0);
   });
+  it.each([
+    [false, null],
+    [true, "working"],
+  ] as const)("settles the failed turn's marks when its recovery ends, unless a newer input took the recovery over (%s)", async (handedOn, reaction) => {
+    const { s } = await prepared({ delay: async () => {} });
+    await s.taskRepo.markTurnWorking("failed", { chatId: CONCIERGE_CHAT, messageKey: "g1" });
+    s.onBackendTurn(() => {
+      void s.finish({
+        turnId: "recovery",
+        agentName: CONCIERGE_AGENT_ID,
+        chatId: CONCIERGE_CHAT,
+        status: handedOn ? "interrupted" : "completed",
+        handedOn,
+        text: "done",
+      });
+    });
+    await finish(s, failure("Repeated 529 Overloaded errors"));
+    await s.settle();
+    expect(s.backendTurns).toHaveLength(1);
+    const marks = await s.taskRepo.reactionsOf(CONCIERGE_CHAT, ["g1"]);
+    expect(marks.get("g1") ?? null).toBe(reaction);
+  });
   it("waits about thirty seconds before one same-model retry, then stops on success", async () => {
     let release!: () => void;
     const delay = rs.fn(
@@ -3917,5 +4138,823 @@ describe("Concierge first sign-in and connection notices", () => {
     expect(s.backendTurns[0]).toMatchObject({ threadId: TOPIC_CHAT });
     expect(s.backendTurns[0].prompt).toContain('<service_connected service="ma&quot;il"/>');
     expect(s.turnOptions[0]).toEqual({ quiet: true, inputLabel: "Service connected" });
+  });
+});
+
+describe("Concierge status reactions", () => {
+  /** A guardian message of the tools' turn. */
+  const guardianSays = (s: ReturnType<typeof setup>, id: string, turnId = "concierge-turn-1") => {
+    const list = s.messages.get(CONCIERGE_CHAT) ?? [];
+    list.push({ id, role: "user", content: "[]", turnId });
+    s.messages.set(CONCIERGE_CHAT, list);
+  };
+  const reactionOf = async (s: ReturnType<typeof setup>, messageKey: string) =>
+    (await s.taskRepo.reactionsOf(CONCIERGE_CHAT, [messageKey])).get(messageKey) ?? null;
+  const started = async (s: ReturnType<typeof setup>, args: Record<string, unknown> = {}) =>
+    JSON.parse(
+      (await s.tool("chat_start", { title: "Weather", brief: "Check the weather", ...args }))
+        .content[0].text,
+    ) as { chatId: string; taskId: string };
+  /** The Concierge's turn that reports task chat `chatId`'s news ends `outcome`. */
+  const reportEnds = async (
+    s: ReturnType<typeof setup>,
+    chatId: string,
+    outcome: "completed" | "failed" | "interrupted" | "stopped" = "completed",
+  ) => {
+    const task = await s.taskRepo.findBySession(chatId);
+    s.onBackendTurn(() => outcome);
+    await s.service.systemTurnOutcome(
+      CONCIERGE_CHAT,
+      `<task_events>\n<task id="${task!.id}" title="Weather">\n</task>\n</task_events>`,
+    );
+    s.onBackendTurn(() => "completed");
+  };
+  /** The task chat's turn ends `status`, and, unless it was stopped, the Concierge reports it. */
+  const finishTask = async (
+    s: ReturnType<typeof setup>,
+    chatId: string,
+    status?: AgentTurnFinishedEvent["status"],
+    { reported = true }: { reported?: boolean } = {},
+  ) => {
+    await s.finish({
+      turnId: `task-turn-${chatId}`,
+      agentName: "core:main",
+      chatId,
+      status,
+      text: "x",
+    });
+    if (reported && status !== "interrupted") await reportEnds(s, chatId);
+  };
+  /** Task chat `chatId` wrote a reply, so its turn's end has news to report. */
+  const replies = (s: ReturnType<typeof setup>, chatId: string) =>
+    s.messages.get(chatId)?.push({
+      role: "assistant",
+      content: JSON.stringify([{ type: "text", content: "Sunny" }]),
+    });
+  /** Every reaction change the dashboard is told of, in order. */
+  const watch = (s: ReturnType<typeof setup>) => {
+    const seen: [string, string | null][] = [];
+    s.taskRepo.onReaction((target, reaction) => seen.push([target.messageKey, reaction]));
+    return seen;
+  };
+
+  it("marks the guardian message a task starts for as working, with no acknowledgement first", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const seen = watch(s);
+    const { taskId } = await started(s);
+    expect(await reactionOf(s, "g1")).toBe("working");
+    expect(seen).toEqual([["g1", "working"]]);
+    // With nothing said, the row points at the guardian's message.
+    expect((await s.taskRepo.getWithChat(taskId))?.sourceMessageId).toBe("g1");
+  });
+
+  it("starts no task mark for a message answered in the same turn with no task", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    await s.tool("say", { text: "Sunny, 24°" });
+    expect(await reactionOf(s, "g1")).toBeNull();
+  });
+
+  it.each([
+    ["completed", null],
+    ["error", "failed"],
+    ["interrupted", null],
+    ["stopped", "failed"],
+  ] as const)("a task turn that ends %s makes the reaction %s", async (status, reaction) => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    await finishTask(s, chatId, status);
+    expect(await reactionOf(s, "g1")).toBe(reaction);
+  });
+
+  it("clears the reaction, live, when the guardian stops the task", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    s.chats.activeTurns = () => ["task-turn-1"];
+    s.inTurn("call-off");
+    guardianSays(s, "g2", "call-off");
+    await s.tool("chat_stop", { chatId });
+    s.chats.activeTurns = () => [];
+    const seen = watch(s);
+    await finishTask(s, chatId, "interrupted");
+    expect(await reactionOf(s, "g1")).toBeNull();
+    expect(seen).toEqual([["g1", null]]);
+    // The call-off is answered in its own turn and gets none.
+    expect(await reactionOf(s, "g2")).toBeNull();
+  });
+
+  it("waits while the task chat still runs a turn, then settles", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    s.chats.activeTurns = () => ["queued-follow-up"];
+    await finishTask(s, chatId);
+    expect(await reactionOf(s, "g1")).toBe("working");
+    s.chats.activeTurns = () => [];
+    await finishTask(s, chatId);
+    expect(await reactionOf(s, "g1")).toBeNull();
+  });
+
+  it("marks a message passed on to a task, and settles only the work still open", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    await finishTask(s, chatId);
+
+    s.inTurn("follow-up");
+    guardianSays(s, "g2", "follow-up");
+    const seen = watch(s);
+    await s.tool("chat_send", { chatId, text: "And tomorrow?" });
+    expect(await reactionOf(s, "g2")).toBe("working");
+    expect(seen).toEqual([["g2", "working"]]);
+
+    await finishTask(s, chatId, "error");
+    expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, "failed"]);
+  });
+
+  it("marks only the message chat_send names when the guardian sent several", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    s.inTurn("two");
+    guardianSays(s, "a", "two");
+    guardianSays(s, "b", "two");
+    await s.tool("chat_send", { chatId, text: "x" });
+    expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, null]);
+    await s.tool("chat_send", { chatId, text: "x", answers: "b" });
+    expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, "working"]);
+  });
+
+  it("takes the mark back when the task never hears the words", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    await finishTask(s, chatId);
+    s.inTurn("follow-up");
+    guardianSays(s, "g2", "follow-up");
+    s.refuseSends({ ok: false, invalid: "busy" });
+    expect((await s.tool("chat_send", { chatId, text: "x" })).isError).toBe(true);
+    expect(await reactionOf(s, "g2")).toBeNull();
+  });
+
+  it("a message that started two tasks works until both end, and fails if either failed", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const first = await started(s, { title: "Weather" });
+    const second = await started(s, { title: "Traffic" });
+    await finishTask(s, first.chatId);
+    expect(await reactionOf(s, "g1")).toBe("working");
+    await finishTask(s, second.chatId, "error");
+    expect(await reactionOf(s, "g1")).toBe("failed");
+  });
+
+  it.each([
+    ["completed", null],
+    ["error", "failed"],
+  ] as const)("a message whose other task was stopped takes the reaction of the one that ended %s", async (status, reaction) => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const stopped = await started(s, { title: "Weather" });
+    const other = await started(s, { title: "Traffic" });
+    await finishTask(s, stopped.chatId, "interrupted");
+    expect(await reactionOf(s, "g1")).toBe("working");
+    await finishTask(s, other.chatId, status);
+    expect(await reactionOf(s, "g1")).toBe(reaction);
+  });
+
+  it("a turn a newer input supersedes keeps working, since its work carries into the next turn", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    // The `now` input's turn is already queued when the superseded one ends.
+    s.chats.activeTurns = () => ["superseding-turn"];
+    await finishTask(s, chatId, "interrupted");
+    expect(await reactionOf(s, "g1")).toBe("working");
+    s.chats.activeTurns = () => [];
+    await finishTask(s, chatId);
+    expect(await reactionOf(s, "g1")).toBeNull();
+  });
+
+  it("a stopped task works again when it is given more words", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId } = await started(s);
+    await finishTask(s, chatId, "interrupted");
+    expect(await reactionOf(s, "g1")).toBeNull();
+    s.inTurn("go-on");
+    guardianSays(s, "g2", "go-on");
+    await s.tool("chat_send", { chatId, text: "Go on" });
+    expect(await reactionOf(s, "g2")).toBe("working");
+    await finishTask(s, chatId);
+    expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, null]);
+  });
+
+  it("settles when the Concierge closes the row, as after a question the guardian answered", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { taskId } = await started(s);
+    await s.taskRepo.upsertMany([{ id: taskId, state: "done" }]);
+    expect(await reactionOf(s, "g1")).toBeNull();
+  });
+
+  it("clears the reaction when the Concierge drops the row, as a stop does", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { taskId } = await started(s);
+    await s.taskRepo.upsertMany([{ id: taskId, state: "dropped" }]);
+    expect(await reactionOf(s, "g1")).toBeNull();
+  });
+
+  describe("from the turn that takes the message", () => {
+    // The send route marks a message once a Concierge turn takes it.
+    const taken = (s: ReturnType<typeof setup>, key: string, turnId = "concierge-turn-1") =>
+      s.taskRepo.markTurnWorking(turnId, { chatId: CONCIERGE_CHAT, messageKey: key });
+    const conciergeEnds = (
+      s: ReturnType<typeof setup>,
+      status?: AgentTurnFinishedEvent["status"],
+      turnId = "concierge-turn-1",
+      handedOn = false,
+    ) =>
+      s.finish({
+        turnId,
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        status,
+        text: "ok",
+        handedOn,
+      });
+
+    it("is working while a direct answer's turn runs, and goes away when it completes", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const seen = watch(s);
+      await taken(s, "g1");
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await s.tool("say", { text: "Sunny, 24°" });
+      await conciergeEnds(s);
+      expect(await reactionOf(s, "g1")).toBeNull();
+      expect(seen).toEqual([
+        ["g1", "working"],
+        ["g1", null],
+      ]);
+    });
+
+    it("stays working through the task the turn starts, until the task is done", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      const { chatId } = await started(s);
+      await conciergeEnds(s);
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await finishTask(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("settles even while the ended turn's own stream still drains", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      s.chats.activeTurns = () => ["concierge-turn-1"];
+      await conciergeEnds(s);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("goes away when the owner stops the turn", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await conciergeEnds(s, "interrupted");
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("stays working when a newer input supersedes the turn, until the turn that took over ends", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      s.chats.activeTurns = () => ["concierge-turn-2"];
+      await conciergeEnds(s, "interrupted");
+      expect(await reactionOf(s, "g1")).toBe("working");
+      guardianSays(s, "g2", "concierge-turn-2");
+      await taken(s, "g2", "concierge-turn-2");
+      s.chats.activeTurns = () => [];
+      await conciergeEnds(s, "completed", "concierge-turn-2");
+      expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([null, null]);
+    });
+
+    it("stays working through quick sends that each take the work over, until the last turn ends", async () => {
+      const s = setup({ said: false });
+      // Each send supersedes the running turn before the next one starts, so
+      // no other turn runs yet when it ends.
+      for (const [key, turn] of [
+        ["g1", "turn-1"],
+        ["g2", "turn-2"],
+      ] as const) {
+        guardianSays(s, key, turn);
+        await taken(s, key, turn);
+        await conciergeEnds(s, "interrupted", turn, true);
+      }
+      expect([await reactionOf(s, "g1"), await reactionOf(s, "g2")]).toEqual([
+        "working",
+        "working",
+      ]);
+      guardianSays(s, "g3", "turn-3");
+      await taken(s, "g3", "turn-3");
+      await conciergeEnds(s, "completed", "turn-3");
+      expect(await Promise.all(["g1", "g2", "g3"].map((key) => reactionOf(s, key)))).toEqual([
+        null,
+        null,
+        null,
+      ]);
+    });
+
+    it("marks the message a superseded turn handed on, when the turn that took over sends it to a task", async () => {
+      const s = setup({ said: false });
+      // A task from an earlier request, done and reported.
+      s.inTurn("t0");
+      guardianSays(s, "g0", "t0");
+      const { chatId } = await started(s);
+      await finishTask(s, chatId);
+      // "Make it 3 fruits" is cut short by "How are you" before it does anything.
+      guardianSays(s, "a", "turn-a");
+      await taken(s, "a", "turn-a");
+      await conciergeEnds(s, "interrupted", "turn-a", true);
+      s.inTurn("turn-b");
+      guardianSays(s, "b", "turn-b");
+      await taken(s, "b", "turn-b");
+      // The turn carries both: naming none, the send is refused, not guessed.
+      expect(await s.tool("chat_send", { chatId, text: "Make it 3 fruits" })).toMatchObject({
+        isError: true,
+      });
+      expect(await s.taskRepo.reactionsOf(CONCIERGE_CHAT, ["b"])).toEqual(
+        new Map([["b", "working"]]),
+      );
+      await s.tool("chat_send", { chatId, text: "Make it 3 fruits", answers: "a" });
+      await s.tool("say", { text: "I'm well, thanks.", answers: "b" });
+      expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual(["working", null]);
+      await conciergeEnds(s, "completed", "turn-b");
+      // The fruits request works on with its task; the greeting was answered.
+      expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual(["working", null]);
+    });
+
+    it("starts no task on a guess when the turn carries several guardian messages and names none", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "a");
+      guardianSays(s, "b");
+      await taken(s, "a");
+      await taken(s, "b");
+      await s.tool("say", { text: "On it" });
+      const refused = await s.tool("chat_start", { title: "Weather", brief: "Check the weather" });
+      expect(refused).toMatchObject({ isError: true });
+      await conciergeEnds(s);
+      expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, null]);
+    });
+
+    it.each(["error", "stopped"] as const)("fails when the turn ends %s", async (status) => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      await conciergeEnds(s, status);
+      expect(await reactionOf(s, "g1")).toBe("failed");
+    });
+
+    it("marks each message a turn takes, and settles them together", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "a");
+      guardianSays(s, "b");
+      await taken(s, "a");
+      await taken(s, "b");
+      expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual(["working", "working"]);
+      await conciergeEnds(s);
+      expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, null]);
+    });
+
+    it("leaves a task chat's turn alone", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      await taken(s, "g1");
+      const { chatId } = await started(s);
+      await finishTask(s, chatId);
+      // The task is done; the Concierge's own turn still runs.
+      expect(await reactionOf(s, "g1")).toBe("working");
+    });
+
+    it("fails the messages handed on to a turn that never started, and hands none further", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "a", "turn-a");
+      await taken(s, "a", "turn-a");
+      await conciergeEnds(s, "interrupted", "turn-a", true);
+      await s.settle();
+      expect(s.service.promptsHandedOn(CONCIERGE_CHAT)).toEqual(["a"]);
+      await s.failBeforeStart({
+        turnId: "turn-b",
+        chatId: CONCIERGE_CHAT,
+        error: "no session",
+        agentName: "core:concierge",
+      });
+      expect(await reactionOf(s, "a")).toBe("failed");
+      expect(s.service.promptsHandedOn(CONCIERGE_CHAT)).toEqual([]);
+    });
+
+    it("refuses to send words on to a task when the turn carries several messages and names none", async () => {
+      const s = setup({ said: false });
+      s.inTurn("t0");
+      guardianSays(s, "g0", "t0");
+      const { chatId } = await started(s);
+      s.inTurn("concierge-turn-1");
+      guardianSays(s, "a");
+      guardianSays(s, "b");
+      replies(s, chatId);
+      const refused = await s.tool("chat_send", { chatId, text: "Make it 3" });
+      expect(refused).toMatchObject({ isError: true });
+      expect(JSON.stringify(refused)).toContain("Pass answers");
+      // A forward passes nothing on: it shows the result, and moves and marks no message.
+      expect((await s.tool("chat_forward", { chatId })).isError).toBeFalsy();
+      expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, null]);
+    });
+
+    describe("once the Concierge answers it", () => {
+      it("goes away at the answer, while the turn goes on to start a task for another message", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, "chat");
+        guardianSays(s, "kiwi");
+        await taken(s, "chat");
+        await taken(s, "kiwi");
+        await s.tool("say", { text: "Quiet one, thanks.", answers: "chat" });
+        expect([await reactionOf(s, "chat"), await reactionOf(s, "kiwi")]).toEqual([
+          null,
+          "working",
+        ]);
+        const { chatId } = await started(s, { answers: "kiwi" });
+        await conciergeEnds(s);
+        expect([await reactionOf(s, "chat"), await reactionOf(s, "kiwi")]).toEqual([
+          null,
+          "working",
+        ]);
+        await finishTask(s, chatId);
+        expect(await reactionOf(s, "kiwi")).toBeNull();
+      });
+
+      it("goes away at the answer to the turn's only message, though the turn runs on", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, "g1");
+        const seen = watch(s);
+        await taken(s, "g1");
+        await s.tool("say", { text: "Sunny, 24°" });
+        expect(await reactionOf(s, "g1")).toBeNull();
+        await s.tool("task_list", {});
+        await conciergeEnds(s);
+        expect(seen).toEqual([
+          ["g1", "working"],
+          ["g1", null],
+        ]);
+      });
+
+      it("waits for the turn's end when the turn carries several messages and the answer names none", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, "a");
+        guardianSays(s, "b");
+        await taken(s, "a");
+        await taken(s, "b");
+        await s.tool("say", { text: "Both fine" });
+        expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([
+          "working",
+          "working",
+        ]);
+        await conciergeEnds(s);
+        expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, null]);
+      });
+
+      it("keeps working while a task started for it runs, until the task is reported", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, "g1");
+        await taken(s, "g1");
+        const { chatId } = await started(s);
+        await s.tool("say", { text: "I'll let you know." });
+        await conciergeEnds(s);
+        expect(await reactionOf(s, "g1")).toBe("working");
+        await finishTask(s, chatId, "completed", { reported: false });
+        expect(await reactionOf(s, "g1")).toBe("working");
+        await reportEnds(s, chatId);
+        expect(await reactionOf(s, "g1")).toBeNull();
+      });
+
+      it("goes away at an answer naming the task whose thread the message is in", async () => {
+        const s = setup({ said: false });
+        s.inTurn("t0");
+        guardianSays(s, "g0", "t0");
+        const { taskId } = await started(s);
+        await s.taskRepo.setThreadRoot(taskId, "g0");
+        s.inTurn("concierge-turn-1");
+        const list = s.messages.get(CONCIERGE_CHAT) ?? [];
+        list.push({
+          id: "g1",
+          role: "user",
+          content: "[]",
+          turnId: "concierge-turn-1",
+          chatThread: "g0",
+        });
+        await taken(s, "g1");
+        await s.tool("say", { text: "It's still checking.", task: taskId });
+        expect(await reactionOf(s, "g1")).toBeNull();
+      });
+
+      it("waits for the turn's end when the message reports on a task", async () => {
+        const s = setup({ said: false });
+        s.inTurn("t0");
+        guardianSays(s, "g0", "t0");
+        const { taskId } = await started(s);
+        s.inTurn("concierge-turn-1");
+        guardianSays(s, "g1");
+        await taken(s, "g1");
+        await s.tool("say", { text: "The weather task is done.", task: taskId });
+        expect(await reactionOf(s, "g1")).toBe("working");
+      });
+    });
+  });
+
+  describe("until the Concierge says the result", () => {
+    it("stays working after the task ends, until the turn that reports it ends", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      await finishTask(s, chatId, "completed", { reported: false });
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("shows a failed task as failed once its report turn ends", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      await finishTask(s, chatId, "error", { reported: false });
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBe("failed");
+    });
+
+    it("waits for the report to be handed over again when its turn is cut short or fails", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      await finishTask(s, chatId, "completed", { reported: false });
+      await reportEnds(s, chatId, "interrupted");
+      await reportEnds(s, chatId, "failed");
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("settles when another turn says the result, naming the task", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      await finishTask(s, chatId, "completed", { reported: false });
+      s.inTurn("later");
+      guardianSays(s, "g2", "later");
+      await s.tool("say", { text: "Sunny all week", task: taskId });
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await s.finish({
+        turnId: "later",
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        text: "ok",
+      });
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("settles when the Concierge writes the row done, though its report turn is then cut short", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      s.fakeTimers();
+      s.onBackendTurn(async () => {
+        await s.taskRepo.upsertMany([{ id: taskId, state: "done" }]);
+        return "interrupted" as const;
+      });
+      replies(s, chatId);
+      await finishTask(s, chatId, "completed", { reported: false });
+      // Nobody asked for this result, so it waits for the next batch.
+      await rs.advanceTimersByTimeAsync(60_000);
+      expect(s.backendTurns).toHaveLength(1);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it.each([
+      ["done", "completed", null],
+      ["done", "error", "failed"],
+      ["dropped", "completed", null],
+      ["dropped", "error", null],
+    ] as const)("a row written %s while a task that ended %s waits for its report shows %s", async (state, ended, reaction) => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      await finishTask(s, chatId, ended, { reported: false });
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await s.taskRepo.upsertMany([{ id: taskId, state }]);
+      expect(await reactionOf(s, "g1")).toBe(reaction);
+    });
+
+    it("clears a failed task's mark when the Concierge drops it", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      await finishTask(s, chatId, "error");
+      expect(await reactionOf(s, "g1")).toBe("failed");
+      await s.taskRepo.upsertMany([{ id: taskId, state: "dropped" }]);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("shows failed once Rome gives up on the report", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      await finishTask(s, chatId, "completed", { reported: false });
+      const coalescer = (
+        s.service as unknown as { taskEvents: { deps: { giveUp: (id: string) => void } } }
+      ).taskEvents;
+      coalescer.deps.giveUp(taskId);
+      await s.settle();
+      expect(await reactionOf(s, "g1")).toBe("failed");
+    });
+
+    it("runs no report again that a turn which took it over said", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      s.fakeTimers();
+      s.onBackendTurn(() => "interrupted");
+      replies(s, chatId);
+      await finishTask(s, chatId, "completed", { reported: false });
+      // Nobody asked for this result, so it waits for the next batch.
+      await rs.advanceTimersByTimeAsync(60_000);
+      expect(s.backendTurns).toHaveLength(1);
+      s.onBackendTurn(() => "completed");
+      s.inTurn("takeover");
+      guardianSays(s, "g2", "takeover");
+      await s.tool("say", { text: "Sunny all week", task: taskId });
+      await s.finish({
+        turnId: "takeover",
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        text: "",
+      });
+      await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
+      expect(s.backendTurns).toHaveLength(1);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("keeps a report the Concierge never got, though a turn names its task, and reports it again", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      s.fakeTimers();
+      // The report turn fails before the Concierge sees it.
+      s.onBackendTurn(() => "failed");
+      replies(s, chatId);
+      await finishTask(s, chatId, "completed", { reported: false });
+      await rs.advanceTimersByTimeAsync(60_000);
+      expect(s.backendTurns).toHaveLength(1);
+      s.onBackendTurn(() => "completed");
+      // Another turn says something naming the task, from what it read itself.
+      s.inTurn("other");
+      guardianSays(s, "g2", "other");
+      await s.tool("say", { text: "Weather is still running?", task: taskId });
+      await s.finish({
+        turnId: "other",
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        text: "",
+      });
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
+      // Reported again; a report the row was not written for is asked once more.
+      expect(s.backendTurns.length).toBeGreaterThanOrEqual(2);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("keeps a dropped task's failed follow-up failed through a write that sets no state", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      await s.taskRepo.upsertMany([{ id: taskId, state: "dropped" }]);
+      s.inTurn("follow-up");
+      guardianSays(s, "g2", "follow-up");
+      await s.tool("chat_send", { chatId, text: "Try once more" });
+      await finishTask(s, chatId, "error", { reported: false });
+      await s.taskRepo.upsertMany([{ id: taskId, summary: "Tried again" }]);
+      expect(await reactionOf(s, "g2")).toBe("working");
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g2")).toBe("failed");
+    });
+
+    it("tells the Concierge again, after a restart, of a result the stopped process held unsaid", async () => {
+      const s = setup({ said: false, startEvents: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      replies(s, chatId);
+      // The stopped process held the result; its pending report died with it.
+      await s.taskRepo.holdReactions(taskId, "done");
+      s.fakeTimers();
+      s.startEvents();
+      await rs.advanceTimersByTimeAsync(60_000);
+      expect(s.backendTurns).toHaveLength(1);
+      expect(s.backendTurns[0]?.prompt).toContain(taskId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("holds a task's marks for its report even while the ended turn's stream still drains", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      s.chats.activeTurns = (id: string) => (id === chatId ? [`task-turn-${chatId}`] : []);
+      s.fakeTimers();
+      await finishTask(s, chatId, "completed", { reported: false });
+      // Past the wait for the stream, which never ends here.
+      await rs.advanceTimersByTimeAsync(11_000);
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("keeps a result that could not be shown to be reported again, its marks working", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      replies(s, chatId);
+      s.fakeTimers();
+      s.onBackendTurn(() => "interrupted");
+      await finishTask(s, chatId, "completed", { reported: false });
+      await rs.advanceTimersByTimeAsync(60_000);
+      expect(s.backendTurns).toHaveLength(1);
+      s.onBackendTurn(() => "completed");
+      // The turn that took the report over fails to store the forward.
+      s.inTurn("takeover");
+      guardianSays(s, "g2", "takeover");
+      s.deps.webchatRepo.addBackendMessage = async () => {
+        throw new Error("disk full");
+      };
+      expect(await s.tool("chat_forward", { chatId })).toMatchObject({ isError: true });
+      await s.finish({
+        turnId: "takeover",
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        text: "",
+      });
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
+      expect(s.backendTurns.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it("runs no report again for two tasks a takeover turn said, after their batch was cut short", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const weather = await started(s, { title: "Weather" });
+      const traffic = await started(s, { title: "Traffic" });
+      replies(s, weather.chatId);
+      replies(s, traffic.chatId);
+      s.fakeTimers();
+      s.onBackendTurn(() => "interrupted");
+      await finishTask(s, weather.chatId, "completed", { reported: false });
+      await finishTask(s, traffic.chatId, "completed", { reported: false });
+      await rs.advanceTimersByTimeAsync(60_000);
+      // One batch named both tasks, and a newer message cut it short.
+      expect(s.backendTurns).toHaveLength(1);
+      expect(s.backendTurns[0]?.prompt).toContain(weather.taskId);
+      expect(s.backendTurns[0]?.prompt).toContain(traffic.taskId);
+      s.onBackendTurn(() => "completed");
+      s.inTurn("takeover");
+      guardianSays(s, "g2", "takeover");
+      await s.tool("say", { text: "Sunny all week", task: weather.taskId });
+      await s.tool("say", { text: "Roads are clear", task: traffic.taskId });
+      await s.finish({
+        turnId: "takeover",
+        agentName: "core:concierge",
+        chatId: CONCIERGE_CHAT,
+        text: "",
+      });
+      expect(await reactionOf(s, "g1")).toBeNull();
+      await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
+      expect(s.backendTurns).toHaveLength(1);
+    });
+
+    it("clears a stopped task at once, with nothing to report", async () => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId } = await started(s);
+      await finishTask(s, chatId, "interrupted", { reported: false });
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+  });
+
+  it("never pushes a reaction to the phone", async () => {
+    const s = setup({ said: false, startEvents: false });
+    guardianSays(s, "g1");
+    const { taskId } = await started(s);
+    await s.taskRepo.settleReactions(taskId, "done");
+    expect(await reactionOf(s, "g1")).toBeNull();
+    expect(s.pushes).toEqual([]);
   });
 });
