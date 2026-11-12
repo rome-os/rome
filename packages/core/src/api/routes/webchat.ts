@@ -472,6 +472,8 @@ function readWidgetFromOutput(
   };
 }
 
+// Matched by name: a provider drops the `mcp__<server>__` prefix, so a tool of
+// the same name on an agent's external MCP server matches too (ZHA-171).
 const isExecuteActionTool = (tool: unknown): boolean =>
   typeof tool === "string" && (tool === "execute_action" || tool.endsWith("__execute_action"));
 
@@ -488,8 +490,8 @@ type WidgetPart = Extract<MessagePart, { type: "widget" }>;
 /**
  * The widget a tool_result shows, when Rome may store it. Tool output is not
  * proof of where it came from: an action's own data, a shell command or
- * another server's tool can print the same JSON. So a widget is stored only
- * from an `execute_action` call (`actionName`), only for the app that owns
+ * another tool can print the same JSON. So a widget is stored only from a
+ * tool call named `execute_action` (`actionName`), only for the app that owns
  * that action, and only when that app is installed and declares the component.
  */
 function trustedWidget(
