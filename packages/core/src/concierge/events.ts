@@ -246,6 +246,7 @@ export function startConciergeEvents(
       if (!(await service.isServed(owner))) return "failed";
       return await service.systemTurnOutcome(chatId, prompt, { quiet, pushLevel: "active" });
     },
+    carried: (taskId) => service.carriesReport(taskId),
     giveUp: (taskId) => {
       coalescer.forget(taskId);
       tasks.markNotSynced(taskId);

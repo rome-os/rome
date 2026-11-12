@@ -28,7 +28,7 @@ import { createTestDb, type TestDb } from "../test/db.js";
 import { readWebchatMessages } from "../webchat/adapter.js";
 import type { AgentTurnFailedBeforeStart, TurnLifecycleListener } from "../agent/index.js";
 import { startConciergeEvents } from "./events.js";
-import { RETRY_MS } from "./task-events.js";
+import { MIN_FLUSH_SPACING_MS, RETRY_MS } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
 import { mainChatIdOf } from "./main-chat.js";
 import { createConciergeOwners } from "./owners.js";
@@ -2788,7 +2788,10 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
     s.onBackendTurn(() => "completed");
-    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    // The guardian's turn that took the report over ends without saying it:
+    // the next flush does, not RETRY_MS later.
+    s.service.turnSettled(CONCIERGE_CHAT);
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
     expect(s.backendTurns).toHaveLength(2);
   });
 

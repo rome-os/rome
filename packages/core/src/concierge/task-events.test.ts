@@ -16,7 +16,7 @@ const urgent = (taskId: string, kind = "turn_end:completed by=concierge") => ({
 });
 const quiet = (taskId: string, kind = "guardian_message") => ({ taskId, kind, urgent: false });
 
-function setup() {
+function setup(carried: Set<string> = new Set()) {
   const flushes: Array<{ ids: string[]; quiet: boolean; at: number }> = [];
   const rendered: string[][] = [];
   const gaveUp: string[] = [];
@@ -45,6 +45,7 @@ function setup() {
       return outcome;
     },
     giveUp: (taskId) => gaveUp.push(taskId),
+    carried: (taskId) => carried.has(taskId),
   });
   return {
     coalescer,
@@ -404,16 +405,63 @@ describe("TaskEventCoalescer", () => {
     ).toHaveLength(1);
   });
 
-  it("tries a turn a newer message cut short again, since it may never have reached the model", async () => {
+  it("tries a report a newer message cut short again with the next flush, not minutes later", async () => {
     const s = setup();
     s.turnsInterrupted();
     s.coalescer.mark(urgent("a"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
     expect(s.flushes).toHaveLength(1);
+    // Still owed: its task reads as active until the news is said.
+    expect(s.coalescer.pending).toEqual(["a"]);
     s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
+    expect(s.flushes).toHaveLength(2);
+    // Said: nothing is owed, so its task leaves Active.
+    expect(s.coalescer.pending).toEqual([]);
+    expect(s.gaveUp).toEqual([]);
+  });
+
+  it("waits for the turn that took a cut-short report over, which may say it itself", async () => {
+    const carried = new Set<string>();
+    const s = setup(carried);
+    s.turnsInterrupted();
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    // The guardian's turn that cut it short now carries its news.
+    carried.add("a");
+    s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(3 * MIN_FLUSH_SPACING_MS);
+    expect(s.flushes).toHaveLength(1);
+    // That turn ended without saying it: the next flush does.
+    carried.delete("a");
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
+    expect(s.flushes).toHaveLength(2);
+    expect(s.coalescer.pending).toEqual([]);
+  });
+
+  it("waits for a turn that carries a cut-short report no longer than RETRY_MS", async () => {
+    const carried = new Set<string>(["a"]);
+    const s = setup(carried);
+    s.turnsInterrupted();
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    s.turnsRun(true);
+    // The turn that took it over never ends, as after a crash.
+    await rs.advanceTimersByTimeAsync(RETRY_MS + MIN_FLUSH_SPACING_MS);
+    expect(s.flushes).toHaveLength(2);
+    expect(s.coalescer.pending).toEqual([]);
+  });
+
+  it("still waits RETRY_MS after a report that failed", async () => {
+    const s = setup();
+    s.turnsRun(false);
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(3 * MIN_FLUSH_SPACING_MS);
+    expect(s.flushes).toHaveLength(1);
     await rs.advanceTimersByTimeAsync(RETRY_MS);
     expect(s.flushes).toHaveLength(2);
-    expect(s.gaveUp).toEqual([]);
   });
 
   it("waits to retry only the rows of a chat whose turn did not run", async () => {

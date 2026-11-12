@@ -836,6 +836,12 @@ export class ConciergeService {
     return this.carriedReports.get(chatId);
   }
 
+  /** Whether a running Concierge turn took over a cut-short report that holds task `taskId`'s news. */
+  carriesReport(taskId: string): boolean {
+    for (const tasks of this.carriedReports.values()) if (tasks.includes(taskId)) return true;
+    return false;
+  }
+
   /** A Concierge turn in `chatId` ended without handing its work on. */
   turnSettled(chatId: string): void {
     this.carriedReports.delete(chatId);
