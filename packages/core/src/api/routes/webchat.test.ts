@@ -6432,8 +6432,8 @@ describe("Webchat API", () => {
         { title: "Tokyo weather", state: "doing", chatId: "topic" },
       ]);
       await repo.setThreadRoot(task.id, "g1");
-      // A later task started from a message in that thread shares it, and the
-      // thread keeps its first task's name.
+      // Rows from before one thread per task may share a root: the thread
+      // keeps its first task's name.
       const [later] = await repo.upsertMany(
         [{ title: "London weather", state: "doing", chatId: "topic" }],
         new Date(Date.now() + 1_000),
@@ -6443,18 +6443,40 @@ describe("Webchat API", () => {
 
       const listed = (await (await app.request("/chat/sessions/topic/messages")).json()) as {
         id: string;
+        chatThreadId?: string | null;
         chatThreadTitle?: string;
       }[];
-      expect(listed.find((m) => m.id === "g1")?.chatThreadTitle).toBe("Tokyo weather");
-      // A thread no task has, and a message in none, carry no title.
+      expect(listed.find((m) => m.id === "g1")).toMatchObject({
+        chatThreadId: "g1",
+        chatThreadTitle: "Tokyo weather",
+      });
+      // Only a task has a thread: one from before that no task has is sent as
+      // none, so every client shows it as none.
+      expect(listed.find((m) => m.id === "g3")?.chatThreadId ?? null).toBeNull();
       expect(listed.find((m) => m.id === "g3")).not.toHaveProperty("chatThreadTitle");
       expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("chatThreadTitle");
+      const thread = (await (
+        await app.request("/chat/sessions/topic/messages?thread=g3")
+      ).json()) as { messages: { id: string; chatThreadId?: string | null }[] };
+      expect(thread.messages.map((m) => m.chatThreadId ?? null)).toEqual([null]);
 
       const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
       const placed = readSseUntil(events, "event: message_chat_thread");
+      // A placement in a thread no task has is not told; the task's next is.
+      await deps.webchatRepo.addMessage("g4", "topic", "user", text("Old"), "turn-4");
+      await deps.webchatRepo.placeInChatThread("topic", "g4", { in: "g3", settle: true });
       await deps.webchatRepo.placeInChatThread("topic", "g2", { in: "g1", settle: true });
-      expect(await placed).toContain(
+      const told = await placed;
+      expect(told).toContain(
         `data: ${JSON.stringify({ sessionId: "topic", messageId: "g2", chatThreadId: "g1", chatThreadTitle: "Tokyo weather" })}`,
+      );
+      expect(told).not.toContain('"messageId":"g4"');
+
+      // A task that leaves the chat takes its thread's label with it.
+      const retired = readSseUntil(events, "event: chat_thread_retired");
+      await repo.moveToMainChat("topic");
+      expect(await retired).toContain(
+        `data: ${JSON.stringify({ sessionId: "topic", chatThreadId: "g1" })}`,
       );
       await events.cancel();
     });

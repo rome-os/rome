@@ -44,7 +44,7 @@ export type ThreadTimelineMessage = Pick<ChatMessage, "id" | "role" | "chatThrea
  */
 export function taskThreads(
   messages: readonly ThreadTimelineMessage[],
-  liveTitles: ReadonlyMap<string, string> = new Map(),
+  liveTitles: ReadonlyMap<string, string | null> = new Map(),
 ): { threads: Map<string, string>; titles: Map<string, string> } {
   const titles = new Map<string, string>();
   for (const message of messages) {
@@ -52,7 +52,11 @@ export function taskThreads(
       titles.set(message.chatThreadId, message.chatThreadTitle);
     }
   }
-  for (const [thread, title] of liveTitles) titles.set(thread, title);
+  // A live title wins; null is a thread whose task left the chat.
+  for (const [thread, title] of liveTitles) {
+    if (title === null) titles.delete(thread);
+    else titles.set(thread, title);
+  }
   const threads = new Map<string, string>();
   for (const message of messages) {
     if (message.chatThreadId && titles.has(message.chatThreadId)) {
@@ -68,7 +72,7 @@ export function taskThreads(
  */
 export function threadLabels(
   messages: readonly ThreadTimelineMessage[],
-  liveTitles: ReadonlyMap<string, string> = new Map(),
+  liveTitles: ReadonlyMap<string, string | null> = new Map(),
 ): Map<string, ThreadLabel> {
   const { threads, titles } = taskThreads(messages, liveTitles);
   const labels = new Map<string, ThreadLabel>();
@@ -98,7 +102,7 @@ export interface ThreadPlacement {
 export function useChatThreadsValue(
   messages: readonly ThreadTimelineMessage[],
   rethreaded: ReadonlyMap<string, ThreadPlacement>,
-  liveTitles: ReadonlyMap<string, string>,
+  liveTitles: ReadonlyMap<string, string | null>,
 ): ChatThreads {
   return useMemo(() => {
     const shown = placed(messages, rethreaded);

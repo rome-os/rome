@@ -7,6 +7,7 @@ import {
   eq,
   gte,
   inArray,
+  isNotNull,
   isNull,
   ne,
   notInArray,
@@ -100,6 +101,12 @@ export type TaskReactionState = ConciergeStatusReaction | "done" | "stopped" | H
 export type TaskReactionEnd = "done" | "failed" | "stopped";
 
 /** A message's status reaction changed; null when it has none now. */
+/** A task's chat thread in Concierge chat `chatId`, rooted at `root`, ended: its task left the chat. */
+export interface ChatThreadRetired {
+  chatId: string;
+  root: string;
+}
+
 export type ReactionListener = (
   target: ReactionTarget,
   reaction: ConciergeStatusReaction | null,
@@ -126,6 +133,7 @@ export function reactionOf(states: readonly TaskReactionState[]): ConciergeStatu
 export class ConciergeTasksRepository {
   private listeners = new Set<ChangeListener>();
   private reactionListeners = new Set<ReactionListener>();
+  private threadListeners = new Set<(retired: ChatThreadRetired) => void>();
 
   /** Where a task's source message is looked up: its Concierge chat's
    *  lines in Chats. */
@@ -147,6 +155,10 @@ export class ConciergeTasksRepository {
   async moveToMainChat(from: string, to: string | null = null): Promise<number> {
     // Every row of the chat is its main chat's from now on, the finished ones
     // too, and a chat thread stays in the chat it is in.
+    const retired = await this.db
+      .select({ root: conciergeTasks.threadRoot })
+      .from(conciergeTasks)
+      .where(and(eq(conciergeTasks.chatId, from), isNotNull(conciergeTasks.threadRoot)));
     await this.db
       .update(conciergeTasks)
       .set({ threadRoot: null })
@@ -163,7 +175,25 @@ export class ConciergeTasksRepository {
       )
       .returning({ id: conciergeTasks.id });
     for (const { id } of moved) await this.announce(id, "refresh");
+    for (const root of new Set(retired.map((row) => row.root))) {
+      if (root) this.retireThread(from, root);
+    }
     return moved.length;
+  }
+
+  /** Tells the listeners that task chat thread `root` of chat `chatId` (null: the main chat) ended. */
+  private retireThread(chatId: string | null, root: string): void {
+    for (const listener of this.threadListeners) {
+      listener({ chatId: chatId ?? CONCIERGE_CHAT_ID, root });
+    }
+  }
+
+  /** Listens for task chat threads that end, as when their task moves to another chat. */
+  onThreadRetired(listener: (retired: ChatThreadRetired) => void): () => void {
+    this.threadListeners.add(listener);
+    return () => {
+      this.threadListeners.delete(listener);
+    };
   }
 
   onChange(listener: ChangeListener): () => void {
@@ -208,13 +238,16 @@ export class ConciergeTasksRepository {
       })
       .where(eq(conciergeTasks.id, id));
     await this.announce(id, "refresh");
+    if (existing?.threadRoot && existing.chatId !== stored) {
+      this.retireThread(existing.chatId, existing.threadRoot);
+    }
   }
 
   /**
    * The title of the task whose chat thread each of `roots` names in
-   * Concierge chat `chatId`, for the roots a task's thread has. A task
-   * started from a message in another task's thread shares it, and the
-   * thread keeps the name of the task that started it: the oldest.
+   * Concierge chat `chatId`, for the roots a task's thread has. A task has
+   * its own thread; rows from before that share a root keep the name of the
+   * oldest.
    */
   async threadTitles(chatId: string, roots: readonly string[]): Promise<Map<string, string>> {
     const titles = new Map<string, string>();
@@ -347,6 +380,7 @@ export class ConciergeTasksRepository {
     // row is the Concierge taking the report in. A dropped task was called
     // off, not failed, so it counts as stopped, and shows no mark.
     const settled: { taskId: string; state: "done" | "dropped"; ended: boolean }[] = [];
+    const retired: { chatId: string | null; root: string }[] = [];
     const written = await this.db.transaction((tx) => {
       const out: ConciergeTaskRow[] = [];
       for (const write of writes) {
@@ -369,8 +403,14 @@ export class ConciergeTasksRepository {
             throw new Error(`Chat ${write.sessionId} is already linked to task ${taken.id}`);
         }
         const state = write.state ?? existing?.state ?? "next";
-        if (existing && (state === "done" || state === "dropped")) {
-          settled.push({ taskId: existing.id, state, ended: !isFinished(existing.state) });
+        // Only a write that sets the state: a title or notes write to a
+        // finished row settles nothing.
+        if (existing && (write.state === "done" || write.state === "dropped")) {
+          settled.push({
+            taskId: existing.id,
+            state: write.state,
+            ended: !isFinished(existing.state),
+          });
         }
         const archivedAt =
           write.archived === undefined
@@ -380,6 +420,12 @@ export class ConciergeTasksRepository {
               : null;
         const completedAt = isFinished(state) ? (existing?.completedAt ?? now) : null;
         const chatId = write.chatId !== undefined ? write.chatId : (existing?.chatId ?? null);
+        if (
+          existing?.threadRoot &&
+          (existing.chatId ?? null) !== (chatId === CONCIERGE_CHAT_ID ? null : chatId)
+        ) {
+          retired.push({ chatId: existing.chatId, root: existing.threadRoot });
+        }
         const fields = {
           title: write.title ?? existing?.title ?? "",
           state,
@@ -436,6 +482,7 @@ export class ConciergeTasksRepository {
       return out;
     });
     for (const row of written) await this.announce(row.id, "write");
+    for (const { chatId, root } of retired) this.retireThread(chatId, root);
     // The rows are written; a reaction that fails to settle fails no write.
     for (const { taskId, state, ended } of settled) {
       await this.settleWrittenReactions(taskId, state, ended).catch((error: unknown) =>

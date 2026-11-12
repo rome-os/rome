@@ -464,13 +464,22 @@ export async function buildConciergeTools(
   const threadOf = async (chatId: string, messageId: string) =>
     (await taskThreadOf(chatId, messageId))?.root ?? null;
 
+  /**
+   * Whether a message is in any chat thread, one from before that no task
+   * has included: such a message is settled there, so nothing moves it into
+   * a task's thread and no task takes it as its root.
+   */
+  const inAnyThread = async (chatId: string, messageId: string) =>
+    Boolean((await webchatRepo.getReplyTarget(chatId, messageId))?.chatThreadId);
+
   // A guardian message in a task's thread is that task's: the Concierge
   // sends it on to that task or answers it itself, never sends it to another.
   const requireOwnTask = async (taskChatId: string, messageId: string | undefined) => {
     if (!messageId) return;
     const owner = await taskThreadOf(currentTurn().chatId, messageId);
     if (!owner) return;
-    if ((await tasks.repo.findBySession(taskChatId))?.id === owner.task.id) return;
+    // Rows from before one root per task may share it: each owns the thread.
+    if ((await tasks.repo.findBySession(taskChatId))?.threadRoot === owner.root) return;
     throw new Error(
       `Guardian message ${messageId} is in the thread of task ${owner.task.id} ("${owner.task.title}"). Send it on to that task, or answer it yourself with say.`,
     );
@@ -518,8 +527,10 @@ export async function buildConciergeTools(
     const message = await webchatRepo.getReplyTarget(chatId, answered);
     return {
       answered,
-      // A message already in a task's thread is that task's: it roots no other.
-      root: (await threadOf(chatId, answered)) ? null : (message?.chatThreadId ?? answered),
+      // A message already in a thread roots nothing: one in a task's thread
+      // is that task's, and one in a thread from before is settled there.
+      // The task then takes the first thing it brings back.
+      root: message?.chatThreadId ? null : answered,
       turnId: message?.turnId ?? null,
     };
   };
@@ -556,7 +567,7 @@ export async function buildConciergeTools(
     const { chatId } = currentTurn();
     const root = await tasks.repo.setThreadRoot(taskId, start.root);
     if (!root) return;
-    if (root === start.answered && !(await threadOf(chatId, root))) {
+    if (root === start.answered && !(await inAnyThread(chatId, root))) {
       await webchatRepo.placeInChatThread(chatId, root, { starts: true, settle: true });
     }
     // The acknowledgements are in the turn the guardian's message prompted.
@@ -565,7 +576,7 @@ export async function buildConciergeTools(
     const prompts = await promptsOf(chatId, turnId);
     const answersOf = (id: string) => namedAnswers().get(turnId)?.get(id);
     for (const row of await webchatRepo.getTurnChatMessages(chatId, turnId)) {
-      if (row.role !== "assistant" || (await threadOf(chatId, row.id))) continue;
+      if (row.role !== "assistant" || (await inAnyThread(chatId, row.id))) continue;
       const answered = answersOf(row.id) ?? (prompts.length === 1 ? prompts[0] : undefined);
       if (answered !== start.answered) continue;
       await webchatRepo.placeInChatThread(chatId, row.id, { in: root });
@@ -652,9 +663,12 @@ export async function buildConciergeTools(
   const relayToTaskThread = async (taskChatId: string, answers?: string) => {
     const { chatId } = currentTurn();
     const prompts = await requireTurnPrompt(answers);
+    // A turn that also carries another task's report has two subjects:
+    // which one the guardian's message goes with is a guess.
+    if (answers === undefined && service.carriedReport(chatId)) return;
     const unthreaded: string[] = [];
     for (const id of answers ? [answers] : prompts) {
-      if (!(await threadOf(chatId, id))) unthreaded.push(id);
+      if (!(await inAnyThread(chatId, id))) unthreaded.push(id);
     }
     const relayed = unthreaded.length === 1 ? unthreaded[0] : undefined;
     const task = relayed ? await tasks.repo.findBySession(taskChatId) : null;
@@ -697,7 +711,7 @@ export async function buildConciergeTools(
       [{ type: "text", content: text, ...(format === "long" ? { format } : {}) }],
       await placementFor(answers, taskId ? { taskId } : {}),
     );
-    if (taskId) service.noteRelayed(turnId, taskId);
+    if (taskId) service.noteRelayed(turnId, chatId, taskId);
     noteAnswers(id, answers);
     said(chatId, turnId, text, isPrivate);
     const answered = answers ?? (await certainlyAnswered(taskId));
@@ -713,13 +727,18 @@ export async function buildConciergeTools(
   };
 
   // The guardian message a `say` naming no `answers` answers, when that is
-  // certain: the turn's only one, and the message is about no task.
-  // Otherwise the turn's end settles it.
+  // certain: the turn's only one, when the message is about no task or about
+  // the task whose thread that one is in. Otherwise the turn's end settles it.
   const certainlyAnswered = async (taskId: string | undefined) => {
     const { chatId } = currentTurn();
-    if (taskId || service.carriedReport(chatId)) return undefined;
+    if (service.carriedReport(chatId)) return undefined;
     const prompts = await turnPrompts();
-    return prompts.length === 1 ? prompts[0] : undefined;
+    const only = prompts.length === 1 ? prompts[0] : undefined;
+    if (!only || !taskId) return only;
+    // A message naming a task answers the turn's message when that message
+    // is in the task's thread.
+    const root = await rootOf(taskId);
+    return root && (await threadOf(chatId, only)) === root ? only : undefined;
   };
 
   // One message, so the lead-in and the report always arrive together. The
@@ -727,7 +746,7 @@ export async function buildConciergeTools(
   const forward = async (text: string, from: ForwardedFrom, intro?: string, answers?: string) => {
     const { chatId, turnId } = currentTurn();
     const task = await tasks.repo.findBySession(from.chatId);
-    if (task) service.noteRelayed(turnId, task.id);
+    if (task) service.noteRelayed(turnId, chatId, task.id);
     const id = await addMessage(
       [
         ...(intro ? [{ type: "text" as const, content: intro }] : []),
@@ -1242,15 +1261,9 @@ export async function buildConciergeTools(
           const answer = latest?.body.text ?? null;
           if (!answer) throw new Error("The task chat has no answer yet");
           currentTurn();
-          const forwardPrompts = await requireOnePrompt(
-            optionalString(args, "answers"),
-            "this answers",
-          );
-          await requireOwnTask(
-            chatId,
-            optionalString(args, "answers") ??
-              (forwardPrompts.length === 1 ? forwardPrompts[0] : undefined),
-          );
+          await requireOnePrompt(optionalString(args, "answers"), "this answers");
+          // A forward shows the task's result to the guardian; it passes their
+          // message on to no task. A message already in a thread stays there.
           await relayToTaskThread(chatId, optionalString(args, "answers"));
           const messageId = await forward(
             answer,

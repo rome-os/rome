@@ -176,6 +176,14 @@ export class TaskEventCoalescer {
     }
   }
 
+  /**
+   * Whether task `taskId` has news a turn was built to carry but that never
+   * reached the Concierge, as when that turn failed or was cut short.
+   */
+  unseen(taskId: string): boolean {
+    return this.dirty.get(taskId)?.undelivered === true;
+  }
+
   /** Drops a row's mark, such as when its row is gone. */
   forget(taskId: string): void {
     if (this.dirty.delete(taskId)) this.changed();

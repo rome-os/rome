@@ -949,15 +949,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       if (event.sessionId === sessionId) emit("session_name", event);
     });
     // A task's thread carries its title, so the label under the message can
-    // name it.
+    // name it. Only a task has a thread, so a placement in none is not told.
     const unsubscribeChatThread = deps.webchatRepo.onChatThreadPlaced((event) => {
       if (event.sessionId !== sessionId) return;
       void threadTitlesOf(sessionId, [event.chatThreadId])
         .catch(() => new Map<string, string>())
         .then((titles) => {
           const chatThreadTitle = titles.get(event.chatThreadId);
-          emit("message_chat_thread", chatThreadTitle ? { ...event, chatThreadTitle } : event);
+          if (chatThreadTitle) emit("message_chat_thread", { ...event, chatThreadTitle });
         });
+    });
+    // A task that leaves the chat takes its thread with it: its label goes.
+    const unsubscribeThreadRetired = deps.concierge?.deps.tasks.repo.onThreadRetired((retired) => {
+      if (retired.chatId !== sessionId) return;
+      emit("chat_thread_retired", { sessionId, chatThreadId: retired.root });
     });
     // A status reaction is no message, so it only changes the bubble and
     // never pushes (docs/domains/chats.md#status-reaction).
@@ -972,6 +977,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
     return () => {
       runningListeners.delete(runningListener);
+      unsubscribeThreadRetired?.();
       unsubscribeMessages();
       unsubscribeSessionName();
       unsubscribeChatThread();
@@ -1363,7 +1369,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
   const threadTitlesOf = async (sessionId: string, roots: readonly string[]) =>
     (await deps.concierge?.deps.tasks.repo.threadTitles(sessionId, roots)) ??
     new Map<string, string>();
-  // The title of the task whose thread each message is in, when it is a task's.
+  // The title of the task whose thread each message is in, when it is a
+  // task's. Only a task has a chat thread, so a thread from before that no
+  // task has is sent as none (docs/domains/chats.md#chat-thread).
   const attachChatThreadTitles = async <T extends StoredMessages[number]>(
     sessionId: string,
     messages: T[],
@@ -1376,11 +1384,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const roots = messages.flatMap((message) => threadOf(message) ?? []);
     if (roots.length === 0) return messages;
     const titles = await threadTitlesOf(sessionId, roots);
-    if (titles.size === 0) return messages;
     return messages.map((message) => {
       const thread = threadOf(message);
-      const chatThreadTitle = thread ? titles.get(thread) : undefined;
-      return chatThreadTitle ? { ...message, chatThreadTitle } : message;
+      if (!thread) return message;
+      const chatThreadTitle = titles.get(thread);
+      return chatThreadTitle ? { ...message, chatThreadTitle } : { ...message, chatThreadId: null };
     });
   };
   // The status reaction on each guardian message that has one, which only a

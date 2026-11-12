@@ -260,11 +260,18 @@ const messageChatThreadSchema = z.object({
   chatThreadTitle: z.string().optional(),
 });
 
+/** A task left the chat, and its chat thread with it. */
+const chatThreadRetiredSchema = z.object({
+  sessionId: z.string(),
+  chatThreadId: z.string(),
+});
+
 interface ChatSessionEventsProps {
   sessionId: string;
   onMessageInsert: (sessionId: string, message: ChatMessage) => void;
   /** The Concierge placed a message of the chat in a chat thread. */
   onMessageChatThread?: (event: z.infer<typeof messageChatThreadSchema>) => void;
+  onChatThreadRetired?: (event: z.infer<typeof chatThreadRetiredSchema>) => void;
   /** Rome changed the status reaction on a guardian message of a Concierge chat. */
   onMessageStatusReaction?: (event: z.infer<typeof messageStatusReactionSchema>) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
@@ -276,6 +283,7 @@ function ChatSessionEvents({
   sessionId,
   onMessageInsert,
   onMessageChatThread,
+  onChatThreadRetired,
   onMessageStatusReaction,
   onSessionName,
   onSessionRunning,
@@ -296,6 +304,12 @@ function ChatSessionEvents({
         schema: messageChatThreadSchema,
         fn: (event) => {
           if (event.sessionId === sessionId) onMessageChatThread?.(event);
+        },
+      },
+      chat_thread_retired: {
+        schema: chatThreadRetiredSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onChatThreadRetired?.(event);
         },
       },
       message_status_reaction: {
@@ -507,8 +521,18 @@ export function Chat({
   // a placement after a reload builds on what the reload said.
   const [rethreaded, setRethreaded] = useState<ReadonlyMap<string, ThreadPlacement>>(new Map());
   const loadedThreads = useRef<ReadonlyMap<string, string | null>>(new Map());
-  // Task titles live placements told, by the thread they name.
-  const [liveThreadTitles, setLiveThreadTitles] = useState<ReadonlyMap<string, string>>(new Map());
+  // Task titles live placements told, by the thread they name; null for a
+  // thread whose task left the chat, which is a task's no more.
+  const [liveThreadTitles, setLiveThreadTitles] = useState<ReadonlyMap<string, string | null>>(
+    new Map(),
+  );
+  const handleChatThreadRetired = useCallback(
+    ({ chatThreadId }: z.infer<typeof chatThreadRetiredSchema>) =>
+      setLiveThreadTitles((prev) =>
+        prev.get(chatThreadId) === null ? prev : new Map(prev).set(chatThreadId, null),
+      ),
+    [],
+  );
   const handleMessageChatThread = useCallback(
     ({ messageId, chatThreadId, chatThreadTitle }: z.infer<typeof messageChatThreadSchema>) => {
       setRethreaded((prev) =>
@@ -2418,6 +2442,7 @@ export function Chat({
           sessionId={sid}
           onMessageInsert={handleMessageInsert}
           onMessageChatThread={handleMessageChatThread}
+          onChatThreadRetired={handleChatThreadRetired}
           onMessageStatusReaction={handleMessageStatusReaction}
           onSessionName={handleSessionName}
           onSessionRunning={handleSessionRunning}

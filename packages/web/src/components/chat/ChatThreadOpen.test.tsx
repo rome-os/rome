@@ -117,6 +117,13 @@ describe("threadLabels", () => {
     );
   });
 
+  it("drops the label of a thread whose task left the chat", () => {
+    const loaded = [{ ...g("q1"), chatThreadTitle: "Flights" }, a("a1", "q1")];
+    expect(threadLabels(loaded).get("a1")).toEqual({ thread: "q1", title: "Flights" });
+    expect(threadLabels(loaded, new Map([["q1", null]]))).toEqual(new Map());
+    expect(taskThreads(loaded, new Map([["q1", null]])).threads).toEqual(new Map());
+  });
+
   it("takes a title a live placement told", () => {
     const labels = threadLabels([g("q1"), a("a1", "q1")], new Map([["q1", "Flights"]]));
     expect(labels.get("a1")).toMatchObject({ title: "Flights" });

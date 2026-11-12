@@ -754,13 +754,21 @@ export class ConciergeService {
     return outcome;
   }
 
-  /** Task `taskId`'s result was said in Concierge turn `turnId`, as by `say` naming it. */
-  noteRelayed(turnId: string, taskId: string): void {
-    // Its news is said: a report a newer input cut short is not run again.
-    this.taskEvents?.settle(taskId);
+  /**
+   * Task `taskId`'s result was said in Concierge turn `turnId` of chat
+   * `chatId`, as by `say` naming it. It counts only when the Concierge had
+   * the task's news: news a failed or cut-short turn never brought it stays
+   * to be reported, and the messages it holds stay working, unless this turn
+   * took that report over.
+   */
+  noteRelayed(turnId: string, chatId: string, taskId: string): void {
+    const unseen = this.taskEvents?.unseen(taskId) === true;
+    if (unseen && this.carriedReports.get(chatId) !== taskId) return;
     const tasks = this.relayedInTurn.get(turnId) ?? new Set<string>();
     tasks.add(taskId);
     this.relayedInTurn.set(turnId, tasks);
+    // Its news is said: a report a newer input cut short is not run again.
+    this.taskEvents?.settle(taskId);
   }
 
   /** The tasks whose result Concierge turn `turnId` said, forgotten once read. */

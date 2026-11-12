@@ -31,12 +31,12 @@ A chat inside a chat, usually started from one of its messages. A thread is not 
 One [task](#task)'s conversation inside a [Concierge chat](#concierge-chat), which its owner follows on its own. Unlike a [thread](#thread), it is not a place: its messages stay in the chat's own timeline. Only a task has a chat thread, and a task has exactly one.
 
 - A chat thread is known by its chat and the id of its first message, its root.
-- A task's root is kept for good: the owner's message that started the task. A task no owner's message started takes the first owner's message sent on to it, or the first thing it brings back. A message already in another task's thread starts no thread, so a task started for it takes its root the same way.
+- A task's root is kept for good: the owner's message that started the task. A task no owner's message started takes the first owner's message sent on to it, or the first thing it brings back. A message already in a thread, another task's or one from before, starts no thread, so a task started for it takes its root the same way.
 - Rome places the messages of a task's thread, never the owner and never by guess. A task's thread holds what the task brings back, its results, question cards and forwards, the owner's messages sent on to it, and the Concierge's answers to those messages. The Concierge's messages that answer the message a task was started for join it too.
 - A Concierge message that names its task goes into that task's thread, whatever turn says it. One that names nothing goes by its turn: into the thread of the task the turn reports on, or of the task the turn's one owner's message is in. A turn about several things, as the owner's message and another task's news, or several tasks' news, puts a message that names nothing in no thread.
-- A reply to a message in a task's thread is in that thread at once, and nothing moves it. The Concierge reads which task it belongs to. It sends the message on to that task or answers it itself, and Rome refuses to send it on to any other task.
+- A reply to a message in a task's thread is in that thread at once, and nothing moves it. The Concierge reads which task it belongs to. It sends the message on to that task or answers it itself, and Rome refuses to send it on to any other task. Showing another task's result there leaves the message where it is.
 - A reply to a message in no task's thread is only a quote: it is in no thread. A task the Concierge then starts for it takes it as its root.
-- Any other message is in no chat thread: an owner's message typed in the chat, the Concierge's answer to one, and every message of a thread from before that no task has.
+- Any other message is in no chat thread: an owner's message typed in the chat, the Concierge's answer to one, and every message of a thread from before that no task has, which every client shows as in none.
 - A task moved to another Concierge chat leaves its thread behind, and starts a new one there the same way.
 - The chat's timeline shows every message in the order it was said, whatever its thread. The thread view shows one task's thread on its own.
 - In the chat's timeline, every Concierge message in a task's thread shows the task's title under it, which opens the thread view. The owner's own messages show none, and neither does the thread view. A label shows no count.
@@ -163,7 +163,7 @@ One piece of work the Concierge keeps on its owner's task list, with a title, a 
 - The Concierge **writes** a task: it creates it, moves it between states and marks it done or dropped. Starting a task chat for one makes it in progress. Nothing else sets a task's state.
 - Rome tells the Concierge what a task's chat does, and marks a task not synced when the Concierge never takes in what it was told.
 - A task has at most one [chat thread](#chat-thread), and its root is kept for good.
-- A task moves to its owner's main chat when its Concierge chat is archived or deleted.
+- A task moves to its owner's main chat when its Concierge chat is archived or deleted. Its thread stays behind and is a task's no more, so its label goes.
 - A message a task works for shows a [status reaction](#status-reaction) until the Concierge says the task's result, marks it done, or drops it.
 
 ## Task chat
