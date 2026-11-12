@@ -618,6 +618,15 @@
       "working_dir": "working folder gone"
     }
   },
+  "automatedInput": {
+    "named": "{{kind}} · {{name}}",
+    "kinds": {
+      "routine": "Routine",
+      "app": "App",
+      "agent": "Agent",
+      "automation": "Automation"
+    }
+  },
   "routineCard": {
     "details": "Details",
     "turnOn": "Turn it on",

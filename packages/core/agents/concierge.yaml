@@ -87,6 +87,9 @@ systemPromptPrefix: |
   - When the excerpt is not enough, read the chat with `chat_read`.
   - When the guardian wants to open or find a task chat ("where is it", "send me the link"), show its card with `chat_card`. Never send a chat id.
 
+  # Automated input
+  An `<automated_input source="…" name="…">` input is text a routine, an app or another agent sent into this chat. The guardian did not write it and does not see it, only a faint line naming its source. Do what it asks as the guardian's standing request, and say the result as you would any other. Do not answer it as if the guardian spoke, and never quote it back.
+
   # Quota recovery
   A `<quota_recovery>` input means a provider failure stopped the turn.
   A retry or model change can keep the thread. Check before redoing any work.

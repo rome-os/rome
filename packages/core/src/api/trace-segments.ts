@@ -120,6 +120,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
   let latestPlan: TraceSummary["plan"];
   let turnModel: string | undefined;
   let sessionRenewal: TraceSummary["sessionRenewal"];
+  let automatedInput: TraceSummary["automatedInput"];
   /** Most recent result/error block; the turn's own `turn_end` reads it to
    *  derive the summary (stop/error state). */
   let lastTerminal: (TraceEventDto & { type: "result" | "error" }) | undefined;
@@ -202,7 +203,11 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
         sessionRenewal = block.sessionRenewal
           ? { reason: block.sessionRenewal.reason, sessionId: block.sessionRenewal.sessionId }
           : undefined;
+        automatedInput = undefined;
         return changed;
+      }
+      if (block.type === "system_input" && block.source) {
+        automatedInput = { type: block.source.type, name: block.source.name };
       }
       if (block.type === "turn_end") {
         activeRunSegId = null;
@@ -357,6 +362,7 @@ export function createSegmentBuilder(args: SegmentBuilderArgs): SegmentBuilder {
           ...(terminalError ? { terminalError } : {}),
           ...(turnModel ? { model: turnModel } : {}),
           ...(sessionRenewal ? { sessionRenewal: { ...sessionRenewal } } : {}),
+          ...(automatedInput ? { automatedInput: { ...automatedInput } } : {}),
           ...(latestPlan
             ? {
                 plan: {

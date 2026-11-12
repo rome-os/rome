@@ -618,6 +618,15 @@
       "working_dir": "工作目录不存在"
     }
   },
+  "automatedInput": {
+    "named": "{{kind}} · {{name}}",
+    "kinds": {
+      "routine": "例程",
+      "app": "应用",
+      "agent": "Agent",
+      "automation": "自动化"
+    }
+  },
   "routineCard": {
     "details": "详情",
     "turnOn": "开启",

@@ -366,7 +366,7 @@ export class AgentRunner {
         // The turn's input, under the caller's label, right after it starts.
         if (msg.type === "turn_start" && params.inputLabel) {
           await recorder
-            .recordSystemInput(params.inputLabel, params.prompt)
+            .recordSystemInput(params.inputLabel, params.prompt, params.inputSource)
             .catch((error: unknown) =>
               log.warn("system input not recorded", {
                 turnId: handle.id,

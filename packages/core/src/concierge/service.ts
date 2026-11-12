@@ -1,3 +1,4 @@
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
 // Concierge: texting-style chats that hand work to task chats. One Concierge
 // talks in a main chat and in any topic chats its owner starts, all sharing one
 // memory, one list of follows and one task list (docs/domains/chats.md#concierge-chat,
@@ -208,6 +209,8 @@ export type ResolvedTurn = BackendTurnParams & { reportedTask?: string };
 export interface SystemTurnOptions {
   quiet?: boolean;
   inputLabel?: string;
+  /** Who sent the input, when something sent it into the chat (RunParams.inputSource). */
+  inputSource?: SystemInputSource;
   /** Each message the Concierge says in the turn goes to the phone of the
    *  person the chat serves at this level. A reminder, a recovery or a notice has none. */
   pushLevel?: NotifyLevel;

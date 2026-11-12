@@ -1,3 +1,4 @@
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import {
   getCurrentActionContext,
   type CurrentActionContext,
@@ -149,7 +150,11 @@ export class AgentTraceRecorder {
   }
 
   /** Keeps what a system turn was handed, under its label, as one trace block. */
-  async recordSystemInput(label: string, content: string): Promise<void> {
+  async recordSystemInput(
+    label: string,
+    content: string,
+    source?: SystemInputSource,
+  ): Promise<void> {
     await this.ensureSession();
     const sessionId = this.romeSessionId();
     await this.input.webchatRepo.appendTraceBlocks({
@@ -157,7 +162,7 @@ export class AgentTraceRecorder {
       sessionId,
       turnId: this.input.turnId,
       startSeq: this.seq,
-      blocks: [{ type: "system_input", label, content }],
+      blocks: [{ type: "system_input", label, content, ...(source ? { source } : {}) }],
       trigger: this.triggerMetadata(),
       transcriptMessages: [],
     });
