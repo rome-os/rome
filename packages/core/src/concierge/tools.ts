@@ -679,7 +679,29 @@ export async function buildConciergeTools(
     if (taskId) service.noteRelayed(turnId, taskId);
     noteAnswers(id, answers);
     said(chatId, turnId, text, isPrivate);
+    const answered = answers ?? (await certainlyAnswered(thread, taskId));
+    if (answered) {
+      await tasks.repo.settleAnsweredTurnReaction(chatId, answered).catch((error: unknown) =>
+        log.warn("failed to settle an answered message's status reaction", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     return id;
+  };
+
+  // The guardian message a `say` naming no `answers` answers, when that is
+  // certain: the turn's only one, and the message is about no task and no
+  // other thread. Otherwise the turn's end settles it.
+  const certainlyAnswered = async (thread: string | undefined, taskId: string | undefined) => {
+    const { chatId } = currentTurn();
+    if (taskId || service.carriedReport(chatId)) return undefined;
+    const prompts = await turnPrompts();
+    const only = prompts.length === 1 ? prompts[0] : undefined;
+    if (!only || thread === undefined) return only;
+    const named = await threadOf(chatId, thread);
+    return named !== null && named === (await threadOf(chatId, only)) ? only : undefined;
   };
 
   // One message, so the lead-in and the report always arrive together. The

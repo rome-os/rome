@@ -590,6 +590,31 @@ export class ConciergeTasksRepository {
     return changed.length;
   }
 
+  /**
+   * Settles guardian message `messageKey` of Concierge chat `chatId` as done
+   * for the turns working on it: the Concierge answered it. A task started for
+   * it keeps its own mark. Answers how many changed.
+   */
+  async settleAnsweredTurnReaction(
+    chatId: string,
+    messageKey: string,
+    now = new Date(),
+  ): Promise<number> {
+    const changed = await this.db
+      .update(conciergeTurnReactions)
+      .set({ state: "done", updatedAt: now })
+      .where(
+        and(
+          eq(conciergeTurnReactions.chatId, chatId),
+          eq(conciergeTurnReactions.messageKey, messageKey),
+          eq(conciergeTurnReactions.state, "working"),
+        ),
+      )
+      .returning({ turnId: conciergeTurnReactions.turnId });
+    if (changed.length > 0) await this.announceReaction({ chatId, messageKey });
+    return changed.length;
+  }
+
   /** The status reaction of each of `messageKeys` in Concierge chat `chatId` that has one. */
   async reactionsOf(
     chatId: string,

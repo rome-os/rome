@@ -119,7 +119,7 @@ A mark Rome puts on its owner's message in a [Concierge chat](#concierge-chat) t
   - A newer input supersedes its turn and the work carries into the next turn: still working, until that turn ends.
 - A stopped task that is resumed or given more words is working again.
 - A message counts only the work not stopped: working while any of it works, then failed if any failed, else none. When all of it was stopped, it has none too.
-- A message the Concierge answers in the same turn, with no task, is working while that turn runs, and the mark goes away when the turn completes.
+- The turn's part of the work is done as soon as the Concierge answers the message, though the turn runs on. A message with no task then shows no mark. The Concierge answers it when its answer names it, or when the message is the turn's only one and the answer is about no task and no other thread. A turn that holds several of its owner's messages and names none in an answer settles them only when it ends.
 - It is not a message. It never reaches the phone as a push, and it does nothing when pressed.
 - A common chat has none, and neither does a task chat.
 

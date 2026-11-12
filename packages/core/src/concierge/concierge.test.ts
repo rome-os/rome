@@ -4166,6 +4166,7 @@ describe("Concierge status reactions", () => {
       );
       await s.tool("chat_send", { chatId, text: "Make it 3 fruits", answers: "a" });
       await s.tool("say", { text: "I'm well, thanks.", answers: "b" });
+      expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual(["working", null]);
       await conciergeEnds(s, "completed", "turn-b");
       // The fruits request works on with its task; the greeting was answered.
       expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual(["working", null]);
@@ -4211,6 +4212,85 @@ describe("Concierge status reactions", () => {
       await finishTask(s, chatId);
       // The task is done; the Concierge's own turn still runs.
       expect(await reactionOf(s, "g1")).toBe("working");
+    });
+
+    describe("once the Concierge answers it", () => {
+      it("goes away at the answer, while the turn goes on to start a task for another message", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, "chat");
+        guardianSays(s, "kiwi");
+        await taken(s, "chat");
+        await taken(s, "kiwi");
+        await s.tool("say", { text: "Quiet one, thanks.", answers: "chat" });
+        expect([await reactionOf(s, "chat"), await reactionOf(s, "kiwi")]).toEqual([
+          null,
+          "working",
+        ]);
+        const { chatId } = await started(s, { answers: "kiwi" });
+        await conciergeEnds(s);
+        expect([await reactionOf(s, "chat"), await reactionOf(s, "kiwi")]).toEqual([
+          null,
+          "working",
+        ]);
+        await finishTask(s, chatId);
+        expect(await reactionOf(s, "kiwi")).toBeNull();
+      });
+
+      it("goes away at the answer to the turn's only message, though the turn runs on", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, "g1");
+        const seen = watch(s);
+        await taken(s, "g1");
+        await s.tool("say", { text: "Sunny, 24°" });
+        expect(await reactionOf(s, "g1")).toBeNull();
+        await s.tool("task_list", {});
+        await conciergeEnds(s);
+        expect(seen).toEqual([
+          ["g1", "working"],
+          ["g1", null],
+        ]);
+      });
+
+      it("waits for the turn's end when the turn carries several messages and the answer names none", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, "a");
+        guardianSays(s, "b");
+        await taken(s, "a");
+        await taken(s, "b");
+        await s.tool("say", { text: "Both fine" });
+        expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([
+          "working",
+          "working",
+        ]);
+        await conciergeEnds(s);
+        expect([await reactionOf(s, "a"), await reactionOf(s, "b")]).toEqual([null, null]);
+      });
+
+      it("keeps working while a task started for it runs, until the task is reported", async () => {
+        const s = setup({ said: false });
+        guardianSays(s, "g1");
+        await taken(s, "g1");
+        const { chatId } = await started(s);
+        await s.tool("say", { text: "I'll let you know." });
+        await conciergeEnds(s);
+        expect(await reactionOf(s, "g1")).toBe("working");
+        await finishTask(s, chatId, "completed", { reported: false });
+        expect(await reactionOf(s, "g1")).toBe("working");
+        await reportEnds(s, chatId);
+        expect(await reactionOf(s, "g1")).toBeNull();
+      });
+
+      it("waits for the turn's end when the message reports on a task", async () => {
+        const s = setup({ said: false });
+        s.inTurn("t0");
+        guardianSays(s, "g0", "t0");
+        const { taskId } = await started(s);
+        s.inTurn("concierge-turn-1");
+        guardianSays(s, "g1");
+        await taken(s, "g1");
+        await s.tool("say", { text: "The weather task is done.", task: taskId });
+        expect(await reactionOf(s, "g1")).toBe("working");
+      });
     });
   });
 
