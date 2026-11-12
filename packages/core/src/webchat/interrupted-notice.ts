@@ -3,10 +3,9 @@
 // the list and decides what to continue. Contract: docs/concepts/sessions.md.
 
 import { sql } from "drizzle-orm";
-import { GUARDIAN_OWNER } from "./owner.js";
+import { type ConciergeOwner, GUARDIAN_OWNER } from "./owner.js";
 import { actorOfOwner } from "../access/owner-actor.js";
 import type { ActionEngine } from "../apps/actions/engine.js";
-import type { ConciergeService } from "../concierge/service.js";
 import type { DrizzleDb } from "../db/index.js";
 import {
   actionExecutions,
@@ -219,7 +218,8 @@ export function interruptedNoticeText(
 /** Sends a notice into the guardian's main Concierge chat, as an automated message acting for the guardian. */
 export function conciergeNoticeSender(deps: {
   db: DrizzleDb;
-  concierge: Pick<ConciergeService, "ensureChatId">;
+  /** The Concierge: its main chat for an owner, made when missing. */
+  concierge: { ensureChatId(owner: ConciergeOwner): Promise<string> };
   actions: Pick<ActionEngine, "run">;
 }): (text: string) => Promise<void> {
   return async (text) => {
