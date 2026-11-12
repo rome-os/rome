@@ -42,11 +42,6 @@ import { useInvalidateApps, useUpgradeCandidates, type UpgradeCandidate } from "
 // surfaces. Persistent install errors (`app.error` from the server) are a
 // separate concern rendered by the details page.
 
-interface PublicAccessConfigPayload {
-  allowedApps: string[];
-  cloudEmailAccess: Record<string, string[]>;
-}
-
 interface UninstallTarget {
   app: InstalledAppCard;
   purge: boolean;
@@ -253,9 +248,7 @@ export function useAppLifecycle(
     onSettled: () => setBulkUpgradeAppIds([]),
   });
 
-  // Public/restricted access lives in a separate config endpoint: read the
-  // current policy, update only this app's mode, write it back. Tracked by its
-  // own acting id so it doesn't lock the install/toggle controls.
+  // Tracked by its own acting id so it doesn't lock the install/toggle controls.
   const accessMutation = useMutation({
     mutationFn: async ({
       app,
@@ -266,26 +259,9 @@ export function useAppLifecycle(
       mode: AppAccessMode;
       emails: string[];
     }) => {
-      const config = await fetchJson<PublicAccessConfigPayload>("/api/public-access", {
-        fallback: t("installed.errors.publicAccessLoadFailed", { name: app.displayName }),
-      });
-      const allowedApps = new Set(config.allowedApps);
-      const cloudEmailAccess = { ...config.cloudEmailAccess };
-      allowedApps.delete(app.id);
-      delete cloudEmailAccess[app.id];
-
-      if (mode === "public") {
-        allowedApps.add(app.id);
-      } else if (mode === "cloud-email") {
-        cloudEmailAccess[app.id] = emails;
-      }
-
-      await fetchJson<unknown>("/api/public-access", {
+      await fetchJson<unknown>(`/api/public-access/${encodeURIComponent(app.id)}`, {
         method: "PUT",
-        json: {
-          allowedApps: Array.from(allowedApps).sort(),
-          cloudEmailAccess,
-        } satisfies PublicAccessConfigPayload,
+        json: { mode, emails },
         fallback: t("installed.errors.publicAccessUpdateFailed", { name: app.displayName }),
       });
     },

@@ -4,7 +4,9 @@ import type { DrizzleDb } from "../db/index.js";
 import { settings } from "../db/schema.js";
 import type { Permission, Permissions } from "../access/permissions.js";
 import { normalizeVisitorEmail } from "../access/visitor-email.js";
+import type { AppCatalog } from "./catalog.js";
 import { isValidAppId } from "./packaging/app-id.js";
+import { isResolvedApp } from "./state.js";
 
 /**
  * Who besides the guardian may open each app, as the guardian set it on the
@@ -112,6 +114,112 @@ export async function saveAppPermissionsSetting(
       set: { value: setting, updatedAt: now },
     });
   permissions.replace(appPermissions(setting));
+}
+
+/** Who may open one app, as the app page names it. `emails` is empty unless `mode` is `cloud-email`. */
+export interface AppAccess {
+  mode: AppAccessMode;
+  emails: string[];
+}
+
+export type AppAccessRefusal =
+  | { reason: "unknown-app"; message: string }
+  | { reason: "no-page"; message: string }
+  | { reason: "invalid"; message: string };
+
+export function isAppAccessRefusal(value: object): value is AppAccessRefusal {
+  return "reason" in value;
+}
+
+/** What an app needs for its access to be set: it is installed and has a page. */
+export interface ShareableApps {
+  /** Whether the installed app has a page, or null when no such app is installed. */
+  hasPage(appId: string): boolean | null;
+}
+
+/** Reads installed apps and their pages from the catalog. */
+export function shareableApps(catalog: Pick<AppCatalog, "get">): ShareableApps {
+  return {
+    hasPage(appId) {
+      const view = catalog.get(appId);
+      if (!view) return null;
+      return isResolvedApp(view) && !!view.web;
+    },
+  };
+}
+
+const APP_ACCESS_MODES: readonly AppAccessMode[] = ["private", "public", "cloud-email"];
+
+export function appAccessOf(setting: AppPermissionsSetting, appId: string): AppAccess {
+  const permission = appPermissions(setting).get(appId);
+  if (!permission) return { mode: "private", emails: [] };
+  const mode = appAccessMode(permission);
+  return { mode, emails: mode === "cloud-email" ? [...permission.listedEmails] : [] };
+}
+
+/**
+ * Checks a requested access, normalizing its emails. Refuses an unknown mode,
+ * an email that is not one, and `cloud-email` with no email.
+ */
+export function parseAppAccess(raw: {
+  mode?: unknown;
+  emails?: unknown;
+}): AppAccess | AppAccessRefusal {
+  const mode = raw.mode;
+  if (typeof mode !== "string" || !APP_ACCESS_MODES.includes(mode as AppAccessMode)) {
+    return { reason: "invalid", message: `mode must be one of ${APP_ACCESS_MODES.join(", ")}.` };
+  }
+  if (mode !== "cloud-email") return { mode: mode as AppAccessMode, emails: [] };
+  const given = Array.isArray(raw.emails) ? raw.emails : [];
+  const invalid = given.filter((email) => normalizeVisitorEmail(email) === null);
+  if (invalid.length > 0) {
+    return { reason: "invalid", message: `Not an email: ${invalid.map(String).join(", ")}.` };
+  }
+  const emails = normalizeEmailList(given);
+  if (emails.length === 0) {
+    return { reason: "invalid", message: "cloud-email needs at least one email." };
+  }
+  return { mode: "cloud-email", emails };
+}
+
+/** Whether `after` lets in anyone `before` did not. */
+export function widensAppAccess(before: AppAccess, after: AppAccess): boolean {
+  if (after.mode === "public") return before.mode !== "public";
+  if (after.mode === "private" || before.mode === "public") return false;
+  const allowed = new Set(before.emails);
+  return after.emails.some((email) => !allowed.has(email));
+}
+
+/** Refuses an app that is not installed or has no page. */
+export function checkShareable(apps: ShareableApps, appId: string): AppAccessRefusal | null {
+  const hasPage = apps.hasPage(appId);
+  if (hasPage === null) return { reason: "unknown-app", message: `No installed app "${appId}".` };
+  if (!hasPage) {
+    return { reason: "no-page", message: `App "${appId}" has no page, so it cannot be shared.` };
+  }
+  return null;
+}
+
+/**
+ * Sets who may open one app and leaves every other app's access as it was.
+ * Hands the new permissions to Access before it resolves. Returns the access
+ * before and after the change.
+ */
+export async function setAppAccess(
+  deps: { db: DrizzleDb; permissions: Permissions; apps: ShareableApps },
+  appId: string,
+  access: AppAccess,
+): Promise<{ before: AppAccess; after: AppAccess } | AppAccessRefusal> {
+  const refusal = checkShareable(deps.apps, appId);
+  if (refusal) return refusal;
+  const setting = await loadAppPermissionsSetting(deps.db);
+  const allowedApps = setting.allowedApps.filter((id) => id !== appId);
+  const { [appId]: _dropped, ...cloudEmailAccess } = setting.cloudEmailAccess;
+  if (access.mode === "public") allowedApps.push(appId);
+  if (access.mode === "cloud-email") cloudEmailAccess[appId] = access.emails;
+  const next = { allowedApps: allowedApps.sort(), cloudEmailAccess };
+  await saveAppPermissionsSetting(deps.db, deps.permissions, next);
+  return { before: appAccessOf(setting, appId), after: appAccessOf(next, appId) };
 }
 
 /** Loads the stored setting into Access at startup. */

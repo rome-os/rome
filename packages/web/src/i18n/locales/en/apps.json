@@ -197,7 +197,6 @@
       "uninstallFailed": "Failed to uninstall {{name}}.",
       "publishFailed": "Failed to publish {{name}}.",
       "appUninstallFailed": "App uninstall failed.",
-      "publicAccessLoadFailed": "Failed to load public access settings for {{name}}.",
       "publicAccessUpdateFailed": "Failed to update public access for {{name}}.",
       "publicAccessFailed": "Public access update failed."
     }

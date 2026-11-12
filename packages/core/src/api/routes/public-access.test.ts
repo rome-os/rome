@@ -110,4 +110,60 @@ describe("Public-access API", () => {
       expect(permissions.get("inbox").anyoneWithLink).toBe(false);
     });
   });
+
+  describe("PUT /public-access/:appId", () => {
+    const PAGES: Record<string, boolean> = { "@ray/demo": true, worker: false };
+
+    beforeEach(() => {
+      deps = {
+        ...deps,
+        appCatalog: {
+          get: (appId: string) =>
+            appId in PAGES
+              ? ({ appId, manifest: {}, web: PAGES[appId] ? {} : undefined } as never)
+              : null,
+        } as unknown as ApiDeps["appCatalog"],
+      };
+      app = new Hono().route("/", publicAccessRoutes(deps));
+    });
+
+    const putApp = (appId: string, body: unknown) =>
+      app.request(`/public-access/${encodeURIComponent(appId)}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "sec-fetch-site": "same-origin" },
+        body: JSON.stringify(body),
+      });
+
+    it("sets one app and keeps the others", async () => {
+      await putConfig(JSON.stringify({ allowedApps: ["inbox"], cloudEmailAccess: {} }));
+      const res = await putApp("@ray/demo", { mode: "cloud-email", emails: ["Ada@Example.com"] });
+      expect(res.status).toBe(200);
+      expect(await res.json()).toEqual({
+        before: { mode: "private", emails: [] },
+        after: { mode: "cloud-email", emails: ["ada@example.com"] },
+      });
+      expect(await (await app.request("/public-access")).json()).toEqual({
+        allowedApps: ["inbox"],
+        cloudEmailAccess: { "@ray/demo": ["ada@example.com"] },
+      });
+      expect([...permissions.get("@ray/demo").listedEmails]).toEqual(["ada@example.com"]);
+    });
+
+    it("refuses an unknown app, an app with no page, and a bad request", async () => {
+      expect((await putApp("missing", { mode: "public" })).status).toBe(404);
+      expect((await putApp("worker", { mode: "public" })).status).toBe(409);
+      expect((await putApp("@ray/demo", { mode: "everyone" })).status).toBe(400);
+      expect((await putApp("@ray/demo", { mode: "cloud-email", emails: [] })).status).toBe(400);
+      expect(permissions.get("@ray/demo").anyoneWithLink).toBe(false);
+    });
+
+    it("refuses a cross-site request", async () => {
+      const res = await app.request("/public-access/%40ray%2Fdemo", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", "sec-fetch-site": "cross-site" },
+        body: JSON.stringify({ mode: "public" }),
+      });
+      expect(res.status).toBe(403);
+    });
+  });
 });

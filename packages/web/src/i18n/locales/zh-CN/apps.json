@@ -197,7 +197,6 @@
       "uninstallFailed": "卸载 {{name}} 失败。",
       "publishFailed": "发布 {{name}} 失败。",
       "appUninstallFailed": "应用卸载失败。",
-      "publicAccessLoadFailed": "加载 {{name}} 的公开访问设置失败。",
       "publicAccessUpdateFailed": "更新 {{name}} 的公开访问失败。",
       "publicAccessFailed": "公开访问更新失败。"
     }

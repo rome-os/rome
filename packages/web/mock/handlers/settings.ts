@@ -441,6 +441,16 @@ export const settingsHandlers = [
     publicAccess.config = (await request.json()) as PublicAccessConfig;
     return HttpResponse.json(publicAccess.config);
   }),
+  http.put("/api/public-access/:appId", async ({ params, request }) => {
+    const appId = String(params.appId);
+    const { mode, emails } = (await request.json()) as { mode: string; emails: string[] };
+    const { [appId]: _dropped, ...cloudEmailAccess } = publicAccess.config.cloudEmailAccess;
+    const allowedApps = publicAccess.config.allowedApps.filter((id) => id !== appId);
+    if (mode === "public") allowedApps.push(appId);
+    if (mode === "cloud-email") cloudEmailAccess[appId] = emails;
+    publicAccess.config = { allowedApps, cloudEmailAccess };
+    return HttpResponse.json({ ok: true });
+  }),
   http.get("/api/dashboard-access", () => HttpResponse.json(dashboardAccess)),
   http.put("/api/dashboard-access", async ({ request }) => {
     const body = (await request.json()) as { cloudEmailAccess: string[] };

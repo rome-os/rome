@@ -258,7 +258,8 @@ import { HostExecutionService } from "./apps/host-execution/service.js";
 import { createHostWorkerRecovery } from "./apps/host-execution/worker-recovery.js";
 import { resolveAutoUpgradeEnabled } from "./instance/auto-upgrade-gate.js";
 import { Permissions } from "./access/permissions.js";
-import { loadAppPermissions } from "./apps/app-permissions.js";
+import { registerAppAccessActions } from "./apps/app-access-actions.js";
+import { loadAppPermissions, shareableApps } from "./apps/app-permissions.js";
 import { DashboardAccessState } from "./access/dashboard-access-state.js";
 import { DashboardAccessStore } from "./access/dashboard-access-store.js";
 import {
@@ -2064,6 +2065,12 @@ async function main() {
       error: err instanceof Error ? err.message : String(err),
     });
   }
+  registerAppAccessActions(actionRegistry, {
+    db,
+    permissions,
+    apps: shareableApps(appCatalog),
+    ownerOfChat: (chatId) => concierge.ownerOfChat(chatId),
+  });
   const dashboardAccessStore = new DashboardAccessStore(settingsRepo);
   const visitorAllowListSync = new VisitorAllowListSync({
     raiseRevisionPast: (floor) => dashboardAccessStore.raisePast(floor),
