@@ -571,6 +571,16 @@
         }
       }
     },
+    "Back to %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回到 %@"
+          }
+        }
+      }
+    },
     "Back to chat" : {
       "localizations" : {
         "zh-Hans" : {
@@ -761,6 +771,16 @@
         }
       }
     },
+    "Check my inbox every hour and only ping me for urgent emails." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每小时看一下我的邮箱，只有紧急邮件才通知我。"
+          }
+        }
+      }
+    },
     "Check off habits every day" : {
       "localizations" : {
         "zh-Hans" : {
@@ -817,6 +837,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "关闭"
+          }
+        }
+      }
+    },
+    "Compare the best noise-cancelling headphones under $300." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对比一下 $300 以内最好的降噪耳机。"
           }
         }
       }
@@ -1101,6 +1131,16 @@
         }
       }
     },
+    "Daily brief" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每日早报"
+          }
+        }
+      }
+    },
     "Dark" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1207,6 +1247,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "事件例程"
+          }
+        }
+      }
+    },
+    "Every weekday at 8am, send me a brief of today's calendar and important emails." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每个工作日早上 8 点，给我发一份今天的日程和重要邮件简报。"
           }
         }
       }
@@ -1357,6 +1407,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "身高"
+          }
+        }
+      }
+    },
+    "How I slept" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "昨晚睡得怎样"
+          }
+        }
+      }
+    },
+    "How did I sleep last night?" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "我昨晚睡得怎么样？"
           }
         }
       }
@@ -1565,6 +1635,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "做一个新应用"
+          }
+        }
+      }
+    },
+    "Make an app" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "做个 App"
+          }
+        }
+      }
+    },
+    "Make an app to track my workouts, with a weekly chart." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "做一个记录我锻炼的 App，带每周图表。"
           }
         }
       }
@@ -2259,6 +2349,16 @@
         }
       }
     },
+    "Puts it in the message box." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "放进输入框。"
+          }
+        }
+      }
+    },
     "Read only when your Rome asks. Never changed." : {
       "localizations" : {
         "zh-Hans" : {
@@ -2405,6 +2505,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "回复这个任务"
+          }
+        }
+      }
+    },
+    "Research" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "帮我调研"
           }
         }
       }
@@ -2901,16 +3011,6 @@
         }
       }
     },
-    "Shows the message in Chat." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 Chat 里查看"
-          }
-        }
-      }
-    },
     "Sign in again" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3321,6 +3421,16 @@
         }
       }
     },
+    "Tell me when the price of ___ drops below $___." : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "___ 的价格降到 $___ 以下时告诉我。"
+          }
+        }
+      }
+    },
     "The latest is %@." : {
       "localizations" : {
         "zh-Hans" : {
@@ -3701,6 +3811,16 @@
         }
       }
     },
+    "Urgent emails only" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "只提醒急事"
+          }
+        }
+      }
+    },
     "Usage resets automatically" : {
       "localizations" : {
         "zh-Hans" : {
@@ -3735,6 +3855,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "用了 %lld 个工具"
+          }
+        }
+      }
+    },
+    "Uses" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "用法"
           }
         }
       }
@@ -3805,6 +3935,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "步行心率"
+          }
+        }
+      }
+    },
+    "Watch a price" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "盯个价格"
           }
         }
       }

@@ -103,7 +103,7 @@ Debug builds read these environment variables (set them in the scheme's Run opti
 | `ROME_DEMO=many-apps` | Opens the demo data with a screenful of apps, for the Apps grid. |
 | `ROME_LOCAL_ORIGIN`, `ROME_LOCAL_USER`, `ROME_LOCAL_PASSWORD` | Signs in to a Rome on this Mac with a local test guardian instead of Rome Cloud. |
 
-The stacking game ("Build Rome") opens from the update page while a Rome upgrades, or with ten quick taps on Chat's mascot. To reach the update entry without a real upgrade, launch with `ROME_DEMO=update` and tap "Update now": the demo upgrade runs for about 8 seconds, and "Play a game" shows under its status line. The best score stays on the device, across sign-out.
+The stacking game ("Build Rome") opens from the update page while a Rome upgrades, or with ten quick taps on the big mascot of the Agent page (a tap on a chat header's mascot opens it). To reach the update entry without a real upgrade, launch with `ROME_DEMO=update` and tap "Update now": the demo upgrade runs for about 8 seconds, and "Play a game" shows under its status line. The best score stays on the device, across sign-out.
 
 To run a local Rome for this, start core with its own profile so it does not touch `~/.rome/default`:
 

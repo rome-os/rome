@@ -198,6 +198,20 @@ struct SettingsScreen: View {
                         }
                         .transition(.opacity)
                     }
+                    // The main Chat's links: its header has no "…" menu. A
+                    // visitor's own links too, as a message's Share makes them.
+                    if workspace.mainChatShare != nil {
+                        Button {
+                            Task { await workspace.openMainChatLinks() }
+                        } label: {
+                            SettingsRow(systemImage: "link", title: "Shared links") {
+                                Image(systemName: "chevron.right")
+                                    .romeFont(13, .semibold)
+                                    .foregroundStyle(Palette.sub)
+                            }
+                        }
+                        .buttonStyle(RowPressStyle())
+                    }
                     Button {
                         if let url = model.webURL { openInstancePage(url) }
                     } label: {
@@ -273,6 +287,9 @@ struct SettingsScreen: View {
                 .presentationBackground(Palette.sheet)
                 .presentationCornerRadius(22)
         }
+        .sharedLinksSheet(workspace.concierge.share, isPresented: Binding(get: { workspace.showsMainChatLinks }, set: { workspace.showsMainChatLinks = $0 }))
+        // Closed with Settings, so it never comes back with it.
+        .onDisappear { workspace.showsMainChatLinks = false }
     }
 
     private var accountCard: some View {

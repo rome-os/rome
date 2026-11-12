@@ -5,7 +5,10 @@ import UIKit
 /// A screen change the snapshot runner asks the shell for.
 enum DebugCommand: Equatable {
     case drawer(Bool)
-    case tasks(Bool)
+    /// The Agent page on a tab, opened from the main Chat; nil closes it.
+    case agent(AgentTab?)
+    /// Pages pushed inside the open Agent page.
+    case agentRoute([Route])
     case route([Route])
     /// One of the drawer's pages as the root, with nothing pushed.
     case section(MainSection)
@@ -104,8 +107,14 @@ enum SnapshotRunner {
             await capture("05-drawer", style: styleName, in: directory) { model.debugCommand = .drawer(true) }
             model.debugCommand = .drawer(false)
             try? await Task.sleep(for: .seconds(0.8))
-            await capture("06-tasks", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .tasks(true) }
-            model.debugCommand = .tasks(false)
+            await capture("06-tasks", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.tasks) }
+            await capture("06b-agent-task-chat", style: styleName, in: directory, wait: 2) {
+                model.debugCommand = .agentRoute([.taskChat(chatId: "chat-price", title: "价格追踪：发提醒邮件")])
+            }
+            model.debugCommand = .agentRoute([])
+            try? await Task.sleep(for: .seconds(0.8))
+            await capture("57-agent-uses", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .agent(.uses) }
+            model.debugCommand = .agent(nil)
             try? await Task.sleep(for: .seconds(0.8))
             await capture("07-task-approval", style: styleName, in: directory, wait: 2) {
                 model.debugCommand = .route([.taskChat(chatId: "chat-price", title: "价格追踪：发提醒邮件")])
@@ -120,6 +129,11 @@ enum SnapshotRunner {
                 model.debugCommand = .route([.taskChat(chatId: "chat-notion", title: "同步 Notion 数据库")])
             }
             await capture("11-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([]) }
+            await capture("11b-settings-shared-links", style: styleName, in: directory, wait: 1.2) {
+                Task { await model.workspace?.openMainChatLinks() }
+            }
+            model.workspace?.showsMainChatLinks = false
+            try? await Task.sleep(for: .seconds(0.6))
             await capture("27-settings-notifications-on", style: styleName, in: directory, wait: 1.2) {
                 model.push.debugSet(permission: .on, dismissedAt: .now)
                 model.debugCommand = .settings(nil)
@@ -325,10 +339,10 @@ enum SnapshotRunner {
                 model.openDemo(.empty)
                 Task {
                     try? await Task.sleep(for: .seconds(0.8))
-                    model.debugCommand = .tasks(true)
+                    model.debugCommand = .agent(.tasks)
                 }
             }
-            model.debugCommand = .tasks(false)
+            model.debugCommand = .agent(nil)
             try? await Task.sleep(for: .seconds(0.6))
             model.dynamicTypeOverride = .xxLarge
             await capture("19-chat-xxl", style: styleName, in: directory, wait: 2) { model.openDemo() }
@@ -426,8 +440,8 @@ enum SnapshotRunner {
             }
             try? await Task.sleep(for: .seconds(4))
             await capture("live-04-replied", style: "live", in: directory) {}
-            await capture("live-05-tasks", style: "live", in: directory, wait: 2) { model.debugCommand = .tasks(true) }
-            model.debugCommand = .tasks(false)
+            await capture("live-05-tasks", style: "live", in: directory, wait: 2) { model.debugCommand = .agent(.tasks) }
+            model.debugCommand = .agent(nil)
             try? await Task.sleep(for: .seconds(0.8))
             if let task = workspace.tasks.tasks.first(where: { $0.chat != nil }), let chat = task.chat {
                 await capture("live-06-task", style: "live", in: directory, wait: 3) {

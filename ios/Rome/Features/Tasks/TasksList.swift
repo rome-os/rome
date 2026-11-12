@@ -1,33 +1,17 @@
 import SwiftUI
 
-/// Board 5: the Concierge's tasks, grouped by what they need from the guardian.
-struct TasksSheet: View {
+/// Board 5: the Concierge's tasks in one chat, grouped by what they need
+/// from the guardian. The Agent page's Tasks tab.
+struct TasksList: View {
     let store: TasksStore
     /// The Concierge chat whose tasks it lists: the main chat or a topic chat.
     let chatId: String
     let onOpen: (ConciergeTask) -> Void
 
-    @Environment(\.dismiss) private var dismiss
     @State private var showAllDone = false
 
     var body: some View {
         VStack(spacing: 0) {
-            Capsule()
-                .fill(Palette.grabber)
-                .frame(width: 36, height: 5)
-                .padding(.top, 7)
-            HStack {
-                Text("Tasks")
-                    .romeFont(24, .bold)
-                    .tracking(-0.6)
-                    .accessibilityAddTraits(.isHeader)
-                Spacer()
-                SheetCloseButton { dismiss() }
-            }
-            .padding(.leading, 20)
-            .padding(.trailing, 12)
-            .frame(height: 54)
-
             let groups = store.groups(inChat: chatId, showAllDone: showAllDone)
             if !store.loaded {
                 Spacer()
@@ -51,7 +35,7 @@ struct TasksSheet: View {
                 .scrollIndicators(.hidden)
             }
         }
-        .background(Palette.sheet.ignoresSafeArea())
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { await store.refresh() }
     }
 
@@ -115,60 +99,68 @@ struct TasksSheet: View {
 }
 
 /// One task: its title and one muted line. A task waiting on the guardian has
-/// a small dot before its title.
+/// a small dot before its title. A task with a chat opens it; one without is
+/// only read, with no chevron and nothing to press.
 struct TaskRow: View {
     let task: ConciergeTask
     let status: TaskRowStatus
     let last: Bool
     let action: () -> Void
 
-    private var tappable: Bool { task.chat != nil || task.sourceMessageId != nil }
+    /// Only a task with its own chat opens anything.
+    nonisolated static func opens(_ task: ConciergeTask) -> Bool { task.chat != nil }
 
     var body: some View {
-        Button(action: action) {
-            HStack(spacing: 10) {
-                VStack(alignment: .leading, spacing: 3) {
-                    HStack(alignment: .firstTextBaseline, spacing: 7) {
-                        if status == .waiting {
-                            Circle()
-                                .fill(Palette.sub)
-                                .frame(width: 6, height: 6)
-                                .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
-                                .accessibilityHidden(true)
-                        }
-                        Text(task.title)
-                            .romeFont(16, .medium)
-                            .tracking(-0.3)
-                            .foregroundStyle(Palette.fg)
-                            .lineLimit(2)
-                            .multilineTextAlignment(.leading)
-                    }
-                    let line = TasksStore.rowLine(task, status: status, now: .now)
-                    if !line.isEmpty {
-                        Text(line)
-                            .romeFont(13)
-                            .foregroundStyle(Palette.sub)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer(minLength: 0)
-                if tappable {
-                    Image(systemName: "chevron.right")
-                        .romeFont(11, .bold)
-                        .foregroundStyle(Palette.sub)
-                }
-            }
-            .padding(.vertical, 12)
-            .padding(.leading, 16)
-            .padding(.trailing, 12)
-            .overlay(alignment: .bottom) {
-                if !last { Rectangle().fill(Palette.hair).frame(height: 0.5).padding(.leading, 16) }
-            }
-            .contentShape(Rectangle())
+        if Self.opens(task) {
+            Button(action: action) { content(chevron: true) }
+                .buttonStyle(RowPressStyle())
+                .accessibilityElement(children: .combine)
+                .accessibilityHint(Text("Opens the task chat."))
+        } else {
+            content(chevron: false)
+                .accessibilityElement(children: .combine)
         }
-        .buttonStyle(RowPressStyle())
-        .disabled(!tappable)
-        .accessibilityElement(children: .combine)
-        .accessibilityHint(task.chat != nil ? String(localized: "Opens the task chat.") : (task.sourceMessageId != nil ? String(localized: "Shows the message in Chat.") : ""))
+    }
+
+    private func content(chevron: Bool) -> some View {
+        HStack(spacing: 10) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(alignment: .firstTextBaseline, spacing: 7) {
+                    if status == .waiting {
+                        Circle()
+                            .fill(Palette.sub)
+                            .frame(width: 6, height: 6)
+                            .alignmentGuide(.firstTextBaseline) { $0[.bottom] - 1 }
+                            .accessibilityHidden(true)
+                    }
+                    Text(task.title)
+                        .romeFont(16, .medium)
+                        .tracking(-0.3)
+                        .foregroundStyle(Palette.fg)
+                        .lineLimit(2)
+                        .multilineTextAlignment(.leading)
+                }
+                let line = TasksStore.rowLine(task, status: status, now: .now)
+                if !line.isEmpty {
+                    Text(line)
+                        .romeFont(13)
+                        .foregroundStyle(Palette.sub)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            if chevron {
+                Image(systemName: "chevron.right")
+                    .romeFont(11, .bold)
+                    .foregroundStyle(Palette.sub)
+            }
+        }
+        .padding(.vertical, 12)
+        .padding(.leading, 16)
+        .padding(.trailing, 12)
+        .overlay(alignment: .bottom) {
+            if !last { Rectangle().fill(Palette.hair).frame(height: 0.5).padding(.leading, 16) }
+        }
+        .contentShape(Rectangle())
     }
 }

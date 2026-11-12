@@ -1,13 +1,16 @@
+import NaturalLanguage
 import SwiftUI
 import UIKit
 
 /// How the game was opened: from the update page, which keeps its status
-/// in a strip at the top, or from the chat header's mascot.
+/// in a strip at the top, or from the Agent page's mascot.
 struct StackGameLaunch: Identifiable, Equatable {
     enum Sample: Equatable { case start, playing, over }
 
     let id = UUID()
     var fromUpdate = false
+    /// Opened from the Agent page: its name, which the way back names.
+    var backTo: String? = nil
     /// A fixed game for the snapshot runner: nothing moves and the best
     /// score on this device is neither read nor written.
     var sample: Sample? = nil
@@ -32,6 +35,8 @@ struct StackGameScreen: View {
     /// The HUD capsule's bottom edge on screen, measured: the end's label
     /// and the fitted tower stay below it.
     @State private var hudBottom: CGFloat?
+    /// The bottom safe area: the ground's art centers above it.
+    @State private var bottomInset: CGFloat = 0
     /// The mascot's bubble on screen while it shows: part of the tap target.
     @State private var bubbleFrame: CGRect?
     /// The Colosseum on the horizon, built once for the page's width and
@@ -65,10 +70,10 @@ struct StackGameScreen: View {
     static let tumbleTime: TimeInterval = 0.9
     static let fitDelay: TimeInterval = 0.5
     static let fitTime: TimeInterval = 0.9
-    static let toastFrom: TimeInterval = 0.25
-    static let toastTime: TimeInterval = 1.2
+    nonisolated static let toastFrom: TimeInterval = 0.25
+    nonisolated static let toastTime: TimeInterval = 1.2
     /// After the toast, the mascot offers another game.
-    static var againAfter: TimeInterval { toastFrom + toastTime }
+    nonisolated static var againAfter: TimeInterval { toastFrom + toastTime }
     /// How long after the end something still moves: the tumble, the camera
     /// easing out, the label fading in, then the bubble appearing.
     static var endLife: TimeInterval { max(tumbleTime, fitDelay + fitTime, toastFrom + 0.3, againAfter) + 0.05 }
@@ -115,6 +120,7 @@ struct StackGameScreen: View {
             }
         }
         .overlay(alignment: .top) { topBar }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.bottom } action: { bottomInset = $0 }
         // A run left part way still counts toward the best: closed, or the
         // app sent to the background.
         .onDisappear(perform: saveBest)
@@ -235,7 +241,7 @@ struct StackGameScreen: View {
                 // The ground: the Colosseum and a giant "Rome", like a site
                 // footer's logo, dissolving into the ground.
                 anchored(at: CGPoint(x: size.width / 2, y: layout.y(0)), alignment: .top) {
-                    GroundArt(width: min(size.width, Metrics.readableWidth) - Metrics.pagePadding * 2)
+                    GroundArt(width: min(size.width, Metrics.readableWidth) - Metrics.pagePadding * 2, band: size.height * (1 - Self.groundShare) - bottomInset)
                         .equatable()
                 }
                 if game.phase == .ready {
@@ -258,17 +264,15 @@ struct StackGameScreen: View {
                         // part of the frame worth a screenshot.
                         let towerTop = layout.y(CGFloat(game.tower.count) * StackGame.blockHeight)
                         let above = hudBottom ?? size.height * Self.fitTopShare - 24
-                        // Two lines at most, centered, where a narrow window needs them.
-                        Text("Rome wasn't built in a day.")
-                            .romeFont(18, .semibold)
-                            .foregroundStyle(Palette.fg)
-                            .multilineTextAlignment(.center)
-                            .lineLimit(2)
-                            .frame(maxWidth: min(size.width - 48, 360))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .position(x: size.width / 2, y: (above + towerTop) / 2)
-                            .opacity(reduceMotion ? 1 : min((age - Self.toastFrom) / 0.3, 1))
-                            .accessibilityHidden(true)
+                        // Its words land like blocks, one by one; centered,
+                        // on two lines where a narrow window needs them.
+                        EndLine(age: age - Self.toastFrom, still: reduceMotion || frozen) {
+                            if !reduceMotion { dropHaptic.impactOccurred(intensity: 0.6) }
+                        }
+                        .frame(maxWidth: min(size.width - 48, 360))
+                        .fixedSize(horizontal: false, vertical: true)
+                        .position(x: size.width / 2, y: (above + towerTop) / 2)
+                        .accessibilityHidden(true)
                     }
                 }
                 ForEach(effects.floats) { float in
@@ -604,9 +608,11 @@ struct StackGameScreen: View {
     // MARK: Over the field
 
     /// Where closing goes: the update page while it still covers the app,
-    /// else the chat.
+    /// the Agent page it was opened from, else the chat.
     private var backTitle: LocalizedStringKey {
-        launch.fromUpdate && model.update.blocking ? "Back to update" : "Back to chat"
+        if launch.fromUpdate && model.update.blocking { return "Back to update" }
+        if let backTo = launch.backTo { return "Back to \(backTo)" }
+        return "Back to chat"
     }
 
     private var topBar: some View {
@@ -667,17 +673,156 @@ struct StackGameScreen: View {
     }
 }
 
+/// The end line, "Rome wasn't built in a day.", whose words drop in one
+/// after another and land with a small bounce and a tick, like blocks. The
+/// game's clock drives it (`age` is the time since it began), so it moves
+/// only while the end's frames run. `still` shows it whole at once.
+struct EndLine: View {
+    let age: TimeInterval
+    let still: Bool
+    /// A word has just landed.
+    let onLand: () -> Void
+
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+    /// One word's fall, and how high above its place it starts.
+    nonisolated static let fall: TimeInterval = 0.42
+    nonisolated static let height: CGFloat = 26
+    /// The share of the fall spent dropping; the rest is the bounce.
+    nonisolated static let landsAt = 0.6
+
+    /// The line's words: by word, or by phrase in Chinese, each with the
+    /// punctuation after it.
+    nonisolated static func words(_ line: String) -> [String] {
+        let tokenizer = NLTokenizer(unit: .word)
+        tokenizer.string = line
+        let starts = tokenizer.tokens(for: line.startIndex..<line.endIndex).map(\.lowerBound)
+        guard !starts.isEmpty else { return [line] }
+        return starts.indices.map { index in
+            let end = index + 1 < starts.count ? starts[index + 1] : line.endIndex
+            let from = index == 0 ? line.startIndex : starts[index]
+            return String(line[from..<end]).trimmingCharacters(in: .whitespaces)
+        }
+        .filter { !$0.isEmpty }
+    }
+
+    /// When the `index`th of `count` words starts to fall: all of them have
+    /// landed within the toast's time.
+    nonisolated static func start(of index: Int, count: Int) -> TimeInterval {
+        guard count > 1 else { return 0 }
+        let gap = min(0.14, (StackGameScreen.toastTime - fall) / Double(count - 1))
+        return Double(index) * gap
+    }
+
+    /// How many words have landed by `age`.
+    nonisolated static func landed(at age: TimeInterval, count: Int) -> Int {
+        (0..<count).filter { age >= start(of: $0, count: count) + fall * landsAt }.count
+    }
+
+    /// A word's height above its place and its opacity, `time` into its fall.
+    nonisolated static func pose(at time: TimeInterval) -> (lift: CGFloat, opacity: Double) {
+        let progress = min(max(time / fall, 0), 1)
+        let opacity = min(progress / 0.2, 1)
+        if progress < landsAt {
+            let drop = progress / landsAt
+            return (height * (1 - drop * drop), opacity)
+        }
+        let bounce = (progress - landsAt) / (1 - landsAt)
+        return (4 * sin(bounce * .pi), opacity)
+    }
+
+    var body: some View {
+        let line = String(localized: "Rome wasn't built in a day.")
+        let words = Self.words(line)
+        let spaced = line.contains(" ")
+        let space = spaced ? (" " as NSString).size(withAttributes: [.font: UIFont.systemFont(ofSize: ScaledFont.scaled(18, for: dynamicTypeSize), weight: .semibold)]).width : 0
+        CenteredFlow(spacing: space, lineSpacing: 2) {
+            ForEach(Array(words.enumerated()), id: \.offset) { index, word in
+                let pose = still ? (lift: CGFloat(0), opacity: 1.0) : Self.pose(at: age - Self.start(of: index, count: words.count))
+                Text(verbatim: word)
+                    .romeFont(18, .semibold)
+                    .foregroundStyle(Palette.fg)
+                    .offset(y: -pose.lift)
+                    .opacity(pose.opacity)
+            }
+        }
+        .onChange(of: still ? 0 : Self.landed(at: age, count: words.count)) { old, new in
+            if new > old { onLand() }
+        }
+    }
+}
+
+/// Lays words out in centered lines, wrapping where the width runs out.
+struct CenteredFlow: Layout {
+    var spacing: CGFloat
+    var lineSpacing: CGFloat
+
+    private func lines(_ sizes: [CGSize], width: CGFloat) -> [[Int]] {
+        var lines: [[Int]] = [[]]
+        var used: CGFloat = 0
+        for (index, size) in sizes.enumerated() {
+            let needed = lines[lines.count - 1].isEmpty ? size.width : used + spacing + size.width
+            if needed > width, !lines[lines.count - 1].isEmpty {
+                lines.append([index])
+                used = size.width
+            } else {
+                lines[lines.count - 1].append(index)
+                used = needed
+            }
+        }
+        return lines
+    }
+
+    private func lineWidth(_ line: [Int], _ sizes: [CGSize]) -> CGFloat {
+        line.map { sizes[$0].width }.reduce(0, +) + spacing * CGFloat(max(line.count - 1, 0))
+    }
+
+    private func lineHeight(_ line: [Int], _ sizes: [CGSize]) -> CGFloat {
+        line.map { sizes[$0].height }.max() ?? 0
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        let laid = lines(sizes, width: proposal.width ?? .infinity)
+        let width = laid.map { lineWidth($0, sizes) }.max() ?? 0
+        let height = laid.map { lineHeight($0, sizes) }.reduce(0, +) + lineSpacing * CGFloat(max(laid.count - 1, 0))
+        return CGSize(width: width, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        let sizes = subviews.map { $0.sizeThatFits(.unspecified) }
+        var y = bounds.minY
+        for line in lines(sizes, width: bounds.width) {
+            var x = bounds.midX - lineWidth(line, sizes) / 2
+            let height = lineHeight(line, sizes)
+            for index in line {
+                subviews[index].place(at: CGPoint(x: x, y: y + height / 2), anchor: .leading, proposal: .unspecified)
+                x += sizes[index].width + spacing
+            }
+            y += height + lineSpacing
+        }
+    }
+}
+
 /// The ground's art: a giant "Rome" in the opening screen's wordmark family
 /// at a heavy weight, as wide as the page allows, fluted like a column. It
 /// dissolves into the ground toward its baseline. Drawn once per width: the
 /// camera only moves it. Decoration only.
 struct GroundArt: View, Equatable {
     let width: CGFloat
+    /// The ground seen at rest: from its edge to the bottom safe area.
+    let band: CGFloat
 
     /// Tight, as the opening screen's wordmark sets it.
     static let tracking: CGFloat = -0.02
-    /// The letters' tops sit this far under the ground's edge.
-    static let letterTop: CGFloat = 14
+    /// The least room between the ground's edge and the letters' tops.
+    nonisolated static let minLetterTop: CGFloat = 14
+
+    /// How far under the ground's edge the letters' tops sit: centered in
+    /// the band, from their tops to the baseline where they are gone.
+    nonisolated static func letterTop(capHeight: CGFloat, band: CGFloat) -> CGFloat {
+        max(minLetterTop, ((band - capHeight) / 2).rounded())
+    }
 
     /// The point size at which the word spans `width`, measured, since a
     /// shrink-to-fit misjudges the tight tracking and cuts the last letter.
@@ -688,12 +833,13 @@ struct GroundArt: View, Equatable {
         return (probe * width / measured).rounded(.down)
     }
 
-    nonisolated static func == (a: GroundArt, b: GroundArt) -> Bool { a.width == b.width }
+    nonisolated static func == (a: GroundArt, b: GroundArt) -> Bool { a.width == b.width && a.band == b.band }
 
     var body: some View {
         let size = Self.size(for: width)
         let font = UIFont.systemFont(ofSize: size, weight: .heavy)
-        let baseline = (Self.letterTop + font.capHeight).rounded()
+        let letterTop = Self.letterTop(capHeight: font.capHeight, band: band)
+        let baseline = (letterTop + font.capHeight).rounded()
         let height = baseline + 2
         Canvas { canvas, _ in
             let word = canvas.resolve(
@@ -724,7 +870,7 @@ struct GroundArt: View, Equatable {
         .frame(width: width, height: height)
         .mask {
             // Whole down to the middle of the letters, gone by their baseline.
-            LinearGradient(stops: [.init(color: .black, location: (Self.letterTop + font.capHeight * 0.45) / height), .init(color: .clear, location: baseline / height)], startPoint: .top, endPoint: .bottom)
+            LinearGradient(stops: [.init(color: .black, location: (letterTop + font.capHeight * 0.45) / height), .init(color: .clear, location: baseline / height)], startPoint: .top, endPoint: .bottom)
         }
         .allowsHitTesting(false)
         .accessibilityHidden(true)
