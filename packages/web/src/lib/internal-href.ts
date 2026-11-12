@@ -30,3 +30,16 @@ export function toInternalPath(href: string): string {
     return href;
   }
 }
+
+/**
+ * The raw path, query and hash of an href `isInternalHref` accepted, without
+ * the canonicalization `new URL().pathname` applies. A leading `/`, `#` or `?`
+ * href is already just that; an absolute same-origin URL has its scheme and
+ * authority sliced off verbatim. A schemeless relative href has no such path
+ * and gives null.
+ */
+export function getInternalRawPath(href: string): string | null {
+  if (href.startsWith("/") || href.startsWith("#") || href.startsWith("?")) return href;
+  const authority = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(href);
+  return authority ? href.slice(authority[0].length) || "/" : null;
+}

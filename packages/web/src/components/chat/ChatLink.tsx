@@ -1,12 +1,14 @@
-import { useContext } from "react";
+import { useContext, type ReactNode } from "react";
 import { MarkdownLink, MARKDOWN_LINK_CLASS, type MarkdownLinkProps } from "@/components/markdown";
 import { resolveAppToOpen } from "@/lib/chat-helpers";
 import { decodeFileBrowserRoutePath } from "@/lib/file-browser-routing";
-import { isInternalHref } from "@/lib/internal-href";
+import { getInternalRawPath, isInternalHref } from "@/lib/internal-href";
 import { autoPlaceApp } from "@/pages/free/use-free-cells";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
-import { InsideLinkContext } from "./ChatImage";
+import { parseAssetHref } from "@/lib/asset-links";
+import { ChatMedia, InsideLinkContext } from "./ChatImage";
+import { FileChip } from "./FileChip";
 
 // The link renderer for markdown rendered inside the chat workspace. It keeps
 // the generic Markdown component workspace-agnostic: the special-casing for the
@@ -67,18 +69,6 @@ function getProjectsRouteHref(href: string): string | null {
 function stripQueryAndFragment(path: string): string {
   const cut = path.search(/[?#]/);
   return cut === -1 ? path : path.slice(0, cut);
-}
-
-// The raw path+query+hash of an href `isInternalHref` accepted, without the
-// canonicalization `new URL().pathname` applies. A leading `/`, `#` or `?` href
-// is already just that path; an absolute same-origin URL has its scheme and
-// authority sliced off verbatim. A schemeless relative href like `foo/bar`
-// (which `isInternalHref` also accepts) is never a `/projects` route, so it
-// resolves to null here.
-function getInternalRawPath(href: string): string | null {
-  if (href.startsWith("/") || href.startsWith("#") || href.startsWith("?")) return href;
-  const authority = /^[a-z][a-z0-9+.-]*:\/\/[^/?#]*/i.exec(href);
-  return authority ? href.slice(authority[0].length) || "/" : null;
 }
 
 // The markdown pipeline percent-encodes hrefs (micromark's normalizeUri), so a
@@ -154,29 +144,22 @@ function WorkspaceLink({
 }
 
 // A link to a stored file (`/api/assets/<id>.<ext>`, relative or same-origin)
-// is a plain anchor in a new tab. It is a file, not a route, so a react-router
-// `<Link>` would navigate the SPA to it.
-function isAssetHref(href: string): boolean {
-  if (!isInternalHref(href)) return false;
-  const rawPath = getInternalRawPath(href);
-  return rawPath !== null && rawPath.startsWith("/api/assets/");
+// is the file itself, never a route: a react-router `<Link>` would navigate the
+// SPA to it. A video or audio file plays in place, anything else is a chip.
+function AssetLink({ children, href }: MarkdownLinkProps) {
+  const asset = parseAssetHref(href);
+  if (!href || !asset) return null;
+  const label = linkText(children) || href.split("/").at(-1) || href;
+  if (asset.kind === "video" || asset.kind === "audio") {
+    return <ChatMedia src={asset.path} kind={asset.kind} label={label} />;
+  }
+  return <FileChip href={href} label={label} download={asset.kind !== "pdf"} />;
 }
 
-function AssetLink({
-  children,
-  href,
-  node: _node,
-  target: _target,
-  rel: _rel,
-  className: _className,
-  ref: _ref,
-  ...rest
-}: MarkdownLinkProps) {
-  return (
-    <a href={href} target="_blank" rel="noopener" className={MARKDOWN_LINK_CLASS} {...rest}>
-      {children}
-    </a>
-  );
+function linkText(children: ReactNode): string {
+  if (typeof children === "string" || typeof children === "number") return String(children);
+  if (Array.isArray(children)) return children.map(linkText).join("");
+  return "";
 }
 
 // A picture inside the link leaves the tap to the link.
@@ -196,7 +179,7 @@ function ChatLinkTarget(props: MarkdownLinkProps) {
   const eventBus = useWorkspaceEventBus();
   const href = props.href;
 
-  if (href && isAssetHref(href)) return <AssetLink {...props} />;
+  if (parseAssetHref(href)) return <AssetLink {...props} />;
 
   if (store && href) {
     const projectsHref = getProjectsRouteHref(href);

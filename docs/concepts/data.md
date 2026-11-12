@@ -35,16 +35,17 @@ Projects are working directories where the agent does its work — writing code,
 
 - **[App](apps.md#rome-apps)** — an app is an installed extension package. A project is a working directory the agent operates in.
 
-## Chat uploads
+## Chat files
 
-A file the guardian attaches in chat is copied into the profile's `assets` folder under a new random name, so it never overwrites or replaces another file.
+A file shown in a dashboard chat is a copy in the profile's `assets` folder under a new random name, so it never overwrites or replaces another file. Two things put files there: a file the guardian attaches, and the `core:show_file` action, which an agent calls with a local path to show a picture, video or file.
 
 **Contracts:**
 
-- The copy is read-only and never changes. The dashboard serves it at `/api/assets/<id>.<ext>` behind the same session check as the rest of `/api`, and the browser may cache it for a year.
-- The message links to that URL. The agent's copy of the turn also names the file's local path, so it can read the file.
+- The copy is read-only and never changes. The dashboard serves it at `/api/assets/<id>.<ext>` behind the same session check as the rest of `/api`, and the browser may cache it for a year. If the agent later overwrites the original file and shows it again, the earlier message keeps the earlier bytes.
+- An attached file's message links to that URL. The agent's copy of the turn also names the file's local path, so it can read the file.
+- `core:show_file` takes an absolute path to a regular file of at most 100 MB under the projects, memory or assets folder, with links resolved first. It refuses keys, credentials, `.env` files, databases and the insides of `.git`, `.ssh` and similar folders. It returns the URL and the Markdown that shows the file.
 - Only images, audio, video, and PDFs open in the browser. Every other type downloads.
-- One file may be at most 100 MB.
+- In chat, pictures show as thumbnails that zoom, video and audio play in place, and other files appear as a chip that saves the file (a PDF opens in a new tab).
 
 ## Routines
 

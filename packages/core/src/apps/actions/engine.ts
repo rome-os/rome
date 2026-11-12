@@ -140,6 +140,7 @@ const COORDINATION_ACTIONS: ReadonlySet<string> = new Set([
   "system:create_routine",
   "system:send_feedback",
   "core:set_agent_name",
+  "core:show_file",
   "core:app_connection_read",
   "core:app_connection_write",
   "core:app_connection_write_without_approval",

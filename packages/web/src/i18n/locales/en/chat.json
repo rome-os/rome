@@ -5,7 +5,8 @@
   "markdown": {
     "code": "Code",
     "mermaid": "Mermaid diagram",
-    "imageNotAvailable": "Image not available"
+    "imageNotAvailable": "Image not available",
+    "mediaNotAvailable": "Media not available"
   },
   "title": "Rome",
   "concierge": {

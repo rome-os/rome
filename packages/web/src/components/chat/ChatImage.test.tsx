@@ -177,6 +177,30 @@ describe("ChatImage", () => {
     expect(screen.getByRole("img", { name: "Shot" }).getAttribute("src")).toBe(`${src}?w=900`);
   });
 
+  it("plays a stored video and audio file in place, without a thumbnail width", () => {
+    const id = "0123456789abcdef0123456789abcdef";
+    const { container } = render(
+      <Message text={`![Clip](/api/assets/${id}.mp4)\n\n![Song](/api/assets/${id}.mp3)`} />,
+    );
+    const video = container.querySelector("video") as HTMLVideoElement;
+    expect(video.getAttribute("src")).toBe(`/api/assets/${id}.mp4`);
+    expect(video.controls).toBe(true);
+    expect(video.getAttribute("preload")).toBe("metadata");
+    const audio = container.querySelector("audio") as HTMLAudioElement;
+    expect(audio.getAttribute("src")).toBe(`/api/assets/${id}.mp3`);
+    expect(audio.controls).toBe(true);
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("shows a line of text when a video fails to load", () => {
+    const { container } = render(
+      <Message text="![Clip](/api/assets/0123456789abcdef0123456789abcdef.webm)" />,
+    );
+    fireEvent.error(container.querySelector("video") as HTMLVideoElement);
+    expect(screen.getByText("Media not available")).toBeTruthy();
+    expect(container.querySelector("video")).toBeNull();
+  });
+
   it.each([
     "https://example.com/sky.jpg?w=1",
     "/api/share/token/projects/asset/a.png?path=projects%2Fa.png",

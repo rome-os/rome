@@ -651,6 +651,10 @@ final class StubBackend: RomeBackend {
         #expect(try link("/apps") == .page(URL(string: "https://me.romeos.cc/apps")!))
         #expect(try link("/apps/a/b") == .page(URL(string: "https://me.romeos.cc/apps/a/b")!))
         #expect(try link("https://me.romeos.cc/chat/123") == .page(URL(string: "https://me.romeos.cc/chat/123")!))
+        // A stored file (a pdf, a video) opens in the same web view, which has the session.
+        let stored = "/api/assets/0123456789abcdef0123456789abcdef.pdf"
+        #expect(try link(stored) == .page(URL(string: "https://me.romeos.cc" + stored)!))
+        #expect(try link("https://me.romeos.cc" + stored) == .page(URL(string: "https://me.romeos.cc" + stored)!))
         // No origin (demo data): a page has nowhere to resolve.
         #expect(try link("/settings", origin: nil) == .system)
         #expect(try link("/apps/habit-tracker", origin: nil) == .app(id: "habit-tracker", page: nil))
