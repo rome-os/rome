@@ -262,6 +262,10 @@ export interface PendingApproval {
  * Resolves by posting an `interaction_result` (the produced artifact, or
  * `{ dismissed: true }`) on the session, which re-drives the calling agent
  * with a server-built outcome prompt. Control never leaves the calling agent.
+ *
+ * @deprecated Return `{ status: "show_widget", widget: { ..., waits: true } }`
+ * instead. Rome stores and answers both the same way, and this spelling keeps
+ * working for apps that already return it.
  */
 export interface PendingInteraction {
   appId: string;

@@ -37,7 +37,8 @@ export interface ActionApprovalResolutionObserver {
   approvalRejected(actionName: string, args: Record<string, unknown>): Promise<void> | void;
 }
 
-function formatResultForAgent(result: ActionResult): string {
+/** What the agent reads when an approved action finally runs. */
+export function formatResultForAgent(result: ActionResult): string {
   if (result.status === "error") {
     return `The action failed with error: ${result.error}`;
   }
@@ -51,7 +52,12 @@ function formatResultForAgent(result: ActionResult): string {
     return `The action you requested was approved and executed; the "${result.placement.appId}" widget has been placed on the guardian's workspace.`;
   }
   if (result.status === "show_widget") {
-    return `The action you requested was approved and executed. ${result.widget.text}`;
+    // The approved run happens outside the turn that asked, so no card is
+    // stored for it.
+    return (
+      `The action you requested was approved and executed. Its "${result.widget.componentId}" ` +
+      `card is not shown. Tell the guardian what it would have shown, in a message: ${result.widget.text}`
+    );
   }
   const dataStr = result.data ? JSON.stringify(result.data, null, 2) : "no data";
   return `The action you requested has been approved and executed successfully.\n\nResult: ${dataStr}`;

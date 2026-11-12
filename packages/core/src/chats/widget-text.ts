@@ -66,5 +66,7 @@ export function widgetText(part: MessagePart): string | undefined {
   if (part.type === "approval_card" && typeof part.preview === "object" && part.preview) {
     return approvalCardText(part);
   }
+  // An app's widget brings its own line.
+  if (part.type === "widget") return part.text;
   return undefined;
 }

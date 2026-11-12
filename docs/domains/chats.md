@@ -163,7 +163,8 @@ One thing a participant said or did in a chat.
 - A message that reaches Rome is recorded in its chat before anything acts on it, whether or not an agent is woken by it. A platform delivering the same message again records nothing new.
 - A message is made of text, attachments and [widgets](#widget).
 - Every message reads as plain text, so any person on any platform, and any agent, can follow the chat. A widget brings its own plain-text line.
-- Acting on a widget is a message of its own, from whoever did it, in the place the widget is in. It says what they meant, such as answering Q3, approving or picking a place, not how they did it: a button on one platform may be a typed reply on another. Without it, someone reading the chat later could not tell what was chosen.
+- Acting on a widget that asks something is a message of its own, from whoever did it, in the place the widget is in. It says what they meant, such as answering Q3, approving or picking a place, not how they did it: a button on one platform may be a typed reply on another. Without it, someone reading the chat later could not tell what was chosen.
+- Acting on a widget that only shows something, such as ticking off a meal on today's meals, is not a message. It changes the app the widget belongs to, and the chat shows the change only through the widget.
 - A delegate's reply is recorded as said by the agent on the guardian's behalf, under the guardian's account.
 
 ## Share link
@@ -196,6 +197,8 @@ Something shown in a chat that people can look at or act on: a question with cho
 - A place's widget drawing is card or plain text.
 - A widget's live state belongs to what it is about. An approval request shows as approved because the approval is.
 - An agent shows a widget by calling a tool.
+- A widget either asks something or only shows something. One that asks keeps the agent waiting until it is answered. One that only shows something leaves the agent to go on, and nobody answers it.
+- An app's widget belongs to the app whose action showed it, and is one of the kinds that app adds. An action cannot show another app's widget.
 
 ## Platform
 

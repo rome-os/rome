@@ -53,8 +53,9 @@ export interface AppComponentViewProps {
   props?: Record<string, unknown>;
   /** Prior submitted output when this instance already resolved. */
   result?: Record<string, unknown>;
-  /** Absent for a card nothing answers, such as a widget: the component
-   *  mounts as resolved, and its `submit` and `dismiss` do nothing. */
+  /** Absent for a card nothing answers, such as a widget: the chat never
+   *  waits on it, the component stays live for its own buttons, and its
+   *  `submit` and `dismiss` do nothing. */
   onSubmit?: (toolUseId: string, output: Record<string, unknown>, summary?: string) => void;
   onDismiss?: (toolUseId: string) => void;
 }
@@ -86,8 +87,10 @@ export function AppComponentView({
   submitRef.current = onSubmit;
   const dismissRef = useRef(onDismiss);
   dismissRef.current = onDismiss;
-  const answerable = onSubmit !== undefined;
-  const resolved = result !== undefined || !answerable;
+  // A card resolves once it has an answer. Only a card that can be answered
+  // keeps the chat waiting until then.
+  const resolved = result !== undefined;
+  const waiting = onSubmit !== undefined && !resolved;
 
   useEffect(() => {
     let disposed = false;
@@ -173,7 +176,7 @@ export function AppComponentView({
       <Alert
         variant="destructive"
         tabIndex={-1}
-        data-chat-pending-card={!resolved ? "" : undefined}
+        data-chat-pending-card={waiting ? "" : undefined}
         className="mb-4 rounded-12"
       >
         <AlertDescription>
@@ -183,7 +186,7 @@ export function AppComponentView({
         {/* A card that cannot load can still be dismissed, so a step that only
             the card can answer, which also closes the composer, is never a
             dead end. */}
-        {resolved ? null : (
+        {waiting ? (
           <Button
             type="button"
             variant="outline"
@@ -193,7 +196,7 @@ export function AppComponentView({
           >
             {t("appComponent.dismiss")}
           </Button>
-        )}
+        ) : null}
       </Alert>
     );
   }
@@ -201,7 +204,7 @@ export function AppComponentView({
   return (
     <div
       tabIndex={-1}
-      data-chat-pending-card={!resolved ? "" : undefined}
+      data-chat-pending-card={waiting ? "" : undefined}
       data-ui-scale={scale}
       ref={rootRef}
       className="mb-4"

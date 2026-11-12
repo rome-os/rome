@@ -72,6 +72,18 @@ describe("widgetText", () => {
     );
   });
 
+  it("reads an app's widget as the line it brought", () => {
+    const widget: MessagePart = {
+      type: "widget",
+      toolUseId: "tu-1",
+      appId: "meals",
+      componentId: "today",
+      text: "You ate twice today.",
+    };
+    expect(widgetText(widget)).toBe("You ate twice today.");
+    expect(partsText([widget])).toBe("You ate twice today.");
+  });
+
   it("is how a recorded card reads as plain text", () => {
     expect(partsText([{ type: "text", content: "Before I send it:" }, card()])).toBe(
       `Before I send it:\n${widgetText(card())}`,
