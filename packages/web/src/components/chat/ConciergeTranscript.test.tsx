@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import i18n from "@/i18n";
 import { readFileSync } from "node:fs";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 
 rs.mock("@/hooks/use-dashboard-identity", () => ({
@@ -15,6 +15,7 @@ import type { BlockActions, LivePreview, ShareSelection } from "./MessageList";
 import { EMPTY_LIVE_TEXT } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
 import type { ChatMessage } from "@/lib/chat-types";
+import { questionCardRender } from "../../../mock/fixtures/question-card";
 
 afterEach(() => cleanup());
 
@@ -192,7 +193,7 @@ describe("bubble arrival styles", () => {
 });
 
 describe("ConciergeTranscript waiting cards", () => {
-  it("tags a card with its message, so Needs you can tell it is in the current reply", () => {
+  it("tags a card with its message, so Needs you can tell it is in the current reply", async () => {
     const question: ChatMessage = {
       ...agent("a1", "t1"),
       content: JSON.stringify([
@@ -200,19 +201,18 @@ describe("ConciergeTranscript waiting cards", () => {
           type: "pending_interaction",
           toolUseId: "q1",
           appId: "core",
-          render: {
-            kind: "inline",
-            builtin: true,
-            componentId: "question-card",
-            props: { questions: [{ id: "day", question: "Which day?", type: "text" }] },
-          },
+          render: questionCardRender([{ id: "day", question: "Which day?", type: "text" }]),
         },
         { type: "text", content: "Pick a day above." },
       ]),
     };
     const { container } = render(transcript([user("u1", "t1"), question]));
-    const card = container.querySelector<HTMLElement>("[data-chat-pending-card]");
-    expect(card?.closest<HTMLElement>("[data-chat-card-message]")?.dataset.chatCardMessage).toBe(
+    const card = await waitFor(() => {
+      const found = container.querySelector<HTMLElement>("[data-chat-pending-card]");
+      if (!found) throw new Error("the card has not drawn yet");
+      return found;
+    });
+    expect(card.closest<HTMLElement>("[data-chat-card-message]")?.dataset.chatCardMessage).toBe(
       "a1",
     );
   });

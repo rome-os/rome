@@ -29,6 +29,7 @@ import type { ChatMessage } from "@/lib/chat-types";
 import { EMPTY_LIVE_TEXT, staticLiveText } from "@/hooks/live-text";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { ReplyDraftProvider, type ReplyDraft } from "./reply/reply-draft";
+import { questionCardRender } from "../../../mock/fixtures/question-card";
 
 afterEach(() => cleanup());
 
@@ -60,11 +61,7 @@ function questionCardTurn(): ChatMessage {
         type: "pending_interaction",
         toolUseId: "t-1",
         appId: "system",
-        render: {
-          builtin: true,
-          componentId: "question-card",
-          props: { questions: [{ id: "q1", question: "Your name?", type: "text" }] },
-        },
+        render: questionCardRender([{ id: "q1", question: "Your name?", type: "text" }]),
       },
     ]),
     createdAt: "2026-06-13T00:00:00.000Z",
@@ -108,7 +105,10 @@ function renderList(streaming: boolean) {
 }
 
 describe("MessageList archived steps", () => {
-  it.each([true, false])("keeps replies and cards when assistant rows exist: %s", (hasReply) => {
+  it.each([
+    true,
+    false,
+  ])("keeps replies and cards when assistant rows exist: %s", async (hasReply) => {
     const trace: ChatMessage = {
       id: "archived-trace",
       sessionId: "s-1",
@@ -148,7 +148,7 @@ describe("MessageList archived steps", () => {
     if (hasReply) {
       expect(screen.getByText("My question")).toBeTruthy();
       expect(screen.getByText("The final answer")).toBeTruthy();
-      expect(screen.getByPlaceholderText("Type your answer…")).toBeTruthy();
+      expect(await screen.findByPlaceholderText("Type your answer…")).toBeTruthy();
     }
     expect(screen.queryByRole("button", { name: /step/i })).toBeNull();
   });
