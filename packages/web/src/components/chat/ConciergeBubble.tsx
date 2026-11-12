@@ -15,7 +15,8 @@ const HOVER_CHIP =
   "rounded-full border border-border bg-surface/95 text-muted-foreground shadow-10 hover:text-foreground";
 
 // A tap on any of these belongs to the thing tapped, not to the bubble.
-const INTERACTIVE = "a,button,input,textarea,select,summary,label,[role=button],[role=link]";
+const INTERACTIVE =
+  "a,button,input,textarea,select,summary,label,[role=button],[role=link],[data-rmiz]";
 
 // Every bubble shrinks to its content up to this share of the column, so even
 // the widest leaves a gap on the other side that tells whose it is.

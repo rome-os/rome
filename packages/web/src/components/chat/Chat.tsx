@@ -2559,6 +2559,8 @@ export function Chat({
                         isStreaming={displayedStreaming}
                         onStop={stopComposerTurn}
                         streamError={streamError}
+                        // An open topic chat names itself in its box.
+                        chatName={isMainChat ? null : sessionName?.trim() || null}
                         modelSelection={
                           chatModelPickable
                             ? { value: chatModelValue, onChange: pickChatModel }

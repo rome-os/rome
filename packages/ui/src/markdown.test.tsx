@@ -334,6 +334,26 @@ describe("Markdown", () => {
   });
 });
 
+describe("Markdown images", () => {
+  it("renders the default Streamdown image without an imageComponent", () => {
+    const { container } = renderMd("![Sky](https://example.com/sky.png)");
+    const image = container.querySelector('[data-streamdown="image"]');
+    expect(image?.getAttribute("src")).toBe("https://example.com/sky.png");
+    expect(container.querySelector('[data-streamdown="image-wrapper"]')).not.toBeNull();
+    expect(container.querySelector("[data-custom-image]")).toBeNull();
+  });
+
+  it("renders an image through imageComponent when given", () => {
+    const { container } = render(
+      <Markdown
+        imageComponent={({ src, alt }) => <b data-custom-image={String(src)}>{alt}</b>}
+      >{`![Sky](https://example.com/sky.png)`}</Markdown>,
+    );
+    expect(container.querySelector("[data-custom-image]")?.textContent).toBe("Sky");
+    expect(container.querySelector('[data-streamdown="image"]')).toBeNull();
+  });
+});
+
 describe("Markdown Mermaid theme", () => {
   // The theme is only resolved for content with a Mermaid fence.
   const mermaid = (label: string) => `\`\`\`mermaid\ngraph TD; A-->B; %% ${label}\n\`\`\``;
