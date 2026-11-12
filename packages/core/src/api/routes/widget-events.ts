@@ -1,17 +1,38 @@
-import { WIDGET_UI_HOST_EVENTS, isWidgetAppPath } from "@rome-os/app-runtime";
+import { isWidgetAppPath } from "@rome-os/app-runtime";
 import { Hono } from "hono";
 import { currentChatOwner } from "../../access/session-actor.js";
 import type { WebChatRepository } from "../../webchat/repository.js";
 import { canOpenChat } from "../../webchat/privacy.js";
 
-/** The events that answer the agent waiting on a widget, not the widget's app. */
-const ANSWER_EVENTS: ReadonlySet<string> = new Set(WIDGET_UI_HOST_EVENTS);
+/** What core's own widget makes of one of its events: the output that answers
+ *  the agent waiting on it. */
+type CoreHandler = (context: Record<string, unknown>) => Record<string, unknown>;
+
+/**
+ * The widgets core owns, by kind, and how each handles its events. The question
+ * card's Send answers the agent with what was picked and typed, and its Dismiss
+ * declines. Core turns the answer into what the agent reads when the turn starts.
+ */
+const CORE_WIDGETS: Record<string, Record<string, CoreHandler>> = {
+  "question-card": {
+    send: (context) => context,
+    dismiss: () => ({ dismissed: true }),
+  },
+};
+
+/** The names a question card stored before its events were its own. */
+const STORED_EVENT_NAMES: Record<string, string> = {
+  "rome:answer": "send",
+  "rome:dismiss": "dismiss",
+};
 
 /** A widget as a chat stores it: one message whose one part is the widget. */
 interface StoredWidget {
   chatId: string;
   toolUseId: string;
   appId: string;
+  /** The kind of a widget core owns, such as `question-card`. */
+  componentId?: string;
   components: unknown[];
   waits: boolean;
 }
@@ -29,9 +50,10 @@ export interface WidgetEventDeps {
  * Where a client (the web dashboard or the iOS app) sends every event a widget
  * fires. A widget is a message of its own, so its id is the message's id.
  * Core finds it, checks that the caller may open its chat and that the widget
- * declares the event, then routes it: `rome:answer` and `rome:dismiss` answer
- * the agent waiting on the widget, as a turn in the chat; any other event calls
- * the widget's app at `/api/apps/<app id>/<event>`.
+ * declares the event, then hands the event to the widget's owner: an app's
+ * widget calls the app at `/api/apps/<app id>/<event>`; a widget core owns,
+ * such as the question card, is handled here, and its answer becomes a turn in
+ * the chat. The client only sends the event; it never decides what it means.
  */
 export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
   const app = new Hono();
@@ -73,15 +95,18 @@ export function widgetEventRoutes(deps: WidgetEventDeps): Hono {
         c.env,
       );
 
-    if (ANSWER_EVENTS.has(name)) {
+    if (widget.appId === "core") {
+      const handle = CORE_WIDGETS[widget.componentId ?? ""]?.[STORED_EVENT_NAMES[name] ?? name];
+      if (!handle) return c.json({ error: "This widget declares no such event" }, 400);
       if (!widget.waits) return c.json({ error: "The agent does not wait on this widget" }, 400);
-      const output = name === "rome:dismiss" ? { dismissed: true } : context;
       // The rest of the turn (persona, reasoning effort, workspace) is the
-      // chat's, as the dashboard sends it with any other turn.
+      // chat's, which the client sends with every event.
       const turn = isObject(body?.turn) ? body.turn : {};
       return to(`/api/chat/sessions/${encodeURIComponent(widget.chatId)}/turns`, {
         ...turn,
-        parts: [{ type: "interaction_result", toolUseId: widget.toolUseId, output }],
+        parts: [
+          { type: "interaction_result", toolUseId: widget.toolUseId, output: handle(context) },
+        ],
       });
     }
     if (!isWidgetAppPath(name)) return c.json({ error: "The event is not a path in the app" }, 400);
@@ -115,6 +140,10 @@ function readWidget(chatId: string, content: string | null): StoredWidget | null
     chatId,
     toolUseId: part.toolUseId,
     appId: part.appId,
+    componentId:
+      isObject(part.render) && typeof part.render.componentId === "string"
+        ? part.render.componentId
+        : undefined,
     components: ui.components,
     waits: part.type === "pending_interaction",
   };

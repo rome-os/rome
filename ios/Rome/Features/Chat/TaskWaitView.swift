@@ -22,8 +22,8 @@ struct TaskWaitView: View {
             }
             switch store.card {
             case .question(let part, let key):
-                QuestionCardView(part: part, answered: store.sent[key], sending: store.answering == key) { name, context in
-                    Task { await store.answer(part, key: key, name: name, context: context) }
+                QuestionCardView(part: part, answered: nil) { name, context in
+                    try await store.answer(part, key: key, name: name, context: context)
                 }
                 .id(key)
             case .approval(let approval):

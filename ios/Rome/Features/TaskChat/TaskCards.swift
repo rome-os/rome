@@ -387,17 +387,12 @@ struct ApprovalCardView: View {
 struct QuestionCardView: View {
     let part: MessagePart.QuestionPart
     let answered: JSONValue?
-    let sending: Bool
-    /// Send or Dismiss: its event name and context, which core turns into the answer.
-    let onAnswer: (String, JSONValue) -> Void
+    /// Sends an event the card fired to core, which decides what it means.
+    let press: (String, JSONValue) async throws -> Void
 
     var body: some View {
         if let card = part.ui {
-            WidgetUICardView(part: card, call: { _, _, _ in throw APIError.notFound }, waiting: .init(
-                answered: answered,
-                sending: sending,
-                answer: onAnswer
-            ))
+            WidgetUICardView(part: card, call: { _, _, _ in throw APIError.notFound }, press: press, waiting: .init(answered: answered))
         } else {
             Text(verbatim: part.questions.map(\.text).joined(separator: "\n"))
                 .romeFont(CardScale.body)

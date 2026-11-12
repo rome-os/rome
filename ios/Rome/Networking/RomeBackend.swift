@@ -52,9 +52,9 @@ protocol RomeBackend: AnyObject, Sendable {
     func apiFile(path: String, query: String?) async throws -> Data
     /// The instance's origin, when there is a real one.
     var origin: URL? { get }
-    /// A press on a widget's button, sent to core, which decides what it means:
-    /// `rome:answer` and `rome:dismiss` answer the interaction the agent waits
-    /// on, as a turn in the chat; any other event calls the widget's app.
+    /// An event a widget fired, sent to core by the widget's id. Core decides
+    /// what it means: its owner handles it, an app's widget by calling the app,
+    /// and the question card by answering the agent.
     func answerWidget(widgetId: String, name: String, context: JSONValue) async throws
     func markRead(sessionId: String) async
     func sessions() async throws -> [ChatSession]

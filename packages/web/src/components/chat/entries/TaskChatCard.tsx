@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { useApprovals } from "@/hooks/use-approvals";
-import { listSessionMessagePage, postWidgetEventTurn, widgetAnswerOutput } from "@/lib/chat-api";
+import { listSessionMessagePage, type WidgetEventOutcome } from "@/lib/chat-api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { ApprovalCard } from "../approval/ApprovalCard";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
@@ -190,10 +190,6 @@ function WaitingTaskCard({
     refetchOnMount: "always",
   });
   const approvals = useApprovals({ status: "pending" });
-  const [submitted, setSubmitted] = useState<{
-    key: string;
-    output: Record<string, unknown>;
-  } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const interaction = latestOpenInteraction(messages.data?.messages ?? []);
@@ -212,28 +208,19 @@ function WaitingTaskCard({
     await Promise.all([messages.refetch(), approvals.refetch(), onRefresh()]);
   }
 
-  async function answer(widgetId: string, name: string, context: Record<string, unknown>) {
-    if (!interaction || submitted?.key === interaction.key) return;
-    setSubmitted({ key: interaction.key, output: widgetAnswerOutput(name, context) });
-    setError(null);
-    try {
-      // This turn belongs to the task, never to the main Chat's stream state.
-      const result = await postWidgetEventTurn(widgetId, { name, context });
-      if (!result.ok) {
-        setError(
-          result.status === 400
-            ? t("concierge.taskCardAlreadyAnswered")
-            : result.message || t("stream.errors.sendFallback"),
-        );
-        setSubmitted(null);
-        setAttempt((value) => value + 1);
-      }
-    } catch {
-      setError(t("stream.errors.sendFallback"));
-      setSubmitted(null);
+  // Core takes the card's events; this hears what it said. A card already
+  // answered elsewhere refreshes and says so; a failure lets the guardian retry.
+  function settled(outcome: WidgetEventOutcome) {
+    if (outcome.ok) setError(null);
+    else {
+      setError(
+        outcome.status === 400
+          ? t("concierge.taskCardAlreadyAnswered")
+          : t("stream.errors.sendFallback"),
+      );
       setAttempt((value) => value + 1);
     }
-    await refresh();
+    void refresh();
   }
 
   return (
@@ -270,10 +257,7 @@ function WaitingTaskCard({
           appId={interaction.part.appId ?? "core"}
           ui={interaction.part.render.ui}
           props={interaction.part.render.props}
-          result={submitted?.key === interaction.key ? submitted.output : undefined}
-          onAnswer={(widgetId, _toolUseId, name, context) => {
-            void answer(widgetId, name, context);
-          }}
+          onSettled={settled}
         />
       ) : null}
     </div>

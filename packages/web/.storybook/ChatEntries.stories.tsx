@@ -10,7 +10,6 @@ const meta = {
     sessionId: "storybook-chat-entries",
     onSubmitAppComponent: () => undefined,
     onDismissAppComponent: () => undefined,
-    onAnswerWidget: () => undefined,
   },
 } satisfies Meta<typeof ChatEntryPreview>;
 
@@ -67,26 +66,34 @@ export const UnbrokenLabels: Story = {
 
 export const WrappedSubmission: Story = {
   ...NarrowQuestion,
-  args: { ...NarrowQuestion.args, onAnswerWidget: fn() },
-  play: async ({ canvas, args }) => {
-    const answer = "要，中文 + 英文，默认跟随 Rome 界面语言";
-    const option = await canvas.findByRole("button", { name: answer });
-    option.focus();
-    await userEvent.keyboard(" ");
-    await expect(option).toHaveAttribute("aria-pressed", "true");
-    await userEvent.click(canvas.getByRole("button", { name: /^(Send|发送)$/ }));
-    await expect(args.onAnswerWidget).toHaveBeenCalledWith(
-      "storybook-chat-entries",
-      "dev-ask-cjk",
-      "dev-ask-cjk",
-      "rome:answer",
-      {
-        answers: [
-          { values: [answer], text: "" },
-          { values: [], text: "" },
-        ],
-      },
-    );
-    await expect(option).toBeDisabled();
+  play: async ({ canvas }) => {
+    // The card sends its events to core; here core takes them.
+    const sent: { url: string; body: unknown }[] = [];
+    const realFetch = globalThis.fetch;
+    globalThis.fetch = fn(async (url: RequestInfo | URL, init?: RequestInit) => {
+      sent.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+      return new Response("{}", { status: 200 });
+    }) as typeof fetch;
+    try {
+      const answer = "要，中文 + 英文，默认跟随 Rome 界面语言";
+      const option = await canvas.findByRole("button", { name: answer });
+      option.focus();
+      await userEvent.keyboard(" ");
+      await expect(option).toHaveAttribute("aria-pressed", "true");
+      await userEvent.click(canvas.getByRole("button", { name: /^(Send|发送)$/ }));
+      await expect(option).toBeDisabled();
+      await expect(sent[0]?.url).toBe("/api/chat/widgets/dev-ask-cjk/events");
+      await expect(sent[0]?.body).toMatchObject({
+        name: "send",
+        context: {
+          answers: [
+            { values: [answer], text: "" },
+            { values: [], text: "" },
+          ],
+        },
+      });
+    } finally {
+      globalThis.fetch = realFetch;
+    }
   },
 };

@@ -117,11 +117,10 @@ import Testing
     /// The question card on the engine; `answers` records what it sends.
     private func waitingSurface(_ part: WidgetUIPart, answered: JSONValue? = nil, answers: Box<[JSONValue]> = Box([])) async -> WidgetSurface {
         let surface = WidgetSurface()
-        surface.waiting = .init(answered: answered, sending: false, answer: { name, context in
-            answers.value.append(name == "rome:dismiss" ? .string("dismissed") : context)
+        surface.answered = answered != nil
+        surface.show(part, call: { _, _, _ in throw APIError.notFound }, press: { name, context in
+            answers.value.append(.object(["name": .string(name), "context": context]))
         })
-        surface.locked = answered != nil
-        surface.show(part) { _, _, _ in throw APIError.notFound }
         surface.showAnswered(answered)
         await surface.load()
         return surface
@@ -172,7 +171,26 @@ import Testing
         surface.viewModel?.dataModel.set("/answers/0/values", value: .array([.string("高蛋白")]))
         find("send", in: surface.viewModel?.rootNode)?.action(for: "action", userActivation: true)?()
         for _ in 0..<50 where answers.value.isEmpty { try await Task.sleep(for: .milliseconds(10)) }
-        #expect(answers.value.first?["answers"]?.array?.first?["values"] == .array([.string("高蛋白")]))
+        #expect(answers.value.first?["name"]?.string == "send")
+        #expect(answers.value.first?["context"]?["answers"]?.array?.first?["values"] == .array([.string("高蛋白")]))
+        // Core took it: the card is sent, and takes no second press.
+        #expect(surface.sent)
+    }
+
+    @Test func aCardCoreDidNotTakeStaysUsable() async throws {
+        let surface = WidgetSurface()
+        let tries = Box(0)
+        surface.show(try questionCard(), call: { _, _, _ in throw APIError.notFound }, press: { _, _ in
+            tries.value += 1
+            throw APIError.network
+        })
+        await surface.load()
+        find("dismiss", in: surface.viewModel?.rootNode)?.action(for: "action", userActivation: true)?()
+        for _ in 0..<50 where !surface.failed { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(surface.failed && !surface.sent)
+        find("dismiss", in: surface.viewModel?.rootNode)?.action(for: "action", userActivation: true)?()
+        for _ in 0..<50 where tries.value < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        #expect(tries.value == 2)
     }
 
     @Test func anAnsweredCardShowsWhatWasSentAndTakesNoPress() async throws {

@@ -86,7 +86,7 @@ describe("a widget described as data", () => {
     const post = fetch.mock.calls.find(([, init]) => init?.method === "POST");
     // The press goes to core, which calls the app.
     expect(String(post?.[0])).toBe("/api/chat/widgets/m-ui/events");
-    expect(JSON.parse(String(post?.[1]?.body))).toEqual({
+    expect(JSON.parse(String(post?.[1]?.body))).toMatchObject({
       name: "water",
       context: { date: "2026-11-11" },
     });

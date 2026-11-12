@@ -109,6 +109,38 @@ describe("an event on a widget", () => {
     ]);
   });
 
+  it("handles the question card's own send and dismiss in core", async () => {
+    const card = structuredClone(question);
+    card.render.ui.components = [
+      { id: "root", component: "Column", children: ["send", "dismiss"] },
+      button("send", "send", { answers: { path: "/answers" } }),
+      button("dismiss", "dismiss"),
+    ];
+    const { fire, forwarded } = setup({ m3: { chatId: "c1", content: [card] } });
+    await fire("m3", { name: "send", context: { answers: [{ values: ["Warm"], text: "" }] } });
+    await fire("m3", { name: "dismiss" });
+    expect(forwarded.map((f) => f.body)).toEqual([
+      {
+        parts: [
+          {
+            type: "interaction_result",
+            toolUseId: "q1",
+            output: { answers: [{ values: ["Warm"], text: "" }] },
+          },
+        ],
+      },
+      { parts: [{ type: "interaction_result", toolUseId: "q1", output: { dismissed: true } }] },
+    ]);
+  });
+
+  it("sends an app widget's event named send to the app, not to the agent", async () => {
+    const { fire, forwarded } = setup({
+      m1: { chatId: "c1", content: [mealWidget("w1", "notes", "send")] },
+    });
+    await fire("m1", { name: "send", context: { to: "team" } });
+    expect(forwarded.map((f) => f.url)).toEqual(["/api/apps/notes/send"]);
+  });
+
   it("dismisses with the output every dismissal has", async () => {
     const { fire, forwarded } = setup({ m2: { chatId: "c1", content: [question] } });
     await fire("m2", { name: "rome:dismiss", context: { ignored: true } });

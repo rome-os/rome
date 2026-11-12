@@ -59,7 +59,7 @@ private func approval(_ id: String, chat: String = "task-1", at seconds: TimeInt
         guard case .question(let part, let key) = store.card else { Issue.record("no question"); return }
         backend.answerError = .network
         backend.messagesError = .network
-        await store.answer(part, key: key, name: "rome:answer", context: .object(["answers": .array([])]))
+        try? await store.answer(part, key: key, name: "send", context: .object(["answers": .array([])]))
         #expect(store.error == "Could not send. Please try again.")
         #expect(store.card == .question(part, key: key))
         // Back online, a read that answers with nothing open clears it.
@@ -121,16 +121,15 @@ private func approval(_ id: String, chat: String = "task-1", at seconds: TimeInt
         guard case .question(let part, let key) = store.card else { Issue.record("no question"); return }
         // Already answered elsewhere: the card refreshes and says so.
         backend.answerError = .server(status: 400, message: nil)
-        await store.answer(part, key: key, name: "rome:answer", context: .object(["answers": .array([])]))
+        try? await store.answer(part, key: key, name: "send", context: .object(["answers": .array([])]))
         #expect(store.error == "This card was already answered. The task has been refreshed.")
-        #expect(store.sent[key] == nil)
         // The network dropped: it may be sent again.
         backend.answerError = .network
-        await store.answer(part, key: key, name: "rome:answer", context: .object(["answers": .array([])]))
+        try? await store.answer(part, key: key, name: "send", context: .object(["answers": .array([])]))
         #expect(store.error == "Could not send. Please try again.")
         // It goes through, to the task chat, never the main Chat.
         backend.answerError = nil
-        await store.answer(part, key: key, name: "rome:answer", context: .object(["answers": .array([])]))
+        try? await store.answer(part, key: key, name: "send", context: .object(["answers": .array([])]))
         // A widget is a message of its own: the answer goes to core by its message's id.
         #expect(backend.answeredWidgets == ["m", "m", "m"])
         #expect(store.error == nil)

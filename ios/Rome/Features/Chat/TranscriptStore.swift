@@ -40,8 +40,6 @@ final class TranscriptStore {
     private(set) var resolvingApproval: [String: Bool] = [:]
     private(set) var approvalErrors: [String: String] = [:]
     /// Answers sent this session, before the server echoes them.
-    private(set) var localAnswers: [String: JSONValue] = [:]
-    private(set) var answering: Set<String> = []
     /// Each connect card's state, by row, kept while the card scrolls away.
     private(set) var connectPhases: [String: ConnectPhase] = [:]
     @ObservationIgnored private var connectRuns: [String: Task<Void, Never>] = [:]
@@ -82,11 +80,9 @@ final class TranscriptStore {
         share.chat = self
     }
 
-    /// Answers given to cards: stored ones, then those sent this session.
+    /// Answers given to cards, as stored.
     var answers: [String: JSONValue] {
-        var answers = TranscriptBuilder.answers(in: messages)
-        answers.merge(localAnswers) { stored, _ in stored }
-        return answers
+        TranscriptBuilder.answers(in: messages)
     }
 
     var rows: [TranscriptRow] {
@@ -651,25 +647,6 @@ final class TranscriptStore {
         }
     }
 
-    // MARK: Questions
-
-    /// Answers the agent waiting on a widget with an event, which starts a turn.
-    /// `widgetId` is the id of the message that holds the widget.
-    func answer(widgetId: String, toolUseId: String, name: String, context: JSONValue) {
-        guard !answering.contains(toolUseId) else { return }
-        answering.insert(toolUseId)
-        localAnswers[toolUseId] = WidgetPaths.answerOutput(name, context)
-        Task {
-            do {
-                try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
-                markRunning()
-            } catch {
-                localAnswers[toolUseId] = nil
-            }
-            answering.remove(toolUseId)
-        }
-    }
-
     // MARK: Connect cards
 
     #if DEBUG
@@ -680,9 +657,13 @@ final class TranscriptStore {
     static func previewPhase(_ service: String) -> ConnectPhase? { nil }
     #endif
 
-    /// An event on a widget that calls its app, sent to core by the widget's id.
+    /// An event a widget fired, sent to core by the widget's id; core decides
+    /// what it means. What it changed, such as an answer and the turn it
+    /// starts, comes back with the next read: the server announces no message
+    /// of the guardian's own.
     func answerWidget(widgetId: String, name: String, context: JSONValue) async throws {
         try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
+        resync()
     }
 
     /// A widget's read of its own app, with this chat's backend.

@@ -23,16 +23,12 @@ export const mealPlannerHandlers = [
     glasses += 1;
     return HttpResponse.json({ water: glasses });
   }),
-  // The card's water button, answered through core, which calls the app's
-  // `water` above. The card declares no other event.
+  // Core's events route. The meal card's water button reaches the app's
+  // `water` above; any other widget's event is taken, as core takes an answer
+  // (mock mode has no agent to start a turn for it).
   http.post("/api/chat/widgets/:widgetId/events", async ({ request }) => {
     const { name } = (await request.json()) as { name?: unknown };
-    if (name !== "water") {
-      return HttpResponse.json(
-        { error: "This widget has no button for that event" },
-        { status: 400 },
-      );
-    }
+    if (name !== "water") return HttpResponse.json({});
     glasses += 1;
     return HttpResponse.json({ water: glasses });
   }),

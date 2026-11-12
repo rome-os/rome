@@ -18,10 +18,6 @@ final class TaskWaitStore {
     let chatId: String
     private(set) var card: Card?
     private(set) var loaded = false
-    /// The answer being sent, by the card's key.
-    private(set) var answering: String?
-    /// Answers sent this session, before the task's next page shows them.
-    private(set) var sent: [String: JSONValue] = [:]
     private(set) var error: String?
     private(set) var approvalRecord: ApprovalRecord?
     private(set) var resolving: Bool?
@@ -108,23 +104,21 @@ final class TaskWaitStore {
         (try? String(data: JSONEncoder().encode(JSONValue.array(parts)), encoding: .utf8)) ?? "[]"
     }
 
-    /// Sends the answer to the task chat. One the server already has
-    /// refreshes the card; a network failure lets the guardian try again.
-    func answer(_ part: MessagePart.QuestionPart, key: String, name: String, context: JSONValue) async {
-        guard answering == nil, sent[key] == nil else { return }
-        answering = key
-        sent[key] = WidgetPaths.answerOutput(name, context)
+    /// Sends an event the task's card fired to core. One the server already
+    /// has refreshes the card and says so; a network failure lets the guardian
+    /// try again. Either way the card stays usable, so the error is rethrown.
+    func answer(_ part: MessagePart.QuestionPart, key: String, name: String, context: JSONValue) async throws {
         error = nil
         do {
             try await backend.answerWidget(widgetId: part.ui?.widgetId ?? "", name: name, context: context)
         } catch APIError.server(let status, _) where status == 400 {
-            sent[key] = nil
             error = String(localized: "This card was already answered. The task has been refreshed.")
+            await load()
+            throw APIError.server(status: status, message: nil)
         } catch {
-            sent[key] = nil
             self.error = String(localized: "Could not send. Please try again.")
+            throw error
         }
-        answering = nil
         await load()
     }
 

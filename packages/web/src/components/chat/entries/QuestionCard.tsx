@@ -1,4 +1,5 @@
 import { lazy, Suspense } from "react";
+import type { WidgetEventOutcome } from "@/lib/chat-api";
 import { CardBoundary } from "./widget-ui/CardBoundary";
 import { isDrawableCard } from "./widget-ui/drawable";
 
@@ -17,13 +18,8 @@ export interface QuestionCardProps {
   props?: Record<string, unknown>;
   /** Prior submitted output when this instance already resolved. */
   result?: Record<string, unknown>;
-  /** Sends Send or Dismiss, which core turns into the answer. */
-  onAnswer: (
-    widgetId: string,
-    toolUseId: string,
-    name: string,
-    context: Record<string, unknown>,
-  ) => void;
+  /** Hears what core said to each of the card's events. */
+  onSettled?: (outcome: WidgetEventOutcome) => void;
 }
 
 /**
@@ -39,7 +35,7 @@ export function QuestionCard({
   ui,
   props,
   result,
-  onAnswer,
+  onSettled,
 }: QuestionCardProps) {
   const line = <QuestionLine props={props} />;
   if (!ui || !isDrawableCard(appId, ui, {}, true)) return line;
@@ -52,7 +48,7 @@ export function QuestionCard({
           appId={appId}
           ui={ui as never}
           text=""
-          waiting={{ result, onAnswer }}
+          waiting={{ result, onSettled }}
         />
       </Suspense>
     </CardBoundary>

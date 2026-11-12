@@ -11,6 +11,16 @@ afterEach(() => {
   rs.restoreAllMocks();
 });
 
+/** The events the card sends to core, which takes each one. */
+function captureEvents() {
+  const events: { url: string; body: { name: string; context: unknown } }[] = [];
+  rs.spyOn(globalThis, "fetch").mockImplementation(async (url, init) => {
+    events.push({ url: String(url), body: JSON.parse(String(init?.body)) });
+    return new Response("{}", { status: 200 });
+  });
+  return events;
+}
+
 // The shape core's `questionCardUi` builds for one single-choice question.
 const ui = {
   components: [
@@ -49,7 +59,7 @@ const ui = {
       component: "Button",
       child: "send-label",
       variant: "primary",
-      action: { event: { name: "rome:answer", context: { answers: { path: "/answers" } } } },
+      action: { event: { name: "send", context: { answers: { path: "/answers" } } } },
       checks: [
         {
           condition: {
@@ -71,7 +81,7 @@ const ui = {
       component: "Button",
       child: "dismiss-label",
       variant: "borderless",
-      action: { event: { name: "rome:dismiss" } },
+      action: { event: { name: "dismiss" } },
     },
     { id: "actions", component: "Row", children: ["dismiss", "send"], justify: "end" },
     { id: "root", component: "Column", children: ["q0", "app-post", "actions"] },
@@ -81,17 +91,8 @@ const ui = {
 
 describe("a question card described as data", () => {
   it("answers the waiting turn with what the guardian picked, once a required question has an answer", async () => {
-    const onAnswer = rs.fn();
-    render(
-      <WidgetUiCard
-        widgetId="m1"
-        toolUseId="q1"
-        appId="core"
-        ui={ui}
-        text=""
-        waiting={{ onAnswer }}
-      />,
-    );
+    const events = captureEvents();
+    render(<WidgetUiCard widgetId="m1" toolUseId="q1" appId="core" ui={ui} text="" waiting={{}} />);
 
     const send = await screen.findByRole("button", { name: "Send" });
     expect((send as HTMLButtonElement).disabled).toBe(true);
@@ -101,9 +102,27 @@ describe("a question card described as data", () => {
     await waitFor(() => expect((send as HTMLButtonElement).disabled).toBe(false));
     fireEvent.click(send);
 
-    await waitFor(() => expect(onAnswer).toHaveBeenCalled());
-    expect(onAnswer.mock.calls[0]?.slice(0, 3)).toEqual(["m1", "q1", "rome:answer"]);
-    expect(onAnswer.mock.calls[0]?.[3]).toEqual({ answers: [{ values: ["Plain"], text: "" }] });
+    await waitFor(() => expect(events).toHaveLength(1));
+    expect(events[0]?.url).toBe("/api/chat/widgets/m1/events");
+    expect(events[0]?.body.name).toBe("send");
+    expect(events[0]?.body.context).toEqual({ answers: [{ values: ["Plain"], text: "" }] });
+    // Core took it: the card waits for the stored answer, read-only.
+    expect(await screen.findByText("Sent")).toBeTruthy();
+  });
+
+  it("stays usable when core does not take the event", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(new Response("{}", { status: 500 }));
+    render(<WidgetUiCard widgetId="m1" toolUseId="q1" appId="core" ui={ui} text="" waiting={{}} />);
+    const send = await screen.findByRole("button", { name: "Send" });
+    fireEvent.click(screen.getByRole("button", { name: /Plain/ }));
+    await waitFor(() => expect((send as HTMLButtonElement).disabled).toBe(false));
+    fireEvent.click(send);
+    // Nothing locks: Send and the options work again, and the card says it failed.
+    await waitFor(() => expect((send as HTMLButtonElement).disabled).toBe(false));
+    expect(screen.queryByText("Sent")).toBeNull();
+    expect((screen.getByRole("button", { name: /Warm/ }) as HTMLButtonElement).disabled).toBe(
+      false,
+    );
   });
 
   it("shows an answered card read-only with what was sent", async () => {
@@ -119,7 +138,6 @@ describe("a question card described as data", () => {
             answers: [{ questionId: "tone", value: "Warm" }],
             card: [{ values: ["Warm"], text: "" }],
           },
-          onAnswer: rs.fn(),
         }}
       />,
     );
@@ -133,17 +151,8 @@ describe("a question card described as data", () => {
   });
 
   it("lets the last of a pick and typed text win on a single choice", async () => {
-    const onAnswer = rs.fn();
-    render(
-      <WidgetUiCard
-        widgetId="m1"
-        toolUseId="q2"
-        appId="core"
-        ui={ui}
-        text=""
-        waiting={{ onAnswer }}
-      />,
-    );
+    const events = captureEvents();
+    render(<WidgetUiCard widgetId="m1" toolUseId="q2" appId="core" ui={ui} text="" waiting={{}} />);
     const own = await screen.findByRole("textbox", { name: "Which tone?" });
     fireEvent.change(own, { target: { value: "Friendly" } });
     fireEvent.click(screen.getByRole("button", { name: /Plain/ }));
@@ -156,21 +165,12 @@ describe("a question card described as data", () => {
       ),
     );
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(onAnswer).toHaveBeenCalled());
-    expect(onAnswer.mock.calls[0]?.[3]).toEqual({ answers: [{ values: [], text: "Calm" }] });
+    await waitFor(() => expect(events).toHaveLength(1));
+    expect(events[0]?.body.context).toEqual({ answers: [{ values: [], text: "Calm" }] });
   });
 
   it("keeps Send off for an answer of only spaces", async () => {
-    render(
-      <WidgetUiCard
-        widgetId="m1"
-        toolUseId="q4"
-        appId="core"
-        ui={ui}
-        text=""
-        waiting={{ onAnswer: rs.fn() }}
-      />,
-    );
+    render(<WidgetUiCard widgetId="m1" toolUseId="q4" appId="core" ui={ui} text="" waiting={{}} />);
     fireEvent.change(await screen.findByRole("textbox", { name: "Which tone?" }), {
       target: { value: "   " },
     });
@@ -190,7 +190,7 @@ describe("a question card described as data", () => {
         appId="core"
         ui={withDefault}
         text=""
-        waiting={{ result: { dismissed: true }, onAnswer: rs.fn() }}
+        waiting={{ result: { dismissed: true } }}
       />,
     );
     await screen.findByText("Dismissed");
@@ -244,30 +244,23 @@ describe("a question card described as data", () => {
   });
 
   it("sends a button's context as written, even an object with only a string key", async () => {
-    const onAnswer = rs.fn();
+    const events = captureEvents();
     const card = {
       components: [
         {
           id: "root",
           component: "Button",
           child: "l",
-          action: { event: { name: "rome:answer", context: { tag: ["a", { string: "send" }] } } },
+          action: { event: { name: "send", context: { tag: ["a", { string: "send" }] } } },
         },
         { id: "l", component: "Text", text: { string: "send" } },
       ],
     } as never;
     render(
-      <WidgetUiCard
-        widgetId="m1"
-        toolUseId="q8"
-        appId="core"
-        ui={card}
-        text=""
-        waiting={{ onAnswer }}
-      />,
+      <WidgetUiCard widgetId="m1" toolUseId="q8" appId="core" ui={card} text="" waiting={{}} />,
     );
     fireEvent.click(await screen.findByRole("button", { name: "Send" }));
-    await waitFor(() => expect(onAnswer).toHaveBeenCalled());
-    expect(onAnswer.mock.calls[0]?.[3]).toEqual({ tag: ["a", { string: "send" }] });
+    await waitFor(() => expect(events).toHaveLength(1));
+    expect(events[0]?.body.context).toEqual({ tag: ["a", { string: "send" }] });
   });
 });

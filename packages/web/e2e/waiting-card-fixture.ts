@@ -200,7 +200,8 @@ export async function openWaitingCard(
                 {
                   type: "interaction_result",
                   toolUseId,
-                  output: name === "rome:dismiss" ? { dismissed: true } : context,
+                  output:
+                    name === "dismiss" || name === "rome:dismiss" ? { dismissed: true } : context,
                 },
               ],
             }),

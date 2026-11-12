@@ -303,7 +303,7 @@ describe("TaskChatCard", () => {
   it("allows a later question in the same mounted card to be answered", async () => {
     show();
     await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
-    await screen.findByText("Dismissed");
+    await screen.findByText("Sent");
     const nextQuestion = {
       ...question,
       toolUseId: "item_1",
@@ -320,7 +320,7 @@ describe("TaskChatCard", () => {
     await waitFor(() => expect(posts()).toHaveLength(2));
     expect(posts()[1][0]).toBe("/api/chat/widgets/next/events");
     expect(JSON.parse(String(posts()[1][1]?.body))).toMatchObject({
-      name: "rome:answer",
+      name: "send",
       context: { answers: [{ values: ["Yes"], text: "" }] },
     });
   });
@@ -334,11 +334,11 @@ describe("TaskChatCard", () => {
     const [url, init] = posts()[0];
     expect(url).toBe("/api/chat/widgets/ask/events");
     expect(JSON.parse(String(init?.body))).toMatchObject({
-      name: "rome:answer",
+      name: "send",
       context: { answers: [{ values: ["Warm"], text: "" }] },
     });
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
-    expect(screen.getByText("Answered")).toBeTruthy();
+    expect(await screen.findByText("Sent")).toBeTruthy();
     expect(screen.getByRole("link").getAttribute("href")).toBe(`/chat/${chatId}`);
     await waitFor(() =>
       expect(
@@ -362,8 +362,8 @@ describe("TaskChatCard", () => {
     show();
     await userEvent.click(await screen.findByRole("button", { name: "Dismiss" }));
     await waitFor(() => expect(posts()).toHaveLength(1));
-    expect(JSON.parse(String(posts()[0][1]?.body)).name).toBe("rome:dismiss");
-    expect(screen.getByText("Dismissed")).toBeTruthy();
+    expect(JSON.parse(String(posts()[0][1]?.body)).name).toBe("dismiss");
+    expect(await screen.findByText("Sent")).toBeTruthy();
   });
 
   it("shows an approval belonging to this task with the existing approval controls", async () => {

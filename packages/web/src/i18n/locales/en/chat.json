@@ -382,6 +382,7 @@
     "stopGenerating": "Stop generating"
   },
   "questionCard": {
+    "sent": "Sent",
     "optional": "optional",
     "addOwn": "Add your own…",
     "typeOwn": "Or type your own…",

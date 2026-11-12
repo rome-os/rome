@@ -51,8 +51,8 @@ struct InteractionRow: View {
             // The record is the guardian's to read: a visitor would only get 403s.
             .onAppear { if !isVisitor { store.watchApproval(part.approvalId) } }
         case .question(_, let part, _, let answered):
-            QuestionCardView(part: part, answered: answered, sending: store.answering.contains(part.toolUseId)) { name, context in
-                store.answer(widgetId: part.ui?.widgetId ?? "", toolUseId: part.toolUseId, name: name, context: context)
+            QuestionCardView(part: part, answered: answered) { name, context in
+                try await store.answerWidget(widgetId: part.ui?.widgetId ?? "", name: name, context: context)
             }
         case .connect(let id, let part, let sessionId):
             ConnectCardView(part: part, phase: store.connectPhases[id] ?? TranscriptStore.previewPhase(part.service) ?? .idle) {
