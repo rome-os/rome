@@ -49,7 +49,7 @@ import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { connectorHandlers } from "./connector";
-import { mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
+import { dinnerQuestion, mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
@@ -368,6 +368,7 @@ const transcripts: Record<string, ChatMessage[]> = {
     ...turn(CONCIERGE_CHAT_ID, 8, "2026-08-07T12:40:00.000Z", "How much have I eaten today?", [
       mealPlannerCard,
       text("1,240 kcal so far, 760 under your goal. A protein-heavy dinner fits."),
+      dinnerQuestion,
     ]),
   ],
   "mock-task-question": turn(

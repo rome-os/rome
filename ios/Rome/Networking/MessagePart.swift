@@ -114,6 +114,8 @@ enum MessagePart: Hashable, Sendable {
     struct QuestionPart: Hashable, Sendable {
         let toolUseId: String
         let questions: [Question]
+        /// The same card described as data, drawn instead when set.
+        var ui: WidgetUIPart? = nil
 
         struct Question: Hashable, Sendable {
             let id: String
@@ -227,7 +229,9 @@ enum MessagePart: Hashable, Sendable {
             let render = value["render"]
             if render?["componentId"]?.string == "question-card",
                let toolUseId = value["toolUseId"]?.string {
-                return .question(question(render?["props"], toolUseId: toolUseId))
+                var part = question(render?["props"], toolUseId: toolUseId)
+                part.ui = WidgetUIPart(interaction: value)
+                return .question(part)
             }
             return .webOnly(webOnlyKind(componentId: render?["componentId"]?.string, appId: value["appId"]?.string), toolUseId: value["toolUseId"]?.string)
         case "widget":

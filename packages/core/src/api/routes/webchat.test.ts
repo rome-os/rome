@@ -1,5 +1,5 @@
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
-import { askQuestionToolOutput } from "../../agent/index.js";
+import { askQuestionToolOutput, type Question } from "../../agent/index.js";
 import { testReceipt, testTurnHandle } from "../../test/turn-handle.js";
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -4685,16 +4685,16 @@ describe("Webchat API", () => {
     }
 
     it("stores what a described question card sends as the answers the card has always sent", async () => {
-      const questions = [
+      const questions: Question[] = [
         { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
-      ] as const;
+      ];
       const ctl = mockScriptedManager();
       ctl.setEvents(async function* () {
         yield {
           type: "tool_result",
           toolUseId: "tu-ask-ui",
           tool: "ask_question",
-          output: askQuestionToolOutput([...questions], true),
+          output: askQuestionToolOutput(questions, true),
         };
         yield { type: "result", content: "" };
       });

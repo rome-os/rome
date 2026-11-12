@@ -285,12 +285,20 @@ final class DemoBackend: RomeBackend {
 
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
         try await pause(0.4)
-        let part: JSONValue = .object(["type": .string("interaction_result"), "toolUseId": .string(toolUseId), "output": output])
+        // Core keeps what a described card sent as `card`, beside the answers.
+        var stored = output
+        if case .object(var object) = output, let sent = object["answers"], sent.array?.first?["questionId"] == nil, toolUseId == "q-dinner" {
+            object["card"] = sent
+            stored = .object(object)
+        }
+        let part: JSONValue = .object(["type": .string("interaction_result"), "toolUseId": .string(toolUseId), "output": stored])
         insert(sessionId, ChatMessage(id: nextID(), sessionId: sessionId, role: "user", content: json([part]), createdAt: RomeDate.string(.now)))
         setRunning(sessionId, "turn-\(nextID())")
         Task {
             try? await pause(3)
-            let reply = toolUseId == "q-hk" ? "好，我查一下海口明天的天气。" : "好的，只看国内产品。我整理好表格后告诉你。"
+            let reply = toolUseId == "q-hk" ? "好，我查一下海口明天的天气。"
+                : toolUseId == "q-dinner" ? "好，晚饭按你选的来，我列三个做法。"
+                : "好的，只看国内产品。我整理好表格后告诉你。"
             insert(sessionId, agent(reply, at: .now, session: sessionId))
             setRunning(sessionId, nil)
         }
@@ -468,6 +476,10 @@ final class DemoBackend: RomeBackend {
     }
 
     private var glasses = 3
+
+    /// An `ask_question` card as core stores it: the question card's props,
+    /// with the same card described as data in `render.ui`.
+    static let dinnerQuestion: JSONValue = try! JSONDecoder().decode(JSONValue.self, from: Data(#"{"type":"pending_interaction","toolUseId":"q-dinner","appId":"core","render":{"kind":"inline","componentId":"question-card","props":{"questions":[{"id":"dinner","question":"晚饭想吃哪种？","type":"single","options":["高蛋白","清淡一点"],"optionDescriptions":{"高蛋白":"鸡胸肉、豆腐、鸡蛋"},"freeText":true},{"id":"avoid","question":"有不想吃的吗？","type":"multi","options":["辣","海鲜","乳制品"],"optional":true}]},"ui":{"components":[{"id":"q0-text","component":"Text","text":"晚饭想吃哪种？","variant":"h5"},{"id":"q0-title","component":"Row","children":["q0-text"]},{"id":"q0-pick","component":"ChoicePicker","variant":"mutuallyExclusive","options":[{"label":"高蛋白","value":"高蛋白","description":"鸡胸肉、豆腐、鸡蛋"},{"label":"清淡一点","value":"清淡一点"}],"value":{"path":"/answers/0/values"}},{"id":"q0-own","component":"TextField","label":"晚饭想吃哪种？","value":{"path":"/answers/0/text"},"variant":"shortText","placeholder":{"string":"typeOwn"}},{"id":"q0","component":"Column","children":["q0-title","q0-pick","q0-own"]},{"id":"q1-text","component":"Text","text":"有不想吃的吗？","variant":"h5"},{"id":"q1-optional","component":"Text","text":{"string":"optional"},"variant":"caption"},{"id":"q1-title","component":"Row","children":["q1-text","q1-optional"]},{"id":"q1-pick","component":"ChoicePicker","variant":"multipleSelection","options":[{"label":"辣","value":"辣"},{"label":"海鲜","value":"海鲜"},{"label":"乳制品","value":"乳制品"}],"value":{"path":"/answers/1/values"}},{"id":"q1","component":"Column","children":["q1-title","q1-pick"]},{"id":"send-label","component":"Text","text":{"string":"send"}},{"id":"send","component":"Button","child":"send-label","variant":"primary","action":{"event":{"name":"rome:answer","context":{"answers":{"path":"/answers"}}}},"checks":[{"condition":{"call":"or","args":{"values":[{"call":"required","args":{"value":{"path":"/answers/0/values"}}},{"call":"required","args":{"value":{"path":"/answers/0/text"}}}]}},"message":""}]},{"id":"dismiss-label","component":"Text","text":{"string":"dismiss"}},{"id":"dismiss","component":"Button","child":"dismiss-label","variant":"borderless","action":{"event":{"name":"rome:dismiss"}}},{"id":"actions","component":"Row","children":["dismiss","send"],"justify":"end"},{"id":"root","component":"Column","children":["q0","q1","actions"]}],"data":{"answers":[{"values":[],"text":""},{"values":[],"text":""}]}},"builtin":true}}"#.utf8))
 
     static let mealCard: JSONValue = {
         func c(_ id: String, _ kind: String, _ props: [String: JSONValue]) -> JSONValue {
@@ -737,6 +749,7 @@ final class DemoBackend: RomeBackend {
             user("m1", "我今天吃了多少？", at: at(12, 40), session: "topic-meals"),
             parts([Self.mealCard], at: at(12, 41), session: "topic-meals"),
             agent("到现在 1,240 千卡，离目标还差 760。晚饭可以吃点蛋白质多的。", at: at(12, 41).addingTimeInterval(2), session: "topic-meals"),
+            parts([Self.dinnerQuestion], at: at(12, 41).addingTimeInterval(3), session: "topic-meals"),
         ]
 
         // Concierge, as on the design's Chat board.

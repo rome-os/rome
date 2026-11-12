@@ -408,7 +408,7 @@ export function createAction(
 |---|---|
 | `Action` | Shape of the returned object: `{ config, inputSchema?, execute }` |
 | `ActionConfig` | Parsed from `action.yaml` and passed through at runtime |
-| `ActionResult` | `{ status: "ok", data?: unknown } \| { status: "error", error: string } \| { status: "pending_approval", approval } \| { status: "pending_interaction", interaction } \| { status: "show_widget", widget: { componentId, props?, text, waits? } \| { ui, bind?, text } }`. A `ui` widget is a card described as data (an A2UI v0.9 subset: `Text`, `Stat`, `List`, `Row`, `Column`, `Image`, `Progress`, `Button`), drawn by the dashboard and the iOS app. `bind` maps JSON Pointers to GET paths in the app's API; a `Button`'s `action.event.name` is a path it POSTs to. Check one with `checkWidgetUi` |
+| `ActionResult` | `{ status: "ok", data?: unknown } \| { status: "error", error: string } \| { status: "pending_approval", approval } \| { status: "pending_interaction", interaction } \| { status: "show_widget", widget: { componentId, props?, text, waits? } \| { ui, bind?, text } }`. A `ui` widget is a card described as data (an A2UI v0.9 subset: `Text`, `Stat`, `List`, `Row`, `Column`, `Image`, `Progress`, `Button`, `ChoicePicker`, `TextField`), drawn by the dashboard and the iOS app. `bind` maps JSON Pointers to GET paths in the app's API; a `Button`'s `action.event.name` is a path it POSTs to. Check one with `checkWidgetUi` |
 | `AppActionRuntimeDeps<T>` | Dependency container; generic `T` is app-defined extras |
 
 **Commonly used fields on `AppActionRuntimeDeps`**

@@ -59,4 +59,35 @@ import Testing
         guard case .widgetUI(let card) = MessagePart.parse(JSONValue.array([DemoBackend.mealCard]).prettyText).first else { Issue.record("demo card did not parse"); return }
         #expect(card.components.count == 12)
     }
+
+    @MainActor @Test func aQuestionCardDescribedAsDataIsDrawnFromItsDescription() {
+        guard case .question(let part) = MessagePart.parse(JSONValue.array([DemoBackend.dinnerQuestion]).prettyText).first else {
+            Issue.record("not a question card"); return
+        }
+        #expect(part.questions.count == 2)
+        let card = part.ui
+        #expect(card?.components["q0-pick"]?.kind == .choicePicker)
+        #expect(card?.components["q0-own"]?.kind == .textField)
+        #expect(card?.data["answers"]?.array?.count == 2)
+    }
+
+    @Test func inputsWriteIntoTheModelAndChecksReadIt() {
+        let start: JSONValue = .object(["answers": .array([.object(["values": .array([]), "text": .string("")])])])
+        let required: JSONValue = .object(["call": .string("required"), "args": .object(["value": .object(["path": .string("/answers/0/values")])])])
+        let either: JSONValue = .object(["call": .string("or"), "args": .object(["values": .array([
+            required,
+            .object(["call": .string("required"), "args": .object(["value": .object(["path": .string("/answers/0/text")])])]),
+        ])])])
+        #expect(!WidgetData.passes(either, in: start, scope: ""))
+        let typed = WidgetData.storing(.string("Spicy"), at: "/answers/0/text", in: start)
+        #expect(WidgetData.passes(either, in: typed, scope: ""))
+        #expect(!WidgetData.passes(required, in: typed, scope: ""))
+        let picked = WidgetData.storing(.array([.string("Warm")]), at: "/answers/0/values", in: start)
+        #expect(WidgetData.passes(required, in: picked, scope: ""))
+        #expect(WidgetData.storing(.string("x"), at: "/answers/5/text", in: start) == start)
+    }
+
+    @Test func romeStringsAreTranslatedByTheReader() {
+        #expect(WidgetData.text(.object(["string": .string("send")]), in: .null, scope: "") == String(localized: "Send"))
+    }
 }

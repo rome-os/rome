@@ -656,18 +656,22 @@ final class TranscriptStore {
     /// `sessionId`: the question's own chat, this one unless it says otherwise.
     func answer(_ part: MessagePart.QuestionPart, answers: [JSONValue], sessionId: String? = nil) {
         // An empty list is an answer too: a card of only optional questions left blank.
-        guard !answering.contains(part.toolUseId) else { return }
-        let output: JSONValue = .object(["answers": .array(answers)])
-        answering.insert(part.toolUseId)
-        localAnswers[part.toolUseId] = output
+        answer(toolUseId: part.toolUseId, output: .object(["answers": .array(answers)]), sessionId: sessionId)
+    }
+
+    /// Answers the interaction a card waits on with `output`, as the card sent it.
+    func answer(toolUseId: String, output: JSONValue, sessionId: String? = nil) {
+        guard !answering.contains(toolUseId) else { return }
+        answering.insert(toolUseId)
+        localAnswers[toolUseId] = output
         Task {
             do {
-                try await backend.answer(sessionId: sessionId ?? self.sessionId, toolUseId: part.toolUseId, output: output)
+                try await backend.answer(sessionId: sessionId ?? self.sessionId, toolUseId: toolUseId, output: output)
                 markRunning()
             } catch {
-                localAnswers[part.toolUseId] = nil
+                localAnswers[toolUseId] = nil
             }
-            answering.remove(part.toolUseId)
+            answering.remove(toolUseId)
         }
     }
 
@@ -681,13 +685,13 @@ final class TranscriptStore {
     static func previewPhase(_ service: String) -> ConnectPhase? { nil }
     #endif
 
-    /// A card for a service that already works shows Connected when it opens,
-    /// and tells nobody: an old card must not wake Chat again.
     /// A widget's call on its own app, with this chat's backend.
     func appCall(appId: String, method: String, path: String, body: JSONValue?) async throws -> ConnectReply {
         try await backend.appCall(appId: appId, method: method, path: path, body: body)
     }
 
+    /// A card for a service that already works shows Connected when it opens,
+    /// and tells nobody: an old card must not wake Chat again.
     func checkConnected(_ part: MessagePart.ConnectCardPart, rowId: String) async {
         guard connectPhases[rowId] == nil || connectPhases[rowId] == .idle else { return }
         guard let list = try? await backend.connectors(),
