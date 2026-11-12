@@ -653,15 +653,15 @@ final class TranscriptStore {
 
     // MARK: Questions
 
-    /// Answers the widget the agent waits on with a press, which starts a turn.
-    /// `sessionId`: the widget's own chat, this one unless it says otherwise.
-    func answer(toolUseId: String, name: String, context: JSONValue, sessionId: String? = nil) {
+    /// Answers the agent waiting on a widget with an event, which starts a turn.
+    /// `widgetId` is the id of the message that holds the widget.
+    func answer(widgetId: String, toolUseId: String, name: String, context: JSONValue) {
         guard !answering.contains(toolUseId) else { return }
         answering.insert(toolUseId)
         localAnswers[toolUseId] = WidgetPaths.answerOutput(name, context)
         Task {
             do {
-                try await backend.answerWidget(sessionId: sessionId ?? self.sessionId, toolUseId: toolUseId, name: name, context: context)
+                try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
                 markRunning()
             } catch {
                 localAnswers[toolUseId] = nil
@@ -680,9 +680,9 @@ final class TranscriptStore {
     static func previewPhase(_ service: String) -> ConnectPhase? { nil }
     #endif
 
-    /// A press on a widget that calls its app, sent to core.
-    func answerWidget(toolUseId: String, name: String, context: JSONValue, sessionId: String) async throws {
-        try await backend.answerWidget(sessionId: sessionId, toolUseId: toolUseId, name: name, context: context)
+    /// An event on a widget that calls its app, sent to core by the widget's id.
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws {
+        try await backend.answerWidget(widgetId: widgetId, name: name, context: context)
     }
 
     /// A widget's read of its own app, with this chat's backend.

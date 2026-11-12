@@ -50,20 +50,20 @@ struct InteractionRow: View {
             }
             // The record is the guardian's to read: a visitor would only get 403s.
             .onAppear { if !isVisitor { store.watchApproval(part.approvalId) } }
-        case .question(_, let part, let sessionId, let answered):
+        case .question(_, let part, _, let answered):
             QuestionCardView(part: part, answered: answered, sending: store.answering.contains(part.toolUseId)) { name, context in
-                store.answer(toolUseId: part.toolUseId, name: name, context: context, sessionId: sessionId)
+                store.answer(widgetId: part.ui?.widgetId ?? "", toolUseId: part.toolUseId, name: name, context: context)
             }
         case .connect(let id, let part, let sessionId):
             ConnectCardView(part: part, phase: store.connectPhases[id] ?? TranscriptStore.previewPhase(part.service) ?? .idle) {
                 store.connect(part, rowId: id, chatId: sessionId)
             }
             .task(id: id) { await store.checkConnected(part, rowId: id) }
-        case .widgetUI(_, let part, let sessionId):
+        case .widgetUI(_, let part, _):
             WidgetUICardView(part: part, call: { method, path, body in
                 try await store.appCall(appId: part.appId, method: method, path: path, body: body)
             }, press: { name, context in
-                try await store.answerWidget(toolUseId: part.toolUseId, name: name, context: context, sessionId: sessionId)
+                try await store.answerWidget(widgetId: part.widgetId, name: name, context: context)
             })
         case .webOnly(_, let kind, let done):
             WebOnlyCard(kind: kind, done: done, sessionId: store.sessionId)

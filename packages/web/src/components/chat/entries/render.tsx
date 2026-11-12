@@ -54,6 +54,9 @@ export interface RenderEntryOptions {
    * interaction state and routes submissions to the right session in the merged
    * (multi-session) transcript. */
   sessionId?: string;
+  /** The message these blocks belong to. A widget is a message of its own, so
+   * this is the id a widget's events go to core by. */
+  messageId?: string;
   /** Turn that owns the rendered text blocks, used to preserve disclosure state
    * when a live block is replaced by its persisted transcript representation. */
   turnId?: string;
@@ -71,6 +74,7 @@ export interface RenderEntryOptions {
   /** Invoked when a press on a widget the agent waits on answers it, as a turn. */
   onAnswerWidget?: (
     sessionId: string,
+    widgetId: string,
     toolUseId: string,
     name: string,
     context: Record<string, unknown>,
@@ -89,6 +93,7 @@ export function renderSingleEntry(
     onApprovalResolved,
     compact = false,
     sessionId,
+    messageId,
     turnId,
     interactionResults,
     onSubmitAppComponent,
@@ -104,8 +109,14 @@ export function renderSingleEntry(
     ? (toolUseId: string, output: Record<string, unknown>, summary?: string) =>
         onSubmitAppComponent(sid, toolUseId, output, summary)
     : () => {};
-  const answerWidget = (toolUseId: string, name: string, context: Record<string, unknown>) =>
-    void onAnswerWidget?.(sid, toolUseId, name, context);
+  // A widget is a message of its own, so the message's id is the widget's.
+  const widgetId = messageId ?? "";
+  const answerWidget = (
+    id: string,
+    toolUseId: string,
+    name: string,
+    context: Record<string, unknown>,
+  ) => void onAnswerWidget?.(sid, id, toolUseId, name, context);
   const dismiss = onDismissAppComponent
     ? (toolUseId: string) => onDismissAppComponent(sid, toolUseId)
     : () => {};
@@ -230,7 +241,7 @@ export function renderSingleEntry(
         return (
           <QuestionCard
             key={`question-card-${block.toolUseId}`}
-            sessionId={sid}
+            widgetId={widgetId}
             toolUseId={block.toolUseId}
             appId={block.appId}
             ui={block.render.ui}
@@ -262,7 +273,7 @@ export function renderSingleEntry(
           >
             <Suspense fallback={null}>
               <WidgetUiCard
-                sessionId={sid}
+                widgetId={widgetId}
                 toolUseId={block.toolUseId}
                 appId={block.appId}
                 ui={block.ui}

@@ -1065,8 +1065,9 @@ describe("Webchat API", () => {
       });
     }
     const isWebchat = type === "webchat" || variant === "promoted-fork";
-    const reply = JSON.stringify([
-      { type: "text", content: "The final reply" },
+    const reply = JSON.stringify([{ type: "text", content: "The final reply" }]);
+    // A card the agent waits on is a message of its own.
+    const card = JSON.stringify([
       {
         type: "pending_interaction",
         toolUseId: "question",
@@ -1100,6 +1101,13 @@ describe("Webchat API", () => {
         sessionId,
         "assistant",
         reply,
+        turnId,
+      );
+      await deps.webchatRepo.addMessage(
+        `${sessionId}-${turnId}-card`,
+        sessionId,
+        "assistant",
+        card,
         turnId,
       );
     }

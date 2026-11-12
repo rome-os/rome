@@ -1,4 +1,4 @@
-import { widgetAnswerRoutes } from "./routes/widget-answers.js";
+import { widgetEventRoutes } from "./routes/widget-events.js";
 import { devicesRoutes } from "./routes/devices.js";
 import type { Server } from "node:http";
 import { existsSync, readFileSync } from "node:fs";
@@ -236,11 +236,11 @@ export function buildApp(
 
   const { routes: webchatRoutesApp, runtime: webchatRuntime } = createWebchatRuntime(deps);
   api.route("/", webchatRoutesApp);
-  // A widget's answer goes back through the API, so the turn or the app call
+  // A widget's event goes back through the API, so the turn or the app call
   // it becomes passes every check a direct call would.
   api.route(
     "/",
-    widgetAnswerRoutes({
+    widgetEventRoutes({
       webchatRepo: deps.webchatRepo,
       forward: (request, env) => app.fetch(request, env),
     }),

@@ -25,7 +25,7 @@ export const mealPlannerHandlers = [
   }),
   // The card's water button, answered through core, which calls the app's
   // `water` above. The card declares no other event.
-  http.post("/api/chat/sessions/:sessionId/widgets/mock-meal-card/answers", async ({ request }) => {
+  http.post("/api/chat/widgets/:widgetId/events", async ({ request }) => {
     const { name } = (await request.json()) as { name?: unknown };
     if (name !== "water") {
       return HttpResponse.json(

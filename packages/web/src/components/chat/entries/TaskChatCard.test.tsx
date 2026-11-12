@@ -81,7 +81,7 @@ beforeEach(async () => {
   postAction = () => {};
   fetchMock = rs.fn<typeof fetch>(async (input, init) => {
     const url = String(input);
-    if (url.endsWith("/answers") && init?.method === "POST") {
+    if (url.endsWith("/events") && init?.method === "POST") {
       postAction();
       return Response.json(
         postStatus === 400
@@ -318,7 +318,7 @@ describe("TaskChatCard", () => {
     await userEvent.click(await screen.findByRole("button", { name: "Yes" }));
     await userEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(posts()).toHaveLength(2));
-    expect(posts()[1][0]).toBe(`/api/chat/sessions/${chatId}/widgets/item_1/answers`);
+    expect(posts()[1][0]).toBe("/api/chat/widgets/next/events");
     expect(JSON.parse(String(posts()[1][1]?.body))).toMatchObject({
       name: "rome:answer",
       context: { answers: [{ values: ["Yes"], text: "" }] },
@@ -332,7 +332,7 @@ describe("TaskChatCard", () => {
     await user.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(posts()).toHaveLength(1));
     const [url, init] = posts()[0];
-    expect(url).toBe(`/api/chat/sessions/${chatId}/widgets/item_0/answers`);
+    expect(url).toBe("/api/chat/widgets/ask/events");
     expect(JSON.parse(String(init?.body))).toMatchObject({
       name: "rome:answer",
       context: { answers: [{ values: ["Warm"], text: "" }] },

@@ -3,7 +3,7 @@ import { A2uiSurface } from "@a2ui/react/v0_9";
 import type { TranscriptPart } from "@rome/api-types/chat";
 import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { widgetAnswerPath } from "@/lib/chat-api";
+import { widgetEventPath } from "@/lib/chat-api";
 import { fetchJson } from "@/lib/fetch-json";
 import { CardBoundary } from "./CardBoundary";
 import { isDrawableCard } from "./drawable";
@@ -18,8 +18,8 @@ import {
 type WidgetUi = Extract<TranscriptPart, { type: "widget"; ui: unknown }>["ui"];
 
 export interface WidgetUiCardProps {
-  /** The chat the widget is in, where its buttons are answered. */
-  sessionId: string;
+  /** The widget's id: the id of the message that holds it. Its events go to core by it. */
+  widgetId: string;
   toolUseId: string;
   appId: string;
   ui: WidgetUi;
@@ -31,7 +31,12 @@ export interface WidgetUiCardProps {
    *  `result` is the stored answer once there is one, which locks the card. */
   waiting?: {
     result?: Record<string, unknown>;
-    onAnswer: (toolUseId: string, name: string, context: Record<string, unknown>) => void;
+    onAnswer: (
+      widgetId: string,
+      toolUseId: string,
+      name: string,
+      context: Record<string, unknown>,
+    ) => void;
   };
 }
 
@@ -93,7 +98,7 @@ function splitClears(components: unknown[]): {
  * in the chat.
  */
 export function WidgetUiCard({
-  sessionId,
+  widgetId,
   toolUseId,
   appId,
   ui,
@@ -164,14 +169,19 @@ export function WidgetUiCard({
       const host = waitingRef.current;
       if (host && startsATurn(action.name)) {
         setSent(true);
-        host.onAnswer(toolUseId, action.name, (action.context ?? {}) as Record<string, unknown>);
+        host.onAnswer(
+          widgetId,
+          toolUseId,
+          action.name,
+          (action.context ?? {}) as Record<string, unknown>,
+        );
         return;
       }
       if (inFlight.current) return;
       inFlight.current = true;
       setBusy(true);
       try {
-        await fetchJson<unknown>(widgetAnswerPath(sessionId, toolUseId), {
+        await fetchJson<unknown>(widgetEventPath(widgetId), {
           method: "POST",
           json: { name: action.name, context: action.context ?? {} },
           fallback: "The card's button failed",
@@ -213,7 +223,7 @@ export function WidgetUiCard({
       return { processor: p, drawable: false };
     }
     return { processor: p, drawable: true };
-  }, [load, sessionId, toolUseId, uiKey, parts, valid]);
+  }, [load, widgetId, toolUseId, uiKey, parts, valid]);
 
   // An answered card shows what the guardian sent, which core keeps as `card`.
   // A dismissed card was never answered, so it shows nothing picked rather

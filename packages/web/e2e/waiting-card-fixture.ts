@@ -185,9 +185,12 @@ export async function openWaitingCard(
             success: true,
           });
         }
-        // Core answers a widget the agent waits on with the turn below.
-        const answered = path.match(/^\/api\/chat\/sessions\/[^/]+\/widgets\/([^/]+)\/answers$/);
+        // Core answers the agent waiting on a widget with the turn below. A
+        // widget is a message of its own, so its id is the message's.
+        const answered = path.match(/^\/api\/chat\/widgets\/([^/]+)\/events$/);
         if (answered && method === "POST") {
+          const held = messages.find((m) => m.id === decodeURIComponent(answered[1]));
+          const toolUseId = (JSON.parse(held?.content ?? "[]")[0] ?? {}).toolUseId;
           const { name, context, turn } = JSON.parse(String(init?.body));
           init = {
             ...init,
@@ -196,7 +199,7 @@ export async function openWaitingCard(
               parts: [
                 {
                   type: "interaction_result",
-                  toolUseId: decodeURIComponent(answered[1]),
+                  toolUseId,
                   output: name === "rome:dismiss" ? { dismissed: true } : context,
                 },
               ],

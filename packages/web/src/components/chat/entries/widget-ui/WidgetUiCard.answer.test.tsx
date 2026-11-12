@@ -84,7 +84,7 @@ describe("a question card described as data", () => {
     const onAnswer = rs.fn();
     render(
       <WidgetUiCard
-        sessionId="s1"
+        widgetId="m1"
         toolUseId="q1"
         appId="core"
         ui={ui}
@@ -102,14 +102,14 @@ describe("a question card described as data", () => {
     fireEvent.click(send);
 
     await waitFor(() => expect(onAnswer).toHaveBeenCalled());
-    expect(onAnswer.mock.calls[0]?.slice(0, 2)).toEqual(["q1", "rome:answer"]);
-    expect(onAnswer.mock.calls[0]?.[2]).toEqual({ answers: [{ values: ["Plain"], text: "" }] });
+    expect(onAnswer.mock.calls[0]?.slice(0, 3)).toEqual(["m1", "q1", "rome:answer"]);
+    expect(onAnswer.mock.calls[0]?.[3]).toEqual({ answers: [{ values: ["Plain"], text: "" }] });
   });
 
   it("shows an answered card read-only with what was sent", async () => {
     const { container } = render(
       <WidgetUiCard
-        sessionId="s1"
+        widgetId="m1"
         toolUseId="q1"
         appId="core"
         ui={ui}
@@ -136,7 +136,7 @@ describe("a question card described as data", () => {
     const onAnswer = rs.fn();
     render(
       <WidgetUiCard
-        sessionId="s1"
+        widgetId="m1"
         toolUseId="q2"
         appId="core"
         ui={ui}
@@ -157,13 +157,13 @@ describe("a question card described as data", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: "Send" }));
     await waitFor(() => expect(onAnswer).toHaveBeenCalled());
-    expect(onAnswer.mock.calls[0]?.[2]).toEqual({ answers: [{ values: [], text: "Calm" }] });
+    expect(onAnswer.mock.calls[0]?.[3]).toEqual({ answers: [{ values: [], text: "Calm" }] });
   });
 
   it("keeps Send off for an answer of only spaces", async () => {
     render(
       <WidgetUiCard
-        sessionId="s1"
+        widgetId="m1"
         toolUseId="q4"
         appId="core"
         ui={ui}
@@ -185,7 +185,7 @@ describe("a question card described as data", () => {
     } as never;
     render(
       <WidgetUiCard
-        sessionId="s1"
+        widgetId="m1"
         toolUseId="q5"
         appId="core"
         ui={withDefault}
@@ -213,7 +213,7 @@ describe("a question card described as data", () => {
       ],
       data: { hint: "Friendly and short", picked: [] },
     } as never;
-    render(<WidgetUiCard sessionId="s1" toolUseId="q6" appId="core" ui={bound} text="" />);
+    render(<WidgetUiCard widgetId="m1" toolUseId="q6" appId="core" ui={bound} text="" />);
     expect(await screen.findByText("Friendly and short")).toBeTruthy();
   });
 
@@ -258,7 +258,7 @@ describe("a question card described as data", () => {
     } as never;
     render(
       <WidgetUiCard
-        sessionId="s1"
+        widgetId="m1"
         toolUseId="q8"
         appId="core"
         ui={card}
@@ -268,6 +268,6 @@ describe("a question card described as data", () => {
     );
     fireEvent.click(await screen.findByRole("button", { name: "Send" }));
     await waitFor(() => expect(onAnswer).toHaveBeenCalled());
-    expect(onAnswer.mock.calls[0]?.[2]).toEqual({ tag: ["a", { string: "send" }] });
+    expect(onAnswer.mock.calls[0]?.[3]).toEqual({ tag: ["a", { string: "send" }] });
   });
 });

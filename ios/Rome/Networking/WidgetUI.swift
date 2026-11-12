@@ -6,6 +6,10 @@ import Foundation
 /// dashboard's does, so both draw the same card.
 struct WidgetUIPart: Hashable, Sendable {
     let toolUseId: String
+    /// The widget's id: the id of the message that holds it, since a widget
+    /// is a message of its own. Set by whoever reads the message; its events
+    /// go to core by it.
+    var widgetId = ""
     let appId: String
     /// The widget's line, for when the card cannot be drawn or read.
     let text: String

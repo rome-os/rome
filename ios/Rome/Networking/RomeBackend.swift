@@ -55,7 +55,7 @@ protocol RomeBackend: AnyObject, Sendable {
     /// A press on a widget's button, sent to core, which decides what it means:
     /// `rome:answer` and `rome:dismiss` answer the interaction the agent waits
     /// on, as a turn in the chat; any other event calls the widget's app.
-    func answerWidget(sessionId: String, toolUseId: String, name: String, context: JSONValue) async throws
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws
     func markRead(sessionId: String) async
     func sessions() async throws -> [ChatSession]
     func activeTurns(sessionId: String) async throws -> [ActiveTurn]
@@ -191,9 +191,9 @@ final class LiveBackend: RomeBackend {
         return try await client.getData(route, query: query, limit: APIClient.imageLimit)
     }
 
-    func answerWidget(sessionId: String, toolUseId: String, name: String, context: JSONValue) async throws {
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws {
         _ = try await client.post(
-            "/chat/sessions/\(escape(sessionId))/widgets/\(escape(toolUseId))/answers",
+            "/chat/widgets/\(escape(widgetId))/events",
             json: .object(["name": .string(name), "context": context])
         )
     }

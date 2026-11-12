@@ -156,6 +156,8 @@ enum TranscriptBuilder {
                 case .approval(let approval):
                     rows.append(.approval(id: id, part: approval, sessionId: message.sessionId))
                 case .question(let question):
+                    var question = question
+                    question.ui?.widgetId = message.id
                     rows.append(.question(id: id, part: question, sessionId: message.sessionId, answered: answers[question.toolUseId]))
                 case .webOnly(let kind, let toolUseId):
                     rows.append(.webOnly(id: id, kind: kind, done: toolUseId.map { answers[$0] != nil } ?? false))
@@ -164,6 +166,8 @@ enum TranscriptBuilder {
                 case .connectCard(let card):
                     rows.append(.connect(id: id, part: card, sessionId: message.sessionId))
                 case .widgetUI(let card):
+                    var card = card
+                    card.widgetId = message.id
                     rows.append(.widgetUI(id: id, part: card, sessionId: message.sessionId))
                 case .error(let text):
                     rows.append(.error(id: id, text: text.isEmpty ? String(localized: "This turn did not finish") : text))

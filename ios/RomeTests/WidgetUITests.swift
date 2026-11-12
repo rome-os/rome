@@ -185,6 +185,21 @@ import Testing
         #expect(answers.value.isEmpty)
     }
 
+    @Test func aWidgetsIdIsTheIdOfTheMessageThatHoldsIt() {
+        let held = { (part: JSONValue, id: String) in
+            ChatMessage(id: id, sessionId: "topic-meals", role: "assistant", content: JSONValue.array([part]).prettyText, createdAt: RomeDate.string(.now))
+        }
+        let rows = TranscriptBuilder.rows(messages: [held(DemoBackend.mealCard, "m-meal"), held(DemoBackend.dinnerQuestion, "m-dinner")], pending: [], answers: [:], options: .init())
+        let ids = rows.compactMap { row -> String? in
+            switch row {
+            case .widgetUI(_, let part, _): part.widgetId
+            case .question(_, let part, _, _): part.ui?.widgetId
+            default: nil
+            }
+        }
+        #expect(ids == ["m-meal", "m-dinner"])
+    }
+
     @Test func onlyHttpsImagesLoad() {
         #expect(WidgetPaths.httpsURL("https://example.com/a.png") != nil)
         for url in ["/api/settings", "http://example.com/a.png", "photo.png", "https://"] {

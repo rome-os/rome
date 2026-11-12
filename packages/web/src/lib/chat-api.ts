@@ -481,24 +481,24 @@ export async function listSessionTurns(sessionId: string): Promise<TurnInfo[] | 
   return (await res.json()) as TurnInfo[];
 }
 
-/** Where a client sends a press on a widget's button: core routes it to the
- *  widget's app, or answers the interaction the agent waits on. */
-export const widgetAnswerPath = (sessionId: string, toolUseId: string) =>
-  `/api/chat/sessions/${encodeURIComponent(sessionId)}/widgets/${encodeURIComponent(toolUseId)}/answers`;
+/** Where a client sends every event a widget fires. A widget is a message of
+ *  its own, so `widgetId` is its message's id; core routes the event to the
+ *  widget's app, or answers the agent waiting on it. */
+export const widgetEventPath = (widgetId: string) =>
+  `/api/chat/widgets/${encodeURIComponent(widgetId)}/events`;
 
-/** Answers a widget the agent waits on: the press becomes a turn in the chat,
- *  read back like any other turn. `turn` carries the chat's own turn fields. */
 /** The interaction result a widget's answer becomes, as the chat shows it
  *  before the server's copy arrives. */
 export const widgetAnswerOutput = (name: string, context: Record<string, unknown>) =>
   name === "rome:dismiss" ? { dismissed: true } : context;
 
-export async function postWidgetAnswerTurn(
-  sessionId: string,
-  toolUseId: string,
+/** An event that answers the agent waiting on a widget: it becomes a turn in
+ *  the chat, read back like any other turn. `turn` carries the chat's own turn fields. */
+export async function postWidgetEventTurn(
+  widgetId: string,
   body: { name: string; context?: unknown; turn?: Record<string, unknown> },
 ): Promise<PostTurnResult> {
-  const res = await fetch(widgetAnswerPath(sessionId, toolUseId), {
+  const res = await fetch(widgetEventPath(widgetId), {
     method: "POST",
     credentials: "include",
     headers: { "content-type": "application/json" },

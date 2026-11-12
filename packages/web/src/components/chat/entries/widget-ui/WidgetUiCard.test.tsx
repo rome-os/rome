@@ -73,7 +73,7 @@ describe("a widget described as data", () => {
       });
     });
 
-    render(<>{renderFlatEntries(stored(), { sessionId: "s1" })}</>);
+    render(<>{renderFlatEntries(stored(), { sessionId: "s1", messageId: "m-ui" })}</>);
 
     await screen.findByText("Oatmeal");
     expect(screen.getByText("Ramen")).toBeTruthy();
@@ -85,7 +85,7 @@ describe("a widget described as data", () => {
     await waitFor(() => expect(fetch.mock.calls.length).toBe(3));
     const post = fetch.mock.calls.find(([, init]) => init?.method === "POST");
     // The press goes to core, which calls the app.
-    expect(String(post?.[0])).toBe("/api/chat/sessions/s1/widgets/w-ui/answers");
+    expect(String(post?.[0])).toBe("/api/chat/widgets/m-ui/events");
     expect(JSON.parse(String(post?.[1]?.body))).toEqual({
       name: "water",
       context: { date: "2026-11-11" },

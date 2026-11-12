@@ -6,7 +6,7 @@ import { Link } from "react-router-dom";
 import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { useApprovals } from "@/hooks/use-approvals";
-import { listSessionMessagePage, postWidgetAnswerTurn, widgetAnswerOutput } from "@/lib/chat-api";
+import { listSessionMessagePage, postWidgetEventTurn, widgetAnswerOutput } from "@/lib/chat-api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { ApprovalCard } from "../approval/ApprovalCard";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
@@ -144,7 +144,7 @@ const approvalPayloadSchema = z.object({
 function latestOpenInteraction(messages: ChatMessage[]) {
   const open = new Map<
     string,
-    { part: z.infer<typeof interactionSchema>; key: string; at: string }
+    { part: z.infer<typeof interactionSchema>; key: string; messageId: string; at: string }
   >();
   // Results close only earlier cards: a later turn can reuse the same toolUseId.
   for (const message of messages) {
@@ -162,7 +162,12 @@ function latestOpenInteraction(messages: ChatMessage[]) {
       const part = parsed.data;
       open.delete(part.toolUseId);
       if (part.type === "pending_interaction") {
-        open.set(part.toolUseId, { part, key: `${message.id}:${index}`, at: message.createdAt });
+        open.set(part.toolUseId, {
+          part,
+          key: `${message.id}:${index}`,
+          messageId: message.id,
+          at: message.createdAt,
+        });
       }
     }
   }
@@ -207,13 +212,13 @@ function WaitingTaskCard({
     await Promise.all([messages.refetch(), approvals.refetch(), onRefresh()]);
   }
 
-  async function answer(toolUseId: string, name: string, context: Record<string, unknown>) {
+  async function answer(widgetId: string, name: string, context: Record<string, unknown>) {
     if (!interaction || submitted?.key === interaction.key) return;
     setSubmitted({ key: interaction.key, output: widgetAnswerOutput(name, context) });
     setError(null);
     try {
       // This turn belongs to the task, never to the main Chat's stream state.
-      const result = await postWidgetAnswerTurn(chatId, toolUseId, { name, context });
+      const result = await postWidgetEventTurn(widgetId, { name, context });
       if (!result.ok) {
         setError(
           result.status === 400
@@ -259,15 +264,15 @@ function WaitingTaskCard({
       ) : interaction?.part.render?.builtin &&
         interaction.part.render.componentId === "question-card" ? (
         <QuestionCard
-          sessionId={chatId}
+          widgetId={interaction.messageId}
           key={`${interaction.key}:${attempt}`}
           toolUseId={interaction.part.toolUseId}
           appId={interaction.part.appId ?? "core"}
           ui={interaction.part.render.ui}
           props={interaction.part.render.props}
           result={submitted?.key === interaction.key ? submitted.output : undefined}
-          onAnswer={(toolUseId, name, context) => {
-            void answer(toolUseId, name, context);
+          onAnswer={(widgetId, _toolUseId, name, context) => {
+            void answer(widgetId, name, context);
           }}
         />
       ) : null}

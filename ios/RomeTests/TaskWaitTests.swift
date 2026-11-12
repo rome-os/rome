@@ -2,7 +2,7 @@ import Foundation
 import Testing
 @testable import Rome
 
-nonisolated(unsafe) private let question: [String: Any] = ["type": "pending_interaction", "toolUseId": "q1", "render": ["componentId": "question-card", "builtin": true, "props": ["questions": [["id": "s", "question": "Which?", "type": "single", "options": ["A", "B"]]]]]]
+nonisolated(unsafe) private let question: [String: Any] = ["type": "pending_interaction", "toolUseId": "q1", "appId": "core", "render": ["componentId": "question-card", "builtin": true, "props": ["questions": [["id": "s", "question": "Which?", "type": "single", "options": ["A", "B"]]]], "ui": ["components": [["id": "root", "component": "Text", "text": "Which?"]]]]]
 
 private func message(_ id: String, role: String = "assistant", _ parts: [[String: Any]], at seconds: TimeInterval, session: String = "task-1") -> ChatMessage {
     let content = String(data: try! JSONSerialization.data(withJSONObject: parts), encoding: .utf8)!
@@ -131,7 +131,8 @@ private func approval(_ id: String, chat: String = "task-1", at seconds: TimeInt
         // It goes through, to the task chat, never the main Chat.
         backend.answerError = nil
         await store.answer(part, key: key, name: "rome:answer", context: .object(["answers": .array([])]))
-        #expect(backend.answeredSessions == ["task-1", "task-1", "task-1"])
+        // A widget is a message of its own: the answer goes to core by its message's id.
+        #expect(backend.answeredWidgets == ["m", "m", "m"])
         #expect(store.error == nil)
     }
 }

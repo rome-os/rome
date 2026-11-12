@@ -287,7 +287,14 @@ final class DemoBackend: RomeBackend {
 
     /// Core's routing of a widget's answer: the meal card's water button calls
     /// its app, and a question card's Send or Dismiss answers the agent.
-    func answerWidget(sessionId: String, toolUseId: String, name: String, context: JSONValue) async throws {
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws {
+        // A widget is a message of its own: its id finds its chat and its card.
+        guard let (sessionId, held) = messages.lazy.compactMap({ entry in
+            entry.value.first(where: { $0.id == widgetId }).map { (entry.key, $0) }
+        }).first,
+            let data = held.content.data(using: .utf8),
+            let toolUseId = (try? JSONDecoder().decode(JSONValue.self, from: data))?.array?.first?["toolUseId"]?.string
+        else { throw APIError.notFound }
         guard WidgetPaths.startsATurn(name) else {
             _ = try await appCall(appId: "meal-planner", method: "POST", path: name, body: context)
             return

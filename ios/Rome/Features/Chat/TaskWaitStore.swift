@@ -79,7 +79,7 @@ final class TaskWaitStore {
     /// later turn can reuse a tool-call id. A latest open card of another
     /// kind (an app's own) shows none: the task chat's Open link reaches it.
     nonisolated static func card(messages: [ChatMessage], approvals: [PendingApproval], chatId: String) -> Card? {
-        var open: [(key: String, part: JSONValue, date: Date)] = []
+        var open: [(key: String, messageId: String, part: JSONValue, date: Date)] = []
         for message in messages where message.role == "assistant" || message.role == "user" {
             guard let data = message.content.data(using: .utf8),
                   case .array(let parts)? = try? JSONDecoder().decode(JSONValue.self, from: data)
@@ -89,7 +89,7 @@ final class TaskWaitStore {
                       let toolUseId = part["toolUseId"]?.string
                 else { continue }
                 open.removeAll { $0.part["toolUseId"]?.string == toolUseId }
-                if type == "pending_interaction" { open.append(("\(message.id):\(index)", part, message.date)) }
+                if type == "pending_interaction" { open.append(("\(message.id):\(index)", message.id, part, message.date)) }
             }
         }
         let latest = open.last
@@ -98,8 +98,9 @@ final class TaskWaitStore {
             return .approval(approval)
         }
         guard let latest, latest.part["render"]?["componentId"]?.string == "question-card",
-              case .question(let question) = MessagePart.parse(Self.json([latest.part])).first
+              case .question(var question) = MessagePart.parse(Self.json([latest.part])).first
         else { return nil }
+        question.ui?.widgetId = latest.messageId
         return .question(question, key: latest.key)
     }
 
@@ -115,7 +116,7 @@ final class TaskWaitStore {
         sent[key] = WidgetPaths.answerOutput(name, context)
         error = nil
         do {
-            try await backend.answerWidget(sessionId: chatId, toolUseId: part.toolUseId, name: name, context: context)
+            try await backend.answerWidget(widgetId: part.ui?.widgetId ?? "", name: name, context: context)
         } catch APIError.server(let status, _) where status == 400 {
             sent[key] = nil
             error = String(localized: "This card was already answered. The task has been refreshed.")

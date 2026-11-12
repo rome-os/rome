@@ -78,6 +78,7 @@ export const WrappedSubmission: Story = {
     await expect(args.onAnswerWidget).toHaveBeenCalledWith(
       "storybook-chat-entries",
       "dev-ask-cjk",
+      "dev-ask-cjk",
       "rome:answer",
       {
         answers: [

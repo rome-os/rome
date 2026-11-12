@@ -1,4 +1,5 @@
 import type { DeviceFolder } from "@rome/api-types/devices";
+import { assertWidgetAlone, assertWidgetAloneInContent } from "./widget-message.js";
 import type { TranscriptPart } from "@rome/api-types/chat";
 import { canOpenSql, privateChildren } from "./privacy.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -1959,6 +1960,7 @@ export class WebChatRepository {
     content: string,
     turnId: string | null = null,
   ) {
+    assertWidgetAloneInContent(content);
     const accounting = traceAccountingColumns(role, content);
     await this.db.transaction((tx) => {
       const createdAt = new Date();
@@ -2008,6 +2010,7 @@ export class WebChatRepository {
     id: string = randomUUID(),
     _chatThread?: ChatThreadPlacement,
   ): Promise<StoredWebchatMessage> {
+    assertWidgetAlone(parts);
     const message = await this.db.transaction((tx) => {
       const createdAt = new Date();
       const rows = tx
@@ -2265,6 +2268,7 @@ export class WebChatRepository {
   }
 
   async updateMessageContent(id: string, content: string) {
+    assertWidgetAloneInContent(content);
     const rows = await this.db
       .select({ role: romeAgentMessages.role })
       .from(romeAgentMessages)

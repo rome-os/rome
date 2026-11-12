@@ -271,6 +271,8 @@ export function ChatEntryPreview({
 
   return renderSingleEntry(block, toolUseId ?? "chat-block-preview", {
     sessionId,
+    // A specimen stands in for a stored message; its widget id is its tool-use id.
+    messageId: toolUseId,
     interactionResults: results,
     onSubmitAppComponent,
     onDismissAppComponent,

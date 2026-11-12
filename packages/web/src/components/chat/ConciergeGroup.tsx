@@ -145,6 +145,7 @@ const AgentEntry = memo(function AgentEntry({
           {renderFlatEntries([part], {
             ...actions,
             sessionId: message.sessionId,
+            messageId: message.id,
             turnId: message.turnId ?? undefined,
           })}
         </div>

@@ -302,7 +302,7 @@ final class StubBackend: RomeBackend {
     func asset(path: String) async throws -> Data { throw APIError.notFound }
     func apiFile(path: String, query: String?) async throws -> Data { throw APIError.notFound }
     var origin: URL? { nil }
-    func answerWidget(sessionId: String, toolUseId: String, name: String, context: JSONValue) async throws {}
+    func answerWidget(widgetId: String, name: String, context: JSONValue) async throws {}
     func markRead(sessionId: String) async {}
     func sessions() async throws -> [ChatSession] { [] }
     func activeTurns(sessionId: String) async throws -> [ActiveTurn] { [] }

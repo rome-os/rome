@@ -168,7 +168,7 @@ import {
   openTurnStream,
   postSessionTurn,
   postSessionTurnJson,
-  postWidgetAnswerTurn,
+  postWidgetEventTurn,
   widgetAnswerOutput,
   type PostTurnResult,
   updateSessionModel,
@@ -1957,11 +1957,12 @@ export function Chat({
   const handleAnswerWidget = useCallback(
     async (
       sendingSessionId: string,
+      widgetId: string,
       toolUseId: string,
       name: string,
       context: Record<string, unknown>,
     ) => {
-      if (!sendingSessionId) return;
+      if (!sendingSessionId || !widgetId) return;
       const meta = composerRef.current?.getMetadataSnapshot();
       const turn: Record<string, unknown> = {};
       if (meta) {
@@ -1973,7 +1974,7 @@ export function Chat({
       const output = widgetAnswerOutput(name, context);
       await runTurnLifecycle(
         sendingSessionId,
-        () => postWidgetAnswerTurn(sendingSessionId, toolUseId, { name, context, turn }),
+        () => postWidgetEventTurn(widgetId, { name, context, turn }),
         JSON.stringify([{ type: "interaction_result", toolUseId, output }]),
       );
     },

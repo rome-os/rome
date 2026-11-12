@@ -59,7 +59,7 @@ function Harness({
                 ui={questionCardUi(question)}
                 props={{ questions: question }}
                 result={questionResult?.resolved as Record<string, unknown> | undefined}
-                sessionId="s1"
+                widgetId="m1"
                 onAnswer={() => {}}
               />
             ) : (
