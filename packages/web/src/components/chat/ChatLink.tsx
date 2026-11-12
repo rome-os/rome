@@ -6,6 +6,7 @@ import { isInternalHref } from "@/lib/internal-href";
 import { autoPlaceApp } from "@/pages/free/use-free-cells";
 import { useWorkspaceEventBus } from "@/pages/free/workspace-event-bus";
 import { WorkspaceStoreContext } from "@/pages/free/workspace-store";
+import { InsideLinkContext } from "./ChatImage";
 
 // The link renderer for markdown rendered inside the chat workspace. It keeps
 // the generic Markdown component workspace-agnostic: the special-casing for the
@@ -152,7 +153,16 @@ function WorkspaceLink({
   );
 }
 
+// A picture inside the link leaves the tap to the link.
 export function ChatLink(props: MarkdownLinkProps) {
+  return (
+    <InsideLinkContext.Provider value={true}>
+      <ChatLinkTarget {...props} />
+    </InsideLinkContext.Provider>
+  );
+}
+
+function ChatLinkTarget(props: MarkdownLinkProps) {
   // Defensive: read the store via context (not the throwing hook) so ChatLink
   // is safe even if a chat block is ever rendered outside the workspace — it
   // just degrades to the default react-router link.

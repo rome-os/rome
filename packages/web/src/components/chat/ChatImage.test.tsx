@@ -94,6 +94,17 @@ describe("ChatImage", () => {
     expect(screen.getByRole("button", { name: "Zoom in" }, { hidden: true })).toBeTruthy();
   });
 
+  it("leaves a tap on a linked picture to the link", () => {
+    const { container } = render(
+      <Message text="[![Sky](https://example.com/sky.jpg)](https://example.org/target)" />,
+    );
+    const image = screen.getByRole("img", { name: "Sky" });
+    expect(image.closest("a")?.getAttribute("href")).toBe("https://example.org/target");
+    expect(image.className).toContain("max-h-72");
+    expect(container.querySelector("[data-rmiz]")).toBeNull();
+    expect(screen.queryByRole("button", { name: "Preview: Sky" })).toBeNull();
+  });
+
   it("shows text instead of a broken icon when the picture fails to load", () => {
     render(<Message text="![Gone](https://example.com/missing.png)" />);
     fireEvent.error(screen.getByRole("img", { name: "Gone" }));
