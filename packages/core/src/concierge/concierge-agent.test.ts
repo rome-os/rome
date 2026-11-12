@@ -45,6 +45,8 @@ describe("the Concierge agent", () => {
     const prompt = concierge.systemPromptPrefix;
     expect(prompt).toContain("is a scheduled task: `chat_start` with a `schedule`");
     expect(prompt).toContain("Never set up a generic routine that posts into this chat");
+    // A brief that names a place to send to has the task chat deliver past you.
+    expect(prompt).toContain("The brief says what to do, never where to send it");
   });
 
   it("never tells the Concierge a forward needs `answers` or passes the guardian's words on", () => {
