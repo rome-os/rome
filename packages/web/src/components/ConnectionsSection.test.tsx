@@ -369,6 +369,15 @@ describe("ConnectionsSection — Connected and Add", () => {
     );
   });
 
+  it("refreshes in the background from a pane, so no loading skeleton shows above it", async () => {
+    const onRefresh = rs.fn(async () => null);
+    renderSection([oauth("github", "authorized")], null, onRefresh);
+    fireEvent.click(screen.getByRole("button", { name: "Open GitHub" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    expect(onRefresh.mock.calls.every(([background]) => background === true)).toBe(true);
+  });
+
   it("clears the search on Escape", () => {
     renderSection(mixed());
     const input = screen.getByLabelText("Search connections") as HTMLInputElement;

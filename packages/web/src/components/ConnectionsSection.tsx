@@ -471,7 +471,8 @@ export function ConnectionsSection({
               backLabel={t("tabs.Connections")}
               composio={composio}
               onClose={() => select(null)}
-              onRefresh={() => void onRefresh()}
+              // In the background: a loading skeleton would show above the pane.
+              onRefresh={() => void onRefresh(true)}
               onFlash={onFlash}
               onOpenAccount={openAccount}
             />
