@@ -522,8 +522,14 @@ final class AppModel {
         }
     }
     private(set) var workspace: Workspace? {
-        // Pictures belong to the workspace that loaded them.
-        didSet { if workspace !== oldValue { images.reset() } }
+        // Pictures belong to the workspace that loaded them. Every way in (a
+        // sign-in, a cached launch, a switch) names its instance here, which
+        // the widget's copy of the apps is filed under.
+        didSet {
+            guard workspace !== oldValue else { return }
+            images.reset()
+            workspace?.instanceID = currentInstanceID
+        }
     }
     private(set) var instances: [CloudInstance] = []
     private(set) var currentInstanceID: String?
@@ -1155,7 +1161,6 @@ final class AppModel {
     private func open(_ workspace: Workspace) async {
         // A banner from the workspace this one replaces does not carry over.
         sessionExpired = false
-        workspace.instanceID = currentInstanceID
         self.workspace = workspace
         syncLanguage()
         // Its own task: the poll that reports the finish is cancelled when the

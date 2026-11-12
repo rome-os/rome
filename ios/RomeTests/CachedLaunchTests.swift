@@ -111,6 +111,9 @@ extension LastInstanceDefaults {
                 await app.launch(skipSnapshot: true)
                 #expect(app.phase == .ready)
                 #expect(app.workspace?.isVisitor == true && app.workspace?.accountLabel == "Ada")
+                // The widget files this instance's apps under its id; without
+                // it a cached launch never wrote them.
+                #expect(app.workspace?.instanceID == "b")
                 try? await Task.sleep(for: .milliseconds(200))
                 #expect(app.phase == .ready && app.workspace != nil)
             }
