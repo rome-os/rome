@@ -1,7 +1,12 @@
 // An action as the agent finds it and what a tool call on one hands back.
 // Agent model: docs/concepts/agents.md.
 
-import type { ActionConfig, ActionResult } from "@rome-os/app-runtime";
+import {
+  type ActionConfig,
+  type ActionResult,
+  checkWidgetUi,
+  type ShownUi,
+} from "@rome-os/app-runtime";
 import { createSearchMatcher, normalizeSearchLimit } from "./catalog-search.js";
 import type { TurnFacts } from "./turn-facts.js";
 
@@ -215,8 +220,8 @@ export function searchActions(
 /**
  * What a tool call on an action hands back, read by two parties: the model,
  * and the webchat drain, which mounts cards from `pendingInteraction`,
- * `showWidget`, `appId`, `render`, `componentId`, `props`, `text` and
- * `placeWidget`.
+ * `showWidget`, `appId`, `render`, `componentId`, `props`, `ui`, `bind`,
+ * `text` and `placeWidget`.
  * Those field names are a contract with the drain. An `error` result passes
  * through as data and reaches the model as an ordinary tool result, not an
  * error one. `appId` is the app that owns the action; a `show_widget` card is
@@ -228,6 +233,7 @@ export function actionToolOutput(
   appId?: string,
 ): unknown {
   if (result.status === "show_widget") {
+    if ("ui" in result.widget) return shownUiOutput(result.widget, widgetsShow, appId);
     const { componentId, props, text, waits } = result.widget;
     if (!appId) {
       return {
@@ -330,4 +336,34 @@ export function actionToolOutput(
     return result;
   }
   return result.data ?? result;
+}
+
+function shownUiOutput(widget: ShownUi, widgetsShow: boolean, appId?: string): unknown {
+  const { ui, bind, text } = widget;
+  if (!appId) {
+    return { message: `No card was shown: only an app's action can show one. ${text}` };
+  }
+  const problems = checkWidgetUi(ui, bind ?? {});
+  if (problems.length > 0) {
+    return {
+      message:
+        `No card was shown, because the card's description is not valid (${problems.join("; ")}). ` +
+        `Tell the guardian what it would have shown, in a message: ${text}`,
+    };
+  }
+  if (!widgetsShow) {
+    return {
+      message:
+        "The card could not be shown, because this conversation cannot show cards. " +
+        `Tell the guardian what it would have shown, in a message: ${text}`,
+    };
+  }
+  return {
+    showWidget: true,
+    appId,
+    ui,
+    ...(bind ? { bind } : {}),
+    text,
+    message: `${text} The card is shown in your message. Continue your turn as normal.`,
+  };
 }

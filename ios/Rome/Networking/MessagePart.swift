@@ -15,6 +15,8 @@ enum MessagePart: Hashable, Sendable {
     case question(QuestionPart)
     /// Chat asks the guardian to connect a service.
     case connectCard(ConnectCardPart)
+    /// An app's card described as data (a `widget` part with `ui`), drawn here.
+    case widgetUI(WidgetUIPart)
     /// A routine Chat proposed (`propose_routine`), shown read-only.
     case routineDraft(RoutineDraftPart)
     /// A part the web dashboard draws and this app does not: a row that opens
@@ -228,6 +230,10 @@ enum MessagePart: Hashable, Sendable {
                 return .question(question(render?["props"], toolUseId: toolUseId))
             }
             return .webOnly(webOnlyKind(componentId: render?["componentId"]?.string, appId: value["appId"]?.string), toolUseId: value["toolUseId"]?.string)
+        case "widget":
+            // A widget that names a web component is drawn only on the web.
+            if let card = WidgetUIPart(json: value) { return .widgetUI(card) }
+            return .webOnly(value["appId"]?.string.map(WebOnlyKind.app) ?? .unknown)
         case "interaction_result":
             guard let toolUseId = value["toolUseId"]?.string else { return nil }
             return .interactionResult(toolUseId: toolUseId, output: value["output"] ?? .null)

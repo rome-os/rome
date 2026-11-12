@@ -138,7 +138,8 @@ export class FavorDispatchRunner {
           ? { data: result.data }
           : result.status === "place_widget"
             ? { placement: result.placement }
-            : result.status === "show_widget" && result.widget.waits !== true
+            : result.status === "show_widget" &&
+                !("waits" in result.widget && result.widget.waits === true)
               ? { widget: result.widget }
               : null;
       if (outputRef) {

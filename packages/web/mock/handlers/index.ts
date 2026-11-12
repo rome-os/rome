@@ -49,6 +49,7 @@ import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { connectorHandlers } from "./connector";
+import { mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
@@ -363,6 +364,10 @@ const transcripts: Record<string, ChatMessage[]> = {
         content: CONCIERGE_LAS_VEGAS_LIST,
         forwardedFrom: { chatId: "mock-chat-4", title: "拉斯维加斯景点" },
       } as TranscriptPart,
+    ]),
+    ...turn(CONCIERGE_CHAT_ID, 8, "2026-08-07T12:40:00.000Z", "How much have I eaten today?", [
+      mealPlannerCard,
+      text("1,240 kcal so far, 760 under your goal. A protein-heavy dinner fits."),
     ]),
   ],
   "mock-task-question": turn(
@@ -1654,6 +1659,7 @@ export const handlers = [
   ...shareHandlers(chatSessions, transcripts),
   ...settingsHandlers,
   ...connectorHandlers,
+  ...mealPlannerHandlers,
   ...recordedAppHandlers,
   ...appKeysHandlers,
   ...liveEventsHandlers,

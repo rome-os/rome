@@ -199,6 +199,56 @@ describe("actionToolOutput", () => {
       expect(output.message).toContain("Showing today's meals as a card.");
     });
 
+    describe("described as data", () => {
+      const ui = {
+        components: [
+          {
+            id: "root",
+            component: "Stat" as const,
+            label: "Calories",
+            value: { path: "/today/calories" },
+          },
+        ],
+      };
+      const described = (u: unknown = ui): ActionResult => ({
+        status: "show_widget",
+        widget: {
+          ui: u as typeof ui,
+          bind: { "/today": "days/2026-11-11" },
+          text: "Showing today's meals.",
+        },
+      });
+
+      it("hands the drain the owner app's card and its bindings", () => {
+        const output = actionToolOutput(described(), true, "meals") as Record<string, unknown>;
+
+        expect(output).toMatchObject({
+          showWidget: true,
+          appId: "meals",
+          ui,
+          bind: { "/today": "days/2026-11-11" },
+          text: "Showing today's meals.",
+        });
+        expect(output).not.toHaveProperty("componentId");
+      });
+
+      it("tells the model why a card that fails the check showed nowhere", () => {
+        const bad = { components: [{ id: "top", component: "Text", text: "a" }] };
+        const output = actionToolOutput(described(bad), true, "meals") as Record<string, unknown>;
+
+        expect(output).not.toHaveProperty("showWidget");
+        expect(output.message).toContain('"root"');
+        expect(output.message).toContain("Showing today's meals.");
+      });
+
+      it("tells the model no card showed where none can", () => {
+        const output = actionToolOutput(described(), false, "meals") as Record<string, unknown>;
+
+        expect(output).not.toHaveProperty("showWidget");
+        expect(output.message).toContain("could not be shown");
+      });
+    });
+
     it("shows no card for an action no app owns", () => {
       const output = actionToolOutput(shown(), true, undefined) as Record<string, unknown>;
 

@@ -5026,6 +5026,60 @@ describe("Webchat API", () => {
       expect(parts.some((p) => p.type === "pending_interaction")).toBe(false);
     });
 
+    it("stores a card described as data, with its bindings", async () => {
+      registerAppAction("show_today", "meals");
+      const ui = {
+        components: [{ id: "root", component: "Text", text: { path: "/today/summary" } }],
+      };
+      const ctl = mockScriptedManager();
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_use",
+          id: "tu-widget-ui",
+          tool: "execute_action",
+          input: { action_name: "show_today" },
+        };
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-widget-ui",
+          tool: "execute_action",
+          output: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                showWidget: true,
+                appId: "meals",
+                ui,
+                bind: { "/today": "days/2026-11-11" },
+                text: "Showing today's meals.",
+              }),
+            },
+          ],
+        };
+        yield { type: "result", content: "" };
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "what did I eat today?" }),
+        }),
+      );
+
+      expect(await assistantPartsIn(sessionId)).toContainEqual({
+        type: "widget",
+        toolUseId: "tu-widget-ui",
+        appId: "meals",
+        ui,
+        bind: { "/today": "days/2026-11-11" },
+        text: "Showing today's meals.",
+      });
+    });
+
     it("stores no widget for a component its app does not declare", async () => {
       registerAppAction("show_today", "meals");
       const ctl = mockScriptedManager();

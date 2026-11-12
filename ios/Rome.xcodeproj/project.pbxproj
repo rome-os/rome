@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		A10000000000000000000071 /* RomeWidget.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = A10000000000000000000015 /* RomeWidget.appex */; platformFilter = ios; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		A10000000000000000000611 /* A2UISwiftCore in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000601 /* A2UISwiftCore */; };
+		A10000000000000000000612 /* A2UISwiftUI in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000602 /* A2UISwiftUI */; };
+		A10000000000000000000613 /* BasicCatalog in Frameworks */ = {isa = PBXBuildFile; productRef = A10000000000000000000603 /* BasicCatalog */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -100,6 +103,9 @@
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				A10000000000000000000611 /* A2UISwiftCore in Frameworks */,
+				A10000000000000000000612 /* A2UISwiftUI in Frameworks */,
+				A10000000000000000000613 /* BasicCatalog in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -165,6 +171,9 @@
 			);
 			name = Rome;
 			packageProductDependencies = (
+				A10000000000000000000601 /* A2UISwiftCore */,
+				A10000000000000000000602 /* A2UISwiftUI */,
+				A10000000000000000000603 /* BasicCatalog */,
 			);
 			productName = Rome;
 			productReference = A10000000000000000000011 /* Rome.app */;
@@ -248,6 +257,9 @@
 			);
 			mainGroup = A10000000000000000000002;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				A10000000000000000000600 /* XCRemoteSwiftPackageReference "a2ui" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = A10000000000000000000003 /* Products */;
 			projectDirPath = "";
@@ -541,6 +553,35 @@
 			defaultConfigurationName = Release;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		A10000000000000000000600 /* XCRemoteSwiftPackageReference "a2ui" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/a2ui-project/a2ui";
+			requirement = {
+				kind = upToNextMinorVersion;
+				minimumVersion = 0.10.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		A10000000000000000000601 /* A2UISwiftCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000600 /* XCRemoteSwiftPackageReference "a2ui" */;
+			productName = A2UISwiftCore;
+		};
+		A10000000000000000000602 /* A2UISwiftUI */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000600 /* XCRemoteSwiftPackageReference "a2ui" */;
+			productName = A2UISwiftUI;
+		};
+		A10000000000000000000603 /* BasicCatalog */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = A10000000000000000000600 /* XCRemoteSwiftPackageReference "a2ui" */;
+			productName = BasicCatalog;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = A10000000000000000000001 /* Project object */;
 }
