@@ -24,7 +24,7 @@ export function FileChip({
       rel="noopener"
       {...(download ? { download: label } : {})}
       className={cn(
-        "inline-flex max-w-full items-center gap-1.5 rounded-8 border border-border bg-muted px-2 py-1 align-middle text-ui text-foreground !no-underline outline-1 outline-offset-0 outline-transparent hover:border-border-strong focus-visible:outline-solid focus-visible:outline-ring/50",
+        "inline-flex max-w-full items-center gap-2 rounded-8 border border-border bg-muted px-2 py-1 align-middle text-ui text-foreground !no-underline outline-1 outline-offset-0 outline-transparent hover:border-border-strong focus-visible:outline-solid focus-visible:outline-ring/50",
         className,
       )}
     >
