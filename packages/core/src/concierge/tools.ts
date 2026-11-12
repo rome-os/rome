@@ -869,9 +869,7 @@ export async function buildConciergeTools(
           const messageId = optionalString(args, "messageId");
           if (taskId) {
             const planned = await requireTaskRow(taskId);
-            if (messageId) {
-              await requireRowHere(taskId, "Start a task here without taskId instead.");
-            }
+            await requireRowHere(taskId, "Start a task here without taskId instead.");
             if (planned.sessionId) {
               throw new Error(
                 `Task ${taskId} already has chat ${planned.sessionId}. Use chat_send to continue it.`,

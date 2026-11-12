@@ -1771,25 +1771,30 @@ describe("Concierge task anchors", () => {
       });
     });
 
-    it("refuses chat_start from a topic chat that would take a planned row of the main chat", async () => {
+    it.each([
+      ["with", true],
+      ["without", false],
+    ] as const)("refuses chat_start from a topic chat for a planned row of the main chat %s a messageId", async (_label, withMessage) => {
       const { s } = await startInMain();
       const [planned] = await s.taskRepo.upsertMany([
         { title: "Plan trip", state: "next", chatId: CONCIERGE_CHAT },
       ]);
+      const before = await s.taskRepo.get(planned!.id);
       const messageId = text(await s.tool("say", { text: "Starting" })).messageId;
 
       const result = await s.tool("chat_start", {
         title: "Plan trip",
         brief: "Plan it",
         taskId: planned!.id,
-        messageId,
+        ...(withMessage ? { messageId } : {}),
       });
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain("belongs to another Concierge chat");
       // Only the main chat's own task started a chat.
       expect(s.chats.startChat).toHaveBeenCalledTimes(1);
-      expect((await s.taskRepo.get(planned!.id))?.sessionId).toBeNull();
+      expect(await s.taskRepo.get(planned!.id)).toEqual(before);
+      expect(await s.tasks.repo.threadRoot(planned!.id)).toBeNull();
     });
 
     it("still lets the topic chat read it", async () => {
