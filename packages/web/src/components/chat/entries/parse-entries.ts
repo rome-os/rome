@@ -28,7 +28,7 @@ const REQUIRED_FIELDS = {
   },
   routine_draft_card: { toolUseId: "string", draft: "object" },
   pending_interaction: { toolUseId: "string", appId: "string", render: "object" },
-  widget: { toolUseId: "string", appId: "string", componentId: "string", text: "string" },
+  widget: { toolUseId: "string", appId: "string", text: "string" },
   interaction_result: { toolUseId: "string" },
   error: { error: "string" },
   quota_switch: { from: "string", to: "string", model: "string" },
@@ -49,6 +49,14 @@ function wellFormed(part: unknown): TranscriptPart[] {
   for (const [field, kind] of Object.entries(required)) {
     const value = p[field];
     if (kind === "object" ? !value || typeof value !== "object" : typeof value !== kind) return [];
+  }
+  // A widget is one of the app's components or a card described as data.
+  if (
+    p.type === "widget" &&
+    typeof p.componentId !== "string" &&
+    (!p.ui || typeof p.ui !== "object")
+  ) {
+    return [];
   }
   if (p.type === "interaction_result" && (!p.output || typeof p.output !== "object")) {
     // Core resolves the interaction whatever `output` holds, and counts only an
