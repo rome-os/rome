@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/db.js";
+import type { Routine } from "../routines/types.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { TaskChecks } from "./task-checks.js";
 
@@ -13,7 +14,10 @@ describe("TaskChecks", () => {
   let listeners: Array<(routineId: string) => void>;
   let deactivated: string[];
 
+  let gate: ((routine: Routine) => Promise<boolean>) | null = null;
+
   beforeEach(() => {
+    gate = null;
     testDb = createTestDb();
     routines = new RoutinesRepository(testDb.db);
     listeners = [];
@@ -25,6 +29,9 @@ describe("TaskChecks", () => {
         onChange: (listener) => {
           listeners.push(listener);
           return () => {};
+        },
+        setFireGate: (next) => {
+          gate = next;
         },
       },
       now: () => NOW,
@@ -105,6 +112,28 @@ describe("TaskChecks", () => {
     expect((await routines.findAll()).map((routine) => routine.id).sort()).toEqual(
       [kept, others].sort(),
     );
+  });
+
+  it("cancels a stopped task's check whose time passed while Rome was down, which would fire", async () => {
+    const overdue = await timed("chat-a", NOW - 60_000, { taskId: "t1" });
+    expect(await checks.pendingTaskIds()).toEqual(["t1"]);
+    expect(await checks.cancelFor("t1", "guardian")).toBe(1);
+    expect(deactivated).toEqual([overdue]);
+    // It no longer shows as pending in its chat, as before.
+    expect(await checks.inChat("chat-a")).toEqual([]);
+  });
+
+  it("turns down a fire of a check whose task is stopped, and cancels it", async () => {
+    const ended = new Set(["stopped-task"]);
+    checks.guardFires(async (taskId) => ended.has(taskId));
+    const routine = async (id: string) => (await routines.findById(id)) as unknown as Routine;
+    const stopped = await timed("chat-a", NOW + 60_000, { taskId: "stopped-task" });
+    const open = await timed("chat-b", NOW + 60_000, { taskId: "open-task" });
+    const plain = await timed("chat-c", NOW + 60_000);
+    expect(await gate!(await routine(stopped))).toBe(false);
+    expect(deactivated).toEqual([stopped]);
+    expect(await gate!(await routine(open))).toBe(true);
+    expect(await gate!(await routine(plain))).toBe(true);
   });
 
   it("counts an event wait from before deadlines as pending, with no time", async () => {

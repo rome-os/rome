@@ -919,11 +919,13 @@ export class ConciergeService {
     // a task still open stops: one that ended keeps how it ended.
     const linked = await this.deps.tasks.repo.findBySession(chatId);
     const owned = linked && ownerOf(linked) === ownerOf(chat) ? linked : null;
-    if (owned) await this.turnDownForStop(chatId);
+    // Read before the turn-down: a task waiting on an approval is open, and
+    // turning the approval down would make it read ended.
     const open = owned
       ? (await this.deps.tasks.statusOf([owned], { asReported: true })).get(owned.id)?.status !==
         "ended"
       : false;
+    if (owned) await this.turnDownForStop(chatId, Date.now());
     const row = await this.deps.tasks.repo.endWithChat(
       chatId,
       ownerOf(chat),
@@ -1075,10 +1077,11 @@ export class ConciergeService {
     await this.cancelChecks(taskId);
     if (by === "guardian")
       this.taskEvents?.mark({ taskId, kind: "stopped_by_owner", urgent: false });
-    const chatId = (await this.deps.tasks.repo.get(taskId))?.sessionId;
+    const row = await this.deps.tasks.repo.get(taskId);
+    const chatId = row?.sessionId;
     if (!chatId) return 0;
     // Nothing approved later runs for a stopped task.
-    await this.turnDownForStop(chatId);
+    await this.turnDownForStop(chatId, row.stoppedAt?.getTime() ?? Date.now());
     if (!this.attached) return 0;
     const { chats } = this.attached;
     const turns = chats.activeTurns(chatId);
@@ -1105,9 +1108,9 @@ export class ConciergeService {
       log.warn("failed to read the stopped tasks' chats", {
         error: error instanceof Error ? error.message : String(error),
       });
-      return [] as string[];
+      return [] as { chatId: string; stoppedAt: number }[];
     });
-    for (const chatId of chats) await this.turnDownForStop(chatId);
+    for (const { chatId, stoppedAt } of chats) await this.turnDownForStop(chatId, stoppedAt);
   }
 
   /**
@@ -1124,10 +1127,17 @@ export class ConciergeService {
    * carries on. The stop goes ahead whatever happens here; a failed turn-down
    * is tried again, backing off, and the next start sweeps any left.
    */
-  private async turnDownForStop(chatId: string, failures = 0): Promise<void> {
+  private async turnDownForStop(chatId: string, stoppedAt: number, failures = 0): Promise<void> {
+    // A retry after the task was taken up again turns down nothing: the
+    // approvals its new work asks for are its own.
+    if (failures > 0) {
+      const row = await this.deps.tasks.repo.findBySession(chatId);
+      if (row && (!row.stoppedAt || row.stoppedAt.getTime() > stoppedAt)) return;
+    }
     try {
+      // Only approvals that began by the stop: they were the stopped work's.
       await this.expireApprovals(chatId, {
-        until: Number.POSITIVE_INFINITY,
+        until: stoppedAt,
         reason: "The task was stopped",
         resolvedBy: RESOLVED_BY_STOP,
         continueTurn: false,
@@ -1139,7 +1149,7 @@ export class ConciergeService {
         error: error instanceof Error ? error.message : String(error),
       });
       const wait = Math.min(STOP_RETRY_FIRST_MS * 2 ** failures, STOP_RETRY_MAX_MS);
-      setTimeout(() => void this.turnDownForStop(chatId, failures + 1), wait).unref?.();
+      setTimeout(() => void this.turnDownForStop(chatId, stoppedAt, failures + 1), wait).unref?.();
     }
   }
 
@@ -1153,6 +1163,27 @@ export class ConciergeService {
         error: error instanceof Error ? error.message : String(error),
       }),
     );
+  }
+
+  /**
+   * The owner cancelled check `checkId` of chat `chatId` from the chat's
+   * checks. One for a task tells the Concierge quietly, as cancelling from
+   * the task's row does. Answers whether there was such a check.
+   */
+  async cancelCheckByOwner(chatId: string, checkId: string): Promise<boolean> {
+    const checks = this.deps.checks;
+    if (!checks) return false;
+    const check = (await checks.inChat(chatId)).find((found) => found.id === checkId);
+    if (!(await checks.cancel(chatId, checkId))) return false;
+    if (check?.taskId) {
+      this.taskEvents?.mark({
+        taskId: check.taskId,
+        kind: "checks_cancelled_by_owner",
+        urgent: false,
+      });
+      await this.deps.tasks.taskChanged(check.taskId);
+    }
+    return true;
   }
 
   /**

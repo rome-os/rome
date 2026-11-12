@@ -902,13 +902,17 @@ export class ConciergeTasksRepository {
       .where(inArray(conciergeTasks.id, [...taskIds]));
   }
 
-  /** The task chats of every stopped task, so nothing approved later runs for one. */
-  async stoppedTaskChats(): Promise<string[]> {
+  /** The task chat of every stopped task, and when it stopped, so nothing approved later runs for one. */
+  async stoppedTaskChats(): Promise<{ chatId: string; stoppedAt: number }[]> {
     const rows = await this.db
-      .select({ chatId: conciergeTasks.sessionId })
+      .select({ chatId: conciergeTasks.sessionId, stoppedAt: conciergeTasks.stoppedAt })
       .from(conciergeTasks)
       .where(and(isNotNull(conciergeTasks.stoppedAt), isNotNull(conciergeTasks.sessionId)));
-    return rows.flatMap((row) => (row.chatId ? [row.chatId] : []));
+    return rows.flatMap((row) =>
+      row.chatId && row.stoppedAt
+        ? [{ chatId: row.chatId, stoppedAt: row.stoppedAt.getTime() }]
+        : [],
+    );
   }
 
   /** Rows `taskIds` were listed in a digest that ran to its end, as never started. */
@@ -937,10 +941,12 @@ export class ConciergeTasksRepository {
         .where(and(inArray(conciergeTasks.id, [...ended]), isNull(conciergeTasks.endedAt)));
     }
     if (open.length > 0) {
-      // A task that opens again ended for no response no more, so no digest lists it.
+      // Its no-response note stays: a turn Rome runs on its own, such as the
+      // one after an approval it turned down, opens the task only for a
+      // while. Only someone writing to it clears the note (clearWaitExpired).
       await this.db
         .update(conciergeTasks)
-        .set({ endedAt: null, noResponseUnlisted: false })
+        .set({ endedAt: null })
         .where(and(inArray(conciergeTasks.id, [...open]), isNotNull(conciergeTasks.endedAt)));
     }
   }

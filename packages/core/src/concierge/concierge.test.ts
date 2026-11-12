@@ -1520,10 +1520,32 @@ describe("Concierge tools", () => {
       (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
     );
     await s.service.endTaskChat(second.chatId, "archived");
+    // Only approvals that began by the stop.
     expect(turnedDown).toEqual([
-      [first.chatId, Number.POSITIVE_INFINITY, false],
-      [second.chatId, Number.POSITIVE_INFINITY, false],
+      [first.chatId, expect.any(Number), false],
+      [second.chatId, expect.any(Number), false],
     ]);
+    expect(turnedDown.every(([, until]) => Number.isFinite(until))).toBe(true);
+  });
+
+  it("drops a stop's turn-down retry once the task is taken up again", async () => {
+    const s = setup();
+    s.fakeTimers();
+    let calls = 0;
+    s.service.attachApprovalExpiry(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("database is locked");
+      return 1;
+    });
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.service.stopTask(taskId, "guardian");
+    expect(calls).toBe(1);
+    // The owner types in the task chat before the retry: its new work's approvals are its own.
+    await s.service.resumeTaskChat(chatId);
+    await rs.advanceTimersByTimeAsync(60_000);
+    expect(calls).toBe(1);
   });
 
   it("turns down at start what a stopped task's chat still has pending", async () => {
@@ -1580,6 +1602,22 @@ describe("Concierge tools", () => {
     expect(pending()).toContain(row!.id);
   });
 
+  it("tells the Concierge quietly when the owner cancels a task's check from the chat's checks", async () => {
+    const s = setup();
+    const [row] = await s.taskRepo.upsertMany([{ title: "PR 42", chatId: CONCIERGE_CHAT }]);
+    const pending = () =>
+      (s.service as unknown as { taskEvents: { pending: string[] } }).taskEvents.pending;
+    s.deps.checks = {
+      inChat: async () => [{ id: "r-1", name: "CI", at: 5, waitingFor: null, taskId: row!.id }],
+      cancel: async (_chat: string, id: string) => id === "r-1",
+      laterOf: async () => new Map(),
+    } as never;
+    expect(await s.service.cancelCheckByOwner(CONCIERGE_CHAT, "r-9")).toBe(false);
+    expect(pending()).not.toContain(row!.id);
+    expect(await s.service.cancelCheckByOwner(CONCIERGE_CHAT, "r-1")).toBe(true);
+    expect(pending()).toContain(row!.id);
+  });
+
   it("archiving a task that is still open stops it, and leaves an ended one's outcome alone", async () => {
     const s = setup();
     const { taskId } = JSON.parse(
@@ -1596,6 +1634,28 @@ describe("Concierge tools", () => {
     await s.taskRepo.setLastOutcome(done!.id, "succeeded", new Date(), { reported: false });
     await s.tool("task_upsert", { tasks: [{ id: done!.id, archived: true }] });
     expect((await s.taskRepo.get(done!.id))?.stoppedAt).toBeNull();
+  });
+
+  it("archiving a task chat that waits on an approval stops its task, though the approval is turned down first", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.taskRepo.setLastOutcome(taskId, "succeeded", new Date(), { reported: false });
+    const waiting = new Map([[chatId, Date.now()]]);
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      waitingSince: async (ids) => new Map([...waiting].filter(([id]) => ids.includes(id))),
+      reportPending: () => [],
+    });
+    s.service.attachApprovalExpiry(async (chat) => {
+      // Turned down: the chat waits on nothing any more.
+      waiting.delete(chat);
+      return 1;
+    });
+    await s.service.endTaskChat(chatId, "archived");
+    expect(await s.taskRepo.get(taskId)).toMatchObject({ stopReason: "archived" });
   });
 
   it("archiving or deleting a task chat stops only an open task, and a finished one stays done", async () => {

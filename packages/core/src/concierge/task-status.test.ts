@@ -212,8 +212,17 @@ describe("ConciergeTasks status", () => {
     await repo.markWaitExpired(row!.id, new Date(NOW - HOUR));
     running.add("task-chat");
     await tasks.statusOf([(await repo.get(row!.id))!]);
-    // Open again, it ended for no response no more: no digest lists it.
-    expect(await repo.get(row!.id)).toMatchObject({ endedAt: null, noResponseUnlisted: false });
+    // Open for a while, as while Rome's own turn after a turned-down approval
+    // runs: its no-response note stays for the next digest.
+    expect(await repo.get(row!.id)).toMatchObject({ endedAt: null, noResponseUnlisted: true });
+    running.delete("task-chat");
+    expect((await tasks.statusOf([(await repo.get(row!.id))!])).get(row!.id)).toMatchObject({
+      status: "ended",
+      endReason: "no_response",
+    });
+    // Someone writing to it ends the no-response, note and all.
+    await repo.clearWaitExpired(row!.id);
+    expect((await repo.get(row!.id))?.noResponseUnlisted).toBe(false);
   });
 
   it("tells a task's changes in the order they happened", async () => {

@@ -219,7 +219,7 @@ export async function renderTaskEvents(
     if (changes.includes("chat_deleted")) lines.push("The task chat was deleted.");
     if (changes.includes("stopped_by_owner")) lines.push("The guardian stopped this task.");
     if (changes.includes("checks_cancelled_by_owner")) {
-      lines.push("The guardian cancelled this task's checks: none will wake you for it.");
+      lines.push("The guardian cancelled checks of this task. Read task_list for any left.");
     }
     if (changes.includes("no_response")) {
       lines.push(
@@ -287,6 +287,12 @@ export function startConciergeEvents(
   service.attachTaskEvents(coalescer);
 
   const activity = startActivity(service, coalescer);
+  // A stopped or archived task's check never wakes its chat, whatever a
+  // crash or a failed cancel left: it is turned down when it fires.
+  const releaseFires = service.deps.checks?.guardFires(async (taskId) => {
+    const row = await tasks.repo.get(taskId);
+    return row !== null && (row.stoppedAt !== null || row.archivedAt !== null);
+  });
   // A stopped or archived task keeps no check, whatever a crash left.
   void service.cancelChecksOfEndedTasks().catch((error: unknown) =>
     log.warn("failed to cancel ended tasks' checks", {
@@ -709,6 +715,7 @@ export function startConciergeEvents(
     for (const unsubscribe of unsubscribers) unsubscribe();
     activity();
     stopWaitExpiry();
+    releaseFires?.();
     coalescer.stop();
     service.attachTaskEvents(null);
     service.attachFailedBeforeStart(null);

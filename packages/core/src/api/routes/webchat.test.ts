@@ -7030,13 +7030,14 @@ describe("Webchat API", () => {
       const cancelled: [string, string][] = [];
       const check = { id: "r-1", name: "CI", at: 5, waitingFor: "the run", taskId: "t-1" };
       deps.concierge = {
+        // The strip's cancel goes through the Concierge, which tells it of a task's check.
+        cancelCheckByOwner: async (chatId: string, id: string) => {
+          cancelled.push([chatId, id]);
+          return id === "r-1";
+        },
         deps: {
           checks: {
             inChatForApi: async (chatId: string) => (chatId === "chat-a" ? [check] : []),
-            cancel: async (chatId: string, id: string) => {
-              cancelled.push([chatId, id]);
-              return id === "r-1";
-            },
           },
           // A check for a task names it.
           tasks: {
