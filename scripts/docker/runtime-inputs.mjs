@@ -12,7 +12,6 @@ export const rootFiles = [
   "pnpm-lock.yaml",
   "sshd_config",
   "tsconfig.json",
-  "tsconfig.scripts.build.json",
 ];
 
 export const runtimePackages = [
