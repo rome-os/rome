@@ -1,5 +1,4 @@
 import type { ThreadContext } from "@rome-os/app-runtime";
-import type { SettingsRepository } from "../db/repositories/settings.js";
 import type { WebChatRepository } from "../webchat/repository.js";
 import { TASK_CHAT_TRIGGER_KIND } from "../webchat/privacy.js";
 
@@ -73,55 +72,35 @@ export function withoutConclusion(answer: string): string {
   return `${answer.slice(0, open.index)}${after}`.replace(/\n{3,}/g, "\n\n").trim();
 }
 
-/** The name of a language code, in English, or null when it is not a language. */
-function languageName(code: string | null): string | null {
-  if (!code) return null;
-  try {
-    return new Intl.DisplayNames(["en"], { type: "language" }).of(code) ?? null;
-  } catch {
-    return null;
-  }
-}
-
 /**
  * What every task chat is told, whoever writes to it. It rides the chat's
  * system prompt, so a follow-up, a continuation and the guardian's own
- * message get it too. `language` is the guardian's dashboard language code, or
- * null when it is unknown: the conclusion then follows the language of the
- * guardian's own request in the brief.
+ * message get it too. The conclusion follows the language of the guardian's
+ * request as the Concierge's brief gives it.
  */
-export function conclusionInstruction(language: string | null): string {
-  const name = languageName(language);
-  const written = name
-    ? `in the guardian's language, ${name}`
-    : "in the language of the guardian's own request in your brief";
-  return [
-    "## Your conclusion",
-    "",
-    `The guardian's Concierge started this chat for a task. Every final answer you give here keeps its full content. End it with a separate conclusion section, written ${written}, on lines of their own between these two markers, exactly:`,
-    "",
-    CONCLUSION_OPEN,
-    "the conclusion",
-    CONCLUSION_CLOSE,
-    "",
-    `The conclusion is the outcome in one or two sentences, at most ${CONCLUSION_MAX_CHARS} characters, plus anything the guardian must decide or do, such as a question you need answered. The Concierge passes this section on to the guardian word for word and nothing else of your answer, so it must make sense alone. Never put a secret, code, password or token in it. Write it in every final answer, after a follow-up and when the guardian writes to you directly too.`,
-  ].join("\n");
-}
+export const CONCLUSION_INSTRUCTION = [
+  "## Your conclusion",
+  "",
+  "The guardian's Concierge started this chat for a task. Every final answer you give here keeps its full content. End it with a separate conclusion section, written in the language of the guardian's request as your brief gives it, on lines of their own between these two markers, exactly:",
+  "",
+  CONCLUSION_OPEN,
+  "the conclusion",
+  CONCLUSION_CLOSE,
+  "",
+  `The conclusion is the outcome in one or two sentences, at most ${CONCLUSION_MAX_CHARS} characters, plus anything the guardian must decide or do, such as a question you need answered. The Concierge passes this section on to the guardian word for word and nothing else of your answer, so it must make sense alone. Never put a secret, code, password or token in it. Write it in every final answer, after a follow-up and when the guardian writes to you directly too.`,
+].join("\n");
 
 /**
  * The agent context's `chatInstructions` for Rome: the conclusion instruction
  * for a task chat, whichever way its session opens, and nothing for any other
- * chat. The guardian's language is the dashboard language they picked.
+ * chat.
  */
 export function taskChatInstructions(deps: {
   webchatRepo: Pick<WebChatRepository, "getSession">;
-  settingsRepo: Pick<SettingsRepository, "get">;
 }): (thread: Pick<ThreadContext, "channel" | "threadId"> | undefined) => Promise<string | null> {
   return async (thread) => {
     if (thread?.channel !== "webchat" || !thread.threadId) return null;
     const chat = await deps.webchatRepo.getSession(thread.threadId);
-    if (chat?.triggerKind !== TASK_CHAT_TRIGGER_KIND) return null;
-    const stored = await deps.settingsRepo.get("guardianLanguage");
-    return conclusionInstruction(typeof stored === "string" ? stored : null);
+    return chat?.triggerKind === TASK_CHAT_TRIGGER_KIND ? CONCLUSION_INSTRUCTION : null;
   };
 }

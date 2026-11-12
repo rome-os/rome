@@ -82,11 +82,13 @@ enum MarkdownParser {
                 code = []
                 continue
             }
-            // HTML comments, such as the markers that bound a task's
-            // conclusion, show nothing. A line they leave empty ends the block
-            // below, and the rest of any other line is read as it stands.
+            // The two markers that bound a task's conclusion show nothing, as
+            // on the web. A line they leave empty ends the block below, and the
+            // rest of any other line is read as it stands. Any other HTML
+            // comment is text like the rest.
             if line.contains("<!--") {
-                line = line.replacingOccurrences(of: "<!--.*?-->", with: "", options: .regularExpression)
+                line = line.replacingOccurrences(
+                    of: "<!--\\s*/?rome:conclusion\\s*-->", with: "", options: .regularExpression)
                 trimmed = line.trimmingCharacters(in: .whitespaces)
             }
             if trimmed.isEmpty {

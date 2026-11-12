@@ -47,7 +47,7 @@ describe("the Concierge agent", () => {
     const rule = (start: string) => lines.find((line) => line.startsWith(start)) ?? "";
     const finished = rule('- `task_finished` with initiator="concierge"');
     for (const text of [
-      "forwarding the task chat's conclusion with `chat_forward`",
+      "forward the task chat's conclusion with `chat_forward`",
       "the forwarded message shows its source chat, which opens the details",
       "Never paste or retell the rest of the answer",
       "refuses because the answer has no conclusion or it is too long",

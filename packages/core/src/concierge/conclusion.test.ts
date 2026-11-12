@@ -3,7 +3,7 @@ import {
   CONCLUSION_CLOSE,
   CONCLUSION_MAX_CHARS,
   CONCLUSION_OPEN,
-  conclusionInstruction,
+  CONCLUSION_INSTRUCTION,
   conclusionOf,
   taskChatInstructions,
   withoutConclusion,
@@ -96,26 +96,19 @@ describe("withoutMarkers and withoutConclusion", () => {
 
 describe("the instruction every task chat gets", () => {
   it("names both markers, the cap, and every turn", () => {
-    const text = conclusionInstruction("en");
-    expect(text).toContain(CONCLUSION_OPEN);
-    expect(text).toContain(CONCLUSION_CLOSE);
-    expect(text).toContain(`${CONCLUSION_MAX_CHARS} characters`);
-    expect(text).toContain("in every final answer");
-    expect(text).toContain("when the guardian writes to you directly");
-    expect(text).toContain("Never put a secret");
+    expect(CONCLUSION_INSTRUCTION).toContain(CONCLUSION_OPEN);
+    expect(CONCLUSION_INSTRUCTION).toContain(CONCLUSION_CLOSE);
+    expect(CONCLUSION_INSTRUCTION).toContain(`${CONCLUSION_MAX_CHARS} characters`);
+    expect(CONCLUSION_INSTRUCTION).toContain("in every final answer");
+    expect(CONCLUSION_INSTRUCTION).toContain("when the guardian writes to you directly");
+    expect(CONCLUSION_INSTRUCTION).toContain("Never put a secret");
   });
 
-  it("names the guardian's language when it is known", () => {
-    expect(conclusionInstruction("en")).toContain("in the guardian's language, English");
-    expect(conclusionInstruction("zh-CN")).toContain("in the guardian's language, Chinese");
-  });
-
-  it("follows the language of the guardian's request in the brief when it is not known", () => {
-    for (const unknown of [null, "", "not a language!"]) {
-      const text = conclusionInstruction(unknown);
-      expect(text).toContain("in the language of the guardian's own request in your brief");
-      expect(text).not.toContain("the guardian's language,");
-    }
+  it("follows the language of the guardian's request as the brief gives it, and names no other", () => {
+    expect(CONCLUSION_INSTRUCTION).toContain(
+      "written in the language of the guardian's request as your brief gives it",
+    );
+    expect(CONCLUSION_INSTRUCTION).not.toMatch(/English|Chinese|dashboard/);
   });
 });
 
@@ -124,23 +117,16 @@ describe("taskChatInstructions", () => {
     ["task-1", { triggerKind: "concierge" }],
     ["plain-1", { triggerKind: null }],
   ]);
-  const deps = (language: unknown) => ({
+  const instructions = taskChatInstructions({
     webchatRepo: { getSession: async (id: string) => chats.get(id) ?? null },
-    settingsRepo: { get: async () => language },
-  });
+  } as never);
   const webchat = (threadId: string) => ({ channel: "webchat", threadId });
 
-  it("answers the instruction, in the guardian's language, for a task chat only", async () => {
-    const instructions = taskChatInstructions(deps("zh-CN") as never);
-    expect(await instructions(webchat("task-1") as never)).toBe(conclusionInstruction("zh-CN"));
+  it("answers the instruction for a task chat only", async () => {
+    expect(await instructions(webchat("task-1") as never)).toBe(CONCLUSION_INSTRUCTION);
     expect(await instructions(webchat("plain-1") as never)).toBeNull();
     expect(await instructions(webchat("missing") as never)).toBeNull();
     expect(await instructions({ channel: "telegram", threadId: "task-1" } as never)).toBeNull();
     expect(await instructions(undefined)).toBeNull();
-  });
-
-  it("falls back to the request's language when the guardian's is not stored", async () => {
-    const instructions = taskChatInstructions(deps(undefined) as never);
-    expect(await instructions(webchat("task-1") as never)).toBe(conclusionInstruction(null));
   });
 });

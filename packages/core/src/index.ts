@@ -1215,7 +1215,7 @@ async function main() {
         subagentSessions(manager, parentLink, webchatRepo, inherited),
       turnMiddleware,
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
-      chatInstructions: taskChatInstructions({ webchatRepo, settingsRepo }),
+      chatInstructions: taskChatInstructions({ webchatRepo }),
       sessionTracing: romeSessionTracing,
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),

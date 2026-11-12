@@ -1152,7 +1152,7 @@ describe("Concierge tools", () => {
       const hotels = await startTaskFor(s, "ask-2", ["h0"]);
       s.messages.get(hotels.chatId)?.push({
         role: "assistant",
-        content: JSON.stringify([{ type: "text", content: "2 hotels" }]),
+        content: JSON.stringify([{ type: "text", content: concluded("2 hotels") }]),
       });
       s.inTurn("reply-turn");
       guardianSays(s, { id: "show", turnId: "reply-turn", chatThread: "g0", settled: true });
@@ -1167,7 +1167,7 @@ describe("Concierge tools", () => {
       const short = await startTaskFor(s, "routine", []);
       s.messages.get(short.chatId)?.push({
         role: "assistant",
-        content: JSON.stringify([{ type: "text", content: "# Report" }]),
+        content: JSON.stringify([{ type: "text", content: concluded("# Report") }]),
       });
       await reportTakenOver(s, short.taskId);
       s.inTurn("notes");
@@ -1204,7 +1204,7 @@ describe("Concierge tools", () => {
       const hotels = await startTaskFor(s, "ask-2", []);
       s.messages.get(hotels.chatId)?.push({
         role: "assistant",
-        content: JSON.stringify([{ type: "text", content: "2 hotels" }]),
+        content: JSON.stringify([{ type: "text", content: concluded("2 hotels") }]),
       });
       s.inTurn("two");
       // One message is in the flights thread, the other in none.
@@ -4364,7 +4364,7 @@ describe("Concierge status reactions", () => {
   const replies = (s: ReturnType<typeof setup>, chatId: string) =>
     s.messages.get(chatId)?.push({
       role: "assistant",
-      content: JSON.stringify([{ type: "text", content: "Sunny" }]),
+      content: JSON.stringify([{ type: "text", content: concluded("Sunny") }]),
     });
   /** Every reaction change the dashboard is told of, in order. */
   const watch = (s: ReturnType<typeof setup>) => {
@@ -4372,6 +4372,77 @@ describe("Concierge status reactions", () => {
     s.taskRepo.onReaction((target, reaction) => seen.push([target.messageKey, reaction]));
     return seen;
   };
+
+  describe("a task's conclusion forwarded, or refused", () => {
+    /** The task finished with `answer`; its news waits for the Concierge's report turn. */
+    const finishedWith = async (answer: string) => {
+      const s = setup({ said: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      s.messages.get(chatId)?.push({
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: answer }]),
+      });
+      await finishTask(s, chatId, "completed", { reported: false });
+      s.inTurn("report-turn");
+      return { s, chatId, taskId };
+    };
+    const threadOfId = (s: ReturnType<typeof setup>, id: string) =>
+      s.messages.get(CONCIERGE_CHAT)?.find((row) => row.id === id)?.chatThread;
+
+    it("forwards the conclusion into the task's thread, anchors the row to it, and the report's end settles the reaction", async () => {
+      const { s, chatId, taskId } = await finishedWith(concluded("Found 3 flights. Which one?"));
+      expect(await reactionOf(s, "g1")).toBe("working");
+      const forwarded = JSON.parse((await s.tool("chat_forward", { chatId })).content[0].text);
+      expect(threadOfId(s, forwarded.messageId)).toBe("g1");
+      expect((await s.taskRepo.getWithChat(taskId))?.sourceMessageId).toBe(forwarded.messageId);
+      // Only the Concierge's turn that reports it tells the guardian: the end settles it.
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("leaves the reaction as it was when the forward is refused, and the report said in the task's thread settles it", async () => {
+      const { s, chatId, taskId } = await finishedWith("Details, but no conclusion section.");
+      const seen = watch(s);
+      const refused = await s.tool("chat_forward", { chatId });
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0].text).toContain("with task set to this task's id");
+      // Nothing was said, moved or marked.
+      expect(seen).toEqual([]);
+      expect(await reactionOf(s, "g1")).toBe("working");
+      const said = JSON.parse(
+        (
+          await s.tool("say", {
+            text: "Found 3 flights, cheapest ¥4,380. Which one?",
+            task: taskId,
+          })
+        ).content[0].text,
+      );
+      expect(threadOfId(s, said.messageId)).toBe("g1");
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("never leaves 👀 stuck on a refused forward: the report turn's end settles it even when nothing more is said", async () => {
+      const { s, chatId } = await finishedWith("x".repeat(CONCLUSION_MAX_CHARS + 1));
+      expect((await s.tool("chat_forward", { chatId })).isError).toBe(true);
+      await reportEnds(s, chatId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
+    it("does not count a message an earlier, cut-short turn handed on as the guardian starting this turn", async () => {
+      const { s, chatId } = await finishedWith(concluded("Done."));
+      s.service.handOnPrompts(CONCIERGE_CHAT, ["g1"]);
+      const refused = await s.tool("chat_forward", { chatId, full: true });
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0].text).toContain("only in a turn they started");
+      // Its own message in the turn does.
+      guardianSays(s, "g2", "report-turn");
+      const allowed = await s.tool("chat_forward", { chatId, full: true });
+      expect(allowed.isError).toBeFalsy();
+    });
+  });
 
   it("marks the guardian message a task starts for as working, with no acknowledgement first", async () => {
     const s = setup({ said: false });

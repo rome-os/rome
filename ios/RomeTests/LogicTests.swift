@@ -130,13 +130,20 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
         #expect(blocks == [.paragraph("Details."), .paragraph("Found 3 flights. Which one?")])
     }
 
-    @Test func aCommentSpanShowsNothingAndItsLineKeepsTheRest() {
+    @Test func theConclusionMarkersShowNothingAndTheirLineKeepsTheRest() {
         #expect(MarkdownParser.parse("<!-- rome:conclusion -->Done.<!-- /rome:conclusion -->") == [.paragraph("Done.")])
         #expect(MarkdownParser.parse("<!--rome:conclusion-->Done.") == [.paragraph("Done.")])
+        #expect(MarkdownParser.parse("<!--  /rome:conclusion  -->") == [])
     }
 
-    @Test func aCommentInsideACodeBlockStaysLiteral() {
-        #expect(MarkdownParser.parse("```\n<!-- keep -->\n```") == [.code(language: nil, text: "<!-- keep -->")])
+    @Test func otherCommentsStayAsTheyAre() {
+        #expect(MarkdownParser.parse("Keep <!-- keep --> this.") == [.paragraph("Keep <!-- keep --> this.")])
+        #expect(MarkdownParser.parse("Use `<!-- keep -->` here.") == [.paragraph("Use `<!-- keep -->` here.")])
+        #expect(MarkdownParser.parse("<!-- keep -->") == [.paragraph("<!-- keep -->")])
+    }
+
+    @Test func aMarkerInsideACodeBlockStaysLiteral() {
+        #expect(MarkdownParser.parse("```\n<!-- rome:conclusion -->\n```") == [.code(language: nil, text: "<!-- rome:conclusion -->")])
     }
 
     @Test func unterminatedCodeStillRenders() {
