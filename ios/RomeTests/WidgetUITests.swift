@@ -106,4 +106,9 @@ import Testing
             #expect(WidgetData.httpsURL(url) == nil)
         }
     }
+
+    @Test func aStoreAppsScopedIdIsOnePathSegment() {
+        #expect(WidgetData.appAPIPath(appId: "meal-planner", path: "water") == "/api/apps/meal-planner/water")
+        #expect(WidgetData.appAPIPath(appId: "@alice/meals", path: "days/today") == "/api/apps/@alice%2Fmeals/days/today")
+    }
 }

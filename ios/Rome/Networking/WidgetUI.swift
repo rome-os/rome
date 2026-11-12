@@ -192,6 +192,15 @@ enum WidgetData {
         resolve(value, in: root, scope: scope)?.number
     }
 
+    /// `/api/apps/<appId>/<path>`, with the app id as one path segment: a
+    /// Store app's id such as `@alice/meals` holds a `/`.
+    static func appAPIPath(appId: String, path: String) -> String? {
+        guard isAppPath(path),
+              let app = appId.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed.subtracting(CharacterSet(charactersIn: "/")))
+        else { return nil }
+        return "/api/apps/\(app)/\(path)"
+    }
+
     /// An image URL a card may load: `https:` only, so it never reads the
     /// instance, and loads the same as on the dashboard.
     static func httpsURL(_ text: String) -> URL? {

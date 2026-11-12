@@ -106,4 +106,25 @@ describe("checkWidgetUi", () => {
     const ui = { components: [{ id: "root", component: "Text", text: "a", weight: 1 }] };
     expect(checkWidgetUi(ui)).not.toEqual([]);
   });
+
+  it("takes only the button context values every reader can send", () => {
+    const button = (context: unknown) => ({
+      components: [
+        {
+          id: "root",
+          component: "Button",
+          child: "l",
+          action: { event: { name: "water", context } },
+        },
+        { id: "l", component: "Text", text: "Go" },
+      ],
+    });
+    expect(
+      checkWidgetUi(
+        button({ date: "2026-11-11", cups: 1, cold: true, tags: ["a"], kcal: { path: "/k" } }),
+      ),
+    ).toEqual([]);
+    expect(checkWidgetUi(button({ meal: { id: 42 } }))).not.toEqual([]);
+    expect(checkWidgetUi(button({ meal: null }))).not.toEqual([]);
+  });
 });

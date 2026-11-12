@@ -168,7 +168,12 @@ final class APIClient: Sendable {
     /// on the instance's origin, never taken whole from a server's answer.
     func exchange(method: String, apiPath: String, json: JSONValue?) async throws -> ConnectReply {
         guard let url = Self.instanceURL(origin: origin, apiPath: apiPath) else { throw APIError.notFound }
-        var request = request(String(url.path(percentEncoded: true).dropFirst("/api".count)), method: method)
+        // Built from `url` as it is: going through a path would encode an
+        // already-encoded segment, such as a Store app's `@alice%2Fmeals`, twice.
+        var request = URLRequest(url: url)
+        request.httpMethod = method
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        signIn(&request)
         if let json {
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
             request.httpBody = try JSONEncoder().encode(json)

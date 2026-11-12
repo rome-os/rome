@@ -1,7 +1,16 @@
 import { MessageProcessor } from "@a2ui/web_core/v0_9";
 import { A2uiSurface } from "@a2ui/react/v0_9";
 import type { TranscriptPart } from "@rome/api-types/chat";
-import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Component,
+  type ComponentProps,
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { useTranslation } from "react-i18next";
 import { fetchJson } from "@/lib/fetch-json";
 import {
@@ -56,6 +65,20 @@ function withHostStrings(value: unknown, translate: (key: string) => string): un
 }
 
 const appApi = (appId: string, path: string) => `/api/apps/${encodeURIComponent(appId)}/${path}`;
+
+/** Shows `fallback` in place of a card A2UI throws on while drawing. */
+class DrawBoundary extends Component<
+  { fallback: ReactNode; children: ReactNode },
+  { failed: boolean }
+> {
+  state = { failed: false };
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
 
 /** Each component's `clears`, taken out of the components, since A2UI's
  *  schemas have no such field. */
@@ -119,7 +142,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
     [appId, bindKey, toolUseId],
   );
 
-  const processor = useMemo(() => {
+  const { processor, drawable } = useMemo(() => {
     const p = new MessageProcessor([romeWidgetCatalog], async (action) => {
       const host = waitingRef.current;
       if (action.name === "rome:answer" || action.name === "rome:dismiss") {
@@ -147,26 +170,33 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
         setBusy(false);
       }
     });
-    p.processMessages([
-      {
-        version: "v0.9",
-        createSurface: { surfaceId: toolUseId, catalogId: ROME_WIDGET_CATALOG_ID },
-      },
-      {
-        version: "v0.9",
-        updateComponents: {
-          surfaceId: toolUseId,
-          components: parts.components as never,
-        },
-      },
-    ]);
-    const data = (JSON.parse(uiKey) as WidgetUi).data;
-    if (data) {
+    // A2UI refuses some cards core accepts, such as a path through
+    // `constructor`; such a card shows its fallback line instead of throwing
+    // out of the transcript.
+    try {
       p.processMessages([
-        { version: "v0.9", updateDataModel: { surfaceId: toolUseId, path: "/", value: data } },
+        {
+          version: "v0.9",
+          createSurface: { surfaceId: toolUseId, catalogId: ROME_WIDGET_CATALOG_ID },
+        },
+        {
+          version: "v0.9",
+          updateComponents: {
+            surfaceId: toolUseId,
+            components: parts.components as never,
+          },
+        },
       ]);
+      const data = (JSON.parse(uiKey) as WidgetUi).data;
+      if (data) {
+        p.processMessages([
+          { version: "v0.9", updateDataModel: { surfaceId: toolUseId, path: "/", value: data } },
+        ]);
+      }
+    } catch {
+      return { processor: p, drawable: false };
     }
-    return p;
+    return { processor: p, drawable: true };
   }, [appId, load, toolUseId, uiKey, parts]);
 
   // An answered card shows what the guardian sent, which core keeps as `card`.
@@ -174,9 +204,16 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
   useEffect(() => {
     const card = JSON.parse(answeredKey) as unknown;
     if (card === null) return;
-    processor.processMessages([
-      { version: "v0.9", updateDataModel: { surfaceId: toolUseId, path: "/answers", value: card } },
-    ]);
+    try {
+      processor.processMessages([
+        {
+          version: "v0.9",
+          updateDataModel: { surfaceId: toolUseId, path: "/answers", value: card },
+        },
+      ]);
+    } catch {
+      setFailed(true);
+    }
   }, [answeredKey, processor, toolUseId]);
 
   useEffect(() => {
@@ -189,7 +226,12 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
 
   useEffect(() => () => processor.dispose(), [processor]);
 
-  const surface = processor.model.surfacesMap.get(toolUseId);
+  const surface = drawable ? processor.model.surfacesMap.get(toolUseId) : undefined;
+  const undrawable = (
+    <span className="text-aux text-destructive">
+      {t("appComponent.widgetUndrawable", { text })}
+    </span>
+  );
   return (
     <div
       tabIndex={waiting ? -1 : undefined}
@@ -202,13 +244,17 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
         <WidgetLockedContext.Provider value={locked}>
           <WidgetBusyContext.Provider value={busy}>
             <WidgetClearsContext.Provider value={parts.clears}>
-              <A2uiSurface
-                surface={surface as unknown as ComponentProps<typeof A2uiSurface>["surface"]}
-              />
+              <DrawBoundary fallback={undrawable}>
+                <A2uiSurface
+                  surface={surface as unknown as ComponentProps<typeof A2uiSurface>["surface"]}
+                />
+              </DrawBoundary>
             </WidgetClearsContext.Provider>
           </WidgetBusyContext.Provider>
         </WidgetLockedContext.Provider>
-      ) : null}
+      ) : drawable ? null : (
+        undrawable
+      )}
       {waiting && locked ? (
         <span className="text-aux text-muted-foreground">
           {t(dismissed ? "questionCard.dismissed" : "questionCard.answered")}

@@ -390,7 +390,8 @@
   },
   "appComponent": {
     "dismiss": "跳过",
-    "widgetUnavailable": "无法读取这张卡片的数据。{{text}}"
+    "widgetUnavailable": "无法读取这张卡片的数据。{{text}}",
+    "widgetUndrawable": "无法显示这张卡片。{{text}}"
   },
   "aiToolsCard": {
     "title": "连接 Claude 或 ChatGPT",

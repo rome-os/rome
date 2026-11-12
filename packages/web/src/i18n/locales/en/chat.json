@@ -390,7 +390,8 @@
   },
   "appComponent": {
     "dismiss": "Dismiss",
-    "widgetUnavailable": "Could not read this card's data. {{text}}"
+    "widgetUnavailable": "Could not read this card's data. {{text}}",
+    "widgetUndrawable": "Could not show this card. {{text}}"
   },
   "aiToolsCard": {
     "title": "Connect Claude or ChatGPT",

@@ -67,8 +67,12 @@ export type WidgetUiChildren = string[] | { componentId: string; path: string };
  * agent waits on, `name` may instead be one of {@link WIDGET_UI_HOST_EVENTS}.
  */
 export interface WidgetUiAction {
-  event: { name: string; context?: Record<string, unknown> };
+  /** Each `context` value is a literal string, number or boolean, a list, or
+   *  a `{ path }`, as A2UI allows. */
+  event: { name: string; context?: Record<string, WidgetUiContextValue> };
 }
+
+export type WidgetUiContextValue = string | number | boolean | unknown[] | WidgetUiPath;
 
 interface Common {
   id: string;
@@ -287,7 +291,12 @@ const ComponentSchema = z.discriminatedUnion("component", [
           event: z
             .object({
               name: z.string().min(1),
-              context: z.record(z.string(), z.unknown()).optional(),
+              context: z
+                .record(
+                  z.string(),
+                  z.union([z.string(), z.number(), z.boolean(), z.array(z.unknown()), PathSchema]),
+                )
+                .optional(),
             })
             .strict(),
         })

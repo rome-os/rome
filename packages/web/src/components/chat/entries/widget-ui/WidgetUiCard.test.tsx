@@ -1,7 +1,9 @@
 // @rstest-environment jsdom
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { MemoryRouter } from "react-router-dom";
 import "@/i18n";
+import { ThemeProvider } from "@/hooks/use-theme";
 import { parseEntries } from "../parse-entries";
 import { renderFlatEntries } from "../render";
 
@@ -113,5 +115,46 @@ describe("a widget described as data", () => {
     release();
     await waitFor(() => expect((button as HTMLButtonElement).disabled).toBe(false));
     expect(fetch.mock.calls.filter(([, init]) => init?.method === "POST")).toHaveLength(1);
+  });
+
+  it("shows its fallback line, and leaves the rest of the chat drawn, for a card A2UI refuses", async () => {
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(Response.json({}));
+    const refused = (toolUseId: string, ui: unknown) => ({
+      type: "widget",
+      toolUseId,
+      appId: "meals",
+      ui,
+      text: "Today's meals.",
+    });
+    render(
+      <MemoryRouter>
+        <ThemeProvider>
+          {renderFlatEntries(
+            parseEntries(
+              JSON.stringify([
+                refused("w-ctor", {
+                  components: [{ id: "root", component: "Text", text: { path: "/constructor" } }],
+                }),
+                refused("w-ctx", {
+                  components: [
+                    {
+                      id: "root",
+                      component: "Button",
+                      child: "l",
+                      action: { event: { name: "water", context: { meal: { id: 42 } } } },
+                    },
+                    { id: "l", component: "Text", text: "Go" },
+                  ],
+                }),
+                { type: "text", content: "Still here" },
+              ]),
+            ),
+            { sessionId: "s1" },
+          )}
+        </ThemeProvider>
+      </MemoryRouter>,
+    );
+    expect(await screen.findAllByText(/Could not show this card/)).toHaveLength(2);
+    expect(screen.getByText("Still here")).toBeTruthy();
   });
 });
