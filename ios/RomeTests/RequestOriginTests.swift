@@ -38,4 +38,14 @@ final class OriginRecorder: URLProtocol, @unchecked Sendable {
         #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "Origin") == "http://127.0.0.1:4141" })
         #expect(requests.allSatisfy { $0.value(forHTTPHeaderField: "Cookie") == "rome_session=t" })
     }
+
+    @Test func aStoreAppsCardCallKeepsItsScopedIdAsOneSegment() async throws {
+        OriginRecorder.reset()
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [OriginRecorder.self]
+        let client = APIClient(origin: URL(string: "http://127.0.0.1:4141")!, token: { "t" }, configuration: configuration)
+        let path = try #require(WidgetData.appAPIPath(appId: "@alice/meals", path: "water"))
+        _ = try await client.exchange(method: "POST", apiPath: path, json: .object([:]))
+        #expect(OriginRecorder.requests.first?.url?.absoluteString == "http://127.0.0.1:4141/api/apps/@alice%2Fmeals/water")
+    }
 }
