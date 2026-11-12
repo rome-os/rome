@@ -135,6 +135,33 @@ export const splitEntrypoints = [
   ],
 ];
 
+// bin/apps-cli.js has oclif discover its commands in dist/apps/cli/commands
+// when src/ is gone, so each command file is an entry at its source path.
+// These bundles do not split: oclif would load a chunk as a command.
+export const cliCommandsDir = [
+  "packages/core/src/apps/cli/commands",
+  "packages/core/dist/apps/cli/commands",
+];
+
+/** The command files under `dir`, tests excluded. */
+export async function cliCommandFiles(dir) {
+  const entries = await readdir(dir, { recursive: true, withFileTypes: true });
+  return entries
+    .filter((e) => e.isFile() && e.name.endsWith(".ts") && !/\.test\.ts$/.test(e.name))
+    .map((e) => resolve(e.parentPath, e.name))
+    .sort();
+}
+
+/** Options that bundle every app CLI command into `outdir`, keeping its path under `srcDir`. */
+export async function cliCommandsBundleOptions(srcDir, outdir) {
+  return {
+    ...dockerBundleOptions("esm"),
+    entryPoints: await cliCommandFiles(srcDir),
+    outbase: srcDir,
+    outdir,
+  };
+}
+
 async function main() {
   const { build } = await loadEsbuild();
   // Nothing from an earlier build may stay behind for Node to load.
@@ -153,6 +180,10 @@ async function main() {
         splitBundleOptions(resolve(projectRoot, entry), resolve(projectRoot, outdir), entryName),
       ),
     ),
+    cliCommandsBundleOptions(
+      resolve(projectRoot, cliCommandsDir[0]),
+      resolve(projectRoot, cliCommandsDir[1]),
+    ).then(build),
   ]);
 
   for (const [srcRel, destRel, label] of bundledAssets) {
@@ -167,7 +198,7 @@ async function main() {
   }
 
   console.log(
-    `Bundled core runtime entrypoints (${entrypoints.length + splitEntrypoints.length} files).`,
+    `Bundled core runtime entrypoints (${entrypoints.length + splitEntrypoints.length} files) and the app CLI commands.`,
   );
 }
 
