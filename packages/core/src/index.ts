@@ -1178,7 +1178,10 @@ async function main() {
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { find: (continuityKey) => agentSessionManager.find(continuityKey) },
-    tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
+    tasks: new ConciergeTasks(
+      new ConciergeTasksRepository(db),
+      config.conciergeTaskWaitExpiryMinutes * 60_000,
+    ),
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
     notify: notifyClient,

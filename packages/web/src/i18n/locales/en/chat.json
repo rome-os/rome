@@ -37,11 +37,15 @@
       "title": "Tasks",
       "close": "Close tasks",
       "groups": {
-        "needsYou": "Needs you",
-        "doing": "Doing",
-        "next": "Up next",
-        "watching": "Watching",
-        "done": "Done"
+        "needsYou": "Waiting for you",
+        "active": "Active",
+        "later": "Later",
+        "ended": "Ended"
+      },
+      "ended": {
+        "failed": "Failed",
+        "stopped": "Stopped",
+        "no_response": "No response"
       },
       "stop": "Stop",
       "done": "Done",
@@ -71,7 +75,7 @@
         "done": "I've done this"
       },
       "emptyTitle": "No tasks yet",
-      "emptyDescription": "Tasks {{name}} is working on, planning, or watching appear here."
+      "emptyDescription": "Tasks {{name}} hands to other agents appear here, with what each one waits for."
     },
     "messageDetails": "Message details",
     "chooseFolder": "Choose folder…",

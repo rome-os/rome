@@ -157,10 +157,16 @@ A Concierge chat its owner starts for one topic, such as the calendar or a proje
 
 ## Task
 
-One piece of work the Concierge keeps on its owner's task list, with a title, a state and, while an agent works on it, a [task chat](#task-chat). It belongs to the Concierge chat it reports to.
+One piece of work the Concierge keeps on its owner's task list, with a title, a status and, while an agent works on it, a [task chat](#task-chat). It belongs to the Concierge chat it reports to.
 
-- Its states are planned (next), in progress (doing), waiting on something outside (watching), waiting on its owner (needs_user), done, and dropped, for work called off.
-- The Concierge **writes** a task: it creates it, moves it between states and marks it done or dropped. Starting a task chat for one makes it in progress. Nothing else sets a task's state.
+- Rome **derives** a task's status from facts it holds. The status is one of four, checked in this order:
+  - **Waiting for you**: its task chat has an unanswered question card or approval, opened less than a day ago.
+  - **Active**: a turn runs or is queued in its task chat, or its result waits for the Concierge to report it.
+  - **Later**: a check is scheduled for it, and nothing runs.
+  - **Ended**, with a reason: done, failed, stopped, or no response, when a wait went unanswered for a day.
+- A stopped task is always ended·stopped, whoever stopped it: the Concierge, its owner, or archiving or deleting its task chat.
+- The status, the task list, the chat header and the status reactions all read the same derived result. Rome tells the task list again whenever a fact changes it. The state the Concierge used to write stays for apps from before, mapped from the status.
+- The Concierge **writes** a task: it creates it and names it. Starting a task chat for one makes it active.
 - Rome tells the Concierge what a task's chat does, and marks a task not synced when the Concierge never takes in what it was told.
 - A task has at most one [chat thread](#chat-thread), and its root is kept for good.
 - A task reports to its owner's main chat while its Concierge chat is archived or deleted. Nothing moves it: it reads as the main chat's, and as its own chat's again once that chat is unarchived. An open task's thread stays behind and is a task's no more, so its label goes and the task starts a new thread in the main chat. An ended task keeps its thread.

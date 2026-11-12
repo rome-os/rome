@@ -1,0 +1,165 @@
+import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import {
+  type ConciergeTaskFacts,
+  legacyTaskState,
+  parseTaskStatus,
+  taskStatus,
+} from "@rome/api-types/concierge-task-status";
+import type { ConciergeTaskDto } from "@rome/api-types/concierge";
+import { createTestDb, type TestDb } from "../test/db.js";
+import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
+import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
+import { ConciergeTasks } from "./tasks.js";
+
+const HOUR = 60 * 60 * 1000;
+const NOW = 100 * HOUR;
+
+const facts = (extra: Partial<ConciergeTaskFacts> = {}): ConciergeTaskFacts => ({
+  stoppedAt: null,
+  waitingSince: null,
+  running: false,
+  reportPending: false,
+  laterAt: null,
+  lastOutcome: null,
+  ...extra,
+});
+
+describe("taskStatus", () => {
+  it("is ended·stopped once stopped, whatever else holds", () => {
+    expect(
+      taskStatus(facts({ stoppedAt: 1, waitingSince: NOW, running: true, laterAt: NOW }), NOW),
+    ).toEqual({ status: "ended", endReason: "stopped" });
+  });
+
+  it("needs its owner while a wait is younger than the expiry, ahead of a running turn", () => {
+    expect(taskStatus(facts({ waitingSince: NOW - HOUR, running: true }), NOW)).toEqual({
+      status: "needs_you",
+      endReason: null,
+    });
+  });
+
+  it("is active while a turn runs or a result waits to be reported", () => {
+    expect(taskStatus(facts({ running: true }), NOW).status).toBe("active");
+    expect(taskStatus(facts({ reportPending: true, laterAt: NOW + HOUR }), NOW).status).toBe(
+      "active",
+    );
+  });
+
+  it("is later while a check is pending and nothing runs", () => {
+    expect(taskStatus(facts({ laterAt: NOW + HOUR, lastOutcome: "succeeded" }), NOW)).toEqual({
+      status: "later",
+      endReason: null,
+    });
+  });
+
+  it("ends for no response once a wait is older than the expiry", () => {
+    expect(taskStatus(facts({ waitingSince: NOW - 25 * HOUR }), NOW)).toEqual({
+      status: "ended",
+      endReason: "no_response",
+    });
+    // A shorter expiry, as a live test sets it.
+    expect(taskStatus(facts({ waitingSince: NOW - 2 * HOUR }), NOW, HOUR).endReason).toBe(
+      "no_response",
+    );
+    // An expired wait does not end a task that runs again.
+    expect(taskStatus(facts({ waitingSince: NOW - 25 * HOUR, running: true }), NOW).status).toBe(
+      "active",
+    );
+  });
+
+  it("ends done, failed or stopped by how the task chat's last turn ended", () => {
+    expect(taskStatus(facts({ lastOutcome: "succeeded" }), NOW).endReason).toBe("done");
+    expect(taskStatus(facts({ lastOutcome: "failed" }), NOW).endReason).toBe("failed");
+    expect(taskStatus(facts({ lastOutcome: "stopped" }), NOW).endReason).toBe("stopped");
+    expect(taskStatus(facts(), NOW).endReason).toBe("done");
+  });
+});
+
+describe("legacyTaskState", () => {
+  it("maps each status to the state an app from before reads", () => {
+    expect(legacyTaskState({ status: "needs_you", endReason: null })).toBe("needs_user");
+    expect(legacyTaskState({ status: "active", endReason: null })).toBe("doing");
+    expect(legacyTaskState({ status: "later", endReason: null })).toBe("watching");
+    expect(legacyTaskState({ status: "ended", endReason: "done" })).toBe("done");
+    for (const endReason of ["failed", "stopped", "no_response"] as const) {
+      expect(legacyTaskState({ status: "ended", endReason })).toBe("dropped");
+    }
+  });
+});
+
+describe("parseTaskStatus", () => {
+  it("reads a status it does not know as active, and an end reason it does not know as done", () => {
+    expect(parseTaskStatus("sleeping", null)).toEqual({ status: "active", endReason: null });
+    expect(parseTaskStatus(undefined, undefined)).toEqual({ status: "active", endReason: null });
+    expect(parseTaskStatus("ended", "vanished")).toEqual({ status: "ended", endReason: "done" });
+    expect(parseTaskStatus("later", "done")).toEqual({ status: "later", endReason: null });
+    expect(parseTaskStatus("ended", "no_response")).toEqual({
+      status: "ended",
+      endReason: "no_response",
+    });
+  });
+});
+
+describe("ConciergeTasks status", () => {
+  let testDb: TestDb;
+  let repo: ConciergeTasksRepository;
+  let tasks: ConciergeTasks;
+  const running = new Set<string>();
+  const waiting = new Map<string, number>();
+  let told: ConciergeTaskDto[];
+
+  beforeEach(async () => {
+    testDb = createTestDb();
+    repo = new ConciergeTasksRepository(testDb.db);
+    tasks = new ConciergeTasks(repo, 24 * HOUR);
+    running.clear();
+    waiting.clear();
+    tasks.attachFacts({
+      now: () => NOW,
+      running: (chatId) => running.has(chatId),
+      waitingSince: async (chatIds) =>
+        new Map(chatIds.flatMap((id) => (waiting.has(id) ? [[id, waiting.get(id)!]] : []))),
+      reportPending: () => [],
+    });
+    told = [];
+    tasks.subscribe((event, payload) => {
+      if (event === "task_upsert") told.push((payload as { task: ConciergeTaskDto }).task);
+    });
+    await new ChatsWebChatRepository(testDb.db).createSession("task-chat", "Flights");
+  });
+  afterEach(() => testDb.close());
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0));
+
+  it("sends each row with its status, and the old state mapped from it", async () => {
+    await repo.upsertMany([{ title: "Flights", state: "next", sessionId: "task-chat" }]);
+    running.add("task-chat");
+    expect(await tasks.listForPanel()).toMatchObject([
+      { title: "Flights", status: "active", endReason: null, state: "doing" },
+    ]);
+    running.delete("task-chat");
+    waiting.set("task-chat", NOW - HOUR);
+    expect(await tasks.listForPanel()).toMatchObject([
+      { status: "needs_you", state: "needs_user", waitingSince: NOW - HOUR },
+    ]);
+  });
+
+  it("tells a task again when a fact of its chat changes its status, and only then", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await flush();
+    told = [];
+    running.add("task-chat");
+    await tasks.chatChanged("task-chat");
+    await flush();
+    expect(told.map((task) => [task.id, task.status])).toEqual([[row.id, "active"]]);
+    // A change that leaves the status as it was tells nothing.
+    await tasks.chatChanged("task-chat");
+    await flush();
+    expect(told).toHaveLength(1);
+
+    running.delete("task-chat");
+    await repo.setLastOutcome(row.id, "failed");
+    await flush();
+    expect(told.at(-1)).toMatchObject({ status: "ended", endReason: "failed", state: "dropped" });
+  });
+});

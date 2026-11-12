@@ -15,6 +15,7 @@ import {
   RECHECK_MS,
   TOOL_HOLD_MS,
 } from "./activity.js";
+import { taskStatus } from "@rome/api-types/concierge-task-status";
 
 const task = (extra: Partial<TaskChatActivityFacts> = {}): TaskChatActivityFacts => ({
   title: "Book the flight",
@@ -158,7 +159,7 @@ function world() {
   /** When the owner last spoke in each Concierge chat. */
   const spoke = new Map<string, number>();
   const pending: string[] = [];
-  const rows: (ActivityTaskRow & { conciergeChat: string })[] = [];
+  const rows: (Omit<ActivityTaskRow, "status" | "waitingSince"> & { conciergeChat: string })[] = [];
   const chats = new Map<string, string>([
     ["main", "guardian"],
     ["topic", "guardian"],
@@ -172,9 +173,27 @@ function world() {
     awaitingGuardianSince: async (ids) =>
       new Map(ids.filter((id) => awaiting.has(id)).map((id) => [id, waitBegan.get(id) ?? now])),
     ownerSpokeAt: async (chatId) => spoke.get(chatId) ?? null,
+    // Each row's status read from the same facts, as events.ts reads it.
     tasksOf: async (chatId) => {
       reads += 1;
-      return rows.filter((row) => row.conciergeChat === chatId);
+      return rows
+        .filter((row) => row.conciergeChat === chatId)
+        .map((row) => {
+          const waitingSince =
+            row.chatId && awaiting.has(row.chatId) ? (waitBegan.get(row.chatId) ?? now) : null;
+          const { status } = taskStatus(
+            {
+              stoppedAt: null,
+              waitingSince,
+              running: row.chatId ? running.has(row.chatId) : false,
+              reportPending: pending.includes(row.id),
+              laterAt: null,
+              lastOutcome: null,
+            },
+            now,
+          );
+          return { ...row, status, waitingSince };
+        });
     },
     reportPending: () => pending,
     ownerOf: async (chatId) => chats.get(chatId) ?? null,

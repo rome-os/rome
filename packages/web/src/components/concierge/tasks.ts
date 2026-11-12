@@ -1,40 +1,42 @@
 // The Concierge's task list as the panel reads it. All pure, so the grouping
 // is tested without a DOM.
 
-import type { ConciergeTaskDto, ConciergeTaskState } from "@rome/api-types/concierge";
+import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import { CONCIERGE_DONE_DAYS } from "@rome/api-types/concierge";
+import { type ConciergeTaskStatus, taskStatusOfDto } from "@rome/api-types/concierge-task-status";
 
-export type TaskGroupKey = "needsYou" | "doing" | "next" | "watching" | "done";
+export type TaskGroupKey = "needsYou" | "active" | "later" | "ended";
 
 /** The groups in the order the panel shows them. */
-const TASK_GROUP_ORDER: readonly TaskGroupKey[] = ["needsYou", "doing", "next", "watching", "done"];
+const TASK_GROUP_ORDER: readonly TaskGroupKey[] = ["needsYou", "active", "later", "ended"];
 
-const GROUP_OF_STATE: Record<ConciergeTaskState, TaskGroupKey> = {
-  needs_user: "needsYou",
-  doing: "doing",
-  next: "next",
-  watching: "watching",
-  done: "done",
-  dropped: "done",
+const GROUP_OF_STATUS: Record<ConciergeTaskStatus, TaskGroupKey> = {
+  needs_you: "needsYou",
+  active: "active",
+  later: "later",
+  ended: "ended",
 };
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-const groupOf = (task: Pick<ConciergeTaskDto, "state">): TaskGroupKey => GROUP_OF_STATE[task.state];
+const groupOf = (task: ConciergeTaskDto): TaskGroupKey =>
+  GROUP_OF_STATUS[taskStatusOfDto(task).status];
 
 /** Missing values sort last. */
 const byNullableAsc = (a: number | null, b: number | null) =>
   a === b ? 0 : a === null ? 1 : b === null ? -1 : a - b;
 
+const endedAt = (task: ConciergeTaskDto) => task.completedAt ?? task.updatedAt;
+
 const SORTERS: Record<TaskGroupKey, (a: ConciergeTaskDto, b: ConciergeTaskDto) => number> = {
+  // The oldest wait first: it ends soonest.
+  needsYou: (a, b) =>
+    byNullableAsc(a.waitingSince ?? null, b.waitingSince ?? null) || b.updatedAt - a.updatedAt,
   // The newest change first: it is what the guardian has not seen yet.
-  needsYou: (a, b) => b.updatedAt - a.updatedAt,
-  doing: (a, b) => b.updatedAt - a.updatedAt,
-  // The Concierge's own order, then the order it planned them in.
-  next: (a, b) => byNullableAsc(a.rank, b.rank) || a.createdAt - b.createdAt,
+  active: (a, b) => b.updatedAt - a.updatedAt,
   // The soonest check first.
-  watching: (a, b) => byNullableAsc(a.dueAt, b.dueAt) || b.updatedAt - a.updatedAt,
-  done: (a, b) => (b.completedAt ?? b.updatedAt) - (a.completedAt ?? a.updatedAt),
+  later: (a, b) => byNullableAsc(a.laterAt ?? null, b.laterAt ?? null) || b.updatedAt - a.updatedAt,
+  ended: (a, b) => endedAt(b) - endedAt(a),
 };
 
 export interface TaskGroup {
@@ -45,9 +47,9 @@ export interface TaskGroup {
 }
 
 /**
- * The five groups, in order, with empty ones left out. Finished rows (done or
- * dropped) show for the last `doneDays` days by completion; older ones are
- * counted in `hidden` unless `showAllDone`. An archived row is in no group.
+ * The four groups, in order, with empty ones left out. Ended rows show for the
+ * last `doneDays` days; older ones are counted in `hidden` unless
+ * `showAllDone`. An archived row is in no group.
  */
 export function groupTasks(
   tasks: readonly ConciergeTaskDto[],
@@ -63,8 +65,8 @@ export function groupTasks(
   return TASK_GROUP_ORDER.flatMap((key): TaskGroup[] => {
     const sorted = [...(groups.get(key) ?? [])].sort(SORTERS[key]);
     if (sorted.length === 0) return [];
-    if (key !== "done" || options.showAllDone) return [{ key, tasks: sorted, hidden: 0 }];
-    const recent = sorted.filter((task) => (task.completedAt ?? task.updatedAt) >= since);
+    if (key !== "ended" || options.showAllDone) return [{ key, tasks: sorted, hidden: 0 }];
+    const recent = sorted.filter((task) => endedAt(task) >= since);
     // A group of only old rows shows its "show more" and nothing else.
     return [{ key, tasks: recent, hidden: sorted.length - recent.length }];
   });
@@ -89,15 +91,14 @@ export function applyTaskUpsert(
 }
 
 /**
- * The time that carries meaning on a row: when a watched or planned row is due,
- * and when a finished one finished. A row that needs the guardian or is being
- * worked on shows none, since the time it was last written says little.
+ * The time that carries meaning on a row: when a later row's check is due,
+ * and when an ended one ended. A row that needs the guardian or is at work
+ * shows none, since the time it was last written says little.
  */
-export function taskTime(
-  task: Pick<ConciergeTaskDto, "state" | "dueAt" | "completedAt" | "updatedAt">,
-): number | null {
-  if (task.state === "watching" || task.state === "next") return task.dueAt;
-  if (task.state === "done" || task.state === "dropped") return task.completedAt ?? task.updatedAt;
+export function taskTime(task: ConciergeTaskDto): number | null {
+  const { status } = taskStatusOfDto(task);
+  if (status === "later") return task.laterAt ?? task.dueAt;
+  if (status === "ended") return endedAt(task);
   return null;
 }
 

@@ -241,6 +241,19 @@ export class ConciergeTasksRepository {
     await this.announce(row.id, "refresh");
   }
 
+  /** How task `id`'s task chat's latest work ended. Rome writes it; the Concierge never does. */
+  async setLastOutcome(
+    id: string,
+    outcome: "succeeded" | "failed" | "stopped",
+    now = new Date(),
+  ): Promise<void> {
+    await this.db
+      .update(conciergeTasks)
+      .set({ lastOutcome: outcome, updatedAt: now })
+      .where(eq(conciergeTasks.id, id));
+    await this.announce(id, "refresh");
+  }
+
   /** Task `id` was stopped by `by`. A stop is kept: a later one changes nothing. */
   async stop(id: string, by: "concierge" | "guardian", now = new Date()): Promise<void> {
     const stopped = await this.db

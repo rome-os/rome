@@ -5,6 +5,10 @@ import { Link } from "react-router-dom";
 import { toast } from "sonner";
 import type { ConciergeTaskAction, ConciergeTaskDto } from "@rome/api-types/concierge";
 import {
+  type ConciergeTaskStatusResult,
+  taskStatusOfDto,
+} from "@rome/api-types/concierge-task-status";
+import {
   EmptyState,
   EmptyStateDescription,
   EmptyStateIcon,
@@ -34,11 +38,14 @@ import { useConciergeTasks } from "./use-concierge-tasks";
 /** How often a pending press asks whether its turn has ended. */
 const CHECK_PRESSES_MS = 2_000;
 
-/** The action a row offers: Stop on a Doing row with a chat, Done on a Needs you one, Archive on a finished one. */
-function rowAction(task: ConciergeTaskDto): ConciergeTaskAction | null {
-  if (task.state === "doing" && task.chat) return "stop";
-  if (task.state === "needs_user") return "done";
-  if (task.state === "done" || task.state === "dropped") return "archive";
+/** The action a row offers: Stop on an active row with a chat, Done on one that needs the guardian, Archive on an ended one. */
+function rowAction(
+  task: ConciergeTaskDto,
+  status: ConciergeTaskStatusResult,
+): ConciergeTaskAction | null {
+  if (status.status === "active" && task.chat) return "stop";
+  if (status.status === "needs_you") return "done";
+  if (status.status === "ended") return "archive";
   return null;
 }
 
@@ -57,12 +64,15 @@ function TaskRow({
 }) {
   const { t, i18n } = useTranslation("chat");
   const name = useConciergeName();
-  const action = rowAction(task);
-  const finished = task.state === "done" || task.state === "dropped";
-  const detail =
-    task.state === "watching" || task.state === "needs_user"
-      ? (task.waitingOn ?? task.summary)
-      : task.summary;
+  const taskStatus = taskStatusOfDto(task);
+  const action = rowAction(task, taskStatus);
+  const finished = taskStatus.status === "ended";
+  // An ended task that did not finish says why, ahead of the Concierge's words.
+  const ended =
+    taskStatus.endReason && taskStatus.endReason !== "done"
+      ? t(`concierge.tasks.ended.${taskStatus.endReason}`)
+      : null;
+  const detail = [ended, task.summary].filter(Boolean).join(" · ");
   // One quiet line under the title: what a press did so far, else the Concierge's own words.
   const status = pending
     ? pending.phase === "pending"
@@ -96,8 +106,8 @@ function TaskRow({
       size="md"
       className="group/row relative transition-colors hover:bg-surface-hover"
     >
-      <li data-task-id={task.id} data-task-state={task.state}>
-        <TaskGlyph state={task.state} />
+      <li data-task-id={task.id} data-task-status={taskStatus.status}>
+        <TaskGlyph status={taskStatus} />
         <ListRowContent>
           <button
             type="button"
@@ -185,8 +195,8 @@ function TitleText({ task, finished }: { task: ConciergeTaskDto; finished: boole
 }
 
 /**
- * The Concierge's task list: what needs the guardian, what it is doing, what is
- * next, what it is watching, and what it finished. Read-only: a button sends the
+ * The Concierge's task list: what waits for the guardian, what is at work,
+ * what is checked later, and what ended. Read-only: a button sends the
  * Concierge a message, and the row changes when the Concierge writes it.
  */
 export function ConciergeTaskPanel({
@@ -202,7 +212,7 @@ export function ConciergeTaskPanel({
   const activeSessionId = useActiveSessionId();
   const openChatId = chatId === undefined ? activeSessionId : chatId;
   // Finished work is history, so that group starts folded.
-  const [folded, setFolded] = useState<ReadonlySet<TaskGroupKey>>(new Set(["done"]));
+  const [folded, setFolded] = useState<ReadonlySet<TaskGroupKey>>(new Set(["ended"]));
   const [showAllDone, setShowAllDone] = useState(false);
   // Every finished row is loaded and the 7-day window is applied here, so the
   // panel knows how many older ones "Show older" holds.
@@ -280,7 +290,7 @@ export function ConciergeTaskPanel({
                       onNavigate={onNavigate}
                     />
                   ))}
-                  {group.key === "done" && (group.hidden > 0 || showAllDone) ? (
+                  {group.key === "ended" && (group.hidden > 0 || showAllDone) ? (
                     <li>
                       <ListRow
                         asChild

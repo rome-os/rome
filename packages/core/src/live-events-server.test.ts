@@ -359,7 +359,17 @@ describe("live events WebSocket", () => {
       await client.next((m) => m.type === "event" && m.topic === "concierge.tasks"),
     ).toMatchObject({
       event: "task_upsert",
-      data: { task: { id: row.id, title: "Fix flaky test", state: "doing", chat: null } },
+      // Rome derives the status: with no task chat and nothing scheduled, the task has ended.
+      data: {
+        task: {
+          id: row.id,
+          title: "Fix flaky test",
+          status: "ended",
+          endReason: "done",
+          state: "done",
+          chat: null,
+        },
+      },
     });
   });
 

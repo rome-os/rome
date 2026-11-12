@@ -2,8 +2,12 @@
 // server is packages/core/src/concierge and the client is packages/web.
 
 import type { ConciergeActivity } from "./concierge-activity.js";
+import type { ConciergeTaskEndReason, ConciergeTaskStatus } from "./concierge-task-status.js";
 
-/** What a task row is doing. The Concierge sets it; the system never derives it. */
+/**
+ * What a task row is doing, as apps from before derived status read it. Rome
+ * maps it from the task's status (`legacyTaskState`); read `status` instead.
+ */
 export const CONCIERGE_TASK_STATES = [
   "next",
   "doing",
@@ -74,7 +78,20 @@ export const CONCIERGE_TASK_SUMMARY_MAX_LENGTH = 120;
 export interface ConciergeTaskDto {
   id: string;
   title: string;
+  /** Mapped from `status` for apps from before it. */
   state: ConciergeTaskState;
+  /**
+   * How the task stands, derived by Rome (`taskStatus` in
+   * concierge-task-status.ts). Read it with `parseTaskStatus`. Absent from
+   * servers before it.
+   */
+  status?: ConciergeTaskStatus;
+  /** Why an ended task ended; null while it has not. */
+  endReason?: ConciergeTaskEndReason | null;
+  /** When the wait on its owner began, while one is open in its task chat, epoch milliseconds. */
+  waitingSince?: number | null;
+  /** When the check scheduled for it is due, while one is pending, epoch milliseconds. */
+  laterAt?: number | null;
   summary: string | null;
   waitingOn: string | null;
   dueAt: number | null;

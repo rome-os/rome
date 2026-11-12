@@ -38,10 +38,14 @@
       "close": "关闭任务",
       "groups": {
         "needsYou": "等你处理",
-        "doing": "进行中",
-        "next": "接下来",
-        "watching": "盯着",
-        "done": "已完成"
+        "active": "进行中",
+        "later": "稍后",
+        "ended": "已结束"
+      },
+      "ended": {
+        "failed": "失败",
+        "stopped": "已停止",
+        "no_response": "没回应"
       },
       "stop": "停止",
       "done": "完成",
@@ -71,7 +75,7 @@
         "done": "我已经完成了"
       },
       "emptyTitle": "还没有任务",
-      "emptyDescription": "{{name}} 正在做、计划做或盯着的任务会显示在这里。"
+      "emptyDescription": "{{name}} 交给其他 Agent 的任务会显示在这里，以及每个任务在等什么。"
     },
     "messageDetails": "消息详情",
     "chooseFolder": "选择文件夹…",

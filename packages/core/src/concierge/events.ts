@@ -97,6 +97,12 @@ function reactionEndOf(status: AgentTurnFinishedEvent["status"]): "done" | "fail
   return status === "interrupted" ? "stopped" : "failed";
 }
 
+/** How a task chat's turn ended, as its task's outcome. */
+function outcomeOf(status: AgentTurnFinishedEvent["status"]): "succeeded" | "failed" | "stopped" {
+  const end = reactionEndOf(status);
+  return end === "done" ? "succeeded" : end;
+}
+
 function userText(content: string): string {
   try {
     const parts: unknown = JSON.parse(content);
@@ -390,6 +396,19 @@ export function startConciergeEvents(
     const taskId = await taskOf(chatId);
     if (!taskId) return;
     await waitForTurnStream(service, chatId, event.turn.turnId);
+    // How the task chat's work ended, once it has nothing left to run: a turn
+    // a newer input took over hands its work on, and ends nothing.
+    const stillRunning = service.dashboard.chats
+      .activeTurns(chatId)
+      .filter((id) => id !== event.turn.turnId);
+    if (stillRunning.length === 0 && (event as EndedAgentTurn).handedOn !== true) {
+      await tasks.repo.setLastOutcome(taskId, outcomeOf(event.status)).catch((error: unknown) =>
+        log.warn("failed to write a task's outcome", {
+          taskId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     const rows = await webchatRepo.getTurnChatMessages(chatId, event.turn.turnId);
     const userRows = rows.filter((row) => row.role === "user");
     // A follow-up the task chat queued or deferred sits under the turn that
@@ -601,11 +620,15 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
       const owner = await service.ownerOfChat(chatId);
       if (!owner) return [];
       const since = new Date(Date.now() - CONCIERGE_DONE_DAYS * 24 * 60 * 60 * 1000);
-      return (await tasks.repo.listForConciergeChat(chatId, owner, since)).map((task) => ({
+      const found = await tasks.repo.listForConciergeChat(chatId, owner, since);
+      const status = await tasks.statusOf(found.map((task) => task.row));
+      return found.map((task) => ({
         id: task.row.id,
         title: task.row.title,
         chatId: task.chat?.id ?? null,
         updatedAt: task.row.updatedAt.getTime(),
+        status: status.get(task.row.id)?.status ?? "active",
+        waitingSince: status.get(task.row.id)?.waitingSince ?? null,
       }));
     },
     reportPending: () => coalescer.awaitingReport,
@@ -643,8 +666,18 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
         error: error instanceof Error ? error.message : String(error),
       }),
     );
-  const sessionChanged = (sessionId: string, change: { toolOnly?: boolean } = {}) =>
+  // A task's status reads the same facts: Rome tells its row again when one
+  // changes it.
+  tasks.attachFacts({
+    now: () => Date.now(),
+    running: (chatId) => service.dashboard.chats.activeTurns(chatId).length > 0,
+    waitingSince: (chatIds) => webchatRepo.awaitingGuardianSince(chatIds),
+    reportPending: () => coalescer.awaitingReport,
+  });
+  const sessionChanged = (sessionId: string, change: { toolOnly?: boolean } = {}) => {
     void guard(tracker.sessionChanged(sessionId, change));
+    if (!change.toolOnly) void guard(tasks.chatChanged(sessionId));
+  };
   const approvalChanged = (approval: { payload: unknown }) => {
     const threadId = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
       ?.channelContext?.threadId;
@@ -663,6 +696,7 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
       void guard(
         chatOfTask(taskId).then((chatId) => (chatId ? tracker.refresh(chatId) : undefined)),
       );
+      void guard(tasks.taskChanged(taskId));
     }
   };
 
@@ -684,5 +718,6 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     for (const unsubscribe of unsubscribers) unsubscribe();
     tracker.stop();
     service.attachActivity(null);
+    tasks.attachFacts(null);
   };
 }
