@@ -86,7 +86,7 @@ struct RootView: View {
                 Color.clear
             } else if model.phase == .ready, let workspace = model.workspace {
                 MainShell(workspace: workspace)
-                    .environment(\.assetLoader) { [backend = workspace.backend] path in try await backend.asset(path: path) }
+                    .environment(\.assetLoader) { [backend = workspace.backend] path, width in try await backend.asset(path: path, width: width) }
                     .environment(\.apiFileLoader) { [backend = workspace.backend] path, query in try await backend.apiFile(path: path, query: query) }
                     .environment(\.instanceOrigin, workspace.backend.origin)
                     .id(ObjectIdentifier(workspace))

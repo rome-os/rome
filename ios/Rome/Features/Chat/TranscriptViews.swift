@@ -2,8 +2,10 @@ import PhotosUI
 import SwiftUI
 
 /// Loads a stored upload's bytes; the shell sets it from the open instance.
+/// The second argument is a width the server shrinks the picture to (600 or 900),
+/// or nil for the original.
 extension EnvironmentValues {
-    @Entry var assetLoader: (@MainActor (String) async throws -> Data)? = nil
+    @Entry var assetLoader: (@MainActor (String, Int?) async throws -> Data)? = nil
     /// An `/api/…` path and its percent-encoded query, fetched with the session.
     @Entry var apiFileLoader: (@MainActor (String, String?) async throws -> Data)? = nil
     /// The instance's origin: an absolute URL on it is one of its own.
@@ -163,6 +165,8 @@ private struct UserImageGrid: View {
 
 private struct UserImageTile: View {
     let image: UserImage
+    /// A width the server offers; the tile only needs a small thumbnail.
+    private static let assetWidth = 600
     @Environment(\.assetLoader) private var assetLoader
     @State private var loaded: CGImage?
     @State private var failed = false
@@ -203,7 +207,7 @@ private struct UserImageTile: View {
             return
         }
         do {
-            let data = try await assetLoader(upload.assetPath)
+            let data = try await assetLoader(upload.assetPath, Self.assetWidth)
             // Decoded small and off the main actor: an upload from the web may be huge.
             let thumbnail = await Task.detached(priority: .userInitiated) {
                 ImageCompressor.thumbnail(from: data, maxPixel: ComposerImage.thumbnailPixels)

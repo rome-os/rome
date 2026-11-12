@@ -141,4 +141,13 @@ describe("file browser asset byte ranges", () => {
     expect(response.headers.get("Content-Range")).toBe(`bytes */${audio.length}`);
     expect((await response.arrayBuffer()).byteLength).toBe(0);
   });
+
+  it("still serves a byte range when a width is asked for", async () => {
+    const response = await app.request(`${await assetUrl()}&w=900`, {
+      headers: { Range: "bytes=0-99" },
+    });
+    expect(response.status).toBe(206);
+    expect(response.headers.get("Content-Range")).toBe(`bytes 0-99/${audio.length}`);
+    expect(response.headers.get("Content-Type")).toBe("audio/wav");
+  });
 });

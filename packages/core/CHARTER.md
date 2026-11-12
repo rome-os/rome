@@ -49,4 +49,4 @@ In a dashboard chat reply (the `webchat` channel), show a picture inline with Ma
 - Memory file: `![short description](/memory/path/to/picture.png)`
 - Picture on the web: `![short description](https://example.com/picture.jpg)`
 
-Encode each space in a path as `%20`. For a picture on the web, use only the real https address of the image as its source page shows it. Never put private content in a picture's URL.
+Encode each space in a path as `%20`. For a picture on the web, use only the real https address of the image as its source page shows it. If the source page offers a smaller size, such as a thumbnail or preview, use that address instead of the full-size original. Never put private content in a picture's URL.

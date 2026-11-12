@@ -11,6 +11,7 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Hono } from "hono";
+import sharp from "sharp";
 import {
   createAssetHandler,
   createFileGetHandler,
@@ -429,5 +430,226 @@ describe("confineToRealRoot", () => {
     );
     expect(status).toBe(400);
     expect(body).toEqual({ error: "Invalid path" });
+  });
+});
+
+describe("file browser asset width", () => {
+  let rootDir: string;
+  let app: Hono;
+  let png: Buffer;
+  const url = (name: string, query = "") =>
+    `/api/projects/asset/${name}?path=projects/${name}${query}`;
+
+  beforeEach(async () => {
+    rootDir = mkdtempSync(join(tmpdir(), "rome-asset-width-"));
+    // Noise does not compress, so the PNG is large and its WebP is much smaller.
+    png = await sharp({
+      create: {
+        width: 1200,
+        height: 800,
+        channels: 3,
+        background: "#808080",
+        noise: { type: "gaussian", mean: 128, sigma: 30 },
+      },
+    })
+      .png()
+      .toBuffer();
+    writeFileSync(join(rootDir, "photo.png"), png);
+    app = new Hono();
+    app.get(
+      "/api/projects/asset/:fileName",
+      createAssetHandler({
+        assetBasePath: "/api/projects/asset",
+        logicalRoot: "projects",
+        rootDir,
+      }),
+    );
+  });
+
+  afterEach(() => {
+    rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  async function bytes(response: Response): Promise<Buffer> {
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  it.each([
+    [600, 600, 400],
+    [900, 900, 600],
+  ])("serves a WebP no longer than w=%s on its long edge", async (w, width, height) => {
+    const response = await app.request(url("photo.png", `&w=${w}`));
+    const body = await bytes(response);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("image/webp");
+    expect(response.headers.get("Content-Length")).toBe(String(body.length));
+    expect(response.headers.get("Cache-Control")).toBe("private, no-cache");
+    const { mtimeMs, size } = statSync(join(rootDir, "photo.png"));
+    expect(response.headers.get("ETag")).toBe(`W/"${Math.trunc(mtimeMs)}-${size}-w${w}"`);
+    expect(body.length).toBeLessThan(size);
+    const meta = await sharp(body).metadata();
+    expect([meta.format, meta.width, meta.height]).toEqual(["webp", width, height]);
+  });
+
+  it("does not enlarge a picture narrower than the width", async () => {
+    const small = await sharp(png).resize(300).png().toBuffer();
+    writeFileSync(join(rootDir, "small.png"), small);
+    const response = await app.request(url("small.png", "&w=900"));
+    const meta = await sharp(await bytes(response)).metadata();
+    expect([response.headers.get("Content-Type"), meta.width]).toEqual(["image/webp", 300]);
+  });
+
+  it("resizes JPEG and WebP pictures too", async () => {
+    writeFileSync(join(rootDir, "photo.jpg"), await sharp(png).jpeg({ quality: 95 }).toBuffer());
+    writeFileSync(join(rootDir, "photo.webp"), await sharp(png).webp({ quality: 100 }).toBuffer());
+    for (const name of ["photo.jpg", "photo.webp"]) {
+      const response = await app.request(url(name, "&w=600"));
+      const meta = await sharp(await bytes(response)).metadata();
+      expect([name, meta.format, meta.width]).toEqual([name, "webp", 600]);
+    }
+  });
+
+  it("returns 304 for the width ETag without decoding the picture", async () => {
+    // A whole-second mtime survives the round trip through a Date exactly.
+    const filePath = join(rootDir, "photo.png");
+    const mtime = new Date(1_700_000_000_000);
+    utimesSync(filePath, mtime, mtime);
+    const first = await app.request(url("photo.png", "&w=900"));
+    const etag = first.headers.get("ETag")!;
+    await first.arrayBuffer();
+    // The same size and mtime, but bytes that no decoder reads: only a 304
+    // that skips the decoder can answer without falling back to the original.
+    writeFileSync(filePath, Buffer.alloc(png.length, 1));
+    utimesSync(filePath, mtime, mtime);
+
+    const response = await app.request(url("photo.png", "&w=900"), {
+      headers: { "If-None-Match": etag },
+    });
+    expect(response.status).toBe(304);
+    expect(response.headers.get("ETag")).toBe(etag);
+    expect(response.body).toBeNull();
+  });
+
+  it("does not let an original's ETag validate a width, or the reverse", async () => {
+    const original = await app.request(url("photo.png"));
+    const resized = await app.request(url("photo.png", "&w=900"));
+    expect(original.headers.get("ETag")).not.toBe(resized.headers.get("ETag"));
+    const other = await app.request(url("photo.png", "&w=600"), {
+      headers: { "If-None-Match": resized.headers.get("ETag")! },
+    });
+    expect(other.status).toBe(200);
+    const plain = await app.request(url("photo.png"), {
+      headers: { "If-None-Match": resized.headers.get("ETag")! },
+    });
+    expect(plain.status).toBe(200);
+  });
+
+  it("changes the width ETag and the bytes when an overwrite keeps the same size", async () => {
+    // Bytes after the PNG's last chunk are ignored by the decoder, so padding
+    // gives two different pictures one file size.
+    const other = await sharp({
+      create: { width: 1200, height: 800, channels: 3, background: "#206090" },
+    })
+      .png()
+      .toBuffer();
+    const total = png.length + 10_000;
+    const filePath = join(rootDir, "photo.png");
+    writeFileSync(filePath, Buffer.concat([png, Buffer.alloc(total - png.length)]));
+    const first = await app.request(url("photo.png", "&w=900"));
+    const etag = first.headers.get("ETag")!;
+    const before = await bytes(first);
+    const { mtimeMs } = statSync(filePath);
+    writeFileSync(filePath, Buffer.concat([other, Buffer.alloc(total - other.length)]));
+    utimesSync(filePath, new Date(mtimeMs + 2000), new Date(mtimeMs + 2000));
+
+    const response = await app.request(url("photo.png", "&w=900"), {
+      headers: { "If-None-Match": etag },
+    });
+    expect(response.status).toBe(200);
+    expect(response.headers.get("ETag")).not.toBe(etag);
+    expect(response.headers.get("Content-Type")).toBe("image/webp");
+    expect(await bytes(response)).not.toEqual(before);
+  });
+
+  it.each([
+    "601",
+    "abc",
+    "",
+    "0",
+    "-900",
+    "900.5",
+    "900px",
+  ])("serves the original for w=%j", async (w) => {
+    const response = await app.request(url("photo.png", `&w=${w}`));
+    const { mtimeMs, size } = statSync(join(rootDir, "photo.png"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("image/png");
+    expect(response.headers.get("ETag")).toBe(`W/"${Math.trunc(mtimeMs)}-${size}"`);
+    expect(await bytes(response)).toEqual(png);
+  });
+
+  it("serves the original for a GIF, an SVG and an animated WebP", async () => {
+    const frame = await sharp(png).resize(40, 40).png().toBuffer();
+    const inverse = await sharp(png).resize(40, 40).negate().png().toBuffer();
+    const animated = await sharp([frame, inverse], { join: { animated: true } })
+      .webp({ loop: 0, delay: [100, 100] })
+      .toBuffer();
+    expect((await sharp(animated).metadata()).pages).toBe(2);
+    const files: Array<[string, Buffer, string]> = [
+      ["still.gif", Buffer.from("GIF89a-not-decoded"), "image/gif"],
+      ["vector.svg", Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"/>'), "image/svg+xml"],
+      ["moving.webp", animated, "image/webp"],
+    ];
+    for (const [name, content, type] of files) {
+      writeFileSync(join(rootDir, name), content);
+      const response = await app.request(url(name, "&w=600"));
+      expect([name, response.status, response.headers.get("Content-Type")]).toEqual([
+        name,
+        200,
+        type,
+      ]);
+      expect([name, await bytes(response)]).toEqual([name, content]);
+    }
+  });
+
+  it("serves the original with its plain ETag when the picture cannot be decoded", async () => {
+    const corrupt = Buffer.from("this is not a png at all");
+    writeFileSync(join(rootDir, "broken.png"), corrupt);
+    const response = await app.request(url("broken.png", "&w=900"));
+    const { mtimeMs, size } = statSync(join(rootDir, "broken.png"));
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Content-Type")).toBe("image/png");
+    expect(response.headers.get("ETag")).toBe(`W/"${Math.trunc(mtimeMs)}-${size}"`);
+    expect(await bytes(response)).toEqual(corrupt);
+  });
+
+  it("serves the original under the width ETag when the WebP is not smaller", async () => {
+    const raw = Buffer.alloc(16 * 16 * 3);
+    for (let i = 0; i < 256; i++) {
+      raw.fill(((i % 16) + Math.floor(i / 16)) % 2 ? 255 : 0, i * 3, i * 3 + 3);
+    }
+    const tiny = await sharp(raw, { raw: { width: 16, height: 16, channels: 3 } })
+      .png({ palette: true, colours: 2 })
+      .toBuffer();
+    writeFileSync(join(rootDir, "tiny.png"), tiny);
+    const response = await app.request(url("tiny.png", "&w=600"));
+    const { mtimeMs, size } = statSync(join(rootDir, "tiny.png"));
+    expect(response.headers.get("Content-Type")).toBe("image/png");
+    expect(response.headers.get("ETag")).toBe(`W/"${Math.trunc(mtimeMs)}-${size}-w600"`);
+    expect(await bytes(response)).toEqual(tiny);
+  });
+
+  it("leaves a request without w unchanged", async () => {
+    const response = await app.request(url("photo.png"));
+    const { mtimeMs, size } = statSync(join(rootDir, "photo.png"));
+    expect(Object.fromEntries(response.headers)).toEqual({
+      "accept-ranges": "bytes",
+      "cache-control": "private, no-cache",
+      "content-disposition": expect.stringContaining("photo.png"),
+      "content-length": String(size),
+      "content-type": "image/png",
+      etag: `W/"${Math.trunc(mtimeMs)}-${size}"`,
+    });
+    expect(await bytes(response)).toEqual(png);
   });
 });

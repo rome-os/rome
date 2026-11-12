@@ -25,6 +25,8 @@ export type ImagePreviewContentProps = PreviewContentProps & {
    * blob of what was just picked, in a square card, so it has neither.
    */
   inReply?: boolean;
+  /** What Download saves, when it is not the viewer's own image: the original of a thumbnail. */
+  downloadSrc?: string;
 };
 
 /**
@@ -54,6 +56,7 @@ export function ImagePreviewContent({
   modalState,
   onUnzoom,
   inReply = false,
+  downloadSrc,
 }: ImagePreviewContentProps) {
   const { t } = useTranslation("chat");
   const [scale, setScale] = useState(MIN_SCALE);
@@ -180,12 +183,12 @@ export function ImagePreviewContent({
           disabled={modalState === "UNLOADING"}
           className="rounded-full border-border bg-surface shadow-sm"
         />
-        {inReply && image?.props.src && (
+        {inReply && (downloadSrc ?? image?.props.src) && (
           <IconButton
             data-preview-controls
             label={t("composer.downloadImage")}
             icon={<Download aria-hidden />}
-            onClick={() => downloadImage(image.props.src as string)}
+            onClick={() => downloadImage((downloadSrc ?? image?.props.src) as string)}
             disabled={modalState === "UNLOADING"}
             className="rounded-full border-border bg-surface shadow-sm"
           />
