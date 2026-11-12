@@ -393,4 +393,67 @@ describe("ChatLink", () => {
     const link = screen.getByText("x") as HTMLAnchorElement;
     expect(link.getAttribute("href")).toBe("/projects/default/x.png");
   });
+
+  const ID = "0123456789abcdef0123456789abcdef";
+
+  it("renders a link to a stored file as a chip that saves it under its name", () => {
+    const store = createWorkspaceStore();
+    const bus = createWorkspaceEventBus();
+    const href = `/api/assets/${ID}.zip`;
+
+    renderInWorkspace(<ChatLink href={href}>report.zip</ChatLink>, { store, bus });
+    const link = screen.getByText("report.zip").closest("a") as HTMLAnchorElement;
+
+    expect(link.getAttribute("href")).toBe(href);
+    expect(link.getAttribute("download")).toBe("report.zip");
+    expect(link.getAttribute("target")).toBe("_blank");
+    expect(link.getAttribute("rel")).toBe("noopener");
+    expect(link.querySelector("svg")).not.toBeNull();
+    // Not intercepted: the browser follows it, and the SPA does not move.
+    expect(fireEvent.click(link)).toBe(true);
+    expect(store.get("followTargetPath")).toBeUndefined();
+  });
+
+  it("saves a pdf like any other file, so the desktop session handles it", () => {
+    render(
+      <MemoryRouter>
+        <ChatLink href={`/api/assets/${ID}.pdf`}>spec.pdf</ChatLink>
+      </MemoryRouter>,
+    );
+    const link = screen.getByText("spec.pdf").closest("a") as HTMLAnchorElement;
+    expect(link.getAttribute("download")).toBe("spec.pdf");
+  });
+
+  it("plays a linked video or audio file in place", () => {
+    const { container } = render(
+      <MemoryRouter>
+        <ChatLink href={`/api/assets/${ID}.mp4`}>clip.mp4</ChatLink>
+        <ChatLink href={`/api/assets/${ID}.mp3`}>song.mp3</ChatLink>
+      </MemoryRouter>,
+    );
+    expect(container.querySelector("video")?.getAttribute("src")).toBe(`/api/assets/${ID}.mp4`);
+    expect(container.querySelector("audio")?.getAttribute("src")).toBe(`/api/assets/${ID}.mp3`);
+    expect(container.querySelector("a")).toBeNull();
+  });
+
+  it("keeps a same-origin absolute stored-file link a chip", () => {
+    stubOrigin("https://staging.romeos.cc");
+    const href = `https://staging.romeos.cc/api/assets/${ID}.pdf`;
+
+    render(
+      <MemoryRouter>
+        <ChatLink href={href}>report.pdf</ChatLink>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("report.pdf").closest("a")?.getAttribute("href")).toBe(href);
+  });
+
+  it("leaves a look-alike link to the router", () => {
+    render(
+      <MemoryRouter>
+        <ChatLink href="/api/assets/x.png">x</ChatLink>
+      </MemoryRouter>,
+    );
+    expect(screen.getByText("x").closest("a")?.hasAttribute("download")).toBe(false);
+  });
 });
