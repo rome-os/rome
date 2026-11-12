@@ -45,6 +45,13 @@ export { resolveAgentPolicy, type AgentPolicy } from "./domain/agent-policy.js";
 export { turnStatus, turnStop, type TurnEnding } from "./domain/turn-end.js";
 export { shapedResult, type AnswerShape, type ReadAnswerShape } from "./domain/answer-shape.js";
 export { catchUpPrompt } from "./domain/catch-up.js";
+export {
+  HANDOFF_RECENT_TOKENS,
+  recentWithin,
+  type HandoffContext,
+  type RecentMessage,
+  type RenewalHandoffs,
+} from "./domain/session-handoff.js";
 export { restoresSavedSelection, type SessionSettings } from "./domain/session-settings.js";
 export {
   evaluateProviderSessionReset,

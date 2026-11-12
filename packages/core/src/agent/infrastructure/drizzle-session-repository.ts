@@ -241,6 +241,7 @@ function restore(row: SessionRow): Session {
     setup: row.setup,
     supersededBy: row.supersededBy,
     supersededFor: row.supersededFor,
+    handoff: row.handoff,
     createdAt: row.createdAt,
     lastActiveAt: row.lastActiveAt,
   });
@@ -290,6 +291,7 @@ function toRow(state: SessionState): SessionRow {
     setup: state.setup,
     supersededBy: state.supersededBy,
     supersededFor: state.supersededFor,
+    handoff: state.handoff,
     createdAt: state.createdAt,
     lastActiveAt: state.lastActiveAt,
     status: state.status,

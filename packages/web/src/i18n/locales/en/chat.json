@@ -114,7 +114,8 @@
         "startingTopic": "Starting a topic chat",
         "checkingFollows": "Checking what you follow",
         "searchingWeb": "Searching the web",
-        "readingPage": "Reading a page"
+        "readingPage": "Reading a page",
+        "tidyingUp": "Tidying up context"
       }
     },
     "statusReaction": {
@@ -594,6 +595,9 @@
   },
   "sessionRenewal": {
     "notice": "New session · {{reason}}",
+    "showHandoff": "show handoff",
+    "hideHandoff": "hide handoff",
+    "handoffTitle": "Handoff to the new session",
     "reasons": {
       "setup": "setup changed",
       "idle": "after a quiet period",

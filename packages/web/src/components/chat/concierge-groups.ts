@@ -27,7 +27,7 @@ export type ConciergeItem =
   | { kind: "separator"; key: string; at: string }
   | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
   /** Faint line where the chat's agent session was renewed, for `reason`. */
-  | { kind: "renewal"; key: string; reason: string }
+  | { kind: "renewal"; key: string; reason: string; chatId: string; renewedSessionId: string }
   /**
    * Consecutive messages from one sender. Agent messages of separate turns share a
    * group when they are close enough in time. `typing` adds the typing bubble to
@@ -194,7 +194,7 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
   type Slot =
     | { kind: "separator"; anchor: ChatMessage; key: string; at: string }
     | { kind: "notice"; key: string; model: string; quota?: QuotaSwitchPart }
-    | { kind: "renewal"; key: string; reason: string }
+    | { kind: "renewal"; key: string; reason: string; chatId: string; renewedSessionId: string }
     | { kind: "group"; sender: "guardian" | "agent"; messages: ChatMessage[] };
   const slots: Slot[] = [];
   let group: Extract<Slot, { kind: "group" }> | null = null;
@@ -241,7 +241,13 @@ export function buildConciergeItems(rows: ChatRow[], opts: { typing: boolean }):
         } else if (isRenderable(message)) add(message, "agent");
       }
     } else if (row.kind === "session_renewal") {
-      slots.push({ kind: "renewal", key: row.key, reason: row.reason });
+      slots.push({
+        kind: "renewal",
+        key: row.key,
+        reason: row.reason,
+        chatId: row.chatId,
+        renewedSessionId: row.renewedSessionId,
+      });
       group = null;
     } else if (row.kind === "model_switch") {
       if (row.model === automaticModel) {

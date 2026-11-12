@@ -181,6 +181,8 @@ export function buildContinuationBlock(input: {
   previousModel?: string;
   /** The agent may call `system:fetch_channel_history`. */
   canReadHistory: boolean;
+  /** What a renewal's handoff adds, from `handoffSections`, one string per line. */
+  handoff?: readonly string[];
 }): string {
   const open = input.previousModel
     ? `<continuation previous_model="${xmlAttr(input.previousModel)}">`
@@ -193,6 +195,7 @@ export function buildContinuationBlock(input: {
       `When the conversation needs them, read them with \`${FETCH_CHANNEL_HISTORY_ACTION}\`, passing this thread's channel and thread id. To page back, pass limit, then the nextCursor it returns as cursor.`,
     );
   }
+  if (input.handoff) lines.push(...input.handoff);
   return `${open}\n${lines.join("\n")}\n</continuation>`;
 }
 

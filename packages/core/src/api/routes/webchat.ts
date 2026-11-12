@@ -3091,6 +3091,20 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   });
 
+  // The handoff a renewal started one of the chat's sessions from, for the
+  // chat's renewal line (docs/concepts/sessions.md#handoff). Null when none
+  // was written.
+  app.get("/chat/sessions/:id/renewals/:sessionId", async (c) => {
+    const chatId = c.req.param("id");
+    const lookup = await getStoredWebchatSession(c, chatId);
+    if ("response" in lookup) return lookup.response;
+    const renewed = await deps.sessionRepository.session(c.req.param("sessionId"));
+    if (!renewed || renewed.continuityKey !== webchatSessionKey(chatId)) {
+      return c.json({ error: "Session not found" }, 404);
+    }
+    return c.json({ handoff: renewed.handoff });
+  });
+
   app.get("/chat/sessions/:id/events", async (c) => {
     const sessionId = c.req.param("id");
     const lookup = await getStoredWebchatSession(c, sessionId);

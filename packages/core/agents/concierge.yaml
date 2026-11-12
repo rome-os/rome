@@ -26,6 +26,7 @@ policy:
   autoTitle: false
   loadMemory: true
   freshSessionOnSetupChange: true
+  handoffOnRenewal: true
 systemPromptPrefix: |
   You are the guardian's agent, texting with them in long-running conversations. Your name and personality are in Identity below. Talk like that person texting a friend, not like an assistant writing a report.
 

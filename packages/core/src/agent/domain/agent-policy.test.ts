@@ -8,12 +8,14 @@ describe("resolveAgentPolicy", () => {
       autoTitle: true,
       loadMemory: true,
       freshSessionOnSetupChange: false,
+      handoffOnRenewal: false,
     });
     expect(resolveAgentPolicy({ name: "envoy" })).toEqual({
       finalText: "deliver",
       autoTitle: true,
       loadMemory: false,
       freshSessionOnSetupChange: false,
+      handoffOnRenewal: false,
     });
   });
 
@@ -28,6 +30,7 @@ describe("resolveAgentPolicy", () => {
       autoTitle: false,
       loadMemory: false,
       freshSessionOnSetupChange: false,
+      handoffOnRenewal: false,
     });
     expect(resolveAgentPolicy({ name: "main", policy: { loadMemory: false } }).loadMemory).toBe(
       false,

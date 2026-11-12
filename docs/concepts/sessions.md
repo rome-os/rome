@@ -70,6 +70,21 @@ A renewal replaces a chat's session with a fresh one, on a new provider thread, 
 - While an approval holds a session, a cold open resumes it instead of renewing it. The first cold open after the hold ends renews it.
 - A renewal opens the new session exactly as a fresh open would, from the agent's setup as it is then. Its model comes from the agent's tier or model as they map now, never the retired session's [model pin](#model-pin). A model the guardian picked for the chat still applies.
 - The successor is written, with its setup, its reason and the working folder, and the retired session marked superseded, only once the fresh thread has opened. If that open fails, nothing is written, and the next cold open tries again on a fresh thread, never the retired one.
+- An agent whose policy asks for it starts the successor from a [handoff](#handoff). The Concierge's chats work this way.
+
+## Handoff
+
+A handoff is the private note a retired session writes for the session that renews it: what was in progress, what was agreed with the guardian, what is still open, and the ids that work refers to. It is written at send time, when a cold open decides to renew, and not while the chat is quiet.
+
+**Contracts:**
+
+- Only an agent whose policy asks for it gets a handoff. Every other renewal starts with the [continuation](#continuation) notice alone.
+- The retired session writes it, in one turn on its own thread with no tools, asked for the note alone. Nothing of that turn reaches the chat or the guardian's phone: it has no turn of its own in the chat, marks no message, and consumes no task event. The retired thread is not resumed after it.
+- When the retired session has not written it within 30 seconds (`SESSION_HANDOFF_TIMEOUT_SECONDS`), or cannot, a small model writes it from the chat's recent messages and open tasks. When that fails too, the renewal goes on without one.
+- While it is written, a Concierge chat's header says it is tidying up its context ([Concierge activity](../architecture/concierge-activity.md)). The message that caused the cold open waits, and the successor answers it.
+- The handoff is stored with the successor and does not change. The successor's first turns carry it inside the continuation notice, with the chat's open tasks as Rome holds them when the turn runs and the chat's latest messages up to about 8,000 tokens. They stop carrying it once a turn of the successor succeeds.
+- The chat's renewal line opens to show the handoff. A renewal that wrote none shows the line as before.
+- An approval that holds a session still defers its renewal, so no handoff is written while it holds.
 
 ## Session in use
 

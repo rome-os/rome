@@ -29,6 +29,8 @@ import { setupChanged, setupFingerprint } from "../domain/session-setup.js";
 import { ROME_TOOL_GROUPS } from "../domain/rome-tools.js";
 import { type AgentFolders, projectPath } from "../domain/agent-folders.js";
 import { catchUpPrompt } from "../domain/catch-up.js";
+import { handoffSections, type RenewalHandoffs } from "../domain/session-handoff.js";
+import { writeRenewalHandoff } from "./session-handoff.js";
 import { type PromptFacts, type PromptMessage } from "../domain/prompt-facts.js";
 import { type AgentLog } from "../domain/agent-log.js";
 import { type DeferTool } from "./ask-user-tools.js";
@@ -371,6 +373,12 @@ interface ManagerDeps {
    * the hold ends. Absent, nothing holds a session.
    */
   heldMidTurn?: (sessionId: string) => Promise<boolean>;
+  /**
+   * Writes a renewal's handoff when the retired session cannot, says the chat
+   * is tidying up while one is written, and reads what the successor's first
+   * turn shows beside it. Absent, no renewal writes a handoff.
+   */
+  handoffs?: RenewalHandoffs;
   /** Hears how sessions are served and how every turn goes, forked turns included. */
   turnUsage: TurnUsageReporting;
   /** Stamps the session id on the spans a session starts and binds it for logs. */
@@ -1078,12 +1086,36 @@ async function openSession(
       reason = undefined;
     }
     if (reason) {
+      // Written at send time, before the fresh session opens, so the message
+      // that caused the cold open is answered by a session that has read it.
+      const handoff =
+        deps.handoffs &&
+        !config.codeBacked &&
+        resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+          ? await writeRenewalHandoff(
+              {
+                retired: resumed,
+                agentName: key.agentName,
+                chatId: init.threadContext?.romeSessionId,
+                systemPrompt: active.systemPrompt(),
+                workingDir,
+                env: { ...init.toolEnv },
+              },
+              {
+                handoffs: deps.handoffs,
+                modelResolver: deps.modelResolver,
+                turnUsage: deps.turnUsage,
+                log,
+              },
+            )
+          : null;
       // Only in memory until the fresh backend opens: a failed open writes
       // nothing, and the next cold open tries again.
       const successor = resumed.replace({
         setup: setupNow ?? resumed.setup ?? undefined,
         reason,
         workingDir,
+        handoff: handoff ?? undefined,
       });
       renewing = { retired: resumed, successor, reason };
       resumed = undefined;
@@ -1609,6 +1641,8 @@ async function openSession(
     // now runs the chat, and its new thread has seen none of it.
     replacedThread: (!threadResumed && !!resumed?.modelThreadId) || continuesChat,
     renewal,
+    // Shown with the continuation notice until a turn of this session succeeds.
+    handoff: continuesChat ? (session.handoff ?? undefined) : undefined,
     previousModel: resumed?.model ?? undefined,
     openModelSession,
     modelProvider: initialResolution?.modelProvider,
@@ -1673,6 +1707,8 @@ interface ImplArgs {
   /** Set when a reset replaced the chat's earlier session with this one and
    *  no turn of it has succeeded: the first turn_start announces it. */
   renewal?: SessionRenewal;
+  /** The handoff the session started from, while no turn of it has succeeded. */
+  handoff?: string;
   /** The model the row's thread ran on. */
   previousModel?: string;
   openModelSession: (
@@ -1692,6 +1728,8 @@ interface TurnSink {
   /** The turn's prompt carries the `<continuation>` notice, which stays due
    *  until the turn returns a result. */
   carriesContinuation?: boolean;
+  /** The notice carries the session's handoff, which goes with it. */
+  carriesHandoff?: boolean;
   /** Prompt that opened the turn; carried on the turn_start event. */
   userPrompt: string;
   /** Guards the one-turn_start-per-stream invariant across error paths. */
@@ -1932,6 +1970,8 @@ class AgentSessionImpl implements AgentSession {
   private continuationPending: boolean;
   /** Announced on the next turn_start, then cleared. */
   private renewalPending?: SessionRenewal;
+  /** The renewal's handoff, carried by the continuation notice until a turn succeeds. */
+  private handoff?: string;
   /** The model the chat ran on before the current thread started. */
   private previousModel?: string;
   private selectionId?: ModelSelectionId;
@@ -1991,6 +2031,7 @@ class AgentSessionImpl implements AgentSession {
     this.threadFresh = !args.threadResumed;
     this.continuationPending = args.replacedThread;
     this.renewalPending = args.renewal;
+    this.handoff = args.handoff;
     this.previousModel = args.previousModel;
     this.openModelSession = args.openModelSession;
     this.toolCount = args.toolCount;
@@ -2330,6 +2371,7 @@ class AgentSessionImpl implements AgentSession {
               interrupted ? undefined : position,
             );
             if (sink.carriesContinuation) this.continuationPending = false;
+            if (sink.carriesHandoff) this.handoff = undefined;
           }
           // Use `outbound` (not `msg`) so provider-output validation is
           // reflected in span status and the turn_end bracket. The turn_end
@@ -2355,6 +2397,26 @@ class AgentSessionImpl implements AgentSession {
       this.emitStatus();
       this.onClosed();
     }
+  }
+
+  /**
+   * The handoff sections of the continuation notice, with the open tasks and
+   * recent messages read now. Undefined when the session carries no handoff,
+   * or the turn is in no chat. A failed read leaves out what it would add.
+   */
+  private async handoffSectionsFor(sink: TurnSink): Promise<string[] | undefined> {
+    const handoff = this.handoff;
+    const handoffs = this.deps.handoffs;
+    if (!handoff || !handoffs || !sink.romeSessionId) return undefined;
+    sink.carriesHandoff = true;
+    const context = await handoffs.context(sink.romeSessionId, sink.turnId).catch((err) => {
+      this.log.warn("session_handoff.context_failed", {
+        sessionId: this.sessionId,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      return { openTasks: null, recent: [] };
+    });
+    return handoffSections(handoff, context);
   }
 
   /**
@@ -3358,9 +3420,11 @@ class AgentSessionImpl implements AgentSession {
           this.previousModel && this.previousModel !== this.modelSession.model
             ? this.previousModel
             : undefined;
+        const handoff = await this.handoffSectionsFor(sink);
         const block = buildContinuationBlock({
           ...(previousModel ? { previousModel } : {}),
           canReadHistory: this.mayCall(FETCH_CHANNEL_HISTORY_ACTION),
+          ...(handoff ? { handoff } : {}),
         });
         userPrompt = `${block}\n\n${userPrompt}`;
       }

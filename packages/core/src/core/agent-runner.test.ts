@@ -43,7 +43,7 @@ import * as telemetry from "../telemetry.js" with { rstest: "importActual" };
 const recordMetrics = rs.hoisted(() => rs.fn());
 rs.mock("../telemetry.js", () => ({ ...telemetry, recordModelTurnMetrics: recordMetrics }));
 
-import type { ModelSessionEvent, RomeTools } from "../agent/index.js";
+import type { ModelSessionEvent, RenewalHandoffs, RomeTools } from "../agent/index.js";
 import {
   executeActionTool,
   executeSubagentTool,
@@ -3809,6 +3809,162 @@ describe("AgentRunner", () => {
         ]);
         expect(provider.calls[1]?.prompt).toContain("<continuation>");
         expect(provider.calls[2]?.prompt).not.toContain("<continuation>");
+      });
+
+      describe("with a handoff", () => {
+        const HANDOFF = "- Agreed: dinner at 7 on Friday, task t-1.";
+        let handoffAgent: { definition: AgentDefinition };
+        let original: AgentDefinition;
+        beforeEach(() => {
+          handoffAgent = agentLoader.find("test-renewing")! as { definition: AgentDefinition };
+          original = handoffAgent.definition;
+          handoffAgent.definition = {
+            ...original,
+            policy: { ...original.policy, handoffOnRenewal: true },
+          };
+        });
+        afterEach(() => {
+          handoffAgent.definition = original;
+        });
+
+        /** The handoff port, recording what it was asked. */
+        function fakeHandoffs(overrides: Partial<RenewalHandoffs> = {}) {
+          const asked = { tidying: [] as (string | undefined)[], fallback: 0, context: 0 };
+          const handoffs: RenewalHandoffs = {
+            timeoutMs: 1_000,
+            tidying: async (chatId, work) => {
+              asked.tidying.push(chatId);
+              return work();
+            },
+            fallback: async () => {
+              asked.fallback += 1;
+              return "- Fallback note.";
+            },
+            context: async () => {
+              asked.context += 1;
+              return {
+                openTasks: "- t-1 · Book dinner · active",
+                recent: [{ senderName: "Guardian", text: "Friday at 7 then", at: new Date(0) }],
+              };
+            },
+            ...overrides,
+          };
+          return { handoffs, asked };
+        }
+
+        /** One cold turn, and every event it streamed. */
+        async function coldTurn(runner: AgentRunner) {
+          await evict(runner);
+          return collectMessages(
+            runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
+          );
+        }
+
+        it("asks the retired session for a handoff, stores it, and opens the successor with it", async () => {
+          const provider = threadedProvider(4);
+          // The second call is the handoff turn: it answers with the note.
+          provider["responses"][1] = [{ type: "result", content: HANDOFF }];
+          const { handoffs, asked } = fakeHandoffs();
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          await coldTurn(runner);
+          identity.text = "**Agent Name:** YoYo";
+          const renewedEvents = await coldTurn(runner);
+          const renewed = await sessionRepository.current(key, "core:test-renewing");
+
+          // The handoff turn resumed the retired thread with no tools.
+          expect(provider.sessions[1]?.thread).toEqual({
+            kind: "resume",
+            modelThreadId: "thread-1",
+          });
+          expect(provider.sessions[1]?.tools.listTools("actions")).toEqual([]);
+          expect(provider.calls[1]?.prompt).toContain("<handoff_request>");
+          expect(renewed?.handoff).toBe(HANDOFF);
+          expect(asked.tidying).toHaveLength(1);
+          expect(asked.fallback).toBe(0);
+          // The successor's first turn carries it, with the open tasks and recent messages.
+          const firstPrompt = provider.calls[2]?.prompt ?? "";
+          expect(firstPrompt).toContain(`<handoff>\n${HANDOFF}\n</handoff>`);
+          expect(firstPrompt).toContain("<open_tasks>\n- t-1 · Book dinner · active");
+          expect(firstPrompt).toContain("Guardian: Friday at 7 then");
+          // Nothing of the handoff turn reached the chat: one turn, answered by the successor.
+          expect(renewedEvents.filter((event) => event.type === "turn_start")).toHaveLength(1);
+          expect(
+            renewedEvents.some(
+              (event) => event.type === "result" && event.content.includes("dinner"),
+            ),
+          ).toBe(false);
+          expect(renewedEvents.find((event) => event.type === "turn_start")?.sessionId).toBe(
+            renewed?.id,
+          );
+
+          // A later turn of the successor carries it no more.
+          await coldTurn(runner);
+          expect(provider.calls[3]?.prompt).not.toContain("<handoff>");
+        });
+
+        it("writes it with the fallback when the retired session does not answer in time", async () => {
+          const provider = threadedProvider(3);
+          const open = provider.openSession.bind(provider);
+          provider.openSession = async (params) => {
+            if (params.thread.kind !== "resume") return open(params);
+            provider.sessions.push(params);
+            // A thread that never answers.
+            return {
+              providerId: "mock",
+              model: params.config.model,
+              events: (async function* () {
+                await new Promise(() => {});
+              })(),
+              sendUserInput: async () => {},
+              interrupt: async () => {},
+              close: async () => {},
+            } as ModelSession;
+          };
+          const { handoffs, asked } = fakeHandoffs({ timeoutMs: 20 });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          await coldTurn(runner);
+          identity.text = "**Agent Name:** YoYo";
+          await coldTurn(runner);
+
+          expect(asked.fallback).toBe(1);
+          expect((await sessionRepository.current(key, "core:test-renewing"))?.handoff).toBe(
+            "- Fallback note.",
+          );
+          expect(provider.calls.at(-1)?.prompt).toContain("- Fallback note.");
+        });
+
+        it("renews without a handoff when neither the session nor the fallback writes one", async () => {
+          const provider = threadedProvider(3);
+          provider["responses"][1] = [{ type: "error", error: "thread gone" }];
+          const { handoffs, asked } = fakeHandoffs({ fallback: async () => null });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await coldTurn(runner);
+          identity.text = "**Agent Name:** YoYo";
+          await coldTurn(runner);
+
+          const renewed = await sessionRepository.current(key, "core:test-renewing");
+          expect(renewed?.id).not.toBe(
+            first.find((event) => event.type === "turn_start")?.sessionId,
+          );
+          expect(renewed?.handoff).toBeNull();
+          expect(asked.context).toBe(0);
+          expect(provider.calls.at(-1)?.prompt).toContain("<continuation>");
+          expect(provider.calls.at(-1)?.prompt).not.toContain("<handoff>");
+        });
+
+        it("writes none for an agent whose policy does not ask for one", async () => {
+          handoffAgent.definition = original;
+          const provider = threadedProvider(2);
+          const { handoffs, asked } = fakeHandoffs();
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          await coldTurn(runner);
+          identity.text = "**Agent Name:** YoYo";
+          await coldTurn(runner);
+
+          expect(provider.sessions.map((params) => params.thread.kind)).toEqual(["new", "new"]);
+          expect(asked).toEqual({ tidying: [], fallback: 0, context: 0 });
+          expect(provider.calls[1]?.prompt).not.toContain("<handoff>");
+        });
       });
 
       it("starts a fresh session after an instruction change", async () => {

@@ -23,6 +23,13 @@ export interface AgentPolicy {
    * never replaced. docs/concepts/sessions.md#setup
    */
   freshSessionOnSetupChange: boolean;
+  /**
+   * Whether a renewal starts the fresh session from a handoff: a note the
+   * retired session writes, at send time, of what was in progress, agreed and
+   * still open, with the chat's open tasks and its recent messages beside it.
+   * docs/concepts/sessions.md#handoff
+   */
+  handoffOnRenewal: boolean;
 }
 
 export function resolveAgentPolicy(agent: {
@@ -34,5 +41,6 @@ export function resolveAgentPolicy(agent: {
     autoTitle: agent.policy?.autoTitle ?? true,
     loadMemory: agent.policy?.loadMemory ?? agent.name === "main",
     freshSessionOnSetupChange: agent.policy?.freshSessionOnSetupChange ?? false,
+    handoffOnRenewal: agent.policy?.handoffOnRenewal ?? false,
   };
 }

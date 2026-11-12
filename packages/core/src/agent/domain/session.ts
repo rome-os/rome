@@ -35,6 +35,8 @@ export interface ReplaceSessionOptions {
   reason?: string;
   /** The fingerprint of the setup the successor opens with. */
   setup?: string;
+  /** The handoff the retired session left for the successor ({@link Session.handoff}). */
+  handoff?: string;
 }
 
 /** What one turn ran on. */
@@ -74,6 +76,8 @@ export interface SessionState {
   supersededBy: SessionId | null;
   /** Why the reset replaced it, or null. */
   supersededFor: string | null;
+  /** The handoff this session started from, or null. */
+  handoff: string | null;
   createdAt: Date;
   lastActiveAt: Date;
 }
@@ -115,6 +119,7 @@ export class Session {
       setup: options.setup ?? null,
       supersededBy: null,
       supersededFor: null,
+      handoff: null,
       createdAt: now,
       lastActiveAt: now,
     });
@@ -176,6 +181,14 @@ export class Session {
   /** Why a reset replaced this session, or null when none did. */
   get supersededFor(): string | null {
     return this.state.supersededFor;
+  }
+  /**
+   * The note the session it replaced wrote for it in a renewal: what was in
+   * progress, agreed and still open. Fixed for the session's life. Null when
+   * no renewal handoff was written. docs/concepts/sessions.md#handoff
+   */
+  get handoff(): string | null {
+    return this.state.handoff;
   }
   get createdAt(): Date {
     return this.state.createdAt;
@@ -252,6 +265,7 @@ export class Session {
       workingDir: options.workingDir,
       setup: options.setup,
     });
+    successor.state.handoff = options.handoff ?? null;
     this.state.supersededBy = successor.id;
     this.state.supersededFor = options.reason ?? null;
     return successor;

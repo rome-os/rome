@@ -133,6 +133,7 @@ export const AgentConfigSchema = z
         autoTitle: z.boolean().optional(),
         loadMemory: z.boolean().optional(),
         freshSessionOnSetupChange: z.boolean().optional(),
+        handoffOnRenewal: z.boolean().optional(),
       })
       .strict()
       .optional(),
