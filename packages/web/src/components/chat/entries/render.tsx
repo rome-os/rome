@@ -144,7 +144,13 @@ export function renderSingleEntry(
       // narration reads as separate utterances under one speaker.
       if (transcript) {
         return (
-          <ChatBubble key={key} tone="received">
+          <ChatBubble
+            key={key}
+            tone="received"
+            data-chat-assistant-text
+            // 沿用消息行的宽布局断点；流式与已保存正文共享规则，其他宿主保留基础上限。
+            className="@min-[40rem]/message:max-w-[min(100%,var(--chat-assistant-text-max-width,var(--container-2xl)))]"
+          >
             <TextBlock
               content={block.content}
               compact={compact}
