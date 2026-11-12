@@ -15,10 +15,9 @@ import Testing
     /// A surface for `part` whose reads return `body`; `posts` records each press.
     private func surface(_ part: WidgetUIPart, body: Rome.JSONValue, posts: Box<[String]> = Box([])) async -> WidgetSurface {
         let surface = WidgetSurface()
-        surface.show(part) { method, path, _ in
-            if method == "POST" { posts.value.append(path) }
-            return ConnectReply(ok: true, body: body)
-        }
+        surface.show(part, call: { _, _, _ in ConnectReply(ok: true, body: body) }, press: { name, _ in
+            posts.value.append(name)
+        })
         await surface.load()
         return surface
     }
@@ -78,7 +77,7 @@ import Testing
         #expect(items.map { $0.string(for: "text") } == ["spicy", "seafood"])
     }
 
-    @Test func aPressPostsToTheAppAndReadsAgain() async throws {
+    @Test func aPressGoesToCore() async throws {
         let part = try #require(card(#"""
         [{"id":"root","component":"Button","child":"l","action":{"event":{"name":"water","context":{"cups":1}}}},
          {"id":"l","component":"Text","text":"Water"}]
@@ -118,7 +117,9 @@ import Testing
     /// The question card on the engine; `answers` records what it sends.
     private func waitingSurface(_ part: WidgetUIPart, answered: JSONValue? = nil, answers: Box<[JSONValue]> = Box([])) async -> WidgetSurface {
         let surface = WidgetSurface()
-        surface.waiting = .init(answered: answered, sending: false, answer: { answers.value.append($0) }, dismiss: { answers.value.append(.string("dismissed")) })
+        surface.waiting = .init(answered: answered, sending: false, answer: { name, context in
+            answers.value.append(name == "rome:dismiss" ? .string("dismissed") : context)
+        })
         surface.locked = answered != nil
         surface.show(part) { _, _, _ in throw APIError.notFound }
         surface.showAnswered(answered)

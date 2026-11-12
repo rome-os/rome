@@ -109,13 +109,13 @@ final class TaskWaitStore {
 
     /// Sends the answer to the task chat. One the server already has
     /// refreshes the card; a network failure lets the guardian try again.
-    func answer(_ part: MessagePart.QuestionPart, key: String, output: JSONValue) async {
+    func answer(_ part: MessagePart.QuestionPart, key: String, name: String, context: JSONValue) async {
         guard answering == nil, sent[key] == nil else { return }
         answering = key
-        sent[key] = output
+        sent[key] = WidgetPaths.answerOutput(name, context)
         error = nil
         do {
-            try await backend.answer(sessionId: chatId, toolUseId: part.toolUseId, output: output)
+            try await backend.answerWidget(sessionId: chatId, toolUseId: part.toolUseId, name: name, context: context)
         } catch APIError.server(let status, _) where status == 400 {
             sent[key] = nil
             error = String(localized: "This card was already answered. The task has been refreshed.")

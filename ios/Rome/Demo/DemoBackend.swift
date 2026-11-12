@@ -285,8 +285,15 @@ final class DemoBackend: RomeBackend {
         return CreatedTurn(turnId: turnId, inputId: inputId, disposition: "started")
     }
 
-    func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
+    /// Core's routing of a widget's answer: the meal card's water button calls
+    /// its app, and a question card's Send or Dismiss answers the agent.
+    func answerWidget(sessionId: String, toolUseId: String, name: String, context: JSONValue) async throws {
+        guard WidgetPaths.startsATurn(name) else {
+            _ = try await appCall(appId: "meal-planner", method: "POST", path: name, body: context)
+            return
+        }
         try await pause(0.4)
+        let output = WidgetPaths.answerOutput(name, context)
         // Core keeps what a described card sent as `card`, beside the answers.
         var stored = output
         if case .object(var object) = output, let sent = object["answers"], sent.array?.first?["questionId"] == nil {

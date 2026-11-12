@@ -202,7 +202,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
     @Test func theAnswerGoesToTheQuestionsSession() async {
         let backend = FakeBackend()
         let store = TranscriptStore(sessionId: "topic-1", kind: .concierge, backend: backend)
-        store.answer(toolUseId: "q1", output: .object(["answers": .array([])]), sessionId: "topic-1")
+        store.answer(toolUseId: "q1", name: "rome:answer", context: .object(["answers": .array([])]), sessionId: "topic-1")
         for _ in 0..<20 where backend.answeredSessions.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
         #expect(backend.answeredSessions == ["topic-1"])
     }

@@ -52,7 +52,10 @@ protocol RomeBackend: AnyObject, Sendable {
     func apiFile(path: String, query: String?) async throws -> Data
     /// The instance's origin, when there is a real one.
     var origin: URL? { get }
-    func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws
+    /// A press on a widget's button, sent to core, which decides what it means:
+    /// `rome:answer` and `rome:dismiss` answer the interaction the agent waits
+    /// on, as a turn in the chat; any other event calls the widget's app.
+    func answerWidget(sessionId: String, toolUseId: String, name: String, context: JSONValue) async throws
     func markRead(sessionId: String) async
     func sessions() async throws -> [ChatSession]
     func activeTurns(sessionId: String) async throws -> [ActiveTurn]
@@ -87,7 +90,7 @@ protocol RomeBackend: AnyObject, Sendable {
     /// `/api/…` path on the instance. Any status answers; only a dropped
     /// connection or a lost session throws.
     func connectCall(method: String, apiPath: String, body: JSONValue?) async throws -> ConnectReply
-    /// A widget's call on its own app: `path` is relative to
+    /// A widget's read of its own app: `path` is relative to
     /// `/api/apps/<appId>/`. Any status answers; only a dropped connection or
     /// a lost session throws.
     func appCall(appId: String, method: String, path: String, body: JSONValue?) async throws -> ConnectReply
@@ -188,13 +191,11 @@ final class LiveBackend: RomeBackend {
         return try await client.getData(route, query: query, limit: APIClient.imageLimit)
     }
 
-    func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
-        let part: JSONValue = .object([
-            "type": .string("interaction_result"),
-            "toolUseId": .string(toolUseId),
-            "output": output,
-        ])
-        try await client.post("/chat/sessions/\(escape(sessionId))/turns", json: .object(["parts": .array([part])]))
+    func answerWidget(sessionId: String, toolUseId: String, name: String, context: JSONValue) async throws {
+        _ = try await client.post(
+            "/chat/sessions/\(escape(sessionId))/widgets/\(escape(toolUseId))/answers",
+            json: .object(["name": .string(name), "context": context])
+        )
     }
 
     func markRead(sessionId: String) async {

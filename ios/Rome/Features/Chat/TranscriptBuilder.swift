@@ -41,7 +41,7 @@ enum TranscriptRow: Identifiable, Hashable {
     case webOnly(id: String, kind: MessagePart.WebOnlyKind, done: Bool = false)
     case routineDraft(id: String, part: MessagePart.RoutineDraftPart)
     case connect(id: String, part: MessagePart.ConnectCardPart, sessionId: String)
-    case widgetUI(id: String, part: WidgetUIPart)
+    case widgetUI(id: String, part: WidgetUIPart, sessionId: String)
     case error(id: String, text: String)
     case tools(id: String, traceMessageId: String, count: Int)
     /// Under an Agent message that ends a stretch of a chat thread, where the
@@ -54,7 +54,7 @@ enum TranscriptRow: Identifiable, Hashable {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
              .taskCard(let id, _, _, _), .approval(let id, _, _), .question(let id, _, _, _),
-             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _), .error(let id, _), .tools(let id, _, _),
+             .webOnly(let id, _, _), .routineDraft(let id, _), .connect(let id, _, _), .widgetUI(let id, _, _), .error(let id, _), .tools(let id, _, _),
              .threadReplies(let id, _, _, _):
             return id
         case .typing:
@@ -164,7 +164,7 @@ enum TranscriptBuilder {
                 case .connectCard(let card):
                     rows.append(.connect(id: id, part: card, sessionId: message.sessionId))
                 case .widgetUI(let card):
-                    rows.append(.widgetUI(id: id, part: card))
+                    rows.append(.widgetUI(id: id, part: card, sessionId: message.sessionId))
                 case .error(let text):
                     rows.append(.error(id: id, text: text.isEmpty ? String(localized: "This turn did not finish") : text))
                 case .interactionResult, .other:

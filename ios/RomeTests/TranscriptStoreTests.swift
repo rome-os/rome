@@ -180,7 +180,7 @@ final class FakeBackend: RomeBackend {
 
     func pendingApprovals() async throws -> [PendingApproval] { pending }
 
-    func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
+    func answerWidget(sessionId: String, toolUseId: String, name: String, context: JSONValue) async throws {
         answeredSessions.append(sessionId)
         if let answerError { throw answerError }
     }
