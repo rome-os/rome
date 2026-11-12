@@ -287,13 +287,22 @@ export class ConciergeTasksRepository {
 
   /**
    * Names the row's chat thread by message `root`, unless it already has
-   * one: a root is written once. Answers the row's root after.
+   * one or another row holds that root: a root is written once, and a thread
+   * is one task's. One statement claims it, so of two tasks started at once
+   * for one message, one gets it and the other stays without. Answers the
+   * row's root after.
    */
   async setThreadRoot(id: string, root: string): Promise<string | null> {
     await this.db
       .update(conciergeTasks)
       .set({ threadRoot: root })
-      .where(and(eq(conciergeTasks.id, id), isNull(conciergeTasks.threadRoot)));
+      .where(
+        and(
+          eq(conciergeTasks.id, id),
+          isNull(conciergeTasks.threadRoot),
+          sql`not exists (select 1 from ${conciergeTasks} as other where other.thread_root = ${root} and other.id <> ${id})`,
+        ),
+      );
     return this.threadRoot(id);
   }
 
@@ -783,6 +792,30 @@ export class ConciergeTasksRepository {
         );
       changed.push({ chatId: row.chatId, messageKey: row.messageKey });
     }
+    for (const target of changed) await this.announceReaction(target);
+    return changed.length;
+  }
+
+  /**
+   * Turn `turnId` of Concierge chat `chatId` runs again, as when a usage
+   * limit cleared: its messages a failed end marked work again, and the
+   * turn that runs it settles them when it ends.
+   */
+  async reopenTurnReactions(chatId: string, turnId: string, now = new Date()): Promise<number> {
+    const changed = await this.db
+      .update(conciergeTurnReactions)
+      .set({ state: "working", updatedAt: now })
+      .where(
+        and(
+          eq(conciergeTurnReactions.chatId, chatId),
+          eq(conciergeTurnReactions.turnId, turnId),
+          eq(conciergeTurnReactions.state, "failed"),
+        ),
+      )
+      .returning({
+        chatId: conciergeTurnReactions.chatId,
+        messageKey: conciergeTurnReactions.messageKey,
+      });
     for (const target of changed) await this.announceReaction(target);
     return changed.length;
   }

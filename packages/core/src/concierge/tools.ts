@@ -666,20 +666,20 @@ export async function buildConciergeTools(
     // A turn that also carries another task's report has two subjects:
     // which one the guardian's message goes with is a guess.
     if (answers === undefined && service.carriedReport(chatId)) return;
-    const unthreaded: string[] = [];
-    for (const id of answers ? [answers] : prompts) {
-      if (!(await inAnyThread(chatId, id))) unthreaded.push(id);
-    }
-    const relayed = unthreaded.length === 1 ? unthreaded[0] : undefined;
+    // Without `answers`, only the turn's one message is certain.
+    const named = answers ?? (prompts.length === 1 ? prompts[0] : undefined);
+    const relayed = named && !(await inAnyThread(chatId, named)) ? named : undefined;
     const task = relayed ? await tasks.repo.findBySession(taskChatId) : null;
     if (!relayed || !task) return;
     const found = await tasks.repo.getWithChat(task.id);
     if (found?.conciergeChat.id !== chatId) return;
     const root = (await rootOf(task.id)) ?? (await tasks.repo.setThreadRoot(task.id, relayed));
+    // Another task claimed the message as its root first.
+    if (!root) return;
     await webchatRepo.placeInChatThread(
       chatId,
       relayed,
-      !root || root === relayed ? { starts: true, settle: true } : { in: root, settle: true },
+      root === relayed ? { starts: true, settle: true } : { in: root, settle: true },
     );
   };
 
@@ -746,7 +746,6 @@ export async function buildConciergeTools(
   const forward = async (text: string, from: ForwardedFrom, intro?: string, answers?: string) => {
     const { chatId, turnId } = currentTurn();
     const task = await tasks.repo.findBySession(from.chatId);
-    if (task) service.noteRelayed(turnId, chatId, task.id);
     const id = await addMessage(
       [
         ...(intro ? [{ type: "text" as const, content: intro }] : []),
@@ -754,6 +753,8 @@ export async function buildConciergeTools(
       ],
       await placementFor(answers, { taskId: task?.id ?? null }),
     );
+    // Only a result the guardian was shown counts as said.
+    if (task) service.noteRelayed(turnId, chatId, task.id);
     noteAnswers(id, answers);
     // Forwarded text is the task's, not the Concierge's, and so are a task's
     // title and chat name, which can come from its output: none becomes the
@@ -1261,9 +1262,9 @@ export async function buildConciergeTools(
           const answer = latest?.body.text ?? null;
           if (!answer) throw new Error("The task chat has no answer yet");
           currentTurn();
-          await requireOnePrompt(optionalString(args, "answers"), "this answers");
           // A forward shows the task's result to the guardian; it passes their
-          // message on to no task. A message already in a thread stays there.
+          // message on to no task, so it needs no message named. A message
+          // already in a thread stays there.
           await relayToTaskThread(chatId, optionalString(args, "answers"));
           const messageId = await forward(
             answer,

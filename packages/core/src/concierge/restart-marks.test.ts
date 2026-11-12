@@ -116,4 +116,15 @@ describe("status reactions after a restart", () => {
     expect(await reaction("concierge", "done-ask")).toBe("working");
     expect(await tasks.tasksHoldingReactions()).toEqual([task!.id]);
   });
+
+  it("never stops boot when the marks cannot be settled", async () => {
+    await running("concierge");
+    const ended = await chats.endInterruptedTurns(DAY);
+    const broken = {
+      failInterruptedReactions: async () => {
+        throw new Error("database is locked");
+      },
+    };
+    await expect(settleMarksAfterRestart(broken, chats, ended)).resolves.toBe(0);
+  });
 });

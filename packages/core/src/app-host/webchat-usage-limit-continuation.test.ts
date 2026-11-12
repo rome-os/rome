@@ -10,6 +10,7 @@ import { createBackendTurnRunner, type MainBackendTurnRunner } from "./backend-t
 import type { Channel } from "../chats/connected-accounts/connected-account.js";
 import { guardianAuth, romeSessions, sessions } from "../db/schema.js";
 import { createMockAgentRunner, createTestDb, type TestDb } from "../test/helpers.js";
+import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { continuationActor } from "../webchat/continuation-actor.js";
 import { sendForCaller } from "./caller-notify.js";
@@ -247,6 +248,28 @@ describe("usage-limit continuation", () => {
         { body: "Done" },
       );
       expect(pushes).toEqual([{ body: "Done" }]);
+    });
+
+    it("marks the stopped turn's messages working again as its continuation runs", async () => {
+      // The stop's end marked the guardian's message failed.
+      const tasks = new ConciergeTasksRepository(db.db);
+      await stopped();
+      await tasks.markTurnWorking("chat-turn", { chatId: "chat", messageKey: "chat-input" });
+      await tasks.settleTurnReactions("chat", "failed", []);
+      claude.set(available);
+      const { agent, runner } = backend();
+      stop = startUsageLimitContinuation({
+        accounts,
+        repo,
+        runner,
+        onContinue: (turn) => tasks.reopenTurnReactions(turn.sessionId, turn.turnId),
+      });
+      await clearAndSweep();
+      expect(agent.calls).toHaveLength(1);
+      expect((await tasks.reactionsOf("chat", ["chat-input"])).get("chat-input")).toBe("working");
+      // The continuation's end settles it, as any turn's end does.
+      await tasks.settleTurnReactions("chat", "done", []);
+      expect(await tasks.reactionsOf("chat", ["chat-input"])).toEqual(new Map());
     });
 
     it("continues after the provider clears, in the same chat, runtime and agent", async () => {

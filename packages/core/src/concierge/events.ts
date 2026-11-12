@@ -422,7 +422,11 @@ export function startConciergeEvents(
     // that reports it ends, since only that reply tells the guardian. A task
     // that asks a question is still working.
     const handedOn = (event as EndedAgentTurn).handedOn === true;
-    if (service.dashboard.chats.activeTurns(chatId).length === 0 && !handedOn) {
+    // The ended turn's stream may still be draining, so it is left out.
+    const running = service.dashboard.chats
+      .activeTurns(chatId)
+      .filter((id) => id !== event.turn.turnId);
+    if (running.length === 0 && !handedOn) {
       const end = reactionEndOf(event.status);
       await (end === "stopped"
         ? tasks.repo.settleReactions(taskId, "stopped")
