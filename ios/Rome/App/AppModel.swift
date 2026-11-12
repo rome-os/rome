@@ -449,7 +449,7 @@ final class Workspace {
         guard backend.account.isCurrent else { return }
         if appsCache != apps { appsCache = apps }
         guard let instanceID else { return }
-        await WidgetShelf.shelve(apps, instanceId: instanceID, backend: backend)
+        WidgetShelf.shared.shelve(apps, instanceId: instanceID, backend: backend, account: backend.account, by: self)
     }
 
     func stop() {
@@ -518,7 +518,7 @@ final class AppModel {
             if phase.isSignedIn != oldValue.isSignedIn { node.setSignedIn(phase.isSignedIn) }
             if !phase.isSignedIn { stackGame = nil }
             // Signed out, however it came about: the widget offers to make an app.
-            if phase == .signedOut, oldValue != .signedOut { WidgetShelf.clear() }
+            if phase == .signedOut, oldValue != .signedOut { WidgetShelf.shared.clear() }
         }
     }
     private(set) var workspace: Workspace? {
@@ -529,6 +529,10 @@ final class AppModel {
             guard workspace !== oldValue else { return }
             images.reset()
             workspace?.instanceID = currentInstanceID
+            // Only this workspace writes the widget's copy from now on.
+            WidgetShelf.shared.hand(to: workspace, instanceId: currentInstanceID)
+            // A widget link for the instance left behind is never followed.
+            if widgetRequest?.instanceId != currentInstanceID { widgetRequest = nil }
         }
     }
     private(set) var instances: [CloudInstance] = []
@@ -553,8 +557,11 @@ final class AppModel {
     private var pendingPush: PushTarget?
     /// The instance whose stopped page shows, when a push led there.
     private var stoppedInstanceID: String?
-    /// Goes up when a widget link asks the shell to open an app, Apps or Chat.
-    private(set) var widgetRequest = WidgetRequest(serial: 0, link: nil)
+    /// A widget link for the shell to follow on the open instance: an app,
+    /// Apps or Chat. It waits here until the shell takes it, so a shell that
+    /// mounts after the link was routed (a sign-in, a switch) still follows
+    /// it; it belongs to one instance and is dropped anywhere else.
+    private(set) var widgetRequest: WidgetRequest?
     /// A widget link waiting for an instance to open.
     private var pendingLink: WidgetLink?
 
@@ -696,6 +703,11 @@ final class AppModel {
         if pendingPush != nil {
             await routePendingPush()
             // The push was for another instance, now open in its place.
+            guard self.workspace === workspace else { return }
+        }
+        if pendingLink != nil {
+            await routePendingLink()
+            // The link was for another instance, now open in its place.
             guard self.workspace === workspace else { return }
         }
         await workspace.start()
@@ -1044,7 +1056,8 @@ final class AppModel {
         leaveAccount()
         pendingPush = nil
         pendingLink = nil
-        WidgetShelf.clear()
+        widgetRequest = nil
+        WidgetShelf.shared.clear()
         await push.signOut { await cloud.signOut() }
         forgetAccountData()
         browserSignIn = nil
@@ -1369,19 +1382,38 @@ final class AppModel {
             if instanceId != currentInstanceID, !instances.contains(where: { $0.id == instanceId }) {
                 await refreshInstances()
             }
-            if case .switchTo(let instance) = PushRoute.decide(instanceId: instanceId, currentInstanceID: currentInstanceID, instances: instances) {
+            switch PushRoute.decide(instanceId: instanceId, currentInstanceID: currentInstanceID, instances: instances) {
+            case .switchTo(let instance):
+                // As a push does: the link waits again for that instance.
                 pendingLink = link
                 await switchInstance(to: instance)
                 return
-            }
-            // An instance this account cannot open now: its apps are not
-            // here, so the open instance's Apps page shows.
-            if instanceId != currentInstanceID {
-                widgetRequest = WidgetRequest(serial: widgetRequest.serial + 1, link: .apps)
+            case .showStopped(let instance):
+                showStopped(instance)
                 return
+            case .openConcierge:
+                // An instance this account no longer lists: its apps are not
+                // here, so the open instance's Apps page shows.
+                if instanceId != currentInstanceID {
+                    request(.apps)
+                    return
+                }
             }
         }
-        widgetRequest = WidgetRequest(serial: widgetRequest.serial + 1, link: link)
+        request(link)
+    }
+
+    private func request(_ link: WidgetLink) {
+        widgetRequest = WidgetRequest(serial: (widgetRequest?.serial ?? 0) + 1, instanceId: currentInstanceID, link: link)
+    }
+
+    /// The shell of `instanceId` takes the waiting widget link, once. One
+    /// made for another instance stays for that instance's shell; a new
+    /// workspace drops it (`workspace`).
+    func takeWidgetLink(for instanceId: String?) -> WidgetLink? {
+        guard let request = widgetRequest, request.instanceId == instanceId else { return nil }
+        widgetRequest = nil
+        return request.link
     }
 
     /// The topic chat a push names, when this account has it; otherwise the

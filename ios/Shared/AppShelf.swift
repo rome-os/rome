@@ -13,6 +13,9 @@ struct ShelfApp: Codable, Equatable, Hashable, Sendable, Identifiable {
     let opens: Bool
     /// The app has an icon file beside the list.
     let hasIcon: Bool
+    /// The icon the file was drawn from (its URL and the app's version): an
+    /// unchanged one is not fetched again. Nil in lists written before it.
+    var iconKey: String? = nil
 }
 
 /// The open instance's apps, in the Apps page's order.
@@ -64,9 +67,16 @@ struct AppShelfStore: Sendable {
         return true
     }
 
-    /// Signed out: the widget shows its empty state.
+    /// Signed out: the widget shows its empty state, and the apps opened
+    /// last are forgotten with the rest.
     func clear() {
         try? FileManager.default.removeItem(at: root)
+        defaults.removePersistentDomain(forName: suite)
+    }
+
+    /// The app's icon file is there.
+    func hasIconFile(_ appId: String) -> Bool {
+        FileManager.default.fileExists(atPath: iconURL(appId).path)
     }
 
     func iconURL(_ appId: String) -> URL {

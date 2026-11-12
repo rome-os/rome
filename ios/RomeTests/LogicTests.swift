@@ -621,10 +621,12 @@ final class StubBackend: RomeBackend {
     }
 }
 
-/// The widget's icons, written by the app: SVGs drawn, a new icon replacing
-/// the old, and one missing filled in on the next pass.
+/// The widget's copy, written by the app: SVGs drawn, a changed icon
+/// replaced and an unchanged one left alone, and nothing written by a
+/// workspace that has been left or an account that has ended.
 @MainActor
-@Suite struct WidgetShelfIconTests {
+@Suite struct WidgetShelfTests {
+    private final class Owner {}
     private let svg = Data(##"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="10" height="10" fill="#d97757"/></svg>"##.utf8)
     private func png(_ color: UIColor) -> Data {
         UIGraphicsImageRenderer(size: CGSize(width: 8, height: 8)).image { context in
@@ -632,8 +634,8 @@ final class StubBackend: RomeBackend {
             context.fill(CGRect(x: 0, y: 0, width: 8, height: 8))
         }.pngData()!
     }
-    private func store() -> AppShelfStore {
-        AppShelfStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-shelf-\(UUID().uuidString)", directoryHint: .isDirectory), suite: "rome-shelf-test")
+    private func shelf() -> WidgetShelf {
+        WidgetShelf(store: AppShelfStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-shelf-\(UUID().uuidString)", directoryHint: .isDirectory), suite: "rome-shelf-\(UUID().uuidString)"))
     }
     private func app(_ id: String, version: String = "1") -> InstalledApp {
         InstalledApp(id: id, iconUrl: "/api/apps/\(id)/icon", version: version)
@@ -643,30 +645,93 @@ final class StubBackend: RomeBackend {
     @Test func anSVGIconIsDrawnForTheWidget() async {
         let backend = FakeBackend()
         backend.apiFiles = ["/apps/a/icon": svg]
-        let store = store()
-        defer { store.clear() }
-        await WidgetShelf.shelve([app("a")], instanceId: "i", backend: backend, store: store)
-        let written = try? Data(contentsOf: store.iconURL("a"))
+        let shelf = shelf(), owner = Owner()
+        defer { shelf.clear() }
+        shelf.hand(to: owner, instanceId: "i")
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        let written = try? Data(contentsOf: shelf.store!.iconURL("a"))
         #expect(written.flatMap(UIImage.init(data:)) != nil)
     }
 
-    @Test func aNewIconReplacesTheOldAndAMissingOneIsFilled() async {
+    @Test func onlyANewOrMissingIconIsFetched() async {
         let backend = FakeBackend()
         backend.apiFiles = ["/apps/a/icon": png(.red)]
-        let store = store()
-        defer { store.clear() }
-        await WidgetShelf.shelve([app("a")], instanceId: "i", backend: backend, store: store)
+        let shelf = shelf(), owner = Owner()
+        let store = shelf.store!
+        defer { shelf.clear() }
+        shelf.hand(to: owner, instanceId: "i")
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
         let first = try? Data(contentsOf: store.iconURL("a"))
-        #expect(first != nil)
-        // A new version brings a new icon: it is written over the old one.
+        #expect(first != nil && backend.apiFileRequests.count == 1)
+        // The same app again: its icon is kept, not fetched.
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        #expect(backend.apiFileRequests.count == 1)
+        // A new version brings a new icon, written over the old one.
         backend.apiFiles["/apps/a/icon"] = png(.blue)
-        await WidgetShelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, store: store)
+        shelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
         let second = try? Data(contentsOf: store.iconURL("a"))
-        #expect(second != nil && second != first)
-        // The same list again, with the icon gone from the group: it comes back.
+        #expect(backend.apiFileRequests.count == 2 && second != nil && second != first)
+        // Gone from the group, the same list fills it in again.
         try? FileManager.default.removeItem(at: store.iconURL("a"))
-        await WidgetShelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, store: store)
-        #expect(FileManager.default.fileExists(atPath: store.iconURL("a").path))
+        shelf.shelve([app("a", version: "2")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        #expect(store.hasIconFile("a"))
+    }
+
+    /// A list from the workspace left behind, after a switch or a sign-out,
+    /// writes nothing.
+    @Test func aLateListIsDropped() {
+        let backend = FakeBackend()
+        let shelf = shelf(), old = Owner(), new = Owner()
+        defer { shelf.clear() }
+        shelf.hand(to: old, instanceId: "i1")
+        shelf.hand(to: new, instanceId: "i2")
+        shelf.shelve([app("a")], instanceId: "i2", backend: backend, account: .unchecked, by: new)
+        shelf.shelve([app("old")], instanceId: "i1", backend: backend, account: .unchecked, by: old)
+        #expect(shelf.store!.read()?.instanceId == "i2")
+        #expect(shelf.store!.read()?.apps.map(\.id) == ["a"])
+
+        shelf.clear()
+        shelf.shelve([app("a")], instanceId: "i2", backend: backend, account: .unchecked, by: new)
+        #expect(shelf.store!.read() == nil)
+
+        // An account that has ended writes nothing either.
+        let accounts = AccountGeneration()
+        let stamp = accounts.stamp()
+        accounts.end()
+        shelf.hand(to: new, instanceId: "i2")
+        shelf.shelve([app("a")], instanceId: "i2", backend: backend, account: stamp, by: new)
+        #expect(shelf.store!.read() == nil)
+    }
+
+    /// An icon that arrives after a switch or a sign-out is not written.
+    @Test(arguments: ["switch", "signOut"])
+    func aLateIconIsDropped(_ leave: String) async {
+        let backend = FakeBackend()
+        backend.apiFiles = ["/apps/a/icon": png(.red)]
+        let shelf = shelf(), owner = Owner()
+        defer { shelf.clear() }
+        shelf.hand(to: owner, instanceId: "i")
+        backend.duringApiFile = {
+            if leave == "switch" { shelf.hand(to: Owner(), instanceId: "other") } else { shelf.clear() }
+        }
+        shelf.shelve([app("a")], instanceId: "i", backend: backend, account: .unchecked, by: owner)
+        await shelf.iconsWritten()
+        #expect(!shelf.store!.hasIconFile("a"))
+    }
+
+    /// Sign-out forgets the apps opened last with the rest.
+    @Test func clearingForgetsTheAppsOpenedLast() {
+        let shelf = shelf(), owner = Owner()
+        shelf.hand(to: owner, instanceId: "i")
+        shelf.recordOpen(appId: "a", instanceId: "i")
+        #expect(shelf.store!.recent(instanceId: "i") == ["a"])
+        shelf.clear()
+        #expect(shelf.store!.recent(instanceId: "i").isEmpty)
     }
 }
 

@@ -304,6 +304,22 @@ extension LastInstanceDefaults {
             }
         }
 
+        /// A widget tap that launched the app is followed once the kept
+        /// instance is open, by the shell of that instance only. Fails before
+        /// the fix: the cached launch never routed it.
+        @Test func aWidgetTapThatLaunchedTheAppIsFollowed() async {
+            await clean {
+                LaunchProtocol.offline = true
+                let (app, _) = model(session: fresh)
+                await app.openFromWidget(.newApp)
+                await app.launch(skipSnapshot: true)
+                #expect(await eventually { app.widgetRequest != nil })
+                #expect(app.takeWidgetLink(for: "other") == nil)
+                #expect(app.takeWidgetLink(for: "b") == .newApp)
+                #expect(app.widgetRequest == nil)
+            }
+        }
+
         /// A push tap for another instance opens that one, not the kept one.
         @Test func aPushTapForAnotherInstanceOpensIt() async {
             await clean {

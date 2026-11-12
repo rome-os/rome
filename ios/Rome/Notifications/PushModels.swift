@@ -60,10 +60,11 @@ extension PushRoute {
     }
 }
 
-/// Asks the shell to follow a widget link on the open instance.
+/// Asks the shell of one instance to follow a widget link.
 struct WidgetRequest: Equatable {
     let serial: Int
-    let link: WidgetLink?
+    let instanceId: String?
+    let link: WidgetLink
 }
 
 /// Asks the shell to show a Concierge chat: a topic chat, or the main one (nil).

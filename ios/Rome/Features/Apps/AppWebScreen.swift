@@ -67,7 +67,7 @@ struct AppWebScreen: View {
         .task(id: app.id) {
             guard pageURL == nil else { return }
             RecentApps(host: workspace.host, account: workspace.backend.account).record(app.id)
-            WidgetShelf.recordOpen(appId: app.id, instanceId: workspace.instanceID)
+            WidgetShelf.shared.recordOpen(appId: app.id, instanceId: workspace.instanceID)
         }
     }
 
