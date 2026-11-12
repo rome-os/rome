@@ -169,6 +169,39 @@ export async function buildConciergeTools(
     return chat;
   };
 
+  // Whether the row `taskId` belongs to this Concierge chat, with the chat
+  // that owns it. A row with no owner to find counts as ours.
+  const rowOwnedElsewhere = async (taskId: string) => {
+    const { chatId: here } = currentTurn();
+    const found = await tasks.repo.getWithChat(taskId);
+    return found && found.conciergeChat.id !== here ? found.conciergeChat : null;
+  };
+
+  // Refuses a write that would move a row another Concierge chat owns here:
+  // its result and thread belong to that chat.
+  const requireRowHere = async (taskId: string, then: string) => {
+    const other = await rowOwnedElsewhere(taskId);
+    if (other) {
+      throw new Error(`Task ${taskId} belongs to another Concierge chat (${other.name}). ${then}`);
+    }
+  };
+
+  // A task chat this Concierge chat started, which it may send into or
+  // forward. A task another Concierge chat started is refused. A task chat
+  // with no row yet counts as ours.
+  const requireOwnTaskChat = async (chatId: string) => {
+    const chat = await requireTaskChat(chatId);
+    const task = await tasks.repo.findBySession(chatId);
+    const other = task ? await rowOwnedElsewhere(task.id) : null;
+    if (other) {
+      throw new Error(
+        `Task chat ${chatId} belongs to another Concierge chat (${other.name}). ` +
+          "Start a task here with chat_start; read that chat with chat_read first to reuse what it found.",
+      );
+    }
+    return chat;
+  };
+
   // A chat the Concierge may read: one of its task chats, or another of its
   // Concierge chats.
   const requireReadableChat = async (chatId: string) => {
@@ -322,6 +355,10 @@ export async function buildConciergeTools(
       write.sourceMessageId = await sourceMessageForNewRow(messageId);
       write.chatId = currentTurn().chatId;
     } else if (messageId) {
+      await requireRowHere(
+        write.id,
+        "Update it there, or start a task here with chat_start. Without a messageId you can still update its state or summary.",
+      );
       write.sourceMessageId = await requireSourceMessage(messageId);
       write.chatId = currentTurn().chatId;
     }
@@ -559,7 +596,8 @@ export async function buildConciergeTools(
   const pointTaskTo = async (taskChatId: string, messageId: string) => {
     const { chatId } = currentTurn();
     const task = await tasks.repo.findBySession(taskChatId);
-    if (!task) return null;
+    // A row another Concierge chat owns stays where it is.
+    if (!task || (await rowOwnedElsewhere(task.id))) return null;
     await tasks.repo.setSourceMessage(task.id, chatId, messageId);
     return task;
   };
@@ -831,6 +869,7 @@ export async function buildConciergeTools(
           const messageId = optionalString(args, "messageId");
           if (taskId) {
             const planned = await requireTaskRow(taskId);
+            await requireRowHere(taskId, "Start a task here without taskId instead.");
             if (planned.sessionId) {
               throw new Error(
                 `Task ${taskId} already has chat ${planned.sessionId}. Use chat_send to continue it.`,
@@ -907,7 +946,7 @@ export async function buildConciergeTools(
     {
       name: "chat_send",
       description:
-        "Send a follow-up to a task chat: more detail, a correction, or the guardian's answer to its question. " +
+        "Send a follow-up to a task chat started from this Concierge chat: more detail, a correction, or the guardian's answer to its question. " +
         "A running task takes it as input, so it does not restart.",
       inputSchema: {
         type: "object",
@@ -922,7 +961,7 @@ export async function buildConciergeTools(
         runTool("chat_send", input, async (args) => {
           currentTurn();
           const chatId = requireString(args, "chatId");
-          const chat = await requireTaskChat(chatId);
+          const chat = await requireOwnTaskChat(chatId);
           const answers = optionalString(args, "answers");
           // Checked before the task hears anything, so a retry never sends twice.
           await requireTurnPrompt(answers);
@@ -1069,7 +1108,7 @@ export async function buildConciergeTools(
     {
       name: "chat_forward",
       description:
-        "Send the guardian a task chat's latest answer as one long message, word for word, without retyping it. " +
+        "Send the guardian the latest answer of a task chat started from this Concierge chat as one long message, word for word, without retyping it. " +
         "Use it for long content the guardian asked for. An existing task row automatically points to the forwarded message in this Concierge chat, unless the task already has a chat thread.",
       inputSchema: {
         type: "object",
@@ -1083,7 +1122,7 @@ export async function buildConciergeTools(
       handler: (input) =>
         runTool("chat_forward", input, async (args) => {
           const chatId = requireString(args, "chatId");
-          const chat = await requireTaskChat(chatId);
+          const chat = await requireOwnTaskChat(chatId);
           const [latest] = await latestSaid(
             messages,
             taskChatPlace(chatId),
