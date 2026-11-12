@@ -27,20 +27,21 @@ Run them from the repository root inside `nix develop`.
 | --- | --- |
 | `environments/onboarding/env.sh up` | Builds the Rome image from this checkout, checks out Rome Cloud, starts everything, and prints the link |
 | `environments/onboarding/env.sh up --no-build` | The same, reusing the last Rome image |
-| `environments/onboarding/env.sh walk` | Resets, then walks from the landing page to the new Rome's chat |
+| `environments/onboarding/env.sh walk` | Builds the Rome image when it was built from another commit, resets, then walks from the landing page to the new Rome's chat |
 | `environments/onboarding/env.sh reset` | Deletes every account and Rome, and starts again empty |
-| `environments/onboarding/env.sh down` | Removes everything `up` created, except the Rome Cloud checkout |
+| `environments/onboarding/env.sh down` | Removes everything `up` created, except the Rome Cloud checkout and the image registry |
 
 Rome Cloud is served at `https://onboarding-pantheon.romeos.dev`, and each Rome at `https://<address>.romeos.dev`.
 
-`ROME_CLOUD_REF` picks the Rome Cloud commit, `origin/main` by default. `ROME_CLOUD_DIR` runs an existing Rome Cloud checkout as it is, and Rome Cloud's dev server reloads on each edit there. A change to Rome code needs `up` again, which rebuilds the image, then a new Rome.
+`ROME_CLOUD_REF` picks the Rome Cloud commit, `origin/main` by default. `ROME_CLOUD_DIR` runs an existing Rome Cloud checkout as it is, and Rome Cloud's dev server reloads on each edit there. A committed change to Rome code is picked up by the next `up` or `walk`, which rebuild the image when it was built from another commit. An uncommitted change needs `up`, which always rebuilds.
 
 ## Requirements
 
 - Docker, and the shared Traefik that `pnpm dev:all` uses. `up` starts Traefik when it is not running.
 - A Rome Cloud clone at `~/workspace/rome-cloud`, or `ROME_CLOUD_REPO`.
 - The Cloudflare tunnel for `*.romeos.dev` described in the devbox's `docs/remote-access.md`, with a Cloudflare Access Bypass policy for this machine's IPv4 address. Each Rome calls Rome Cloud at its public address, and so does the walk-through.
-- One onboarding environment per machine. Its router answers every `<name>.rome.localhost` that no other stack claims.
+- One onboarding environment per machine. Its router answers every `<name>.rome.localhost` that no other stack claims. The worktree that first ran `up` owns it, and the commands refuse to run from another worktree until `down`, or with `ROME_ENV_TAKE_OVER=1`.
+- The Rome image goes through a registry container, `rome-env-registry` on port 5050, which any environment can share.
 
 ## Timing
 

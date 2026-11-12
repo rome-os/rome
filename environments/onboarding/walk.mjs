@@ -53,20 +53,25 @@ await step("questions", async () => {
     await next.click();
     if (label === "Create your Rome") break;
   }
-  await page.waitForURL(/\/dashboard/, { timeout: 60_000 });
 });
 
-await step("rome-online", async () => {
-  await page.getByText("Online", { exact: true }).waitFor({ timeout: 10 * 60_000 });
-});
+// After sign-up the user either watches the Rome boot and is taken into it, or
+// lands on the dashboard and opens it there. Either way the walk ends in the
+// Rome's chat.
+const romeOrigin = new RegExp(`^https://${address}\\.${domain.replaceAll(".", "\\.")}/`);
 
-await step("open-rome", async () => {
-  // The link may open a new tab, so follow its address in this one.
-  const href = await page.getByRole("link", { name: "Open Rome" }).getAttribute("href");
-  await page.goto(href);
-  await page.waitForURL(new RegExp(`^https://${address}\\.${domain.replaceAll(".", "\\.")}/`), {
-    timeout: 60_000,
-  });
+await step("rome-chat", async () => {
+  const deadline = Date.now() + 10 * 60_000;
+  while (!romeOrigin.test(page.url())) {
+    if (Date.now() > deadline) throw new Error(`never reached the Rome; last at ${page.url()}`);
+    const open = page.getByRole("link", { name: "Open Rome" });
+    if (await open.isVisible().catch(() => false)) {
+      // The link may open a new tab, so follow its address in this one.
+      await page.goto(await open.getAttribute("href"));
+    } else {
+      await page.waitForTimeout(3_000);
+    }
+  }
   await page.getByText("Main chat").first().waitFor({ timeout: 60_000 });
 });
 
