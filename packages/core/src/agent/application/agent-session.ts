@@ -65,6 +65,8 @@ import {
   buildDeviceFolderBlock,
   buildThreadContextBlock,
   FETCH_CHANNEL_HISTORY_ACTION,
+  type SentHeaders,
+  withoutRepeatedHeaders,
 } from "../domain/prompt.js";
 import { resolveAgentPolicy } from "../domain/agent-policy.js";
 import { createRomeTools } from "./rome-tools.js";
@@ -373,6 +375,12 @@ interface ManagerDeps {
    * the hold ends. Absent, nothing holds a session.
    */
   heldMidTurn?: (sessionId: string) => Promise<boolean>;
+  /**
+   * The header blocks an input may open with, by element name, that a thread
+   * reads only when they changed since its last input. Absent, every input
+   * keeps its headers.
+   */
+  stickyHeaders?: readonly string[];
   /**
    * Writes a renewal's handoff when the retired session cannot, says the chat
    * is tidying up while one is written, and reads what the successor's first
@@ -1828,6 +1836,8 @@ interface TurnSink {
   carriesContinuation?: boolean;
   /** The notice carries the session's handoff, which goes with it. */
   carriesHandoff?: boolean;
+  /** The headers the thread has read once this turn returns a result. */
+  sentHeaders?: Map<string, string>;
   /** Prompt that opened the turn; carried on the turn_start event. */
   userPrompt: string;
   /** Guards the one-turn_start-per-stream invariant across error paths. */
@@ -2070,6 +2080,8 @@ class AgentSessionImpl implements AgentSession {
   private renewalPending?: SessionRenewal;
   /** The renewal's handoff, carried by the continuation notice until a turn succeeds. */
   private handoff?: string;
+  /** The header blocks the current thread has read, by name (`stickyHeaders`). */
+  private sentHeaders: SentHeaders = new Map();
   /** The model the chat ran on before the current thread started. */
   private previousModel?: string;
   private selectionId?: ModelSelectionId;
@@ -2178,6 +2190,7 @@ class AgentSessionImpl implements AgentSession {
    *  it carries the `<continuation>` notice. */
   continuesElsewhere(): void {
     this.continuationPending = true;
+    this.sentHeaders = new Map();
   }
 
   get currentTurnReportedTaskRef(): string | undefined {
@@ -2323,6 +2336,7 @@ class AgentSessionImpl implements AgentSession {
         // Another provider: the new thread has seen nothing of this chat.
         this.threadFresh = true;
         this.threadContextInjected = false;
+        this.sentHeaders = new Map();
         this.lastPosition = undefined;
         if (previous.modelThreadId !== undefined) {
           this.continuationPending = true;
@@ -2485,6 +2499,7 @@ class AgentSessionImpl implements AgentSession {
             );
             if (sink.carriesContinuation) this.continuationPending = false;
             if (sink.carriesHandoff) this.handoff = undefined;
+            if (sink.sentHeaders) this.sentHeaders = sink.sentHeaders;
             const used = outbound.accounting?.context?.usedTokens;
             if (this.contextLimitTokens && used !== undefined && used >= this.contextLimitTokens) {
               this.onContextFull?.();
@@ -3512,6 +3527,13 @@ class AgentSessionImpl implements AgentSession {
       // short-circuits (e.g. the not-logged-in gate) we don't carry it forward;
       // that path means Rome isn't usable yet, so the loss is benign.
       let userPrompt = input.prompt;
+      // Headers the thread already read on an input of its own are left out.
+      const stickyHeaders = this.isSubagent ? undefined : this.deps.stickyHeaders;
+      if (stickyHeaders?.length) {
+        const kept = withoutRepeatedHeaders(userPrompt, stickyHeaders, this.sentHeaders);
+        userPrompt = kept.prompt;
+        sink.sentHeaders = kept.headers;
+      }
       let unseenMessageIds: number[] = [];
       // The agent catches up on the messages said where its session stands
       // that no turn of it took, gave or saw (docs/domains/participation.md#projection).

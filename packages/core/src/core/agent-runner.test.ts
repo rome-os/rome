@@ -3811,6 +3811,32 @@ describe("AgentRunner", () => {
         expect(provider.calls[2]?.prompt).not.toContain("<continuation>");
       });
 
+      it("sends a header block again only when it changed, or to a thread that has not read it", async () => {
+        const provider = threadedProvider(4);
+        const runner = renewingRunner(provider, undefined, { stickyHeaders: ["concierge_chat"] });
+        const say = (name: string, text: string) =>
+          collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: `<concierge_chat id="c1" name="${name}"/>\n\n${text}`,
+              channelThreadKey: key,
+            }),
+          );
+        await say("Main", "one");
+        await say("Main", "two");
+        await say("Home", "three");
+        await evict(runner);
+        await say("Home", "four");
+
+        const prompts = provider.calls.map((call) => call.prompt);
+        expect(prompts[0]).toContain('<concierge_chat id="c1" name="Main"/>');
+        expect(prompts[1]).not.toContain("<concierge_chat");
+        expect(prompts[1]).toContain("two");
+        expect(prompts[2]).toContain('<concierge_chat id="c1" name="Home"/>');
+        // A reopened session's thread is read again from its first input.
+        expect(prompts[3]).toContain('<concierge_chat id="c1" name="Home"/>');
+      });
+
       describe("with a handoff", () => {
         const HANDOFF = "- Agreed: dinner at 7 on Friday, task t-1.";
         let handoffAgent: { definition: AgentDefinition };

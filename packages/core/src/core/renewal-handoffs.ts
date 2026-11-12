@@ -19,9 +19,6 @@ import { createLogger } from "../logger.js";
 
 const log = createLogger("renewal-handoffs");
 
-/** How long the small model has to write a handoff. */
-const FALLBACK_TIMEOUT_MS = 20_000;
-
 /** How many of a chat's latest turns are read for its recent messages. */
 const RECENT_TURNS = 60;
 
@@ -70,7 +67,8 @@ export interface RenewalHandoffSources {
   openTasks(chatId: string): Promise<string | null>;
   /** Runs `work` while chat `chatId` says it is tidying up. Absent, `work` just runs. */
   tidying?: <T>(chatId: string, work: () => Promise<T>) => Promise<T>;
-  fallbackTimeoutMs?: number;
+  /** How long the small model has to write a handoff. */
+  fallbackTimeoutMs: number;
 }
 
 const SENDER: Record<string, string> = {
@@ -117,7 +115,7 @@ export function createRenewalHandoffs(sources: RenewalHandoffSources): RenewalHa
         sources.modelResolver,
         input,
         agentName,
-        sources.fallbackTimeoutMs ?? FALLBACK_TIMEOUT_MS,
+        sources.fallbackTimeoutMs,
       );
     },
     async context(chatId, turnId) {

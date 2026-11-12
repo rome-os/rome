@@ -42,7 +42,7 @@ Solid lines carry something said to the Concierge or by it. Dashed lines are wha
 - **Each Concierge chat has its own transcript and its own agent session.** What is said in one chat is never in another chat's context. The Concierge reads another of its owner's Concierge chats only through its chat-reading tool, when a question needs it.
 - **A rule written for "the Concierge chat" holds in every Concierge chat,** unless it names the main chat. No path checks for the main chat's id to decide behaviour another Concierge chat should share, such as quota failover or the model a resumed session restores.
 - **A Concierge chat's session carries what was agreed across a renewal.** When its setup changes, or a turn ends with its context past the limit, the retired session writes a [handoff](../concepts/sessions.md#handoff) for the next one, and the open tasks come from the task list, not from the handoff.
-- **Every Concierge turn's input opens with the chat it runs in:** its id, its name, and whether it is the main chat. It rides each turn, never the session's starting setup, so a rename reaches a running session.
+- **Every Concierge turn's input opens with the chat it runs in:** its id, its name, and whether it is the main chat. It rides the turns, never the session's starting setup, so a rename reaches a running session. A thread reads it, the person it serves and the open workspace again only when one changed since its last input that returned, and in full on the first input of a new thread.
 
 ### Each thing reports to one chat
 

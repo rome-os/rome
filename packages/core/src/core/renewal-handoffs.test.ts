@@ -34,6 +34,7 @@ describe("createRenewalHandoffs", () => {
   it("reads the open tasks and recent messages a successor's first turn shows", async () => {
     const handoffs = createRenewalHandoffs({
       timeoutMs: 30_000,
+      fallbackTimeoutMs: 30_000,
       modelResolver: unusedResolver,
       rows: async () => [row("user", "Book dinner", "t1"), row("user", "Now?", "t2")],
       openTasks: async () => "- t-1 · Book dinner · active",
@@ -46,6 +47,7 @@ describe("createRenewalHandoffs", () => {
   it("writes no fallback for a session in no chat, or a chat with nothing said", async () => {
     const handoffs = createRenewalHandoffs({
       timeoutMs: 30_000,
+      fallbackTimeoutMs: 30_000,
       modelResolver: unusedResolver,
       rows: async () => [],
       openTasks: async () => null,
@@ -58,6 +60,7 @@ describe("createRenewalHandoffs", () => {
     const tidied: string[] = [];
     const handoffs = createRenewalHandoffs({
       timeoutMs: 30_000,
+      fallbackTimeoutMs: 30_000,
       modelResolver: unusedResolver,
       rows: async () => [],
       openTasks: async () => null,

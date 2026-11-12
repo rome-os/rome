@@ -34,9 +34,11 @@ const configSchema = z.object({
   // a small model writes it from the chat's messages instead
   // (docs/concepts/sessions.md#handoff).
   sessionHandoffTimeoutSeconds: z.coerce.number().int().positive().default(30),
+  // How long the small model then has to write it.
+  sessionHandoffFallbackTimeoutSeconds: z.coerce.number().int().positive().default(30),
   // Past this many tokens of context, a Concierge session is renewed with a
   // handoff once its turn ends and nothing waits on it.
-  sessionHandoffContextTokens: z.coerce.number().int().positive().default(120_000),
+  sessionHandoffContextTokens: z.coerce.number().int().positive().default(150_000),
 
   // Personal WeChat is opt-in and runs as the Rome service user.
   wechatUserEnabled: z
@@ -157,6 +159,9 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   }
   if (env.SESSION_HANDOFF_TIMEOUT_SECONDS) {
     raw.sessionHandoffTimeoutSeconds = env.SESSION_HANDOFF_TIMEOUT_SECONDS;
+  }
+  if (env.SESSION_HANDOFF_FALLBACK_TIMEOUT_SECONDS) {
+    raw.sessionHandoffFallbackTimeoutSeconds = env.SESSION_HANDOFF_FALLBACK_TIMEOUT_SECONDS;
   }
   if (env.SESSION_HANDOFF_CONTEXT_TOKENS) {
     raw.sessionHandoffContextTokens = env.SESSION_HANDOFF_CONTEXT_TOKENS;
