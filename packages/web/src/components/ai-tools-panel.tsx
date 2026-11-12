@@ -72,6 +72,7 @@ export interface AIToolStatus {
   loggedIn: boolean;
   email?: string;
   authMethod?: string;
+  authMode?: string;
   accountType?: string;
   usage?: AIToolUsageStatus;
   /**
@@ -1131,9 +1132,9 @@ export function AiToolsPanel({
                               {t("aiTools.otherProviders.apiKey")}
                             </Button>
                           )}
-                          {provider.statusKey === "codex" && isLoggedIn && !usesApiKey && (
-                            <ChatgptSettingsDropdown />
-                          )}
+                          {provider.statusKey === "codex" &&
+                            isLoggedIn &&
+                            status?.authMode === "chatgpt" && <ChatgptSettingsDropdown />}
                           {!usesApiKey &&
                             (isLoggedIn ? (
                               <Button
@@ -1189,9 +1190,9 @@ export function AiToolsPanel({
                         {t("aiTools.usage.unavailable")}
                       </p>
                     )}
-                    {provider.statusKey === "codex" && !usesApiKey && (
-                      <ChatgptCreditsUsage usage={status.usage} />
-                    )}
+                    {provider.statusKey === "codex" &&
+                      isLoggedIn &&
+                      status.authMode === "chatgpt" && <ChatgptCreditsUsage usage={status.usage} />}
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-[1fr_1px_1fr] sm:gap-4">
                       <UsageBar
                         label={t("aiTools.usage.fiveHour")}

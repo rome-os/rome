@@ -245,15 +245,20 @@ export class SharedCodexAccountService
     if (usage && (useCredits || usageShowsCapacity(usage)) && this.refusal) {
       if (usageReadClearsRefusal(this.refusal, readAt)) this.refusal = undefined;
     }
+    const refusal = this.heldRefusal();
+    const now = this.now();
+    // Preserve the subscription limit across failed reads while credits make the last report available.
+    const previous = this.last?.requiresChatgptCredits
+      ? accountReport(this.last.account, this.last.usage ?? null, undefined, now)
+      : this.last;
+    const subscription = accountReport(status, usage, refusal, now, previous);
     // Credits cover subscription windows; a refused turn still blocks requests.
-    const gatedUsage = useCredits ? { ...usage, fiveHour: undefined, sevenDay: undefined } : usage;
-    this.last = accountReport(
-      status,
-      gatedUsage,
-      this.heldRefusal(),
-      this.now(),
-      useCredits ? undefined : this.last,
-    );
+    this.last = useCredits
+      ? accountReport(status, { ...usage, fiveHour: undefined, sevenDay: undefined }, refusal, now)
+      : subscription;
+    if (this.last.state === "available" && subscription.state === "usage_limit_reached") {
+      this.last.requiresChatgptCredits = true;
+    }
     if (usage) this.last.usage = usage;
     this.refusal = refusalAfterReport(this.refusal, this.last);
     return this.last;

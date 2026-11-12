@@ -87,7 +87,7 @@ describe("SharedCodexAccountService", () => {
     [true, true, false, undefined, "available"],
     [true, false, false, undefined, "usage_limit_reached"],
     [true, false, true, undefined, "available"],
-    [true, true, false, "workspaceOwnerUsageLimitReached", "usage_limit_reached"],
+    [true, true, false, "workspace_owner_usage_limit_reached", "usage_limit_reached"],
   ])("gates exhausted subscription windows with credits enabled=%s, available=%s, unlimited=%s, limit=%s", async (enabled, hasCredits, unlimited, rateLimitReachedType, state) => {
     const rpc = new FakeAccountRpc();
     rpc.queue("account/read", { account: { type: "chatgpt", planType: "plus" } });
@@ -103,7 +103,56 @@ describe("SharedCodexAccountService", () => {
     try {
       const report = await service.report();
       expect(report.state).toBe(state);
+      expect(report.requiresChatgptCredits === true).toBe(state === "available");
       expect(report.usage?.fiveHour?.usedPercent).toBe(100);
+    } finally {
+      service.close();
+    }
+  });
+
+  it("marks only availability that currently requires ChatGPT credits", async () => {
+    const rpc = new FakeAccountRpc();
+    let enabled = true;
+    let now = Date.now();
+    const service = createService(rpc, {
+      allowChatgptCredits: async () => enabled,
+      now: () => now,
+    });
+    const read = async (usedPercent: number, failed = false, spendControlReached = false) => {
+      rpc.queue("account/read", { account: { type: "chatgpt", planType: "plus" } });
+      rpc.queue(
+        "account/rateLimits/read",
+        failed
+          ? new Error("Offline")
+          : {
+              rateLimits: {
+                primary: { usedPercent },
+                credits: { hasCredits: true, unlimited: false },
+                spendControlReached,
+              },
+            },
+      );
+      return service.report();
+    };
+    try {
+      expect((await read(100)).requiresChatgptCredits).toBe(true);
+      expect((await read(10)).requiresChatgptCredits).not.toBe(true);
+      expect((await read(100)).requiresChatgptCredits).toBe(true);
+      const failed = await read(100, true);
+      expect(failed.state).toBe("usage_limit_reached");
+      expect(failed.requiresChatgptCredits).not.toBe(true);
+      expect((await read(100, false, true)).state).toBe("usage_limit_reached");
+      expect((await read(100)).requiresChatgptCredits).toBe(true);
+      enabled = false;
+      expect((await read(100)).requiresChatgptCredits).not.toBe(true);
+      enabled = true;
+      service.refusedTurn({ kind: "usage" });
+      const refused = await read(100);
+      expect(refused.state).toBe("usage_limit_reached");
+      expect(refused.requiresChatgptCredits).not.toBe(true);
+      now += USAGE_REFUSAL_HOLD_MS + 1;
+      expect((await read(100)).requiresChatgptCredits).toBe(true);
+      expect((await read(0)).requiresChatgptCredits).not.toBe(true);
     } finally {
       service.close();
     }

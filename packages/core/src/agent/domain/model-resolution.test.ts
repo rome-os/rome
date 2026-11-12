@@ -48,6 +48,52 @@ const reports = (
 
 describe("resolveModel", () => {
   it.each([
+    [available, "anthropic"],
+    [limited, "openai"],
+    [unauthorized, "openai"],
+  ] as const)("uses ChatGPT credits after Claude capacity (%s)", (claude, providerId) => {
+    const codex: ModelAccountReport = { ...available, requiresChatgptCredits: true };
+    expect(resolveModel(large, facts({ reports: reports(codex, claude) }))).toMatchObject({
+      ok: true,
+      providerId,
+    });
+  });
+
+  it("keeps explicit and provider-restricted GPT requests on allowed ChatGPT credits", () => {
+    const given = facts({
+      reports: reports({ ...available, requiresChatgptCredits: true }, available),
+    });
+    for (const request of [
+      { kind: "exact", providerId: "openai", model: "gpt-6.1-sol" },
+      { kind: "tier", tier: "large", providerId: "openai" },
+    ] as const) {
+      expect(resolveModel(request, given)).toEqual({
+        ok: true,
+        providerId: "openai",
+        model: "gpt-6.1-sol",
+      });
+    }
+  });
+
+  it("keeps ChatGPT plan restrictions when credits cover the subscription limit", () => {
+    const given = facts({
+      reports: reports({ ...restricted, requiresChatgptCredits: true }, limited),
+      tierModels: { openai: { large: "gpt-6.1-sol" } },
+    });
+    expect(resolveModel(large, given)).toEqual({
+      ok: false,
+      failure: { kind: "model_not_allowed", provider: "openai", model: "gpt-6.1-sol" },
+    });
+  });
+
+  it("keeps available Codex subscription capacity ahead of Claude", () => {
+    expect(resolveModel(large, facts({ reports: reports(available, available) }))).toMatchObject({
+      ok: true,
+      providerId: "openai",
+    });
+  });
+
+  it.each([
     ["Codex first when its account is usable", large, facts(), "openai", "gpt-6.1-sol"],
     ["Luna for a small tier", small, facts(), "openai", "gpt-6-luna"],
     [

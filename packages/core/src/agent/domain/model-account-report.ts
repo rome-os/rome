@@ -17,6 +17,8 @@ export type ProviderAvailabilityState =
 
 export interface ModelAccountReport {
   state: ProviderAvailabilityState;
+  /** Available only because ChatGPT credits cover an exhausted subscription window. */
+  requiresChatgptCredits?: boolean;
   /** When the usage limit ends, stated or assumed. Set only in usage_limit_reached. */
   usageLimitUntil?: string;
   /** The account's reports the availability was read off, kept as read. */

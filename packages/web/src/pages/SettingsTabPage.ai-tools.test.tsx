@@ -34,6 +34,40 @@ function ok(json: unknown): Response {
 
 describe("AI Tools refresh", () => {
   it.each([
+    [true, "chatgpt", true],
+    [true, "apikey", false],
+    [true, undefined, false],
+    [false, "chatgpt", false],
+  ] as const)("limits ChatGPT credits controls to loggedIn=%s, authMode=%s", async (loggedIn, authMode, visible) => {
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input) => {
+      if (String(input) === "/api/ai-tools/status")
+        return ok({
+          codex: {
+            loggedIn,
+            authMode,
+            usage: {
+              checkedAt: new Date().toISOString(),
+              source: "test",
+              fiveHour: { usedPercent: 100 },
+            },
+          },
+        });
+      if (String(input) === "/api/settings") return ok({ "aiTools.codex.allowCredits": true });
+      return ok({});
+    }) as typeof fetch);
+    render(<AiToolsPanel showUsage />);
+    await screen.findByRole("button", { name: "Refresh" });
+    await screen.findAllByText(loggedIn ? "Connected" : "Not connected");
+    if (visible) {
+      expect(await screen.findByRole("button", { name: "Settings" })).toBeTruthy();
+      expect(await screen.findByRole("group", { name: "ChatGPT credits" })).toBeTruthy();
+    } else {
+      expect(screen.queryByRole("button", { name: "Settings" })).toBeNull();
+      expect(screen.queryByRole("group", { name: "ChatGPT credits" })).toBeNull();
+    }
+  });
+
+  it.each([
     [false, { hasCredits: true, unlimited: false, balance: "125.75" }, undefined, null],
     [
       true,
@@ -59,6 +93,7 @@ describe("AI Tools refresh", () => {
         return ok({
           codex: {
             loggedIn: true,
+            authMode: "chatgpt",
             usage: {
               checkedAt: new Date().toISOString(),
               source: "test",
@@ -88,7 +123,8 @@ describe("AI Tools refresh", () => {
     const writes: unknown[] = [];
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);
-      if (url === "/api/ai-tools/status") return ok({ codex: { loggedIn: true } });
+      if (url === "/api/ai-tools/status")
+        return ok({ codex: { loggedIn: true, authMode: "chatgpt" } });
       if (url === "/api/settings") {
         if (init?.method === "PUT") {
           const body = JSON.parse(String(init.body));
@@ -154,7 +190,8 @@ describe("AI Tools refresh", () => {
     let fail = true;
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input, init) => {
       const url = String(input);
-      if (url === "/api/ai-tools/status") return ok({ codex: { loggedIn: true } });
+      if (url === "/api/ai-tools/status")
+        return ok({ codex: { loggedIn: true, authMode: "chatgpt" } });
       if (url === "/api/settings") {
         if (init?.method === "PUT") {
           if (fail)
