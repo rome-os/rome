@@ -567,17 +567,11 @@ final class AppModel {
     /// The instance a waiting push or widget link is for, if any.
     private var pendingInstanceID: String? { pendingPush?.instanceId ?? pendingLink?.instanceId }
 
-    /// An instance just opened: a push or link still waiting for another
-    /// one this account lists (its switch failed, or another was opened
-    /// meanwhile) is dropped, so it never pulls the guardian away later. One
-    /// for an instance no longer listed stays, for its usual fallback here.
-    private func dropPendingForOtherInstances() {
-        func elsewhere(_ id: String?) -> Bool {
-            guard let id else { return false }
-            return id != currentInstanceID && instances.contains { $0.id == id }
-        }
-        if elsewhere(pendingPush?.instanceId) { pendingPush = nil }
-        if elsewhere(pendingLink?.instanceId) { pendingLink = nil }
+    /// Opening `instanceId` failed: a push or link waiting for it is dropped,
+    /// so it never pulls the guardian there after they open another.
+    private func dropPending(for instanceId: String) {
+        if pendingPush?.instanceId == instanceId { pendingPush = nil }
+        if pendingLink?.instanceId == instanceId { pendingLink = nil }
     }
 
     let cloud: CloudAuth
@@ -715,7 +709,6 @@ final class AppModel {
             if self.workspace === workspace { KeptIdentity.save(workspace.kept, for: instanceID) }
         }
         Task { await update.attach(backend: workspace.backend, instanceID: instanceID) }
-        dropPendingForOtherInstances()
         if pendingPush != nil {
             await routePendingPush()
             // The push was for another instance, now open in its place.
@@ -985,10 +978,12 @@ final class AppModel {
                 await self?.reconnectWhenRunning(instance.id)
             }
         case .cloudUnauthorized:
+            dropPending(for: instance.id)
             phase = .signedOut
         case .accessRevoked:
             await lostAccess(to: instance)
         default:
+            dropPending(for: instance.id)
             signInError = (error as? LocalizedError)?.errorDescription
             browserSignIn = error as? AuthError == .notOwner ? URL(string: instance.origin) : nil
             phase = .signedOut
@@ -1214,7 +1209,6 @@ final class AppModel {
             guard self.workspace === workspace else { return }
         }
         phase = .ready
-        dropPendingForOtherInstances()
         if pendingPush != nil {
             await routePendingPush()
             // The push was for another instance, now open in its place.

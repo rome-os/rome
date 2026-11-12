@@ -357,6 +357,47 @@ extension LastInstanceDefaults {
             }
         }
 
+        private var cSession: InstanceSession { InstanceSession(token: "c", expiresAt: iso(3600), origin: "https://c.example") }
+        private func listBC() {
+            LaunchProtocol.answers["/v1/instances"] = (200, #"{"items":[{"id":"b","name":"B","slug":"b","origin":"https://b.example","status":"running"},{"id":"c","name":"C","slug":"c","origin":"https://c.example","status":"running"}]}"#)
+        }
+
+        /// A tap for C that came while signed out is followed once sign-in has
+        /// opened B: the app switches to C and shows the app.
+        @Test func aTapQueuedBeforeSignInIsFollowedAfterTheOpen() async {
+            await clean {
+                listBC()
+                let (app, _) = model(session: fresh, kept: false, others: [cSession])
+                await app.openFromWidget(.app(instanceId: "c", appId: "habits"))
+                // Sign-in opens the first running instance, B.
+                await app.openInstance(preferring: nil)
+                #expect(await eventually { app.currentInstance?.id == "c" && app.widgetRequest != nil })
+                #expect(app.takeWidgetLink(for: "c") == .app(instanceId: "c", appId: "habits"))
+            }
+        }
+
+        /// A tap for B that came while C was still connecting is followed once
+        /// C is open.
+        @Test func aTapQueuedWhileConnectingIsFollowedAfterTheOpen() async {
+            await clean {
+                listBC()
+                LaunchProtocol.slow["/api/auth/me"] = 0.6
+                let (app, _) = model(session: fresh, others: [cSession])
+                await app.launch(skipSnapshot: true)
+                #expect(await eventually { app.instances.count == 2 })
+                guard let c = app.instances.first(where: { $0.id == "c" }) else {
+                    Issue.record("C is listed")
+                    return
+                }
+                let switching = Task { await app.switchInstance(to: c) }
+                #expect(await eventually { app.currentInstanceID == "c" })
+                await app.openFromWidget(.app(instanceId: "b", appId: "habits"))
+                await switching.value
+                #expect(await eventually { app.currentInstance?.id == "b" && app.widgetRequest != nil })
+                #expect(app.takeWidgetLink(for: "b") == .app(instanceId: "b", appId: "habits"))
+            }
+        }
+
         /// A push tap for another instance opens that one, not the kept one.
         @Test func aPushTapForAnotherInstanceOpensIt() async {
             await clean {
