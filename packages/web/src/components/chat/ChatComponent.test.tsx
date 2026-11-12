@@ -817,6 +817,24 @@ describe("New chat draft boundaries", () => {
     expect(loadNewChatDraft()?.text).toBe("explicit");
   });
 
+  it("drops the project from the URL once the composer has taken it, keeping other params", async () => {
+    renderChatComponent(
+      { initialProjectName: "alpha" },
+      undefined,
+      "/chat?project=alpha&hideSidebar=1",
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-location").textContent).toBe("/chat?hideSidebar=1 REPLACE"),
+    );
+    await waitFor(() => expect(loadNewChatDraft()?.projectPath).toBe("alpha"));
+  });
+
+  it("leaves a URL without a project alone", async () => {
+    renderChatComponent({}, undefined, "/chat?hideSidebar=1");
+    await waitFor(() => expect(screen.getByRole("textbox")).toBeTruthy());
+    expect(screen.getByTestId("chat-location").textContent).toBe("/chat?hideSidebar=1 POP");
+  });
+
   it("text-only prefill removes the saved skill", async () => {
     saveNewChatDraft({
       version: 1,

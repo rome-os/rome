@@ -10,6 +10,9 @@
  */
 export const COARSE_POINTER_QUERY = "(hover: none) and (pointer: coarse)";
 
+/** Rome running as an installed home-screen app, with no browser tabs around it. */
+export const STANDALONE_DISPLAY_QUERY = "(display-mode: standalone)";
+
 /** False where `matchMedia` is unavailable (node tests, SSR). */
 export function matchesMediaQuery(query: string): boolean {
   if (typeof window === "undefined" || typeof window.matchMedia !== "function") return false;
