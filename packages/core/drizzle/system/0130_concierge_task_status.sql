@@ -58,10 +58,11 @@ UPDATE `routines`
     AND instr(`name`, 'task:') > 0
     AND substr(`name`, instr(`name`, 'task:') + 5, 36) IN (SELECT `id` FROM `concierge_tasks`);
 --> statement-breakpoint
--- A planned or watched row ends done: with no time when it was last
--- written, with a time that passed at that time. One with a time ahead, or
--- a check linked above still pending, stays later until then, and one whose
--- task chat runs reads as active. Only a row written from now on with no
+-- A planned or watched row ends done, and so does a doing or asking row
+-- with no task chat (one whose chat was deleted): with no time when it was
+-- last written, with a time that passed at that time. One with a time ahead,
+-- or a check linked above still pending, stays later until then, and a row
+-- with a task chat reads from it. Only a row written from now on with no
 -- task chat reads as later until the Concierge starts or stops it.
 UPDATE `concierge_tasks`
   SET `last_outcome` = 'succeeded',
@@ -75,7 +76,8 @@ UPDATE `concierge_tasks`
       WHEN `due_at` IS NULL THEN coalesce(`completed_at`, `updated_at`)
       WHEN `due_at` <= CAST(strftime('%s', 'now') AS INTEGER) * 1000 THEN `due_at`
     END
-  WHERE `state` IN ('next', 'watching') AND `last_outcome` IS NULL;
+  WHERE `last_outcome` IS NULL
+    AND (`state` IN ('next', 'watching') OR (`state` IN ('doing', 'needs_user') AND `session_id` IS NULL));
 --> statement-breakpoint
 -- The marks keep only facts now. A message's turn: the newest one that took
 -- it, answered unless it still worked, failed if the ledger had failed it.

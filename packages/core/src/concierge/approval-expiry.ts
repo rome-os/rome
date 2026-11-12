@@ -55,7 +55,9 @@ export async function turnDownApprovals(
     if (resolved.outcome !== "resolved") continue;
     turnedDown += 1;
     if (!turnDown.continueTurn || approval.type !== "action_execution") continue;
-    await deps.handler.onRejected(approval.id, turnDown.reason).catch((error: unknown) =>
+    // The turn that carries on runs on its own: the turn-down is done once
+    // the approval is resolved, whatever that turn does.
+    void deps.handler.onRejected(approval.id, turnDown.reason).catch((error: unknown) =>
       log.warn("failed to finish a turned-down approval's turn", {
         approvalId: approval.id,
         error: error instanceof Error ? error.message : String(error),

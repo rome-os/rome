@@ -161,11 +161,12 @@ export class ConciergeTasksRepository {
   }
 
   /**
-   * Task chat `chatId` is archived or deleted, so its task is stopped: the
-   * row of `owner` that links the chat is stopped for that reason and
-   * archived, in the one transaction that `alsoIn` archives or deletes the
-   * chat in. Answers the row, or null when the chat links no row of `owner`;
-   * the chat is archived or deleted either way.
+   * Task chat `chatId` is archived or deleted: the row of `owner` that links
+   * the chat is archived, in the one transaction that `alsoIn` archives or
+   * deletes the chat in, and stopped for that reason when `stop` says the
+   * task is still open. A task that already ended keeps how it ended.
+   * Answers the row, or null when the chat links no row of `owner`; the chat
+   * is archived or deleted either way.
    */
   async endWithChat(
     chatId: string,
@@ -173,6 +174,7 @@ export class ConciergeTasksRepository {
     end: "archived" | "deleted",
     alsoIn: (tx: DrizzleTx) => void,
     now = new Date(),
+    stop = true,
   ): Promise<ConciergeTaskRow | null> {
     const ended = this.db.transaction((tx) => {
       const row = tx
@@ -185,8 +187,8 @@ export class ConciergeTasksRepository {
         ? tx
             .update(conciergeTasks)
             .set({
-              stoppedAt: own.stoppedAt ?? now,
-              stopReason: own.stopReason ?? end,
+              stoppedAt: own.stoppedAt ?? (stop ? now : null),
+              stopReason: own.stopReason ?? (stop ? end : null),
               // Only a row archiving the chat archived comes back with it.
               archivedAt: own.archivedAt ?? now,
               archivedWithChat: own.archivedAt ? own.archivedWithChat : true,
@@ -898,6 +900,15 @@ export class ConciergeTasksRepository {
       .update(conciergeTasks)
       .set({ noResponseUnlisted: false })
       .where(inArray(conciergeTasks.id, [...taskIds]));
+  }
+
+  /** The task chats of every stopped task, so nothing approved later runs for one. */
+  async stoppedTaskChats(): Promise<string[]> {
+    const rows = await this.db
+      .select({ chatId: conciergeTasks.sessionId })
+      .from(conciergeTasks)
+      .where(and(isNotNull(conciergeTasks.stoppedAt), isNotNull(conciergeTasks.sessionId)));
+    return rows.flatMap((row) => (row.chatId ? [row.chatId] : []));
   }
 
   /** Rows `taskIds` were listed in a digest that ran to its end, as never started. */

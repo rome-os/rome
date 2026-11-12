@@ -92,7 +92,7 @@ describe("WaitExpiry", () => {
     expect(expired).toEqual([]);
   });
 
-  it("turns approvals down before it marks the wait handled, so a failed turn-down is tried again", async () => {
+  it("keeps the expiry before it turns approvals down, and tries a failed turn-down again", async () => {
     const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
     waiting.set("task-chat", NOW - 30 * HOUR);
     let fail = true;
@@ -106,9 +106,19 @@ describe("WaitExpiry", () => {
       now: () => now,
     });
     await expect(flaky.expire(row!.id)).rejects.toThrow("database is locked");
-    expect((await repo.get(row!.id))?.expiredWaitAt).toBeNull();
+    // The expiry is kept and told once, whatever the turn-down does.
+    expect((await repo.get(row!.id))?.expiredWaitAt).toEqual(new Date(NOW - 30 * HOUR));
+    expect(told).toEqual([row!.id]);
     fail = false;
-    await flaky.expire(row!.id);
+    let turnedDown = 0;
+    const steady = new WaitExpiry({
+      tasks,
+      expireApprovals: async () => ((turnedDown += 1), 1),
+      tell: (taskId) => told.push(taskId),
+      now: () => now,
+    });
+    await steady.expire(row!.id);
+    expect(turnedDown).toBe(1);
     expect(told).toEqual([row!.id]);
   });
 
@@ -150,6 +160,54 @@ describe("WaitExpiry", () => {
     await repo.clearWaitExpired(row!.id);
     await repo.setLastOutcome(row!.id, "succeeded", new Date(), { reported: false });
     expect(await status()).toMatchObject({ status: "ended", endReason: "done" });
+  });
+
+  it("has the expiry kept before any approval is turned down", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    waiting.set("task-chat", NOW - 30 * HOUR);
+    let keptFirst: boolean | null = null;
+    const ordered = new WaitExpiry({
+      tasks,
+      expireApprovals: async () => {
+        keptFirst = (await repo.get(row!.id))?.expiredWaitAt != null;
+        return 1;
+      },
+      tell: () => {},
+      now: () => now,
+    });
+    await ordered.expire(row!.id);
+    expect(keptFirst).toBe(true);
+  });
+
+  it("turns down at start an approval a restart left pending after its expiry was kept", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    waiting.set("task-chat", NOW - 30 * HOUR);
+    await repo.markWaitExpired(row!.id, new Date(NOW - 30 * HOUR));
+    const stop = expiry.start();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(expired).toEqual([["task-chat", NOW - 6 * HOUR, NO_RESPONSE_REASON, true]]);
+    // Told before the restart, so not again.
+    expect(told).toEqual([]);
+    stop();
+  });
+
+  it("backs off a turn-down that keeps failing instead of trying again at once", async () => {
+    await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    waiting.set("task-chat", NOW - 30 * HOUR);
+    let attempts = 0;
+    const failing = new WaitExpiry({
+      tasks,
+      expireApprovals: async () => {
+        attempts += 1;
+        throw new Error("database is locked");
+      },
+      tell: () => {},
+      now: () => now,
+    });
+    const stop = failing.start();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(attempts).toBe(1);
+    stop();
   });
 
   it("lists a task that ended for no response in the next digest, once", async () => {

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
-import { RESOLVED_BY_EXPIRY } from "./approval-expiry.js";
+import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { DrizzleTx } from "../db/index.js";
 import { POSTPONED_CHECKS } from "./service.js";
 import type {
@@ -1526,6 +1526,22 @@ describe("Concierge tools", () => {
     ]);
   });
 
+  it("turns down at start what a stopped task's chat still has pending", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    // Stopped before the approval handling was up, as across a crash.
+    await s.service.stopTask(taskId, "guardian");
+    const turnedDown: [string, string][] = [];
+    s.service.attachApprovalExpiry(async (chat, turnDown) => {
+      turnedDown.push([chat, turnDown.resolvedBy]);
+      return 1;
+    });
+    await s.settle();
+    expect(turnedDown).toEqual([[chatId, RESOLVED_BY_STOP]]);
+  });
+
   it("lets a failed turn-down reach the expiry, and a stop go ahead anyway", async () => {
     const s = setup();
     s.service.attachApprovalExpiry(async () => {
@@ -1580,6 +1596,30 @@ describe("Concierge tools", () => {
     await s.taskRepo.setLastOutcome(done!.id, "succeeded", new Date(), { reported: false });
     await s.tool("task_upsert", { tasks: [{ id: done!.id, archived: true }] });
     expect((await s.taskRepo.get(done!.id))?.stoppedAt).toBeNull();
+  });
+
+  it("archiving or deleting a task chat stops only an open task, and a finished one stays done", async () => {
+    const s = setup();
+    const open = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    const done = JSON.parse(
+      (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+    );
+    await s.taskRepo.setLastOutcome(done.taskId, "succeeded", new Date(), { reported: false });
+    s.chats.activeTurns = (chatId: string) => (chatId === open.chatId ? ["t1"] : []);
+    await s.service.endTaskChat(open.chatId, "archived");
+    await s.service.endTaskChat(done.chatId, "deleted");
+    expect(await s.taskRepo.get(open.taskId)).toMatchObject({ stopReason: "archived" });
+    expect(await s.taskRepo.get(done.taskId)).toMatchObject({
+      stoppedAt: null,
+      archivedAt: expect.any(Date),
+    });
+    const row = await s.taskRepo.get(done.taskId);
+    expect((await s.tasks.statusOf([row!])).get(done.taskId)).toMatchObject({
+      status: "ended",
+      endReason: "done",
+    });
   });
 
   it("takes a stopped task up again when its owner types in its chat, or the Concierge starts its row", async () => {
@@ -2936,6 +2976,18 @@ describe("Concierge events", () => {
     expect(s.backendTurns).toHaveLength(1);
     await rs.advanceTimersByTimeAsync(2 * RETRY_MS);
     expect(s.backendTurns).toHaveLength(1);
+  });
+
+  it("shows a result the guardian's Stop cut off before it was said as never told", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    s.onBackendTurn(() => "stopped");
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    await s.settle();
+    expect((await s.taskRepo.get(taskId))?.reportGivenUp).toBe(true);
+    expect((await s.tasks.listForPanel()).find((row) => row.id === taskId)?.notSynced).toBe(true);
   });
 
   it("hands a task's result over again when a newer message, not a Stop, cut the turn short", async () => {
