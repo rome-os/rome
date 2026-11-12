@@ -367,24 +367,25 @@ async function persistRoutineDraftCard(
   }
 }
 
-// Snapshot a suspension into a first-class assistant card message — a
-// `pending_interaction` part for an inline component. Unlike the ask_user /
+// Snapshot an app's card into a first-class assistant card message — a
+// `pending_interaction` part for an inline component that waits, a `widget`
+// part for one that does not. Unlike the ask_user /
 // routine cards (built from the tool INPUT), this is built from the action
 // RESULT: the agent-session executeAction shim returns
 // `{ pendingInteraction: true, ... }` on the tool_result. `toolUseId` is the correlation key the component /
 // surface cites when it posts its result back.
-async function persistSuspensionCard(
+async function persistCard(
   webchatRepo: import("../../webchat/repository.js").WebChatRepository,
   sessionId: string,
   turnId: string,
-  part: Extract<MessagePart, { type: "pending_interaction" }>,
+  part: Extract<MessagePart, { type: "pending_interaction" | "widget" }>,
 ): Promise<void> {
   try {
     // Push live (message_insert) so the card appears in the transcript as the
     // turn streams, not only on the post-turn reload. `addMessage` is silent.
     await webchatRepo.addBackendMessage(sessionId, turnId, [part]);
   } catch (err) {
-    log.warn("failed to persist suspension card", {
+    log.warn("failed to persist card", {
       sessionId,
       turnId,
       toolUseId: part.toolUseId,
@@ -417,10 +418,9 @@ type PendingInteractionPart = Extract<MessagePart, { type: "pending_interaction"
 const isProposeRoutineTool = (tool: unknown): boolean =>
   typeof tool === "string" && (tool === "propose_routine" || tool.endsWith("__propose_routine"));
 
-/** Pull a suspension descriptor (`pendingInteraction: true`) out of an action's tool_result output, whether it arrived structured or
- * JSON-serialized through the Rome tools. Returns null for any non-suspended
- * result so the drain loop ignores ordinary tool calls. */
-function readSuspensionFromOutput(output: unknown): Suspension | null {
+/** The object an action's tool_result carries, whether it arrived structured
+ * or JSON-serialized through the Rome tools, or null for any other output. */
+function toolOutputObject(output: unknown): Record<string, unknown> | null {
   let value: unknown = output;
   // A Rome tool_result surfaces as `[{ type: "text", text: "<json>" }]`
   // (or `{ content: [...] }`); unwrap to the JSON text the action returned.
@@ -447,6 +447,93 @@ function readSuspensionFromOutput(output: unknown): Suspension | null {
   }
   if (!value || typeof value !== "object") return null;
   const o = value as Record<string, unknown>;
+  return o;
+}
+
+/** A widget that does not wait, pulled from an action's tool_result
+ * (`showWidget: true`, written by `actionToolOutput`), or null for any other
+ * result. `appId` is the app that owns the action. */
+function readWidgetFromOutput(
+  output: unknown,
+): { appId: string; componentId: string; props?: Record<string, unknown>; text: string } | null {
+  const o = toolOutputObject(output);
+  if (!o || o.showWidget !== true) return null;
+  if (typeof o.appId !== "string" || typeof o.componentId !== "string") return null;
+  if (typeof o.text !== "string") return null;
+  const props =
+    o.props && typeof o.props === "object" && !Array.isArray(o.props)
+      ? (o.props as Record<string, unknown>)
+      : undefined;
+  return {
+    appId: o.appId,
+    componentId: o.componentId,
+    ...(props ? { props } : {}),
+    text: o.text,
+  };
+}
+
+// Matched by name: a provider drops the `mcp__<server>__` prefix, so a tool of
+// the same name on an agent's external MCP server matches too (ZHA-171).
+const isExecuteActionTool = (tool: unknown): boolean =>
+  typeof tool === "string" && (tool === "execute_action" || tool.endsWith("__execute_action"));
+
+/** The action an `execute_action` tool call names, or undefined for any other
+ *  tool call. */
+function executedActionName(msg: Extract<AgentEvent, { type: "tool_use" }>): string | undefined {
+  if (!isExecuteActionTool(msg.tool)) return undefined;
+  const name = (msg.input as { action_name?: unknown } | undefined)?.action_name;
+  return typeof name === "string" ? name : undefined;
+}
+
+type WidgetPart = Extract<MessagePart, { type: "widget" }>;
+
+/**
+ * The widget a tool_result shows, when Rome may store it. Tool output is not
+ * proof of where it came from: an action's own data, a shell command or
+ * another tool can print the same JSON. So a widget is stored only from a
+ * tool call named `execute_action` (`actionName`), only for the app that owns
+ * that action, and only when that app is installed and declares the component.
+ */
+function trustedWidget(
+  msg: Extract<AgentEvent, { type: "tool_result" }>,
+  actionName: string | undefined,
+  deps: Pick<ApiDeps, "appCatalog" | "actionRegistry">,
+  sessionId: string,
+): WidgetPart | null {
+  const widget = readWidgetFromOutput(msg.output);
+  if (!widget) return null;
+  const owner = actionName ? deps.actionRegistry.getMetadata?.(actionName) : undefined;
+  if (owner?.ownerType !== "app" || owner.ownerId !== widget.appId) {
+    log.warn("rejected widget: not shown by an action its app owns", {
+      sessionId,
+      appId: widget.appId,
+      tool: typeof msg.tool === "string" ? msg.tool : undefined,
+      actionName,
+    });
+    return null;
+  }
+  const resolvedApp = deps.appCatalog.listResolved().find((a) => a.appId === widget.appId);
+  if (!resolvedApp) {
+    log.warn("rejected widget: app not installed", { sessionId, appId: widget.appId });
+    return null;
+  }
+  if (!(resolvedApp.manifest.components ?? []).includes(widget.componentId)) {
+    log.warn("rejected widget: component not declared by app", {
+      sessionId,
+      appId: widget.appId,
+      componentId: widget.componentId,
+    });
+    return null;
+  }
+  return { type: "widget", toolUseId: msg.toolUseId, ...widget };
+}
+
+/** Pull a suspension descriptor (`pendingInteraction: true`) out of an action's tool_result output, whether it arrived structured or
+ * JSON-serialized through the Rome tools. Returns null for any non-suspended
+ * result so the drain loop ignores ordinary tool calls. */
+function readSuspensionFromOutput(output: unknown): Suspension | null {
+  const o = toolOutputObject(output);
+  if (!o) return null;
   if (typeof o.appId !== "string") return null;
   const asRecord = (v: unknown): Record<string, unknown> | undefined =>
     v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, unknown>) : undefined;
@@ -528,31 +615,8 @@ function readPlaceWidgetFromOutput(output: unknown): {
   route?: string;
   params?: Record<string, string | number | boolean>;
 } | null {
-  let value: unknown = output;
-  if (value && typeof value === "object" && !Array.isArray(value)) {
-    const content = (value as { content?: unknown }).content;
-    if (Array.isArray(content)) value = content;
-  }
-  if (Array.isArray(value)) {
-    const textBlock = value.find(
-      (b): b is { type: "text"; text: string } =>
-        !!b &&
-        typeof b === "object" &&
-        (b as { type?: unknown }).type === "text" &&
-        typeof (b as { text?: unknown }).text === "string",
-    );
-    value = textBlock?.text;
-  }
-  if (typeof value === "string") {
-    try {
-      value = JSON.parse(value);
-    } catch {
-      return null;
-    }
-  }
-  if (!value || typeof value !== "object") return null;
-  const o = value as Record<string, unknown>;
-  if (o.placeWidget !== true) return null;
+  const o = toolOutputObject(output);
+  if (!o || o.placeWidget !== true) return null;
   if (typeof o.appId !== "string") return null;
   // `route` addresses a screen inside the app; `params` are flat scalar query
   // params. Both are agent-supplied, so accept only well-formed shapes and drop
@@ -4016,6 +4080,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           // from the tool-use id (the key the handler created the routine
           // with), never read from the tool's output.
           const pendingRoutineActivations = new Map<string, unknown>();
+          // The action each `execute_action` call of this turn names, by tool
+          // call id, so a widget is stored only for the app that owns it.
+          const executeActionCalls = new Map<string, string>();
           const persistActivatedCard = (toolUseId: string, toolInput: unknown) =>
             persistRoutineDraftCard(
               deps.webchatRepo,
@@ -4166,6 +4233,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // Out-of-band snapshot for the routine draft card. An
               // `activate: true` call creates the routine in its handler, so its
               // card waits for the tool_result, which carries the routine id.
+              if (msg.type === "tool_use") {
+                const actionName = executedActionName(msg);
+                if (actionName) executeActionCalls.set(msg.id, actionName);
+              }
               if (
                 msg.type === "tool_use" &&
                 isProposeRoutineTool(msg.tool) &&
@@ -4205,7 +4276,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                   // there is no owning app to validate.
                   const card = buildBuiltinCard(msg, suspension, sessionId);
                   if (card) {
-                    await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, card);
+                    await persistCard(deps.webchatRepo, sessionId, turnId, card);
                   }
                 } else if (suspension) {
                   const resolvedApp = deps.appCatalog
@@ -4225,7 +4296,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                       componentId: suspension.componentId,
                     });
                   } else {
-                    await persistSuspensionCard(deps.webchatRepo, sessionId, turnId, {
+                    await persistCard(deps.webchatRepo, sessionId, turnId, {
                       type: "pending_interaction",
                       toolUseId: msg.toolUseId,
                       appId: suspension.appId,
@@ -4238,6 +4309,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                     });
                   }
                 }
+                // A widget that does not wait: stored as its own part of a
+                // message, so it shows in the turn and again on every load.
+                const widget = trustedWidget(
+                  msg,
+                  executeActionCalls.get(msg.toolUseId),
+                  deps,
+                  sessionId,
+                );
+                if (widget) await persistCard(deps.webchatRepo, sessionId, turnId, widget);
                 // Fire-and-forget widget placement: an action that returned
                 // `place_widget` surfaces it on its tool_result. Emit a transient
                 // `widget_placement` event so the live client mounts the widget on
@@ -4499,7 +4579,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // foreground turn (notably after `defer` wakes it). Its tool result still
     // needs to become a first-class transcript card; otherwise it exists only
     // in the trace and the model falsely believes the form was shown.
-    const builtinQuestionCards: PendingInteractionPart[] = [];
+    const backendCards: Array<PendingInteractionPart | WidgetPart> = [];
+    // As in a foreground turn: the action each `execute_action` call names.
+    const executeActionCalls = new Map<string, string>();
     // A recorded event's turn delivers its own reply, so its cards are written
     // as they arrive, ahead of that reply, under the turn's own id.
     let recordedTurnId: string | undefined;
@@ -4581,18 +4663,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           });
         }
       }
+      if (msg.type === "tool_use") {
+        const actionName = executedActionName(msg);
+        if (actionName) executeActionCalls.set(msg.id, actionName);
+      }
       if (msg.type === "tool_result") {
         const suspension = readSuspensionFromOutput(msg.output);
-        if (suspension && suspension.kind === "inline" && suspension.builtin) {
-          const card = buildBuiltinCard(msg, suspension, sessionId);
-          if (card && recorded) {
-            const cardTurnId = recordedTurnId ?? syntheticTurnId;
-            recordedCardWrites = recordedCardWrites.then(() =>
-              persistSuspensionCard(deps.webchatRepo, sessionId, cardTurnId, card),
-            );
-          } else if (card) {
-            builtinQuestionCards.push(card);
-          }
+        const card =
+          suspension && suspension.kind === "inline" && suspension.builtin
+            ? buildBuiltinCard(msg, suspension, sessionId)
+            : trustedWidget(msg, executeActionCalls.get(msg.toolUseId), deps, sessionId);
+        if (card && recorded) {
+          const cardTurnId = recordedTurnId ?? syntheticTurnId;
+          recordedCardWrites = recordedCardWrites.then(() =>
+            persistCard(deps.webchatRepo, sessionId, cardTurnId, card),
+          );
+        } else if (card) {
+          backendCards.push(card);
         }
       }
       return recordedCardWrites;
@@ -4604,8 +4691,8 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // Persist cards before the final narration so transcript order matches the
       // foreground path ("choose above"). `addBackendMessage` also pushes a
       // message_insert event to an already-open session.
-      for (const card of builtinQuestionCards) {
-        await persistSuspensionCard(deps.webchatRepo, sessionId, syntheticTurnId, card);
+      for (const card of backendCards) {
+        await persistCard(deps.webchatRepo, sessionId, syntheticTurnId, card);
       }
       // Persist + push the reply before the stream emits `done`, so a
       // late-attached subscriber's reload-on-done also sees it. The push

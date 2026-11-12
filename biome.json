@@ -114,6 +114,37 @@
           }
         }
       }
+    },
+    {
+      "includes": [
+        "rome_apps/**",
+        "!rome_apps/coding/src/actions/coding-task/index.test.ts",
+        "!rome_apps/dream/src/actions/dream/index.test.ts",
+        "!rome_apps/dream/src/actions/skill-review/index.test.ts",
+        "!rome_apps/dream/src/api/index.test.ts",
+        "!rome_apps/showcases/src/api/index.test.ts",
+        "!rome_apps/system/src/actions/create-routine/create-routine.test.ts",
+        "!rome_apps/system/src/actions/delete-routine/delete-routine.test.ts",
+        "!rome_apps/system/src/actions/search-routine/search-routine.test.ts",
+        "!rome_apps/system/src/actions/summon/summon.test.ts"
+      ],
+      "linter": {
+        "rules": {
+          "style": {
+            "noRestrictedImports": {
+              "level": "error",
+              "options": {
+                "patterns": [
+                  {
+                    "group": ["@rome/core", "@rome/core/**", "**/packages/core/**"],
+                    "message": "An app reaches core only through @rome-os/app-runtime and @rome-os/app-web-sdk. See rome_apps/CLAUDE.md."
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
     }
   ]
 }

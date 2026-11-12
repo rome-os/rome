@@ -26,14 +26,14 @@ import {
   onInstanceLinked,
 } from "./instance/instance-identity.js";
 import { startInstanceIdentityHeartbeat } from "./instance/instance-identity-heartbeat.js";
-import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./lib/feedback-client.js";
+import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "./instance/feedback-client.js";
 import { assembleDiagnosticBundle } from "./instance/diagnostics.js";
-import { NotifyClient } from "./lib/notify-client.js";
+import { NotifyClient } from "./instance/notify-client.js";
 import { CloudProfileClient } from "./instance/cloud-profile.js";
 import { getGuardianAuthState, recordResolvedAccount } from "./access/guardian-auth-state.js";
 import { systemClock } from "./lib/clock.js";
 import { provisionRelayMailboxAtBoot } from "./relay/mailbox.js";
-import { createRomeCloudAgentsClient } from "./lib/rome-cloud-agents.js";
+import { createRomeCloudAgentsClient } from "./connections/integrations/rome-cloud-agents.js";
 import { createNodeCallerProvisioner } from "./desktops/rome-node-provisioning.js";
 import { getConfiguredInstanceOrigin, getRomeCloudOrigin } from "./instance/rome-cloud-origin.js";
 import { resolveInstanceSlug } from "./instance/runtime.js";

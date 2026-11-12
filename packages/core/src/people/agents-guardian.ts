@@ -18,7 +18,7 @@
 import type { ChannelMessage } from "@rome-os/app-runtime";
 import type { PeopleRepository } from "../db/repositories/people.js";
 import type { SettingsRepository } from "../db/repositories/settings.js";
-import type { AgentMessageEnvelope } from "../lib/rome-cloud-agents.js";
+import type { AgentMessageEnvelope } from "../connections/integrations/rome-cloud-agents.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("agents-guardian");

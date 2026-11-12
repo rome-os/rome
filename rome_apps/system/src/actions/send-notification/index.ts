@@ -6,7 +6,7 @@ import type { Action, ActionConfig, ActionResult } from "@rome-os/app-runtime";
 // ---------------------------------------------------------------------------
 
 /** Structural copy of core's `SendOutcome`/`NotifyService`
- * (`packages/core/src/lib/notify-client.ts`). Like every system action's
+ * (`packages/core/src/instance/notify-client.ts`). Like every system action's
  * capability interface, it is re-declared here rather than imported: the action
  * can't reach core internals, and the runtime injects the real `NotifyClient`
  * in the main process or its WorkerRPC proxy in a worker — both satisfy this

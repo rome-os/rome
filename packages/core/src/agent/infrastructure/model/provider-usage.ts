@@ -7,11 +7,12 @@
 // each maintaining its own narrower parser that could miss a genuinely-exhausted
 // window.
 
-import type { ModelAccountUsage, ModelUsageWindow } from "../agent/index.js";
+import type { ModelAccountUsage, ModelUsageWindow } from "../../domain/model-account.js";
 import { promises as fs } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import { createLogger } from "../logger.js";
+import { getErrorMessage } from "../../../lib/error-message.js";
+import { createLogger } from "../../../logger.js";
 
 const log = createLogger("provider-usage");
 
@@ -33,10 +34,6 @@ const WINDOW_DURATION_KEYS = [
   "windowDurationMinutes",
   "window_duration_minutes",
 ];
-
-export function getErrorMessage(err: unknown): string {
-  return err instanceof Error ? err.message : "Command failed";
-}
 
 function clampPercent(value: number): number {
   return Math.max(0, Math.min(100, Math.round(value * 10) / 10));

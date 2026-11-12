@@ -27,7 +27,7 @@ import {
 } from "../apps/actions/module-loader.js";
 import type { AppFavorRequests } from "../apps/app-favors-port.js";
 import type { HostExecutionService } from "../apps/host-execution/service.js";
-import type { FeedbackService } from "../lib/feedback-client.js";
+import type { FeedbackService } from "../instance/feedback-client.js";
 import type { CloudProfileService } from "../instance/cloud-profile.js";
 import type { AgentNamesService } from "../chats/accounts/agent-names.js";
 import { withRemovedMembers } from "../lib/removed-members.js";

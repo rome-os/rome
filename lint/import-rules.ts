@@ -12,6 +12,7 @@ import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import { contextCrossings, contextRules } from "./rules/contexts.js";
 import { layerRules, listedCrossings } from "./rules/layers.js";
+import { libraryRules } from "./rules/library.js";
 import { wiringCrossings, wiringRules } from "./rules/wiring.js";
 
 /**
@@ -239,7 +240,7 @@ function toPosix(path: string): string {
 /** Checks packages/core/src against every rule set and prints each violation. Returns the exit code. */
 export function runCli(): number {
   const core = join(dirname(fileURLToPath(import.meta.url)), "..", "packages", "core");
-  const rules = [...layerRules, ...contextRules, ...wiringRules];
+  const rules = [...layerRules, ...contextRules, ...libraryRules, ...wiringRules];
   const crossings = [...listedCrossings, ...contextCrossings, ...wiringCrossings];
   const violations = checkImports(join(core, "src"), join(core, "tsconfig.json"), rules, crossings);
   if (violations.length > 0) {

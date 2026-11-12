@@ -1,4 +1,4 @@
-import { AGENT_REPORTS_ENABLED_KEY } from "../../lib/feedback-client.js";
+import { AGENT_REPORTS_ENABLED_KEY } from "../../instance/feedback-client.js";
 import { Hono } from "hono";
 import type { ApiDeps } from "../deps.js";
 import {

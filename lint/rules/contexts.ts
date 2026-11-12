@@ -3,7 +3,7 @@
 // contexts it may import. Every pair of contexts it does not name is a rule:
 // the first context never imports the second, type-only imports included.
 // Folders that are not listed here, such as db/, lib/ and the folders not yet
-// in a context, are not checked.
+// in a context, are not checked here. rules/library.ts checks lib/.
 
 import type { ImportRule, ListedCrossing } from "../import-rules.js";
 
@@ -110,6 +110,7 @@ function describe(from: string, to: string, name: string): string {
   return `${from}/ may import only ${may}, so no file in ${from}/ imports ${to}/.`;
 }
 
+/** Every context folder directly under src/. */
 export const contexts = Object.keys(ALLOWED_IMPORTS);
 
 export const contextRules: ImportRule[] = contexts.flatMap((from) =>

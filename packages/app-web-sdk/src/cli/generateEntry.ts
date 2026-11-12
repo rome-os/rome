@@ -13,6 +13,7 @@ export function generateEntry({ outFile, userEntryPath }: GenerateEntryOptions):
 import { StrictMode } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import {
+  bindBootstrap,
   getBootstrap,
   getRegisteredComponent,
   setMountContainer,
@@ -30,6 +31,7 @@ export async function mount(
   bootstrap?: RomeAppBootstrap,
 ): Promise<void> {
   const resolved = bootstrap ?? getBootstrap();
+  bindBootstrap(resolved);
   setMountContainer(container);
   root = createRoot(container);
   root.render(
@@ -56,6 +58,7 @@ export async function mountComponent(
   componentId: string,
   ctx: AppComponentContext,
 ): Promise<void> {
+  bindBootstrap(ctx.bootstrap);
   const renderer = getRegisteredComponent(componentId);
   if (!renderer) {
     throw new Error(\`App did not register an inline component "\${componentId}"\`);

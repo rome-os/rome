@@ -12,7 +12,8 @@ import {
   getStoredAnthropicCompatibleCredentials,
   summarizeAnthropicCompatibleCredentials,
 } from "./anthropic-compatible-providers.js";
-import { getErrorMessage, readClaudeOAuthUsage } from "../../../../lib/provider-usage.js";
+import { getErrorMessage } from "../../../../lib/error-message.js";
+import { readClaudeOAuthUsage } from "../provider-usage.js";
 import { createLogger } from "../../../../logger.js";
 import type {
   ModelAccount,

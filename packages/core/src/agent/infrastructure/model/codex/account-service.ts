@@ -7,13 +7,13 @@ import {
   markCodexAuthRevoked,
   type CodexCliStatus,
   type CodexPlanType,
-} from "../../../../lib/codex-cli-auth.js";
+} from "./cli-auth.js";
+import { getErrorMessage } from "../../../../lib/error-message.js";
 import {
-  getErrorMessage,
   normalizeUsageStatus,
   readLiveOrCachedUsage,
   type AIToolUsageStatus,
-} from "../../../../lib/provider-usage.js";
+} from "../provider-usage.js";
 import { fetchRomeCredits } from "./rome-credits.js";
 import type {
   ModelAccount,

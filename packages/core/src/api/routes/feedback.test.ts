@@ -3,7 +3,7 @@ import { Hono } from "hono";
 import { feedbackRoutes } from "./feedback.js";
 import { buildTestDeps, createTestDb, type TestDb } from "../../test/helpers.js";
 import { setInstanceTokenInMemory } from "../../instance/instance-identity.js";
-import { FEEDBACK_BODY_MAX } from "../../lib/feedback.js";
+import { FEEDBACK_BODY_MAX } from "../../instance/feedback.js";
 
 interface RelayCall {
   url: string;

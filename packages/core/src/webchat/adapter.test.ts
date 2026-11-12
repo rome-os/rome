@@ -68,12 +68,27 @@ describe("WebChatAdapter", () => {
       "assistant",
       JSON.stringify([{ type: "approval_card", approvalId: "appr-1" }]),
     );
+    await repo.addMessage(
+      "msg-widget",
+      "sess-1",
+      "assistant",
+      JSON.stringify([
+        {
+          type: "widget",
+          toolUseId: "tu-1",
+          appId: "meals",
+          componentId: "today",
+          text: "You ate twice today.",
+        },
+      ]),
+    );
     await repo.addMessage("msg-trace", "sess-1", "trace", "[]");
 
     const messages = await readWebchatMessages(repo, "sess-1", hoursAgo(2));
 
-    expect(messages).toHaveLength(2);
-    expect(messages.map((m) => m.messageId)).toEqual(["msg-user", "msg-assistant"]);
+    expect(messages).toHaveLength(3);
+    expect(messages.map((m) => m.messageId)).toEqual(["msg-user", "msg-assistant", "msg-widget"]);
+    expect(messages[2]?.text).toBe("You ate twice today.");
     expect(messages[0]).toStrictEqual({
       channel: "webchat",
       direction: "inbound",

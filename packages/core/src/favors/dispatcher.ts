@@ -131,14 +131,23 @@ export class FavorDispatchRunner {
           favorDispatchAttempt: claim.dispatchAttempt,
         },
       });
-      if (result.status === "ok" || result.status === "place_widget") {
+      // Nobody sees a card from a favor, so a widget that does not wait has
+      // done all it does, as a placed widget has.
+      const outputRef =
+        result.status === "ok"
+          ? { data: result.data }
+          : result.status === "place_widget"
+            ? { placement: result.placement }
+            : result.status === "show_widget" && result.widget.waits !== true
+              ? { widget: result.widget }
+              : null;
+      if (outputRef) {
         await this.deps.favorService.reportDispatchResult(id, {
           claimToken: claim.claimToken,
           actionRefHash: claim.actionRefHash,
           status: "succeeded",
           completedAt: new Date().toISOString(),
-          outputRef:
-            result.status === "ok" ? { data: result.data } : { placement: result.placement },
+          outputRef,
         });
         return;
       }
