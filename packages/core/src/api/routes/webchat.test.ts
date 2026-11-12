@@ -1,6 +1,6 @@
 import { ConciergeService, type ConciergeDeps } from "../../concierge/service.js";
 import { testReceipt, testTurnHandle } from "../../test/turn-handle.js";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { context as otelContext } from "@opentelemetry/api";
@@ -37,7 +37,14 @@ import type {
 } from "../../agent/index.js";
 import type { ForkRunParams } from "../../core/types.js";
 import { ModelResolutionError } from "../../agent/index.js";
-import { guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";
+import { conciergeTasks, guardianAuth, romeSessions, webchatProjects } from "../../db/schema.js";
+import { Hono } from "hono";
+import { COOKIE_NAME, createSession as signGuardianSession } from "../../access/auth.js";
+import { sessionActorMiddleware } from "../../access/session-actor.js";
+import { ConciergeTasks } from "../../concierge/tasks.js";
+import { TASK_CHAT_TRIGGER_KIND } from "../../concierge/service.js";
+import type { ApiDeps } from "../deps.js";
+import { conciergeRoutes } from "./concierge.js";
 import { ConciergeTasksRepository } from "../../db/repositories/concierge-tasks.js";
 import { VisitorProfilesRepository } from "../../access/visitor-profiles.js";
 import { TURN_BRANCH_PROMPT_MAX_LENGTH } from "@rome/api-types/trace-segments";
@@ -818,8 +825,9 @@ describe("Webchat API", () => {
       shutdown: async () => {},
     };
     const repo = new ConciergeTasksRepository(testDb.db);
+    const tasks = new ConciergeTasks(repo);
     deps.concierge = {
-      deps: { tasks: { repo } },
+      deps: { tasks },
       conciergeChat: async () => null,
       switchIfExhausted: async () => {},
     } as never;
@@ -845,7 +853,7 @@ describe("Webchat API", () => {
         }),
       );
     const reaction = async (key: string) =>
-      (await repo.reactionsOf("topic", [key])).get(key) ?? null;
+      (await tasks.reactionsOf("topic", [key])).get(key) ?? null;
     const a = "00000000-0000-4000-8000-00000000000a";
     const b = "00000000-0000-4000-8000-00000000000b";
     try {
@@ -936,6 +944,105 @@ describe("Webchat API", () => {
       expect(interrupt).not.toHaveBeenCalled();
     } finally {
       for (const finish of finishers) finish();
+    }
+  });
+
+  it("stores uploads in the asset store, naming the local file to the model only", async () => {
+    const home = mkdtempSync(join(tmpdir(), "rome-webchat-assets-"));
+    rs.stubEnv("HOME", home);
+    rs.stubEnv("ROME_PROFILE", "webchat-assets-test");
+    const prompts: string[] = [];
+    const agent: FakeSession = {
+      key: { agentName: "main", channelThreadKey: "webchat:test" },
+      sessionId: "agent-session",
+      status: "running",
+      runningTurn: testTurnHandle({ turnId: "upload-turn", events: (async function* () {})() }),
+      startTurn: (input) => {
+        prompts.push(input.prompt);
+        return testTurnHandle({
+          turnId: `upload-${prompts.length}`,
+          turnContext: otelContext.active(),
+          events: (async function* () {
+            yield { type: "result" as const, content: "" };
+          })(),
+        });
+      },
+      onStatusChange: () => () => {},
+      stop: async () => {},
+      close: async () => {},
+    };
+    deps.agentSessionManager = fakeSessionManager(() => agent);
+    const app = createWebchatRuntime(deps).routes;
+    const created = await app.request("/chat/sessions", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "Uploads" }),
+    });
+    const { id } = (await created.json()) as { id: string };
+    const file = (data: string) => ({
+      name: "image.png",
+      mimeType: "image/png",
+      dataBase64: Buffer.from(data).toString("base64"),
+    });
+    const send = (files: unknown[]) =>
+      app.request(`/chat/sessions/${id}/turns`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ text: "look", files }),
+      });
+    try {
+      expect((await send([file("first"), file("second")])).status).toBe(200);
+
+      const [shown] = (await deps.webchatRepo.getMessages(id)).filter((m) => m.role === "user");
+      const links = [
+        ...shown.content.matchAll(/\[image\.png\]\(<(\/api\/assets\/[0-9a-f]{32}\.png)>\)/g),
+      ];
+      // The same name twice makes two assets, and the persisted text has no local path.
+      expect(links.map((link) => link[1])).toHaveLength(2);
+      expect(links[0][1]).not.toBe(links[1][1]);
+      expect(shown.content).not.toContain("local file");
+      expect(shown.content).not.toContain(home);
+      const assetsDir = join(home, ".rome", "webchat-assets-test", "assets");
+      // The model's turn carries each file's local path too.
+      expect(prompts).toHaveLength(1);
+      for (const [index, [, url]] of links.entries()) {
+        const local = join(assetsDir, url.replace("/api/assets/", ""));
+        expect(prompts[0]).toContain(`(<${url}>) — local file: ${local}`);
+        expect(readFileSync(local, "utf-8")).toBe(index === 0 ? "first" : "second");
+      }
+      // Nothing was written into the project.
+      expect(existsSync(join(projectsRoot, "default", String(new Date().getFullYear())))).toBe(
+        false,
+      );
+    } finally {
+      rs.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it("refuses an upload over the size cap with 413", async () => {
+    const home = mkdtempSync(join(tmpdir(), "rome-webchat-assets-"));
+    rs.stubEnv("HOME", home);
+    rs.stubEnv("ROME_PROFILE", "webchat-assets-test");
+    const app = createWebchatRuntime(deps).routes;
+    await deps.webchatRepo.createSession("big-upload", "Big");
+    try {
+      // Over 100 MB of base64 text, refused before it is decoded.
+      const res = await app.request("/chat/sessions/big-upload/turns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          files: [
+            { name: "big.bin", dataBase64: "A".repeat(Math.ceil((100 * 1024 * 1024 + 4) / 3) * 4) },
+          ],
+        }),
+      });
+      expect(res.status).toBe(413);
+      expect(((await res.json()) as { error: string }).error).toMatch(/big\.bin.*100 MB/);
+      expect(await deps.webchatRepo.getMessageCount("big-upload")).toBe(0);
+    } finally {
+      rs.unstubAllEnvs();
+      rmSync(home, { recursive: true, force: true });
     }
   });
 
@@ -4443,6 +4550,7 @@ describe("Webchat API", () => {
           id === "topic-1" ? { id, name: "Calendar", main: false } : null,
         turnHeader: async (chat: { id: string; name: string; main: boolean }) =>
           `<concierge_chat id="${chat.id}" name="${chat.name}" main="${chat.main}"/>\n<concierge_owner role="visitor" email="ann@example.com"/>`,
+        stoppedRequestLines: async () => "",
       } as never;
       await deps.webchatRepo.createSession(
         "topic-1",
@@ -5065,6 +5173,60 @@ describe("Webchat API", () => {
         text: "Showing today's meals as a card.",
       });
       expect(parts.some((p) => p.type === "pending_interaction")).toBe(false);
+    });
+
+    it("stores a card described as data, with its bindings", async () => {
+      registerAppAction("show_today", "meals");
+      const ui = {
+        components: [{ id: "root", component: "Text", text: { path: "/today/summary" } }],
+      };
+      const ctl = mockScriptedManager();
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_use",
+          id: "tu-widget-ui",
+          tool: "execute_action",
+          input: { action_name: "show_today" },
+        };
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-widget-ui",
+          tool: "execute_action",
+          output: [
+            {
+              type: "text",
+              text: JSON.stringify({
+                showWidget: true,
+                appId: "meals",
+                ui,
+                bind: { "/today": "days/2026-11-11" },
+                text: "Showing today's meals.",
+              }),
+            },
+          ],
+        };
+        yield { type: "result", content: "" };
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "what did I eat today?" }),
+        }),
+      );
+
+      expect(await assistantPartsIn(sessionId)).toContainEqual({
+        type: "widget",
+        toolUseId: "tu-widget-ui",
+        appId: "meals",
+        ui,
+        bind: { "/today": "days/2026-11-11" },
+        text: "Showing today's meals.",
+      });
     });
 
     it("stores no widget for a component its app does not declare", async () => {
@@ -6610,7 +6772,16 @@ describe("Webchat API", () => {
 
     it("shows a status reaction on the guardian's message in a Concierge chat, and streams its changes", async () => {
       const repo = new ConciergeTasksRepository(testDb.db);
-      deps.concierge = { deps: { tasks: { repo } } } as never;
+      const tasks = new ConciergeTasks(repo);
+      // The task chat runs while `running` says so.
+      let running = true;
+      tasks.attachFacts({
+        now: () => Date.now(),
+        running: () => running,
+        waitingSince: async () => new Map(),
+        reportPending: () => [],
+      });
+      deps.concierge = { deps: { tasks } } as never;
       await deps.webchatRepo.createSession(
         "topic",
         "Topic",
@@ -6634,22 +6805,27 @@ describe("Webchat API", () => {
         JSON.stringify([{ type: "text", content: "Thanks" }]),
         "turn-2",
       );
-      const [task] = await repo.upsertMany([{ title: "Weather", state: "doing" }]);
+      await deps.webchatRepo.createSession("task-chat", "Weather");
+      const [task] = await repo.upsertMany([{ title: "Weather", sessionId: "task-chat" }]);
       const app = createWebchatRuntime(deps).routes;
       const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
       const working = readSseUntil(events, "event: message_status_reaction");
-      await repo.markWorking(task.id, { chatId: "topic", messageKey: "g1" });
+      await repo.linkMessage(task.id, { chatId: "topic", messageKey: "g1" });
       expect(await working).toContain(
         `data: ${JSON.stringify({ sessionId: "topic", messageId: "g1", statusReaction: "working" })}`,
       );
-      // Finished work shows none: the event carries null.
+      // Finished and reported work shows none: the event carries null.
       const cleared = readSseUntil(events, '"statusReaction":null');
-      await repo.settleReactions(task.id, "done");
+      running = false;
+      await repo.setLastOutcome(task.id, "succeeded");
+      await repo.markReported([task.id]);
       expect(await cleared).toContain('"messageId":"g1"');
-      const [retry] = await repo.upsertMany([{ title: "Retry", state: "doing" }]);
-      await repo.markWorking(retry.id, { chatId: "topic", messageKey: "g1" });
+      await deps.webchatRepo.createSession("retry-chat", "Retry");
+      const [retry] = await repo.upsertMany([{ title: "Retry", sessionId: "retry-chat" }]);
+      await repo.linkMessage(retry.id, { chatId: "topic", messageKey: "g1" });
       const failed = readSseUntil(events, '"statusReaction":"failed"');
-      await repo.settleReactions(retry.id, "failed");
+      await repo.setLastOutcome(retry.id, "failed");
+      await repo.markReported([retry.id]);
       expect(await failed).toContain('"messageId":"g1"');
       await events.cancel();
 
@@ -6664,7 +6840,7 @@ describe("Webchat API", () => {
 
     it("names a task's chat thread on its messages and on a live placement, and no other thread", async () => {
       const repo = new ConciergeTasksRepository(testDb.db);
-      deps.concierge = { deps: { tasks: { repo } } } as never;
+      deps.concierge = { deps: { tasks: new ConciergeTasks(repo) } } as never;
       await deps.webchatRepo.createSession(
         "topic",
         "Topic",
@@ -6726,45 +6902,202 @@ describe("Webchat API", () => {
 
       // A task that leaves the chat takes its thread's label with it.
       const retired = readSseUntil(events, "event: chat_thread_retired");
-      await repo.moveToMainChat("topic");
+      await repo.upsertMany([{ id: task.id, chatId: null }]);
       expect(await retired).toContain(
         `data: ${JSON.stringify({ sessionId: "topic", chatThreadId: "g1" })}`,
       );
       await events.cancel();
     });
 
-    it("keeps a deleted task chat's row on the Concierge's list and tells the Concierge", async () => {
-      const repo = new ConciergeTasksRepository(testDb.db);
-      const deleted: string[] = [];
+    describe("a task chat's row", () => {
+      const guardianCookie = {
+        headers: { Cookie: `${COOKIE_NAME}=${signGuardianSession("guardian-1")}` },
+      };
+      let repo: ConciergeTasksRepository;
+      let deleted: string[];
+      let upserts: Array<{ id: string; archivedAt: number | null }>;
+      let app: ReturnType<typeof createWebchatRuntime>["routes"];
+
+      /** A chat the Concierge of `ownerKey` started, linked to a row of its own. */
+      const taskChat = async (id: string, ownerKey = "guardian") => {
+        await deps.webchatRepo.createSession(
+          id,
+          "Fix flaky test",
+          undefined,
+          undefined,
+          undefined,
+          undefined,
+          null,
+          "webchat",
+          null,
+          { ownerKey },
+        );
+        await deps.webchatRepo.setSessionTrigger(id, {
+          triggerKind: TASK_CHAT_TRIGGER_KIND,
+          triggerName: "Fix flaky test",
+        });
+        const [row] = await repo.upsertMany([
+          { title: `Task of ${id}`, state: "doing", sessionId: id },
+        ]);
+        // Its own task_upsert is told once its status is read: let it land.
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return row;
+      };
+      const archive = (id: string, archived = true) =>
+        app.request(`/chat/sessions/${id}/archive`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ archived }),
+        });
+      const panel = async () => {
+        const tasksApp = new Hono().use("*", sessionActorMiddleware(testDb.db)).route(
+          "/",
+          conciergeRoutes({
+            concierge: deps.concierge,
+            webchatRepo: deps.webchatRepo,
+          } as unknown as ApiDeps),
+        );
+        const response = await tasksApp.request("/concierge/tasks", guardianCookie);
+        expect(response.status).toBe(200);
+        return ((await response.json()) as { tasks: Array<{ title: string }> }).tasks
+          .map((task) => task.title)
+          .sort();
+      };
+
+      beforeEach(() => {
+        rs.useFakeTimers({ toFake: ["Date"] });
+        rs.setSystemTime(new Date());
+        repo = new ConciergeTasksRepository(testDb.db);
+        const tasks = new ConciergeTasks(repo);
+        const service = new ConciergeService({
+          webchatRepo: deps.webchatRepo,
+          tasks,
+        } as unknown as ConciergeDeps);
+        deleted = [];
+        service.chatDeleted = (taskId: string) => void deleted.push(taskId);
+        deps.concierge = service;
+        upserts = [];
+        tasks.subscribe((event, payload) => {
+          if (event !== "task_upsert") return;
+          const { task } = payload as { task: { id: string; archivedAt: number | null } };
+          upserts.push({ id: task.id, archivedAt: task.archivedAt });
+        });
+        app = createWebchatRuntime(deps).routes;
+      });
+
+      it("stops the task and takes it off the task list when its chat is archived, and lists it again unarchived", async () => {
+        const row = await taskChat("task-chat");
+        expect(await panel()).toEqual(["Task of task-chat"]);
+        upserts = [];
+
+        expect((await archive("task-chat")).status).toBe(200);
+        expect(await panel()).toEqual([]);
+        expect(upserts).toEqual([{ id: row.id, archivedAt: expect.any(Number) }]);
+        expect(await repo.get(row.id)).toMatchObject({ stopReason: "archived" });
+        // A repeated archive changes nothing, so the row still comes back.
+        expect((await archive("task-chat")).status).toBe(200);
+
+        expect((await archive("task-chat", false)).status).toBe(200);
+        expect(await panel()).toEqual(["Task of task-chat"]);
+        expect(upserts.at(-1)).toEqual({ id: row.id, archivedAt: null });
+        // Back on the list, the task stays stopped.
+        expect(await repo.get(row.id)).toMatchObject({
+          stoppedAt: expect.any(Date),
+          stopReason: "archived",
+        });
+      });
+
+      it("keeps a row the Concierge archived before its chat was archived", async () => {
+        const row = await taskChat("task-chat");
+        await repo.upsertMany([{ id: row.id, archived: true }]);
+        expect((await archive("task-chat")).status).toBe(200);
+        expect((await archive("task-chat", false)).status).toBe(200);
+        expect((await repo.get(row.id))?.archivedAt).not.toBeNull();
+      });
+
+      it("leaves the task list for good when the chat is deleted, and tells the Concierge", async () => {
+        const row = await taskChat("task-chat");
+        upserts = [];
+        expect((await app.request("/chat/sessions/task-chat", { method: "DELETE" })).status).toBe(
+          200,
+        );
+        expect(await panel()).toEqual([]);
+        expect(upserts).toEqual([{ id: row.id, archivedAt: expect.any(Number) }]);
+        expect(deleted).toEqual([row.id]);
+        expect(await repo.get(row.id)).toMatchObject({
+          sessionId: null,
+          stopReason: "deleted",
+          stoppedAt: expect.any(Date),
+          archivedAt: expect.any(Date),
+        });
+      });
+
+      it("leaves the rows alone when a common chat is archived or deleted", async () => {
+        await taskChat("task-chat");
+        await deps.webchatRepo.createSession("plain-chat", "Plain");
+        upserts = [];
+        expect((await archive("plain-chat")).status).toBe(200);
+        expect((await archive("plain-chat", false)).status).toBe(200);
+        expect((await app.request("/chat/sessions/plain-chat", { method: "DELETE" })).status).toBe(
+          200,
+        );
+        expect(await panel()).toEqual(["Task of task-chat"]);
+        expect(upserts).toEqual([]);
+        expect(deleted).toEqual([]);
+      });
+
+      it("never archives a row of another owner that links the chat", async () => {
+        const row = await taskChat("task-chat");
+        // A row that links the chat but is another owner's, as no write makes it.
+        testDb.db
+          .update(conciergeTasks)
+          .set({ ownerKey: "visitor:a" })
+          .where(eq(conciergeTasks.id, row.id))
+          .run();
+        expect((await archive("task-chat")).status).toBe(200);
+        expect(await repo.get(row.id)).toMatchObject({ archivedAt: null, stoppedAt: null });
+      });
+    });
+
+    it("lists a chat's pending checks and cancels one there", async () => {
+      const cancelled: [string, string][] = [];
+      const check = { id: "r-1", name: "CI", at: 5, waitingFor: "the run", taskId: "t-1" };
       deps.concierge = {
-        deps: { tasks: { repo } },
-        taskOfChat: async (chatId: string) => (await repo.findBySession(chatId))?.id ?? null,
-        chatDeleted: (taskId: string) => deleted.push(taskId),
+        deps: {
+          checks: {
+            inChatForApi: async (chatId: string) => (chatId === "chat-a" ? [check] : []),
+            cancel: async (chatId: string, id: string) => {
+              cancelled.push([chatId, id]);
+              return id === "r-1";
+            },
+          },
+          // A check for a task names it.
+          tasks: {
+            repo: { get: async (id: string) => (id === "t-1" ? { title: "PR 42" } : null) },
+          },
+        },
       } as never;
-      await deps.webchatRepo.createSession("task-chat", "Fix flaky test");
-      const [row] = await repo.upsertMany([
-        { title: "Fix flaky test", state: "doing", sessionId: "task-chat" },
-      ]);
-      await deps.webchatRepo.createSession("plain-chat", "Plain");
+      await deps.webchatRepo.createSession("chat-a", "A");
       const app = createWebchatRuntime(deps).routes;
-
-      expect((await app.request("/chat/sessions/plain-chat", { method: "DELETE" })).status).toBe(
-        200,
-      );
-      expect(deleted).toEqual([]);
-      expect((await app.request("/chat/sessions/task-chat", { method: "DELETE" })).status).toBe(
-        200,
-      );
-
-      expect(deleted).toEqual([row.id]);
-      expect(await repo.get(row.id)).toMatchObject({ state: "doing", sessionId: null });
+      expect(await (await app.request("/chat/sessions/chat-a/checks")).json()).toEqual({
+        checks: [{ ...check, taskTitle: "PR 42" }],
+      });
+      const gone = await app.request("/chat/sessions/chat-a/checks/r-9", { method: "DELETE" });
+      expect(gone.status).toBe(404);
+      const ok = await app.request("/chat/sessions/chat-a/checks/r-1", { method: "DELETE" });
+      expect(ok.status).toBe(200);
+      expect(cancelled).toEqual([
+        ["chat-a", "r-9"],
+        ["chat-a", "r-1"],
+      ]);
+      // A chat that is not there has no checks to show.
+      expect((await app.request("/chat/sessions/nope/checks")).status).toBe(404);
     });
 
     it("keeps the main Concierge chat, retires a topic chat before deleting it, and tells the activity after", async () => {
       const retired: [string, string][] = [];
       const gone: [string, boolean][] = [];
       deps.concierge = {
-        taskOfChat: async () => null,
         retireChat: async (chatId: string, how: string) => {
           retired.push([chatId, how]);
           return "concierge";
@@ -6772,6 +7105,12 @@ describe("Webchat API", () => {
         // The activity hears of a deleted chat once it is gone, as an archive.
         chatGone: async (chatId: string) =>
           void gone.push([chatId, (await deps.webchatRepo.getSession(chatId)) === null]),
+        endTaskChat: async (chatId: string, end: "archived" | "deleted") => {
+          if (end === "archived") await deps.webchatRepo.archiveSession(chatId);
+          else await deps.webchatRepo.deleteSession(chatId);
+          return null;
+        },
+        restoreTaskChat: async () => undefined,
       } as never;
       const topic = (id: string) =>
         deps.webchatRepo.createSession(

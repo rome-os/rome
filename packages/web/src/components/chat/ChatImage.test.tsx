@@ -171,6 +171,44 @@ describe("ChatImage", () => {
     );
   });
 
+  it("asks the server for a 900 px thumbnail of a stored picture", () => {
+    const src = "/api/assets/0123456789abcdef0123456789abcdef.png";
+    render(<Message text={`![Shot](${src})`} />);
+    expect(screen.getByRole("img", { name: "Shot" }).getAttribute("src")).toBe(`${src}?w=900`);
+  });
+
+  it("plays a stored video and audio file in place, without a thumbnail width", () => {
+    const id = "0123456789abcdef0123456789abcdef";
+    const { container } = render(
+      <Message text={`![Clip](/api/assets/${id}.mp4)\n\n![Song](/api/assets/${id}.mp3)`} />,
+    );
+    const video = container.querySelector("video") as HTMLVideoElement;
+    expect(video.getAttribute("src")).toBe(`/api/assets/${id}.mp4`);
+    expect(video.controls).toBe(true);
+    expect(video.getAttribute("preload")).toBe("metadata");
+    const audio = container.querySelector("audio") as HTMLAudioElement;
+    expect(audio.getAttribute("src")).toBe(`/api/assets/${id}.mp3`);
+    expect(audio.controls).toBe(true);
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("keeps the file reachable as a chip when a video or audio file cannot be played", () => {
+    const id = "0123456789abcdef0123456789abcdef";
+    const { container } = render(
+      <Message text={`![Clip](/api/assets/${id}.webm)\n\n![Song](/api/assets/${id}.mp3)`} />,
+    );
+    fireEvent.error(container.querySelector("video") as HTMLVideoElement);
+    fireEvent.error(container.querySelector("audio") as HTMLAudioElement);
+
+    expect(container.querySelector("video")).toBeNull();
+    expect(container.querySelector("audio")).toBeNull();
+    const clip = screen.getByText("Clip").closest("a") as HTMLAnchorElement;
+    expect(clip.getAttribute("href")).toBe(`/api/assets/${id}.webm`);
+    expect(clip.getAttribute("download")).toBe("Clip");
+    const song = screen.getByText("Song").closest("a") as HTMLAnchorElement;
+    expect(song.getAttribute("href")).toBe(`/api/assets/${id}.mp3`);
+  });
+
   it.each([
     "https://example.com/sky.jpg?w=1",
     "/api/share/token/projects/asset/a.png?path=projects%2Fa.png",

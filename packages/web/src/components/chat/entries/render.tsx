@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, lazy, Suspense, useContext } from "react";
 import type { ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
@@ -12,6 +12,7 @@ import { AppComponentView } from "./AppComponentView";
 import { ConnectCard } from "./ConnectCard";
 import { ErrorRunView } from "./ErrorEventView";
 import { QuestionCard } from "./QuestionCard";
+import { CardBoundary } from "./widget-ui/CardBoundary";
 import { RoutineDraftCard } from "./RoutineDraftCard";
 import { SubagentCallView } from "./SubagentCallView";
 import { TaskChatCard } from "./TaskChatCard";
@@ -23,6 +24,12 @@ import { ToolUseBlock } from "./ToolUseBlock";
 import { TurnRecapView } from "./TurnRecapView";
 import { UsageSummaryView } from "./UsageSummaryView";
 
+// Cards described as data bring in the A2UI renderer, which most chats never
+// need, so it loads with the first such card.
+const WidgetUiCard = lazy(() =>
+  import("./widget-ui/WidgetUiCard").then((m) => ({ default: m.WidgetUiCard })),
+);
+
 /** Latest parsed task_chat block per task in the Concierge transcript. */
 export const LatestTaskChatsContext = createContext<ReadonlyMap<string, ChatEntry> | null>(null);
 
@@ -33,6 +40,7 @@ function TaskChatEntry({ block }: { block: Extract<ChatEntry, { type: "task_chat
       chatId={block.chatId}
       title={block.title}
       isLatestForChat={!latest || latest.get(block.chatId) === block}
+      show={block.show}
     />
   );
 }
@@ -234,6 +242,24 @@ export function renderSingleEntry(
       );
     }
     case "widget":
+      if ("ui" in block) {
+        return (
+          <CardBoundary
+            key={`app-widget-${block.toolUseId}`}
+            fallback={<p className="text-ui text-muted-foreground">{block.text}</p>}
+          >
+            <Suspense fallback={null}>
+              <WidgetUiCard
+                toolUseId={block.toolUseId}
+                appId={block.appId}
+                ui={block.ui}
+                bind={block.bind}
+                text={block.text}
+              />
+            </Suspense>
+          </CardBoundary>
+        );
+      }
       // Nothing answers a widget, so the card gets no submit or dismiss.
       return (
         <AppComponentView

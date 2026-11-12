@@ -15,7 +15,8 @@
       "running": "Working",
       "waiting": "Needs you",
       "failed": "Stopped with an error",
-      "idle": "Done"
+      "idle": "Done",
+      "later": "Later"
     },
     "openForwardedChat": "Open task chat {{title}}",
     "showFullText": "Show full text",
@@ -31,20 +32,38 @@
       "blocked": "Pop-up blocked",
       "checkFailed": "Could not check the connection"
     },
+    "ask": {
+      "expiredFold": "Expired · answer to continue",
+      "answered": "Answered",
+      "answeredWith": "Answered: {{answer}}",
+      "dismissed": "Dismissed",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "waitingBelow": "Waiting: answer the card below",
+      "turnedDown": "Turned down: no answer within a day",
+      "turnedDownStopped": "Turned down: task stopped",
+      "openToAnswer": "Open the task chat to answer"
+    },
     "taskCardAlreadyAnswered": "This card was already answered. The task has been refreshed.",
     "openTaskChat": "Open",
     "tasks": {
       "title": "Tasks",
       "close": "Close tasks",
       "groups": {
-        "needsYou": "Needs you",
-        "doing": "Doing",
-        "next": "Up next",
-        "watching": "Watching",
-        "done": "Done"
+        "needsYou": "Waiting for you",
+        "active": "Active",
+        "later": "Later",
+        "ended": "Ended"
       },
+      "ended": {
+        "failed": "Failed",
+        "stopped": "Stopped",
+        "no_response": "No response"
+      },
+      "expired": "Expired — answer to continue",
       "stop": "Stop",
       "done": "Done",
+      "cancelCheck": "Cancel check",
       "archive": "Archive",
       "retry": "Try again",
       "pending": {
@@ -71,7 +90,7 @@
         "done": "I've done this"
       },
       "emptyTitle": "No tasks yet",
-      "emptyDescription": "Tasks {{name}} is working on, planning, or watching appear here."
+      "emptyDescription": "Tasks {{name}} hands to other agents appear here, with what each one waits for."
     },
     "messageDetails": "Message details",
     "chooseFolder": "Choose folder…",
@@ -157,6 +176,17 @@
   "archived": {
     "readOnly": "This chat is archived and read-only.",
     "unarchive": "Unarchive"
+  },
+  "checks": {
+    "label": "Checks scheduled in this chat",
+    "timed": "{{name}} · {{when}}",
+    "waiting": "Waiting for {{what}} · checks {{when}}",
+    "cancel": "Cancel {{name}}",
+    "loadFailed": "Failed to load scheduled checks",
+    "summary": "{{count}} checks · next: {{next}}",
+    "expand": "Show scheduled checks",
+    "collapse": "Hide scheduled checks",
+    "cancelFailed": "Failed to cancel the check"
   },
   "share": {
     "title": "Share chat",
@@ -389,12 +419,13 @@
     "typeAnswer": "Type your answer…",
     "dismissed": "Dismissed",
     "answered": "Answered",
-    "askedByRome": "Asked by Rome",
     "dismiss": "Dismiss",
     "send": "Send"
   },
   "appComponent": {
-    "dismiss": "Dismiss"
+    "dismiss": "Dismiss",
+    "widgetUnavailable": "Could not read this card's data. {{text}}",
+    "widgetUndrawable": "Could not show this card. {{text}}"
   },
   "aiToolsCard": {
     "title": "Connect Claude or ChatGPT",
@@ -589,6 +620,7 @@
   },
   "thread": {
     "title": "Chat thread",
+    "openTaskChat": "Open task chat",
     "close": "Close chat thread",
     "loadFailed": "Couldn't load this chat thread.",
     "replyPlaceholder": "Reply"

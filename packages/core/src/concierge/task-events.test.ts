@@ -16,7 +16,7 @@ const urgent = (taskId: string, kind = "turn_end:completed by=concierge") => ({
 });
 const quiet = (taskId: string, kind = "guardian_message") => ({ taskId, kind, urgent: false });
 
-function setup() {
+function setup(carried: Set<string> = new Set()) {
   const flushes: Array<{ ids: string[]; quiet: boolean; at: number }> = [];
   const rendered: string[][] = [];
   const gaveUp: string[] = [];
@@ -45,6 +45,7 @@ function setup() {
       return outcome;
     },
     giveUp: (taskId) => gaveUp.push(taskId),
+    carried: (taskId) => carried.has(taskId),
   });
   return {
     coalescer,
@@ -104,12 +105,12 @@ describe("TaskEventCoalescer", () => {
       expect(changes.at(-1)).toEqual([]);
     });
 
-    it("lets go of a row the turn carried but did not settle, until its retry", async () => {
+    it("lets go of a row once the turn that carried it ran to its end", async () => {
       const s = setup();
       s.coalescer.mark(urgent("a"));
       await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
       expect(s.flushes).toHaveLength(1);
-      expect(s.coalescer.pending).toEqual(["a"]);
+      expect(s.coalescer.pending).toEqual([]);
       expect(s.coalescer.awaitingReport).toEqual([]);
     });
 
@@ -224,18 +225,15 @@ describe("TaskEventCoalescer", () => {
     expect(s.flushes.map((flush) => flush.ids)).toEqual([["a"], ["a"]]);
   });
 
-  it("flushes an unwritten row once more, then gives it up as not synced", async () => {
+  it("delivers a row once: a turn that ran to its end settles it, with no write and no retry", async () => {
     const s = setup();
     s.coalescer.mark(urgent("a"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
     expect(s.flushes).toHaveLength(1);
-    expect(s.gaveUp).toEqual([]);
-    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
-    expect(s.flushes).toHaveLength(2);
-    expect(s.gaveUp).toEqual(["a"]);
     expect(s.coalescer.pending).toEqual([]);
     await rs.advanceTimersByTimeAsync(10 * QUIET_DELAY_MS);
-    expect(s.flushes).toHaveLength(2);
+    expect(s.flushes).toHaveLength(1);
+    expect(s.gaveUp).toEqual([]);
   });
 
   it("does not give up a row whose retry the Concierge wrote", async () => {
@@ -249,7 +247,7 @@ describe("TaskEventCoalescer", () => {
     expect(s.gaveUp).toEqual([]);
   });
 
-  it("tries a row again 5 min after a turn that did not run, without spending its retries", async () => {
+  it("tries a row again 5 min after a turn that did not run, until one runs", async () => {
     const s = setup();
     s.turnsRun(false);
     s.coalescer.mark(urgent("a"));
@@ -259,18 +257,12 @@ describe("TaskEventCoalescer", () => {
     expect(s.flushes).toHaveLength(1);
     await rs.advanceTimersByTimeAsync(1);
     expect(s.flushes).toHaveLength(2);
-    await rs.advanceTimersByTimeAsync(RETRY_MS);
-    expect(s.flushes).toHaveLength(3);
-    expect(s.gaveUp).toEqual([]);
 
-    // Turns run again: the row still has its flush and its retry before it is given up.
     s.turnsRun(true);
     await rs.advanceTimersByTimeAsync(RETRY_MS);
-    expect(s.flushes).toHaveLength(4);
+    expect(s.flushes).toHaveLength(3);
+    expect(s.coalescer.pending).toEqual([]);
     expect(s.gaveUp).toEqual([]);
-    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
-    expect(s.flushes).toHaveLength(5);
-    expect(s.gaveUp).toEqual(["a"]);
   });
 
   it("keeps changes that arrive while turns fail, and a write still settles what a turn carried", async () => {
@@ -311,30 +303,59 @@ describe("TaskEventCoalescer", () => {
     await rs.advanceTimersByTimeAsync(RETRY_MS);
     await s.endTurn();
     expect(s.rendered[1]).toEqual(["turn_end:completed question by=concierge", "approval"]);
-    // The attempt did not count: the row still gets its retry before it is given up.
-    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
-    await s.endTurn();
-    expect(s.flushes).toHaveLength(3);
-    expect(s.gaveUp).toEqual(["a"]);
+    expect(s.coalescer.pending).toEqual([]);
   });
 
-  it("gives a change that arrives during the wait its own attempts", async () => {
+  it("delivers a change that arrives during the wait with the next turn that runs", async () => {
     const s = setup();
-    s.coalescer.mark(urgent("a"));
-    // The first turn runs without writing the row; its retry then does not run.
-    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
     s.turnsRun(false);
-    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
-    expect(s.flushes).toHaveLength(2);
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
     s.coalescer.mark(urgent("a", "approval"));
 
     s.turnsRun(true);
     await rs.advanceTimersByTimeAsync(RETRY_MS);
-    expect(s.flushes).toHaveLength(3);
-    expect(s.gaveUp).toEqual([]);
-    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
-    expect(s.flushes).toHaveLength(4);
-    expect(s.gaveUp).toEqual(["a"]);
+    expect(s.flushes).toHaveLength(2);
+    expect(s.rendered[1]).toContain("approval");
+    expect(s.coalescer.pending).toEqual([]);
+  });
+
+  it("wakes no turn for a change that needs no word, and takes it along with the next flush", async () => {
+    const s = setup();
+    s.coalescer.mark({
+      taskId: "a",
+      kind: "turn_end:completed by=system",
+      urgent: false,
+      passive: true,
+    });
+    await rs.advanceTimersByTimeAsync(10 * QUIET_DELAY_MS);
+    expect(s.flushes).toEqual([]);
+    expect(s.coalescer.pending).toEqual(["a"]);
+    s.coalescer.mark(urgent("b"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    expect(s.flushes.map((flush) => flush.ids)).toEqual([["a", "b"]]);
+  });
+
+  it("hands a change that needs no word to the digest, and a row with any other change to its flush", async () => {
+    const s = setup();
+    s.coalescer.mark({
+      taskId: "a",
+      kind: "turn_end:completed by=system",
+      urgent: false,
+      passive: true,
+    });
+    s.coalescer.mark({
+      taskId: "b",
+      kind: "turn_end:completed by=system",
+      urgent: false,
+      passive: true,
+    });
+    s.coalescer.mark(urgent("b", "approval"));
+    expect(s.coalescer.passiveOf(["a", "b"])).toEqual(["a"]);
+    // Read only, until the digest that listed them ran to its end.
+    expect(s.coalescer.pending).toEqual(["a", "b"]);
+    s.coalescer.settlePassive(["a", "b"]);
+    expect(s.coalescer.pending).toEqual(["b"]);
   });
 
   it("does not hand back changes a write settled while a failing turn ran", async () => {
@@ -384,16 +405,63 @@ describe("TaskEventCoalescer", () => {
     ).toHaveLength(1);
   });
 
-  it("tries a turn a newer message cut short again, since it may never have reached the model", async () => {
+  it("tries a report a newer message cut short again with the next flush, not minutes later", async () => {
     const s = setup();
     s.turnsInterrupted();
     s.coalescer.mark(urgent("a"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
     expect(s.flushes).toHaveLength(1);
+    // Still owed: its task reads as active until the news is said.
+    expect(s.coalescer.pending).toEqual(["a"]);
     s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
+    expect(s.flushes).toHaveLength(2);
+    // Said: nothing is owed, so its task leaves Active.
+    expect(s.coalescer.pending).toEqual([]);
+    expect(s.gaveUp).toEqual([]);
+  });
+
+  it("waits for the turn that took a cut-short report over, which may say it itself", async () => {
+    const carried = new Set<string>();
+    const s = setup(carried);
+    s.turnsInterrupted();
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    // The guardian's turn that cut it short now carries its news.
+    carried.add("a");
+    s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(3 * MIN_FLUSH_SPACING_MS);
+    expect(s.flushes).toHaveLength(1);
+    // That turn ended without saying it: the next flush does.
+    carried.delete("a");
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
+    expect(s.flushes).toHaveLength(2);
+    expect(s.coalescer.pending).toEqual([]);
+  });
+
+  it("waits for a turn that carries a cut-short report no longer than RETRY_MS", async () => {
+    const carried = new Set<string>(["a"]);
+    const s = setup(carried);
+    s.turnsInterrupted();
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    s.turnsRun(true);
+    // The turn that took it over never ends, as after a crash.
+    await rs.advanceTimersByTimeAsync(RETRY_MS + MIN_FLUSH_SPACING_MS);
+    expect(s.flushes).toHaveLength(2);
+    expect(s.coalescer.pending).toEqual([]);
+  });
+
+  it("still waits RETRY_MS after a report that failed", async () => {
+    const s = setup();
+    s.turnsRun(false);
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(3 * MIN_FLUSH_SPACING_MS);
+    expect(s.flushes).toHaveLength(1);
     await rs.advanceTimersByTimeAsync(RETRY_MS);
     expect(s.flushes).toHaveLength(2);
-    expect(s.gaveUp).toEqual([]);
   });
 
   it("waits to retry only the rows of a chat whose turn did not run", async () => {
@@ -417,10 +485,10 @@ describe("TaskEventCoalescer", () => {
     coalescer.mark(urgent("a"));
     coalescer.mark(urgent("b"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS + MIN_FLUSH_SPACING_MS);
-    // "b" ran and was not written, so it gets its retry now; "a" waits.
-    expect(delivered).toEqual(["a", "b", "b"]);
+    // "b" ran: it is settled. "a" waits for its retry.
+    expect(delivered).toEqual(["a", "b"]);
     await rs.advanceTimersByTimeAsync(RETRY_MS);
-    expect(delivered).toEqual(["a", "b", "b", "a"]);
+    expect(delivered).toEqual(["a", "b", "a"]);
   });
 
   it("still delivers the other chats' turns when one chat's turn fails", async () => {

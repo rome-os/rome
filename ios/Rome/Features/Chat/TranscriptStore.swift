@@ -681,6 +681,11 @@ final class TranscriptStore {
     static func previewPhase(_ service: String) -> ConnectPhase? { nil }
     #endif
 
+    /// A widget's call on its own app, with this chat's backend.
+    func appCall(appId: String, method: String, path: String, body: JSONValue?) async throws -> ConnectReply {
+        try await backend.appCall(appId: appId, method: method, path: path, body: body)
+    }
+
     /// A card for a service that already works shows Connected when it opens,
     /// and tells nobody: an old card must not wake Chat again.
     func checkConnected(_ part: MessagePart.ConnectCardPart, rowId: String) async {

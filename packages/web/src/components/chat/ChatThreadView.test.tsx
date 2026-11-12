@@ -456,6 +456,46 @@ describe("ChatThreadView", () => {
     });
   });
 
+  it("tints every bubble of the message it opened from, not only its first", async () => {
+    // Each bubble of a message after its first names the message as its own.
+    const bubbles = (messages: { id: string; content: string }[]) =>
+      messages.flatMap((m) =>
+        (JSON.parse(m.content) as { content: string }[]).map((part, index) => (
+          <p
+            key={`${m.id}:${index}`}
+            data-timeline-anchor={index === 0 ? m.id : undefined}
+            data-message-part={m.id}
+          >
+            {index === 0 ? part.content : `${part.content} (more)`}
+          </p>
+        )),
+      );
+    thread = [
+      message("m1", "user", "Move my 3pm"),
+      {
+        ...message("a1", "assistant", "Which day?"),
+        content: JSON.stringify([
+          { type: "text", content: "Which day?" },
+          { type: "text", content: "Which day?" },
+        ]),
+      },
+    ];
+    render(
+      host(
+        <ChatThreadView
+          sessionId="concierge"
+          messageId="a1"
+          onClose={() => {}}
+          renderMessages={bubbles}
+        />,
+      ),
+    );
+    const first = (await screen.findByText("Which day?")).closest("[data-message-part]")!;
+    const later = screen.getByText("Which day? (more)");
+    await waitFor(() => expect(first.hasAttribute("data-timeline-landed")).toBe(true));
+    expect(later.hasAttribute("data-timeline-landed")).toBe(true);
+  });
+
   it("tints the message again each time its thread opens, from the cache under StrictMode too", async () => {
     // The dashboard runs under StrictMode, which runs a view's effects twice
     // on mount; a reopened thread draws its cached messages at once.

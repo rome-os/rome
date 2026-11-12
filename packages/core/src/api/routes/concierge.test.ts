@@ -152,11 +152,15 @@ describe("GET /concierge/tasks", () => {
     const old = new Date(Date.now() - 30 * DAY);
     await repo.upsertMany([{ title: "Old needs you", state: "needs_user" }], old);
     await repo.upsertMany([{ title: "Old watching", state: "watching" }], old);
-    await repo.upsertMany([{ title: "Old done", state: "done" }], old);
-    await repo.upsertMany(
+    const [oldDone] = await repo.upsertMany([{ title: "Old done", state: "done" }], old);
+    await repo.setLastOutcome(oldDone!.id, "succeeded", old, { reported: false });
+    await repo.keepEnded([oldDone!.id], [], old);
+    const fresh = new Date(Date.now() - DAY);
+    const [freshDropped] = await repo.upsertMany(
       [{ title: "Fresh dropped", state: "dropped" }],
-      new Date(Date.now() - DAY),
+      fresh,
     );
+    await repo.keepEnded([freshDropped!.id], [], fresh);
   });
   afterEach(() => testDb.close());
 
@@ -256,6 +260,119 @@ describe("GET /concierge/tasks", () => {
     expect(stream.status).toBe(200);
     expect(stream.headers.get("content-type")).toContain("text/event-stream");
     await stream.body?.cancel();
+  });
+});
+
+describe("POST /concierge/tasks/:taskId/stop", () => {
+  let testDb: TestDb;
+  let repo: ConciergeTasksRepository;
+  let stopped: [string, string][];
+
+  const app = () => {
+    const concierge = {
+      deps: { tasks: new ConciergeTasks(repo) },
+      stopTask: async (taskId: string, by: string) => void stopped.push([taskId, by]),
+    } as unknown as ConciergeService;
+    return mount(testDb, concierge, new ChatsWebChatRepository(testDb.db));
+  };
+  const stop = (taskId: string) =>
+    app().request(`/concierge/tasks/${taskId}/stop`, { ...guardian, method: "POST" });
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    repo = new ConciergeTasksRepository(testDb.db);
+    stopped = [];
+  });
+  afterEach(() => testDb.close());
+
+  it("stops the caller's own task, as its owner", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights" }]);
+    expect((await stop(row!.id)).status).toBe(200);
+    expect(stopped).toEqual([[row!.id, "guardian"]]);
+  });
+
+  it("stops no task that is not there, or is another person's", async () => {
+    const chats = new ChatsWebChatRepository(testDb.db);
+    await chats.createSession(
+      "ann-main",
+      "Ann",
+      undefined,
+      undefined,
+      null,
+      undefined,
+      "core:concierge",
+      "webchat",
+      null,
+      { ownerKey: "visitor:acct-ann" },
+    );
+    const [theirs] = await repo.upsertMany([{ title: "Hers", chatId: "ann-main" }]);
+    expect((await stop("nope")).status).toBe(404);
+    expect((await stop(theirs!.id)).status).toBe(404);
+    expect(stopped).toEqual([]);
+  });
+});
+
+describe("DELETE /concierge/tasks/:taskId/checks", () => {
+  let testDb: TestDb;
+  let repo: ConciergeTasksRepository;
+  let cancelled: string[];
+  let failing: string | null = null;
+
+  const app = () => {
+    const concierge = {
+      deps: { tasks: new ConciergeTasks(repo) },
+      cancelChecksByOwner: async (taskId: string) => {
+        if (taskId === failing) throw new Error("database is locked");
+        cancelled.push(taskId);
+      },
+    } as unknown as ConciergeService;
+    return mount(testDb, concierge, new ChatsWebChatRepository(testDb.db));
+  };
+  const cancel = (taskId: string) =>
+    app().request(`/concierge/tasks/${taskId}/checks`, { ...guardian, method: "DELETE" });
+
+  beforeEach(() => {
+    testDb = createTestDb();
+    repo = new ConciergeTasksRepository(testDb.db);
+    cancelled = [];
+  });
+  afterEach(() => testDb.close());
+
+  it("cancels only the checks of the caller's own task, which stays", async () => {
+    const [row] = await repo.upsertMany([{ title: "PR 42" }]);
+    expect((await cancel(row!.id)).status).toBe(200);
+    expect(cancelled).toEqual([row!.id]);
+    expect(await repo.get(row!.id)).toMatchObject({ title: "PR 42", stoppedAt: null });
+  });
+
+  it("answers a failure as one, not as cancelled", async () => {
+    const [row] = await repo.upsertMany([{ title: "PR 42" }]);
+    failing = row!.id;
+    try {
+      expect((await cancel(row!.id)).status).toBe(500);
+    } finally {
+      failing = null;
+    }
+  });
+
+  it("cancels nothing for a task that is not there, or is another person's", async () => {
+    const chats = new ChatsWebChatRepository(testDb.db);
+    await chats.createSession(
+      "ann-main",
+      "Ann",
+      undefined,
+      undefined,
+      null,
+      undefined,
+      "core:concierge",
+      "webchat",
+      null,
+      { ownerKey: "visitor:acct-ann" },
+    );
+    const [theirs] = await repo.upsertMany([{ title: "Hers", chatId: "ann-main" }]);
+    expect((await cancel("nope")).status).toBe(404);
+    expect((await cancel(theirs!.id)).status).toBe(404);
+    expect(cancelled).toEqual([]);
   });
 });
 

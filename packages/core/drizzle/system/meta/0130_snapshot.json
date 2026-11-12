@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "6640628d-bca4-4232-95b2-6507b39623ed",
+  "id": "d3c8d8d3-3bf6-4adf-b55d-463b3013f66b",
   "prevId": "a4a64f30-31c3-4c3e-90f1-106400caf23b",
   "tables": {
     "account_profiles": {
@@ -1230,8 +1230,8 @@
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
-    "concierge_task_reactions": {
-      "name": "concierge_task_reactions",
+    "concierge_message_tasks": {
+      "name": "concierge_message_tasks",
       "columns": {
         "task_id": {
           "name": "task_id",
@@ -1253,25 +1253,11 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
         }
       },
       "indexes": {
-        "idx_concierge_task_reactions_message": {
-          "name": "idx_concierge_task_reactions_message",
+        "idx_concierge_message_tasks_message": {
+          "name": "idx_concierge_message_tasks_message",
           "columns": [
             "chat_id",
             "message_key"
@@ -1280,9 +1266,9 @@
         }
       },
       "foreignKeys": {
-        "concierge_task_reactions_task_id_concierge_tasks_id_fk": {
-          "name": "concierge_task_reactions_task_id_concierge_tasks_id_fk",
-          "tableFrom": "concierge_task_reactions",
+        "concierge_message_tasks_task_id_concierge_tasks_id_fk": {
+          "name": "concierge_message_tasks_task_id_concierge_tasks_id_fk",
+          "tableFrom": "concierge_message_tasks",
           "tableTo": "concierge_tasks",
           "columnsFrom": [
             "task_id"
@@ -1295,13 +1281,91 @@
         }
       },
       "compositePrimaryKeys": {
-        "concierge_task_reactions_task_id_chat_id_message_key_pk": {
+        "concierge_message_tasks_task_id_chat_id_message_key_pk": {
           "columns": [
             "task_id",
             "chat_id",
             "message_key"
           ],
-          "name": "concierge_task_reactions_task_id_chat_id_message_key_pk"
+          "name": "concierge_message_tasks_task_id_chat_id_message_key_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {}
+    },
+    "concierge_message_turns": {
+      "name": "concierge_message_turns",
+      "columns": {
+        "chat_id": {
+          "name": "chat_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "message_key": {
+          "name": "message_key",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "turn_id": {
+          "name": "turn_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "taken_at": {
+          "name": "taken_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "answered_at": {
+          "name": "answered_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "stopped_untold": {
+          "name": "stopped_untold",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "turn_failed": {
+          "name": "turn_failed",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        }
+      },
+      "indexes": {
+        "idx_concierge_message_turns_turn": {
+          "name": "idx_concierge_message_turns_turn",
+          "columns": [
+            "chat_id",
+            "turn_id"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "concierge_message_turns_chat_id_message_key_pk": {
+          "columns": [
+            "chat_id",
+            "message_key"
+          ],
+          "name": "concierge_message_turns_chat_id_message_key_pk"
         }
       },
       "uniqueConstraints": {},
@@ -1333,6 +1397,13 @@
         },
         "summary": {
           "name": "summary",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "note": {
+          "name": "note",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
@@ -1429,6 +1500,80 @@
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
+        },
+        "archived_with_chat": {
+          "name": "archived_with_chat",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "linked_at": {
+          "name": "linked_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "stopped_at": {
+          "name": "stopped_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "stop_reason": {
+          "name": "stop_reason",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "last_outcome": {
+          "name": "last_outcome",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "outcome_unsaid": {
+          "name": "outcome_unsaid",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "expired_wait_at": {
+          "name": "expired_wait_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "no_response_unlisted": {
+          "name": "no_response_unlisted",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "report_given_up": {
+          "name": "report_given_up",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": false
+        },
+        "ended_at": {
+          "name": "ended_at",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
         }
       },
       "indexes": {
@@ -1483,77 +1628,6 @@
         }
       },
       "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {}
-    },
-    "concierge_turn_reactions": {
-      "name": "concierge_turn_reactions",
-      "columns": {
-        "turn_id": {
-          "name": "turn_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "chat_id": {
-          "name": "chat_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "message_key": {
-          "name": "message_key",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "state": {
-          "name": "state",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "updated_at": {
-          "name": "updated_at",
-          "type": "integer",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "idx_concierge_turn_reactions_message": {
-          "name": "idx_concierge_turn_reactions_message",
-          "columns": [
-            "chat_id",
-            "message_key"
-          ],
-          "isUnique": false
-        },
-        "idx_concierge_turn_reactions_chat_state": {
-          "name": "idx_concierge_turn_reactions_chat_state",
-          "columns": [
-            "chat_id",
-            "state"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {},
-      "compositePrimaryKeys": {
-        "concierge_turn_reactions_turn_id_chat_id_message_key_pk": {
-          "columns": [
-            "turn_id",
-            "chat_id",
-            "message_key"
-          ],
-          "name": "concierge_turn_reactions_turn_id_chat_id_message_key_pk"
-        }
-      },
       "uniqueConstraints": {},
       "checkConstraints": {}
     },
@@ -3767,20 +3841,6 @@
         "superseded_for": {
           "name": "superseded_for",
           "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "handoff": {
-          "name": "handoff",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "context_tokens": {
-          "name": "context_tokens",
-          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

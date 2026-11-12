@@ -15,7 +15,8 @@
       "running": "进行中",
       "waiting": "等你处理",
       "failed": "出错停止了",
-      "idle": "已完成"
+      "idle": "已完成",
+      "later": "稍后"
     },
     "openForwardedChat": "打开任务对话：{{title}}",
     "showFullText": "展开全文",
@@ -31,6 +32,18 @@
       "blocked": "弹窗被拦截",
       "checkFailed": "无法检查连接状态"
     },
+    "ask": {
+      "expiredFold": "已过期 · 回答后继续",
+      "answered": "已回答",
+      "answeredWith": "已回答：{{answer}}",
+      "dismissed": "已忽略",
+      "approved": "已批准",
+      "rejected": "已拒绝",
+      "waitingBelow": "等待回答：见下方卡片",
+      "turnedDown": "已自动拒绝：一天内没有回应",
+      "turnedDownStopped": "已自动拒绝：任务已停止",
+      "openToAnswer": "打开任务对话来回答"
+    },
     "taskCardAlreadyAnswered": "这张卡片已在别处回复，任务状态已刷新。",
     "openTaskChat": "打开",
     "tasks": {
@@ -38,13 +51,19 @@
       "close": "关闭任务",
       "groups": {
         "needsYou": "等你处理",
-        "doing": "进行中",
-        "next": "接下来",
-        "watching": "盯着",
-        "done": "已完成"
+        "active": "进行中",
+        "later": "稍后",
+        "ended": "已结束"
       },
+      "ended": {
+        "failed": "失败",
+        "stopped": "已停止",
+        "no_response": "没回应"
+      },
+      "expired": "已过期，回答后继续",
       "stop": "停止",
       "done": "完成",
+      "cancelCheck": "取消检查",
       "archive": "归档",
       "retry": "再试一次",
       "pending": {
@@ -71,7 +90,7 @@
         "done": "我已经完成了"
       },
       "emptyTitle": "还没有任务",
-      "emptyDescription": "{{name}} 正在做、计划做或盯着的任务会显示在这里。"
+      "emptyDescription": "{{name}} 交给其他 Agent 的任务会显示在这里，以及每个任务在等什么。"
     },
     "messageDetails": "消息详情",
     "chooseFolder": "选择文件夹…",
@@ -157,6 +176,17 @@
   "archived": {
     "readOnly": "该对话已归档，为只读状态。",
     "unarchive": "取消归档"
+  },
+  "checks": {
+    "label": "这个聊天里排好的检查",
+    "timed": "{{name}} · {{when}}",
+    "waiting": "等待{{what}} · {{when}}检查",
+    "cancel": "取消「{{name}}」",
+    "loadFailed": "无法加载排好的检查",
+    "summary": "{{count}} 个检查 · 下一个：{{next}}",
+    "expand": "展开排好的检查",
+    "collapse": "收起排好的检查",
+    "cancelFailed": "无法取消这个检查"
   },
   "share": {
     "title": "分享对话",
@@ -389,12 +419,13 @@
     "typeAnswer": "输入你的答案…",
     "dismissed": "已跳过",
     "answered": "已回答",
-    "askedByRome": "Rome 正在提问",
     "dismiss": "跳过",
     "send": "发送"
   },
   "appComponent": {
-    "dismiss": "跳过"
+    "dismiss": "跳过",
+    "widgetUnavailable": "无法读取这张卡片的数据。{{text}}",
+    "widgetUndrawable": "无法显示这张卡片。{{text}}"
   },
   "aiToolsCard": {
     "title": "连接 Claude 或 ChatGPT",
@@ -589,6 +620,7 @@
   },
   "thread": {
     "title": "对话串",
+    "openTaskChat": "打开任务对话",
     "close": "关闭对话串",
     "loadFailed": "无法加载这个对话串。",
     "replyPlaceholder": "回复"

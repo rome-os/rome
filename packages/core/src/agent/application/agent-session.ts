@@ -364,6 +364,13 @@ interface ManagerDeps {
   turnMiddleware?: TurnMiddleware;
   /** What each chat set for its sessions. Absent, no saved model is restored. */
   sessionSettings?: SessionSettings;
+  /**
+   * What the conversation a session serves adds to its context: text for the
+   * end of its system prompt, or null. Every open and resume of a
+   * conversation session asks, so a cold continuation holds it too. Absent,
+   * nothing is added.
+   */
+  chatInstructions?: (thread: ThreadContext | undefined) => Promise<string | null>;
   /** Where agents work: the default working directory and the projects folder. */
   folders: AgentFolders;
   /** Where the session logs. */
@@ -952,6 +959,7 @@ function sessionSetupOf(
       ? {
           schedule: (turn, wakeUp) => deps.defer.schedule(turn, wakeUp),
           finalText: policy.finalText,
+          taskChecks: policy.taskChecks,
         }
       : undefined;
   const romeTools: SessionSetupSource["romeTools"] = (turn, run, session) =>
@@ -1063,7 +1071,21 @@ async function prepareSetup(
   init: SessionOpening,
   isSubagent: boolean,
 ): Promise<PreparedSetup> {
-  const source = sessionSetupOf(deps, agent, init, isSubagent);
+  // The chat adds to the opener's context on every path that opens its
+  // session. The fingerprint leaves the context suffix out, so this renews
+  // no session.
+  const added =
+    init.kind === "conversation" && !isSubagent
+      ? await deps.chatInstructions?.(init.threadContext)
+      : null;
+  const source = sessionSetupOf(
+    deps,
+    agent,
+    added
+      ? { ...init, contextSuffix: [init.contextSuffix, added].filter(Boolean).join("\n\n") }
+      : init,
+    isSubagent,
+  );
   let prompt: string | undefined;
   return {
     source,

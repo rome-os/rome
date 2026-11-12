@@ -23,6 +23,21 @@ export function playLanding(anchor: HTMLElement): void {
 }
 
 /**
+ * Every bubble of message `messageId` under `root`: its anchor, the first,
+ * and the later ones that name it as theirs. Landing on a message tints all.
+ */
+export function messageBubbles(root: ParentNode, messageId: string): HTMLElement[] {
+  const bubbles = new Set<HTMLElement>();
+  for (const element of root.querySelectorAll<HTMLElement>("[data-timeline-anchor]")) {
+    if (element.dataset.timelineAnchor?.split(" ").includes(messageId)) bubbles.add(element);
+  }
+  for (const element of root.querySelectorAll<HTMLElement>("[data-message-part]")) {
+    if (element.dataset.messagePart === messageId) bubbles.add(element);
+  }
+  return [...bubbles];
+}
+
+/**
  * Where the thread view puts its messages so the message it was opened from
  * stays exactly where it was in the timeline. All lengths are in px from the
  * top of the view's scroll box.

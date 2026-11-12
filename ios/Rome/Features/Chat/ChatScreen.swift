@@ -259,7 +259,7 @@ struct ConciergeRow: View {
             }
         case .typing:
             TypingDots().frame(maxWidth: .infinity, alignment: .leading)
-        case .approval, .question, .webOnly, .routineDraft, .tools, .connect:
+        case .approval, .question, .webOnly, .routineDraft, .tools, .connect, .widgetUI:
             // In a thread a tap on a card stays on it, never closing the thread.
             InteractionRow(row: row, store: store)
                 .keepsTaps(inThread)

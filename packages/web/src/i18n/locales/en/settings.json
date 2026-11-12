@@ -552,6 +552,21 @@
     }
   },
   "aiTools": {
+    "codexCredits": {
+      "balanceLabel": "ChatGPT credits",
+      "remaining": "{{balance}} credits remaining",
+      "unlimited": "Unlimited",
+      "empty": "No credits available",
+      "balanceUnavailable": "Balance unavailable",
+
+      "confirmTitle": "Enable credit usage?",
+      "enable": "Enable",
+      "manageCredits": "View ChatGPT usage",
+      "settingsButton": "Settings",
+      "label": "Allow credit usage",
+      "description": "When your subscription quota runs out, allow use of available ChatGPT / Codex credits. Enabling this automatically resumes eligible chats paused by a usage limit and may spend credits immediately. No credits are purchased automatically.",
+      "saveFailed": "Could not load or save the ChatGPT credits setting. Please try again."
+    },
     "title": "AI Tools",
     "refresh": "Refresh",
     "refreshing": "Refreshing…",

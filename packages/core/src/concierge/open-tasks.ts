@@ -5,8 +5,9 @@
 import type { ConciergeService } from "./service.js";
 
 /**
- * Chat `chatId`'s open task rows, one line each with its id, title, state and
- * what it waits on, or null when it has none or is no Concierge chat.
+ * Chat `chatId`'s tasks that have not ended, one line each with its id,
+ * title, status and when a check is due, or null when it has none or is no
+ * Concierge chat. The status is the one Rome derives, as `task_list` reads it.
  */
 export async function conciergeOpenTasks(
   service: Pick<ConciergeService, "conciergeChat" | "ownerOfChat" | "deps">,
@@ -15,15 +16,24 @@ export async function conciergeOpenTasks(
   if (!(await service.conciergeChat(chatId))) return null;
   const owner = await service.ownerOfChat(chatId);
   if (!owner) return null;
-  const rows = (await service.deps.tasks.repo.listForAgent(false)).filter(
+  const { tasks } = service.deps;
+  const rows = (await tasks.repo.listForAgent(true)).filter(
     (task) => task.owner === owner && task.conciergeChat.id === chatId,
   );
   if (rows.length === 0) return null;
-  return rows
-    .map(({ row, chat }) =>
+  const status = await tasks.statusOf(rows.map((task) => task.row));
+  const open = rows.flatMap((task) => {
+    const of = status.get(task.row.id);
+    return of && of.status !== "ended" ? [{ ...task, status: of }] : [];
+  });
+  if (open.length === 0) return null;
+  return open
+    .map(({ row, chat, status: of }) =>
       [
-        `- ${row.id} · ${row.title} · ${row.state}`,
-        row.waitingOn ? ` · waiting on ${row.waitingOn}` : "",
+        `- ${row.id} · ${row.title} · ${of.status}`,
+        of.status === "later" && of.laterAt !== null && Number.isFinite(of.laterAt)
+          ? ` · check due ${new Date(of.laterAt).toISOString()}`
+          : "",
         chat ? ` · task chat ${chat.id}` : "",
         row.summary ? `\n  ${row.summary}` : "",
       ].join(""),

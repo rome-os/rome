@@ -25,6 +25,8 @@ describe("runDefer", () => {
     const result = await runDefer(
       {
         kind: "event",
+        waitingFor: "the event",
+        deadlineMs: Date.UTC(2030, 0, 1),
         name: "CI on #12",
         note: "Check the run and tell the guardian.",
         event: {
@@ -39,6 +41,7 @@ describe("runDefer", () => {
       ok: true,
       name: "CI on #12",
       waitingFor: "github.check_suite",
+      deadline: "2030-01-01T00:00:00.000Z",
       routineId: "r-ev",
     });
     const args = createRoutine.mock.calls[0][0];
@@ -58,6 +61,8 @@ describe("runDefer", () => {
       agentName: "main",
       text: expect.stringContaining("📨 Event arrived: CI on #12\n<defer_note"),
       attachEvent: true,
+      waitingFor: "the event",
+      deadline: "2030-01-01T00:00:00.000Z",
     });
   });
 
@@ -75,6 +80,8 @@ describe("runDefer", () => {
     const result = await runDefer(
       {
         kind: "event",
+        waitingFor: "the event",
+        deadlineMs: Date.UTC(2030, 0, 1),
         name: "CI",
         note: "Check the run and tell the guardian.",
         event: { eventName: "provider:event:github.workflow_run", filter },
@@ -88,6 +95,7 @@ describe("runDefer", () => {
       ok: true,
       name: "CI",
       waitingFor: "provider:event:github.workflow_run",
+      deadline: "2030-01-01T00:00:00.000Z",
       subscription: "created",
       routineId: "r-ev",
     });
@@ -103,6 +111,8 @@ describe("runDefer", () => {
       runDefer(
         {
           kind: "event",
+          waitingFor: "the event",
+          deadlineMs: Date.UTC(2030, 0, 1),
           name: "CI",
           note: "Check the run and tell the guardian.",
           event: { eventName: "provider:event:github.workflow_run" },
@@ -123,6 +133,8 @@ describe("runDefer", () => {
     const result = await runDefer(
       {
         kind: "event",
+        waitingFor: "the event",
+        deadlineMs: Date.UTC(2030, 0, 1),
         name: "reply",
         note: "Check the run and tell the guardian.",
         event: { eventName: "provider:event:gmail.new_message" },
@@ -202,6 +214,23 @@ describe("runDefer", () => {
     );
     expect(args.args).not.toHaveProperty("messageId");
     expect(args.args).not.toHaveProperty("attachEvent");
+  });
+
+  it("names the task a check is for, in its args and in the note the woken turn reads", async () => {
+    const createRoutine = rs.fn().mockResolvedValue({ routineId: "r-task" });
+    await runDefer(
+      {
+        kind: "time",
+        name: "CI",
+        note: "Look at the run",
+        fireAtMs: NOW + 5 * MINUTE_MS,
+        taskId: "task-1",
+      },
+      { context: baseContext, createRoutine },
+    );
+    const { args } = createRoutine.mock.calls[0][0] as { args: Record<string, unknown> };
+    expect(args.taskId).toBe("task-1");
+    expect(args.text).toContain('task_id="task-1"');
   });
 
   it("throws on a missing thread context", async () => {

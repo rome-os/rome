@@ -12,6 +12,10 @@ export type {
   RoutineDraftSpec,
 } from "@rome-os/app-runtime";
 
+// The check core runs before it stores a described card, so a reader can run
+// it again on the stored part before drawing it or calling the app.
+export { checkWidgetUi, isWidgetAppPath } from "@rome-os/app-runtime";
+
 /** Error core stores as a turn's assistant content when model resolution fails
  * before the turn runs. It carries the trace error event's fields. */
 export type StoredErrorPart = Pick<
@@ -41,6 +45,13 @@ export interface TaskChatPart {
   type: "task_chat";
   chatId: string;
   title: string;
+  /**
+   * What the card shows: `task`, the task card (its title, status, Stop and
+   * Open), or `ask`, the task's question or approval alone. A card from
+   * before has none, and shows the task card with its waiting question or
+   * approval inside.
+   */
+  show?: "task" | "ask";
 }
 
 /** A card that connects a service for the guardian. `connect` is the service's

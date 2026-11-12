@@ -908,8 +908,15 @@
     {
       "idx": 130,
       "version": "6",
-      "when": 1794471170715,
-      "tag": "0130_session_handoff",
+      "when": 1794503215776,
+      "tag": "0130_concierge_task_status",
+      "breakpoints": true
+    },
+    {
+      "idx": 131,
+      "version": "6",
+      "when": 1794521891848,
+      "tag": "0131_session_handoff",
       "breakpoints": true
     }
   ]

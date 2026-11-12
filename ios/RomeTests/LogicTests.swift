@@ -120,6 +120,32 @@ private func task(_ id: String, _ state: TaskState, updated: Double, completed: 
         ])
     }
 
+    @Test func aCommentLineShowsNothingAndSeparatesBlocks() {
+        let blocks = MarkdownParser.parse("""
+        Details.
+        <!-- rome:conclusion -->
+        Found 3 flights. Which one?
+        <!-- /rome:conclusion -->
+        """)
+        #expect(blocks == [.paragraph("Details."), .paragraph("Found 3 flights. Which one?")])
+    }
+
+    @Test func theConclusionMarkersShowNothingAndTheirLineKeepsTheRest() {
+        #expect(MarkdownParser.parse("<!-- rome:conclusion -->Done.<!-- /rome:conclusion -->") == [.paragraph("Done.")])
+        #expect(MarkdownParser.parse("<!--rome:conclusion-->Done.") == [.paragraph("Done.")])
+        #expect(MarkdownParser.parse("<!--  /rome:conclusion  -->") == [])
+    }
+
+    @Test func otherCommentsStayAsTheyAre() {
+        #expect(MarkdownParser.parse("Keep <!-- keep --> this.") == [.paragraph("Keep <!-- keep --> this.")])
+        #expect(MarkdownParser.parse("Use `<!-- keep -->` here.") == [.paragraph("Use `<!-- keep -->` here.")])
+        #expect(MarkdownParser.parse("<!-- keep -->") == [.paragraph("<!-- keep -->")])
+    }
+
+    @Test func aMarkerInsideACodeBlockStaysLiteral() {
+        #expect(MarkdownParser.parse("```\n<!-- rome:conclusion -->\n```") == [.code(language: nil, text: "<!-- rome:conclusion -->")])
+    }
+
     @Test func unterminatedCodeStillRenders() {
         #expect(MarkdownParser.parse("```\nabc") == [.code(language: nil, text: "abc")])
     }
@@ -651,6 +677,10 @@ final class StubBackend: RomeBackend {
         #expect(try link("/apps") == .page(URL(string: "https://me.romeos.cc/apps")!))
         #expect(try link("/apps/a/b") == .page(URL(string: "https://me.romeos.cc/apps/a/b")!))
         #expect(try link("https://me.romeos.cc/chat/123") == .page(URL(string: "https://me.romeos.cc/chat/123")!))
+        // A stored file (a pdf, a video) opens in the same web view, which has the session.
+        let stored = "/api/assets/0123456789abcdef0123456789abcdef.pdf"
+        #expect(try link(stored) == .page(URL(string: "https://me.romeos.cc" + stored)!))
+        #expect(try link("https://me.romeos.cc" + stored) == .page(URL(string: "https://me.romeos.cc" + stored)!))
         // No origin (demo data): a page has nowhere to resolve.
         #expect(try link("/settings", origin: nil) == .system)
         #expect(try link("/apps/habit-tracker", origin: nil) == .app(id: "habit-tracker", page: nil))
