@@ -2,7 +2,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
-import { ImagePreviewContent } from "./ImagePreviewContent";
+import { downloadImage, ImagePreviewContent } from "./ImagePreviewContent";
 
 beforeEach(async () => {
   await i18n.changeLanguage("en");
@@ -100,5 +100,75 @@ describe("image preview controls", () => {
     view.rerender(<ImagePreviewContent {...props} modalState="UNLOADED" />);
     view.rerender(<ImagePreviewContent {...props} />);
     expect(screen.getByLabelText("Zoom").textContent).toBe("100%");
+  });
+});
+
+describe("image preview in a reply", () => {
+  afterEach(() => {
+    rs.restoreAllMocks();
+  });
+
+  it("shows no download button outside a reply", () => {
+    const view = render(<ImagePreviewContent {...preview()} />);
+    expect(screen.queryByRole("button", { name: "Download" })).toBeNull();
+    view.rerender(<ImagePreviewContent {...preview()} inReply />);
+    expect(screen.getByRole("button", { name: "Download" })).toBeTruthy();
+  });
+
+  it("crops a composer preview to its square card but not a reply picture", () => {
+    const props = preview();
+    props.img = (
+      <img
+        src="test.png"
+        alt="Test image"
+        style={{ width: 640, height: 240, transform: "scale(0.4)" }}
+      />
+    );
+    const view = render(<ImagePreviewContent {...props} modalState="UNLOADING" />);
+    expect(screen.getByAltText<HTMLImageElement>("Test image").style.clipPath).toContain(
+      "inset(0% 31.25%",
+    );
+    view.rerender(<ImagePreviewContent {...props} modalState="UNLOADING" inReply />);
+    expect(screen.getByAltText<HTMLImageElement>("Test image").style.clipPath).toBe("");
+  });
+
+  it("downloads a same-origin picture through a link named after the file", () => {
+    const click = rs.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const open = rs.spyOn(window, "open").mockImplementation(() => null);
+    downloadImage("/api/projects/asset/image%20one.png?path=projects/demo/image%20one.png");
+    expect(click).toHaveBeenCalledTimes(1);
+    const link = click.mock.contexts[0] as HTMLAnchorElement;
+    expect(link.download).toBe("image one.png");
+    expect(new URL(link.href).pathname).toBe("/api/projects/asset/image%20one.png");
+    expect(open).not.toHaveBeenCalled();
+  });
+
+  it("opens a cross-origin picture in a new tab without fetching it", () => {
+    const click = rs.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(() => {});
+    const open = rs.spyOn(window, "open").mockImplementation(() => null);
+    const fetchSpy = rs.fn();
+    rs.stubGlobal("fetch", fetchSpy);
+    downloadImage("https://example.com/picture.jpg");
+    rs.unstubAllGlobals();
+    expect(open).toHaveBeenCalledWith(
+      "https://example.com/picture.jpg",
+      "_blank",
+      "noopener,noreferrer",
+    );
+    expect(click).not.toHaveBeenCalled();
+    expect(fetchSpy).not.toHaveBeenCalled();
+  });
+
+  it("taps Download inside the click, so the new tab keeps the user's gesture", () => {
+    const open = rs.spyOn(window, "open").mockImplementation(() => null);
+    render(
+      <ImagePreviewContent
+        {...preview()}
+        img={<img src="https://example.com/picture.jpg" alt="Test image" />}
+        inReply
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Download" }));
+    expect(open).toHaveBeenCalledTimes(1);
   });
 });

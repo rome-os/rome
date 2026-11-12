@@ -3,6 +3,7 @@ import Markdown from "@/components/markdown";
 import { cn } from "@/lib/utils";
 import { ChatLink } from "./ChatLink";
 import { ChatCodeBlock, ChatCodeBlockScopeContext } from "./ChatCodeBlock";
+import { ChatImage } from "./ChatImage";
 
 type ChatMarkdownProps = ComponentProps<typeof Markdown> & { disclosureStateKey?: string };
 
@@ -47,6 +48,7 @@ export default function ChatMarkdown({
         key={disclosureStateKey}
         {...props}
         className={cn("rome-markdown-message", className)}
+        imageComponent={ChatImage}
         inlineCodeComponent={ChatInlineCode}
         linkComponent={ChatLink}
         preComponent={ChatCodeBlock}
