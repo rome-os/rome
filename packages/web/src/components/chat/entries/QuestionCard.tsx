@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
@@ -127,9 +127,18 @@ export interface QuestionCardProps {
   result?: Record<string, unknown>;
   onSubmit: (toolUseId: string, output: Record<string, unknown>, summary?: string) => void;
   onDismiss: (toolUseId: string) => void;
+  /** Shown at the top inside the card, such as the task it is for. */
+  header?: ReactNode;
 }
 
-export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: QuestionCardProps) {
+export function QuestionCard({
+  toolUseId,
+  props,
+  result,
+  onSubmit,
+  onDismiss,
+  header,
+}: QuestionCardProps) {
   const { t } = useTranslation("chat");
   const questions = parseQuestions(props);
   const resolved = result !== undefined;
@@ -243,6 +252,7 @@ export function QuestionCard({ toolUseId, props, result, onSubmit, onDismiss }: 
       data-chat-pending-card={!locked ? "" : undefined}
       className="mb-4 min-w-0 max-w-full rounded-12 border border-border bg-surface"
     >
+      {header ? <div className="flex min-w-0 flex-col px-4 pt-3">{header}</div> : null}
       {/* A fieldset defaults to min-width: min-content, which can widen the card. */}
       <fieldset disabled={locked} className="min-w-0 p-4">
         <FieldGroup className="space-y-5">

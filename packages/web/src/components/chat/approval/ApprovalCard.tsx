@@ -1,3 +1,4 @@
+import type { ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import type { ApprovalCardStatus, PreviewPayload } from "@/lib/chat-types";
 import { Button } from "@/components/ui/button";
@@ -21,12 +22,15 @@ export function ApprovalCard({
   preview,
   status: initialStatus,
   onResolved,
+  header,
 }: {
   approvalId: string;
   actionName?: string;
   preview: PreviewPayload;
   status: ApprovalCardStatus;
   onResolved: () => void;
+  /** Shown at the top inside the card, such as the task it is for. */
+  header?: ReactNode;
 }) {
   const { t } = useTranslation("chat");
   const { status, isTerminal, record, submitting, submitError, submit } = useApprovalCard({
@@ -50,6 +54,7 @@ export function ApprovalCard({
       data-chat-pending-card={record && status === "pending" ? "approval" : undefined}
       className="mb-3 overflow-hidden rounded-12 border border-warning-border bg-warning-bg/60"
     >
+      {header ? <div className="flex min-w-0 flex-col bg-surface px-4 pt-2">{header}</div> : null}
       <div className="flex items-center justify-between border-b border-warning-border bg-warning-bg px-4 py-2">
         <div className="flex items-center gap-2 text-ui text-warning-fg">
           <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">

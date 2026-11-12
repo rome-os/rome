@@ -1,6 +1,6 @@
 import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { useQuery } from "@tanstack/react-query";
-import { createContext, useContext, useState } from "react";
+import { createContext, type ReactNode, useContext, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link } from "react-router-dom";
 import { z } from "zod";
@@ -50,8 +50,9 @@ export function TaskChatCard(props: {
 
 /**
  * A task's question or approval, shown in the Concierge chat on its own: a
- * header that names the task and opens its chat, then the card. Answered, or
- * superseded by a later one, it folds to a short line.
+ * quiet header that names the task and opens its chat, inside the card. Once
+ * answered, decided or turned down, or superseded by a later one, it folds to
+ * one small card that says how it ended.
  */
 function TaskAskCard({
   chatId,
@@ -69,22 +70,106 @@ function TaskAskCard({
   const task = tasks.find((candidate) => candidate.chat?.id === chatId);
   const derived = task ? taskStatusOfDto(task) : null;
   const waiting = isLatestForChat && session?.awaitingGuardian === true;
+  const chip = <ForwardedChip chatId={chatId} title={session?.name ?? title} />;
+  if (waiting) {
+    return (
+      <div className="flex w-full min-w-0 max-w-md flex-col">
+        <WaitingTaskCard
+          key={chatId}
+          chatId={chatId}
+          onRefresh={invalidate}
+          header={
+            <>
+              {chip}
+              {derived?.endReason === "no_response" ? (
+                // The wait ran out and the task ended, yet its card still takes an answer.
+                <p className="text-aux text-muted-foreground">{t("concierge.tasks.expired")}</p>
+              ) : null}
+            </>
+          }
+        />
+      </div>
+    );
+  }
+  if (!session) return null;
   return (
-    <div className="flex w-full min-w-0 max-w-md flex-col">
-      <ForwardedChip chatId={chatId} title={session?.name ?? title} />
-      {waiting ? (
-        <div className="space-y-2">
-          {derived?.endReason === "no_response" ? (
-            // The wait ran out and the task ended, yet its card still takes an answer.
-            <p className="text-aux text-muted-foreground">{t("concierge.tasks.expired")}</p>
-          ) : null}
-          <WaitingTaskCard key={chatId} chatId={chatId} onRefresh={invalidate} />
-        </div>
-      ) : session ? (
-        <p className="px-1 text-aux text-muted-foreground">{t("concierge.askAnswered")}</p>
-      ) : null}
+    <div className="flex w-full min-w-0 max-w-md flex-col rounded-12 border border-border bg-surface px-4 py-2">
+      {chip}
+      <FoldedAskLine chatId={chatId} />
     </div>
   );
+}
+
+const resultSchema = z.object({
+  type: z.literal("interaction_result"),
+  toolUseId: z.string(),
+  output: z.record(z.string(), z.unknown()).optional(),
+});
+
+/** An answer short enough to repeat on the folded card. */
+const SHORT_ANSWER = 24;
+
+/**
+ * How a task's question or approval ended, from the task chat's latest one:
+ * the answer, or that it was dismissed; an approval approved, rejected, or
+ * turned down by Rome when the wait ran out.
+ */
+function FoldedAskLine({ chatId }: { chatId: string }) {
+  const { t } = useTranslation("chat");
+  const messages = useQuery({
+    queryKey: ["task-chat-cards", chatId],
+    queryFn: () => listSessionMessagePage(chatId, { limit: 2 }),
+  });
+  const approvals = useApprovals();
+  const approval = (approvals.data ?? [])
+    .filter(
+      (row) =>
+        approvalPayloadSchema.safeParse(row.payload).data?.channelContext.threadId === chatId,
+    )
+    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
+  // The latest answer to a question, and when it came.
+  let answer: { at: string; output: Record<string, unknown> } | null = null;
+  for (const message of messages.data?.messages ?? []) {
+    let parts: unknown;
+    try {
+      parts = JSON.parse(message.content);
+    } catch {
+      continue;
+    }
+    if (!Array.isArray(parts)) continue;
+    for (const raw of parts) {
+      const parsed = resultSchema.safeParse(raw);
+      if (parsed.success) answer = { at: message.createdAt, output: parsed.data.output ?? {} };
+    }
+  }
+  const approvalIsLatest =
+    approval !== undefined &&
+    (answer === null || Date.parse(approval.createdAt) > Date.parse(answer.at));
+  let line: string;
+  if (approvalIsLatest) {
+    line =
+      approval.resolvedBy === "rome:task-ended"
+        ? t("concierge.ask.turnedDown")
+        : approval.status === "rejected"
+          ? t("concierge.ask.rejected")
+          : approval.status === "pending"
+            ? t("concierge.ask.answered")
+            : t("concierge.ask.approved");
+  } else if (answer?.output.dismissed === true) {
+    line = t("concierge.ask.dismissed");
+  } else {
+    const values = (Array.isArray(answer?.output.answers) ? answer.output.answers : [])
+      .map((entry) =>
+        entry && typeof entry === "object" ? (entry as { value?: unknown }).value : undefined,
+      )
+      .filter((value): value is string => typeof value === "string" && value.trim() !== "");
+    const text = values.join(", ");
+    line =
+      text && text.length <= SHORT_ANSWER
+        ? t("concierge.ask.answeredWith", { answer: text })
+        : t("concierge.ask.answered");
+  }
+  return <p className="text-aux text-muted-foreground">{line}</p>;
 }
 
 function StaticTaskChatCard({ title }: { title: string }) {
@@ -264,9 +349,12 @@ function latestOpenInteraction(messages: ChatMessage[]) {
 function WaitingTaskCard({
   chatId,
   onRefresh,
+  header,
 }: {
   chatId: string;
   onRefresh: () => Promise<void>;
+  /** Shown at the top inside the question or approval card. */
+  header?: ReactNode;
 }) {
   const { t } = useTranslation("chat");
   const messages = useQuery({
@@ -346,6 +434,7 @@ function WaitingTaskCard({
             }
           }
           status="pending"
+          header={header}
           onResolved={() => {
             void refresh();
           }}
@@ -363,6 +452,7 @@ function WaitingTaskCard({
           onDismiss={(toolUseId) => {
             void submit(toolUseId, { dismissed: true });
           }}
+          header={header}
         />
       ) : null}
     </div>

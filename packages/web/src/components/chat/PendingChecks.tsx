@@ -67,39 +67,42 @@ export function PendingChecks({ chatId, turnKey }: { chatId: string; turnKey: un
       : t("checks.summary", { count: checks.length, next: lineOf(first) });
   const Chevron = open ? ChevronDown : ChevronRight;
   return (
-    <div className="flex flex-col gap-1 px-1 pb-1">
-      <button
-        type="button"
-        aria-expanded={open}
-        aria-label={t(open ? "checks.collapse" : "checks.expand")}
-        onClick={() => setOpen((current) => !current)}
-        className="flex min-w-0 items-center gap-2 rounded-12 border border-border bg-surface/95 px-3 py-1 text-left text-aux text-muted-foreground outline-1 outline-offset-0 outline-transparent backdrop-blur-md transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50 supports-[backdrop-filter]:bg-surface/80 motion-reduce:transition-none"
-      >
-        <Clock className="size-3.5 shrink-0" aria-hidden />
-        <span className="min-w-0 flex-1 truncate">{summary}</span>
-        <Chevron className="size-3.5 shrink-0" aria-hidden />
-      </button>
-      {open ? (
-        <ul aria-label={t("checks.label")} className="flex flex-col gap-1">
-          {checks.map((check) => (
-            <li
-              key={check.id}
-              className="flex items-center gap-2 rounded-12 border border-border bg-surface/95 py-1 pl-3 pr-1 text-aux text-muted-foreground backdrop-blur-md supports-[backdrop-filter]:bg-surface/80"
-            >
-              <Clock className="size-3.5 shrink-0" aria-hidden />
-              <span className="min-w-0 flex-1 truncate">{lineOf(check)}</span>
-              <IconButton
-                size="xs"
-                label={t("checks.cancel", { name: check.taskTitle ?? check.name })}
-                icon={<X />}
-                disabled={cancel.isPending && cancel.variables === check.id}
-                onClick={() => cancel.mutate(check.id)}
-                className="text-muted-foreground hover:text-foreground"
-              />
-            </li>
-          ))}
-        </ul>
-      ) : null}
+    <div className="px-1 pb-1">
+      {/* One panel with one solid background, so nothing from the timeline shows through. */}
+      <div className="overflow-hidden rounded-12 border border-border bg-surface text-aux text-muted-foreground">
+        <button
+          type="button"
+          aria-expanded={open}
+          aria-label={t(open ? "checks.collapse" : "checks.expand")}
+          onClick={() => setOpen((current) => !current)}
+          className="flex w-full min-w-0 items-center gap-2 px-3 py-1 text-left outline-1 -outline-offset-1 outline-transparent transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50 motion-reduce:transition-none"
+        >
+          <Clock className="size-3.5 shrink-0" aria-hidden />
+          <span className="min-w-0 flex-1 truncate">{summary}</span>
+          <Chevron className="size-3.5 shrink-0" aria-hidden />
+        </button>
+        {open ? (
+          <ul
+            aria-label={t("checks.label")}
+            className="divide-y divide-border border-t border-border"
+          >
+            {checks.map((check) => (
+              <li key={check.id} className="flex items-center gap-2 py-1 pl-3 pr-1">
+                <span className="size-3.5 shrink-0" aria-hidden />
+                <span className="min-w-0 flex-1 truncate">{lineOf(check)}</span>
+                <IconButton
+                  size="xs"
+                  label={t("checks.cancel", { name: check.taskTitle ?? check.name })}
+                  icon={<X />}
+                  disabled={cancel.isPending && cancel.variables === check.id}
+                  onClick={() => cancel.mutate(check.id)}
+                  className="text-muted-foreground hover:text-foreground"
+                />
+              </li>
+            ))}
+          </ul>
+        ) : null}
+      </div>
     </div>
   );
 }

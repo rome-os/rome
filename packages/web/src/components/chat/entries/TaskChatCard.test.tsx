@@ -68,6 +68,8 @@ const approval = (threadId = chatId, at = "2026-11-10T11:00:00Z") => ({
 let client: QueryClient;
 let messages: ChatMessage[];
 let approvals: ReturnType<typeof approval>[];
+/** Every approval the list answers, resolved ones included. */
+let allApprovals: Record<string, unknown>[];
 let waiting: boolean;
 let running: boolean;
 let postStatus: number;
@@ -86,6 +88,7 @@ beforeEach(async () => {
   });
   messages = [message("ask", [question])];
   approvals = [];
+  allApprovals = [];
   waiting = true;
   running = false;
   postStatus = 202;
@@ -117,6 +120,7 @@ beforeEach(async () => {
     if (url === `/api/chat/sessions/${chatId}/messages?limit=2`)
       return Response.json({ messages, nextCursor: "older-turn" });
     if (url === "/api/approvals?status=pending") return Response.json(approvals);
+    if (url === "/api/approvals") return Response.json(allApprovals);
     if (url === "/api/approvals/approval-1")
       return Response.json({ id: "approval-1", status: "pending" });
     if (url === "/api/approvals/approval-1/approve" && init?.method === "POST")
@@ -245,6 +249,106 @@ describe("TaskChatCard shown as one card or the other", () => {
     show(true, "ask");
     expect(await screen.findByText("Expired — answer to continue")).toBeTruthy();
     expect(await screen.findByText("Which tone?")).toBeTruthy();
+  });
+
+  describe("folded", () => {
+    const folded = async (line: string) => {
+      waiting = false;
+      show(true, "ask");
+      const text = await screen.findByText(line);
+      // One card holds the task's header and the line.
+      const card = text.parentElement!;
+      expect(card.querySelector('a[aria-label="Open task chat Draft email"]')).toBeTruthy();
+      expect(card.className).toContain("rounded-12");
+    };
+    const decided = (status: string, resolvedBy: string) => ({
+      ...approval(),
+      status,
+      resolvedBy,
+      createdAt: "2026-11-10T12:00:00Z",
+    });
+
+    it("says a question was answered, with the answer when it is short", async () => {
+      messages = [
+        message("ask", [question]),
+        message("answer", [
+          {
+            type: "interaction_result",
+            toolUseId: "item_0",
+            output: { answers: [{ questionId: "tone", value: "Warm" }] },
+          },
+        ]),
+      ];
+      await folded("Answered: Warm");
+    });
+
+    it("says only Answered when the answer is long", async () => {
+      messages = [
+        message("ask", [question]),
+        message("answer", [
+          {
+            type: "interaction_result",
+            toolUseId: "item_0",
+            output: {
+              answers: [{ questionId: "tone", value: "Warm, but keep it short and kind" }],
+            },
+          },
+        ]),
+      ];
+      await folded("Answered");
+    });
+
+    it("says a question was dismissed", async () => {
+      messages = [message("ask", [question]), message("answer", [result])];
+      await folded("Dismissed");
+    });
+
+    it("says an approval the guardian approved", async () => {
+      allApprovals = [decided("executed", "dev")];
+      await folded("Approved");
+    });
+
+    it("says an approval the guardian rejected", async () => {
+      allApprovals = [decided("rejected", "dev")];
+      await folded("Rejected");
+    });
+
+    it("says an approval Rome turned down when the wait ran out", async () => {
+      allApprovals = [decided("rejected", "rome:task-ended")];
+      await folded("Turned down: no answer within a day");
+    });
+
+    it("says it in Chinese too", async () => {
+      await i18n.changeLanguage("zh-CN");
+      allApprovals = [decided("rejected", "rome:task-ended")];
+      waiting = false;
+      show(true, "ask");
+      expect(await screen.findByText("已自动拒绝：一天内没有回应")).toBeTruthy();
+    });
+  });
+
+  it("keeps an expired question's header and its expired line inside the card, above the form", async () => {
+    taskRows = [
+      {
+        id: "task-9",
+        title: "Draft email",
+        state: "dropped",
+        status: "ended",
+        endReason: "no_response",
+        chat: { id: chatId, name: "Draft email" },
+        conciergeChat: { id: "concierge", name: "Concierge", main: true },
+        createdAt: 1,
+        updatedAt: 2,
+      },
+    ];
+    show(true, "ask");
+    const expired = await screen.findByText("Expired — answer to continue");
+    const card = expired.closest("[data-chat-pending-card]")!;
+    expect(card).toBeTruthy();
+    expect(card.querySelector('a[aria-label="Open task chat Draft email"]')).toBeTruthy();
+    expect(card.textContent?.indexOf("Expired")).toBeLessThan(
+      card.textContent!.indexOf("Which tone?"),
+    );
   });
 
   it("keeps the task card to its title, status, Stop and Open, with no question inside", async () => {
