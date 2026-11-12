@@ -70,6 +70,14 @@ describe("WaitExpiry", () => {
     expect(told).toEqual([row!.id, row!.id]);
   });
 
+  it("handles an expiry once when two calls for one task overlap", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    waiting.set("task-chat", NOW - 25 * HOUR);
+    await Promise.all([expiry.expire(row!.id), expiry.expire(row!.id)]);
+    expect(expired).toHaveLength(1);
+    expect(told).toEqual([row!.id]);
+  });
+
   it("never ends a stopped or archived task's wait for no response", async () => {
     const [stopped, archived] = await repo.upsertMany([
       { title: "Stopped", sessionId: "task-chat" },

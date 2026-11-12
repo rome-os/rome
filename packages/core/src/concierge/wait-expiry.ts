@@ -29,6 +29,8 @@ export class WaitExpiry {
   private timers = new Map<string, { at: number; timer: ReturnType<typeof setTimeout> }>();
   private readonly now: () => number;
   private stopped = false;
+  /** Tasks whose expiry runs now: another call for one of them does nothing. */
+  private handling = new Set<string>();
 
   constructor(private readonly deps: WaitExpiryDeps) {
     this.now = deps.now ?? Date.now;
@@ -87,8 +89,22 @@ export class WaitExpiry {
     this.timers.set(taskId, { at, timer });
   }
 
-  /** The wait of task `taskId` may have expired: handles it once, if it did. */
+  /**
+   * The wait of task `taskId` may have expired: handles it once, if it did.
+   * A call while one for the same task runs does nothing, so the expiry is
+   * handled and logged once.
+   */
   async expire(taskId: string): Promise<void> {
+    if (this.handling.has(taskId)) return;
+    this.handling.add(taskId);
+    try {
+      await this.handle(taskId);
+    } finally {
+      this.handling.delete(taskId);
+    }
+  }
+
+  private async handle(taskId: string): Promise<void> {
     const row = await this.deps.tasks.repo.get(taskId);
     // A stopped or archived task ended otherwise: its wait ends with nothing to tell.
     if (!row?.sessionId || row.stoppedAt || row.archivedAt) return;
