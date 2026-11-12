@@ -151,7 +151,7 @@ final class Workspace {
     var kept: KeptIdentity? {
         role == .unknown ? nil : KeptIdentity(guardian: role == .guardian, name: accountLabel, avatarURL: avatarURL)
     }
-    /// A Chat message to scroll to and highlight, set from the Tasks sheet.
+    /// A Chat message to scroll to and highlight, set from the Agent page's Tasks.
     var focusMessageID: String?
     /// Prompts for chats' composers, unsent, by the chat's draft key (the
     /// main Chat's is `conciergeChatID`); a chat takes its own once its draft
@@ -190,6 +190,22 @@ final class Workspace {
         if main.loaded { conciergeState = .ready }
         concierge = main
         topics = TopicChatsStore(backend: backend)
+    }
+
+    /// The main Chat's sharing, for its Shared links in Settings; nil until
+    /// the instance names the main chat, whose links it then lists.
+    var mainChatShare: ChatShareFlow? {
+        mainChatServerID == nil ? nil : concierge.share
+    }
+    /// The main Chat's Shared links sheet is up over Settings. Its own flag:
+    /// the chat's would ask the chat, under Settings, for a second sheet.
+    var showsMainChatLinks = false
+
+    /// Settings' Shared links: the sheet, then the main Chat's links.
+    func openMainChatLinks() async {
+        guard let share = mainChatShare else { return }
+        showsMainChatLinks = true
+        await share.loadLinks()
     }
 
     /// A chat's Shared links sheet or share sheet is up: it covers the chat.

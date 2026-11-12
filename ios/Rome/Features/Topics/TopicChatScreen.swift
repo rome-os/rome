@@ -141,7 +141,7 @@ struct TopicChatScreen: View {
     }
 
     /// Read only while it is the chat on screen: never under an instance
-    /// page's sheet, the Tasks sheet or the drawer.
+    /// page's sheet, the Agent page or the drawer.
     private func markRead(_ store: TranscriptStore) {
         guard visibleChat == store.sessionId || (chatId != nil && visibleChat == chatId) else { return }
         store.markRead()

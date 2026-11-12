@@ -109,7 +109,6 @@ enum SnapshotRunner {
             await capture("57-agent-uses", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .agent(.uses) }
             model.debugCommand = .agent(nil)
             try? await Task.sleep(for: .seconds(0.8))
-            try? await Task.sleep(for: .seconds(0.8))
             await capture("07-task-approval", style: styleName, in: directory, wait: 2) {
                 model.debugCommand = .route([.taskChat(chatId: "chat-price", title: "价格追踪：发提醒邮件")])
             }
@@ -123,6 +122,11 @@ enum SnapshotRunner {
                 model.debugCommand = .route([.taskChat(chatId: "chat-notion", title: "同步 Notion 数据库")])
             }
             await capture("11-settings", style: styleName, in: directory, wait: 1.5) { model.debugCommand = .settings([]) }
+            await capture("11b-settings-shared-links", style: styleName, in: directory, wait: 1.2) {
+                Task { await model.workspace?.openMainChatLinks() }
+            }
+            model.workspace?.showsMainChatLinks = false
+            try? await Task.sleep(for: .seconds(0.6))
             await capture("27-settings-notifications-on", style: styleName, in: directory, wait: 1.2) {
                 model.push.debugSet(permission: .on, dismissedAt: .now)
                 model.debugCommand = .settings(nil)

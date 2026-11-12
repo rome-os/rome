@@ -422,9 +422,8 @@ struct MainShell: View {
     }
 
     /// The chat on screen: none while something covers the page (the drawer,
-    /// the Tasks or Settings sheet, an instance page's sheet, a chat's share
-    /// sheets); a pushed task
-    /// chat; else the section's chat. Chat's read marks, the server's watch
+    /// the Agent page, the Settings sheet, an instance page's sheet, a chat's
+    /// share sheets); a pushed task chat; else the section's chat. Chat's read marks, the server's watch
     /// and push banners all go by this one answer.
     static func visibleChat(section: MainSection, path: [Route], covered: Bool) -> String? {
         if covered { return nil }

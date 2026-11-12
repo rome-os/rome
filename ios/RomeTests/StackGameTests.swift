@@ -272,6 +272,30 @@ import UIKit
         #expect(StackFace.eyes(at: 3.65) < 1)
         #expect(StackFace.glance(at: 2) != StackFace.glance(at: 0))
     }
+
+    /// The end line drops word by word, punctuation with its word; Chinese
+    /// by phrase. All of it has landed before "Play again" shows.
+    @Test func theEndLineLandsWordByWordInTime() {
+        #expect(EndLine.words("Rome wasn't built in a day.") == ["Rome", "wasn't", "built", "in", "a", "day."])
+        let chinese = EndLine.words("罗马不是一天建成的。")
+        #expect(chinese.count > 1 && chinese.joined() == "罗马不是一天建成的。")
+        for count in [1, 4, 6, 12] {
+            #expect(EndLine.landed(at: 0, count: count) == 0)
+            let last = EndLine.start(of: count - 1, count: count) + EndLine.fall
+            #expect(StackGameScreen.toastFrom + last <= StackGameScreen.againAfter + 0.0001)
+            #expect(EndLine.landed(at: last, count: count) == count)
+        }
+        // At rest in its place once landed; above it before.
+        #expect(EndLine.pose(at: 0).lift == EndLine.height)
+        #expect(abs(EndLine.pose(at: EndLine.fall).lift) < 0.0001)
+    }
+
+    /// The giant "Rome" sits in the middle of the ground seen at rest, and
+    /// never closer than the minimum to its edge.
+    @Test func theGroundWordCentersInItsBand() {
+        #expect(GroundArt.letterTop(capHeight: 100, band: 200) == 50)
+        #expect(GroundArt.letterTop(capHeight: 100, band: 110) == GroundArt.minLetterTop)
+    }
 }
 
 /// A closed game costs the app nothing: its screen, with its timeline,
