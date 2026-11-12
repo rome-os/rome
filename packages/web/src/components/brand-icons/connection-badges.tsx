@@ -151,7 +151,8 @@ const CONNECTION_BADGES: Partial<Record<string, ConnectionBadge>> = {
   google: { Icon: GoogleIcon },
   github: { Icon: GithubIcon },
   shopify: { Icon: ShopifyIcon },
-  webchat: { Icon: RomeLogo },
+  // The tile shows through the face, which would otherwise paint the page background.
+  webchat: { Icon: (props) => <RomeLogo cutoutFace {...props} /> },
   email: { Icon: Mail, mark: "text-primary" },
   agents: { Icon: Bot, mark: "text-primary" },
   // Composio is a broker, not a single brand — reuse the legacy Integrations

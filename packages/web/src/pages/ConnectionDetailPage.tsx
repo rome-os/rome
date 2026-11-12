@@ -31,7 +31,7 @@ import {
  * first account routes as the service (`feishu`), later ones by their channel
  * id. Unknown or unmatched ids redirect back to the list. The connect ceremony
  * + enablement copy is the shared `ConnectionDetailBody` (also used by the
- * in-list dialog).
+ * in-list `ConnectionDetailPane`).
  */
 
 const BACK_TO_LIST = "/settings/connections";

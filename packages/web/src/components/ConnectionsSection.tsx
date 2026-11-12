@@ -65,6 +65,12 @@ function CardSlot({
   );
 }
 
+function findCardSlot(grids: HTMLElement | null, id: string): Element | undefined {
+  return [...(grids?.querySelectorAll("[data-card-slot]") ?? [])].find(
+    (slot) => slot.getAttribute("data-card-slot") === id,
+  );
+}
+
 /**
  * The Connections tab: a search box, then two grids of the same cards,
  * Connected and Add.
@@ -178,7 +184,22 @@ export function ConnectionsSection({
   const connectedHeading = t("connections.sections.connected", { count: "\u0000" }).split("\u0000");
 
   const openRow = composioServices.rows.connected.find((row) => row.slug === openService) ?? null;
-  const paneOpen = selected !== null || openRow !== null;
+  const paneSlot = selected ? selected.route : openRow ? `composio:${openRow.slug}` : null;
+  const paneOpen = paneSlot !== null;
+
+  // The open pane hides the grids, which drops the card's focus and scroll
+  // position, so its card takes both back once the grids show again. A card
+  // connected from its pane has moved to Connected, and this brings it into view.
+  const grids = useRef<HTMLDivElement>(null);
+  const lastPaneSlot = useRef<string | null>(null);
+  useEffect(() => {
+    const from = lastPaneSlot.current;
+    lastPaneSlot.current = paneSlot;
+    if (paneSlot !== null || from === null) return;
+    const card = findCardSlot(grids.current, from);
+    card?.scrollIntoView?.({ block: "nearest" });
+    card?.querySelector("button")?.focus({ preventScroll: true });
+  }, [paneSlot]);
 
   // A card that just connected can land out of view in a long list, so bring it
   // back once it has arrived. Accounts loading all at once are not a connect.
@@ -192,16 +213,17 @@ export function ConnectionsSection({
     const id = added[0]!;
     const timer = window.setTimeout(() => {
       const behavior = reducedMotion ? "auto" : "smooth";
-      const target = [`composio:${id}`, id]
-        .map((slotId) => document.querySelector(`[data-card-slot="${CSS.escape(slotId)}"]`))
-        .find(Boolean);
+      const target =
+        findCardSlot(grids.current, `composio:${id}`) ?? findCardSlot(grids.current, id);
       target?.scrollIntoView?.({ block: "nearest", behavior });
     }, TRAVEL.duration * 1000);
     return () => window.clearTimeout(timer);
   }, [connectedKey, reducedMotion]);
 
+  // `layoutDependency` keeps a search from starting a glide, but not from
+  // continuing one, so a new search remounts each card where it lands.
   const slot = (id: string, card: ReactNode) => (
-    <CardSlot key={id} id={id} connectedKey={connectedKey}>
+    <CardSlot key={`${id} ${needle}`} id={id} connectedKey={connectedKey}>
       {card}
     </CardSlot>
   );
@@ -330,7 +352,7 @@ export function ConnectionsSection({
               <EmptyStateTitle>{t("connections.emptyTitle")}</EmptyStateTitle>
             </EmptyState>
           ) : (
-            <div className="flex flex-col gap-5" hidden={paneOpen}>
+            <div ref={grids} className="flex flex-col gap-5" hidden={paneOpen}>
               <div className="relative w-full">
                 <Search
                   className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-subtle-foreground"

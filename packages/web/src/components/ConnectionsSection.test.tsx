@@ -34,6 +34,8 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   rs.restoreAllMocks();
+  // jsdom has no scrollIntoView, so a test that stubs one removes it after.
+  delete (Element.prototype as Partial<Element>).scrollIntoView;
 });
 
 function grantDisplay(overrides: Partial<GrantDisplay> = {}): GrantDisplay {
@@ -342,6 +344,29 @@ describe("ConnectionsSection — Connected and Add", () => {
     rerender(sectionWith([oauth("google", "authorized")], onRefresh));
     const google = within(connectedList()).getByRole("button", { name: "Open Google" });
     expect(within(google).getByText("Working")).toBeTruthy();
+  });
+
+  it("hands focus back to the card, in view, when its pane closes", () => {
+    const scrollIntoView = rs.fn();
+    Element.prototype.scrollIntoView = scrollIntoView;
+    renderSection(mixed());
+    fireEvent.click(screen.getByRole("button", { name: "Open GitHub" }));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    const github = within(connectedList()).getByRole("button", { name: "Open GitHub" });
+    expect(document.activeElement).toBe(github);
+    expect(scrollIntoView.mock.contexts.at(-1)).toBe(github.closest("[data-card-slot]"));
+  });
+
+  it("hands focus to a card connected from its pane, now under Connected", () => {
+    Element.prototype.scrollIntoView = rs.fn();
+    const onRefresh = rs.fn(async () => null);
+    const { rerender } = render(sectionWith([oauth("google")], onRefresh));
+    fireEvent.click(screen.getByRole("button", { name: "Open Google" }));
+    rerender(sectionWith([oauth("google", "authorized")], onRefresh));
+    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    expect(document.activeElement).toBe(
+      within(connectedList()).getByRole("button", { name: "Open Google" }),
+    );
   });
 
   it("clears the search on Escape", () => {
