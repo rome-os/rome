@@ -136,6 +136,29 @@ describe("the reply the toolbar and the tap row send", () => {
     expect(sent()).toEqual({ replyToMessageId: "m1", replyQuote: LEAD });
   });
 
+  it("leaves the tap row closed when a tap on a phone lands on a picture", () => {
+    rs.stubGlobal(
+      "matchMedia",
+      rs.fn((query: string) => ({
+        matches: query === "(hover: none)",
+        media: query,
+        addEventListener: rs.fn(),
+        removeEventListener: rs.fn(),
+      })),
+    );
+    renderChat([
+      agentRow("m1", [
+        { type: "text", content: "A note\n\n![A chart](https://example.com/chart.png)" },
+      ]),
+    ]);
+
+    fireEvent.click(screen.getByAltText("A chart"));
+    expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
+
+    fireEvent.click(screen.getByText("A note"));
+    expect(screen.getByRole("button", { name: "Reply" })).toBeTruthy();
+  });
+
   it("keeps the toolbar outside the clipped text and clear of the chip's row", () => {
     renderChat([agentRow("m1", forward)]);
 

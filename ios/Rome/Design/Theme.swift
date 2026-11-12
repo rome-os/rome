@@ -57,6 +57,22 @@ enum Palette {
         dynamic(0xC9506F, 0xB44864), // rose
     ]
 
+    /// The stacking game: its three block tiers from light to deep, the
+    /// base's stone, the ground under it, and the dusk its page shifts to
+    /// as the tower rises.
+    static let stackAction = dynamic(0xE2C79C, 0xB39466)
+    static let stackSkill = dynamic(0xB9784F, 0x95583A)
+    static let stackApp = primary
+    static let stackStone = dynamic(0xCBC2B4, 0x3B342E)
+    static let stackGround = dynamic(0xE7E1D7, 0x16120F)
+    static let stackDusk = dynamic(0xF0DCCB, 0x1C1114)
+    /// The giant "Rome" on the ground: a quiet neutral that reads clearly
+    /// against the ground.
+    static let stackWordmark = dynamic(0xD9D1C4, 0x28221E)
+    /// The Colosseum on the game's horizon: a few steps off the sky, at
+    /// any height of its dusk.
+    static let stackHorizon = dynamic(rgba: (0x1A130F, 0.06), (0xF4F3EF, 0.055))
+
     /// `from` blended toward `to` by `amount` (0…1), in each appearance.
     static func blend(_ from: Color, _ to: Color, _ amount: CGFloat) -> Color {
         let t = min(1, max(0, amount))

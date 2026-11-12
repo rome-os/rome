@@ -1,5 +1,5 @@
 // @rstest-environment jsdom
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { ThemeProvider } from "@/hooks/use-theme";
 import { AppComponentView } from "./AppComponentView";
@@ -63,6 +63,26 @@ describe("AppComponentView", () => {
 
     const card = container.querySelector("[data-ui-scale]") as HTMLElement;
     expect(card.dataset.chatPendingCard).toBeUndefined();
+  });
+
+  it("mounts a widget live, so its own buttons still work", async () => {
+    const entry = `data:text/javascript,${encodeURIComponent(
+      "export function mountComponent(_root, _id, ctx) { globalThis.__widgetCtx = ctx; }",
+    )}`;
+    rs.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ entryUrl: entry, styleUrls: [], bootstrap: { shell: {} } }), {
+        status: 200,
+      }),
+    );
+    render(
+      <ThemeProvider>
+        <AppComponentView toolUseId="w1" appId="meals" componentId="today" />
+      </ThemeProvider>,
+    );
+
+    const g = globalThis as { __widgetCtx?: { host: { resolved: boolean } } };
+    await waitFor(() => expect(g.__widgetCtx).toBeDefined());
+    expect(g.__widgetCtx?.host.resolved).toBe(false);
   });
 
   it("offers no dismiss on a widget that cannot load", async () => {

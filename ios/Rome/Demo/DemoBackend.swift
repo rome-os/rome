@@ -34,6 +34,8 @@ final class DemoBackend: RomeBackend {
             CloudInstance(id: "demo-1", name: chinese ? "我的 Rome" : "My Rome", slug: "me", origin: "https://me.romeos.cc", status: "running"),
             CloudInstance(id: "demo-2", name: chinese ? "团队 Rome" : "Team Rome", slug: "team", origin: "https://team.romeos.cc", status: "running", role: "visitor", ownerName: "Dev User"),
             CloudInstance(id: "demo-3", name: chinese ? "测试实例" : "Staging", slug: "staging", origin: "https://staging.romeos.cc", status: "stopped"),
+            // A long name and host, to check what a row cuts.
+            CloudInstance(id: "demo-4", name: chinese ? "设计工作室的共享 Rome（全体成员）" : "Design studio's shared Rome for everyone", slug: "studio", origin: "https://design-studio-shared-workspace.romeos.cc", status: "running", role: "visitor", ownerName: "Studio Owner"),
         ]
     }
 
@@ -399,7 +401,12 @@ final class DemoBackend: RomeBackend {
     /// The demo's Concierge goes by a name of its own.
     func agentName() async -> String? { "Milo" }
 
-    func me() async throws -> AccountIdentity? { AccountIdentity(name: "Lin", isGuardian: variant != .visitor) }
+    /// A visitor is known by a long email, to check what Settings cuts.
+    func me() async throws -> AccountIdentity? {
+        variant == .visitor
+            ? AccountIdentity(name: "lin.wei.visiting.designer@studio-example.com", isGuardian: false)
+            : AccountIdentity(name: "Lin")
+    }
 
     func isGuardian() async -> Bool { variant != .visitor }
 

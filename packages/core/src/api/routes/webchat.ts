@@ -497,6 +497,66 @@ function readWidgetFromOutput(output: unknown): ShownWidgetPart | null {
   };
 }
 
+// Matched by name: a provider drops the `mcp__<server>__` prefix, so a tool of
+// the same name on an agent's external MCP server matches too (ZHA-171).
+const isExecuteActionTool = (tool: unknown): boolean =>
+  typeof tool === "string" && (tool === "execute_action" || tool.endsWith("__execute_action"));
+
+/** The action an `execute_action` tool call names, or undefined for any other
+ *  tool call. */
+function executedActionName(msg: Extract<AgentEvent, { type: "tool_use" }>): string | undefined {
+  if (!isExecuteActionTool(msg.tool)) return undefined;
+  const name = (msg.input as { action_name?: unknown } | undefined)?.action_name;
+  return typeof name === "string" ? name : undefined;
+}
+
+type WidgetPart = Extract<MessagePart, { type: "widget" }>;
+
+/**
+ * The widget a tool_result shows, when Rome may store it. Tool output is not
+ * proof of where it came from: an action's own data, a shell command or
+ * another tool can print the same JSON. So a widget is stored only from a
+ * tool call named `execute_action` (`actionName`), only for the app that owns
+ * that action, and only when that app is installed and declares the component
+ * (a described card names none).
+ */
+function trustedWidget(
+  msg: Extract<AgentEvent, { type: "tool_result" }>,
+  actionName: string | undefined,
+  deps: Pick<ApiDeps, "appCatalog" | "actionRegistry">,
+  sessionId: string,
+): WidgetPart | null {
+  const widget = readWidgetFromOutput(msg.output);
+  if (!widget) return null;
+  const owner = actionName ? deps.actionRegistry.getMetadata?.(actionName) : undefined;
+  if (owner?.ownerType !== "app" || owner.ownerId !== widget.appId) {
+    log.warn("rejected widget: not shown by an action its app owns", {
+      sessionId,
+      appId: widget.appId,
+      tool: typeof msg.tool === "string" ? msg.tool : undefined,
+      actionName,
+    });
+    return null;
+  }
+  const resolvedApp = deps.appCatalog.listResolved().find((a) => a.appId === widget.appId);
+  if (!resolvedApp) {
+    log.warn("rejected widget: app not installed", { sessionId, appId: widget.appId });
+    return null;
+  }
+  if (
+    "componentId" in widget &&
+    !(resolvedApp.manifest.components ?? []).includes(widget.componentId)
+  ) {
+    log.warn("rejected widget: component not declared by app", {
+      sessionId,
+      appId: widget.appId,
+      componentId: widget.componentId,
+    });
+    return null;
+  }
+  return { type: "widget", toolUseId: msg.toolUseId, ...widget };
+}
+
 /** Pull a suspension descriptor (`pendingInteraction: true`) out of an action's tool_result output, whether it arrived structured or
  * JSON-serialized through the Rome tools. Returns null for any non-suspended
  * result so the drain loop ignores ordinary tool calls. */
@@ -4085,6 +4145,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           // from the tool-use id (the key the handler created the routine
           // with), never read from the tool's output.
           const pendingRoutineActivations = new Map<string, unknown>();
+          // The action each `execute_action` call of this turn names, by tool
+          // call id, so a widget is stored only for the app that owns it.
+          const executeActionCalls = new Map<string, string>();
           const persistActivatedCard = (toolUseId: string, toolInput: unknown) =>
             persistRoutineDraftCard(
               deps.webchatRepo,
@@ -4235,6 +4298,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
               // Out-of-band snapshot for the routine draft card. An
               // `activate: true` call creates the routine in its handler, so its
               // card waits for the tool_result, which carries the routine id.
+              if (msg.type === "tool_use") {
+                const actionName = executedActionName(msg);
+                if (actionName) executeActionCalls.set(msg.id, actionName);
+              }
               if (
                 msg.type === "tool_use" &&
                 isProposeRoutineTool(msg.tool) &&
@@ -4309,34 +4376,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
                 }
                 // A widget that does not wait: stored as its own part of a
                 // message, so it shows in the turn and again on every load.
-                // Fail closed, as for a suspension.
-                const widget = readWidgetFromOutput(msg.output);
-                if (widget) {
-                  const resolvedApp = deps.appCatalog
-                    .listResolved()
-                    .find((a) => a.appId === widget.appId);
-                  if (!resolvedApp) {
-                    log.warn("rejected widget: app not installed", {
-                      sessionId,
-                      appId: widget.appId,
-                    });
-                  } else if (
-                    "componentId" in widget &&
-                    !(resolvedApp.manifest.components ?? []).includes(widget.componentId)
-                  ) {
-                    log.warn("rejected widget: component not declared by app", {
-                      sessionId,
-                      appId: widget.appId,
-                      componentId: widget.componentId,
-                    });
-                  } else {
-                    await persistCard(deps.webchatRepo, sessionId, turnId, {
-                      type: "widget",
-                      toolUseId: msg.toolUseId,
-                      ...widget,
-                    });
-                  }
-                }
+                const widget = trustedWidget(
+                  msg,
+                  executeActionCalls.get(msg.toolUseId),
+                  deps,
+                  sessionId,
+                );
+                if (widget) await persistCard(deps.webchatRepo, sessionId, turnId, widget);
                 // Fire-and-forget widget placement: an action that returned
                 // `place_widget` surfaces it on its tool_result. Emit a transient
                 // `widget_placement` event so the live client mounts the widget on
@@ -4598,7 +4644,9 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     // foreground turn (notably after `defer` wakes it). Its tool result still
     // needs to become a first-class transcript card; otherwise it exists only
     // in the trace and the model falsely believes the form was shown.
-    const builtinQuestionCards: PendingInteractionPart[] = [];
+    const backendCards: Array<PendingInteractionPart | WidgetPart> = [];
+    // As in a foreground turn: the action each `execute_action` call names.
+    const executeActionCalls = new Map<string, string>();
     // A recorded event's turn delivers its own reply, so its cards are written
     // as they arrive, ahead of that reply, under the turn's own id.
     let recordedTurnId: string | undefined;
@@ -4680,18 +4728,23 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
           });
         }
       }
+      if (msg.type === "tool_use") {
+        const actionName = executedActionName(msg);
+        if (actionName) executeActionCalls.set(msg.id, actionName);
+      }
       if (msg.type === "tool_result") {
         const suspension = readSuspensionFromOutput(msg.output);
-        if (suspension && suspension.kind === "inline" && suspension.builtin) {
-          const card = buildBuiltinCard(msg, suspension, sessionId);
-          if (card && recorded) {
-            const cardTurnId = recordedTurnId ?? syntheticTurnId;
-            recordedCardWrites = recordedCardWrites.then(() =>
-              persistCard(deps.webchatRepo, sessionId, cardTurnId, card),
-            );
-          } else if (card) {
-            builtinQuestionCards.push(card);
-          }
+        const card =
+          suspension && suspension.kind === "inline" && suspension.builtin
+            ? buildBuiltinCard(msg, suspension, sessionId)
+            : trustedWidget(msg, executeActionCalls.get(msg.toolUseId), deps, sessionId);
+        if (card && recorded) {
+          const cardTurnId = recordedTurnId ?? syntheticTurnId;
+          recordedCardWrites = recordedCardWrites.then(() =>
+            persistCard(deps.webchatRepo, sessionId, cardTurnId, card),
+          );
+        } else if (card) {
+          backendCards.push(card);
         }
       }
       return recordedCardWrites;
@@ -4703,7 +4756,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       // Persist cards before the final narration so transcript order matches the
       // foreground path ("choose above"). `addBackendMessage` also pushes a
       // message_insert event to an already-open session.
-      for (const card of builtinQuestionCards) {
+      for (const card of backendCards) {
         await persistCard(deps.webchatRepo, sessionId, syntheticTurnId, card);
       }
       // Persist + push the reply before the stream emits `done`, so a

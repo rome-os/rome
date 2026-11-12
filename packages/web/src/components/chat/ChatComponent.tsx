@@ -155,9 +155,16 @@ export function ChatComponent({
       "agentName",
       "widgets",
     ];
-    if (!prefillKeys.some((key) => key in state)) return;
+    // A new tab opened from a project's plus carries the project in the URL
+    // instead of state; it goes the same way, so a reload or a later visit to
+    // this page does not put the project back over the user's choice.
+    const query = new URLSearchParams(location.search);
+    const hasProjectParam = query.has("project");
+    if (!hasProjectParam && !prefillKeys.some((key) => key in state)) return;
     for (const key of prefillKeys) delete state[key];
-    navigate(location.pathname + location.search, {
+    query.delete("project");
+    const search = query.toString();
+    navigate(location.pathname + (search ? `?${search}` : ""), {
       replace: true,
       state: Object.keys(state).length ? state : null,
     });

@@ -126,7 +126,10 @@ export function useConciergeUnread(chatId: string | null): number {
 
 /**
  * The Concierge chats: the main chat first, then the topic chats, each with
- * its unread count. Empty while the list is loading.
+ * its unread count. Empty while the list is loading. Like the chat list, it
+ * stays cached for the tab's lifetime (`gcTime: Infinity`), so the sidebar's
+ * topic chats show at once after a long time away from Chat, and every mount
+ * still refetches behind them (`staleTime: 0`).
  */
 export function useConciergeChats(): ConciergeChatDto[] {
   const { data } = useQuery({
@@ -134,6 +137,7 @@ export function useConciergeChats(): ConciergeChatDto[] {
     queryFn: ({ signal }) =>
       fetchJson<ConciergeChatsResponse>("/api/concierge/chats", { signal, fallback: "" }),
     staleTime: 0,
+    gcTime: Number.POSITIVE_INFINITY,
   });
   return data?.chats ?? [];
 }

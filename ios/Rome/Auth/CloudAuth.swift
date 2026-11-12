@@ -3,10 +3,10 @@ import Foundation
 import UIKit
 
 // Native sign-in, ported from packages/lib/src/native-auth (RFC 065). Rome Cloud
-// signs the device in once (PKCE, ephemeral browser session) and returns a device
-// credential. For each instance the app then asks the instance for an
-// authorization request, has Cloud authorize it, and trades the code at the
-// instance for a `rome_session`.
+// signs the device in once (PKCE, the browser session shared with Safari) and
+// returns a device credential. For each instance the app then asks the instance
+// for an authorization request, has Cloud authorize it, and trades the code at
+// the instance for a `rome_session`.
 
 struct CloudCredential: Codable, Sendable {
     var accessToken: String

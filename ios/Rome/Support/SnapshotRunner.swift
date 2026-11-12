@@ -363,6 +363,36 @@ enum SnapshotRunner {
             await capture("33-update-almost-done", style: styleName, in: directory, wait: 1) {
                 model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now), progress: .almostDone)
             }
+            // The stacking game over the upgrading page, its status in the
+            // strip: before the first tap, part way up, then a lost game
+            // above the best.
+            await capture("56-stack-game-start", style: styleName, in: directory, wait: 1.5) {
+                model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now))
+                model.stackGame = StackGameLaunch(fromUpdate: true, sample: .start)
+            }
+            await capture("54-stack-game", style: styleName, in: directory, wait: 1.5) {
+                if model.stackGame != nil {
+                    model.stackGame = nil
+                    Task {
+                        try? await Task.sleep(for: .seconds(0.6))
+                        model.stackGame = StackGameLaunch(fromUpdate: true, sample: .playing)
+                    }
+                    return
+                }
+                model.update.debugShow(.updating(target: DemoBackend.releasedVersion, since: .now))
+                model.stackGame = StackGameLaunch(fromUpdate: true, sample: .playing)
+            }
+            await capture("55-stack-game-over", style: styleName, in: directory, wait: 1.5) {
+                model.stackGame = nil
+                Task {
+                    try? await Task.sleep(for: .seconds(0.6))
+                    model.stackGame = StackGameLaunch(sample: .over)
+                }
+            }
+            if model.stackGame != nil {
+                model.stackGame = nil
+                try? await Task.sleep(for: .seconds(0.8))
+            }
             await capture("22-update-failed", style: styleName, in: directory, wait: 1) {
                 model.update.debugShow(.failed(.timedOut(target: DemoBackend.releasedVersion)))
             }
