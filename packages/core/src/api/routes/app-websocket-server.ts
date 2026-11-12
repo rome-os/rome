@@ -6,26 +6,30 @@ import type {
   RomeAppWebSocket,
   RomeAppWebSocketHandlers,
 } from "@rome-os/app-runtime";
-import { createLogger } from "../logger.js";
-import { AppApiDispatcher, type RomeAppApiRequest, type RomeAppCaller } from "./api.js";
-import type { AppCatalog } from "../apps/catalog.js";
-import type { ActionEngine } from "../apps/actions/engine.js";
-import type { DrizzleDb } from "../db/index.js";
-import type { RoutinesRepository } from "../db/repositories/routines.js";
-import { decodeAppApiPath, decodeAppIdPathSegment } from "../apps/route-path.js";
-import { isSameOriginMutationRequest } from "../lib/mutation-origin.js";
-import { stripInternalHeaders } from "../relay/protocol.js";
-import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "../access/auth.js";
-import { resolveGuardianSessionFromMaterial } from "../access/guardian-session.js";
-import { readCookie, rejectUpgrade, toOriginRequest } from "../lib/ws-upgrade.js";
+import { createLogger } from "../../logger.js";
+import {
+  AppApiDispatcher,
+  type RomeAppApiRequest,
+  type RomeAppCaller,
+} from "../../app-host/api.js";
+import type { AppCatalog } from "../../apps/catalog.js";
+import type { ActionEngine } from "../../apps/actions/engine.js";
+import type { DrizzleDb } from "../../db/index.js";
+import type { RoutinesRepository } from "../../db/repositories/routines.js";
+import { decodeAppApiPath, decodeAppIdPathSegment } from "../helpers.js";
+import { isSameOriginMutationRequest } from "../../lib/mutation-origin.js";
+import { stripInternalHeaders } from "../../relay/protocol.js";
+import { COOKIE_NAME, VISITOR_COOKIE_NAME, verifyVisitorSession } from "../../access/auth.js";
+import { resolveGuardianSessionFromMaterial } from "../../access/guardian-session.js";
+import { readCookie, rejectUpgrade, toOriginRequest } from "../../lib/ws-upgrade.js";
 import {
   enrichGuardianActor,
   runWithSessionActor,
   type SessionActor,
-} from "../access/session-actor.js";
-import type { RomeAppViewer } from "../access/visitor-session.js";
-import type { AppFavorRequests } from "../apps/app-favors-port.js";
-import type { AppConnectionsContextFactory } from "../apps/app-connections-port.js";
+} from "../../access/session-actor.js";
+import type { RomeAppViewer } from "../../access/visitor-session.js";
+import type { AppFavorRequests } from "../../apps/app-favors-port.js";
+import type { AppConnectionsContextFactory } from "../../apps/app-connections-port.js";
 
 const log = createLogger("app-websocket");
 

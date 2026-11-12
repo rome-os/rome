@@ -5,11 +5,12 @@ import { createLogger } from "../../logger.js";
 import { withoutSessionActor } from "../../access/session-actor.js";
 import { createWebhookAuth } from "../middleware/webhook-auth.js";
 import {
+  InvalidAppApiPathError,
+  decodeAppApiPathSegment,
   parseWebhookRequestBody,
   toWebhookInvocationResponse,
   toWebhookInvocationStatus,
 } from "../helpers.js";
-import { InvalidAppApiPathError, decodeAppApiPathSegment } from "../../apps/route-path.js";
 import type { ActionEngine } from "../../apps/actions/engine.js";
 import type { ActionResult } from "../../apps/actions/types.js";
 import type { WebhookInvocationsRepository } from "../../apps/repositories/webhook-invocations.js";

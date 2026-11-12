@@ -18,11 +18,7 @@ import { resolveGuardianSession } from "../../access/guardian-session.js";
 import { resolveVisitorSession, type RomeAppViewer } from "../../access/visitor-session.js";
 import { decide, type Principal, type Verdict } from "../../access/permissions.js";
 import type { ResolvedApp } from "../../apps/state.js";
-import {
-  decodeAppApiPath,
-  decodeAppIdPathSegment,
-  InvalidAppApiPathError,
-} from "../../apps/route-path.js";
+import { decodeAppApiPath, decodeAppIdPathSegment, InvalidAppApiPathError } from "../helpers.js";
 import type { ApiDeps } from "../deps.js";
 
 // `/api/*` endpoints the Caddy `forward_auth` probe waves through without

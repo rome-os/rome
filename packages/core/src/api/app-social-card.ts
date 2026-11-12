@@ -5,7 +5,7 @@ import { appIdToPathSegment } from "../apps/packaging/app-id.js";
 import { type AppView, isResolvedApp, type ResolvedApp } from "../apps/state.js";
 import { getExternalRequestOrigin } from "../lib/request-origin.js";
 import type { SocialCard } from "../lib/social-meta.js";
-import { decodeAppIdPathSegment, InvalidAppApiPathError } from "../apps/route-path.js";
+import { decodeAppIdPathSegment, InvalidAppApiPathError } from "./helpers.js";
 
 const APP_ROUTE_RE = /^\/(?:full\/)?apps\/([^/]+)(?:\/|$)/;
 
