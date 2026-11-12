@@ -3,11 +3,8 @@
 // starts a topic chat, and `connect_card` shows a card that connects a service.
 
 import type { ForwardedFrom } from "@rome/api-types/chat";
-import {
-  CONCIERGE_TASK_STATES,
-  CONCIERGE_TASK_SUMMARY_MAX_LENGTH,
-  type ConciergeTaskState,
-} from "@rome/api-types/concierge";
+import { CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
+import type { TaskStatusView } from "./tasks.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { ChatThreadPlacement } from "../webchat/repository.js";
 import type { SendResult } from "../chats/send.js";
@@ -99,22 +96,19 @@ function statusOf(
   return chat?.lastTurnFailed ? "failed" : "idle";
 }
 
-const isTaskState = (value: unknown): value is ConciergeTaskState =>
-  (CONCIERGE_TASK_STATES as readonly unknown[]).includes(value);
-
 /** The ISO time of a nullable instant, for the Concierge to read. */
 const isoOf = (date: Date | null) => date?.toISOString();
 
-/** A row as the Concierge reads it: compact, with no empty fields. */
-function compactTask({ row }: ConciergeTaskWithChat) {
+/** A row as the Concierge reads it: compact, with no empty fields. Rome derives its status. */
+function compactTask({ row }: ConciergeTaskWithChat, status: TaskStatusView | undefined) {
   return {
     id: row.id,
     title: row.title,
-    state: row.state,
+    ...(status ? { status: status.status } : {}),
+    ...(status?.endReason ? { endReason: status.endReason } : {}),
+    ...(status?.laterAt ? { laterAt: new Date(status.laterAt).toISOString() } : {}),
     ...(row.summary ? { summary: row.summary } : {}),
-    ...(row.waitingOn ? { waitingOn: row.waitingOn } : {}),
-    ...(row.dueAt ? { dueAt: isoOf(row.dueAt) } : {}),
-    ...(row.rank !== null ? { rank: row.rank } : {}),
+    ...(row.note ? { note: row.note } : {}),
     ...(row.sessionId ? { chatId: row.sessionId } : {}),
     updatedAt: row.updatedAt.toISOString(),
   };
@@ -233,9 +227,13 @@ export async function buildConciergeTools(
   };
 
   /** This owner's rows, as the agent's list reads them. */
-  const ownRows = async (includeDone: boolean) => {
+  const ownRows = async (includeEnded: boolean) => {
     const owner = await ownerHere();
-    return (await tasks.repo.listForAgent(includeDone)).filter((task) => task.owner === owner);
+    const rows = (await tasks.repo.listForAgent(true)).filter((task) => task.owner === owner);
+    const status = await tasks.statusOf(rows.map((task) => task.row));
+    return rows
+      .map((task) => ({ ...task, status: status.get(task.row.id) }))
+      .filter((task) => includeEnded || task.status?.status !== "ended");
   };
 
   // Said as Concierge's account, so the task event reads who asked off the
@@ -256,7 +254,6 @@ export async function buildConciergeTools(
     await tasks.repo.upsertMany([
       {
         title: chat.triggerName ?? chat.name,
-        state: "doing",
         sessionId: chat.id,
         chatId: currentTurn().chatId,
       },
@@ -359,10 +356,12 @@ export async function buildConciergeTools(
     }
   };
 
+  // What the Concierge writes on a row: what Rome cannot know. Rome derives
+  // the status, and a field from before it is refused by name.
   const parseTaskWrite = async (
     raw: Record<string, unknown>,
     where: string,
-  ): Promise<ConciergeTaskWrite> => {
+  ): Promise<{ write: ConciergeTaskWrite; stop: boolean }> => {
     const write: ConciergeTaskWrite = {};
     const text = (field: string) => {
       const value = raw[field];
@@ -370,17 +369,19 @@ export async function buildConciergeTools(
       if (typeof value !== "string") throw new Error(`${where}.${field} must be a string or null`);
       return value.trim() || null;
     };
+    for (const field of ["state", "waitingOn", "dueAt", "rank", "chatId"]) {
+      if (raw[field] !== undefined) {
+        throw new Error(
+          `${where}.${field} is no longer written: Rome keeps each task's status from its task chat. ` +
+            "Start a task with chat_start, stop it with stop, and schedule a check with defer.",
+        );
+      }
+    }
     if (raw.id !== undefined) {
       write.id = requireString(raw, "id");
       await requireTaskRow(write.id);
     }
     if (raw.title !== undefined) write.title = requireString(raw, "title");
-    if (raw.state !== undefined) {
-      if (!isTaskState(raw.state)) {
-        throw new Error(`${where}.state must be one of: ${CONCIERGE_TASK_STATES.join(", ")}`);
-      }
-      write.state = raw.state;
-    }
     if (raw.summary !== undefined) {
       const summary = text("summary");
       write.summary =
@@ -388,55 +389,43 @@ export async function buildConciergeTools(
           ? `${summary.slice(0, CONCIERGE_TASK_SUMMARY_MAX_LENGTH - 1)}…`
           : summary;
     }
-    if (raw.waitingOn !== undefined) write.waitingOn = text("waitingOn");
-    if (raw.dueAt !== undefined) {
-      const due = text("dueAt");
-      const dueAt = due === null ? null : new Date(due);
-      if (dueAt !== null && Number.isNaN(dueAt.getTime())) {
-        throw new Error(`${where}.dueAt must be an ISO 8601 time`);
-      }
-      write.dueAt = dueAt;
-    }
-    if (raw.rank !== undefined) {
-      if (raw.rank !== null && !Number.isInteger(raw.rank)) {
-        throw new Error(`${where}.rank must be an integer or null`);
-      }
-      write.rank = raw.rank as number | null;
-    }
-    if (raw.chatId !== undefined) {
-      const chatId = text("chatId");
-      if (chatId) await requireTaskChat(chatId);
-      write.sessionId = chatId;
-    }
+    if (raw.note !== undefined) write.note = text("note");
     if (raw.archived !== undefined) {
       if (typeof raw.archived !== "boolean") throw new Error(`${where}.archived must be a boolean`);
       write.archived = raw.archived;
     }
-    const messageId = raw.messageId === undefined ? undefined : requireString(raw, "messageId");
-    // A row that waits for the guardian points at the message that asks. Only an
-    // entry that sets the state is held to this, so a later write that merely
-    // touches a needs_user row keeps its message.
-    if (write.state === "needs_user" && !messageId) {
-      throw new Error(
-        `${where}: needs_user requires messageId: show a task question or approval with chat_card, otherwise ask with say or chat_forward; pass the returned messageId`,
-      );
+    if (raw.stop !== undefined && typeof raw.stop !== "boolean") {
+      throw new Error(`${where}.stop must be a boolean`);
     }
+    const stop = raw.stop === true;
+    if (stop && !write.id) throw new Error(`${where}.stop needs the id of the task to stop`);
+    const messageId = raw.messageId === undefined ? undefined : requireString(raw, "messageId");
     // A row belongs to the Concierge chat it was made in, and moves to the
     // chat whose message it is pointed at.
     if (!write.id) {
       if (!write.title) throw new Error(`${where}.title is required to create a row`);
-      write.state ??= write.sessionId ? "doing" : "next";
       write.sourceMessageId = await sourceMessageForNewRow(messageId);
       write.chatId = currentTurn().chatId;
     } else if (messageId) {
       await requireRowHere(
         write.id,
-        "Update it there, or start a task here with chat_start. Without a messageId you can still update its state or summary.",
+        "Update it there, or start a task here with chat_start. Without a messageId you can still update its summary.",
       );
       write.sourceMessageId = await requireSourceMessage(messageId);
       write.chatId = currentTurn().chatId;
     }
-    return write;
+    return { write, stop };
+  };
+
+  // Stops a task: Rome keeps it stopped, and its task chat's running work stops.
+  const stopTask = async (taskId: string) => {
+    await tasks.repo.stop(taskId, "concierge");
+    const chatId = (await tasks.repo.get(taskId))?.sessionId;
+    if (!chatId) return 0;
+    const { chats } = service.dashboard;
+    const turns = chats.activeTurns(chatId);
+    for (const turnId of turns) await chats.interruptTurn(turnId);
+    return turns.length;
   };
 
   const findListEntry = async (chatId: string) =>
@@ -868,10 +857,9 @@ export async function buildConciergeTools(
     {
       name: "task_upsert",
       description:
-        "Write your task list, the guardian's panel of what you are busy with. Batch only: one call writes every row that changed. " +
+        "Write your task list, the guardian's panel of what you are busy with. Rome keeps each task's status from its task chat; you write only what Rome cannot know. Batch only: one call writes every row that changed. " +
         "An entry without id creates a row (title required, and a message to point to); an entry with id updates it, and fields you leave out stay. " +
-        "For needs_user, show a task question or approval with chat_card, otherwise ask with say or chat_forward. Use the returned messageId as the row anchor. " +
-        "Returns each row's id and the message it points to.",
+        "Returns each row's id, its status, and the message it points to.",
       inputSchema: {
         type: "object",
         required: ["tasks"],
@@ -885,39 +873,25 @@ export async function buildConciergeTools(
               properties: {
                 id: { type: "string", description: "The row to update. Leave out to create one." },
                 title: { type: "string", description: "A few words naming the task." },
-                state: {
-                  type: "string",
-                  enum: [...CONCIERGE_TASK_STATES],
-                  description:
-                    "next: planned. doing: in progress. watching: waiting on something external. needs_user: blocked on the guardian. done: finished. dropped: given up or called off, with the reason in summary.",
-                },
                 summary: {
                   type: ["string", "null"],
-                  description: `One line, at most ${CONCIERGE_TASK_SUMMARY_MAX_LENGTH} characters: the result or the current status.`,
+                  description: `One line the guardian reads, at most ${CONCIERGE_TASK_SUMMARY_MAX_LENGTH} characters: the result, or where the task stands.`,
                 },
-                waitingOn: {
+                note: {
                   type: ["string", "null"],
                   description:
-                    'What a watching or needs_user row waits for, such as "CI" or "your budget call".',
+                    "What you keep for your later self about the task: links, ids, what to check next. The guardian never sees it.",
                 },
-                dueAt: {
-                  type: ["string", "null"],
+                stop: {
+                  type: "boolean",
                   description:
-                    "ISO 8601 time: the next check of a watching row, or when a next row is planned.",
-                },
-                rank: {
-                  type: ["integer", "null"],
-                  description: "Order inside next. Lower comes first.",
-                },
-                chatId: {
-                  type: ["string", "null"],
-                  description: "The task chat this row follows. Each chat belongs to one row.",
+                    "Stop the task: its task chat's running work stops, and it ends stopped. Only when the guardian calls it off.",
                 },
                 archived: { type: "boolean", description: "Archive the row, or bring it back." },
                 messageId: {
                   type: "string",
                   description:
-                    "The message the row points to, as say, chat_card, or chat_forward returned it. Required for needs_user: show a task question or approval with chat_card, otherwise ask with say or chat_forward. Use the returned messageId as the row anchor. A new row of another state takes your latest message this turn if you leave it out. On an update it replaces the old one; leave it out to keep it. chat_card and chat_forward update this anchor automatically.",
+                    "The message the row points to, as say, chat_card, or chat_forward returned it. A new row takes your latest message this turn if you leave it out. On an update it replaces the old one; leave it out to keep it. chat_card and chat_forward update this anchor automatically.",
                 },
               },
             },
@@ -931,12 +905,19 @@ export async function buildConciergeTools(
             throw new Error("tasks is required: an array with one entry per row to write");
           }
           const writes: ConciergeTaskWrite[] = [];
+          const stops: string[] = [];
           for (const [index, raw] of args.tasks.entries()) {
             if (!raw || typeof raw !== "object")
               throw new Error(`tasks[${index}] must be an object`);
-            writes.push(await parseTaskWrite(raw as Record<string, unknown>, `tasks[${index}]`));
+            const { write, stop } = await parseTaskWrite(
+              raw as Record<string, unknown>,
+              `tasks[${index}]`,
+            );
+            writes.push(write);
+            if (stop && write.id) stops.push(write.id);
           }
           const rows = await tasks.repo.upsertMany(writes);
+          for (const taskId of stops) await stopTask(taskId);
           // A row made in this turn is a task for its guardian message.
           for (const [index, row] of rows.entries()) {
             const write = writes[index];
@@ -947,13 +928,16 @@ export async function buildConciergeTools(
           const anchors = await Promise.all(
             rows.map(async (row) => (await tasks.repo.getWithChat(row.id))?.sourceMessageId),
           );
+          const status = await tasks.statusOf(
+            await Promise.all(rows.map(async (row) => (await tasks.repo.get(row.id)) ?? row)),
+          );
           // Says which message each row points to, and flags the ones that kept an
           // earlier message because the entry passed none.
           return {
             tasks: rows.map((row, index) => ({
               id: row.id,
               title: row.title,
-              state: row.state,
+              ...(status.get(row.id) ? { status: status.get(row.id)?.status } : {}),
               ...(anchors[index] ? { anchor: anchors[index] } : {}),
               ...(writes[index].sourceMessageId === undefined ? { anchorKept: true } : {}),
             })),
@@ -963,16 +947,18 @@ export async function buildConciergeTools(
     {
       name: "task_list",
       description:
-        "List your task list: the open rows, or with includeDone the finished ones too. Check it before you create a row, so you do not create a duplicate.",
+        "List your task list with each task's status, which Rome keeps: needs_you, active, later, or ended (with endReason done, failed, stopped or no_response). Ended rows only with includeDone. Check it before you start a task, so you do not start one twice.",
       inputSchema: {
         type: "object",
         properties: {
-          includeDone: { type: "boolean", description: "Also list done and dropped rows." },
+          includeDone: { type: "boolean", description: "Also list ended rows." },
         },
       },
       handler: (input) =>
         runTool("task_list", input, async (args) => ({
-          tasks: (await ownRows(args.includeDone === true)).map(compactTask),
+          tasks: (await ownRows(args.includeDone === true)).map((task) =>
+            compactTask(task, task.status),
+          ),
         })),
     },
     {
@@ -1097,13 +1083,10 @@ export async function buildConciergeTools(
                 ? {
                     id: taskId,
                     sessionId: chatId,
-                    state: "doing",
-                    waitingOn: null,
                     ...(sourceMessageId ? { sourceMessageId, chatId: conciergeChatId } : {}),
                   }
                 : {
                     title,
-                    state: "doing",
                     sessionId: chatId,
                     sourceMessageId,
                     chatId: conciergeChatId,
@@ -1170,6 +1153,8 @@ export async function buildConciergeTools(
           await ensureTaskRow(chat);
           const task = await tasks.repo.findBySession(chatId);
           const text = requireString(args, "text");
+          // New work for a task the guardian or you stopped takes it up again.
+          if (task) await tasks.repo.resume(task.id);
           // The guardian message whose words go on: the one named, or the
           // turn's only one.
           const relayed = answers ?? (prompts.length === 1 ? prompts[0] : undefined);
@@ -1243,7 +1228,7 @@ export async function buildConciergeTools(
           await requireTaskChat(chatId);
           // The task ends stopped, whether or not it was running.
           const task = await tasks.repo.findBySession(chatId);
-          if (task) await tasks.repo.stop(task.id, "concierge");
+          if (task) return { stopped: await stopTask(task.id) };
           const { chats } = service.dashboard;
           const turns = chats.activeTurns(chatId);
           for (const turnId of turns) await chats.interruptTurn(turnId);
@@ -1365,7 +1350,7 @@ export async function buildConciergeTools(
       name: "chat_card",
       description:
         "Show the guardian a card that opens a task chat and shows its live status. " +
-        "Use it for a task question or approval and use the returned messageId as the needs_user row anchor. Also use it to open or find a task chat instead of sending its id. " +
+        "Use it to show a task's question card or approval: the guardian answers on it, straight into the task chat, and the task waits for them until they do. Also use it to open or find a task chat instead of sending its id. " +
         "An existing task row automatically points to this card in this Concierge chat, unless the task already has a chat thread.",
       inputSchema: {
         type: "object",

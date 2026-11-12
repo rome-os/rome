@@ -704,11 +704,17 @@ export const conciergeTasks = sqliteTable(
   {
     id: text("id").primaryKey(),
     title: text("title").notNull(),
+    /**
+     * The state the Concierge wrote before Rome derived a task's status. Read
+     * only, by the migration that set the facts it stood for; nothing writes it.
+     */
     state: text("state", {
       enum: ["next", "doing", "watching", "needs_user", "done", "dropped"],
     }).notNull(),
     /** One line, the result or the current status. */
     summary: text("summary"),
+    /** What the Concierge keeps for its later self about the task. Never shown to the owner. */
+    note: text("note"),
     /** What a `watching` or `needs_user` row waits for. */
     waitingOn: text("waiting_on"),
     /** The next check of a `watching` row, or the planned time of a `next` one. */

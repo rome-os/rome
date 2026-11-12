@@ -96,9 +96,16 @@ export class ConciergeTasks {
     return this.facts?.now() ?? Date.now();
   }
 
-  /** Each row's status now. */
-  async statusOf(rows: readonly ConciergeTaskRow[]): Promise<Map<string, TaskStatusView>> {
+  /**
+   * Each row's status now. `asReported` reads it as it stands once its
+   * waiting result is reported, as the Concierge is told it.
+   */
+  async statusOf(
+    rows: readonly ConciergeTaskRow[],
+    options: { asReported?: boolean } = {},
+  ): Promise<Map<string, TaskStatusView>> {
     const facts = await this.factsOf(rows);
+    if (options.asReported) for (const of of facts.values()) of.reportPending = false;
     const now = this.now();
     return new Map(
       rows.map((row) => {

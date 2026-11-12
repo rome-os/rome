@@ -56,6 +56,7 @@ export interface ConciergeTaskWrite {
   title?: string;
   state?: ConciergeTaskState;
   summary?: string | null;
+  note?: string | null;
   waitingOn?: string | null;
   dueAt?: Date | null;
   rank?: number | null;
@@ -148,23 +149,22 @@ export class ConciergeTasksRepository {
   /**
    * Concierge chat `chatId` is archived or deleted. Its rows stay its own,
    * and read as its owner's main chat's from now on, so none is moved. Its
-   * open rows (neither finished, stopped nor archived) let go of their chat
-   * thread there, so their next report starts one in the main chat; an
-   * ended row keeps its thread. Answers how many rows are open.
+   * rows that `isOpen` keeps let go of their chat thread there, so their next
+   * report starts one in the main chat; an ended row keeps its thread.
+   * Answers how many rows are open.
    */
-  async leaveChat(chatId: string, now = new Date()): Promise<number> {
-    const open = await this.db
-      .select({ id: conciergeTasks.id, root: conciergeTasks.threadRoot })
+  async leaveChat(
+    chatId: string,
+    isOpen: (rows: ConciergeTaskRow[]) => Promise<Set<string>>,
+    now = new Date(),
+  ): Promise<number> {
+    const rows = await this.db
+      .select()
       .from(conciergeTasks)
-      .where(
-        and(
-          eq(conciergeTasks.chatId, chatId),
-          notInArray(conciergeTasks.state, ["done", "dropped"]),
-          isNull(conciergeTasks.stoppedAt),
-          isNull(conciergeTasks.archivedAt),
-        ),
-      );
-    const rooted = open.filter((row) => row.root);
+      .where(and(eq(conciergeTasks.chatId, chatId), isNull(conciergeTasks.archivedAt)));
+    const openIds = await isOpen(rows);
+    const open = rows.filter((row) => openIds.has(row.id));
+    const rooted = open.filter((row) => row.threadRoot);
     if (rooted.length > 0) {
       await this.db
         .update(conciergeTasks)
@@ -177,7 +177,7 @@ export class ConciergeTasksRepository {
         );
     }
     for (const { id } of open) await this.announce(id, "refresh");
-    for (const root of new Set(rooted.map((row) => row.root))) {
+    for (const root of new Set(rooted.map((row) => row.threadRoot))) {
       if (root) this.retireThread({ chatId }, root);
     }
     return open.length;
@@ -262,6 +262,26 @@ export class ConciergeTasksRepository {
       .where(and(eq(conciergeTasks.id, id), isNull(conciergeTasks.stoppedAt)))
       .returning({ id: conciergeTasks.id });
     if (stopped.length > 0) await this.announce(id, "refresh");
+  }
+
+  /**
+   * Task `id`, stopped by the Concierge or its owner, takes new work: it is
+   * stopped no more. A task stopped by archiving or deleting its chat stays
+   * stopped. Answers whether it was resumed.
+   */
+  async resume(id: string, now = new Date()): Promise<boolean> {
+    const resumed = await this.db
+      .update(conciergeTasks)
+      .set({ stoppedAt: null, stopReason: null, updatedAt: now })
+      .where(
+        and(
+          eq(conciergeTasks.id, id),
+          inArray(conciergeTasks.stopReason, ["concierge", "guardian"]),
+        ),
+      )
+      .returning({ id: conciergeTasks.id });
+    if (resumed.length > 0) await this.announce(id, "refresh");
+    return resumed.length > 0;
   }
 
   /**
@@ -545,6 +565,7 @@ export class ConciergeTasksRepository {
           title: write.title ?? existing?.title ?? "",
           state,
           summary: write.summary !== undefined ? write.summary : (existing?.summary ?? null),
+          note: write.note !== undefined ? write.note : (existing?.note ?? null),
           waitingOn:
             write.waitingOn !== undefined ? write.waitingOn : (existing?.waitingOn ?? null),
           dueAt: write.dueAt !== undefined ? write.dueAt : (existing?.dueAt ?? null),

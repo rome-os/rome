@@ -14,6 +14,7 @@ import { CONCIERGE_CHAT_ID } from "@rome/api-types/concierge";
 import { renderTaskEvents } from "../../concierge/events.js";
 import { mainChatIdOf } from "../../concierge/main-chat.js";
 import type { ConciergeService } from "../../concierge/service.js";
+import { ConciergeTasks } from "../../concierge/tasks.js";
 
 const DAY = 86_400_000;
 
@@ -427,7 +428,8 @@ describe("ConciergeTasksRepository", () => {
       const retired: string[] = [];
       repo.onThreadRetired(({ root }) => retired.push(root));
       await chats.archiveSession("topic-1");
-      expect(await repo.leaveChat("topic-1")).toBe(1);
+      // The open rows are the ones whose status has not ended, as the caller derives it.
+      expect(await repo.leaveChat("topic-1", async () => new Set([open.id]))).toBe(1);
       for (const id of [open.id, done.id]) {
         const found = await repo.getWithChat(id);
         expect(found?.row.chatId).toBe("topic-1");
@@ -466,7 +468,10 @@ describe("ConciergeTasksRepository", () => {
       });
       // Its task events group under that owner's main chat, never the guardian's.
       const service = {
-        deps: { tasks: { repo }, messages: { recent: async () => [], before: async () => [] } },
+        deps: {
+          tasks: new ConciergeTasks(repo),
+          messages: { recent: async () => [], before: async () => [] },
+        },
         dashboard: { chats: { activeTurns: () => [] } },
       } as unknown as ConciergeService;
       const [delivery] = await renderTaskEvents(service, [

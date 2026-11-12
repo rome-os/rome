@@ -151,6 +151,8 @@ export async function renderTaskEvents(
     const found = await store.repo.getWithChat(task.taskId);
     if (!found) continue;
     const { row } = found;
+    // As it stands once this report is read: the report itself keeps it active.
+    const status = (await store.statusOf([row], { asReported: true })).get(row.id);
     // The chat the row reports to now: its own while live, else its owner's main chat.
     const key = found.conciergeChat.id;
     const group = byChat.get(key) ?? { taskIds: [], blocks: [], quiet: true, owner: found.owner };
@@ -185,7 +187,8 @@ export async function renderTaskEvents(
       `id="${attr(row.id)}"`,
       row.sessionId ? `chat_id="${attr(row.sessionId)}"` : null,
       `title="${attr(row.title)}"`,
-      `state="${row.state}"`,
+      status ? `status="${status.status}"` : null,
+      status?.endReason ? `end_reason="${status.endReason}"` : null,
       `changes="${attr([...new Set(changes)].join(", "))}"`,
       task.quiet ? 'quiet="true"' : null,
     ]
