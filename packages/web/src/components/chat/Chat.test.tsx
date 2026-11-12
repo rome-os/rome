@@ -56,6 +56,8 @@ const toast = rs.hoisted(() => ({
   dismiss: rs.fn(),
 }));
 rs.mock("sonner", () => ({ toast }));
+// The strip of scheduled checks reads its own query; PendingChecks.test.tsx covers it.
+rs.mock("./PendingChecks", () => ({ PendingChecks: () => null }));
 // How often the chat and its composer render: the chat calls this hook once
 // per render, and the composer stand-in counts its own.
 const renders = rs.hoisted(() => ({ chat: 0, composer: 0 }));

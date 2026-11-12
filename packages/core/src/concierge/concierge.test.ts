@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import type { DrizzleTx } from "../db/index.js";
+import { POSTPONED_CHECKS } from "./service.js";
 import type {
   Account,
   AgentTurnFinishedEvent,
@@ -3863,9 +3864,10 @@ describe("Concierge chats", () => {
       prompt: "⏰ Time's up: watch task:abc",
       ownerKey: "guardian",
     };
+    // Bound to its chat: it wakes the chat's current session, not the one that set it.
     expect(await s.service.resolveTurn(wakeUp)).toMatchObject({
       threadId: TOPIC_CHAT,
-      sessionId: "runtime-topic",
+      sessionId: "runtime-1",
     });
     if (how === "archived") {
       s.sessions.set(TOPIC_CHAT, { ...s.sessions.get(TOPIC_CHAT), archivedAt: new Date() });
@@ -3971,6 +3973,30 @@ describe("Concierge chats", () => {
       '<concierge_chat_retired name="Calendar" how="archived" follows="0" tasks="1"/>',
     );
     await expect(s.service.retireChat(CONCIERGE_CHAT, "deleted")).rejects.toThrow("main");
+  });
+
+  it("flags in the digest a task still waiting on a check it scheduled three times", async () => {
+    const s = setup({ startEvents: false });
+    const [often, once] = await s.taskRepo.upsertMany([{ title: "CI run" }, { title: "Reply" }]);
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      waitingSince: async () => new Map(),
+      reportPending: () => [],
+      laterOf: async (ids) => new Map(ids.map((id) => [id, Date.now() + 60_000])),
+    });
+    s.deps.checks = {
+      timesScheduled: async () =>
+        new Map([
+          [often.id, POSTPONED_CHECKS],
+          [once.id, 1],
+        ]),
+    } as never;
+    expect(await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).toBe(
+      `<task_review>\n<check_postponed task="${often.id}" title="CI run" checks="3"/>\n</task_review>`,
+    );
+    s.deps.checks = { timesScheduled: async () => new Map() } as never;
+    expect(await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).toBe("");
   });
 
   it("switches a topic chat's provider when its quota runs out, as the main chat's", async () => {

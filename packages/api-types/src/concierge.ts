@@ -113,6 +113,27 @@ export interface ConciergeTaskDto {
   notSynced: boolean;
 }
 
+/**
+ * A wake-up pending in a chat: a check the agent scheduled with `defer`,
+ * which the chat shows until it fires and its owner can cancel there. Times
+ * are epoch milliseconds.
+ */
+export interface ChatPendingCheckDto {
+  id: string;
+  name: string;
+  /** When it wakes the chat: its time, or the deadline of the event it waits for. */
+  at: number;
+  /** What an event wait waits for; null for a timed check. */
+  waitingFor: string | null;
+  /** The task it is for, or null. */
+  taskId: string | null;
+}
+
+/** `GET /chat/sessions/:id/checks`, the soonest first. */
+export interface ChatPendingChecksResponse {
+  checks: ChatPendingCheckDto[];
+}
+
 /** `GET /concierge/tasks`. */
 export interface ConciergeTasksResponse {
   tasks: ConciergeTaskDto[];

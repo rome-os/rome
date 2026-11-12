@@ -215,6 +215,7 @@ import { privateChildren, privateOwnerOf } from "./webchat/privacy.js";
 import { ownerOfChat } from "./webchat/owner.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { continuationActor } from "./webchat/continuation-actor.js";
+import { TaskChecks } from "./concierge/task-checks.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
@@ -1178,6 +1179,8 @@ async function main() {
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { find: (continuityKey) => agentSessionManager.find(continuityKey) },
+    // Created before the routine engine runs any wake-up, which it reads.
+    checks: new TaskChecks({ routines: routinesRepo, routineEngine }),
     tasks: new ConciergeTasks(
       new ConciergeTasksRepository(db),
       config.conciergeTaskWaitExpiryMinutes * 60_000,

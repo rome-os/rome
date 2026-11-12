@@ -3,6 +3,7 @@ import type { TriggerProvider } from "./trigger-provider.js";
 import type { Routine, ScheduleTrigger, Trigger } from "./types.js";
 import type { RoutinesRepository } from "../db/repositories/routines.js";
 import { withoutSessionActor } from "../access/session-actor.js";
+import { RESUME_SESSION_ACTION } from "./defer.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("schedule-trigger");
@@ -46,22 +47,29 @@ export class ScheduleTriggerProvider implements TriggerProvider {
         // instant. The API rejects dates already in the past so we don't
         // need to handle that here.
         const fireAt = parseDateAndLocalTime(trigger.date, trigger.localTime, tzid);
+        const fireOnce = async () => {
+          try {
+            await fire({ scheduledTime: new Date().toISOString() });
+            await this.routinesRepo.updateNextRun(routine.id, null);
+            await this.routinesRepo.update(routine.id, { enabled: false });
+            this.jobs.delete(routine.id);
+          } catch (err) {
+            log.error("dated one-off schedule trigger failed", {
+              routineId: routine.id,
+              name: routine.name,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          }
+        };
+        // A `defer` wake-up whose time passed while Rome was down still wakes
+        // its chat, now. Another one-off that was missed stays missed.
+        if (fireAt.getTime() <= Date.now() && routine.actionName === RESUME_SESSION_ACTION) {
+          log.info("firing a missed defer wake-up", { routineId: routine.id, name: routine.name });
+          void withoutSessionActor(() => fireOnce());
+          return;
+        }
         const job = withoutSessionActor(
-          () =>
-            new Cron(fireAt, { timezone: tzid, maxRuns: 1 }, async () => {
-              try {
-                await fire({ scheduledTime: new Date().toISOString() });
-                await this.routinesRepo.updateNextRun(routine.id, null);
-                await this.routinesRepo.update(routine.id, { enabled: false });
-                this.jobs.delete(routine.id);
-              } catch (err) {
-                log.error("dated one-off schedule trigger failed", {
-                  routineId: routine.id,
-                  name: routine.name,
-                  error: err instanceof Error ? err.message : String(err),
-                });
-              }
-            }),
+          () => new Cron(fireAt, { timezone: tzid, maxRuns: 1 }, fireOnce),
         );
         this.jobs.set(routine.id, job);
 

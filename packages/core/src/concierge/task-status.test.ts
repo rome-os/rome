@@ -144,6 +144,14 @@ describe("ConciergeTasks status", () => {
     ]);
   });
 
+  it("tells a task's changes in the order they happened", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await repo.upsertMany([{ id: row.id, summary: "one" }]);
+    await repo.upsertMany([{ id: row.id, summary: "two" }]);
+    await flush();
+    expect(told.map((task) => task.summary)).toEqual([null, "one", "two"]);
+  });
+
   it("tells a task again when a fact of its chat changes its status, and only then", async () => {
     const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
     await flush();

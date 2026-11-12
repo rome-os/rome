@@ -676,6 +676,7 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     running: (chatId) => service.dashboard.chats.activeTurns(chatId).length > 0,
     waitingSince: (chatIds) => webchatRepo.awaitingGuardianSince(chatIds),
     reportPending: () => coalescer.awaitingReport,
+    laterOf: async (taskIds) => (await service.deps.checks?.laterOf(taskIds)) ?? new Map(),
   });
   const sessionChanged = (sessionId: string, change: { toolOnly?: boolean } = {}) => {
     void guard(tracker.sessionChanged(sessionId, change));
@@ -716,6 +717,13 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
       void guard(tracker.taskChanged(row.id, conciergeChat.id));
     }),
     coalescer.onChange(reportChanged),
+    // A check scheduled, fired or cancelled moves its task between later and the rest.
+    service.deps.checks?.watch((taskId) => {
+      void guard(tasks.taskChanged(taskId));
+      void guard(
+        chatOfTask(taskId).then((chatId) => (chatId ? tracker.refresh(chatId) : undefined)),
+      );
+    }) ?? (() => {}),
   ];
   return () => {
     for (const unsubscribe of unsubscribers) unsubscribe();

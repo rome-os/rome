@@ -742,6 +742,17 @@ export function startConciergeFollowing(
    */
   const deliverDigest = async (owner: ConciergeOwner): Promise<{ items: number }> => {
     if (!(await service.isServed(owner))) return { items: 0 };
+    // A chat's digest also says which of its tasks to bring up again.
+    const digestPrompt = async (chatId: string, items: ConciergeFollowItemRow[]) => {
+      const notes = await Promise.resolve()
+        .then(() => service.digestTaskNotes(chatId, owner))
+        .catch((error: unknown) => {
+          log.warn("digest task notes failed", { chatId, error: messageOf(error) });
+          return "";
+        });
+      const turn = renderDigestTurn(items, at, kindLabel);
+      return notes ? `${turn}\n${notes}` : turn;
+    };
     const owed = await deps.items.owedToDigest(owner);
     const at = guardianNow(now(), await timezoneOf(owner));
     const kindLabel = kindLabelsOf(await readSources().catch(() => [] as WatchSource[]));
@@ -761,11 +772,12 @@ export function startConciergeFollowing(
     let turns = 0;
     for (const [chatId, items] of perChat) {
       let ok = false;
+      const prompt = chatId === null ? "" : await digestPrompt(chatId, items);
       try {
         ok =
           chatId !== null &&
           (await outsideAction(() =>
-            service.runSystemTurn(chatId, renderDigestTurn(items, at, kindLabel), {
+            service.runSystemTurn(chatId, prompt, {
               quiet: true,
               inputLabel: `Following · digest (${items.length})`,
               // A digest is expected at its time, so it arrives without an alert.

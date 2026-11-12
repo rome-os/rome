@@ -68,6 +68,8 @@ export type DeferResult =
       name: string;
       /** The event type the wakeup waits for. */
       waitingFor: string;
+      /** When the wait ends without the event (ISO 8601). */
+      deadline: string;
       /** For an app-declared event: whether the provider subscription was
        * already there or was created for this wait. */
       subscription?: "existing" | "created";
@@ -83,10 +85,14 @@ export type DeferResult =
 function buildResumeArgs(
   context: DeferContext,
   prompt: Record<string, unknown>,
+  wakeUp: WakeUp,
 ): Record<string, unknown> {
   const channelContext = context.channelContext;
   return {
     sessionId: context.sessionId,
+    // The task the check is for: its "later" time is read from here, and
+    // stopping the task cancels it.
+    ...(wakeUp.taskId ? { taskId: wakeUp.taskId } : {}),
     channel: channelContext?.channel,
     threadId: channelContext?.threadId,
     channelUserId: channelContext?.channelUserId,
@@ -105,6 +111,7 @@ function wakePrompt(headline: string, wakeUp: WakeUp, context: DeferContext): st
   const attrs = [
     `scheduled_at="${context.scheduledAt.toISOString()}"`,
     ...(context.turnId ? [`turn_id="${xmlAttr(context.turnId)}"`] : []),
+    ...(wakeUp.taskId ? [`task_id="${xmlAttr(wakeUp.taskId)}"`] : []),
   ].join(" ");
   return `${headline}\n<defer_note ${attrs}>\n${wakeUp.note}\n</defer_note>`;
 }
@@ -139,16 +146,26 @@ export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferRe
       },
       actionName: RESUME_SESSION_ACTION,
       // `resume_session` appends a summary of the event payload to `text`.
-      args: buildResumeArgs(deps.context, {
-        text: wakePrompt(`📨 Event arrived: ${parsed.name}`, parsed, deps.context),
-        attachEvent: true,
-      }),
+      args: buildResumeArgs(
+        deps.context,
+        {
+          text: wakePrompt(`📨 Event arrived: ${parsed.name}`, parsed, deps.context),
+          attachEvent: true,
+          // What the chat shows while it waits, and when the wait ends without
+          // the event: the trigger wakes the session then with a payload that
+          // says so (event-bus-trigger-provider.ts).
+          waitingFor: parsed.waitingFor,
+          deadline: new Date(parsed.deadlineMs).toISOString(),
+        },
+        parsed,
+      ),
     });
     const routineId = (data as { routineId?: string } | null | undefined)?.routineId;
     return {
       ok: true,
       name: parsed.name,
       waitingFor: eventName,
+      deadline: new Date(parsed.deadlineMs).toISOString(),
       ...(prepared.subscription ? { subscription: prepared.subscription } : {}),
       ...(prepared.warning ? { warning: prepared.warning } : {}),
       ...(routineId ? { routineId } : {}),
@@ -173,9 +190,11 @@ export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferRe
     },
     actionName: RESUME_SESSION_ACTION,
     // The ⏰ prefix marks it in the thread, and the note says what to do.
-    args: buildResumeArgs(deps.context, {
-      text: wakePrompt(`⏰ Time's up: ${parsed.name}`, parsed, deps.context),
-    }),
+    args: buildResumeArgs(
+      deps.context,
+      { text: wakePrompt(`⏰ Time's up: ${parsed.name}`, parsed, deps.context) },
+      parsed,
+    ),
   };
 
   const data = await deps.createRoutine(createArgs);

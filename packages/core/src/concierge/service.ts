@@ -36,6 +36,7 @@ import type { ConciergeFollowing } from "./following.js";
 import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
 import type { ConciergeTasks } from "./tasks.js";
+import type { TaskChecks } from "./task-checks.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../webchat/owner.js";
@@ -53,6 +54,9 @@ import { ALL_OWNERS_SERVED, type ConciergeOwners, type OwnerProfile } from "./ow
 import { ambiguousQuota, type FailoverReason } from "../agent/index.js";
 
 const log = createLogger("concierge");
+
+/** A task checked this many times and still waiting is flagged in the digest. */
+export const POSTPONED_CHECKS = 3;
 
 export { CONCIERGE_CHAT_ID };
 export {
@@ -166,6 +170,8 @@ export interface ConciergeDeps {
   >;
   /** The todo list. */
   tasks: ConciergeTasks;
+  /** The checks scheduled with `defer`. Absent, no task is ever later. */
+  checks?: TaskChecks;
   approvals: Pick<ApprovalsRepository, "onCreated" | "onResolved">;
   messages: Pick<MessageRepository, "recent" | "before">;
   sessionRepository: Pick<SessionRepository, "current">;
@@ -197,11 +203,14 @@ export interface SystemTurnOptions {
   pushLevel?: NotifyLevel;
 }
 
-/** The task ids a turn's prompt names: `<task id="…">` lines and `task:<id>` names. */
+/**
+ * The task ids a turn's prompt names: `<task id="…">` lines, the `task_id` of
+ * a `defer` wake-up's note, and `task:<id>` names from before it.
+ */
 function namedTaskIds(prompt: string): Set<string> {
   return new Set(
-    [...prompt.matchAll(/<task id="([^"]+)"|\btask:([\w-]+)/g)]
-      .map((match) => match[1] ?? match[2])
+    [...prompt.matchAll(/<task id="([^"]+)"|\btask_id="([^"]+)"|\btask:([\w-]+)/g)]
+      .map((match) => match[1] ?? match[2] ?? match[3])
       .filter((id): id is string => Boolean(id)),
   );
 }
@@ -671,9 +680,10 @@ export class ConciergeService {
     }
     // Before the main chat exists, the turn stays where it was sent.
     const chatId = (await this.deliveryChat(params.threadId, owner)) ?? params.threadId;
-    const moved = chatId !== params.threadId;
-    const sessionId =
-      (!moved && params.sessionId) || (await this.runtimeOf(chatId)) || params.sessionId;
+    // A turn is bound to its chat, not to the runtime session that asked for
+    // it: a wake-up of `defer` set in a session since renewed wakes the chat's
+    // current one, and its note carries what it needs.
+    const sessionId = (await this.runtimeOf(chatId)) || params.sessionId;
     const chat = await this.conciergeChat(chatId);
     const prompt =
       chat && !params.prompt.startsWith("<concierge_chat ")
@@ -863,6 +873,8 @@ export class ConciergeService {
         ? webchatRepo.archiveSessionIn(tx, chatId)
         : webchatRepo.deleteSessionIn(tx, chatId),
     );
+    // A task that ends with its chat has nothing left to check on.
+    if (row) await this.cancelChecks(row.id);
     if (row && end === "archived" && this.attached) {
       const { chats } = this.attached;
       for (const turnId of chats.activeTurns(chatId)) {
@@ -892,6 +904,42 @@ export class ConciergeService {
     const failed = this.failedStarts.get(chatId);
     if (failed?.turnId === turnId) failed.starts.set(key, taskId);
     else this.failedStarts.set(chatId, { turnId, starts: new Map([[key, taskId]]) });
+  }
+
+  /**
+   * What a digest of Concierge chat `chatId` adds about its tasks: each task
+   * still waiting on a check it scheduled `POSTPONED_CHECKS` times or more,
+   * so the Concierge asks the guardian rather than check again. Empty when
+   * there is nothing to say.
+   */
+  async digestTaskNotes(chatId: string, owner: ConciergeOwner): Promise<string> {
+    const since = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    const rows = (await this.deps.tasks.repo.listForConciergeChat(chatId, owner, since)).map(
+      (task) => task.row,
+    );
+    const status = await this.deps.tasks.statusOf(rows);
+    const later = rows.filter((row) => status.get(row.id)?.status === "later");
+    const counts =
+      (await this.deps.checks?.timesScheduled(later.map((row) => row.id))) ?? new Map();
+    const lines = later.flatMap((row) => {
+      const checks = counts.get(row.id) ?? 0;
+      return checks >= POSTPONED_CHECKS
+        ? [
+            `<check_postponed task="${attr(row.id)}" title="${attr(row.title)}" checks="${checks}"/>`,
+          ]
+        : [];
+    });
+    return lines.length > 0 ? `<task_review>\n${lines.join("\n")}\n</task_review>` : "";
+  }
+
+  /** Cancels every check scheduled for task `taskId`, as when it is stopped or archived. */
+  async cancelChecks(taskId: string): Promise<void> {
+    await this.deps.checks?.cancelFor(taskId).catch((error: unknown) =>
+      log.warn("failed to cancel a task's checks", {
+        taskId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   }
 
   /** Unarchived task chat `chatId` brings back the row archiving it archived; the task stays stopped. */

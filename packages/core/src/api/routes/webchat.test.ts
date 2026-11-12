@@ -6729,6 +6729,8 @@ describe("Webchat API", () => {
         const [row] = await repo.upsertMany([
           { title: `Task of ${id}`, state: "doing", sessionId: id },
         ]);
+        // Its own task_upsert is told once its status is read: let it land.
+        await new Promise((resolve) => setTimeout(resolve, 0));
         return row;
       };
       const archive = (id: string, archived = true) =>
@@ -6845,6 +6847,37 @@ describe("Webchat API", () => {
         expect((await archive("task-chat")).status).toBe(200);
         expect(await repo.get(row.id)).toMatchObject({ archivedAt: null, stoppedAt: null });
       });
+    });
+
+    it("lists a chat's pending checks and cancels one there", async () => {
+      const cancelled: [string, string][] = [];
+      const check = { id: "r-1", name: "CI", at: 5, waitingFor: "the run", taskId: "t-1" };
+      deps.concierge = {
+        deps: {
+          checks: {
+            inChat: async (chatId: string) => (chatId === "chat-a" ? [check] : []),
+            cancel: async (chatId: string, id: string) => {
+              cancelled.push([chatId, id]);
+              return id === "r-1";
+            },
+          },
+        },
+      } as never;
+      await deps.webchatRepo.createSession("chat-a", "A");
+      const app = createWebchatRuntime(deps).routes;
+      expect(await (await app.request("/chat/sessions/chat-a/checks")).json()).toEqual({
+        checks: [check],
+      });
+      const gone = await app.request("/chat/sessions/chat-a/checks/r-9", { method: "DELETE" });
+      expect(gone.status).toBe(404);
+      const ok = await app.request("/chat/sessions/chat-a/checks/r-1", { method: "DELETE" });
+      expect(ok.status).toBe(200);
+      expect(cancelled).toEqual([
+        ["chat-a", "r-9"],
+        ["chat-a", "r-1"],
+      ]);
+      // A chat that is not there has no checks to show.
+      expect((await app.request("/chat/sessions/nope/checks")).status).toBe(404);
     });
 
     it("keeps the main Concierge chat, retires a topic chat before deleting it, and tells the activity after", async () => {

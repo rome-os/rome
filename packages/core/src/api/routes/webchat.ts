@@ -1,6 +1,7 @@
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type {
+  ChatPendingChecksResponse,
   ConciergeStatusReaction,
   MessageStatusReactionEvent,
 } from "@rome/api-types/concierge";
@@ -2894,6 +2895,24 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (!session) return c.json({ error: "Session not found" }, 404);
     const messageCount = await deps.webchatRepo.getMessageCount(sessionId);
     return c.json(toWebchatSessionResponse(session, messageCount));
+  });
+
+  // The checks pending in a chat, which its owner can cancel there.
+  app.get("/chat/sessions/:id/checks", async (c) => {
+    const sessionId = c.req.param("id");
+    const lookup = await getTopLevelWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    const checks = (await deps.concierge?.deps.checks?.inChat(sessionId)) ?? [];
+    return c.json({ checks } satisfies ChatPendingChecksResponse);
+  });
+
+  app.delete("/chat/sessions/:id/checks/:checkId", async (c) => {
+    const sessionId = c.req.param("id");
+    const lookup = await getTopLevelWebchatSession(c, sessionId);
+    if ("response" in lookup) return lookup.response;
+    const cancelled = await deps.concierge?.deps.checks?.cancel(sessionId, c.req.param("checkId"));
+    if (!cancelled) return c.json({ error: "No such check in this chat" }, 404);
+    return c.json({ ok: true });
   });
 
   app.patch("/chat/sessions/:id/pin", async (c) => {

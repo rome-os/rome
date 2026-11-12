@@ -67,11 +67,16 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
           description:
             "Absolute wakeup time as an ISO 8601 instant, e.g. 2026-06-25T14:30:00Z. Provide exactly one of afterMinutes, at, or event.",
         },
+        taskId: {
+          type: "string",
+          description:
+            "Optional: the task this check is for, from your task list. The task shows as later until you wake, and stopping or archiving it cancels the check.",
+        },
         event: {
           type: "object",
           description:
-            "Wake on the next event-bus event that matches. Provide exactly one of afterMinutes, at, or event.",
-          required: ["eventName"],
+            "Wake on the next event-bus event that matches, or at its deadline if none comes. Provide exactly one of afterMinutes, at, or event.",
+          required: ["eventName", "waitingFor", "deadline"],
           properties: {
             eventName: {
               type: "string",
@@ -82,6 +87,16 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
               type: "string",
               description:
                 "Optional: only match events from this source (an appId); a single * matches any run of characters.",
+            },
+            waitingFor: {
+              type: "string",
+              description:
+                'A few words saying what you wait for, shown in the chat while you wait, e.g. "the CI run" or "Dana\'s reply".',
+            },
+            deadline: {
+              type: "string",
+              description:
+                "ISO 8601 instant: when to wake anyway if the event has not come, e.g. 2026-06-25T18:00:00Z.",
             },
             filter: {
               type: "array",

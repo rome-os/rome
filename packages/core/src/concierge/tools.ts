@@ -420,6 +420,7 @@ export async function buildConciergeTools(
   // Stops a task: Rome keeps it stopped, and its task chat's running work stops.
   const stopTask = async (taskId: string) => {
     await tasks.repo.stop(taskId, "concierge");
+    await service.cancelChecks(taskId);
     const chatId = (await tasks.repo.get(taskId))?.sessionId;
     if (!chatId) return 0;
     const { chats } = service.dashboard;
@@ -918,6 +919,10 @@ export async function buildConciergeTools(
           }
           const rows = await tasks.repo.upsertMany(writes);
           for (const taskId of stops) await stopTask(taskId);
+          // An archived task has nothing left to check on.
+          for (const write of writes) {
+            if (write.id && write.archived === true) await service.cancelChecks(write.id);
+          }
           // A row made in this turn is a task for its guardian message.
           for (const [index, row] of rows.entries()) {
             const write = writes[index];

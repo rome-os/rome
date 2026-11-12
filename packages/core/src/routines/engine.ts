@@ -38,6 +38,7 @@ export function payloadSize(payload: Record<string, unknown>): Record<string, un
 export class RoutineEngine {
   private providers = new Map<string, TriggerProvider>();
   private retryTimers = new Set<ClockTimer>();
+  private changeListeners = new Set<(routineId: string) => void>();
   // rootExecutionIds we've asked the action engine to kill. dispatch's catch
   // consults this so a guardian-requested stop is recorded as "cancelled"
   // (not "error") and is never retried.
@@ -92,6 +93,31 @@ export class RoutineEngine {
     log.info("routine engine started", { routineCount: rows.length });
   }
 
+  /**
+   * Calls `listener` with a routine's id when it is activated, deactivated or
+   * fires, so a reader of pending routines (a task's next check) reads again.
+   * Returns the unsubscribe.
+   */
+  onChange(listener: (routineId: string) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => {
+      this.changeListeners.delete(listener);
+    };
+  }
+
+  private changed(routineId: string): void {
+    for (const listener of this.changeListeners) {
+      try {
+        listener(routineId);
+      } catch (error) {
+        log.warn("routine change listener failed", {
+          routineId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+  }
+
   async activate(routine: Routine): Promise<void> {
     const provider = this.providers.get(routine.trigger.type);
     if (!provider) {
@@ -104,8 +130,13 @@ export class RoutineEngine {
     await provider.activate(routine, async (payload) => {
       // A trigger fire ignores the dispatch outcome (it's surfaced via the run
       // record); only the manual runNow() path reads the return value.
-      await this.dispatch(routine, payload);
+      try {
+        await this.dispatch(routine, payload);
+      } finally {
+        this.changed(routine.id);
+      }
     });
+    this.changed(routine.id);
   }
 
   /** Re-activate every enabled floating schedule so it picks up a new guardian
@@ -138,6 +169,7 @@ export class RoutineEngine {
     for (const provider of this.providers.values()) {
       provider.deactivate(routineId);
     }
+    this.changed(routineId);
   }
 
   /** Fire a routine's action immediately, out of band from its trigger — the

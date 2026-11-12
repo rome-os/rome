@@ -32,6 +32,8 @@ export interface TaskFactSources {
   waitingSince(chatIds: readonly string[]): Promise<Map<string, number>>;
   /** The tasks whose result waits for the Concierge turn that reports it. */
   reportPending(): readonly string[];
+  /** When each task's soonest pending check is due, epoch milliseconds. */
+  laterOf?(taskIds: readonly string[]): Promise<Map<string, number>>;
 }
 
 /** A task's status, with the facts the panel shows beside it. */
@@ -70,6 +72,7 @@ export class ConciergeTasks {
     const chats = rows.flatMap((row) => (row.sessionId ? [row.sessionId] : []));
     const since = facts && chats.length > 0 ? await facts.waitingSince(chats) : new Map();
     const pending = new Set(facts?.reportPending() ?? []);
+    const later = (await facts?.laterOf?.(rows.map((row) => row.id))) ?? new Map<string, number>();
     const running = (chatId: string) => {
       try {
         return facts?.running(chatId) ?? false;
@@ -85,7 +88,7 @@ export class ConciergeTasks {
           waitingSince: row.sessionId ? (since.get(row.sessionId) ?? null) : null,
           running: row.sessionId ? running(row.sessionId) : false,
           reportPending: pending.has(row.id),
-          laterAt: laterOf(row, this.now()),
+          laterAt: later.get(row.id) ?? null,
           lastOutcome: row.lastOutcome ?? null,
         },
       ]),
@@ -171,10 +174,15 @@ export class ConciergeTasks {
 
   /** Emits `task_upsert` for every change of one owner's rows. Returns the unsubscribe. */
   subscribe(emit: LiveEventEmit, owner: ConciergeOwner = GUARDIAN_OWNER): () => void {
+    // Each change is told in the order it happened: reading a row's status
+    // takes a moment, and a later change must never overtake an earlier one.
+    let told: Promise<void> = Promise.resolve();
     return this.repo.onChange((task) => {
       if (task.owner !== owner) return;
-      void this.toDtos([task])
-        .then(([dto]) => emit("task_upsert", { task: dto }))
+      const dto = this.toDtos([task]);
+      told = told
+        .then(() => dto)
+        .then(([read]) => emit("task_upsert", { task: read }))
         .catch((error: unknown) =>
           log.warn("failed to tell a task's change", {
             taskId: task.row.id,
@@ -212,15 +220,6 @@ export class ConciergeTasks {
     this.notSynced.add(taskId);
     void this.repo.reannounce(taskId);
   }
-}
-
-/**
- * When a task's next check is due. Until checks link their task, it is the
- * time the row names, while still ahead.
- */
-function laterOf(row: ConciergeTaskRow, now: number): number | null {
-  const due = row.dueAt?.getTime() ?? null;
-  return due !== null && due > now ? due : null;
 }
 
 function keyOf(status: TaskStatusView): string {

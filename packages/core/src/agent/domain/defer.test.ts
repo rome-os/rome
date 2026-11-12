@@ -83,7 +83,10 @@ describe("parseDeferInput with an event", () => {
           eventName: "  ci.done ",
           sourcePattern: " connector ",
           filter: [{ field: " pr.number ", equals: " 12" }],
+          waitingFor: " the CI run ",
+          deadline: "2030-01-01T00:00:00Z",
         },
+        taskId: " task-1 ",
       },
       NOW,
     );
@@ -95,7 +98,29 @@ describe("parseDeferInput with an event", () => {
         // `equals` is matched against payload values verbatim, so it isn't trimmed.
         filter: [{ field: "pr.number", equals: " 12" }],
       });
+      expect(r.wakeUp).toMatchObject({
+        waitingFor: "the CI run",
+        deadlineMs: Date.UTC(2030, 0, 1),
+        taskId: "task-1",
+      });
     }
+  });
+
+  it("needs a deadline in the future and a label for what it waits for", () => {
+    const wait = (event: Record<string, unknown>) =>
+      parseDeferInput({ name: "CI", note: "n", event: { eventName: "ci.done", ...event } }, NOW);
+    expect(wait({ deadline: "2030-01-01T00:00:00Z" })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("waitingFor is required"),
+    });
+    expect(wait({ waitingFor: "the run" })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("deadline is required"),
+    });
+    expect(wait({ waitingFor: "the run", deadline: "2000-01-01T00:00:00Z" })).toMatchObject({
+      ok: false,
+      error: expect.stringContaining("deadline is in the past"),
+    });
   });
 
   it("requires exactly one of afterMinutes/at/event", () => {
@@ -118,14 +143,23 @@ describe("parseDeferInput with an event", () => {
   // error naming where it sits.
   it("rejects an unknown key instead of silently dropping it", () => {
     const top = parseDeferInput(
-      { note: "n", name: "x", event: { eventName: "e" }, memo: "y" },
+      {
+        note: "n",
+        name: "x",
+        event: { eventName: "e", waitingFor: "e", deadline: "2030-01-01T00:00:00Z" },
+        memo: "y",
+      },
       NOW,
     );
     expect(top).toMatchObject({ ok: false });
     if (!top.ok) expect(top.error).toMatch(/^defer: .*memo/);
 
     const nested = parseDeferInput(
-      { note: "n", name: "x", event: { eventName: "e", source: "ci" } },
+      {
+        note: "n",
+        name: "x",
+        event: { eventName: "e", waitingFor: "e", deadline: "2030-01-01T00:00:00Z", source: "ci" },
+      },
       NOW,
     );
     expect(nested).toMatchObject({ ok: false });

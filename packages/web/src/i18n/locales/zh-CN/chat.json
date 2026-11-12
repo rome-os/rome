@@ -161,6 +161,14 @@
     "readOnly": "该对话已归档，为只读状态。",
     "unarchive": "取消归档"
   },
+  "checks": {
+    "label": "这个聊天里排好的检查",
+    "timed": "{{name}} · {{when}}",
+    "waiting": "等待{{what}} · {{when}}检查",
+    "cancel": "取消「{{name}}」",
+    "loadFailed": "无法加载排好的检查",
+    "cancelFailed": "无法取消这个检查"
+  },
   "share": {
     "title": "分享对话",
     "loading": "加载中…",

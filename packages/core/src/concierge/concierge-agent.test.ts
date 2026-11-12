@@ -143,10 +143,12 @@ describe("the Concierge agent", () => {
       expect(section).toContain(text);
   });
 
-  it("names every defer for a row with task:<id> and reads its wake-ups and batches", () => {
+  it("links every defer for a task by its taskId and reads its wake-ups and batches", () => {
     const prompt = concierge.systemPromptPrefix;
     const section = prompt.slice(prompt.indexOf("# Task list"));
-    expect(section).toContain("name containing `task:<id>`");
+    expect(section).toContain("`defer` with its `taskId`");
+    expect(section).toContain("`deadline`");
+    expect(section).toContain("<task_review>");
     expect(section).toContain("`system:search_routine`");
     expect(section).toContain("`system:delete_routine`");
     expect(section).toContain("<task_events>");

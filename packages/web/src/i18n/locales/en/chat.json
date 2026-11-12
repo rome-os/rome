@@ -161,6 +161,14 @@
     "readOnly": "This chat is archived and read-only.",
     "unarchive": "Unarchive"
   },
+  "checks": {
+    "label": "Checks scheduled in this chat",
+    "timed": "{{name}} · {{when}}",
+    "waiting": "Waiting for {{what}} · checks {{when}}",
+    "cancel": "Cancel {{name}}",
+    "loadFailed": "Failed to load scheduled checks",
+    "cancelFailed": "Failed to cancel the check"
+  },
   "share": {
     "title": "Share chat",
     "loading": "Loading…",

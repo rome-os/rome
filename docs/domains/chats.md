@@ -165,6 +165,7 @@ One piece of work the Concierge keeps on its owner's task list, with a title, a 
   - **Later**: a check is scheduled for it, and nothing runs.
   - **Ended**, with a reason: done, failed, stopped, or no response, when a wait went unanswered for a day.
 - A stopped task is always ended·stopped, whoever stopped it: the Concierge, its owner, or archiving or deleting its task chat.
+- The Concierge **schedules a check** on a task with `defer`, for a time or for an event with a deadline. The task is later until the check is due, and its chat shows the check, which its owner can cancel there. Stopping or archiving the task cancels its checks. A task checked three times and still waiting comes up in the next digest, so the Concierge asks its owner rather than check again.
 - The status, the task list, the chat header and the status reactions all read the same derived result. Rome tells the task list again whenever a fact changes it. The state the Concierge used to write stays for apps from before, mapped from the status.
 - The Concierge **writes** a task: it creates it and names it. Starting a task chat for one makes it active.
 - Rome tells the Concierge what a task's chat does, and marks a task not synced when the Concierge never takes in what it was told.

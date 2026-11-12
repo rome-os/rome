@@ -133,6 +133,7 @@ import {
   FLOATING_SURFACE,
 } from "@/components/concierge/ConciergeHeaderStatus";
 import { useConciergeTaskList } from "@/components/concierge/ConciergeTaskList";
+import { PendingChecks } from "./PendingChecks";
 import { useToolTasks } from "@/pages/free/tool-tasks";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
@@ -2651,6 +2652,9 @@ export function Chat({
                   {/* Share mode hides the composer rather than unmounting it,
                       so a draft is still there when share mode ends. */}
                   <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
+                    {mainSessionId && !isArchived ? (
+                      <PendingChecks chatId={mainSessionId} turnKey={displayedStreaming} />
+                    ) : null}
                     {isArchived ? (
                       <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
                         <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
