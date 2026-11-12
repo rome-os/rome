@@ -2,9 +2,10 @@
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { FormRows } from "@rome-os/ui/layout-form";
 import type { ComputerUseStatus } from "@rome/api-types/computer-use";
 import i18n from "@/i18n";
-import { ComputerUseSection } from "./computer-use-section";
+import { ComputerUseRow } from "./computer-use-section";
 
 beforeAll(async () => {
   await i18n.changeLanguage("en");
@@ -21,7 +22,9 @@ function mount(body: ComputerUseStatus, httpStatus = 200) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   render(
     <QueryClientProvider client={client}>
-      <ComputerUseSection />
+      <FormRows>
+        <ComputerUseRow />
+      </FormRows>
     </QueryClientProvider>,
   );
 }
@@ -53,7 +56,7 @@ async function openDetails() {
   fireEvent.click(await screen.findByRole("button", { name: "Details" }));
 }
 
-describe("ComputerUseSection", () => {
+describe("ComputerUseRow", () => {
   it("summarizes the daemon and connected browsers in one row", async () => {
     mount(status);
     expect(await screen.findByText("1 browser connected")).toBeTruthy();
