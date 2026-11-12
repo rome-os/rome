@@ -630,9 +630,11 @@ export function startConciergeEvents(
     if (typeof context?.threadId !== "string") return;
     const taskId = await taskOf(context.threadId);
     if (!taskId) return;
-    // A stopped task's work can still ask for one as it stops, as an
-    // interrupt is accepted before the turn has ended: it is turned down.
-    if ((await tasks.repo.get(taskId))?.stoppedAt) {
+    // A stopped or archived task's work can still ask for one as it stops,
+    // as an interrupt is accepted before the turn has ended: it is turned
+    // down at once, whatever the runtime's interrupt does.
+    const row = await tasks.repo.get(taskId);
+    if (row?.stoppedAt || row?.archivedAt) {
       await service.turnDownWhileStopped(context.threadId);
       return;
     }

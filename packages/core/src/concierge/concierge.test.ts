@@ -1576,6 +1576,13 @@ describe("Concierge tools", () => {
     ask(open.chatId);
     await s.settle();
     expect(turnedDown).toEqual([[stopped.chatId, RESOLVED_BY_STOP]]);
+    // An archived task's chat too, though its task had ended.
+    await s.taskRepo.setLastOutcome(open.taskId, "succeeded", new Date(), { reported: false });
+    await s.taskRepo.upsertMany([{ id: open.taskId, archived: true }]);
+    turnedDown.length = 0;
+    ask(open.chatId);
+    await s.settle();
+    expect(turnedDown).toEqual([[open.chatId, RESOLVED_BY_STOP]]);
   });
 
   it("drops a stop's turn-down retry once the task is taken up again", async () => {
