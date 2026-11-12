@@ -108,7 +108,7 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
-import { ChatThreadView } from "@/components/chat/ChatThreadView";
+import { ChatThreadView, OpenThreadTaskChat } from "@/components/chat/ChatThreadView";
 import {
   type LiveStatusReactions,
   LiveStatusReactionsProvider,
@@ -2421,6 +2421,10 @@ export function Chat({
     displayMessages.map((message) => [message.id, message.chatThreadId ?? null]),
   );
   const chatThreads = useChatThreadsValue(displayMessages, rethreaded, liveThreadTitles);
+  // The open thread view's thread, whose task chat its header opens.
+  const threadRootOfView = threadView
+    ? (chatThreads.taskThreads.get(threadView) ?? threadView)
+    : null;
   const conciergeHeader = concierge ? (
     <>
       {threadOpen ? null : conciergeHeaderWith(navbarActions)}
@@ -2742,13 +2746,22 @@ export function Chat({
                 floor={floorEl}
                 originTop={threadOrigin(threadView)}
                 header={conciergeHeaderWith(
-                  <IconButton
-                    size={floating ? "md" : "sm"}
-                    label={t("thread.close")}
-                    icon={<X />}
-                    onClick={replyDraft.closeThread}
-                    className={actionBadge}
-                  />,
+                  <>
+                    {threadRootOfView ? (
+                      <OpenThreadTaskChat
+                        threadRoot={threadRootOfView}
+                        size={floating ? "md" : "sm"}
+                        className={actionBadge}
+                      />
+                    ) : null}
+                    <IconButton
+                      size={floating ? "md" : "sm"}
+                      label={t("thread.close")}
+                      icon={<X />}
+                      onClick={replyDraft.closeThread}
+                      className={actionBadge}
+                    />
+                  </>,
                 )}
                 renderMessages={(threadMessages) => (
                   // The thread view offers Copy and Reply, not Share: a share

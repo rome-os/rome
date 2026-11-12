@@ -202,6 +202,7 @@ export class ConciergeTasks {
       dueAt: row.dueAt?.getTime() ?? null,
       rank: row.rank,
       chat,
+      threadRoot: row.threadRoot ?? null,
       conciergeChat,
       sourceMessageId,
       createdAt: row.createdAt.getTime(),

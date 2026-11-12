@@ -1,3 +1,7 @@
+import { MessageSquare } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
+import { IconButton } from "@/components/ui/icon-button";
 import { useQuery } from "@tanstack/react-query";
 import {
   type PointerEvent,
@@ -254,5 +258,34 @@ export function ChatThreadView({
       </div>
       {header ? <div data-chat-thread-fade>{header}</div> : null}
     </div>
+  );
+}
+
+/**
+ * The thread view header's way into the open thread's task chat, when a task
+ * of the chat has that thread.
+ */
+export function OpenThreadTaskChat({
+  threadRoot,
+  size,
+  className,
+}: {
+  threadRoot: string;
+  size: "sm" | "md";
+  className?: string;
+}) {
+  const { t } = useTranslation("chat");
+  const navigate = useNavigate();
+  const { tasks } = useConciergeTasks();
+  const chat = tasks.find((task) => task.threadRoot === threadRoot)?.chat;
+  if (!chat) return null;
+  return (
+    <IconButton
+      size={size}
+      label={t("thread.openTaskChat")}
+      icon={<MessageSquare />}
+      onClick={() => navigate(`/chat/${chat.id}`)}
+      className={className}
+    />
   );
 }
