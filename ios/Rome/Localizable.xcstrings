@@ -3011,16 +3011,6 @@
         }
       }
     },
-    "Shows the message in Chat." : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "在 Chat 里查看"
-          }
-        }
-      }
-    },
     "Sign in again" : {
       "localizations" : {
         "zh-Hans" : {

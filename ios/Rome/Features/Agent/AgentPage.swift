@@ -27,6 +27,7 @@ struct AgentPage: View {
     @Binding var tab: AgentTab
     /// A prompt was picked: the page closes and it goes in the composer.
     let onUse: (String) -> Void
+    /// A task with its own chat was tapped: the chat opens inside the page.
     let onOpenTask: (ConciergeTask) -> Void
     let onClose: () -> Void
 

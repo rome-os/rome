@@ -197,10 +197,7 @@ struct ChatScreen: View {
                 .contentShape(Rectangle())
                 .onTapGesture { composerFocused = false }
             } else {
-                TranscriptList(store: store, composerFocused: composerFocused, focusMessageID: Binding(
-                    get: { workspace.focusMessageID },
-                    set: { workspace.focusMessageID = $0 }
-                ), latestRequest: workspace.latestRequest) { row, previous in
+                TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
                     ConciergeRow(row: row, store: store, tasks: workspace.tasks, onOpenChat: onOpenChat)
                         .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
                 }
@@ -683,8 +680,6 @@ struct TranscriptList<Row: View>: View {
     var alignTop = false
     /// Drawn after the last row, inside the scroll: the "Running…" line.
     var footer: AnyView? = nil
-    /// A message to scroll to and briefly highlight.
-    var focusMessageID: Binding<String?> = .constant(nil)
     /// Goes up when the newest rows must come into view (a tapped push).
     var latestRequest = 0
     @ViewBuilder let row: (TranscriptRow, TranscriptRow?) -> Row
@@ -697,7 +692,6 @@ struct TranscriptList<Row: View>: View {
     /// No finger or fling is moving the scroll.
     @State private var atRest = true
     @State private var unseen = 0
-    @State private var highlighted: String?
     @State private var visibleHeight: CGFloat = 0
     /// The guardian is far above the newest rows: the back-to-bottom button shows.
     @State private var showsBackToBottom = false
@@ -763,14 +757,6 @@ struct TranscriptList<Row: View>: View {
                     }
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, item in
                         row(item, index > 0 ? rows[index - 1] : nil)
-                            .background {
-                                if let highlighted, item.id.hasPrefix(highlighted + ":") {
-                                    RoundedRectangle(cornerRadius: 22, style: .continuous)
-                                        .fill(Palette.primarySoft)
-                                        .padding(-6)
-                                        .transition(.opacity)
-                                }
-                            }
                             .id(item.id)
                     }
                     if let footer {
@@ -855,17 +841,6 @@ struct TranscriptList<Row: View>: View {
             }
             .onChange(of: store.arrivals) {
                 if !following { unseen += 1 }
-            }
-            .onChange(of: focusMessageID.wrappedValue, initial: true) { _, target in
-                guard let target, let first = rows.first(where: { $0.id.hasPrefix(target + ":") }) else { return }
-                following = false
-                withAnimation(.spring(response: 0.45, dampingFraction: 0.9)) { proxy.scrollTo(first.id, anchor: .center) }
-                withAnimation(.easeOut(duration: 0.2)) { highlighted = target }
-                focusMessageID.wrappedValue = nil
-                Task {
-                    try? await Task.sleep(for: .seconds(1.6))
-                    withAnimation(.easeOut(duration: 0.6)) { highlighted = nil }
-                }
             }
             .onChange(of: composerFocused) { _, focused in
                 if focused {

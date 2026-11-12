@@ -151,8 +151,6 @@ final class Workspace {
     var kept: KeptIdentity? {
         role == .unknown ? nil : KeptIdentity(guardian: role == .guardian, name: accountLabel, avatarURL: avatarURL)
     }
-    /// A Chat message to scroll to and highlight, set from the Agent page's Tasks.
-    var focusMessageID: String?
     /// Prompts for chats' composers, unsent, by the chat's draft key (the
     /// main Chat's is `conciergeChatID`); a chat takes its own once its draft
     /// is restored, and clears it.

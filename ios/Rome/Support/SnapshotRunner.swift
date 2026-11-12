@@ -7,6 +7,8 @@ enum DebugCommand: Equatable {
     case drawer(Bool)
     /// The Agent page on a tab, opened from the main Chat; nil closes it.
     case agent(AgentTab?)
+    /// Pages pushed inside the open Agent page.
+    case agentRoute([Route])
     case route([Route])
     /// One of the drawer's pages as the root, with nothing pushed.
     case section(MainSection)
@@ -106,6 +108,11 @@ enum SnapshotRunner {
             model.debugCommand = .drawer(false)
             try? await Task.sleep(for: .seconds(0.8))
             await capture("06-tasks", style: styleName, in: directory, wait: 1.6) { model.debugCommand = .agent(.tasks) }
+            await capture("06b-agent-task-chat", style: styleName, in: directory, wait: 2) {
+                model.debugCommand = .agentRoute([.taskChat(chatId: "chat-price", title: "价格追踪：发提醒邮件")])
+            }
+            model.debugCommand = .agentRoute([])
+            try? await Task.sleep(for: .seconds(0.8))
             await capture("57-agent-uses", style: styleName, in: directory, wait: 1.2) { model.debugCommand = .agent(.uses) }
             model.debugCommand = .agent(nil)
             try? await Task.sleep(for: .seconds(0.8))

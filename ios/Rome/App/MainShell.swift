@@ -50,6 +50,11 @@ struct MainShell: View {
     @State private var agentPage: AgentRoute?
     /// The Agent page's last tab, kept while the instance is open.
     @State private var agentTab: AgentTab = .uses
+    /// Pages pushed inside the Agent page: a task chat from its Tasks, an app
+    /// or another task chat linked from there. Back returns to the Tasks.
+    @State private var agentPath: [Route] = []
+    /// A page of the instance opened from inside the Agent page, over it.
+    @State private var agentLinkPage: URL?
     /// Where the Agent page finds the avatar it zooms out of.
     @Namespace private var agentZoom
     /// A blank topic chat that started its chat keeps its view under the new id.
@@ -133,12 +138,28 @@ struct MainShell: View {
             }
         }
         .fullScreenCover(item: $agentPage) { route in
-            AgentPage(workspace: workspace, route: route, tab: $agentTab, onUse: { prompt in
-                // Into this chat's composer, unsent, as the page closes.
-                agentPage = nil
-                workspace.composerPrefills[route.composerKey] = prompt
-            }, onOpenTask: openTask, onClose: { agentPage = nil })
+            // Its own stack: a task opens inside the page, and back returns
+            // to the Tasks as they were.
+            NavigationStack(path: $agentPath) {
+                AgentPage(workspace: workspace, route: route, tab: $agentTab, onUse: { prompt in
+                    // Into this chat's composer, unsent, as the page closes.
+                    agentPage = nil
+                    workspace.composerPrefills[route.composerKey] = prompt
+                }, onOpenTask: { task in
+                    guard let chat = task.chat else { return }
+                    agentPath.append(.taskChat(chatId: chat.id, title: chat.name))
+                }, onClose: { agentPage = nil })
+                .toolbar(.hidden, for: .navigationBar)
+                .navigationDestination(for: Route.self) { route in
+                    destination(route)
+                }
+            }
             .environment(model)
+            .environment(\.chatLinkOpener, openChatLink)
+            .environment(\.visibleChat, visibleChat)
+            .environment(\.isVisitor, workspace.isVisitor)
+            .environment(\.shareAgentName, AgentName.display(workspace.agentName))
+            .instancePageSheet(workspace: workspace, url: $agentLinkPage)
             .presentationBackground(Palette.bg)
             .agentZoomTransition(route.zoomSource, in: agentZoom)
         }
@@ -187,7 +208,12 @@ struct MainShell: View {
         // Whatever covers or replaces the chat takes the keyboard with it;
         // the composer keeps its text.
         .onChange(of: path) { Keyboard.dismiss() }
-        .onChange(of: agentPage) { _, shown in if shown != nil { Keyboard.dismiss() } }
+        .onChange(of: agentPage) { _, shown in
+            Keyboard.dismiss()
+            // Opened or closed, it starts on its own page again.
+            agentPath = []
+            agentLinkPage = nil
+        }
         // The banner that offers a sign-in must not be covered.
         .onChange(of: model.sessionExpired) { _, expired in if expired { agentPage = nil } }
         .onChange(of: showSettings) { _, shown in if shown { Keyboard.dismiss() } }
@@ -213,6 +239,8 @@ struct MainShell: View {
             case .agent(let tab):
                 if let tab { agentTab = tab }
                 agentPage = tab == nil ? nil : AgentRoute(tasksChatId: conciergeChatID, composerKey: conciergeChatID)
+            case .agentRoute(let routes):
+                agentPath = routes
             case .route(let routes):
                 show(.chat)
                 path = routes
@@ -264,7 +292,8 @@ struct MainShell: View {
             Task { await openLinkedApp(id, page: page) }
             return .handled
         case .page(let url):
-            page = url
+            // Over whatever is in front: the Agent page covers the main stack.
+            if agentPage != nil { agentLinkPage = url } else { page = url }
             return .handled
         case .external, .system:
             return .systemAction
@@ -280,9 +309,9 @@ struct MainShell: View {
             app = all.first { $0.id == id }
         }
         if let app {
-            path.append(.app(app))
+            if agentPage != nil { agentPath.append(.app(app)) } else { path.append(.app(app)) }
         } else if let page {
-            self.page = page
+            if agentPage != nil { agentLinkPage = page } else { self.page = page }
         }
     }
 
@@ -399,32 +428,30 @@ struct MainShell: View {
         .presentationBackground(Palette.bg)
     }
 
-    private func openTask(_ task: ConciergeTask) {
-        agentPage = nil
-        Task {
-            try? await Task.sleep(for: .milliseconds(250))
-            if let chat = task.chat {
-                path = [.taskChat(chatId: chat.id, title: chat.name)]
-            } else if let message = task.sourceMessageId, TasksStore.belongs(task, toChat: conciergeChatID) {
-                path = []
-                workspace.focusMessageID = message
-            }
-        }
-    }
-
     // MARK: Drawer motion
 
     static let drawerSpring = Animation.spring(response: 0.38, dampingFraction: 0.86)
 
     /// The chat on screen, by its store's id.
     private var visibleChat: String? {
-        Self.visibleChat(section: section, path: path, covered: drawerOpen || agentPage != nil || showSettings || page != nil || workspace.sharingCoversChat)
+        if agentPage != nil {
+            return Self.visibleChat(agentPath: agentPath, covered: agentLinkPage != nil || workspace.sharingCoversChat)
+        }
+        return Self.visibleChat(section: section, path: path, covered: drawerOpen || showSettings || page != nil || workspace.sharingCoversChat)
+    }
+
+    /// The chat on screen while the Agent page is up: a task chat pushed
+    /// inside it, unless a sheet covers it; the page itself shows none.
+    static func visibleChat(agentPath: [Route], covered: Bool) -> String? {
+        guard !covered, case .taskChat(let chatId, _)? = agentPath.last else { return nil }
+        return chatId
     }
 
     /// The chat on screen: none while something covers the page (the drawer,
-    /// the Agent page, the Settings sheet, an instance page's sheet, a chat's
-    /// share sheets); a pushed task chat; else the section's chat. Chat's read marks, the server's watch
-    /// and push banners all go by this one answer.
+    /// the Settings sheet, an instance page's sheet, a chat's share sheets);
+    /// a pushed task chat; else the section's chat. Chat's read marks, the
+    /// server's watch and push banners all go by this one answer, with
+    /// `visibleChat(agentPath:covered:)` while the Agent page is up.
     static func visibleChat(section: MainSection, path: [Route], covered: Bool) -> String? {
         if covered { return nil }
         if let top = path.last {
