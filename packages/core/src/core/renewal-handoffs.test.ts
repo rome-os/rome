@@ -30,6 +30,16 @@ describe("recentMessagesOf", () => {
   });
 });
 
+describe("recentMessagesOf with an owner", () => {
+  it("names the owner's lines as the chat's owner, and Rome's as before", () => {
+    const rows = [row("user", "Book dinner", "t1"), row("assistant", "Done", "t1")];
+    expect(recentMessagesOf(rows, undefined, "Visitor (Ana)").map((m) => m.senderName)).toEqual([
+      "Visitor (Ana)",
+      "You",
+    ]);
+  });
+});
+
 describe("createRenewalHandoffs", () => {
   it("reads the open tasks and recent messages a successor's first turn shows", async () => {
     const handoffs = createRenewalHandoffs({

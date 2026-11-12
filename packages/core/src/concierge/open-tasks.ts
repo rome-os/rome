@@ -30,3 +30,19 @@ export async function conciergeOpenTasks(
     )
     .join("\n");
 }
+
+/**
+ * Who said chat `chatId`'s owner lines, as a handoff reads them: the guardian,
+ * or a visitor by name. Null for no Concierge chat.
+ */
+export async function conciergeOwnerLabel(
+  service: Pick<ConciergeService, "conciergeChat" | "ownerOfChat" | "owners">,
+  chatId: string,
+): Promise<string | null> {
+  if (!(await service.conciergeChat(chatId))) return null;
+  const owner = await service.ownerOfChat(chatId);
+  if (!owner) return null;
+  const profile = await service.owners.profileOf(owner);
+  if (profile.role === "guardian") return profile.name ? `Guardian (${profile.name})` : "Guardian";
+  return profile.name ? `Visitor (${profile.name})` : "Visitor";
+}

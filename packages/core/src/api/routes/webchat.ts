@@ -102,6 +102,7 @@ import { automatedSenderId } from "../../webchat/automated-source.js";
 import { appIdToPathSegment } from "../../apps/packaging/app-id.js";
 import { isTransientDelta } from "../../agent/index.js";
 import { webchatSessionKey } from "../../core/agent-session-key.js";
+import { EMPTY_WORKSPACE_CONTEXT } from "../../core/sticky-headers.js";
 import type {
   BackendEmitOptions,
   BackendSessionTask,
@@ -3607,6 +3608,10 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     replyQuote?: unknown;
   };
 
+  // The chats whose last input carried an open workspace. In memory: after a
+  // restart a closed workspace is not announced, and the next one opened is.
+  const workspaceOpenIn = new Set<string>();
+
   const parseChatSendBody = async (c: Context): Promise<SendBody> => {
     const contentType = c.req.header("content-type") ?? "";
     if (contentType.includes("multipart/form-data")) {
@@ -3850,7 +3855,13 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const repliedPrompt = reply ? withReplyContext(turnPrompt, reply.promptLine) : turnPrompt;
     // Prepend `<workspace_context>` for this turn only. Lives on the
     // user message so the cached fixed part of the system prompt stays stable.
-    const workspaceSection = buildWorkspaceContextSection(body.workspace);
+    // The session leaves out a block that did not change, so the input after
+    // one with an open workspace says it closed with an empty block.
+    const openWorkspace = buildWorkspaceContextSection(body.workspace);
+    const workspaceSection =
+      openWorkspace ?? (workspaceOpenIn.has(sessionId) ? EMPTY_WORKSPACE_CONTEXT : null);
+    if (openWorkspace) workspaceOpenIn.add(sessionId);
+    else workspaceOpenIn.delete(sessionId);
     const contextPrompt = workspaceSection
       ? `${workspaceSection}\n\n${repliedPrompt}`
       : repliedPrompt;

@@ -249,7 +249,17 @@ function buildRawUsage(usage: BetaUsageShape): Record<string, unknown> | undefin
 function buildContextUsageFromSdk(
   contextUsage: SDKControlGetContextUsageResponse,
 ): AgentContextUsage | undefined {
-  const usedTokens = readPositiveNumber(contextUsage.totalTokens);
+  // Only the rows that occupy the window: the compaction reserve (`buffer`),
+  // the free space and deferred tool schemas are not context the model read.
+  const kinded = (contextUsage.categories ?? []).filter((row) => row.kind !== undefined);
+  const usedTokens =
+    kinded.length > 0
+      ? readPositiveNumber(
+          kinded
+            .filter((row) => row.kind === "used" && !row.isDeferred)
+            .reduce((sum, row) => sum + row.tokens, 0),
+        )
+      : readPositiveNumber(contextUsage.totalTokens);
   if (usedTokens === undefined) {
     return undefined;
   }

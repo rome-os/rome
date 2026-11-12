@@ -38,7 +38,9 @@ const configSchema = z.object({
   sessionHandoffFallbackTimeoutSeconds: z.coerce.number().int().positive().default(30),
   // Past this many tokens of context, a Concierge session is renewed with a
   // handoff once its turn ends and nothing waits on it.
-  sessionHandoffContextTokens: z.coerce.number().int().positive().default(150_000),
+  // At least 50K: a new session starts near 30K, and a limit near that would
+  // renew it after every turn.
+  sessionHandoffContextTokens: z.coerce.number().int().min(50_000).default(150_000),
 
   // Personal WeChat is opt-in and runs as the Rome service user.
   wechatUserEnabled: z

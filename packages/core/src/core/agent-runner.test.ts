@@ -44,6 +44,7 @@ const recordMetrics = rs.hoisted(() => rs.fn());
 rs.mock("../telemetry.js", () => ({ ...telemetry, recordModelTurnMetrics: recordMetrics }));
 
 import type { ModelSessionEvent, RenewalHandoffs, RomeTools } from "../agent/index.js";
+import { ROME_TOOL_GROUPS } from "../agent/index.js";
 import {
   executeActionTool,
   executeSubagentTool,
@@ -3843,6 +3844,50 @@ describe("AgentRunner", () => {
         expect(prompts[4]).toContain('<concierge_chat id="c1" name="Home"/>');
       });
 
+      it("sends the headers again after the provider compacted the thread", async () => {
+        const provider = threadedProvider(4);
+        const withContext = (usedTokens: number) =>
+          [
+            {
+              type: "result" as const,
+              content: "ok",
+              accounting: {
+                provider: "mock",
+                model: "mock",
+                usage: {
+                  inputTokens: usedTokens,
+                  outputTokens: 1,
+                  cacheReadTokens: 0,
+                  cacheWriteTokens: 0,
+                },
+                context: { usedTokens },
+                costUsd: 0,
+              },
+            },
+          ] as AgentEvent[];
+        provider["responses"][0] = withContext(9_000);
+        provider["responses"][1] = withContext(10_000);
+        // Compacted: the thread holds less than it did a turn ago.
+        provider["responses"][2] = withContext(3_000);
+        const runner = renewingRunner(provider, undefined, { stickyHeaders: ["concierge_chat"] });
+        for (const text of ["one", "two", "three", "four"]) {
+          await collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: `<concierge_chat id="c1" name="Main"/>\n\n${text}`,
+              channelThreadKey: key,
+            }),
+          );
+        }
+        const prompts = provider.calls.map((call) => call.prompt);
+        expect(prompts.map((prompt) => prompt.includes("<concierge_chat"))).toEqual([
+          true,
+          false,
+          false,
+          true,
+        ]);
+      });
+
       describe("with a handoff", () => {
         const HANDOFF = "- Agreed: dinner at 7 on Friday, task t-1.";
         let handoffAgent: { definition: AgentDefinition };
@@ -3897,10 +3942,25 @@ describe("AgentRunner", () => {
           // The second call is the handoff turn: it answers with the note.
           provider["responses"][1] = [{ type: "result", content: HANDOFF }];
           const { handoffs, asked } = fakeHandoffs();
-          const runner = renewingRunner(provider, undefined, { handoffs });
+          // Every turn the chat, its status marks, pushes and task events hear of.
+          const lifecycle = { started: 0, ended: 0, couldNotStart: 0 };
+          const turnLifecycle = {
+            started: () => void lifecycle.started++,
+            ended: () => void lifecycle.ended++,
+            couldNotStart: () => void lifecycle.couldNotStart++,
+          };
+          const runner = renewingRunner(provider, undefined, { handoffs, turnLifecycle });
           await coldTurn(runner);
           identity.text = "**Agent Name:** YoYo";
           const renewedEvents = await coldTurn(runner);
+          // Two messages, two turns: the handoff turn is none of them.
+          expect(lifecycle).toEqual({ started: 2, ended: 2, couldNotStart: 0 });
+          // It could not say anything: it served no tool in any group, and refuses `say`.
+          const handoffTools = provider.sessions[1]!.tools;
+          for (const group of ROME_TOOL_GROUPS) expect(handoffTools.listTools(group)).toEqual([]);
+          expect((await handoffTools.callTool("actions", "say", { text: "hi" })).isError).toBe(
+            true,
+          );
           const renewed = await sessionRepository.current(key, "core:test-renewing");
 
           // The handoff turn resumed the retired thread with no tools.
@@ -3984,6 +4044,9 @@ describe("AgentRunner", () => {
           expect(provider.calls.at(-1)?.prompt).not.toContain("<handoff>");
         });
 
+        /** Lets a turn end's background renewal run, as a guardian's pause would. */
+        const settleRenewal = () => new Promise((resolve) => setTimeout(resolve, 100));
+
         /** A result whose last model request read `usedTokens` of context. */
         const fullResult = (usedTokens: number, content = "ok") =>
           [
@@ -4013,6 +4076,8 @@ describe("AgentRunner", () => {
           const runner = renewingRunner(provider, undefined, { handoffs });
           const first = await turn(runner, { live: true });
           expect((await sessionRepository.session(first!))?.contextTokens).toBe(900);
+          // The guardian answers a moment later, after the turn has settled.
+          await settleRenewal();
 
           // The next message, with no eviction: the renewal ran when the turn ended.
           const events = await collectMessages(
@@ -4034,6 +4099,90 @@ describe("AgentRunner", () => {
           ]);
           expect(provider.calls[2]?.prompt).toContain(`<handoff>\n${HANDOFF}\n</handoff>`);
           expect(asked.tidying).toHaveLength(1);
+        });
+
+        it("does not renew again a successor no turn ran on when the setup changes: it takes the new setup and keeps its handoff", async () => {
+          const provider = threadedProvider(4);
+          provider["responses"][0] = fullResult(900);
+          provider["responses"][1] = [{ type: "result", content: HANDOFF }];
+          const { handoffs, asked } = fakeHandoffs({ contextLimitTokens: 500 });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner, { live: true });
+          // The background renewal writes the successor on no thread.
+          await settleRenewal();
+          await evict(runner);
+          const successor = await sessionRepository.current(key, "core:test-renewing");
+          expect(successor?.id).not.toBe(first);
+          expect(successor?.modelThreadId).toBeNull();
+          const setupBefore = successor?.setup;
+
+          identity.text = "**Agent Name:** YoYo";
+          const events = await collectMessages(
+            runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
+          );
+          const after = await sessionRepository.current(key, "core:test-renewing");
+          const start = events.find((event) => event.type === "turn_start");
+
+          expect(after?.id).toBe(successor?.id);
+          expect(after?.handoff).toBe(HANDOFF);
+          expect(after?.setup).not.toBe(setupBefore);
+          expect(asked.fallback).toBe(0);
+          // One handoff turn in all: the retired thread was asked once.
+          expect(
+            provider.calls.filter((call) => call.prompt.includes("<handoff_request>")),
+          ).toHaveLength(1);
+          expect(start && "sessionRenewal" in start ? start.sessionRenewal : undefined).toEqual({
+            reason: "context",
+            sessionId: successor?.id,
+          });
+          expect(provider.calls.at(-1)?.prompt).toContain(`<handoff>\n${HANDOFF}\n</handoff>`);
+        });
+
+        it("reuses the handoff it wrote when the fresh session fails to open, and asks the retired thread once", async () => {
+          const provider = threadedProvider(4);
+          provider["responses"][1] = [{ type: "result", content: HANDOFF }];
+          const open = provider.openSession.bind(provider);
+          let failFresh = false;
+          provider.openSession = async (params) => {
+            if (failFresh && params.thread.kind === "new") {
+              failFresh = false;
+              throw new Error("provider down");
+            }
+            return open(params);
+          };
+          const { handoffs } = fakeHandoffs();
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          await coldTurn(runner);
+          identity.text = "**Agent Name:** YoYo";
+          failFresh = true;
+          await evict(runner);
+          await expect(
+            collectMessages(
+              runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
+            ),
+          ).rejects.toThrow("provider down");
+          await coldTurn(runner);
+
+          expect(
+            provider.calls.filter((call) => call.prompt.includes("<handoff_request>")),
+          ).toHaveLength(1);
+          expect((await sessionRepository.current(key, "core:test-renewing"))?.handoff).toBe(
+            HANDOFF,
+          );
+        });
+
+        it("steps aside for a message that comes before the session settles, and renews at the next turn end", async () => {
+          const provider = threadedProvider(4);
+          provider["responses"][0] = fullResult(900);
+          provider["responses"][1] = fullResult(950);
+          provider["responses"][2] = [{ type: "result", content: HANDOFF }];
+          const { handoffs } = fakeHandoffs({ contextLimitTokens: 500 });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner, { live: true });
+          // At once: the live session takes it, and nothing waits on a renewal.
+          expect(await turn(runner, { live: true })).toBe(first);
+          await settleRenewal();
+          expect((await sessionRepository.session(first!))?.supersededFor).toBe("context");
         });
 
         it("keeps a session under the limit, or one an approval holds", async () => {

@@ -33,6 +33,17 @@ export interface RecentMessage {
   readonly at: Date;
 }
 
+/**
+ * Added to the system prompt of the turn that writes a handoff. A Codex thread
+ * keeps the tools it was opened with, so the model may still see them listed;
+ * Rome refuses every call.
+ */
+export const HANDOFF_TURN_INSTRUCTION = [
+  "<rome_handoff_turn>",
+  "This is a private side turn that writes a handoff note. Do not invoke any tool, even if tools from earlier in this thread are listed: every call is refused. Answer only from the conversation so far.",
+  "</rome_handoff_turn>",
+].join("\n");
+
 /** What a successor's first turn shows beside its handoff, read from Rome when the turn runs. */
 export interface HandoffContext {
   /** The open tasks of the chat, rendered by whoever keeps them, or null for none. */

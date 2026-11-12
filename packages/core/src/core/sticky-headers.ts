@@ -7,3 +7,6 @@ export const STICKY_HEADERS: readonly string[] = [
   "concierge_owner",
   "workspace_context",
 ];
+
+/** The workspace header of an input sent with nothing open in the workspace. */
+export const EMPTY_WORKSPACE_CONTEXT = "<workspace_context/>";

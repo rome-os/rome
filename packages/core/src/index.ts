@@ -1,7 +1,7 @@
 import { continueInterruptedTurns } from "./webchat/restart-continuation.js";
 import { STICKY_HEADERS } from "./core/sticky-headers.js";
 import { createRenewalHandoffs } from "./core/renewal-handoffs.js";
-import { conciergeOpenTasks } from "./concierge/open-tasks.js";
+import { conciergeOpenTasks, conciergeOwnerLabel } from "./concierge/open-tasks.js";
 import { appGuardianProfile } from "./app-host/guardian-profile.js";
 import { startUsageLimitContinuation } from "./webchat/usage-limit-continuation.js";
 import { ChatSessionSettings } from "./webchat/chat-session-settings.js";
@@ -1242,6 +1242,7 @@ async function main() {
         rows: async (chatId, turns) =>
           (await webchatRepo.getMessagesPage(chatId, { limit: turns })).rows,
         openTasks: (chatId) => conciergeOpenTasks(concierge, chatId),
+        ownerLabel: (chatId) => conciergeOwnerLabel(concierge, chatId),
         tidying: (chatId, work) => concierge.activity?.tidying(chatId, work) ?? work(),
       }),
     },

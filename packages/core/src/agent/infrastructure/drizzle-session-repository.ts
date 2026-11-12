@@ -263,6 +263,7 @@ function writeChanges(
   if (changes.has("reasoningEffort")) columns.reasoningEffort = state.reasoningEffort;
   if (changes.has("workingDir")) columns.workingDir = state.workingDir;
   if (changes.has("contextTokens")) columns.contextTokens = state.contextTokens;
+  if (changes.has("setup")) columns.setup = state.setup;
   if (changes.has("lastActiveAt")) columns.lastActiveAt = state.lastActiveAt;
   // A completion is final. A stale instance that still believes the session is
   // active never writes that belief back.

@@ -95,7 +95,8 @@ export type SessionChange =
   | "workingDir"
   | "lastActiveAt"
   | "status"
-  | "contextTokens";
+  | "contextTokens"
+  | "setup";
 
 /**
  * One agent's conversation from one reset to the next: the agent, what it last
@@ -251,6 +252,18 @@ export class Session {
         checkpointId: run.checkpoint.checkpointId,
       });
     }
+  }
+
+  /**
+   * The session opens with setup `setup` from now on. Only for a session no
+   * turn has run on: its thread has read no setup yet, so it starts on this one.
+   */
+  adoptSetup(setup: string): void {
+    if (this.state.modelThreadId !== null) {
+      throw new Error(`Session "${this.state.id}" has a thread and keeps the setup it opened with`);
+    }
+    this.state.setup = setup;
+    this.changes.add("setup");
   }
 
   /** The provider's transcript now lives here. */

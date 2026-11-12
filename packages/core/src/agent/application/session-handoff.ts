@@ -6,7 +6,11 @@ import type { AgentLog } from "../domain/agent-log.js";
 import type { ModelSession, ProviderId } from "../domain/model-port.js";
 import { NO_ROME_TOOLS } from "../domain/rome-tools.js";
 import type { Session } from "../domain/session.js";
-import { HANDOFF_REQUEST, type RenewalHandoffs } from "../domain/session-handoff.js";
+import {
+  HANDOFF_REQUEST,
+  HANDOFF_TURN_INSTRUCTION,
+  type RenewalHandoffs,
+} from "../domain/session-handoff.js";
 import type { TurnUsageReporting } from "../domain/turn-usage-reporting.js";
 import type { ModelResolver } from "./model-resolver.js";
 
@@ -116,7 +120,7 @@ async function askRetiredSession(
     const opened = await resolution.modelProvider.openSession({
       config: {
         model: resolution.model,
-        systemPrompt: input.systemPrompt,
+        systemPrompt: `${input.systemPrompt}\n\n${HANDOFF_TURN_INSTRUCTION}`,
         builtinTools: [],
         reasoningEffort: "low",
         workingDir: retired.workingDir ?? input.workingDir,

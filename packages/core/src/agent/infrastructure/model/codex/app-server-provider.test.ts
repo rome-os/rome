@@ -719,6 +719,54 @@ describe("CodexAppServerProvider", () => {
     await source.close();
   });
 
+  it("refuses a tool a resumed thread opened with no tools calls, as a handoff turn does", async () => {
+    let dynamicResponse: unknown;
+    requestMock.mockImplementation(async (method: string, requestParams: unknown) => {
+      if (method === "thread/resume") {
+        return { thread: { id: "retired-thread", historyMode: "paginated" } };
+      }
+      if (method === "turn/start") {
+        const payload = requestParams as { threadId: string };
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: payload.threadId, turn: { id: "handoff-turn" } });
+        // The retired thread was opened with the Concierge's tools.
+        dynamicResponse = await captured.onServerRequest?.("item/tool/call", {
+          threadId: payload.threadId,
+          turnId: "handoff-turn",
+          callId: "call-say",
+          namespace: null,
+          tool: "say",
+          arguments: { text: "hello guardian" },
+        });
+        n("item/completed", {
+          item: { type: "agentMessage", id: "m1", text: "- Agreed: x", phase: "final_answer" },
+          threadId: payload.threadId,
+          turnId: "handoff-turn",
+          completedAtMs: 0,
+        });
+        n("turn/completed", {
+          threadId: payload.threadId,
+          turn: { id: "handoff-turn", status: "completed" },
+        });
+      }
+      return {};
+    });
+
+    const provider = new CodexAppServerProvider();
+    const session = await provider.openSession({
+      ...buildParams(),
+      tools: NO_ROME_TOOLS,
+      thread: { kind: "resume", modelThreadId: "retired-thread" },
+    });
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "<handoff_request>" });
+    const result = (await collected).find((m) => m.type === "result");
+
+    expect(dynamicResponse).toMatchObject({ success: false });
+    expect(result).toMatchObject({ content: "- Agreed: x" });
+    await session.close();
+  });
+
   it("fails closed when an isolated native fork calls a tool inherited from its source", async () => {
     const sourceExecuteSubagent = rs.fn(async () => "source result");
     let dynamicResponse: unknown;
