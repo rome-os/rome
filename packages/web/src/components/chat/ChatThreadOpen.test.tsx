@@ -115,6 +115,16 @@ describe("threadLabels", () => {
     ]);
   });
 
+  it("labels no task card, the one shown when its task starts: it names its task itself", () => {
+    const card = (id: string, show?: "task" | "ask"): ThreadTimelineMessage => ({
+      ...a(id, "q1"),
+      content: JSON.stringify([{ type: "task_chat", chatId: "c1", title: "Flights", show }]),
+    });
+    expect(
+      where(threadLabels([g("q1"), card("start", "task"), card("old"), card("ask", "ask")], tasks)),
+    ).toEqual([["ask", "q1"]]);
+  });
+
   it("names a task's thread by its title, from any of its messages", () => {
     const labels = threadLabels([{ ...g("q1"), chatThreadTitle: "Tokyo weather" }, a("a1", "q1")]);
     expect(labels.get("a1")).toEqual({ thread: "q1", title: "Tokyo weather" });
@@ -295,6 +305,18 @@ describe("the thread label in the transcript", () => {
     expect(bubble.closest("[data-concierge-bubble-part]")?.querySelector("a")).toBeNull();
     const last = labels.at(-1)!;
     expect(last.previousElementSibling?.contains(bubble)).toBe(true);
+  });
+
+  it("cuts a long title at a fixed width, whole in its tooltip and accessible name", () => {
+    const title = "Compare every ryokan along the Kamo river for the April trip";
+    renderTranscript([{ ...messages[0]!, chatThreadTitle: title }, messages[1]!]);
+    const label = screen.getByRole("button", { name: title });
+    expect(label.getAttribute("title")).toBe(title);
+    expect(label.lastElementChild?.className).toContain("max-w-56");
+    expect(label.lastElementChild?.className).toContain("truncate");
+    // Regular weight, not the badge's.
+    expect(label.className).toContain("text-aux");
+    expect(label.className).not.toContain("text-badge");
   });
 
   it("sits under none of the guardian's messages", () => {

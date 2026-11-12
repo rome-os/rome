@@ -257,11 +257,15 @@ describe("TaskChatCard shown as one card or the other", () => {
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
   });
 
-  it("folds an expired question to one quiet line that waits on no one, and opens to the form", async () => {
+  it("folds an expired question to a card that waits on no one, and opens to the form", async () => {
     taskRows = [expiredRow];
     show(true, "ask");
-    const line = await screen.findByRole("button", { name: "Expired · answer to continue" });
-    expect(screen.queryByText("Which tone?")).toBeNull();
+    // In a card like any settled one: what it asked, then that it expired.
+    const line = await screen.findByRole("button", {
+      name: "Which tone?Expired · answer to continue",
+    });
+    expect(line.closest("[data-chat-settled-card]")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Warm" })).toBeNull();
     expect(document.querySelector("[data-chat-task-waiting]")).toBeNull();
     await userEvent.setup().click(line);
     expect(await screen.findByText("Which tone?")).toBeTruthy();
@@ -570,7 +574,7 @@ describe("TaskChatCard", () => {
       ],
     });
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
-    expect(screen.getByText("Answered")).toBeTruthy();
+    expect(screen.getByText("Answered: Warm")).toBeTruthy();
     expect(screen.getByRole("link").getAttribute("href")).toBe(`/chat/${chatId}`);
     await waitFor(() =>
       expect(

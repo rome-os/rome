@@ -1,4 +1,3 @@
-import { ChevronRight } from "lucide-react";
 import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { useQuery } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext, useState } from "react";
@@ -16,6 +15,7 @@ import { ApprovalCard } from "../approval/ApprovalCard";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { QuestionCard } from "./QuestionCard";
+import { answerOutcome, SettledCard } from "./SettledCard";
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
 
@@ -73,19 +73,7 @@ function TaskAskCard({
   const derived = task ? taskStatusOfDto(task) : null;
   const waiting = isLatestForChat && session?.awaitingGuardian === true;
   const expired = waiting && derived?.endReason === "no_response";
-  if (expired && !open) {
-    return (
-      <button
-        type="button"
-        aria-expanded={false}
-        onClick={() => setOpen(true)}
-        className="flex max-w-md items-center gap-1 rounded-4 px-1 text-left text-aux text-muted-foreground outline-1 outline-offset-1 outline-transparent transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50 motion-reduce:transition-none"
-      >
-        {t("concierge.ask.expiredFold")}
-        <ChevronRight className="size-3 shrink-0" aria-hidden />
-      </button>
-    );
-  }
+  if (expired && !open) return <ExpiredAskCard chatId={chatId} onOpen={() => setOpen(true)} />;
   if (waiting) {
     return (
       <div className="flex w-full min-w-0 max-w-md flex-col">
@@ -108,14 +96,33 @@ function TaskAskCard({
   return <FoldedAskCard chatId={chatId} />;
 }
 
+/**
+ * An expired question, folded to a card: what it asked, then that it expired
+ * and takes an answer still. A click opens the form.
+ */
+function ExpiredAskCard({ chatId, onOpen }: { chatId: string; onOpen: () => void }) {
+  const { t } = useTranslation("chat");
+  const messages = useQuery({
+    queryKey: ["task-chat-cards", chatId],
+    queryFn: () => listSessionMessagePage(chatId, { limit: 2 }),
+  });
+  const props = latestOpenInteraction(messages.data?.messages ?? [])?.part.render?.props;
+  const question = (props?.questions as { question?: unknown }[] | undefined)?.[0]?.question;
+  return (
+    <SettledCard
+      title={typeof question === "string" ? question : null}
+      outcome={t("concierge.ask.expiredFold")}
+      onOpen={onOpen}
+      chevron
+    />
+  );
+}
+
 const resultSchema = z.object({
   type: z.literal("interaction_result"),
   toolUseId: z.string(),
   output: z.record(z.string(), z.unknown()).optional(),
 });
-
-/** An answer short enough to repeat on the folded card. */
-const SHORT_ANSWER = 24;
 
 /**
  * A task's question or approval that is no longer open: what it asked, then
@@ -125,7 +132,6 @@ const SHORT_ANSWER = 24;
  */
 function FoldedAskCard({ chatId }: { chatId: string }) {
   const { t } = useTranslation("chat");
-  const [open, setOpen] = useState(false);
   const messages = useQuery({
     queryKey: ["task-chat-cards", chatId],
     queryFn: () => listSessionMessagePage(chatId, { limit: 2 }),
@@ -194,34 +200,14 @@ function FoldedAskCard({ chatId }: { chatId: string }) {
         : approval.row.status === "rejected"
           ? t("concierge.ask.rejected")
           : t("concierge.ask.approved");
-  } else if (answer?.output.dismissed === true) {
-    outcome = t("concierge.ask.dismissed");
   } else {
-    const values = (Array.isArray(answer?.output.answers) ? answer.output.answers : [])
-      .map((entry) =>
-        entry && typeof entry === "object" ? (entry as { value?: unknown }).value : undefined,
-      )
-      .filter((value): value is string => typeof value === "string" && value.trim() !== "");
-    const text = values.join(", ");
-    outcome =
-      text && text.length <= SHORT_ANSWER
-        ? t("concierge.ask.answeredWith", { answer: text })
-        : t("concierge.ask.answered");
+    outcome = answerOutcome(t, answer?.output ?? {});
   }
   return (
-    <div className="flex w-full min-w-0 max-w-md flex-col gap-2">
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        className="flex w-full min-w-0 flex-col rounded-12 border border-border bg-surface px-4 py-2 text-left outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover focus-visible:outline-solid focus-visible:outline-ring/50 motion-reduce:transition-none"
-      >
-        {title ? (
-          <span className="w-full truncate text-aux text-muted-foreground">{title}</span>
-        ) : null}
-        <span className="text-ui text-foreground">{outcome}</span>
-      </button>
-      {open ? (
+    <SettledCard
+      title={title}
+      outcome={outcome}
+      full={
         approvalIsLatest ? (
           <ApprovalCard
             approvalId={approval.row.id}
@@ -235,6 +221,7 @@ function FoldedAskCard({ chatId }: { chatId: string }) {
             }
             status={approval.row.status as ApprovalCardStatus}
             onResolved={() => {}}
+            settled="full"
           />
         ) : !questionOpen && asked?.part.render?.componentId === "question-card" ? (
           <QuestionCard
@@ -247,10 +234,11 @@ function FoldedAskCard({ chatId }: { chatId: string }) {
             }
             onSubmit={() => {}}
             onDismiss={() => {}}
+            settled="full"
           />
-        ) : null
-      ) : null}
-    </div>
+        ) : undefined
+      }
+    />
   );
 }
 

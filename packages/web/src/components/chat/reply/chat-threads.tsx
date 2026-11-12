@@ -69,7 +69,9 @@ export function taskThreads(
 /**
  * The labels of a loaded timeline: one under every agent message in a task's
  * thread, named by the task's title, and none under the guardian's: a plain
- * message, a forward and a card alike. One label per message.
+ * message, a forward and a question or approval card alike. A task card, the
+ * one shown when its task starts, needs none: it names its task itself. One
+ * label per message.
  */
 export function threadLabels(
   messages: readonly ThreadTimelineMessage[],
@@ -80,7 +82,7 @@ export function threadLabels(
   for (const message of messages) {
     const thread = threads.get(message.id);
     const title = thread ? titles.get(thread) : undefined;
-    if (message.role !== "assistant" || !thread || !title) continue;
+    if (message.role !== "assistant" || !thread || !title || isTaskCard(message)) continue;
     labels.set(message.id, { thread, title });
   }
   return labels;
@@ -147,6 +149,14 @@ export function placed(
   });
 }
 
+/** Whether the message shows a task's card: a task_chat part not shown as its question. */
+function isTaskCard(message: ThreadTimelineMessage): boolean {
+  if (message.content === undefined) return false;
+  return parseMessageEntries({ id: message.id, content: message.content }).some(
+    (part) => part.type === "task_chat" && part.show !== "ask",
+  );
+}
+
 function wordsOf(message: Pick<ChatMessage, "id" | "content">): string {
   return parseMessageEntries(message)
     .flatMap((part) => (part.type === "text" && part.content.trim() ? [part.content] : []))
@@ -179,11 +189,15 @@ export function ThreadLabelLine({ message }: { message: ChatMessage }) {
         })
       }
       // About 2px from its own bubble and 12px before the next message, so it
-      // reads as its bubble's. Faint until hovered or focused.
-      className="-mt-1.5 mb-1 max-w-full truncate rounded-4 px-1 text-left text-badge text-subtle-foreground outline-1 outline-offset-0 outline-transparent transition-colors hover:text-muted-foreground focus-visible:text-muted-foreground focus-visible:outline-solid focus-visible:outline-ring/50 motion-reduce:transition-none"
+      // reads as its bubble's. Regular weight and faint until hovered or
+      // focused; a long title is cut at a fixed width, whole in the tooltip
+      // and the accessible name.
+      className="-mt-1.5 mb-1 flex max-w-full min-w-0 rounded-4 px-1 text-left text-aux text-subtle-foreground/70 outline-1 outline-offset-0 outline-transparent transition-colors hover:text-muted-foreground focus-visible:text-muted-foreground focus-visible:outline-solid focus-visible:outline-ring/50 motion-reduce:transition-none"
     >
-      <span aria-hidden="true">↳ </span>
-      {name}
+      <span aria-hidden="true" className="shrink-0">
+        ↳&nbsp;
+      </span>
+      <span className="max-w-56 truncate">{name}</span>
     </button>
   );
 }

@@ -98,9 +98,6 @@ function statusOf(
   return chat?.lastTurnFailed ? "failed" : "idle";
 }
 
-/** The ISO time of a nullable instant, for the Concierge to read. */
-const isoOf = (date: Date | null) => date?.toISOString();
-
 /** A row as the Concierge reads it: compact, with no empty fields. Rome derives its status. */
 function compactTask({ row }: ConciergeTaskWithChat, status: TaskStatusView | undefined) {
   return {

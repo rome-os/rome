@@ -199,7 +199,9 @@ export const ConciergeGroup = memo(function ConciergeGroup({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2",
+        // A card keeps no margin of its own here, so its thread label sits as
+        // close to it as a bubble's does.
+        "flex flex-col gap-2 [&_[data-chat-card]]:mb-0",
         group.sender === "guardian" ? "items-end" : "items-start",
       )}
     >

@@ -4,6 +4,7 @@ import type { ApprovalCardStatus, PreviewPayload } from "@/lib/chat-types";
 import { Button } from "@/components/ui/button";
 import { useTabStatus } from "@/hooks/use-tab-status";
 import { artifactLocalName } from "@/lib/artifact-name";
+import { SettledCard } from "@/components/chat/entries/SettledCard";
 import { ApprovalPreviewBody } from "./ApprovalPreviewBody";
 import { useApprovalCard } from "./use-approval-card";
 
@@ -23,6 +24,7 @@ export function ApprovalCard({
   status: initialStatus,
   onResolved,
   header,
+  settled = "fold",
 }: {
   approvalId: string;
   actionName?: string;
@@ -31,6 +33,11 @@ export function ApprovalCard({
   onResolved: () => void;
   /** Shown at the top inside the card, such as the task it is for. */
   header?: ReactNode;
+  /**
+   * How it shows once decided: folded to what it asks and how it ended,
+   * opening to the whole card (the default), or whole.
+   */
+  settled?: "fold" | "full";
 }) {
   const { t } = useTranslation("chat");
   const { status, isTerminal, record, submitting, submitError, submit } = useApprovalCard({
@@ -48,9 +55,37 @@ export function ApprovalCard({
   const headerTitle =
     status === "pending" ? t("approvals.headerPending") : t("approvals.headerResolved");
 
+  if (settled === "fold" && status !== "pending") {
+    const outcome =
+      status === "rejected"
+        ? record?.resolvedBy === "rome:task-ended"
+          ? t("concierge.ask.turnedDown")
+          : t("concierge.ask.rejected")
+        : status === "failed"
+          ? statusLabel
+          : t("concierge.ask.approved");
+    return (
+      <SettledCard
+        title={preview.kind === "generic" ? preview.title : resolvedActionName}
+        outcome={outcome}
+        full={
+          <ApprovalCard
+            approvalId={approvalId}
+            actionName={actionName}
+            preview={preview}
+            status={status}
+            onResolved={onResolved}
+            settled="full"
+          />
+        }
+      />
+    );
+  }
+
   return (
     <div
       tabIndex={-1}
+      data-chat-card
       data-chat-pending-card={record && status === "pending" ? "approval" : undefined}
       className="mb-3 overflow-hidden rounded-12 border border-warning-border bg-warning-bg/60"
     >

@@ -47,9 +47,9 @@ export interface TaskChatPart {
   title: string;
   /**
    * What the card shows: `task`, the task card (its title, status, Stop and
-   * Open), or `ask`, the task's question or approval alone, under a header
-   * that opens the task chat. A card from before has none, and shows the task
-   * card with its waiting question or approval inside.
+   * Open), or `ask`, the task's question or approval alone. A card from
+   * before has none, and shows the task card with its waiting question or
+   * approval inside.
    */
   show?: "task" | "ask";
 }
