@@ -1,6 +1,8 @@
 // The wiring builds the object graph from every context and serves it, so no
 // context imports it. The wiring is api/, wiring/, bin/, the root index.ts and
 // chats-wiring.ts under packages/core/src. Type-only imports and tests count.
+// A test that needs the wired graph builds it through test/, which is not a
+// context.
 
 import type { Import, ImportRule, ListedCrossing } from "../import-rules.js";
 import { contexts } from "./contexts.js";
