@@ -194,6 +194,15 @@ export interface SystemTurnOptions {
   pushLevel?: NotifyLevel;
 }
 
+/** The task ids a turn's prompt names: `<task id="…">` lines and `task:<id>` names. */
+function namedTaskIds(prompt: string): Set<string> {
+  return new Set(
+    [...prompt.matchAll(/<task id="([^"]+)"|\btask:([\w-]+)/g)]
+      .map((match) => match[1] ?? match[2])
+      .filter((id): id is string => Boolean(id)),
+  );
+}
+
 export class ConciergeService {
   private readonly leftModels = new Map<string, number>();
   /** The main chat being created, per owner, so concurrent calls share one. */
@@ -501,10 +510,19 @@ export class ConciergeService {
 
   /**
    * A retired Concierge chat is archived or deleted now, and its tasks are
-   * `mainChatId`'s. Finished rows stay on the retired chat, so no row write
+   * `mainChatId`'s. A deleted one's status reactions go with it. Finished rows stay on the retired chat, so no row write
    * tells the activity that their task chats now move the main chat.
    */
-  async chatGone(chatId: string, mainChatId: string): Promise<void> {
+  async chatGone(chatId: string, mainChatId: string, deleted = false): Promise<void> {
+    // A deleted chat's messages are gone, and their marks with them.
+    if (deleted) {
+      await this.deps.tasks.repo.forgetReactions(chatId).catch((error: unknown) =>
+        log.warn("failed to forget a deleted chat's status reactions", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     await this.activity?.retired(chatId, mainChatId).catch((error: unknown) =>
       log.warn("concierge activity retire failed", {
         error: error instanceof Error ? error.message : String(error),
@@ -657,6 +675,16 @@ export class ConciergeService {
     };
   }
 
+  /** Every task row of `chatId` a turn's prompt names, as {@link reportedTaskOf} reads them. */
+  private async reportedTasksOf(prompt: string, chatId: string): Promise<string[]> {
+    const own: string[] = [];
+    for (const id of namedTaskIds(prompt)) {
+      const found = await this.deps.tasks.repo.getWithChat(id);
+      if (found && found.conciergeChat.id === chatId) own.push(found.row.id);
+    }
+    return own;
+  }
+
   /**
    * The one task row a turn reports on: the row its prompt names, when it is
    * `chatId`'s. A turn naming several rows reports on none that a line can be
@@ -664,31 +692,11 @@ export class ConciergeService {
    * of `defer` names it in its name as `task:<id>`, as the Concierge's
    * instructions ask.
    */
-  /** Every task row of `chatId` a turn's prompt names, as {@link reportedTaskOf} reads them. */
-  private async reportedTasksOf(prompt: string, chatId: string): Promise<string[]> {
-    const ids = new Set(
-      [...prompt.matchAll(/<task id="([^"]+)"|\btask:([\w-]+)/g)]
-        .map((match) => match[1] ?? match[2])
-        .filter((id): id is string => Boolean(id)),
-    );
-    const own: string[] = [];
-    for (const id of ids) {
-      const found = await this.deps.tasks.repo.getWithChat(id);
-      if (found && found.conciergeChat.id === chatId) own.push(found.row.id);
-    }
-    return own;
-  }
-
   private async reportedTaskOf(prompt: string, chatId: string): Promise<string | undefined> {
-    const ids = [...prompt.matchAll(/<task id="([^"]+)"|\btask:([\w-]+)/g)].map(
-      (match) => match[1] ?? match[2],
-    );
     // Which of several tasks a line reports on is not ours to guess.
-    const named = new Set(ids.filter(Boolean));
-    if (named.size !== 1) return undefined;
-    const [id] = named;
-    const found = id ? await this.deps.tasks.repo.getWithChat(id) : null;
-    return found && found.conciergeChat.id === chatId ? found.row.id : undefined;
+    if (namedTaskIds(prompt).size !== 1) return undefined;
+    const [own] = await this.reportedTasksOf(prompt, chatId);
+    return own;
   }
 
   /**

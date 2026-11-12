@@ -4645,6 +4645,21 @@ describe("Concierge status reactions", () => {
       expect(await reactionOf(s, "g2")).toBe("failed");
     });
 
+    it("tells the Concierge again, after a restart, of a result the stopped process held unsaid", async () => {
+      const s = setup({ said: false, startEvents: false });
+      guardianSays(s, "g1");
+      const { chatId, taskId } = await started(s);
+      replies(s, chatId);
+      // The stopped process held the result; its pending report died with it.
+      await s.taskRepo.holdReactions(taskId, "done");
+      s.fakeTimers();
+      s.startEvents();
+      await rs.advanceTimersByTimeAsync(60_000);
+      expect(s.backendTurns).toHaveLength(1);
+      expect(s.backendTurns[0]?.prompt).toContain(taskId);
+      expect(await reactionOf(s, "g1")).toBeNull();
+    });
+
     it("clears a stopped task at once, with nothing to report", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");

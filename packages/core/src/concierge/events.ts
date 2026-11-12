@@ -476,14 +476,18 @@ export function startConciergeEvents(
     );
 
   // After a restart, a chat that was active since its row was written may
-  // have changes the Concierge never heard of.
+  // have changes the Concierge never heard of. A task whose result was not
+  // said yet lost the report the stopped process held, so it is told again,
+  // and its marks settle once that report is said.
   void guard(
     "task catch-up",
-    tasks.repo.listBehindTheirChat().then((rows) => {
-      for (const row of rows) {
-        coalescer.mark({ taskId: row.id, kind: "catch_up", urgent: false });
-      }
-    }),
+    Promise.all([tasks.repo.listBehindTheirChat(), tasks.repo.tasksHoldingReactions()]).then(
+      ([rows, holding]) => {
+        for (const taskId of new Set([...rows.map((row) => row.id), ...holding])) {
+          coalescer.mark({ taskId, kind: "catch_up", urgent: false });
+        }
+      },
+    ),
   );
 
   // A turn that failed before it started fires no turn end, so it is told as a failed turn.

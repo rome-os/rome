@@ -173,7 +173,10 @@ describe("the reply draft of a chat that keeps chat threads", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Open the chat thread" }));
 
-    expect(draft.thread).toBe("a1");
+    // The view, and what is sent from it, follow the reply, which is in the
+    // task's thread: the original it quotes may be in none, as when the reply
+    // started the task.
+    expect(draft.thread).toBe("r1");
     // Opening either opens both: the quote also picks the reply.
     expect(draft.target).toMatchObject({ messageId: "a1", preview: "Which day?" });
   });

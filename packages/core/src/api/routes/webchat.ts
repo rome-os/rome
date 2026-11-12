@@ -2785,7 +2785,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     await deps.webchatRepo.deleteSession(sessionId);
     // Told after the delete, as an archive is, so the activity reads the
     // chat's finished rows as the main chat's.
-    if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo);
+    if (retiredTo) await deps.concierge?.chatGone(sessionId, retiredTo, true);
     if (taskId) deps.concierge?.chatDeleted(taskId);
     // Durable audit signal for guardian-initiated chat deletion. Keep the
     // payload free of chat titles and message content because the OTLP

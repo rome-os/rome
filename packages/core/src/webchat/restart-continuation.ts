@@ -36,6 +36,23 @@ export function isRecentActivity(lastActivityAt: number | null, now: number): bo
   );
 }
 
+/**
+ * Whether startup continues interrupted turn `turn`: a turn of a top-level
+ * guardian chat, with recent activity, that is not itself a continuation.
+ */
+export function willContinueAfterRestart(
+  turn: InterruptedTurn,
+  repo: Pick<ChatsWebChatRepository, "canContinueAfterRestart" | "getRestartLastActivityAt">,
+  now = Date.now(),
+): boolean {
+  // The marker lives in turn_start's prompt, not a later best-effort trace
+  // write, so even a crash immediately after turn_start cannot loop recovery.
+  if (!turn.runtimeSessionId || turn.prompt.includes(RESTART_MARKER)) return false;
+  return (
+    repo.canContinueAfterRestart(turn) && isRecentActivity(repo.getRestartLastActivityAt(turn), now)
+  );
+}
+
 /** Call once after startup, with only this boot's cleanup results. Runs sequentially, without retries. */
 export async function continueInterruptedTurns(
   turns: InterruptedTurn[],
@@ -49,12 +66,8 @@ export async function continueInterruptedTurns(
   actorOf: (turn: InterruptedTurn) => Promise<SessionActor | undefined> = async () => undefined,
 ): Promise<void> {
   for (const turn of turns) {
-    // The marker lives in turn_start's prompt, not a later best-effort trace
-    // write, so even a crash immediately after turn_start cannot loop recovery.
-    if (!turn.runtimeSessionId || turn.prompt.includes(RESTART_MARKER)) continue;
     try {
-      if (!repo.canContinueAfterRestart(turn)) continue;
-      if (!isRecentActivity(repo.getRestartLastActivityAt(turn), now)) continue;
+      if (!turn.runtimeSessionId || !willContinueAfterRestart(turn, repo, now)) continue;
       const excerpt = repo.getRestartGuardianPrompt(turn);
       const actor = await actorOf(turn);
       await runner.runAndReport(

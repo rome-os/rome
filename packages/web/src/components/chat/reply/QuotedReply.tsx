@@ -46,12 +46,18 @@ export function QuotedReply({ part, hostId }: { part: ReplyToPart; hostId?: stri
       className={cn(frame, "cursor-pointer transition-colors hover:bg-border")}
       onClick={() =>
         opensThread
-          ? draft.openThread({
-              messageId: part.messageId,
-              author: part.author,
-              ...(part.name ? { name: part.name } : {}),
-              preview: plainQuote(part.text),
-            })
+          ? draft.openThread(
+              {
+                messageId: part.messageId,
+                author: part.author,
+                ...(part.name ? { name: part.name } : {}),
+                preview: plainQuote(part.text),
+              },
+              // The reply is in the task's thread; the original it quotes may
+              // be in none, as when the reply started the task. The view and
+              // what is sent from it follow the reply.
+              hostId,
+            )
           : draft.jump(part.messageId)
       }
     >

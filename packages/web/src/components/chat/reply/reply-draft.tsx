@@ -58,8 +58,10 @@ export interface ReplyDraft {
   /** A message of the chat thread the thread view shows, or null when it is closed. While it is open, the composer sends into that thread. */
   thread: string | null;
   /** Opens the thread view on `target`'s task thread, with `target` as the
-   *  reply. Only a task thread's label, or a quote in it, opens it. */
-  openThread: (target: ReplyTarget) => void;
+   *  reply, or on `thread`, a message of the thread, when `target` is not in
+   *  it, as the original a reply in the thread quotes. Only a task thread's
+   *  label, or a quote in it, opens it. */
+  openThread: (target: ReplyTarget, thread?: string) => void;
   /** Closes the thread view and its reply bar: the same as `clear`. */
   closeThread: () => void;
 }
@@ -119,19 +121,19 @@ export function useReplyDraftState({
   // The one place the reply bar opens, with the thread view when `openView`
   // says so and the chat keeps chat threads.
   const opened = useCallback(
-    (next: ReplyTarget, openView: boolean) => ({
+    (next: ReplyTarget, openView: boolean, thread?: string) => ({
       target: next,
-      thread: threads && openView ? next.messageId : null,
+      thread: threads && openView ? (thread ?? next.messageId) : null,
     }),
     [threads],
   );
   const pick = useCallback(
-    (next: ReplyTarget, openView?: boolean) => {
+    (next: ReplyTarget, openView?: boolean, thread?: string) => {
       changes.current += 1;
       // A reply picked inside an open thread view keeps it open: the view
       // shows its whole thread, older than the loaded timeline too. One picked
       // from the timeline opens no view.
-      setDraft((current) => opened(next, openView ?? current.thread !== null));
+      setDraft((current) => opened(next, openView ?? current.thread !== null, thread));
       requestAnimationFrame(() => focusRef.current());
     },
     [opened],
@@ -156,7 +158,10 @@ export function useReplyDraftState({
     },
     [opened, threads],
   );
-  const openThread = useCallback((next: ReplyTarget) => pick(next, true), [pick]);
+  const openThread = useCallback(
+    (next: ReplyTarget, thread?: string) => pick(next, true, thread),
+    [pick],
+  );
   const closeThread = clear;
   const has = useCallback((messageId: string) => messageIds.has(messageId), [messageIds]);
 
