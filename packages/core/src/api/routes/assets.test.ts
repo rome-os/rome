@@ -73,6 +73,58 @@ describe("GET /api/assets/:name", () => {
     });
   });
 
+  describe("traversal hardening", () => {
+    // A file with a valid asset name sits right outside the store, so any
+    // escape from the assets folder would serve these bytes.
+    const SECRET = "outside-the-store";
+    const plantOutside = () => {
+      mkdirSync(getAssetsDir(), { recursive: true });
+      writeFileSync(join(getAssetsDir(), "..", `${ID}.png`), SECRET);
+      writeFileSync(join(home, `${ID}.png`), SECRET);
+    };
+
+    it.each([
+      ["an encoded slash traversal", `..%2f${ID}.png`],
+      ["a fully encoded traversal", `%2e%2e%2f${ID}.png`],
+      ["a dot-slash traversal", `.%2f..%2f${ID}.png`],
+      ["a double-encoded traversal", `%252e%252e%252f${ID}.png`],
+      ["a backslash traversal", `..%5c${ID}.png`],
+      ["a deep traversal", `..%2f..%2f..%2f${ID}.png`],
+      ["a NUL byte", `${ID}.png%00`],
+      ["a NUL byte before another extension", `${ID}.png%00.html`],
+      ["a trailing newline", `${ID}.png%0a`],
+      ["a trailing slash", `${ID}.png/`],
+      ["an extra path segment", `${ID}.png/${ID}.png`],
+      ["fullwidth digits", encodeURIComponent(`\uff10${ID.slice(1)}.png`)],
+      ["a Cyrillic lookalike", encodeURIComponent(`${ID.slice(0, -1)}\u0430.png`)],
+    ])("never serves a file outside the store for %s", async (_label, name) => {
+      plantOutside();
+      const res = await app.request(`/api/assets/${name}`);
+      expect(res.status).not.toBe(200);
+      expect(await res.text()).not.toContain(SECRET);
+    });
+
+    it("never picks the file from the query string", async () => {
+      plantOutside();
+      const stored = await store("stored-bytes", "x.png");
+      const res = await app.request(
+        `/api/assets/${stored.fileName}?w=..%2f..%2f${ID}.png&path=..%2f${ID}.png`,
+      );
+      expect(res.status).toBe(200);
+      expect(await res.text()).toBe("stored-bytes");
+    });
+
+    it("serves only the stored bytes for a range request", async () => {
+      plantOutside();
+      const stored = await store("0123456789", "clip.mp4");
+      const res = await app.request(`/api/assets/${stored.fileName}`, {
+        headers: { Range: "bytes=0-3" },
+      });
+      expect(res.status).toBe(206);
+      expect(await res.text()).toBe("0123");
+    });
+  });
+
   describe("headers", () => {
     it("serves the bytes with immutable caching, an ETag and nosniff", async () => {
       const stored = await store("PNGBYTES", "image.png");
