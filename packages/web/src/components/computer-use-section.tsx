@@ -4,9 +4,7 @@ import {
   FormRowDescription,
   FormRowHeading,
   FormRowLabel,
-  FormRows,
 } from "@rome-os/ui/layout-form";
-import { Section, SectionHeader, SectionTitle } from "@rome-os/ui/page";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { computerUseStatusSchema } from "@rome/api-types/computer-use";
@@ -27,26 +25,10 @@ function relativeTime(value: string, locale: string): string {
   return formatter.format(Math.ceil(seconds / 86_400), "day");
 }
 
-/** Computer Use under its own heading, for a page that shows it on its own. */
-export function ComputerUseSection() {
-  const { t } = useTranslation("settings");
-  return (
-    <Section>
-      <SectionHeader>
-        <SectionTitle>{t("advanced.computerUse.title")}</SectionTitle>
-      </SectionHeader>
-      <FormRows>
-        <ComputerUseRow />
-      </FormRows>
-    </Section>
-  );
-}
-
 /** One row with the OpenCLI status and how many browsers are connected, for a
- *  `FormRows` group that already has a heading. The per-browser list is rarely
- *  needed, so it opens in a side sheet, which also polls faster while it is
- *  open. `label` names the row; it defaults to the daemon's name. */
-export function ComputerUseRow({ label = "OpenCLI" }: { label?: string }) {
+ *  `FormRows` group. The per-browser list is rarely needed, so it opens in a
+ *  side sheet, which also polls faster while it is open. */
+export function ComputerUseRow() {
   const { t, i18n } = useTranslation("settings");
   const [open, setOpen] = useState(false);
   const query = useQuery({
@@ -70,7 +52,7 @@ export function ComputerUseRow({ label = "OpenCLI" }: { label?: string }) {
     <>
       <FormRow>
         <FormRowHeading>
-          <FormRowLabel>{label}</FormRowLabel>
+          <FormRowLabel>{t("advanced.computerUse.title")}</FormRowLabel>
           <FormRowDescription role={query.isError ? "alert" : undefined}>
             {query.isPending
               ? t("advanced.computerUse.loading")

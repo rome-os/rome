@@ -5,13 +5,10 @@ import {
   FormRowHeading,
   FormRowLabel,
 } from "@rome-os/ui/layout-form";
-import { Loader2 } from "lucide-react";
 import { type ReactNode, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useQuery } from "@tanstack/react-query";
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import { RomeConfirmDialog } from "@/components/rome-confirm-dialog";
 import {
   RESTART_TIMEOUT_MS,
@@ -31,8 +28,7 @@ interface BuildInfoResponse {
   previousVersion: string | null;
 }
 
-/** The build identity, update check, and upgrade, shared by the card and the
- * row so both follow the same states. */
+/** The build identity, update check, and upgrade behind `SystemVersionRow`. */
 function useVersionCheck() {
   const { t } = useTranslation("settings");
   // The shared upgrade copy names what restarts; this page speaks of the product.
@@ -96,164 +92,14 @@ function useVersionCheck() {
 
 type VersionCheck = ReturnType<typeof useVersionCheck>;
 
-export function SystemUpgradeSection() {
-  const versionCheck = useVersionCheck();
-  const {
-    t,
-    name,
-    buildQuery,
-    checkQuery,
-    upgrade,
-    build,
-    check,
-    latest,
-    offered,
-    setConfirmOpen,
-    startCheck,
-  } = versionCheck;
-  const { restartingTo, restartTimedOut, targetConflict } = upgrade;
-
-  if (restartingTo !== null) {
-    return (
-      <div className="flex flex-col gap-3">
-        {restartTimedOut ? (
-          <Alert variant="warning">
-            <AlertTitle>{t("system.restartTimeoutTitle")}</AlertTitle>
-            <AlertDescription>
-              {t("system.restartTimeoutBody", {
-                name,
-                version: restartingTo,
-                minutes: RESTART_TIMEOUT_MS / 60_000,
-              })}{" "}
-              <a
-                href={import.meta.env.ROME_CLOUD_ORIGIN}
-                target="_blank"
-                rel="noreferrer"
-                className="underline underline-offset-2"
-              >
-                {t("system.restartTimeoutAction")}
-              </a>
-            </AlertDescription>
-          </Alert>
-        ) : (
-          <Alert variant="info">
-            <Loader2 aria-hidden className="animate-spin" />
-            <AlertTitle>{t("system.restartingTitle", { name })}</AlertTitle>
-            <AlertDescription>
-              {t("system.restartingBody", { version: restartingTo })}
-            </AlertDescription>
-          </Alert>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <div className="flex flex-col gap-3">
-      {build?.upgradedSinceLastBoot && build.version && (
-        <Alert variant="success">
-          <AlertDescription>
-            {t("system.upgradedNotice", { from: build.previousVersion, to: build.version })}
-          </AlertDescription>
-        </Alert>
-      )}
-
-      <Card>
-        <CardContent className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <p className="text-ui text-muted-foreground">{t("system.currentVersion")}</p>
-            {!build && buildQuery.error ? (
-              <div className="mt-1 flex items-center gap-2">
-                <p className="text-ui text-destructive-fg">{t("system.buildInfoFailed")}</p>
-                <Button variant="outline" size="xs" onClick={() => void buildQuery.refetch()}>
-                  {t("system.retry")}
-                </Button>
-              </div>
-            ) : (
-              <>
-                <p className="text-ui text-foreground">
-                  {build ? (build.version ?? t("system.versionUnknown")) : "…"}
-                </p>
-                {build?.builtAt && (
-                  <p className="mt-1 text-aux text-muted-foreground">
-                    {t("system.builtAt", { builtAt: formatBuildDate(build.builtAt) })}
-                  </p>
-                )}
-              </>
-            )}
-          </div>
-          {build && build.version === null ? (
-            // An unversioned build (source run, test image) has no identity to
-            // compare against a release, so core rejects both upgrade verbs —
-            // don't offer the check at all.
-            <p className="max-w-xs text-ui text-muted-foreground">
-              {t("system.upgradeUnsupported")}
-            </p>
-          ) : (
-            // Disabled until build-info resolves: whether this build supports
-            // upgrades at all is unknown until then, and on an unversioned build
-            // a fast click would reach the check the UI is meant to suppress.
-            <Button
-              variant="outline"
-              onClick={startCheck}
-              disabled={!build || checkQuery.isFetching}
-            >
-              {checkQuery.isFetching ? t("system.checking") : t("system.checkButton")}
-            </Button>
-          )}
-        </CardContent>
-      </Card>
-
-      <div className="space-y-3 empty:hidden">
-        {checkQuery.error && <CheckErrorNotice message={checkQuery.error.message} />}
-
-        {check && offered === null && (
-          <p className="text-ui text-muted-foreground">
-            {t("system.upToDate", { version: check.latest.version })}
-          </p>
-        )}
-
-        {offered && (
-          <Alert variant="info" className="flex flex-wrap items-center justify-between gap-3 p-4">
-            <AlertDescription className="flex-1">
-              {t("system.upgradeAvailable", { version: offered })}
-            </AlertDescription>
-            <Button
-              onClick={() => {
-                upgrade.reset();
-                setConfirmOpen(true);
-              }}
-            >
-              {t("system.upgradeButton", { version: offered })}
-            </Button>
-          </Alert>
-        )}
-
-        {targetConflict && latest && (
-          <Alert variant="warning">
-            <AlertDescription>{t("system.targetChanged", { version: latest })}</AlertDescription>
-          </Alert>
-        )}
-
-        {upgrade.error && (
-          <p className="text-ui text-destructive-fg">
-            {t("system.upgradeFailed", { message: upgrade.error })}
-          </p>
-        )}
-      </div>
-
-      <UpgradeConfirmDialog versionCheck={versionCheck} />
-    </div>
-  );
-}
-
 function UpgradeConfirmDialog({ versionCheck }: { versionCheck: VersionCheck }) {
   const { t, name, latest, confirmOpen, setConfirmOpen, upgrade, checkQuery } = versionCheck;
   if (!latest) return null;
   return (
     <RomeConfirmDialog
-      // A failed request closes the confirmation and reports inline.
-      open={confirmOpen && upgrade.error === null}
+      // A failed request closes the confirmation and reports inline. An
+      // accepted one closes it too, so Confirm cannot send a second request.
+      open={confirmOpen && upgrade.error === null && upgrade.restartingTo === null}
       title={t("system.confirmTitle", { name, version: latest })}
       description={t("system.confirmDescription", { name })}
       confirmLabel={t("system.confirmButton")}
@@ -322,7 +168,7 @@ export function SystemVersionRow() {
       <span className="text-warning-fg">{t("system.targetChanged", { version: latest })}</span>
     );
   } else if (checkQuery.error) {
-    status = <CheckErrorNotice message={checkQuery.error.message} inline />;
+    status = <CheckErrorNotice message={checkQuery.error.message} />;
   } else if (offered) {
     status = t("system.upgradeAvailable", { version: offered });
   } else if (check) {
@@ -385,22 +231,20 @@ export function SystemVersionRow() {
   );
 }
 
-function CheckErrorNotice({ message, inline = false }: { message: string; inline?: boolean }) {
+function CheckErrorNotice({ message }: { message: string }) {
   const { t } = useTranslation("settings");
-  const Tag = inline ? "span" : "p";
-  const size = inline ? "" : "text-ui ";
   // The core relay encodes legible non-error states as error codes; render the
   // ones the viewer can act on as inline copy rather than a raw failure.
   if (message === "pantheon_unconfigured") {
-    return <Tag className={`${size}text-muted-foreground`}>{t("system.notManaged")}</Tag>;
+    return <span className="text-muted-foreground">{t("system.notManaged")}</span>;
   }
   if (message === "unversioned_build") {
-    return <Tag className={`${size}text-muted-foreground`}>{t("system.upgradeUnsupported")}</Tag>;
+    return <span className="text-muted-foreground">{t("system.upgradeUnsupported")}</span>;
   }
   if (message === "latest_unresolvable") {
-    return <Tag className={`${size}text-warning-fg`}>{t("system.unresolvable")}</Tag>;
+    return <span className="text-warning-fg">{t("system.unresolvable")}</span>;
   }
-  return <Tag className={`${size}text-destructive-fg`}>{t("system.checkFailed", { message })}</Tag>;
+  return <span className="text-destructive-fg">{t("system.checkFailed", { message })}</span>;
 }
 
 function formatBuildDate(builtAt: string): string {

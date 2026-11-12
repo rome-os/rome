@@ -1,10 +1,11 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { FormRows } from "@rome-os/ui/layout-form";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import i18n from "@/i18n";
-import { AppKeysSection } from "./app-keys-section";
+import { AppKeysRow } from "./app-keys-section";
 
 // The Toaster mounts in App.tsx, outside this tree — spy on the calls instead.
 rs.mock("sonner", () => ({
@@ -72,18 +73,20 @@ function mockAppKeysFetch(
   return writes;
 }
 
-function renderSection() {
+function renderRow() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
     <QueryClientProvider client={queryClient}>
-      <AppKeysSection />
+      <FormRows>
+        <AppKeysRow />
+      </FormRows>
     </QueryClientProvider>,
   );
 }
 
 /** Renders the Advanced tab's App keys row and opens its sheet. */
 function renderAppKeysSheet() {
-  const view = renderSection();
+  const view = renderRow();
   fireEvent.click(screen.getByRole("button", { name: "Open App keys" }));
   return view;
 }
@@ -99,18 +102,18 @@ describe("App keys row", () => {
   it("shows the stored-key count and keeps the management in the sheet", async () => {
     mockAppKeysFetch(() => ok({ keys: [storedKey] }));
 
-    renderSection();
+    renderRow();
 
-    expect(await screen.findByText("1 key")).toBeTruthy();
+    expect(await screen.findByText(/^1 key · /)).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Add key" })).toBeNull();
   });
 
   it("reads 'None yet' when no keys are stored", async () => {
     mockAppKeysFetch(() => ok({ keys: [] }));
 
-    renderSection();
+    renderRow();
 
-    expect(await screen.findByText("None yet")).toBeTruthy();
+    expect(await screen.findByText(/^None yet · /)).toBeTruthy();
   });
 });
 

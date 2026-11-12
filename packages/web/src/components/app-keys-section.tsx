@@ -5,9 +5,7 @@ import {
   FormRowDescription,
   FormRowHeading,
   FormRowLabel,
-  FormRows,
 } from "@rome-os/ui/layout-form";
-import { Section, SectionHeader, SectionTitle } from "@rome-os/ui/page";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CircleAlert, KeyRound, Plus, RefreshCw, X } from "lucide-react";
 import { useEffect, useId, useState } from "react";
@@ -40,29 +38,12 @@ import { type EnvAppKey, parseAppKeysEnv } from "@/lib/parse-app-keys-env";
 type FormState = { mode: "add" } | { mode: "replace"; name: string; label: string };
 
 /**
- * App keys on the Advanced tab: one row with the stored-key count, and a side
- * sheet that manages them. The sheet shows either the key list or the add or
- * replace form, never both, so the form has the sheet's full width and the
+ * App keys as one row in a `FormRows` group, with the stored-key count, and a
+ * side sheet that manages them. The sheet shows either the key list or the add
+ * or replace form, never both, so the form has the sheet's full width and the
  * header's back arrow returns to the list.
  */
-export function AppKeysSection() {
-  const { t } = useTranslation("settings");
-  return (
-    <Section>
-      <SectionHeader>
-        <SectionTitle>{t("appKeys.title")}</SectionTitle>
-      </SectionHeader>
-      <FormRows>
-        <AppKeysRow />
-      </FormRows>
-    </Section>
-  );
-}
-
-/** The app keys row and its sheet, for a `FormRows` group that already has a
- * heading. With `titled`, the label names the setting and the count moves to
- * the description, so the row reads among its neighbours. */
-export function AppKeysRow({ titled = false }: { titled?: boolean }) {
+export function AppKeysRow() {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
   // Closing unmounts the form, so it waits for a save: a .env batch keeps its
@@ -74,23 +55,17 @@ export function AppKeysRow({ titled = false }: { titled?: boolean }) {
   const keysQuery = useQuery({ queryKey: APP_KEYS_QUERY_KEY, queryFn: fetchAppKeys });
   const count = keysQuery.data?.length;
 
-  const countLabel =
+  const summary =
     count === undefined
-      ? t("appKeys.title")
-      : count === 0
-        ? t("appKeys.noKeysYet")
-        : t("appKeys.keyCount", { count });
+      ? t("appKeys.summary")
+      : `${count === 0 ? t("appKeys.noKeysYet") : t("appKeys.keyCount", { count })} · ${t("appKeys.summary")}`;
 
   return (
     <>
       <FormRow>
         <FormRowHeading>
-          <FormRowLabel>{titled ? t("appKeys.title") : countLabel}</FormRowLabel>
-          <FormRowDescription>
-            {titled && count !== undefined
-              ? `${countLabel} · ${t("appKeys.summary")}`
-              : t("appKeys.summary")}
-          </FormRowDescription>
+          <FormRowLabel>{t("appKeys.title")}</FormRowLabel>
+          <FormRowDescription>{summary}</FormRowDescription>
         </FormRowHeading>
         <FormRowControl>
           <Button

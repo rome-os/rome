@@ -62,14 +62,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardAction,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Field, FieldLabel } from "@/components/ui/field";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
@@ -930,7 +923,7 @@ function AdvancedSection({
           <FormRows>
             <SystemVersionRow />
             <SystemDiagnosisRow details={<RelayHealthSection />} />
-            <ComputerUseRow label={t("advanced.computerUse.title")} />
+            <ComputerUseRow />
           </FormRows>
         </Section>
         <FeaturesSection />
@@ -1522,7 +1515,7 @@ function AccessControlSection({
         <SectionTitle>{t("publicAccess.title")}</SectionTitle>
       </SectionHeader>
       <FormRows>
-        <AppKeysRow titled />
+        <AppKeysRow />
         <SettingsToggleRow
           title={t("advanced.feedback.agentReports.title")}
           description={t("advanced.feedback.agentReports.description")}
