@@ -18,10 +18,10 @@ Device builds need a team: copy `Config/Local.xcconfig.example` to `Config/Local
 
 ### On a physical iPhone
 
-Signing is automatic, so Xcode must have an Apple ID for that team under Xcode → Settings → Accounts. A development certificate in the keychain is not enough: without the account the build fails with "No Accounts". `xcrun devicectl list devices` gives the phone's identifier; the phone needs Developer Mode on.
+Signing is automatic and authenticates with the team's App Store Connect API key, so it works without an Apple ID in Xcode. Command-line builds often cannot see Xcode's signed-in account, even right after signing in, and then fail with "No Accounts". Keep the key's arguments in a shell array (see "Signing with the API key"). `xcrun devicectl list devices` gives the phone's identifier; the phone needs Developer Mode on.
 
 ```bash
-xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Debug -destination 'id=<device-id>' -derivedDataPath /tmp/rome-device -allowProvisioningUpdates build
+xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Debug -destination 'id=<device-id>' -derivedDataPath /tmp/rome-device -allowProvisioningUpdates "${ASC_KEY[@]}" build
 ```
 
 ```bash
@@ -49,30 +49,34 @@ TestFlight ships under Rome's own Apple Developer team, not a personal one. The 
 1. Archive (local only, safe to run):
 
    ```bash
-   xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/rome-archive/Rome.xcarchive -allowProvisioningUpdates DEVELOPMENT_TEAM=<ROME_TEAM_ID> CURRENT_PROJECT_VERSION=$(date -u +%Y%m%d%H%M) archive
+   xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -archivePath /tmp/rome-archive/Rome.xcarchive -allowProvisioningUpdates "${ASC_KEY[@]}" DEVELOPMENT_TEAM=<ROME_TEAM_ID> CURRENT_PROJECT_VERSION=$(date -u +%Y%m%d%H%M) archive
    ```
 
 2. Upload to App Store Connect. **This publishes a build: run it only with the lead's go.** `Config/ExportOptions.plist` uses the `app-store-connect` method with the `upload` destination, so exporting is the upload:
 
    ```bash
-   xcodebuild -exportArchive -archivePath /tmp/rome-archive/Rome.xcarchive -exportOptionsPlist Config/ExportOptions.plist -exportPath /tmp/rome-archive/export -allowProvisioningUpdates
+   xcodebuild -exportArchive -archivePath /tmp/rome-archive/Rome.xcarchive -exportOptionsPlist Config/ExportOptions.plist -exportPath /tmp/rome-archive/export -allowProvisioningUpdates "${ASC_KEY[@]}"
    ```
 
-   Xcode needs an Apple ID in Rome's team signed in under Xcode → Settings → Accounts, with the App Manager role or higher. The App Store Connect app record for `cc.romeos.mobile` must exist first.
-
-   That sign-in can lapse without warning. The export then fails with "No Accounts". To export without it, use a team App Store Connect API key instead. Add these to both the archive and the export command:
-
-   ```bash
-   -authenticationKeyPath ~/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8 -authenticationKeyID <KEY_ID> -authenticationKeyIssuerID <ISSUER_ID>
-   ```
-
-   The key needs the Admin role, because the export creates or uses the cloud-managed distribution certificate. Its `.p8` stays outside every repository, at that path with mode 600. App Store Connect offers the file for download only once.
+   The App Store Connect app record for `cc.romeos.mobile` must exist first.
 
    No certificate needs to be on the Mac beforehand. The first archive creates an Apple Development certificate for the team in the keychain, and the export signs with the team's Apple Distribution certificate, which Xcode keeps in the cloud. The upload ends with "Uploaded package is processing"; App Store Connect then processes the build before TestFlight lists it.
 
    The archive is signed with the development profile, so its app reads `aps-environment` = `development` even in Release. The export re-signs it with `production`. To check that before uploading, export once with `destination` set to `export` in a copy of `ExportOptions.plist`, then read the entitlements of the app in the `.ipa`.
 
 3. Delete `/tmp/rome-archive` when the build shows up in App Store Connect.
+
+### Signing with the API key
+
+Every signed build passes a team App Store Connect API key. Keep its arguments in a shell array, so zsh hands each one to `xcodebuild` as a separate argument:
+
+```bash
+ASC_KEY=(-authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8" -authenticationKeyID <KEY_ID> -authenticationKeyIssuerID <ISSUER_ID>)
+```
+
+A path with `~` inside quotes is not expanded, and the arguments joined into one string reach `xcodebuild` as one; both fail with "Authentication failed". The key needs the Admin role, because the export creates or uses the cloud-managed distribution certificate. Its `.p8` stays outside every repository, at that path with mode 600. App Store Connect offers the file for download only once.
+
+The key registers bundle ids, devices and profiles, but cannot create an App Group. A new group is made once on the Apple Developer site (Identifiers → App Groups) and ticked under App Groups on each App ID that uses it. `group.cc.romeos.mobile` and `group.cc.romeos.mobile.dev` already exist, on the app's and the widget's App IDs.
 
 To check a Release build without signing: `xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -derivedDataPath /tmp/rome-release CODE_SIGNING_ALLOWED=NO build`.
 
