@@ -42,6 +42,48 @@ describe("the Concierge agent", () => {
     expect(prompt).toContain("`chat_forward` passes nothing on");
   });
 
+  it("reports a finished task by forwarding its conclusion, never its whole report", () => {
+    const lines = concierge.systemPromptPrefix.split("\n");
+    const rule = (start: string) => lines.find((line) => line.startsWith(start)) ?? "";
+    const finished = rule('- `task_finished` with initiator="concierge"');
+    for (const text of [
+      "forward the task chat's conclusion with `chat_forward`",
+      "the forwarded message shows its source chat, which opens the details",
+      "Never paste or retell the rest of the answer",
+      "refuses because the answer has no conclusion or it is too long",
+      "at most two short sentences",
+      "with `task` set to the task's id so it joins the task's thread",
+      "deliver the result in ONE message",
+      "(`full: true`) only when the guardian explicitly asked for the full text in a message they sent this turn",
+      "A failed or stopped task: say so plainly",
+    ])
+      expect(finished).toContain(text);
+    expect(rule("- In a task event, `conclusion:`")).toContain(
+      "the task chat's own conclusion, whole",
+    );
+    expect(rule("- When the guardian asks for content you write yourself")).toContain(
+      "never the whole report, unless the guardian explicitly asks for the full text",
+    );
+    expect(concierge.systemPromptPrefix).toContain(
+      "Nor does a forwarded conclusion that asks the guardian something",
+    );
+    for (const obsolete of [
+      "Long content the guardian asked for: `chat_forward`",
+      "(`say` with format long, or `chat_forward`)",
+      "A short finding: 1 to 3 bubbles in your own words",
+    ])
+      expect(concierge.systemPromptPrefix).not.toContain(obsolete);
+  });
+
+  it("tells the Concierge to write a task's brief in the guardian's language", () => {
+    const rule =
+      concierge.systemPromptPrefix
+        .split("\n")
+        .find((line) => line.startsWith("- Everything else is a task")) ?? "";
+    expect(rule).toContain("Write it in the guardian's language");
+    expect(rule).toContain("writes its conclusion in the language of its brief");
+  });
+
   it("shows task questions and approvals as live cards without relaying card answers", () => {
     const rule = concierge.systemPromptPrefix
       .split("\n")

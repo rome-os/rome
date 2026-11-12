@@ -220,6 +220,7 @@ import { turnDownApprovals } from "./concierge/approval-expiry.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
+import { taskChatInstructions } from "./concierge/conclusion.js";
 import { startConciergeEvents } from "./concierge/events.js";
 import { settleMarksAfterRestart } from "./concierge/restart-marks.js";
 import { startConciergeFollowing, watchProvidersOf } from "./concierge/following.js";
@@ -1221,6 +1222,7 @@ async function main() {
         subagentSessions(manager, parentLink, webchatRepo, inherited),
       turnMiddleware,
       sessionSettings: new ChatSessionSettings({ webchatRepo }),
+      chatInstructions: taskChatInstructions({ webchatRepo }),
       sessionTracing: romeSessionTracing,
       turnUsage: new TurnUsageReporter({ usage: usageRecorder, apps: appCatalog }),
       folders: agentFolders(),

@@ -100,3 +100,28 @@ export const CONCIERGE_LAS_VEGAS_LIST = `## 拉斯维加斯首次到访：8 个�
    - **看点 / 适合谁：** 离 Strip 约 30 分钟车程的红色砂岩峡谷，适合喜欢徒步和拍照的人。
    - **实用信息：** 需要提前预约入园时段。
    - **特别注意：** 夏天中午很热，带足水，尽量上午去。`;
+
+/** A task chat's final answer: the details, then its conclusion between two HTML comments. */
+export const TASK_CHAT_ANSWER_WITH_CONCLUSION = `## Flights to Lisbon, 1–7 March
+
+I compared the fares from three sites for the first week of March. Prices are the round trip for one adult, in yuan.
+
+| Option | Leaves | Returns | Stops | Price |
+| --- | --- | --- | --- | --- |
+| A | 2 Mar, 07:40 | 7 Mar, 18:05 | 1 | 4,380 |
+| B | 2 Mar, 13:20 | 7 Mar, 11:10 | 1 | 4,910 |
+| C | 3 Mar, 09:00 | 8 Mar, 15:30 | 0 | 6,240 |
+
+### Notes
+
+- Option A changes in Doha with a 70-minute layover, which is enough at that airport.
+- Option C is the only direct flight, and it adds one night at the hotel.
+- All three fares allow one free change within 24 hours of booking.
+
+<!-- rome:conclusion -->
+Found 3 round trips; the cheapest is option A at ¥4,380, leaving 2 March. Which one should I book?
+<!-- /rome:conclusion -->`;
+
+/** What the Concierge forwards of that answer: its conclusion, word for word. */
+export const TASK_CHAT_CONCLUSION =
+  "Found 3 round trips; the cheapest is option A at ¥4,380, leaving 2 March. Which one should I book?";

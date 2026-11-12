@@ -54,9 +54,11 @@ export function formatResultForAgent(result: ActionResult): string {
   if (result.status === "show_widget") {
     // The approved run happens outside the turn that asked, so no card is
     // stored for it.
+    const card =
+      "componentId" in result.widget ? `Its "${result.widget.componentId}" card` : "Its card";
     return (
-      `The action you requested was approved and executed. Its "${result.widget.componentId}" ` +
-      `card is not shown. Tell the guardian what it would have shown, in a message: ${result.widget.text}`
+      `The action you requested was approved and executed. ${card} ` +
+      `is not shown. Tell the guardian what it would have shown, in a message: ${result.widget.text}`
     );
   }
   const dataStr = result.data ? JSON.stringify(result.data, null, 2) : "no data";

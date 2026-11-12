@@ -61,7 +61,13 @@ import type { AgentEvent, MessagePart } from "../../types.js";
 import { createAgentTurnRef } from "../../agent/index.js";
 import type { AgentSession, AgentTurnHandle } from "../../agent/index.js";
 import { openedInChat, withRomeSession } from "../../core/session-conversation.js";
-import type { Account, RomeSessionType, StreamAgentEvent } from "@rome-os/app-runtime";
+import {
+  type Account,
+  checkWidgetUi,
+  type RomeSessionType,
+  type StreamAgentEvent,
+  type WidgetUi,
+} from "@rome-os/app-runtime";
 import type { ApiDeps } from "../deps.js";
 import type { LiveEventEmit } from "../../lib/live-event.js";
 import {
@@ -444,16 +450,28 @@ function toolOutputObject(output: unknown): Record<string, unknown> | null {
   return o;
 }
 
+type OmitEach<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
+type ShownWidgetPart = OmitEach<Extract<MessagePart, { type: "widget" }>, "type" | "toolUseId">;
+
 /** A widget that does not wait, pulled from an action's tool_result
  * (`showWidget: true`, written by `actionToolOutput`), or null for any other
- * result. `appId` is the app that owns the action. */
-function readWidgetFromOutput(
-  output: unknown,
-): { appId: string; componentId: string; props?: Record<string, unknown>; text: string } | null {
+ * result. `appId` is the app that owns the action. A described card (`ui`)
+ * is checked again here, since the stored part is drawn on every load. */
+function readWidgetFromOutput(output: unknown): ShownWidgetPart | null {
   const o = toolOutputObject(output);
   if (!o || o.showWidget !== true) return null;
-  if (typeof o.appId !== "string" || typeof o.componentId !== "string") return null;
-  if (typeof o.text !== "string") return null;
+  if (typeof o.appId !== "string" || typeof o.text !== "string") return null;
+  if (o.ui !== undefined) {
+    const bind = o.bind ?? {};
+    if (checkWidgetUi(o.ui, bind).length > 0) return null;
+    return {
+      appId: o.appId,
+      text: o.text,
+      ui: o.ui as WidgetUi,
+      ...(o.bind ? { bind: o.bind as Record<string, string> } : {}),
+    };
+  }
+  if (typeof o.componentId !== "string") return null;
   const props =
     o.props && typeof o.props === "object" && !Array.isArray(o.props)
       ? (o.props as Record<string, unknown>)
@@ -486,7 +504,8 @@ type WidgetPart = Extract<MessagePart, { type: "widget" }>;
  * proof of where it came from: an action's own data, a shell command or
  * another tool can print the same JSON. So a widget is stored only from a
  * tool call named `execute_action` (`actionName`), only for the app that owns
- * that action, and only when that app is installed and declares the component.
+ * that action, and only when that app is installed and declares the component
+ * (a described card names none).
  */
 function trustedWidget(
   msg: Extract<AgentEvent, { type: "tool_result" }>,
@@ -511,7 +530,10 @@ function trustedWidget(
     log.warn("rejected widget: app not installed", { sessionId, appId: widget.appId });
     return null;
   }
-  if (!(resolvedApp.manifest.components ?? []).includes(widget.componentId)) {
+  if (
+    "componentId" in widget &&
+    !(resolvedApp.manifest.components ?? []).includes(widget.componentId)
+  ) {
     log.warn("rejected widget: component not declared by app", {
       sessionId,
       appId: widget.appId,

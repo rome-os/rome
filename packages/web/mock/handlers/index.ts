@@ -50,6 +50,7 @@ import { activityHandlers, approvalCardId } from "./activity";
 import { appHandlers } from "./apps";
 import { appKeysHandlers } from "./app-keys";
 import { connectorHandlers } from "./connector";
+import { mealPlannerCard, mealPlannerHandlers } from "./meal-planner";
 import { liveEventsHandlers } from "./live-events";
 import { nodeConsoleHandlers } from "./node-console";
 import { MAIN_AGENT_ID } from "@rome/api-types/account-agents";
@@ -77,6 +78,8 @@ import {
   CONCIERGE_MORNING_DIGEST,
   CONCIERGE_RELEASE_DIGEST,
   CONCIERGE_TRIP_PLAN,
+  TASK_CHAT_ANSWER_WITH_CONCLUSION,
+  TASK_CHAT_CONCLUSION,
 } from "../fixtures/concierge-messages";
 
 // Fixtures are typed against the same types the fetch sites parse into
@@ -365,7 +368,28 @@ const transcripts: Record<string, ChatMessage[]> = {
         forwardedFrom: { chatId: "mock-chat-4", title: "拉斯维加斯景点" },
       } as TranscriptPart,
     ]),
+    ...turn(CONCIERGE_CHAT_ID, 8, "2026-08-07T12:40:00.000Z", "How much have I eaten today?", [
+      mealPlannerCard,
+      text("1,240 kcal so far, 760 under your goal. A protein-heavy dinner fits."),
+    ]),
+    // A finished task is reported by forwarding only its conclusion; the chip opens the task chat.
+    ...turn(CONCIERGE_CHAT_ID, 9, "2026-08-07T13:00:00.000Z", "How are the Lisbon flights going?", [
+      {
+        type: "text",
+        content: TASK_CHAT_CONCLUSION,
+        format: "long",
+        forwardedFrom: { chatId: "mock-chat-lisbon", title: "Lisbon flights" },
+      } as TranscriptPart,
+    ]),
   ],
+  // The task chat the conclusion above came from: the full answer, then its conclusion.
+  "mock-chat-lisbon": turn(
+    "mock-chat-lisbon",
+    1,
+    "2026-08-07T09:20:00.000Z",
+    "Compare round-trip fares to Lisbon for 1–7 March and tell me what to book.",
+    [text(TASK_CHAT_ANSWER_WITH_CONCLUSION)],
+  ),
   "mock-task-question": turn(
     "mock-task-question",
     1,
@@ -862,6 +886,7 @@ const chatSessions: ChatSession[] = [
     model: "gpt-5.6-sol",
     reasoningEffort: "xhigh",
   },
+  { ...session("mock-chat-lisbon", "Lisbon flights"), triggerKind: "concierge" },
   { ...session("mock-chat-3", "Weekly planning"), lastTurnFailed: true, model: "gemini-2.5-pro" },
   { ...session("mock-chat-4", "Plumber for the leak"), awaitingGuardian: true },
   {
@@ -1659,6 +1684,7 @@ export const handlers = [
   ...shareHandlers(chatSessions, transcripts),
   ...settingsHandlers,
   ...connectorHandlers,
+  ...mealPlannerHandlers,
   ...recordedAppHandlers,
   ...appKeysHandlers,
   ...liveEventsHandlers,
