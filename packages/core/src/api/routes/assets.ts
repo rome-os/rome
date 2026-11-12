@@ -69,14 +69,13 @@ export function assetsRoutes(): Hono {
       return new Response(null, { headers, status: 304 });
     }
 
-    // A download carries no filename, so the name the page asks for (the chip's
-    // `download` attribute) decides what the file is saved as.
-    const disposition = (fileName: string) =>
-      inline ? `inline; filename="${fileName}"` : "attachment";
+    // The header carries no filename, inline or not: a header filename would
+    // override the chip's `download` attribute, which names the saved file.
+    const disposition = inline ? "inline" : "attachment";
     const baseHeaders: Record<string, string> = {
       ...headers,
       "Accept-Ranges": "bytes",
-      "Content-Disposition": disposition(name),
+      "Content-Disposition": disposition,
       "Content-Length": String(size),
       "Content-Type": file.mimeType,
     };
@@ -87,7 +86,6 @@ export function assetsRoutes(): Hono {
         return new Response(new Uint8Array(resized), {
           headers: {
             ...baseHeaders,
-            "Content-Disposition": disposition(`${id}.webp`),
             "Content-Length": String(resized.length),
             "Content-Type": "image/webp",
           },

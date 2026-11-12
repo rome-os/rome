@@ -85,7 +85,7 @@ describe("GET /api/assets/:name", () => {
       expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
       expect(res.headers.get("Content-Type")).toBe("image/png");
       expect(res.headers.get("Content-Length")).toBe("8");
-      expect(res.headers.get("Content-Disposition")).toBe(`inline; filename="${stored.fileName}"`);
+      expect(res.headers.get("Content-Disposition")).toBe("inline");
     });
 
     it("answers 304 to a matching If-None-Match, with the caching headers", async () => {
@@ -147,10 +147,8 @@ describe("GET /api/assets/:name", () => {
 
       expect(res.status).toBe(200);
       expect(res.headers.get("Content-Type")?.startsWith(type)).toBe(true);
-      // A download names no file, so the page's `download` name wins.
-      expect(res.headers.get("Content-Disposition")).toBe(
-        disposition === "inline" ? `inline; filename="${stored.fileName}"` : "attachment",
-      );
+      // The header names no file, so the page's `download` name wins.
+      expect(res.headers.get("Content-Disposition")).toBe(disposition);
       expect(res.headers.get("X-Content-Type-Options")).toBe("nosniff");
     });
   });
@@ -203,7 +201,7 @@ describe("GET /api/assets/:name", () => {
       expect(thumb.headers.get("Content-Type")).toBe("image/webp");
       expect(thumb.headers.get("ETag")).toBe(`"${stored.id}-w900"`);
       expect(thumb.headers.get("Cache-Control")).toBe("private, max-age=31536000, immutable");
-      expect(thumb.headers.get("Content-Disposition")).toBe(`inline; filename="${stored.id}.webp"`);
+      expect(thumb.headers.get("Content-Disposition")).toBe("inline");
       const bytes = Buffer.from(await thumb.arrayBuffer());
       expect(bytes.subarray(0, 4).toString()).toBe("RIFF");
       expect(bytes.subarray(8, 12).toString()).toBe("WEBP");
