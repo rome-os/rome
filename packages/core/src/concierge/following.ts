@@ -754,9 +754,6 @@ export function startConciergeFollowing(
       const chatId = resolved.get(key) ?? null;
       perChat.set(chatId, [...(perChat.get(chatId) ?? []), item]);
     }
-    // An empty digest still runs, with count="0", so the person hears that
-    // nothing new came in anywhere.
-    if (owed.length === 0) perChat.set(await service.findChatId(owner), []);
     // A chat's digest also says which of its tasks to bring up again, and a
     // chat with such notes gets one even with no items. An archived chat's
     // tasks read as the main chat's, so their notes go there.
@@ -780,6 +777,9 @@ export function startConciergeFollowing(
       notes.set(chatId, read);
       if (!perChat.has(chatId)) perChat.set(chatId, []);
     }
+    // An empty digest still runs, with count="0", so the person hears that
+    // nothing new came in anywhere: no item and no task note in any chat.
+    if (perChat.size === 0) perChat.set(await service.findChatId(owner), []);
     let delivered = 0;
     let turns = 0;
     for (const [chatId, items] of perChat) {

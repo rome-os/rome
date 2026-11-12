@@ -1499,10 +1499,9 @@ describe("follows in several Concierge chats", () => {
       const s = setup();
       s.taskNotes.set("calendar", noResponseNote("t1"));
       expect(await digest(s)).toEqual({ status: "ok", data: { items: 0 } });
-      // The main chat hears nothing new came in; the calendar chat gets its notes.
-      expect([...s.turnChats].sort()).toEqual(["calendar", "concierge"]);
+      // Something is owed in the calendar chat, so the main chat gets no empty digest.
+      expect(s.turnChats).toEqual(["calendar"]);
       expect(turnIn(s, "calendar")).toContain('<ended_no_response task="t1"');
-      expect(turnIn(s, "concierge")).not.toContain("ended_no_response");
       expect(s.taskNotes.size).toBe(0);
       s.stop();
     });
