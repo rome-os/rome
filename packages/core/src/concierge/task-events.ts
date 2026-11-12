@@ -186,10 +186,19 @@ export class TaskEventCoalescer {
     this.changed();
   }
 
-  /** The Concierge wrote the row. Clears its mark unless a change came after the build. */
+  /**
+   * The Concierge wrote the row, or said its news. Clears its mark unless a
+   * change came after the build, or the turn built to carry it never reached
+   * the Concierge: that news is still owed, and its retry goes ahead.
+   */
   settle(taskId: string): void {
     const entry = this.dirty.get(taskId);
-    if (entry && entry.builtAt !== undefined && entry.since <= entry.builtAt) {
+    if (
+      entry &&
+      entry.builtAt !== undefined &&
+      entry.since <= entry.builtAt &&
+      !entry.undelivered
+    ) {
       this.dirty.delete(taskId);
       this.changed();
     }

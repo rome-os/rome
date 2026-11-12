@@ -905,11 +905,17 @@ export class ConciergeTasksRepository {
   /** The task chat of every stopped task, and when it stopped, so nothing approved later runs for one. */
   async stoppedTaskChats(): Promise<{ chatId: string; stoppedAt: number }[]> {
     const rows = await this.db
-      .select({ chatId: conciergeTasks.sessionId, stoppedAt: conciergeTasks.stoppedAt })
+      .select({
+        chatId: conciergeTasks.sessionId,
+        stoppedAt: conciergeTasks.stoppedAt,
+        stopReason: conciergeTasks.stopReason,
+        archivedAt: conciergeTasks.archivedAt,
+      })
       .from(conciergeTasks)
       .where(and(isNotNull(conciergeTasks.stoppedAt), isNotNull(conciergeTasks.sessionId)));
+    // A chat unarchived after its archive stopped the task is in use again.
     return rows.flatMap((row) =>
-      row.chatId && row.stoppedAt
+      row.chatId && row.stoppedAt && (row.stopReason !== "archived" || row.archivedAt)
         ? [{ chatId: row.chatId, stoppedAt: row.stoppedAt.getTime() }]
         : [],
     );

@@ -1576,13 +1576,28 @@ describe("Concierge tools", () => {
     ask(open.chatId);
     await s.settle();
     expect(turnedDown).toEqual([[stopped.chatId, RESOLVED_BY_STOP]]);
-    // An archived task's chat too, though its task had ended.
+    // A chat still in use keeps its approvals: one whose row only was
+    // archived after its task ended, and one unarchived after its archive
+    // stopped the task.
     await s.taskRepo.setLastOutcome(open.taskId, "succeeded", new Date(), { reported: false });
     await s.taskRepo.upsertMany([{ id: open.taskId, archived: true }]);
+    const restored = JSON.parse(
+      (await s.tool("chat_start", { title: "Cars", brief: "Find a car" })).content[0].text,
+    );
+    s.chats.activeTurns = (id: string) => (id === restored.chatId ? ["t1"] : []);
+    await s.service.endTaskChat(restored.chatId, "archived");
+    s.chats.activeTurns = () => [];
+    turnedDown.length = 0;
+    // Still archived: its approvals are the stopped work's.
+    ask(restored.chatId);
+    await s.settle();
+    expect(turnedDown).toEqual([[restored.chatId, RESOLVED_BY_STOP]]);
+    await s.service.restoreTaskChat(restored.chatId);
     turnedDown.length = 0;
     ask(open.chatId);
+    ask(restored.chatId);
     await s.settle();
-    expect(turnedDown).toEqual([[open.chatId, RESOLVED_BY_STOP]]);
+    expect(turnedDown).toEqual([]);
   });
 
   it("drops a stop's turn-down retry once the task is taken up again", async () => {
@@ -3105,6 +3120,22 @@ describe("Concierge events", () => {
     await s.settle();
     expect((await s.taskRepo.get(taskId))?.reportGivenUp).toBe(true);
     expect((await s.tasks.listForPanel()).find((row) => row.id === taskId)?.notSynced).toBe(true);
+  });
+
+  it("still reports a result whose report failed after the Concierge edits the row meanwhile", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    s.onBackendTurn(() => "failed");
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    // In a turn of its own, the Concierge renames the row: it never got the result.
+    await s.tool("task_upsert", { tasks: [{ id: taskId, title: "Flights to Rome" }] });
+    s.onBackendTurn(() => "completed");
+    await rs.advanceTimersByTimeAsync(RETRY_MS + 1_000);
+    expect(s.backendTurns).toHaveLength(2);
+    expect(s.backendTurns[1].prompt).toContain(`id="${taskId}"`);
   });
 
   it("hands a task's result over again when a newer message, not a Stop, cut the turn short", async () => {

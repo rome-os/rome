@@ -291,23 +291,28 @@ describe("TaskEventCoalescer", () => {
     expect(s.gaveUp).toEqual([]);
   });
 
-  it("keeps changes that arrive while turns fail, and a write still settles what a turn carried", async () => {
+  it("keeps changes that arrive while turns fail, and a write settles nothing a failed turn never brought", async () => {
     const s = setup();
     s.turnsRun(false);
     s.coalescer.mark(urgent("a", "turn_end:error by=concierge"));
     s.coalescer.mark(urgent("b"));
     await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
     s.coalescer.mark(urgent("a", "turn_end:completed by=concierge"));
-    // The Concierge wrote both rows in a turn of its own: only "a" has a change no turn carried.
+    // The Concierge wrote both rows in a turn of its own, such as a title
+    // edit: it never got their news, so the retry still owes it.
     s.coalescer.settle("a");
     s.coalescer.settle("b");
-    expect(s.coalescer.pending).toEqual(["a"]);
+    expect(s.coalescer.pending).toEqual(["a", "b"]);
 
     s.turnsRun(true);
     await rs.advanceTimersByTimeAsync(RETRY_MS);
-    expect(s.flushes.map((flush) => flush.ids)).toEqual([["a", "b"], ["a"]]);
+    expect(s.flushes.map((flush) => flush.ids)).toEqual([
+      ["a", "b"],
+      ["a", "b"],
+    ]);
     expect(s.rendered[1]).toEqual([
       "turn_end:error by=concierge",
+      "turn_end:completed by=concierge",
       "turn_end:completed by=concierge",
     ]);
   });

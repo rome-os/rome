@@ -35,7 +35,7 @@ import { createLogger } from "../logger.js";
 import type { ConciergeFollowing } from "./following.js";
 import type { SaidNews, TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
-import type { ConciergeTasks } from "./tasks.js";
+import { type ConciergeTasks, stopHolds } from "./tasks.js";
 import type { TaskChecks } from "./task-checks.js";
 import { RESOLVED_BY_STOP, type TurnDown } from "./approval-expiry.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
@@ -1149,7 +1149,7 @@ export class ConciergeService {
     // approvals its new work asks for are its own.
     if (failures > 0) {
       const row = await this.deps.tasks.repo.findBySession(chatId);
-      if (row && (!row.stoppedAt || row.stoppedAt.getTime() > stoppedAt)) return;
+      if (row && (!stopHolds(row) || (row.stoppedAt?.getTime() ?? 0) > stoppedAt)) return;
     }
     try {
       // Only approvals that began by the time its work stopped: they were the

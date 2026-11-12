@@ -17,7 +17,7 @@ import {
 import { hasText, latestSaid, taskChatPlace } from "./task-chat.js";
 import { type DirtyTask, TaskEventCoalescer, type TaskEventDelivery } from "./task-events.js";
 import { ConciergeActivityTracker } from "./activity.js";
-import type { TaskStatusView } from "./tasks.js";
+import { stopHolds, type TaskStatusView } from "./tasks.js";
 import { WaitExpiry } from "./wait-expiry.js";
 import { isConciergeChat } from "../webchat/privacy.js";
 import { openQuestion } from "./transcript.js";
@@ -630,11 +630,12 @@ export function startConciergeEvents(
     if (typeof context?.threadId !== "string") return;
     const taskId = await taskOf(context.threadId);
     if (!taskId) return;
-    // A stopped or archived task's work can still ask for one as it stops,
-    // as an interrupt is accepted before the turn has ended: it is turned
-    // down at once, whatever the runtime's interrupt does.
+    // A stopped task's work can still ask for one as it stops, as an
+    // interrupt is accepted before the turn has ended: it is turned down at
+    // once, whatever the runtime's interrupt does. A chat in use again, after
+    // an unarchive or with only its row archived, keeps its approvals.
     const row = await tasks.repo.get(taskId);
-    if (row?.stoppedAt || row?.archivedAt) {
+    if (row && stopHolds(row)) {
       await service.turnDownWhileStopped(context.threadId);
       return;
     }

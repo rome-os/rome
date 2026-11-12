@@ -372,6 +372,23 @@ function legacyLaterOf(row: ConciergeTaskRow, now: number): number | null {
 }
 
 /**
+ * Whether task `row`'s stop still holds over its task chat, so an approval
+ * asked for there is the stopped work's: a stop by the Concierge or its
+ * owner, which new words in the chat lift, or one by archiving or deleting
+ * the chat, while the chat is still archived or gone. A chat unarchived
+ * after it, or a row archived with its chat still open, is in use again.
+ */
+export function stopHolds(row: {
+  stoppedAt: Date | null;
+  stopReason: string | null;
+  archivedAt: Date | null;
+}): boolean {
+  if (!row.stoppedAt) return false;
+  if (row.stopReason === "archived") return row.archivedAt !== null;
+  return true;
+}
+
+/**
  * A check time as it goes out: an event wait with no deadline is due at
  * Infinity, which has no date, so it goes out as none.
  */
