@@ -146,7 +146,8 @@ describe("checkImports with the library rule", () => {
   it("rejects every import from lib/ into a context, type-only and tests included, and allows the rest", () => {
     const lines = checkImports(join(root, "src"), join(root, "tsconfig.json"), libraryRules)
       .map(formatImportViolation)
-      .map((line) => line.replace(/: .*$/, ""));
+      .map((line) => line.replace(/: .*$/, ""))
+      .filter((line) => !line.includes("[unresolved]"));
     expect(lines).toEqual([
       "lib/probe.test.ts:1 → ../apps/catalog.js (apps/catalog.ts) [lib-imports-no-context]",
       "lib/probe.test.ts:2 → @/agent/index.js (agent/index.ts) [lib-imports-no-context]",

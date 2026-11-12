@@ -1,9 +1,9 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
-import type { DiagnosticBundle } from "../instance/diagnostics.js";
+import type { DiagnosticBundle } from "./diagnostics.js";
 import { FEEDBACK_BODY_MAX, FEEDBACK_SCHEMA_VERSION, type FeedbackReport } from "./feedback.js";
-import { cloudBearer } from "../instance/instance-identity.js";
-import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
+import { cloudBearer } from "./instance-identity.js";
+import { getRomeCloudOrigin } from "./rome-cloud-origin.js";
 
 export const AGENT_REPORTS_ENABLED_KEY = "feedback.agentReportsEnabled";
 

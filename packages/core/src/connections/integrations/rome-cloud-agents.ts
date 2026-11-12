@@ -1,6 +1,6 @@
 import type { AssistantKind } from "@rome/api-types/assistants";
-import { cloudBearer } from "../instance/instance-identity.js";
-import { getRomeCloudOrigin } from "../instance/rome-cloud-origin.js";
+import { cloudBearer } from "../../instance/instance-identity.js";
+import { getRomeCloudOrigin } from "../../instance/rome-cloud-origin.js";
 
 // Rome Cloud agent messaging (amantru/rome-cloud#137). Cloud gives this
 // instance an agent of its own that dots and other agents can message, stores

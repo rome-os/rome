@@ -1,6 +1,6 @@
 import { describe, expect, it, rs } from "@rstest/core";
 import { FeedbackClient, type AgentFeedback, type FeedbackClientDeps } from "./feedback-client.js";
-import type { DiagnosticBundle } from "../instance/diagnostics.js";
+import type { DiagnosticBundle } from "./diagnostics.js";
 
 const report: AgentFeedback = {
   category: "bug",

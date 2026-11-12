@@ -6,7 +6,7 @@
 import { z } from "zod";
 import type { ConciergeOwner } from "../webchat/owner.js";
 import { parseWorkerCallParams } from "../lib/worker-call-params.js";
-import type { SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
+import type { SendOutcome, SystemNotifyContent } from "../instance/notify-client.js";
 import type { IpcCallContext } from "../apps/actions/ipc.js";
 import type { MainBackendTurnRunner } from "./backend-turn.js";
 import { actionCaller, sendForCaller } from "./caller-notify.js";
