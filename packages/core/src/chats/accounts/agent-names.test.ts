@@ -1,5 +1,5 @@
 import { describe, expect, it } from "@rstest/core";
-import type { ExternalAgent } from "../../lib/rome-cloud-agents.js";
+import type { ExternalAgent } from "../../connections/integrations/rome-cloud-agents.js";
 import { createAgentNames } from "./agent-names.js";
 import { externalAgents } from "./agents-accounts.js";
 

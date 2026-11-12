@@ -233,6 +233,17 @@ export function renderSingleEntry(
         />
       );
     }
+    case "widget":
+      // Nothing answers a widget, so the card gets no submit or dismiss.
+      return (
+        <AppComponentView
+          key={`app-widget-${block.toolUseId}`}
+          toolUseId={block.toolUseId}
+          appId={block.appId}
+          componentId={block.componentId}
+          props={block.props}
+        />
+      );
     case "interaction_result":
       // The resolution turn's user-side part adds nothing to the bubble — an
       // inline component re-renders read-only from its stored result.

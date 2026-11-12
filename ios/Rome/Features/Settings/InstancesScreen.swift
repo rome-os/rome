@@ -72,21 +72,26 @@ struct InstancesScreen: View {
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
+                        // A long name is cut, never the badge.
                         Text(instance.name)
-                            .romeFont(17, .semibold)
+                            .romeFont(16, .semibold)
                             .foregroundStyle(Palette.fg)
-                        if instance.isVisitor { VisitorBadge() }
+                            .lineLimit(1)
+                        if instance.isVisitor { VisitorBadge().fixedSize() }
                     }
-                    Text(instance.host)
-                        .romeFont(14)
+                    Text(verbatim: instance.host)
+                        .romeFont(13)
                         .foregroundStyle(Palette.sub)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
-                Spacer()
-                HStack(spacing: 6) {
-                    Circle().fill(instance.isRunning ? Palette.success : Palette.sub.opacity(0.4)).frame(width: 7, height: 7)
-                    Text(instance.isRunning ? "Running" : "Stopped")
+                Spacer(minLength: 8)
+                // Running is the normal case and says nothing; only a stopped one is named.
+                if !instance.isRunning {
+                    Text("Stopped")
                         .romeFont(14)
                         .foregroundStyle(Palette.sub)
+                        .fixedSize()
                 }
                 Group {
                     if switching == instance.id {

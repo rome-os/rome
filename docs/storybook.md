@@ -48,15 +48,15 @@ Use the language toolbar to select English or Chinese. Browser checks can pin th
 | `ChatEntryPreview` → `renderSingleEntry` | `ChatEntry` compact question | [`dev-chat-entries--compact-question`](http://localhost:6006/?path=/story/dev-chat-entries--compact-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-entries--compact-question&viewMode=story) |
 | `ChatEntryPreview` → `renderSingleEntry` | `ChatEntry` stacked question | [`dev-chat-entries--stacked-question`](http://localhost:6006/?path=/story/dev-chat-entries--stacked-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-entries--stacked-question&viewMode=story) |
 | `ChatEntryPreview` → `renderSingleEntry` | `ChatEntry` resolved question | [`dev-chat-entries--resolved-question`](http://localhost:6006/?path=/story/dev-chat-entries--resolved-question) | [iframe](http://localhost:6006/iframe.html?id=dev-chat-entries--resolved-question&viewMode=story) |
-| `ConnectionDetailDialog` | typed Discord channel, not connected | [`dev-connections-channel-status--not-connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--not-connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--not-connected&viewMode=story) |
-| `ConnectionDetailDialog` | typed Discord channel, connected | [`dev-connections-channel-status--connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--connected&viewMode=story) |
+| `ConnectionDetailPane` | typed Discord channel, not connected | [`dev-connections-channel-status--not-connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--not-connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--not-connected&viewMode=story) |
+| `ConnectionDetailPane` | typed Discord channel, connected | [`dev-connections-channel-status--connected`](http://localhost:6006/?path=/story/dev-connections-channel-status--connected) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-channel-status--connected&viewMode=story) |
 | `ConnectionSlotCard` | typed Telegram bot, unconnected | [`dev-connections-slot-card--unconnected-bot`](http://localhost:6006/?path=/story/dev-connections-slot-card--unconnected-bot) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-slot-card--unconnected-bot&viewMode=story) |
 | `ConnectionSlotCard` | typed Telegram bot, connected | [`dev-connections-slot-card--connected-bot`](http://localhost:6006/?path=/story/dev-connections-slot-card--connected-bot) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-slot-card--connected-bot&viewMode=story) |
 | `ConnectionSlotCard` | typed Telegram session, available to add | [`dev-connections-slot-card--add-session`](http://localhost:6006/?path=/story/dev-connections-slot-card--add-session) | [iframe](http://localhost:6006/iframe.html?id=dev-connections-slot-card--add-session&viewMode=story) |
 
 `/dev/connections` stays out of Storybook because it loads application data and owns selected-connection
 state. The connection stories pass typed `ConnectionCard` fixtures directly to the production
-`ConnectionDetailDialog`. Their initial render does not start a setup. Connection actions retain their
+`ConnectionDetailPane`. Their initial render does not start a setup. Connection actions retain their
 production behavior and belong to application-flow coverage.
 
 `/dev/login` and `/dev/onboard` stay in `/dev` and E2E. Their views depend on `BootstrapPreview`,

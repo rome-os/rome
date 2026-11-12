@@ -53,8 +53,11 @@ export interface AppComponentViewProps {
   props?: Record<string, unknown>;
   /** Prior submitted output when this instance already resolved. */
   result?: Record<string, unknown>;
-  onSubmit: (toolUseId: string, output: Record<string, unknown>, summary?: string) => void;
-  onDismiss: (toolUseId: string) => void;
+  /** Absent for a card nothing answers, such as a widget: the chat never
+   *  waits on it, the component stays live for its own buttons, and its
+   *  `submit` and `dismiss` do nothing. */
+  onSubmit?: (toolUseId: string, output: Record<string, unknown>, summary?: string) => void;
+  onDismiss?: (toolUseId: string) => void;
 }
 
 /**
@@ -84,7 +87,10 @@ export function AppComponentView({
   submitRef.current = onSubmit;
   const dismissRef = useRef(onDismiss);
   dismissRef.current = onDismiss;
+  // A card resolves once it has an answer. Only a card that can be answered
+  // keeps the chat waiting until then.
   const resolved = result !== undefined;
+  const waiting = onSubmit !== undefined && !resolved;
 
   useEffect(() => {
     let disposed = false;
@@ -119,10 +125,9 @@ export function AppComponentView({
         await appendScopedStyles(mountRoot.getRootNode() as ShadowRoot, manifest.styleUrls);
         if (disposed) return;
 
-        // The app's fetchAppApi() reads this global. Single-app-at-a-time is the
-        // same assumption the full-page host makes; concurrent inline components
-        // from *different* apps that both call fetchAppApi mid-render would race
-        // here — out of scope for the prototype.
+        // A bundle built with an SDK older than its own copy of the bootstrap
+        // (`mountComponent` binds `ctx.bootstrap`) reads this global instead.
+        // Two such bundles from different apps mounting at once race on it.
         window.__ROME_APP_BOOTSTRAP__ = bootstrap;
 
         const module = (await import(
@@ -136,8 +141,8 @@ export function AppComponentView({
 
         const host: AppComponentHost = {
           resolved,
-          submit: (output, summary) => submitRef.current(toolUseId, output, summary),
-          dismiss: () => dismissRef.current(toolUseId),
+          submit: (output, summary) => submitRef.current?.(toolUseId, output, summary),
+          dismiss: () => dismissRef.current?.(toolUseId),
         };
         await module.mountComponent(mountRoot, componentId, {
           bootstrap,
@@ -171,7 +176,7 @@ export function AppComponentView({
       <Alert
         variant="destructive"
         tabIndex={-1}
-        data-chat-pending-card={!resolved ? "" : undefined}
+        data-chat-pending-card={waiting ? "" : undefined}
         className="mb-4 rounded-12"
       >
         <AlertDescription>
@@ -181,17 +186,17 @@ export function AppComponentView({
         {/* A card that cannot load can still be dismissed, so a step that only
             the card can answer, which also closes the composer, is never a
             dead end. */}
-        {resolved ? null : (
+        {waiting ? (
           <Button
             type="button"
             variant="outline"
             size="sm"
             className="col-start-2 mt-1 justify-self-start"
-            onClick={() => onDismiss(toolUseId)}
+            onClick={() => onDismiss?.(toolUseId)}
           >
             {t("appComponent.dismiss")}
           </Button>
-        )}
+        ) : null}
       </Alert>
     );
   }
@@ -199,7 +204,7 @@ export function AppComponentView({
   return (
     <div
       tabIndex={-1}
-      data-chat-pending-card={!resolved ? "" : undefined}
+      data-chat-pending-card={waiting ? "" : undefined}
       data-ui-scale={scale}
       ref={rootRef}
       className="mb-4"

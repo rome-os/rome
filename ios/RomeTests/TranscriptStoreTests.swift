@@ -114,7 +114,12 @@ final class FakeBackend: RomeBackend {
         return try shareAnswer.get()
     }
 
-    func chatShares(sessionId: String) async throws -> [ChatShareLink] { shareLinks }
+    /// The chats whose links were listed, in order.
+    var sharesListed: [String] = []
+    func chatShares(sessionId: String) async throws -> [ChatShareLink] {
+        sharesListed.append(sessionId)
+        return shareLinks
+    }
 
     /// Runs inside a revoke, before it answers.
     var duringRevoke: (() async -> Void)?

@@ -86,7 +86,7 @@ function renderAdvancedSettings() {
 }
 
 describe("SettingsPage Access Control section", () => {
-  it("renders Access and privacy as the section title with Allowed emails beneath it", async () => {
+  it("renders Allowed emails as a row under the Access and privacy title", async () => {
     mockSettingsBackend();
     renderAdvancedSettings();
 
@@ -94,9 +94,8 @@ describe("SettingsPage Access Control section", () => {
       level: 2,
       name: "Access and privacy",
     });
-    const emailsTitle = await screen.findByRole("heading", {
-      level: 3,
-      name: "Allowed emails",
+    const emailsTitle = await screen.findByText("Allowed emails", {
+      selector: "[data-slot=form-row-label]",
     });
 
     expect(

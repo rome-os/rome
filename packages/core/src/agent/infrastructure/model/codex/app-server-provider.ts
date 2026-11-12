@@ -99,7 +99,7 @@ import { codexToolItemIsError } from "./tool-result-error.js";
 import type { RomeToolResult } from "../../../domain/rome-tools.js";
 import { codexStop } from "./stop.js";
 import { CODEX_AUTH_REVOKED_CODE, isCodexAuthRevokedError } from "./auth-revoked.js";
-import { markCodexAuthRevoked } from "../../../../lib/codex-cli-auth.js";
+import { markCodexAuthRevoked } from "./cli-auth.js";
 import { CODEX_SHELL_ENV_EXCLUDE } from "./rome-credits-provider.js";
 import { createLogger } from "../../../../logger.js";
 import type { CodexTurnRuntime } from "./turn-runtime.js";

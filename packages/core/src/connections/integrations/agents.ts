@@ -24,7 +24,7 @@ import {
   createRomeCloudAgentsClient,
   isAgentId,
   isNotReachable,
-} from "../../lib/rome-cloud-agents.js";
+} from "./rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
 import { CredentialRejected, Disconnected } from "../errors.js";
 import type { SetupFn } from "../setup/types.js";

@@ -5,9 +5,7 @@ import {
   FormRowDescription,
   FormRowHeading,
   FormRowLabel,
-  FormRows,
 } from "@rome-os/ui/layout-form";
-import { Section, SectionHeader, SectionTitle } from "@rome-os/ui/page";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ArrowLeft, CircleAlert, KeyRound, Plus, RefreshCw, X } from "lucide-react";
 import { useEffect, useId, useState } from "react";
@@ -40,12 +38,12 @@ import { type EnvAppKey, parseAppKeysEnv } from "@/lib/parse-app-keys-env";
 type FormState = { mode: "add" } | { mode: "replace"; name: string; label: string };
 
 /**
- * App keys on the Advanced tab: one row with the stored-key count, and a side
- * sheet that manages them. The sheet shows either the key list or the add or
- * replace form, never both, so the form has the sheet's full width and the
+ * App keys as one row in a `FormRows` group, with the stored-key count, and a
+ * side sheet that manages them. The sheet shows either the key list or the add
+ * or replace form, never both, so the form has the sheet's full width and the
  * header's back arrow returns to the list.
  */
-export function AppKeysSection() {
+export function AppKeysRow() {
   const { t } = useTranslation("settings");
   const [open, setOpen] = useState(false);
   // Closing unmounts the form, so it waits for a save: a .env batch keeps its
@@ -57,35 +55,29 @@ export function AppKeysSection() {
   const keysQuery = useQuery({ queryKey: APP_KEYS_QUERY_KEY, queryFn: fetchAppKeys });
   const count = keysQuery.data?.length;
 
+  const summary =
+    count === undefined
+      ? t("appKeys.summary")
+      : `${count === 0 ? t("appKeys.noKeysYet") : t("appKeys.keyCount", { count })} · ${t("appKeys.summary")}`;
+
   return (
-    <Section>
-      <SectionHeader>
-        <SectionTitle>{t("appKeys.title")}</SectionTitle>
-      </SectionHeader>
-      <FormRows>
-        <FormRow>
-          <FormRowHeading>
-            <FormRowLabel>
-              {count === undefined
-                ? t("appKeys.title")
-                : count === 0
-                  ? t("appKeys.noKeysYet")
-                  : t("appKeys.keyCount", { count })}
-            </FormRowLabel>
-            <FormRowDescription>{t("appKeys.summary")}</FormRowDescription>
-          </FormRowHeading>
-          <FormRowControl>
-            <Button
-              variant="outline"
-              size="sm"
-              aria-label={t("appKeys.openLabel")}
-              onClick={() => setOpen(true)}
-            >
-              {t("appKeys.manage")}
-            </Button>
-          </FormRowControl>
-        </FormRow>
-      </FormRows>
+    <>
+      <FormRow>
+        <FormRowHeading>
+          <FormRowLabel>{t("appKeys.title")}</FormRowLabel>
+          <FormRowDescription>{summary}</FormRowDescription>
+        </FormRowHeading>
+        <FormRowControl>
+          <Button
+            variant="outline"
+            size="sm"
+            aria-label={t("appKeys.openLabel")}
+            onClick={() => setOpen(true)}
+          >
+            {t("appKeys.manage")}
+          </Button>
+        </FormRowControl>
+      </FormRow>
       <Sheet
         open={open}
         onClose={close}
@@ -95,7 +87,7 @@ export function AppKeysSection() {
         {/* Mounted only while open, so each opening starts on the list. */}
         <AppKeysManager onClose={close} onSavingChange={setSaving} />
       </Sheet>
-    </Section>
+    </>
   );
 }
 

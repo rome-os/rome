@@ -107,7 +107,7 @@ import { AppKeyInjector } from "../apps/app-keys/injector.js";
 import { PoliciesRepository } from "../db/repositories/policies.js";
 import { WebChatRepository } from "../webchat/repository.js";
 import { ownPlatforms } from "../webchat/send.js";
-import { chatsWiring } from "../chats-wiring.js";
+import { chatsWiring, type ChatsWiringDeps } from "../chats-wiring.js";
 import { openChannelChat, type OpenSpeakerDeps } from "../connections/open-chat.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { ActionExecutionsRepository } from "../apps/repositories/action-executions.js";
@@ -136,7 +136,7 @@ import {
 import { createAppStoreService } from "../apps/store-service.js";
 import { type CatalogEvent, isResolvedApp } from "../apps/state.js";
 import { createEmptyLegacyArtifactBindings } from "../apps/artifact-id.js";
-import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../lib/feedback-client.js";
+import { FeedbackClient, AGENT_REPORTS_ENABLED_KEY } from "../instance/feedback-client.js";
 import { assembleDiagnosticBundle } from "../instance/diagnostics.js";
 import type { ApiDeps } from "../api/deps.js";
 import type { FavorService } from "../favors/index.js";
@@ -151,14 +151,17 @@ export * from "./db.js";
 /** Chats over `db` as Rome wires it, reading the channel records `db`
  *  holds. Every channel is active: one its record names no account for is
  *  the account named like it, so tests need not record one per channel. */
-export function testChatsWiring(db: DrizzleDb) {
+export function testChatsWiring(db: DrizzleDb, accounts?: ChatsWiringDeps) {
   const records = new ChannelRecordsRepository(db, testAccountLinkOf);
-  return chatsWiring(db, {
-    accountOf: (channel) =>
-      records.accountOf(channel) ?? { platform: records.platformOfChannel(channel), id: channel },
-    platformOfChannel: (name) => records.platformOfChannel(name),
-    channelsOn: (platform) => [...new Set([...records.namesOn(platform), platform])],
-  });
+  return chatsWiring(
+    db,
+    accounts ?? {
+      accountOf: (channel) =>
+        records.accountOf(channel) ?? { platform: records.platformOfChannel(channel), id: channel },
+      platformOfChannel: (name) => records.platformOfChannel(name),
+      channelsOn: (platform) => [...new Set([...records.namesOn(platform), platform])],
+    },
+  );
 }
 
 /** What opens a speaker over `db`: {@link testChatsWiring}'s chats,

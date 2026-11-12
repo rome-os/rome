@@ -1,12 +1,13 @@
 // @rstest-environment jsdom
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import i18n from "@/i18n";
 import type { DesktopDeviceStatus } from "@/lib/electron-shell";
 import DeviceActivityPage from "./DeviceActivityPage";
+import SettingsDialog from "./SettingsDialog";
 import SettingsPage from "./SettingsTabPage";
 
 beforeAll(async () => {
@@ -51,9 +52,6 @@ it("lists devices independently of the settings request", async () => {
     ],
   }));
   expect(await screen.findByText("Linux · Not connected")).toBeTruthy();
-  expect(screen.getByRole("link", { name: "Devices" }).getAttribute("href")).toBe(
-    "/settings/devices",
-  );
   expect(screen.getByRole("link", { name: /Desktop/ }).getAttribute("href")).toBe(
     "/settings/devices/two",
   );
@@ -269,6 +267,39 @@ it("opens a device's page with the selected command from the URL", async () => {
   expect(screen.getByRole("link", { name: "Devices" }).getAttribute("href")).toBe(
     "/settings/devices",
   );
+});
+
+it("steps back to the devices list on Escape, leaving Settings open", async () => {
+  rs.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+    String(input) === "/api/devices"
+      ? new Response(
+          JSON.stringify({
+            connection: "online",
+            checkedAt: new Date().toISOString(),
+            devices: [{ id: "one", name: "MacBook", platform: "macos", status: "connected" }],
+          }),
+          { headers: { "Content-Type": "application/json" } },
+        )
+      : new Response("{}", { status: 503 }),
+  );
+  const close = rs.fn();
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/settings/devices/one"]}>
+        <SettingsDialog onClose={close}>
+          <Routes>
+            <Route path="/settings/devices/:deviceId" element={<DeviceActivityPage />} />
+            <Route path="/settings/devices" element={<p>Devices list</p>} />
+          </Routes>
+        </SettingsDialog>
+      </MemoryRouter>
+    </QueryClientProvider>,
+  );
+  await screen.findByRole("heading", { name: "MacBook" });
+  fireEvent.keyDown(document, { key: "Escape" });
+  expect(await screen.findByText("Devices list")).toBeTruthy();
+  expect(close).not.toHaveBeenCalled();
 });
 
 describe("managing a device from its page", () => {

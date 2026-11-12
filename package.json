@@ -21,7 +21,7 @@
     "dev:desktop": "pnpm --filter rome-desktop dev",
     "dev:cdp": "pnpm --filter rome-cdp-client dev",
     "build": "pnpm --filter @rome-os/node build && pnpm --filter @rome/discord-cli build && pnpm --filter @rome/signer build && pnpm --filter @rome/core build && pnpm build:apps && pnpm --filter rome-web build",
-    "build:docker-runtime": "pnpm --filter @rome-os/node build && pnpm --filter @rome/discord-cli build && pnpm --filter @rome/signer build && pnpm --filter @rome/core build && pnpm exec tsc -p tsconfig.scripts.build.json && node scripts/bundle-docker-core.mjs && pnpm obfuscate:docker-runtime && pnpm build:apps && pnpm --filter rome-web build",
+    "build:docker-runtime": "pnpm --filter @rome-os/node build && pnpm --filter @rome/discord-cli build && pnpm --filter @rome/signer build && pnpm --filter @rome/core build && pnpm obfuscate:docker-runtime && pnpm build:apps && pnpm --filter rome-web build",
     "docker:runtime-workspace": "node scripts/docker/prepare-runtime-workspace.mjs",
     "docker:closure-check": "node scripts/docker/check-runtime-closure.mjs",
     "obfuscate:docker-runtime": "node scripts/obfuscate-docker-runtime.mjs",
@@ -80,7 +80,9 @@
     "test:prose": "scripts/test-env.sh node --test scripts/check-prose.test.mjs",
     "check:ui:tailwind": "scripts/test-env.sh node scripts/check-tailwind-policy.mjs",
     "gc:worktrees": "tsx scripts/gc-worktrees.ts",
-    "move-files": "tsx scripts/move-files.ts"
+    "move-files": "tsx scripts/move-files.ts",
+    "move-symbol": "tsx scripts/move-symbol.ts",
+    "rename-symbol": "tsx scripts/rename-symbol.ts"
   },
   "devDependencies": {
     "@biomejs/biome": "2.3.6",

@@ -198,6 +198,20 @@ struct SettingsScreen: View {
                         }
                         .transition(.opacity)
                     }
+                    // The main Chat's links: its header has no "…" menu. A
+                    // visitor's own links too, as a message's Share makes them.
+                    if workspace.mainChatShare != nil {
+                        Button {
+                            Task { await workspace.openMainChatLinks() }
+                        } label: {
+                            SettingsRow(systemImage: "link", title: "Shared links") {
+                                Image(systemName: "chevron.right")
+                                    .romeFont(13, .semibold)
+                                    .foregroundStyle(Palette.sub)
+                            }
+                        }
+                        .buttonStyle(RowPressStyle())
+                    }
                     Button {
                         if let url = model.webURL { openInstancePage(url) }
                     } label: {
@@ -273,29 +287,36 @@ struct SettingsScreen: View {
                 .presentationBackground(Palette.sheet)
                 .presentationCornerRadius(22)
         }
+        .sharedLinksSheet(workspace.concierge.share, isPresented: Binding(get: { workspace.showsMainChatLinks }, set: { workspace.showsMainChatLinks = $0 }))
+        // Closed with Settings, so it never comes back with it.
+        .onDisappear { workspace.showsMainChatLinks = false }
     }
 
     private var accountCard: some View {
         Button(action: onInstances) {
             HStack(spacing: 14) {
-                InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host, account: workspace.backend.account, size: 48)
-                VStack(alignment: .leading, spacing: 1) {
+                InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host, account: workspace.backend.account, size: 44)
+                // Centered on the avatar as a pair, with room between the lines.
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
+                        // An email keeps its start and its domain; the name is
+                        // cut, never the badge.
                         Text(workspace.accountLabel)
-                            .romeFont(17, .semibold)
+                            .romeFont(16, .semibold)
                             .foregroundStyle(Palette.fg)
                             .lineLimit(1)
-                        if model.currentInstance?.isVisitor == true { VisitorBadge() }
+                            .truncationMode(workspace.accountLabel.contains("@") ? .middle : .tail)
+                        if model.currentInstance?.isVisitor == true { VisitorBadge().fixedSize() }
                     }
                     HStack(spacing: 6) {
                         Circle().fill(Palette.success).frame(width: 7, height: 7)
-                        // The version first: a long domain is cut, never the version.
+                        // The version before the host: a long domain is cut, never the version.
                         if let version = InstanceLine.version(model.update.runningVersion) {
                             Text(verbatim: "\(version) ·").fixedSize()
                         }
                         Text(verbatim: workspace.host).lineLimit(1).truncationMode(.middle)
                     }
-                    .romeFont(14)
+                    .romeFont(13)
                     .foregroundStyle(Palette.sub)
                 }
                 Spacer(minLength: 0)

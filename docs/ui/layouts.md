@@ -30,6 +30,14 @@ The split is what the arrangement reads by: the header carries what the page *is
 
 The [Activity page](../../packages/web/src/pages/SessionsPage.tsx) uses a title-free header shared by Overview, Sessions, and Events. Its switch stays at the leading edge of the top row across all three views. Each view keeps one visually hidden `PageTitle`. View controls sit at the trailing end or in the toolbar below. All three views share one bounded frame, with the header above the body's scroll region. The switch stays in the same position when the body changes or scrolls, in shell and full mode.
 
+### Settings
+
+Settings is a dialog rather than a routed page, so it opens over the page the guardian came from and closing returns there. `App` keeps rendering that page while a `/settings` address shows, which is why every link and OAuth return lands without knowing about the dialog. A fresh load has no page to return to and shows chat behind it.
+
+A menu of sections sits beside the section. A section holds its own body and carries no title or `PageNav`, because the menu names it.
+
+What a guardian browses or manages opens as a pane in the section, with a back arrow. One short task they finish and leave, such as connecting a service or confirming a disconnect, may open a dialog on top. A dialog never opens from that dialog.
+
 ## What the slots are built from
 
 Structure is plain elements. Every slot a reader operates is a kit primitive, so the behaviour is the primitive's rather than each layout's.

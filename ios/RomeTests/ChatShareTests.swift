@@ -227,6 +227,28 @@ private let twoTurns = [
         #expect(share.error != nil)
     }
 
+    /// The main Chat has no "…" menu: Settings lists its links, from the
+    /// main chat on the server, once the instance has named it.
+    @Test func settingsReachesTheMainChatsLinks() async {
+        let backend = FakeBackend()
+        backend.mainChat = ConciergeSessionInfo(id: "concierge", unread: 0)
+        backend.shareLinks = [ChatShareLink(id: "a", url: "/share/a", title: "Trip", createdAt: "2026-11-01T10:00:00Z")]
+        let workspace = Workspace(backend: backend, instanceName: "T", host: "t", accountLabel: "t", drafts: DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-share-settings-\(UUID().uuidString)/Drafts"), instance: "t"))
+        defer { workspace.stop() }
+        #expect(workspace.mainChatShare == nil)
+        await workspace.openMainChatLinks()
+        #expect(!workspace.showsMainChatLinks && backend.sharesListed.isEmpty)
+
+        await workspace.openConcierge()
+        #expect(workspace.mainChatShare === workspace.concierge.share)
+        await workspace.openMainChatLinks()
+        #expect(workspace.showsMainChatLinks)
+        #expect(backend.sharesListed.last == "concierge")
+        #expect(workspace.concierge.share.links?.map(\.id) == ["a"])
+        // Its own sheet: the chat under Settings asks for none.
+        #expect(!workspace.concierge.share.showsLinks)
+    }
+
     @Test func revokeRemovesTheLink() async {
         let backend = FakeBackend()
         backend.shareLinks = [

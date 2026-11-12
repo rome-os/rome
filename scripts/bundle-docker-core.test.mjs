@@ -1,12 +1,18 @@
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtemp, readFile, rm } from "node:fs/promises";
+import { cp, mkdtemp, readFile, rm, symlink } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
-import { bundledAssets, dockerBundleOptions, splitBundleOptions } from "./bundle-docker-core.mjs";
+import {
+  bundledAssets,
+  cliCommandFiles,
+  cliCommandsBundleOptions,
+  dockerBundleOptions,
+  splitBundleOptions,
+} from "./bundle-docker-core.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const require = createRequire(import.meta.url);
@@ -55,6 +61,23 @@ test("the daemon bundle loads the OpenTelemetry SDK only from its telemetry chun
   const entry = await readFile(join(outdir, "index.js"), "utf8");
   assert.doesNotMatch(entry, /^import .* from "@opentelemetry\/sdk-node";$/m);
   assert.match(entry, /import\("\.\/chunks\/telemetry-[A-Z0-9]+\.js"\)/);
+});
+
+test("the action worker bundle installs telemetry before it loads the runtime", async (t) => {
+  const outdir = await mkdtemp(join(tmpdir(), "rome-compiled-worker-"));
+  t.after(() => rm(outdir, { recursive: true, force: true }));
+  await build({
+    ...splitBundleOptions(
+      join(root, "packages/core/src/app-host/worker-bootstrap.ts"),
+      outdir,
+      "worker-bootstrap",
+    ),
+    logLevel: "silent",
+  });
+
+  const entry = await readFile(join(outdir, "worker-bootstrap.js"), "utf8");
+  assert.match(entry, /initTelemetry\(\);\s*await import\("\.\/chunks\/worker-[A-Z0-9]+\.js"\)/);
+  assert.doesNotMatch(entry, /from "pg"/);
 });
 
 test("the main bundle loads no chat channel SDK at startup", async (t) => {
@@ -154,5 +177,27 @@ test("bundles the WeChat scripts the compiled runtime reads from dist", async ()
     assert.ok(entry, `no bundled asset copied to ${destination}`);
     assert.equal(entry[0], source);
     await readFile(join(root, source), "utf8");
+  }
+});
+
+test("the app CLI runs every command from the bundle when src/ is absent", async (t) => {
+  const core = join(root, "packages/core");
+  const pkg = await mkdtemp(join(tmpdir(), "rome-compiled-cli-"));
+  t.after(() => rm(pkg, { recursive: true, force: true }));
+  await cp(join(core, "bin"), join(pkg, "bin"), { recursive: true });
+  await cp(join(core, "package.json"), join(pkg, "package.json"));
+  await symlink(join(core, "node_modules"), join(pkg, "node_modules"));
+  const srcDir = join(core, "src/apps/cli/commands");
+  await build({
+    ...(await cliCommandsBundleOptions(srcDir, join(pkg, "dist/apps/cli/commands"))),
+    logLevel: "silent",
+  });
+
+  for (const file of await cliCommandFiles(srcDir)) {
+    const command = relative(srcDir, file).replace(/\.ts$/, "").split("/").join(":");
+    const help = execFileSync(process.execPath, [join(pkg, "bin/apps-cli.js"), command, "--help"], {
+      encoding: "utf8",
+    });
+    assert.match(help, /USAGE/, `${command} --help`);
   }
 });

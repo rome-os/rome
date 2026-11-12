@@ -34,6 +34,8 @@ Connections carry messages between chats and Rome. Participation sits between Ch
 
 People follows Chats for platform and account and changes neither. Participation asks People who a sender is and gets a person with their bond level, or nobody. People never decides what happens to a message. Connections and People do not depend on each other, so a disconnect removes nothing from People.
 
+The code in `@rome/core` is split into more contexts than these, one folder each under `packages/core/src`. Each folder's `README.md` says what it owns, such as [`chats/README.md`](../../packages/core/src/chats/README.md).
+
 ## How to read a context file
 
 Each word has a heading, its meaning in one or two sentences, and the rules that go with it: identity, lifetime, operations, and what must stay true. A context file ends with the alternatives decided against, each with the force that killed it, so a settled question is not argued again.
@@ -63,7 +65,7 @@ The language is the model. The code holds most of it and owes the rest. A reader
 - What the guardian writes in an assistant's chat goes to the assistant and wakes no agent.
 - A code People shows, sent in a direct message to any of Rome's accounts on any platform, links the account it came from to the guardian.
 - Disconnecting the last of Rome's accounts on a platform keeps every link on it.
-- The guardian can start topic chats beside the Concierge's main chat. Each follow and each task reports to one Concierge chat, and the digest goes to the main chat.
+- The guardian can start topic chats beside the Concierge's main chat. Each follow and each task reports to one Concierge chat, and a follow's alerts and digest go to that chat.
 - The dashboard's chat list opens with the main chat and its topic chats, then the common chats and task chats under Projects. Chat and the home page open the main chat, and only a common chat or a fork chat can be forked.
 - The guardian and every visitor on the dashboard allow-list each have their own Concierge, private to them, with their own follows, tasks, digest times, quiet hours and time zone. Memory is shared.
 - The grant names the account it reaches, by platform and the platform's own id.

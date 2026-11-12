@@ -44,6 +44,9 @@ protocol RomeBackend: AnyObject, Sendable {
     func thread(sessionId: String, messageId: String) async throws -> [ChatMessage]
     /// A file in the chats' project folder, by its `/projects/…` path without the slash.
     func asset(path: String) async throws -> Data
+    /// The same file shrunk to `width` (600 or 900) by an instance that can, and
+    /// as it is by one that cannot. nil is the original.
+    func asset(path: String, width: Int?) async throws -> Data
     /// An instance URL a reply points at: the path after `/api`, and its query
     /// still percent-encoded, sent as written.
     func apiFile(path: String, query: String?) async throws -> Data
@@ -171,8 +174,14 @@ final class LiveBackend: RomeBackend {
 
     /// `projects/…` from the projects route, `memory/…` from memory's.
     func asset(path: String) async throws -> Data {
+        try await asset(path: path, width: nil)
+    }
+
+    func asset(path: String, width: Int?) async throws -> Data {
         let route = path.hasPrefix("memory/") ? "/memory/asset" : "/projects/asset"
-        return try await client.getData(route, query: [URLQueryItem(name: "path", value: path)], limit: APIClient.imageLimit)
+        var query = [URLQueryItem(name: "path", value: path)]
+        if let width { query.append(URLQueryItem(name: "w", value: String(width))) }
+        return try await client.getData(route, query: query, limit: APIClient.imageLimit)
     }
 
     func answer(sessionId: String, toolUseId: String, output: JSONValue) async throws {
@@ -374,6 +383,8 @@ enum ToolCallExtractor {
 }
 
 extension RomeBackend {
+    /// Demo data and test doubles hold the file as it is.
+    func asset(path: String, width: Int?) async throws -> Data { try await asset(path: path) }
     /// Demo data and test doubles belong to no account.
     var account: AccountStamp { .unchecked }
 

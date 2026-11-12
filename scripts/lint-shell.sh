@@ -15,7 +15,7 @@ set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
 # shfmt: 2-space indent (-i 2) and indented case branches (-ci), matching the
-# repo's existing shell style and the 2-space JS/TS formatting (biome.json).
+# repo's existing shell style and the 2-space JS/TS formatting (biome.jsonc).
 SHFMT_FLAGS=(-i 2 -ci)
 # Static analysis flags: -x follows `source`d files; --severity=warning fails on
 # warnings and errors but not the noisier info/style tier (e.g. SC2329

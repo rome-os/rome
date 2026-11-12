@@ -2,7 +2,7 @@
 // and these calls run in the main process, where the instance's credentials
 // and the upgrade countdown live.
 
-import { feedbackSendSchema, type FeedbackService } from "../lib/feedback-client.js";
+import { feedbackSendSchema, type FeedbackService } from "../instance/feedback-client.js";
 import { parseWorkerCallParams } from "../lib/worker-call-params.js";
 import type { CloudProfileService } from "../instance/cloud-profile.js";
 import type { SystemUpgradeChecker } from "../instance/system-upgrade/service.js";

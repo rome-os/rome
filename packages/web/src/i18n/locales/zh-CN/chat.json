@@ -4,7 +4,8 @@
   "senderAutomation": "自动化",
   "markdown": {
     "code": "代码",
-    "mermaid": "Mermaid 图表"
+    "mermaid": "Mermaid 图表",
+    "imageNotAvailable": "图片无法显示"
   },
   "title": "Rome",
   "concierge": {
@@ -77,6 +78,7 @@
     "removeFolder": "移除文件夹",
     "composerMenu": "添加文件或切换模型",
     "placeholder": "发消息",
+    "placeholderIn": "在「{{name}}」中发消息",
     "empty": {
       "title": "直接告诉我你想做什么",
       "prompts": {
@@ -370,6 +372,7 @@
     "previewImage": "预览",
     "playVideo": "播放",
     "closeImagePreview": "关闭",
+    "downloadImage": "下载",
     "filePill": "#文件 {{index}}",
     "uploadProgressFor": "{{name}} 的上传进度",
     "cancelUpload": "取消",

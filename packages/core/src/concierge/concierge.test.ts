@@ -15,7 +15,7 @@ import type { SaidMessage } from "../chats/message.js";
 import type { Place } from "../chats/place.js";
 import type { Body, SendResult } from "../chats/send.js";
 import type { SessionToolContext } from "../core/session-tools.js";
-import type { NotifyLevel, SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
+import type { NotifyLevel, SendOutcome, SystemNotifyContent } from "../instance/notify-client.js";
 import type { ConciergeFollowing } from "./following.js";
 import { ChatRepository as StoredChats } from "../chats/storage/chat-repository.js";
 import { MessageRepository as StoredMessages } from "../chats/storage/message-repository.js";
@@ -1803,8 +1803,6 @@ describe("Concierge task anchors", () => {
   it.each([
     [CONCIERGE_CHAT, CONCIERGE_CHAT],
     [TOPIC_CHAT, TOPIC_CHAT],
-    [CONCIERGE_CHAT, TOPIC_CHAT],
-    [TOPIC_CHAT, CONCIERGE_CHAT],
   ] as const)("anchors a task created in %s to its result forwarded in %s before completion", async (createdIn, forwardedIn) => {
     const s = setup({ said: false });
     await s.storedChats.createSession(CONCIERGE_CHAT, "Concierge");
@@ -1867,6 +1865,164 @@ describe("Concierge task anchors", () => {
       conciergeChat: expect.objectContaining({ id: forwardedIn }),
       sourceMessageId: forwarded.messageId,
       notSynced: false,
+    });
+  });
+
+  describe("a task chat another Concierge chat started", () => {
+    // The main chat starts "Flights" on the guardian's message g0.
+    const startInMain = async () => {
+      const s = setup({ said: false });
+      await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+      s.messages.set(CONCIERGE_CHAT, [
+        { id: "g0", role: "user", content: "[]", turnId: "concierge-turn-1" },
+      ]);
+      await s.tool("say", { text: "On it" });
+      const started = text(await s.tool("chat_start", { title: "Flights", brief: "Find flights" }));
+      s.messages.set(started.chatId, [
+        { role: "assistant", content: JSON.stringify([{ type: "text", content: "3 options" }]) },
+      ]);
+      const row = await s.taskRepo.get(started.taskId);
+      s.messages.set(TOPIC_CHAT, [{ id: "t0", role: "user", content: "[]", turnId: "ask" }]);
+      s.turnIn(TOPIC_CHAT);
+      s.inTurn("ask");
+      return { s, ...(started as { chatId: string; taskId: string }), row };
+    };
+
+    it("refuses chat_send from a topic chat, and nothing reaches the task", async () => {
+      const { s, chatId, taskId, row } = await startInMain();
+      const sent = s.posted.length;
+      const messagesHere = s.messages.get(TOPIC_CHAT)?.length;
+
+      const result = await s.tool("chat_send", { chatId, text: "Make it Saturday", answers: "t0" });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("belongs to another Concierge chat");
+      expect(result.content[0].text).toContain("chat_start");
+      expect(s.posted).toHaveLength(sent);
+      expect(s.messages.get(TOPIC_CHAT)).toHaveLength(messagesHere ?? 0);
+      expect(await s.taskRepo.get(taskId)).toEqual(row);
+      expect(await s.tasks.repo.threadRoot(taskId)).toBe("g0");
+    });
+
+    it("refuses chat_forward from a topic chat, and nothing is posted or moved", async () => {
+      const { s, chatId, taskId, row } = await startInMain();
+      const messagesHere = s.messages.get(TOPIC_CHAT)?.length;
+
+      const result = await s.tool("chat_forward", { chatId, answers: "t0" });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("belongs to another Concierge chat");
+      expect(s.messages.get(TOPIC_CHAT)).toHaveLength(messagesHere ?? 0);
+      expect(await s.taskRepo.get(taskId)).toEqual(row);
+    });
+
+    it("shows a card for it from a topic chat without moving the row", async () => {
+      const { s, chatId, taskId, row } = await startInMain();
+      const cardsBefore = s.messages.get(TOPIC_CHAT)?.length ?? 0;
+
+      const result = await s.tool("chat_card", { chatId });
+
+      expect(result.isError).toBeFalsy();
+      expect(text(result)).toEqual({
+        sent: "Shown; the guardian sees the card.",
+        messageId: expect.any(String),
+      });
+      expect(s.messages.get(TOPIC_CHAT)).toHaveLength(cardsBefore + 1);
+      expect(await s.taskRepo.get(taskId)).toEqual(row);
+      expect(await s.tasks.repo.threadRoot(taskId)).toBe("g0");
+
+      // The main chat still owns it.
+      s.turnIn(CONCIERGE_CHAT);
+      s.inTurn("concierge-turn-1");
+      const sent = s.posted.length;
+      expect((await s.tool("chat_send", { chatId, text: "Make it Saturday" })).isError).toBeFalsy();
+      expect(s.posted).toHaveLength(sent + 1);
+    });
+
+    it("refuses task_upsert with a messageId on its row from a topic chat, and writes nothing", async () => {
+      const { s, taskId, row } = await startInMain();
+      const messageId = text(await s.tool("say", { text: "Checking" })).messageId;
+
+      const result = await s.tool("task_upsert", {
+        tasks: [
+          { title: "Other errand", messageId },
+          { id: taskId, state: "watching", messageId },
+        ],
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("belongs to another Concierge chat");
+      expect(await s.taskRepo.get(taskId)).toEqual(row);
+      expect(await s.taskRepo.listForAgent(true)).toHaveLength(1);
+    });
+
+    it("still lets a topic chat update the state or summary of its row without a messageId", async () => {
+      const { s, taskId, row } = await startInMain();
+
+      const result = await s.tool("task_upsert", {
+        tasks: [{ id: taskId, summary: "Found 3 options" }],
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(await s.taskRepo.get(taskId)).toEqual({
+        ...row,
+        summary: "Found 3 options",
+        updatedAt: expect.anything(),
+      });
+    });
+
+    it.each([
+      ["with", true],
+      ["without", false],
+    ] as const)("refuses chat_start from a topic chat for a planned row of the main chat %s a messageId", async (_label, withMessage) => {
+      const { s } = await startInMain();
+      const [planned] = await s.taskRepo.upsertMany([
+        { title: "Plan trip", state: "next", chatId: CONCIERGE_CHAT },
+      ]);
+      const before = await s.taskRepo.get(planned!.id);
+      const messageId = text(await s.tool("say", { text: "Starting" })).messageId;
+
+      const result = await s.tool("chat_start", {
+        title: "Plan trip",
+        brief: "Plan it",
+        taskId: planned!.id,
+        ...(withMessage ? { messageId } : {}),
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("belongs to another Concierge chat");
+      // Only the main chat's own task started a chat.
+      expect(s.chats.startChat).toHaveBeenCalledTimes(1);
+      expect(await s.taskRepo.get(planned!.id)).toEqual(before);
+      expect(await s.tasks.repo.threadRoot(planned!.id)).toBeNull();
+    });
+
+    it("still lets the topic chat read it", async () => {
+      const { s, chatId } = await startInMain();
+      expect((await s.tool("chat_read", { chatId })).isError).toBeFalsy();
+    });
+
+    it("lets the main chat send to a task its retired topic chat started", async () => {
+      const s = setup({ said: false });
+      await s.storedChats.createSession(TOPIC_CHAT, "Calendar");
+      s.turnIn(TOPIC_CHAT);
+      s.messages.set(TOPIC_CHAT, [{ id: "t0", role: "user", content: "[]", turnId: "ask" }]);
+      s.inTurn("ask");
+      await s.tool("say", { text: "On it" });
+      const { chatId, taskId } = text(
+        await s.tool("chat_start", { title: "Agenda", brief: "Read the calendar" }),
+      );
+      await s.service.retireChat(TOPIC_CHAT, "archived");
+      const sent = s.posted.length;
+
+      s.turnIn(CONCIERGE_CHAT);
+      const result = await s.tool("chat_send", { chatId, text: "Add Friday" });
+
+      expect(result.isError).toBeFalsy();
+      expect(s.posted).toHaveLength(sent + 1);
+      expect((await s.tasks.listForPanel()).find((row) => row.id === taskId)).toMatchObject({
+        conciergeChat: { id: CONCIERGE_CHAT },
+      });
     });
   });
 

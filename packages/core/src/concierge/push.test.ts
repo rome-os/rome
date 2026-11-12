@@ -1,5 +1,5 @@
 import { describe, expect, it, rs } from "@rstest/core";
-import type { SendOutcome, SystemNotifyContent } from "../lib/notify-client.js";
+import type { SendOutcome, SystemNotifyContent } from "../instance/notify-client.js";
 
 const logged = rs.fn();
 rs.mock("../logger.js", () => ({

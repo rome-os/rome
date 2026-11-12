@@ -71,6 +71,10 @@ export function romeToolPorts(deps: RomeToolPortsDeps): RomeToolPorts {
 
   const actions: AgentActions = {
     list: (turn) => actionRegistry.getForAgent([...turn.actions]).map(toAgentAction),
+    appOf: (name) => {
+      const metadata = actionRegistry.getMetadata?.(name);
+      return metadata?.ownerType === "app" ? metadata.ownerId : undefined;
+    },
     permits: (turn, name) => {
       const canonical = actionRegistry.getCanonicalName?.(name) ?? name;
       return actionRegistry

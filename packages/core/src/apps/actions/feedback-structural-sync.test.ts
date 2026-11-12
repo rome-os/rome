@@ -3,7 +3,7 @@ import {
   type AgentFeedback as CoreInput,
   type FeedbackOutcome as CoreOutcome,
   feedbackInputSchema as coreSchema,
-} from "../../lib/feedback-client.js";
+} from "../../instance/feedback-client.js";
 import {
   type AgentFeedback as ActionInput,
   type FeedbackOutcome as ActionOutcome,

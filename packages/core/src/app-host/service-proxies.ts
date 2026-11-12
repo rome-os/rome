@@ -17,10 +17,14 @@
 
 import { callMain, isTransportUncertain } from "../apps/actions/worker-rpc-client.js";
 import { getCurrentHookInvocationContext } from "../core/hook-recursion.js";
-import type { AgentFeedback, FeedbackOutcome, FeedbackService } from "../lib/feedback-client.js";
+import type {
+  AgentFeedback,
+  FeedbackOutcome,
+  FeedbackService,
+} from "../instance/feedback-client.js";
 import type { CloudProfileOutcome, CloudProfileService } from "../instance/cloud-profile.js";
 import type { AgentNameResolution, AgentNamesService } from "../chats/accounts/agent-names.js";
-import type { NotifyContent, NotifyService, SendOutcome } from "../lib/notify-client.js";
+import type { NotifyContent, NotifyService, SendOutcome } from "../instance/notify-client.js";
 import type {
   AppStoreGetParams,
   AppStoreListingDetailBody,

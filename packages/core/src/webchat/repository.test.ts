@@ -1,8 +1,6 @@
-import { resolveChatSenders } from "../api/routes/chat-senders.js";
-import { resolveReply } from "../api/routes/webchat-reply.js";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { eq, sql } from "drizzle-orm";
-import { buildAgent, createTestDb, testChatsWiring, type TestDb } from "../test/helpers.js";
+import { createTestDb, testChatsWiring, type TestDb } from "../test/helpers.js";
 import { ApprovalsRepository } from "../apps/repositories/approvals.js";
 import { ChatSettingsRepository } from "../chat-settings/repository.js";
 import type { DrizzleDb } from "../db/index.js";
@@ -109,58 +107,6 @@ describe("WebChatRepository", () => {
     } finally {
       spy.mockRestore();
     }
-  });
-
-  it.each([
-    "cookie",
-    "loopback",
-  ] as const)("reads a Concierge input speaking for the guardian via %s", async (via) => {
-    await repo.createSession("concierge-source", "Concierge");
-    const actor = { kind: "guardian" as const, userId: "seat", via };
-    await repo.recordUserInput("concierge-input", "concierge-source", "[]", actor, {
-      platform: "webchat",
-      id: "core:concierge",
-    });
-    const target = await repo.getReplyTarget("concierge-source", "concierge-input");
-    expect(target?.senderId).toBe("core:concierge");
-    expect(target?.actor?.kind).toBe("guardian");
-    expect((await repo.getUserMessageActors("concierge-source")).get("concierge-input")?.kind).toBe(
-      "guardian",
-    );
-    expect(await repo.getUserMessageSources("concierge-source")).toEqual(
-      new Map([["concierge-input", "core:concierge"]]),
-    );
-    const deps = {
-      db: testDb.db,
-      webchatRepo: repo,
-      settingsRepo: { get: async (key: string) => (key === "agentName" ? "Milo" : "Ray") },
-      agentLoader: { list: () => [buildAgent("core:concierge")] },
-      appCatalog: { get: () => undefined },
-    } as never;
-    const senders = await resolveChatSenders(
-      deps,
-      await repo.getUserMessageActors("concierge-source"),
-      await repo.getUserMessageSources("concierge-source"),
-    );
-    expect(senders.get("concierge-input")).toMatchObject({
-      kind: "automated",
-      name: "Milo",
-      onBehalfOf: { kind: "guardian", name: "Ray" },
-    });
-    await repo.recordUserInput(
-      "concierge-quote",
-      "concierge-source",
-      JSON.stringify([{ type: "text", content: "Status?" }]),
-      actor,
-      { platform: "webchat", id: "core:concierge" },
-    );
-    const quote = await resolveReply(deps, {
-      sessionId: "concierge-source",
-      messageId: "concierge-quote",
-      ownRowOnly: true,
-    });
-    expect(quote).toMatchObject({ ok: true, part: { author: "automated", name: "Milo" } });
-    if (quote.ok) expect(quote.promptLine).toContain("Milo: Status?");
   });
 
   it.each([

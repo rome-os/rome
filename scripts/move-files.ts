@@ -64,7 +64,7 @@ export interface MovePlan {
   unresolved: string[];
 }
 
-const TS_EXTENSION = /\.(d\.)?[cm]?tsx?$/;
+export const TS_EXTENSION = /\.(d\.)?[cm]?tsx?$/;
 const TEST_FILE = /\.test\.[cm]?tsx?$/;
 /** What follows a file's stem in the name of one of its tests: `.test.ts`, `.e2e.test.ts`. */
 const TEST_SUFFIX = /^(\.[A-Za-z0-9-]+)*\.test\.[cm]?tsx?$/;
@@ -78,11 +78,11 @@ const MOCK_METHODS = new Set([
   "importMock",
 ]);
 
-function git(cwd: string, args: string[]): string {
+export function git(cwd: string, args: string[]): string {
   return execFileSync("git", args, { cwd, encoding: "utf8" });
 }
 
-function trackedFiles(repoRoot: string, pathspecs: string[]): string[] {
+export function trackedFiles(repoRoot: string, pathspecs: string[]): string[] {
   return git(repoRoot, ["ls-files", "-z", "--", ...pathspecs])
     .split("\0")
     .filter(Boolean)
@@ -90,7 +90,7 @@ function trackedFiles(repoRoot: string, pathspecs: string[]): string[] {
 }
 
 /** The nearest tsconfig.json at or above `path`. */
-function findTsconfig(path: string): string {
+export function findTsconfig(path: string): string {
   let dir = existsSync(path) && statSync(path).isDirectory() ? path : dirname(path);
   for (;;) {
     const candidate = join(dir, "tsconfig.json");
@@ -101,7 +101,24 @@ function findTsconfig(path: string): string {
   }
 }
 
-function moduleSpecifiers(sf: ts.SourceFile): ts.StringLiteralLike[] {
+/** The package holding `path`: the folder of its nearest tsconfig.json, and that config read. */
+export function readPackage(path: string): { pkgDir: string; parsed: ts.ParsedCommandLine } {
+  const tsconfig = findTsconfig(path);
+  const parsed = ts.getParsedCommandLineOfConfigFile(
+    tsconfig,
+    {},
+    {
+      ...ts.sys,
+      onUnRecoverableConfigFileDiagnostic: (d) => {
+        throw new Error(ts.flattenDiagnosticMessageText(d.messageText, "\n"));
+      },
+    },
+  );
+  if (!parsed) throw new Error(`cannot read ${tsconfig}`);
+  return { pkgDir: dirname(tsconfig), parsed };
+}
+
+export function moduleSpecifiers(sf: ts.SourceFile): ts.StringLiteralLike[] {
   const out: ts.StringLiteralLike[] = [];
   const visit = (n: ts.Node): void => {
     if (
@@ -135,7 +152,7 @@ function moduleSpecifiers(sf: ts.SourceFile): ts.StringLiteralLike[] {
   return out;
 }
 
-function toPosix(path: string): string {
+export function toPosix(path: string): string {
   return path.split(sep).join("/");
 }
 
@@ -164,20 +181,8 @@ export function planMoves(
   options: { tests?: boolean } = {},
 ): MovePlan {
   if (moves.length === 0) throw new Error("no moves given");
-  const tsconfig = findTsconfig(moves[0].from);
-  const pkgDir = dirname(tsconfig);
+  const { pkgDir, parsed } = readPackage(moves[0].from);
   const inPackage = (f: string): boolean => f.startsWith(pkgDir + sep);
-  const parsed = ts.getParsedCommandLineOfConfigFile(
-    tsconfig,
-    {},
-    {
-      ...ts.sys,
-      onUnRecoverableConfigFileDiagnostic: (d) => {
-        throw new Error(ts.flattenDiagnosticMessageText(d.messageText, "\n"));
-      },
-    },
-  );
-  if (!parsed) throw new Error(`cannot read ${tsconfig}`);
 
   const renames = new Map<string, string>();
   for (const { from, to } of moves) {
@@ -510,10 +515,21 @@ export function findMentions(repoRoot: string, moves: Move[], plan: MovePlan): s
  */
 export function formatTouched(repoRoot: string, plan: MovePlan): boolean {
   const moved = (f: string): string => plan.renames.get(f) ?? f;
-  const files = [
-    ...new Set([...plan.edits.keys()].map(moved).concat([...plan.renames.values()])),
-  ].filter((f) => /\.[cm]?[jt]sx?$/.test(f));
-  if (files.length === 0) return true;
+  const files = [...new Set([...plan.edits.keys()].map(moved).concat([...plan.renames.values()]))];
+  if (!biomeFormat(repoRoot, files)) return false;
+  const staged = [...plan.renames.values()];
+  for (let i = 0; i < staged.length; i += 500)
+    git(repoRoot, ["add", "--", ...staged.slice(i, i + 500)]);
+  return true;
+}
+
+/**
+ * Formats the scripts among `files` with Biome and sorts their imports.
+ * Returns false when Biome could not run.
+ */
+export function biomeFormat(repoRoot: string, files: string[]): boolean {
+  const scripts = files.filter((f) => /\.[cm]?[jt]sx?$/.test(f));
+  if (scripts.length === 0) return true;
   const run = spawnSync(
     "biome",
     [
@@ -522,15 +538,11 @@ export function formatTouched(repoRoot: string, plan: MovePlan): boolean {
       "--linter-enabled=false",
       "--no-errors-on-unmatched",
       "--files-ignore-unknown=true",
-      ...files,
+      ...scripts,
     ],
     { cwd: repoRoot, encoding: "utf8" },
   );
-  if (run.error || run.status !== 0) return false;
-  const staged = [...plan.renames.values()];
-  for (let i = 0; i < staged.length; i += 500)
-    git(repoRoot, ["add", "--", ...staged.slice(i, i + 500)]);
-  return true;
+  return !run.error && run.status === 0;
 }
 
 function main(argv: string[]): void {

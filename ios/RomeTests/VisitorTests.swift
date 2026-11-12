@@ -39,8 +39,8 @@ import Testing
         await space.openConcierge()
         #expect(space.isVisitor)
         // What Apps' onStart does, then the composer's send.
-        space.composerPrefill = AppIdea.habitTracker.prompt
-        space.concierge.send(space.composerPrefill ?? "")
+        space.composerPrefills[conciergeChatID] = AppIdea.habitTracker.prompt
+        space.concierge.send(space.composerPrefills[conciergeChatID] ?? "")
         try? await Task.sleep(for: .milliseconds(50))
         #expect(backend.calls.contains("send \(Self.visitorChat) \(AppIdea.habitTracker.prompt)"))
         #expect(!backend.calls.contains { $0.hasPrefix("send \(conciergeChatID) ") })

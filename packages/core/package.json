@@ -6,7 +6,7 @@
   "scripts": {
     "start": "tsx src/index.ts",
     "dev": "tsx watch --exclude '../../rome_apps/**' --exclude \"$HOME/.rome/**\" src/index.ts",
-    "build": "tsc -p tsconfig.build.json && node scripts/copy-build-assets.mjs",
+    "build": "node ../../scripts/bundle-docker-core.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "biome check src",
     "lint:fix": "biome check --write src",
@@ -97,6 +97,7 @@
     "pg": "^8.18.0",
     "qrcode": "^1.5.4",
     "semver": "^7.7.4",
+    "sharp": "0.34.5",
     "tar": "^7.5.13",
     "telegram": "^2.26.22",
     "turndown": "^7.2.4",

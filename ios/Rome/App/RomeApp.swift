@@ -86,7 +86,7 @@ struct RootView: View {
                 Color.clear
             } else if model.phase == .ready, let workspace = model.workspace {
                 MainShell(workspace: workspace)
-                    .environment(\.assetLoader) { [backend = workspace.backend] path in try await backend.asset(path: path) }
+                    .environment(\.assetLoader) { [backend = workspace.backend] path, width in try await backend.asset(path: path, width: width) }
                     .environment(\.apiFileLoader) { [backend = workspace.backend] path, query in try await backend.apiFile(path: path, query: query) }
                     .environment(\.instanceOrigin, workspace.backend.origin)
                     .id(ObjectIdentifier(workspace))
@@ -105,6 +105,13 @@ struct RootView: View {
                     .transition(.opacity)
                     .zIndex(1)
             }
+        }
+        // Over the app, not the update page, so an upgrade that ends while
+        // the game is open leaves it open.
+        .fullScreenCover(item: Bindable(model).stackGame) { launch in
+            StackGameScreen(launch: launch) { model.stackGame = nil }
+                .environment(model)
+                .presentationBackground(Palette.bg)
         }
         .animation(.easeInOut(duration: 0.3), value: model.update.blocking)
         .animation(.easeInOut(duration: 0.35), value: model.phase == .ready)

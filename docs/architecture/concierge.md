@@ -23,7 +23,8 @@ flowchart LR
     TaskChat -- result, question, approval --> Topic
     Events -- important --> Topic
     Events -- important --> Main
-    Digest -- every chat's items, grouped --> Main
+    Digest -- its own items --> Topic
+    Digest -- its own items --> Main
     Main -. reads, writes .-> Shared
     Topic -. reads, writes .-> Shared
 
@@ -51,7 +52,7 @@ Solid lines carry something said to the Concierge or by it. Dashed lines are wha
 - **A Concierge turn's chat is decided when it is sent, in one place.** Alerts, digests, task events, recoveries and the wake-ups of `defer` all pass through it, and a chat that is archived or gone resolves to the main chat, so nothing waits on a chat the guardian closed and nothing stored is rewritten when one closes. A chat that never had a turn gets its runtime first, after the same quota check a message makes.
 - **One chat's failed delivery never holds back another's.** Each chat's turn is kept owed and tried again on its own.
 - **One delivery is one Concierge turn per chat.** A batch of important items or task events that spans chats becomes one turn in each, and each turn counts against the hourly cap of important turns.
-- **The digest goes to the main chat only,** with every chat's items grouped under the chat they report to, so an item in a topic chat the guardian does not open is still read.
+- **Each chat gets the digest of its own follows,** as one turn listing only its items. A chat with nothing new gets none, and the main chat gets an empty one when nothing is new anywhere. A chat's items are marked delivered only after its own turn ran to its end. [ADR](../adrs/digest-to-the-chat-its-follow-reports-to.md)
 
 ### The main chat stays
 

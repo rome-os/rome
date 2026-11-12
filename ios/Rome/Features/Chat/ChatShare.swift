@@ -326,9 +326,9 @@ extension View {
         modifier(ShareSelectable(row: row, share: share, top: top, placement: placement ?? .of(row)))
     }
 
-    /// The chat's header, covered by Cancel and the count in share mode. The
-    /// header's "…" menu offers Shared links. Nil: a chat not started yet,
-    /// with nothing to share.
+    /// The chat's header, covered by Cancel and the count in share mode. A
+    /// topic chat's "…" menu offers Shared links; the main Chat's are in
+    /// Settings. Nil: a chat not started yet, with nothing to share.
     func shareModeHeader(_ share: ChatShareFlow?) -> some View {
         let selecting = share?.isSelecting ?? false
         return self
@@ -469,13 +469,22 @@ private struct ShareModeComposer: ViewModifier {
             ActivitySheet(items: outgoing.items)
                 .presentationDetents([.medium, .large])
         }
-        .modifier(SharedLinksPresenter(share: share))
+        .sharedLinksSheet(share, isPresented: $share.showsLinks)
+    }
+}
+
+extension View {
+    /// The Shared links sheet of `share`'s chat, up while `isPresented`:
+    /// over its chat, or over Settings for the main chat.
+    func sharedLinksSheet(_ share: ChatShareFlow, isPresented: Binding<Bool>) -> some View {
+        modifier(SharedLinksPresenter(share: share, isPresented: isPresented))
     }
 }
 
 /// The Shared links sheet; on a snapshot run, its content in a sheet's frame.
 private struct SharedLinksPresenter: ViewModifier {
-    @Bindable var share: ChatShareFlow
+    let share: ChatShareFlow
+    @Binding var isPresented: Bool
 
     func body(content: Content) -> some View {
         #if DEBUG
@@ -484,7 +493,7 @@ private struct SharedLinksPresenter: ViewModifier {
             // in a large sheet's frame, reaching past the composer it hangs
             // from to the whole window.
             content.overlay(alignment: .bottom) {
-                if share.showsLinks, let window = Self.window {
+                if isPresented, let window = Self.window {
                     ZStack(alignment: .bottom) {
                         Color.black
                         SharedLinksSheet(share: share)
@@ -511,7 +520,7 @@ private struct SharedLinksPresenter: ViewModifier {
     #endif
 
     private func sheet(_ content: Content) -> some View {
-        content.sheet(isPresented: $share.showsLinks) {
+        content.sheet(isPresented: $isPresented) {
             SharedLinksSheet(share: share)
                 .presentationDetents([.medium, .large])
                 .presentationDragIndicator(.hidden)

@@ -389,6 +389,7 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       onSend?: (snapshot: unknown, controls: unknown) => Promise<void>;
       isStreaming?: boolean;
       onStop?: () => void;
+      chatName?: string | null;
     },
     ref,
   ) {
@@ -398,7 +399,11 @@ rs.mock("@/components/chat/composer/ConciergeComposer", () => ({
       focus: () => {},
     }));
     return (
-      <div data-testid="chat-composer" data-streaming={props.isStreaming ? "true" : "false"}>
+      <div
+        data-testid="chat-composer"
+        data-streaming={props.isStreaming ? "true" : "false"}
+        data-chat-name={props.chatName ?? ""}
+      >
         <button
           type="button"
           data-testid="concierge-send-button"
@@ -2617,7 +2622,64 @@ describe("Chat Concierge empty state", () => {
       />,
     );
     expect(await screen.findByText("Milo")).toBeTruthy();
+    // The header still goes by the Concierge's name, not the topic's.
     expect(screen.queryByText("Calendar")).toBeNull();
+  });
+
+  it("names an open topic chat in its message box, which follows a rename, and not the main chat", async () => {
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Main chat",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const main = renderChat(
+      <Chat sessionId="concierge" variant="concierge" conciergeMainChatId="concierge" />,
+    );
+    expect((await screen.findByTestId("chat-composer")).getAttribute("data-chat-name")).toBe("");
+    main.unmount();
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Trip to Lisbon",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    const view = renderChat(
+      <Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />,
+    );
+    expect((await screen.findByTestId("chat-composer")).getAttribute("data-chat-name")).toBe(
+      "Trip to Lisbon",
+    );
+
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "Lisbon flights",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    view.rerender(
+      <MemoryRouter>
+        {pane(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />)}
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-composer").getAttribute("data-chat-name")).toBe(
+        "Lisbon flights",
+      ),
+    );
+
+    // A topic chat with no name yet keeps the plain box.
+    mockUseSessionIdentity.mockReturnValue({
+      sessionName: "  ",
+      pinnedAgentMention: null,
+      archivedAt: null,
+    });
+    view.rerender(
+      <MemoryRouter>
+        {pane(<Chat sessionId="topic-1" variant="concierge" conciergeMainChatId="concierge" />)}
+      </MemoryRouter>,
+    );
+    await waitFor(() =>
+      expect(screen.getByTestId("chat-composer").getAttribute("data-chat-name")).toBe(""),
+    );
   });
 
   it("names the agent's app beside a titled chat, but not beside the Concierge's name", async () => {

@@ -133,7 +133,7 @@ A dashboard chat where its owner talks with their Concierge: a [main chat](#main
 - A visitor dropped from the dashboard allow-list keeps their Concierge chats and follows, but their Concierge tells them nothing until they are back on the list.
 - Each follow sends its alerts to one Concierge chat: the one it was followed from, until its owner **moves** it to another. One owner follows one thing once, whatever chat asks for it. Two owners may follow the same thing, and each hears it.
 - Digest times, quiet hours and the time zone they are read in are each owner's own.
-- A Concierge chat can start [task chats](#task-chat), and each task's result comes back to the Concierge chat that started it. A Concierge chat's task panel lists only its own tasks: the main chat's lists the tasks whose chat is the main chat.
+- A Concierge chat can start [task chats](#task-chat), and each task's result comes back to the Concierge chat that started it. A Concierge chat's task panel lists only its own tasks: the main chat's lists the tasks whose chat is the main chat. A Concierge chat sends to and forwards from only its own tasks, and showing a card for another chat's task or pointing its row at a message never moves it. It can read another chat's task, and starts its own task for the same work.
 
 ## Main chat
 
@@ -142,9 +142,9 @@ The one Concierge chat each owner always has.
 - The main chat exists while the Concierge is on, and it is never archived or deleted. The dashboard offers neither.
 - The dashboard's Chat entry and its home page open the main chat. When it cannot be loaded, the dashboard says so rather than opening a blank chat.
 - The dashboard opens it at `/message`, for the guardian and for each visitor alike. A topic chat is at `/chat/<id>`. The old `/chat/concierge` address redirects to `/message`.
-- The digest goes to the main chat and lists every Concierge chat's items, grouped by chat.
+- Each Concierge chat gets the digest of its own follows. The main chat also gets one when nothing is new anywhere.
 - Alerts and tasks whose Concierge chat is archived or deleted come here.
-- In the header of every Concierge chat, a topic chat's included, and in the Concierge's own copy, the dashboard calls the Concierge by the name the guardian gave their agent (else "Rome", as the main agent). A topic chat's own name shows in the chat list. The main chat is stored as "Main chat", and the chat list labels it "Main chat" in the dashboard's language. Product copy never names it "Concierge".
+- In the header of every Concierge chat, a topic chat's included, and in the Concierge's own copy, the dashboard calls the Concierge by the name the guardian gave their agent (else "Rome", as the main agent). A topic chat's own name shows in the chat list. An open topic chat also names itself in its message box, whose placeholder reads "Message in …" with the chat's name. The header keeps the Concierge's name, and the main chat's message box is unchanged. The main chat is stored as "Main chat", and the chat list labels it "Main chat" in the dashboard's language. Product copy never names it "Concierge".
 
 ## Topic chat
 
@@ -200,7 +200,8 @@ One thing a participant said or did in a chat.
 - A message that reaches Rome is recorded in its chat before anything acts on it, whether or not an agent is woken by it. A platform delivering the same message again records nothing new.
 - A message is made of text, attachments and [widgets](#widget).
 - Every message reads as plain text, so any person on any platform, and any agent, can follow the chat. A widget brings its own plain-text line.
-- Acting on a widget is a message of its own, from whoever did it, in the place the widget is in. It says what they meant, such as answering Q3, approving or picking a place, not how they did it: a button on one platform may be a typed reply on another. Without it, someone reading the chat later could not tell what was chosen.
+- Acting on a widget that asks something is a message of its own, from whoever did it, in the place the widget is in. It says what they meant, such as answering Q3, approving or picking a place, not how they did it: a button on one platform may be a typed reply on another. Without it, someone reading the chat later could not tell what was chosen.
+- Acting on a widget that only shows something, such as ticking off a meal on today's meals, is not a message. It changes the app the widget belongs to, and the chat shows the change only through the widget.
 - A delegate's reply is recorded as said by the agent on the guardian's behalf, under the guardian's account.
 
 ## Share link
@@ -233,6 +234,8 @@ Something shown in a chat that people can look at or act on: a question with cho
 - A place's widget drawing is card or plain text.
 - A widget's live state belongs to what it is about. An approval request shows as approved because the approval is.
 - An agent shows a widget by calling a tool.
+- A widget either asks something or only shows something. One that asks keeps the agent waiting until it is answered. One that only shows something leaves the agent to go on, and nobody answers it.
+- An app's widget belongs to the app whose action showed it, and is one of the kinds that app adds. An action cannot show another app's widget.
 
 ## Platform
 
