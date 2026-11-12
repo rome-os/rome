@@ -861,6 +861,7 @@ function sessionSetupOf(
       ? {
           schedule: (turn, wakeUp) => deps.defer.schedule(turn, wakeUp),
           finalText: policy.finalText,
+          eventWaitDeadline: policy.eventWaitDeadline,
         }
       : undefined;
   const romeTools: SessionSetupSource["romeTools"] = (turn, run, session) =>

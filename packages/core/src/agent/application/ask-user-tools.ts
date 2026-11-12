@@ -14,6 +14,8 @@ export interface DeferTool {
   schedule(turn: TurnFacts, wakeUp: WakeUp): Promise<unknown>;
   /** The agent's text never reaches the guardian, so `defer` asks for no confirmation in text. */
   finalText: AgentPolicy["finalText"];
+  /** An event wait needs `waitingFor` and a `deadline` (agent-policy.ts). Absent: it needs neither. */
+  eventWaitDeadline?: boolean;
 }
 
 const DEFER_DESCRIPTION =
@@ -74,9 +76,12 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
         },
         event: {
           type: "object",
-          description:
-            "Wake on the next event-bus event that matches, or at its deadline if none comes. Provide exactly one of afterMinutes, at, or event.",
-          required: ["eventName", "waitingFor", "deadline"],
+          description: defer.eventWaitDeadline
+            ? "Wake on the next event-bus event that matches, or at its deadline if none comes. Provide exactly one of afterMinutes, at, or event."
+            : "Wake on the next event-bus event that matches. Provide exactly one of afterMinutes, at, or event.",
+          required: defer.eventWaitDeadline
+            ? ["eventName", "waitingFor", "deadline"]
+            : ["eventName"],
           properties: {
             eventName: {
               type: "string",
@@ -88,16 +93,20 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
               description:
                 "Optional: only match events from this source (an appId); a single * matches any run of characters.",
             },
-            waitingFor: {
-              type: "string",
-              description:
-                'A few words saying what you wait for, shown in the chat while you wait, e.g. "the CI run" or "Dana\'s reply".',
-            },
-            deadline: {
-              type: "string",
-              description:
-                "ISO 8601 instant: when to wake anyway if the event has not come, e.g. 2026-06-25T18:00:00Z.",
-            },
+            ...(defer.eventWaitDeadline
+              ? {
+                  waitingFor: {
+                    type: "string",
+                    description:
+                      'A few words saying what you wait for, shown in the chat while you wait, e.g. "the CI run" or "Dana\'s reply".',
+                  },
+                  deadline: {
+                    type: "string",
+                    description:
+                      "ISO 8601 instant: when to wake anyway if the event has not come, e.g. 2026-06-25T18:00:00Z.",
+                  },
+                }
+              : {}),
             filter: {
               type: "array",
               description:
@@ -120,7 +129,9 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
     },
     handler: (input) =>
       run("defer", input, () => {
-        const parsed = parseDeferInput(input, Date.now());
+        const parsed = parseDeferInput(input, Date.now(), {
+          eventWaitDeadline: defer.eventWaitDeadline === true,
+        });
         if (!parsed.ok) throw new Error(parsed.error);
         return defer.schedule(turn, parsed.wakeUp);
       }),

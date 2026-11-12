@@ -68,8 +68,8 @@ export type DeferResult =
       name: string;
       /** The event type the wakeup waits for. */
       waitingFor: string;
-      /** When the wait ends without the event (ISO 8601). */
-      deadline: string;
+      /** When the wait ends without the event (ISO 8601), when it has a deadline. */
+      deadline?: string;
       /** For an app-declared event: whether the provider subscription was
        * already there or was created for this wait. */
       subscription?: "existing" | "created";
@@ -153,9 +153,12 @@ export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferRe
           attachEvent: true,
           // What the chat shows while it waits, and when the wait ends without
           // the event: the trigger wakes the session then with a payload that
-          // says so (event-bus-trigger-provider.ts).
-          waitingFor: parsed.waitingFor,
-          deadline: new Date(parsed.deadlineMs).toISOString(),
+          // says so (event-bus-trigger-provider.ts). Only an agent whose
+          // policy asks for them gives them.
+          ...(parsed.waitingFor ? { waitingFor: parsed.waitingFor } : {}),
+          ...(parsed.deadlineMs !== undefined
+            ? { deadline: new Date(parsed.deadlineMs).toISOString() }
+            : {}),
         },
         parsed,
       ),
@@ -165,7 +168,9 @@ export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferRe
       ok: true,
       name: parsed.name,
       waitingFor: eventName,
-      deadline: new Date(parsed.deadlineMs).toISOString(),
+      ...(parsed.deadlineMs !== undefined
+        ? { deadline: new Date(parsed.deadlineMs).toISOString() }
+        : {}),
       ...(prepared.subscription ? { subscription: prepared.subscription } : {}),
       ...(prepared.warning ? { warning: prepared.warning } : {}),
       ...(routineId ? { routineId } : {}),

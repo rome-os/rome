@@ -89,6 +89,7 @@ describe("parseDeferInput with an event", () => {
         taskId: " task-1 ",
       },
       NOW,
+      { eventWaitDeadline: true },
     );
     expect(r.ok).toBe(true);
     if (r.ok && r.wakeUp.kind === "event") {
@@ -106,9 +107,20 @@ describe("parseDeferInput with an event", () => {
     }
   });
 
-  it("needs a deadline in the future and a label for what it waits for", () => {
+  it("waits for an event without a label or a deadline for an agent whose policy asks for neither", () => {
+    expect(
+      parseDeferInput({ name: "CI", note: "n", event: { eventName: "ci.done" } }, NOW),
+    ).toEqual({
+      ok: true,
+      wakeUp: { kind: "event", name: "CI", note: "n", event: { eventName: "ci.done" } },
+    });
+  });
+
+  it("needs a deadline in the future and a label for what it waits for, for an agent whose policy asks", () => {
     const wait = (event: Record<string, unknown>) =>
-      parseDeferInput({ name: "CI", note: "n", event: { eventName: "ci.done", ...event } }, NOW);
+      parseDeferInput({ name: "CI", note: "n", event: { eventName: "ci.done", ...event } }, NOW, {
+        eventWaitDeadline: true,
+      });
     expect(wait({ deadline: "2030-01-01T00:00:00Z" })).toMatchObject({
       ok: false,
       error: expect.stringContaining("waitingFor is required"),

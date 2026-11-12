@@ -236,9 +236,9 @@ export function startConciergeEvents(
     },
     giveUp: (taskId) => {
       tasks.markNotSynced(taskId);
-      // Its result will not be said: it waits for no report any more, so the
-      // task and its messages show how its chat's work ended.
-      void tasks.repo.markReported([taskId]).catch((error: unknown) =>
+      // Its result will not be said: it waits for no report any more, and its
+      // messages show that their owner was never told.
+      void tasks.repo.markGivenUp(taskId).catch((error: unknown) =>
         log.warn("failed to settle a task's unsaid result", {
           taskId,
           error: error instanceof Error ? error.message : String(error),
@@ -276,7 +276,10 @@ export function startConciergeEvents(
     // A turn cut short with nothing carrying it on was stopped by its owner:
     // the messages it took stay stopped, and the next turn is told so.
     await tasks.repo
-      .answerTurns(chatId, running, new Date(), { stopped: status === "interrupted" })
+      .answerTurns(chatId, running, new Date(), {
+        stopped: status === "interrupted",
+        failed: status === "error",
+      })
       .catch((error: unknown) =>
         log.warn("failed to settle turn status reactions", {
           chatId,
@@ -468,6 +471,12 @@ export function startConciergeEvents(
       // A result the Concierge asked for, or an error, is worth telling now.
       // The guardian's own turns, scheduled ones and a stop wait.
       urgent: event.status === "error" || (event.status === "completed" && started),
+      // A scheduled turn that finished with no question, approval or error
+      // needs no word: its row holds the outcome, and it goes with the next
+      // flush or digest rather than waking a turn of its own.
+      ...(by === "system" && event.status === "completed" && !carriesApproval
+        ? { passive: true }
+        : {}),
       ...(detail.length ? { detail: detail.join("\n") } : {}),
     });
   };

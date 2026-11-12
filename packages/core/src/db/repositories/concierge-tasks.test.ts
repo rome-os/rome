@@ -558,8 +558,8 @@ describe("ConciergeTasksRepository", () => {
       await repo.linkMessage(task!.id, { chatId: "concierge", messageKey: "g2" });
       expect(await repo.messageMarks("concierge", ["g1", "g2", "g3"])).toEqual(
         new Map([
-          ["g1", { answered: false, taskIds: [] }],
-          ["g2", { answered: false, taskIds: [task!.id] }],
+          ["g1", { answered: false, turnFailed: false, taskIds: [] }],
+          ["g2", { answered: false, turnFailed: false, taskIds: [task!.id] }],
         ]),
       );
       // Saying an answer answers that message; the end of every turn not running, the rest.

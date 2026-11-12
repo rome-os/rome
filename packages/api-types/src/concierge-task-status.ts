@@ -138,18 +138,27 @@ export function taskStatusOfDto(task: {
 export interface MessageMarkFacts {
   /** Whether the turn that took the message answered it; null when no turn took it. */
   answered: boolean | null;
-  /** The status of each task made for the message. */
-  tasks: readonly ConciergeTaskStatusResult[];
+  /** Whether that turn failed, by an error or a crash, before it answered. A stop or a newer input is no failure. */
+  turnFailed?: boolean;
+  /**
+   * The status of each task made for the message, and whether Rome gave up
+   * telling the Concierge its result, so its owner was never told.
+   */
+  tasks: readonly (ConciergeTaskStatusResult & { reportLost?: boolean })[];
 }
 
 /**
  * A guardian message's status reaction (docs/domains/chats.md#status-reaction):
  * working while its turn has not answered it, or a task made for it waits
- * for its owner, is active or is checked later; failed when a task made for
- * it ended failed; else none. A task that ended for no response shows none.
+ * for its owner, is active or is checked later; failed when its turn failed,
+ * a task made for it ended failed, or Rome gave up telling a task's result;
+ * else none. A task that ended for no response shows none.
  */
 export function messageStatusReaction(facts: MessageMarkFacts): ConciergeStatusReaction | null {
   const open = (task: ConciergeTaskStatusResult) => task.status !== "ended";
   if (facts.answered === false || facts.tasks.some(open)) return "working";
-  return facts.tasks.some((task) => task.endReason === "failed") ? "failed" : null;
+  const failed =
+    facts.turnFailed === true ||
+    facts.tasks.some((task) => task.endReason === "failed" || task.reportLost === true);
+  return failed ? "failed" : null;
 }

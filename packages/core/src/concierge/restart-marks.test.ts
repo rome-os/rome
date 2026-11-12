@@ -73,14 +73,14 @@ describe("status reactions after a restart", () => {
     expect(await reaction("concierge", "concierge-input")).toBe("working");
   });
 
-  it("answers a Concierge turn's messages when startup does not continue it, as after a day, so none stays marked", async () => {
+  it("fails a Concierge turn's messages when startup does not continue it, as after a day, so none stays working", async () => {
     await running("concierge");
     await tasks.takeMessage("concierge-turn", {
       chatId: "concierge",
       messageKey: "concierge-input",
     });
     expect(await boot(Date.now() + 2 * DAY)).toBe(1);
-    expect(await reaction("concierge", "concierge-input")).toBeNull();
+    expect(await reaction("concierge", "concierge-input")).toBe("failed");
   });
 
   it("ends failed a task whose chat the restart ended, and keeps an idle task's mark as its status says", async () => {

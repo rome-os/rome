@@ -785,6 +785,11 @@ export const conciergeTasks = sqliteTable(
     noResponseUnlisted: integer("no_response_unlisted", { mode: "boolean" })
       .notNull()
       .default(false),
+    /**
+     * Set when Rome gave up telling the Concierge the task chat's result, so
+     * its owner was never told; cleared by the next result.
+     */
+    reportGivenUp: integer("report_given_up", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     // A chat belongs to at most one row, so a chat event maps to exactly one row.
@@ -818,6 +823,8 @@ export const conciergeMessageTurns = sqliteTable(
      * Concierge turn in the chat is told not to act on it.
      */
     stoppedUntold: integer("stopped_untold", { mode: "boolean" }).notNull().default(false),
+    /** Set when the turn that took it failed, by an error or a crash, before it answered it. */
+    turnFailed: integer("turn_failed", { mode: "boolean" }).notNull().default(false),
   },
   (table) => [
     primaryKey({ columns: [table.chatId, table.messageKey] }),

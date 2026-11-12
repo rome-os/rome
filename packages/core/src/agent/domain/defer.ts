@@ -15,11 +15,12 @@ export type WakeUp =
       kind: "event";
       name: string;
       note: string;
-      /** The event to wait for, with the label that says what it is. */
+      /** The event to wait for. */
       event: Omit<DeferEvent, "deadline" | "waitingFor">;
-      waitingFor: string;
-      /** When the wait ends without the event, epoch milliseconds. */
-      deadlineMs: number;
+      /** What the wait is for, and when it ends without the event (epoch
+       *  milliseconds), for an agent whose policy asks for them. */
+      waitingFor?: string;
+      deadlineMs?: number;
       taskId?: string;
     };
 
@@ -53,19 +54,16 @@ const deferEventSchema = z.strictObject({
     )
     .optional(),
   waitingFor: z
-    .string({
-      error:
-        'defer.event.waitingFor is required — a few words saying what you wait for, e.g. "the CI run"',
-    })
+    .string()
     .transform((value) => value.trim())
-    .refine((value) => value.length > 0, {
-      message:
-        'defer.event.waitingFor is required — a few words saying what you wait for, e.g. "the CI run"',
-    }),
-  deadline: z.string({
-    error: "defer.event.deadline is required — when to wake anyway if the event never comes",
-  }),
+    .optional(),
+  deadline: z.string().optional(),
 });
+
+const WAITING_FOR_REQUIRED =
+  'defer.event.waitingFor is required — a few words saying what you wait for, e.g. "the CI run"';
+const DEADLINE_REQUIRED =
+  "defer.event.deadline is required — when to wake anyway if the event never comes";
 
 type DeferEvent = z.infer<typeof deferEventSchema>;
 
@@ -113,7 +111,11 @@ const deferInputSchema = z
  * instant, ceiled to the next whole minute (the schedule trigger is
  * minute-resolution) and in the future. An event wakeup resolves to the event
  * match. */
-export function parseDeferInput(input: unknown, now: number): ParsedDefer {
+export function parseDeferInput(
+  input: unknown,
+  now: number,
+  options: { eventWaitDeadline?: boolean } = {},
+): ParsedDefer {
   const parsed = deferInputSchema.safeParse(input);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
@@ -129,6 +131,13 @@ export function parseDeferInput(input: unknown, now: number): ParsedDefer {
 
   if (event) {
     const { deadline, waitingFor, ...match } = event;
+    // An agent whose policy asks for them (the Concierge) labels every wait
+    // and gives it a deadline; any other agent's wait takes neither.
+    if (!options.eventWaitDeadline) {
+      return { ok: true, wakeUp: { kind: "event", name, note, event: match, ...task } };
+    }
+    if (!waitingFor) return { ok: false, error: WAITING_FOR_REQUIRED };
+    if (deadline === undefined) return { ok: false, error: DEADLINE_REQUIRED };
     const deadlineMs = Date.parse(deadline);
     if (Number.isNaN(deadlineMs)) {
       return {

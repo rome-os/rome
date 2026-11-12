@@ -259,9 +259,11 @@ export class ConciergeTasks {
     for (const [key, mark] of marks) {
       const reaction = messageStatusReaction({
         answered: mark.answered,
+        turnFailed: mark.turnFailed,
         tasks: mark.taskIds.flatMap((id) => {
           const of = status.get(id);
-          return of ? [of] : [];
+          const row = rows.find((candidate) => candidate.id === id);
+          return of ? [{ ...of, reportLost: row?.reportGivenUp === true }] : [];
         }),
       });
       if (reaction) out.set(key, reaction);

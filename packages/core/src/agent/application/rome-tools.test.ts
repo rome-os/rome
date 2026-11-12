@@ -242,6 +242,47 @@ describe("defer", () => {
     expect(result.content[0].text).toContain("2026-06-25T12:05:00.000Z");
   });
 
+  it("waits for an event without a label or a deadline, for an agent whose policy asks for neither", async () => {
+    const schedule = rs.fn().mockResolvedValue({ ok: true, waitingFor: "ci.done" });
+    const served = tools({ defer: { schedule, finalText: "deliver" } })
+      .listTools("ask_user")
+      .find((tool) => tool.name === "defer");
+    const event = (served?.inputSchema as { properties: { event: Record<string, unknown> } })
+      .properties.event as { required: string[]; properties: Record<string, unknown> };
+    expect(event.required).toEqual(["eventName"]);
+    expect(event.properties).not.toHaveProperty("deadline");
+    const result = await tools({ defer: { schedule, finalText: "deliver" } }).callTool(
+      "ask_user",
+      "defer",
+      { name: "CI", note: "Read the run.", event: { eventName: "ci.done" } },
+    );
+    expect(result.isError).toBeFalsy();
+    expect(schedule).toHaveBeenCalledWith(TURN, {
+      kind: "event",
+      name: "CI",
+      note: "Read the run.",
+      event: { eventName: "ci.done" },
+    });
+  });
+
+  it("asks for a label and a deadline on an event wait when the agent's policy does", async () => {
+    const schedule = rs.fn().mockResolvedValue({ ok: true });
+    const served = tools({ defer: { schedule, finalText: "private", eventWaitDeadline: true } });
+    const event = (
+      served.listTools("ask_user").find((tool) => tool.name === "defer")?.inputSchema as {
+        properties: { event: { required: string[] } };
+      }
+    ).properties.event;
+    expect(event.required).toEqual(["eventName", "waitingFor", "deadline"]);
+    const refused = await served.callTool("ask_user", "defer", {
+      name: "CI",
+      note: "Read the run.",
+      event: { eventName: "ci.done" },
+    });
+    expect(refused.isError).toBe(true);
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
   // A private-text agent can confirm only with another message, which repeats
   // what it already told the guardian.
   it.each([

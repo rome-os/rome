@@ -103,10 +103,10 @@ A mark Rome puts on its owner's message in a [Concierge chat](#concierge-chat) t
 
 - Rome derives it, never the Concierge, from two facts it keeps: which turn took the message and whether that turn answered it, and which tasks were made for the message (the ones it started, and the ones its words were passed on to). A message has at most one.
 - Working: the turn that took the message has not answered it, or a task made for it waits for its owner, is active or is checked later. A message gets it as soon as a Concierge turn takes it in, before the Concierge says or starts anything.
-- Failed: a task made for it ended failed, and none of its tasks is still open.
-- Otherwise none: a task that ended done, stopped or for no response shows no mark, and a turn that failed or was stopped shows none either.
+- Failed: the turn that took it failed before it answered, by an error or a crash. A task made for it that ended failed shows it too, and so does a task whose result Rome gave up telling the Concierge, since its owner was never told. It shows only once none of its work is still open.
+- Otherwise none: a task that ended done, stopped or for no response shows no mark, and neither does a turn its owner stopped or a newer input took over.
 - A turn answers a message when it ends, or as soon as the Concierge answers it: when its answer names the message, or when the message is the turn's only one and the answer names no task. A message a newer input handed on to the next turn is that turn's, and waits for it. A turn that runs again, as after a usage limit, opens every message it holds again.
-- A task's result keeps the message working until the Concierge reports it, also across a restart. A restart answers every message whose turn it ended, unless it continues that turn, so no mark outlives the process that set it. A task chat turn a restart ended failed.
+- A task's result keeps the message working until the Concierge reports it, also across a restart. A restart ends every message's turn it cut off as failed, unless it continues that turn, so no mark stays working past the process that set it. A task chat turn a restart ended failed.
 - Stopping a task that failed takes its mark away.
 - It is not a message. It never reaches the phone as a push, and it does nothing when pressed.
 - A common chat has none, and neither does a task chat.
@@ -154,7 +154,7 @@ One piece of work the Concierge keeps on its owner's task list, with a title, a 
   - **Active**: a turn runs or is queued in its task chat, or its result waits for the Concierge to report it.
   - **Later**: a check is scheduled for it, and nothing runs.
   - **Ended**, with a reason: done, failed, stopped, or no response, when a wait went unanswered for a day.
-- A stopped task is always ended·stopped, whoever stopped it: the Concierge, its owner, or archiving or deleting its task chat.
+- A stopped task is always ended·stopped, whoever stopped it: the Concierge, its owner, or archiving or deleting its task chat. New words sent to it, the owner's passed on or the Concierge's own, take it up again: it is active once more, as when its owner answers an expired card. A task stopped by archiving or deleting its chat stays stopped.
 - Its owner **stops** a task from its card or its row in the task list. Rome stops it at once, without a turn of the Concierge, which hears of it quietly. Stop in a Concierge chat ends only that chat's turn: the tasks it started keep running, and the header keeps showing them.
 - A message whose turn its owner stopped before an answer stays stopped: the next turn is told of it, and takes it up only when its owner asks again.
 - A wait nobody answers within a day ends the task for no response, and it waits for its owner no more. Its question card stays answerable, marked expired, and answering it takes the task up again. A pending approval is turned down, and the task chat's turn finishes as on any refusal. The Concierge hears of it quietly and asks nothing, and the next digest lists the task once. A task that ended for no response shows no ⚠️.

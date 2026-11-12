@@ -955,6 +955,11 @@ export class ConciergeService {
           ]
         : [];
     });
+    // A scheduled run that finished with nothing to say goes here, not in a turn of its own.
+    for (const taskId of this.taskEvents?.takePassive(rows.map((row) => row.id)) ?? []) {
+      const row = rows.find((candidate) => candidate.id === taskId);
+      if (row) lines.push(`<ran_on_schedule task="${attr(row.id)}" title="${attr(row.title)}"/>`);
+    }
     // Each task that ended for no response is listed once, so it can be resumed.
     const unanswered = new Set(
       await this.deps.tasks.repo.takeNoResponseUnlisted(rows.map((row) => row.id)),

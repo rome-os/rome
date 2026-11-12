@@ -95,6 +95,8 @@ export interface ChatThreadRetired {
 export interface MessageMarkRow {
   /** Whether the turn that took it answered it; null when no turn took it. */
   answered: boolean | null;
+  /** Whether that turn failed, by an error or a crash, before it answered it. */
+  turnFailed: boolean;
   /** The tasks made for it. */
   taskIds: string[];
 }
@@ -224,7 +226,12 @@ export class ConciergeTasksRepository {
     await this.db
       .update(conciergeTasks)
       // A result waits for the Concierge's report; a stop has none to give.
-      .set({ lastOutcome: outcome, outcomeUnsaid: outcome !== "stopped", updatedAt: now })
+      .set({
+        lastOutcome: outcome,
+        outcomeUnsaid: outcome !== "stopped",
+        reportGivenUp: false,
+        updatedAt: now,
+      })
       .where(eq(conciergeTasks.id, id));
     await this.announce(id, "refresh");
   }
@@ -613,7 +620,7 @@ export class ConciergeTasksRepository {
       .values({ ...target, turnId, takenAt: now, answeredAt: null })
       .onConflictDoUpdate({
         target: [conciergeMessageTurns.chatId, conciergeMessageTurns.messageKey],
-        set: { turnId, takenAt: now, answeredAt: null },
+        set: { turnId, takenAt: now, answeredAt: null, turnFailed: false },
       });
     this.messageChanged([target]);
   }
@@ -627,12 +634,16 @@ export class ConciergeTasksRepository {
     chatId: string,
     running: readonly string[],
     now = new Date(),
-    options: { stopped?: boolean } = {},
+    options: { stopped?: boolean; failed?: boolean } = {},
   ): Promise<number> {
     const changed = await this.db
       .update(conciergeMessageTurns)
       // A turn its owner stopped answered nothing: the next turn is told so.
-      .set({ answeredAt: now, ...(options.stopped ? { stoppedUntold: true } : {}) })
+      .set({
+        answeredAt: now,
+        turnFailed: options.failed === true,
+        ...(options.stopped ? { stoppedUntold: true } : {}),
+      })
       .where(
         and(
           eq(conciergeMessageTurns.chatId, chatId),
@@ -695,7 +706,7 @@ export class ConciergeTasksRepository {
   async reopenTurn(chatId: string, turnId: string): Promise<number> {
     const changed = await this.db
       .update(conciergeMessageTurns)
-      .set({ answeredAt: null })
+      .set({ answeredAt: null, turnFailed: false })
       .where(
         and(eq(conciergeMessageTurns.chatId, chatId), eq(conciergeMessageTurns.turnId, turnId)),
       )
@@ -725,7 +736,8 @@ export class ConciergeTasksRepository {
     for (const row of ending) {
       await this.db
         .update(conciergeMessageTurns)
-        .set({ answeredAt: now })
+        // The process died under the turn: it failed, as a crash does.
+        .set({ answeredAt: now, turnFailed: true })
         .where(
           and(
             eq(conciergeMessageTurns.chatId, row.chatId),
@@ -786,7 +798,7 @@ export class ConciergeTasksRepository {
     if (messageKeys.length === 0) return out;
     const keys = [...new Set(messageKeys)];
     const of = (key: string) => {
-      const found = out.get(key) ?? { answered: null, taskIds: [] };
+      const found = out.get(key) ?? { answered: null, turnFailed: false, taskIds: [] };
       out.set(key, found);
       return found;
     };
@@ -794,6 +806,7 @@ export class ConciergeTasksRepository {
       .select({
         messageKey: conciergeMessageTurns.messageKey,
         answeredAt: conciergeMessageTurns.answeredAt,
+        turnFailed: conciergeMessageTurns.turnFailed,
       })
       .from(conciergeMessageTurns)
       .where(
@@ -803,6 +816,7 @@ export class ConciergeTasksRepository {
         ),
       )) {
       of(row.messageKey).answered = row.answeredAt !== null;
+      of(row.messageKey).turnFailed = row.turnFailed;
     }
     for (const row of await this.db
       .select({
@@ -862,7 +876,19 @@ export class ConciergeTasksRepository {
     return rows.map((row) => row.id);
   }
 
-  /** The Concierge reported the results of `taskIds`, or Rome gave up telling it. */
+  /**
+   * Rome gave up telling the Concierge task `taskId`'s result: it waits for
+   * no report any more, and its owner was never told, which its messages show.
+   */
+  async markGivenUp(taskId: string): Promise<void> {
+    await this.db
+      .update(conciergeTasks)
+      .set({ outcomeUnsaid: false, reportGivenUp: true })
+      .where(eq(conciergeTasks.id, taskId));
+    await this.announce(taskId, "refresh");
+  }
+
+  /** The Concierge reported the results of `taskIds`. */
   async markReported(taskIds: readonly string[]): Promise<void> {
     if (taskIds.length === 0) return;
     const reported = await this.db

@@ -23,6 +23,12 @@ export interface AgentPolicy {
    * never replaced. docs/concepts/sessions.md#setup
    */
   freshSessionOnSetupChange: boolean;
+  /**
+   * Whether the agent's `defer` waits for an event only with a label saying
+   * what it waits for and a deadline when it wakes anyway, as the
+   * Concierge's checks do. Off, an event wait takes neither.
+   */
+  eventWaitDeadline: boolean;
 }
 
 export function resolveAgentPolicy(agent: {
@@ -34,5 +40,6 @@ export function resolveAgentPolicy(agent: {
     autoTitle: agent.policy?.autoTitle ?? true,
     loadMemory: agent.policy?.loadMemory ?? agent.name === "main",
     freshSessionOnSetupChange: agent.policy?.freshSessionOnSetupChange ?? false,
+    eventWaitDeadline: agent.policy?.eventWaitDeadline ?? false,
   };
 }
