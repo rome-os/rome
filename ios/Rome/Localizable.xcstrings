@@ -371,6 +371,16 @@
         }
       }
     },
+    "Add your own…" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加自己的选项…"
+          }
+        }
+      }
+    },
     "Allow Rome to read Health" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1227,6 +1237,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "膳食能量"
+          }
+        }
+      }
+    },
+    "Dismiss" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "跳过"
+          }
+        }
+      }
+    },
+    "Dismissed" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已跳过"
           }
         }
       }
@@ -4315,6 +4345,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "下一页"
+          }
+        }
+      }
+    },
+    "optional" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可选"
           }
         }
       }

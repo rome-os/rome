@@ -1615,6 +1615,10 @@ export type MessagePart =
          *  reach the agent as a reply the card cannot be answered with. Unset
          *  (the default) keeps the composer open beside the card. */
         requiresCard?: boolean;
+        /** The same card described as data (see {@link WidgetUi}), which
+         *  readers that know it draw instead of the component. Its buttons
+         *  may answer or dismiss the interaction. */
+        ui?: WidgetUi;
       };
     }
   | ({

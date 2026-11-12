@@ -13,11 +13,22 @@ struct WidgetUIPart: Hashable, Sendable {
     let components: [String: WidgetComponent]
     /// JSON Pointer in the data model → GET path in the app's API.
     let bind: [String: String]
+    /// The data model the card starts from.
+    let data: JSONValue
 
+    /// A `widget` part with `ui`.
     init?(json value: JSONValue) {
-        guard let toolUseId = value["toolUseId"]?.string,
-              let appId = value["appId"]?.string,
-              let list = value["ui"]?["components"]?.array else { return nil }
+        self.init(toolUseId: value["toolUseId"]?.string, appId: value["appId"]?.string, ui: value["ui"], text: value["text"]?.string, bind: value["bind"])
+    }
+
+    /// A card the agent waits on, described as data: a `pending_interaction`
+    /// part whose `render.ui` is set.
+    init?(interaction value: JSONValue) {
+        self.init(toolUseId: value["toolUseId"]?.string, appId: value["appId"]?.string, ui: value["render"]?["ui"], text: nil, bind: nil)
+    }
+
+    private init?(toolUseId: String?, appId: String?, ui: JSONValue?, text: String?, bind: JSONValue?) {
+        guard let toolUseId, let appId, let list = ui?["components"]?.array else { return nil }
         var components: [String: WidgetComponent] = [:]
         for item in list {
             guard let id = item["id"]?.string, let kind = item["component"]?.string else { continue }
@@ -26,9 +37,10 @@ struct WidgetUIPart: Hashable, Sendable {
         guard components["root"] != nil else { return nil }
         self.toolUseId = toolUseId
         self.appId = appId
-        self.text = value["text"]?.string ?? ""
+        self.text = text ?? ""
         self.components = components
-        self.bind = (value["bind"]?.object ?? [:]).compactMapValues(\.string)
+        self.bind = (bind?.object ?? [:]).compactMapValues(\.string)
+        self.data = ui?["data"] ?? .object([:])
     }
 }
 
@@ -37,6 +49,7 @@ struct WidgetComponent: Hashable, Sendable {
     enum Kind: String, Sendable {
         case text = "Text", stat = "Stat", list = "List", row = "Row", column = "Column"
         case image = "Image", progress = "Progress", button = "Button"
+        case choicePicker = "ChoicePicker", textField = "TextField"
         case unknown
     }
 
@@ -105,6 +118,54 @@ enum WidgetData {
         return set(root, ArraySlice(keys))
     }
 
+    /// The model after an input writes `value` at `pointer`. A non-empty write
+    /// also empties the input's `clears` target (Rome's: an empty list where
+    /// the input writes text, an empty string where it writes a list), so the
+    /// last of two inputs edited wins.
+    static func editing(_ value: JSONValue, at pointer: String, clears: JSONValue?, scope: String, in root: JSONValue) -> JSONValue {
+        let next = storing(value, at: pointer, in: root)
+        let written: Bool
+        switch value {
+        case .string(let text): written = !text.isEmpty
+        case .array(let list): written = !list.isEmpty
+        default: written = false
+        }
+        guard written, let target = clears?["path"]?.string else { return next }
+        let empty: JSONValue = value.array == nil ? .array([]) : .string("")
+        return storing(empty, at: absolute(target, scope: scope), in: next)
+    }
+
+    /// Whether a check's condition holds: `required` is a non-empty string or
+    /// list, `or` any of its values. Any other function fails, which the
+    /// server never lets through.
+    static func passes(_ condition: JSONValue?, in root: JSONValue, scope: String) -> Bool {
+        switch condition?["call"]?.string {
+        case "required":
+            switch resolve(condition?["args"]?["value"], in: root, scope: scope) {
+            case .string(let text): return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            case .array(let list): return !list.isEmpty
+            default: return false
+            }
+        case "or":
+            return (condition?["args"]?["values"]?.array ?? []).contains { passes($0, in: root, scope: scope) }
+        default:
+            return false
+        }
+    }
+
+    /// Rome's own strings a card names with `{ string }`: the question card's labels.
+    static func hostString(_ name: String) -> String {
+        switch name {
+        case "send": return String(localized: "Send")
+        case "dismiss": return String(localized: "Dismiss")
+        case "typeOwn": return String(localized: "Or type your own…")
+        case "addOwn": return String(localized: "Add your own…")
+        case "typeAnswer": return String(localized: "Type your answer…")
+        case "optional": return String(localized: "optional")
+        default: return ""
+        }
+    }
+
     /// A literal, or the value its `{ path }` names.
     static func resolve(_ value: JSONValue?, in root: JSONValue, scope: String) -> JSONValue? {
         guard let value else { return nil }
@@ -115,6 +176,7 @@ enum WidgetData {
     }
 
     static func text(_ value: JSONValue?, in root: JSONValue, scope: String) -> String {
+        if let name = value?["string"]?.string, value?.object?.count == 1 { return hostString(name) }
         switch resolve(value, in: root, scope: scope) {
         case .string(let text): return text
         case .number(let number):

@@ -111,6 +111,13 @@ import type {
 } from "../../app-host/backend-turn.js";
 import { z } from "zod";
 import { withReplyContext } from "../../agent/index.js";
+import {
+  answersFromQuestionCard,
+  parseAskQuestionInput,
+  type Question,
+  questionCardFromAnswers,
+  questionCardUi,
+} from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import type { ChatThreadPlacement } from "../../webchat/repository.js";
 import { messageContentText } from "../../chats/history/messages-agent.js";
@@ -604,6 +611,12 @@ function buildBuiltinCard(
   const toolName = typeof msg.tool === "string" ? msg.tool : "";
   const card = BUILTIN_CARDS.find((c) => c.componentId === suspension.componentId);
   if (card && suspension.appId === "core" && card.emittedBy(toolName)) {
+    // The question card described as data, built here from its questions so
+    // the agent never carries it in its context and no tool can supply one.
+    // Readers that know `ui` draw it; older ones draw their own question card
+    // from `props`.
+    const questions =
+      suspension.componentId === "question-card" ? parseAskQuestionInput(suspension.props) : null;
     return {
       type: "pending_interaction",
       toolUseId: msg.toolUseId,
@@ -614,6 +627,7 @@ function buildBuiltinCard(
         props: suspension.props,
         builtin: true,
         ...(suspension.requiresCard ? { requiresCard: true } : {}),
+        ...(questions?.ok ? { ui: questionCardUi(questions.questions) } : {}),
       },
     };
   }
@@ -720,6 +734,8 @@ interface OpenSuspensionCard {
   /** A host-owned built-in card (a question or the connect-AI card) that a
    * typed chat reply dismisses — mirrors rome-web's auto-dismiss rule. */
   dismissedByReply?: boolean;
+  /** The questions of an open question card, to read its answers by. */
+  questions?: Question[];
 }
 
 async function findOpenSuspensions(
@@ -745,13 +761,18 @@ async function findOpenSuspensions(
       const part = p as {
         type?: unknown;
         toolUseId?: unknown;
-        render?: { builtin?: unknown; componentId?: unknown };
+        render?: { builtin?: unknown; componentId?: unknown; props?: { questions?: unknown } };
       };
       if (part.type === "pending_interaction" && typeof part.toolUseId === "string") {
+        const builtin = part.render?.builtin === true;
+        const questions =
+          builtin && part.render?.componentId === "question-card"
+            ? parseAskQuestionInput(part.render?.props)
+            : null;
         cards.set(part.toolUseId, {
           dismissedByReply:
-            part.render?.builtin === true &&
-            BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
+            builtin && BUILTIN_CARDS.some((card) => card.componentId === part.render?.componentId),
+          ...(questions?.ok ? { questions: questions.questions } : {}),
         });
       } else if (part.type === "interaction_result" && typeof part.toolUseId === "string") {
         cards.delete(part.toolUseId);
@@ -3691,6 +3712,40 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
 
     if (resolution && !openSuspensions.has(resolution.toolUseId)) {
       return answer({ error: "No open interaction matches this toolUseId" }, 400);
+    }
+    // A question card drawn from its description sends its data model; store
+    // and hand on the answer in the shape the card has always sent.
+    const questions = resolution && openSuspensions.get(resolution.toolUseId)?.questions;
+    if (resolution && questions && !resolution.dismissed) {
+      const answers = answersFromQuestionCard(questions, resolution.output);
+      // A reader that draws its own question card sends the answers as they
+      // are; keep what the described card would have sent beside them, so
+      // every reader shows the same answered card.
+      const card = answers ? null : questionCardFromAnswers(questions, resolution.output);
+      if (card) {
+        for (const part of body.parts as Array<Record<string, unknown>>) {
+          if (part?.type === "interaction_result" && part.toolUseId === resolution.toolUseId) {
+            part.output = { ...(resolution.output as Record<string, unknown>), card };
+          }
+        }
+      }
+      if (answers) {
+        const sent = (resolution.output as { answers?: unknown } | null)?.answers;
+        Object.assign(
+          resolution,
+          interpretInteractionResult([
+            { type: "interaction_result", toolUseId: resolution.toolUseId, output: answers },
+          ]),
+        );
+        // The stored part also keeps what the card sent (`card`), so a reader
+        // draws the answered card from the same data; the agent reads only
+        // `answers`.
+        for (const part of body.parts as Array<Record<string, unknown>>) {
+          if (part?.type === "interaction_result" && part.toolUseId === resolution.toolUseId) {
+            part.output = { ...answers, card: sent };
+          }
+        }
+      }
     }
 
     let reply: Extract<ReplyResolution, { ok: true }> | undefined;

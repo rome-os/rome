@@ -215,6 +215,36 @@ export function renderSingleEntry(
           />
         );
       }
+      if (block.render.builtin && block.render.componentId === "question-card" && block.render.ui) {
+        return (
+          <CardBoundary
+            key={`question-card-${block.toolUseId}`}
+            fallback={
+              <QuestionCard
+                toolUseId={block.toolUseId}
+                props={block.render.props}
+                result={resultFor(block.toolUseId)}
+                onSubmit={submit}
+                onDismiss={dismiss}
+              />
+            }
+          >
+            <Suspense fallback={null}>
+              <WidgetUiCard
+                toolUseId={block.toolUseId}
+                appId={block.appId}
+                ui={block.render.ui}
+                text=""
+                waiting={{
+                  result: resultFor(block.toolUseId),
+                  onSubmit: submit,
+                  onDismiss: dismiss,
+                }}
+              />
+            </Suspense>
+          </CardBoundary>
+        );
+      }
       if (block.render.builtin && block.render.componentId === "question-card") {
         return (
           <QuestionCard

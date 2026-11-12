@@ -1,5 +1,7 @@
 // What `ask_question` takes and how a question reaches the guardian.
 
+import type { WidgetUi, WidgetUiComponent, WidgetUiCondition } from "@rome-os/app-runtime";
+
 function nonEmptyString(value: unknown): string | null {
   if (typeof value !== "string") return null;
   const trimmed = value.trim();
@@ -183,4 +185,187 @@ export function askQuestionToolOutput(
     },
     message: ASK_QUESTION_PARK_DIRECTIVE,
   };
+}
+
+/**
+ * The question card described as data, so every reader draws it from the same
+ * description. The card's data model holds one `{ values, text }` per question,
+ * in order: the picked options and the typed text. Send answers the waiting
+ * turn with `{ answers: <that list> }`, which {@link answersFromQuestionCard}
+ * turns into the answer shape the card has always sent.
+ */
+export function questionCardUi(questions: readonly Question[]): WidgetUi {
+  const components: WidgetUiComponent[] = [];
+  const rows: string[] = [];
+  const required: WidgetUiCondition[] = [];
+  questions.forEach((q, i) => {
+    const at = `/answers/${i}`;
+    const head = `q${i}`;
+    const parts = [`${head}-title`];
+    components.push({ id: `${head}-text`, component: "Text", text: q.question, variant: "h5" });
+    if (q.optional === true) {
+      components.push({
+        id: `${head}-optional`,
+        component: "Text",
+        text: { string: "optional" },
+        variant: "caption",
+      });
+    }
+    components.push({
+      id: `${head}-title`,
+      component: "Row",
+      children: q.optional === true ? [`${head}-text`, `${head}-optional`] : [`${head}-text`],
+    });
+    const answered: WidgetUiCondition[] = [];
+    if (q.type !== "text") {
+      const descriptions = q.optionDescriptions ?? {};
+      components.push({
+        id: `${head}-pick`,
+        component: "ChoicePicker",
+        variant: q.type === "multi" ? "multipleSelection" : "mutuallyExclusive",
+        options: (q.options ?? []).map((option) => ({
+          label: option,
+          value: option,
+          ...(Object.hasOwn(descriptions, option) ? { description: descriptions[option] } : {}),
+        })),
+        value: { path: `${at}/values` },
+        // On a single choice the last of a pick and typed text wins, as the
+        // guardian sees it.
+        ...(q.type === "single" && q.freeText === true ? { clears: { path: `${at}/text` } } : {}),
+      });
+      parts.push(`${head}-pick`);
+      answered.push({ call: "required", args: { value: { path: `${at}/values` } } });
+    }
+    if (q.type === "text" || q.freeText === true) {
+      components.push({
+        id: `${head}-own`,
+        component: "TextField",
+        label: q.question,
+        value: { path: `${at}/text` },
+        variant: q.type === "text" ? "longText" : "shortText",
+        placeholder: {
+          string: q.type === "text" ? "typeAnswer" : q.type === "multi" ? "addOwn" : "typeOwn",
+        },
+        ...(q.type === "single" ? { clears: { path: `${at}/values` } } : {}),
+      });
+      parts.push(`${head}-own`);
+      answered.push({ call: "required", args: { value: { path: `${at}/text` } } });
+    }
+    components.push({ id: head, component: "Column", children: parts });
+    rows.push(head);
+    if (q.optional !== true) {
+      required.push(
+        answered.length === 1 ? answered[0] : { call: "or", args: { values: answered } },
+      );
+    }
+  });
+  components.push(
+    { id: "send-label", component: "Text", text: { string: "send" } },
+    {
+      id: "send",
+      component: "Button",
+      child: "send-label",
+      variant: "primary",
+      action: { event: { name: "rome:answer", context: { answers: { path: "/answers" } } } },
+      checks: required.map((condition) => ({ condition, message: "" })),
+    },
+    { id: "dismiss-label", component: "Text", text: { string: "dismiss" } },
+    {
+      id: "dismiss",
+      component: "Button",
+      child: "dismiss-label",
+      variant: "borderless",
+      action: { event: { name: "rome:dismiss" } },
+    },
+    { id: "actions", component: "Row", children: ["dismiss", "send"], justify: "end" },
+    { id: "root", component: "Column", children: [...rows, "actions"] },
+  );
+  return {
+    components,
+    data: {
+      answers: questions.map((q) => ({
+        values: q.type === "single" ? (q.defaults ?? []).slice(0, 1) : (q.defaults ?? []),
+        text: q.type === "text" ? (q.defaultText ?? "") : "",
+      })),
+    },
+  };
+}
+
+/** One answer as the question card has always sent it. A multi answer joins
+ * its parts with ", " and keeps them in `values` when a part holds ", ". */
+export interface QuestionAnswer {
+  questionId: string;
+  value: string;
+  values?: string[];
+}
+
+/**
+ * The answers a described question card sent, as the question card has
+ * always sent them, or null when `output` is not from a described card.
+ * Blank answers are left out, so only optional questions can go unanswered.
+ * On a single-choice question the typed text wins over the pick.
+ */
+export function answersFromQuestionCard(
+  questions: readonly Question[],
+  output: unknown,
+): { answers: QuestionAnswer[] } | null {
+  const sent = (output as { answers?: unknown } | null)?.answers;
+  if (!Array.isArray(sent) || sent.some((a) => a && typeof a === "object" && "questionId" in a)) {
+    return null;
+  }
+  const answers = questions.flatMap((q, i): QuestionAnswer[] => {
+    const raw = (sent[i] ?? {}) as { values?: unknown; text?: unknown };
+    const picked = Array.isArray(raw.values)
+      ? raw.values.filter(
+          (v): v is string => typeof v === "string" && (q.options ?? []).includes(v),
+        )
+      : [];
+    const typed = typeof raw.text === "string" ? raw.text.trim() : "";
+    if (q.type === "multi") {
+      const parts = [...picked, ...(typed ? [typed] : [])];
+      if (parts.length === 0) return [];
+      const keep = parts.some((part) => part.includes(", ")) ? { values: parts } : {};
+      return [{ questionId: q.id, value: parts.join(", "), ...keep }];
+    }
+    const value = typed || (q.type === "single" ? (picked[0] ?? "") : "");
+    return value ? [{ questionId: q.id, value }] : [];
+  });
+  return { answers };
+}
+
+/**
+ * What a described question card would have sent for `answers` in the shape
+ * the question card has always sent, so a card answered by a reader that
+ * draws its own question card shows the same answer when drawn from its
+ * description. A value that is one of the options is a pick; the rest is
+ * typed text.
+ */
+export function questionCardFromAnswers(
+  questions: readonly Question[],
+  output: unknown,
+): { values: string[]; text: string }[] | null {
+  const sent = (output as { answers?: unknown } | null)?.answers;
+  if (!Array.isArray(sent)) return null;
+  const answers = sent.filter(
+    (a): a is QuestionAnswer =>
+      !!a &&
+      typeof a === "object" &&
+      typeof (a as QuestionAnswer).questionId === "string" &&
+      typeof (a as QuestionAnswer).value === "string",
+  );
+  if (answers.length !== sent.length) return null;
+  return questions.map((q) => {
+    const answer = answers.find((a) => a.questionId === q.id);
+    if (!answer) return { values: [], text: "" };
+    if (q.type === "text") return { values: [], text: answer.value };
+    const options = q.options ?? [];
+    const parts =
+      q.type === "multi"
+        ? (answer.values ?? answer.value.split(", ")).map((part) => part.trim())
+        : [answer.value];
+    return {
+      values: parts.filter((part) => options.includes(part)),
+      text: parts.filter((part) => part && !options.includes(part)).join(", "),
+    };
+  });
 }

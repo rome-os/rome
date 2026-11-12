@@ -81,3 +81,232 @@ export const mealPlannerCard = {
     ],
   },
 } as TranscriptPart;
+
+// `ask_question`'s card as core stores it: the question card's props, with
+// the same card described as data in `render.ui`, which the dashboard draws.
+export const dinnerQuestion = {
+  type: "pending_interaction",
+  toolUseId: "mock-dinner-question",
+  appId: "core",
+  render: {
+    kind: "inline",
+    componentId: "question-card",
+    props: {
+      questions: [
+        {
+          id: "dinner",
+          question: "What kind of dinner?",
+          type: "single",
+          options: ["High protein", "Something light"],
+          optionDescriptions: {
+            "High protein": "Chicken, tofu, eggs",
+          },
+          freeText: true,
+        },
+        {
+          id: "avoid",
+          question: "Anything to avoid?",
+          type: "multi",
+          options: ["Spicy", "Seafood", "Dairy"],
+          optional: true,
+        },
+      ],
+    },
+    builtin: true,
+    ui: {
+      components: [
+        {
+          id: "q0-text",
+          component: "Text",
+          text: "What kind of dinner?",
+          variant: "h5",
+        },
+        {
+          id: "q0-title",
+          component: "Row",
+          children: ["q0-text"],
+        },
+        {
+          id: "q0-pick",
+          component: "ChoicePicker",
+          variant: "mutuallyExclusive",
+          options: [
+            {
+              label: "High protein",
+              value: "High protein",
+              description: "Chicken, tofu, eggs",
+            },
+            {
+              label: "Something light",
+              value: "Something light",
+            },
+          ],
+          value: {
+            path: "/answers/0/values",
+          },
+          clears: {
+            path: "/answers/0/text",
+          },
+        },
+        {
+          id: "q0-own",
+          component: "TextField",
+          label: "What kind of dinner?",
+          value: {
+            path: "/answers/0/text",
+          },
+          variant: "shortText",
+          placeholder: {
+            string: "typeOwn",
+          },
+          clears: {
+            path: "/answers/0/values",
+          },
+        },
+        {
+          id: "q0",
+          component: "Column",
+          children: ["q0-title", "q0-pick", "q0-own"],
+        },
+        {
+          id: "q1-text",
+          component: "Text",
+          text: "Anything to avoid?",
+          variant: "h5",
+        },
+        {
+          id: "q1-optional",
+          component: "Text",
+          text: {
+            string: "optional",
+          },
+          variant: "caption",
+        },
+        {
+          id: "q1-title",
+          component: "Row",
+          children: ["q1-text", "q1-optional"],
+        },
+        {
+          id: "q1-pick",
+          component: "ChoicePicker",
+          variant: "multipleSelection",
+          options: [
+            {
+              label: "Spicy",
+              value: "Spicy",
+            },
+            {
+              label: "Seafood",
+              value: "Seafood",
+            },
+            {
+              label: "Dairy",
+              value: "Dairy",
+            },
+          ],
+          value: {
+            path: "/answers/1/values",
+          },
+        },
+        {
+          id: "q1",
+          component: "Column",
+          children: ["q1-title", "q1-pick"],
+        },
+        {
+          id: "send-label",
+          component: "Text",
+          text: {
+            string: "send",
+          },
+        },
+        {
+          id: "send",
+          component: "Button",
+          child: "send-label",
+          variant: "primary",
+          action: {
+            event: {
+              name: "rome:answer",
+              context: {
+                answers: {
+                  path: "/answers",
+                },
+              },
+            },
+          },
+          checks: [
+            {
+              condition: {
+                call: "or",
+                args: {
+                  values: [
+                    {
+                      call: "required",
+                      args: {
+                        value: {
+                          path: "/answers/0/values",
+                        },
+                      },
+                    },
+                    {
+                      call: "required",
+                      args: {
+                        value: {
+                          path: "/answers/0/text",
+                        },
+                      },
+                    },
+                  ],
+                },
+              },
+              message: "",
+            },
+          ],
+        },
+        {
+          id: "dismiss-label",
+          component: "Text",
+          text: {
+            string: "dismiss",
+          },
+        },
+        {
+          id: "dismiss",
+          component: "Button",
+          child: "dismiss-label",
+          variant: "borderless",
+          action: {
+            event: {
+              name: "rome:dismiss",
+            },
+          },
+        },
+        {
+          id: "actions",
+          component: "Row",
+          children: ["dismiss", "send"],
+          justify: "end",
+        },
+        {
+          id: "root",
+          component: "Column",
+          children: ["q0", "q1", "actions"],
+        },
+      ],
+      data: {
+        answers: [
+          {
+            values: [],
+            text: "",
+          },
+          {
+            values: [],
+            text: "",
+          },
+        ],
+      },
+    },
+  },
+} as TranscriptPart;
