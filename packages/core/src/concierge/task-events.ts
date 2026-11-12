@@ -86,6 +86,11 @@ export interface TaskEventDeps {
 interface Dirty {
   /** When the first change since the last settled flush arrived; a change after a build restarts it. */
   since: number;
+  /**
+   * Goes up with every change, and is new for a new entry: what a turn
+   * carried or said is forgotten only while it is still all there is.
+   */
+  version: number;
   changes: TaskChange[];
   urgent: boolean;
   /** Every change needs no word: the row waits for another one's flush. */
@@ -101,10 +106,11 @@ interface Dirty {
 }
 
 /** The news a turn said for one row, as {@link TaskEventCoalescer.snapshot} took it. */
-export type SaidNews = { readonly entry: object; readonly changes: number } | null;
+export type SaidNews = { readonly entry: object; readonly version: number } | null;
 
 export class TaskEventCoalescer {
   private dirty = new Map<string, Dirty>();
+  private versions = 0;
   private timer: ReturnType<typeof setTimeout> | null = null;
   private flushing = false;
   private lastFlushStartedAt = Number.NEGATIVE_INFINITY;
@@ -153,6 +159,7 @@ export class TaskEventCoalescer {
     const entry = this.dirty.get(change.taskId);
     if (!entry) {
       this.dirty.set(change.taskId, {
+        version: ++this.versions,
         since: now,
         changes: [change],
         urgent: change.urgent,
@@ -162,11 +169,13 @@ export class TaskEventCoalescer {
       // Everything the entry holds went into a payload already. This change
       // came after the build, so it is a new round, and a write that settles
       // the old round must not clear it.
+      entry.version = ++this.versions;
       entry.since = now;
       entry.changes = [change];
       entry.urgent = change.urgent;
       entry.passive = change.passive === true;
     } else {
+      entry.version = ++this.versions;
       entry.changes.push(change);
       entry.urgent ||= change.urgent;
       entry.passive &&= change.passive === true;
@@ -227,7 +236,7 @@ export class TaskEventCoalescer {
    */
   snapshot(taskId: string): SaidNews {
     const entry = this.dirty.get(taskId);
-    return entry ? { entry, changes: entry.changes.length } : null;
+    return entry ? { entry, version: entry.version } : null;
   }
 
   /**
@@ -238,7 +247,7 @@ export class TaskEventCoalescer {
   forgetSaid(taskId: string, said: SaidNews): boolean {
     const entry = this.dirty.get(taskId);
     if (!entry) return true;
-    if (said && entry === said.entry && entry.changes.length === said.changes) {
+    if (said && entry === said.entry && entry.version === said.version) {
       this.dirty.delete(taskId);
       this.changed();
       return true;
@@ -318,7 +327,7 @@ export class TaskEventCoalescer {
     const carried = new Map(
       taken.map(([taskId, entry]) => [
         taskId,
-        { entry, changes: entry.changes, urgent: entry.urgent },
+        { entry, changes: entry.changes, urgent: entry.urgent, version: entry.version },
       ]),
     );
     // Rows whose turn ran to its end.
@@ -384,7 +393,7 @@ export class TaskEventCoalescer {
     superseded: Set<string>,
     stopped: Set<string>,
     completed: Set<string>,
-    carried: Map<string, { entry: Dirty; changes: TaskChange[]; urgent: boolean }>,
+    carried: Map<string, { entry: Dirty; changes: TaskChange[]; urgent: boolean; version: number }>,
   ): void {
     for (const taskId of taskIds) {
       const entry = this.dirty.get(taskId);
@@ -420,7 +429,12 @@ export class TaskEventCoalescer {
         entry.builtAt = undefined;
       } else if (completed.has(taskId)) {
         // The turn ran to its end with the row's news: one delivery is enough.
-        this.dirty.delete(taskId);
+        // News that replaced what it carried, after a write settled that,
+        // waits for its own flush.
+        const before = carried.get(taskId);
+        if (before && entry === before.entry && entry.version === before.version) {
+          this.dirty.delete(taskId);
+        }
       }
     }
   }

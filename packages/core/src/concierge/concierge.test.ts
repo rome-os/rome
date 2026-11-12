@@ -1550,6 +1550,34 @@ describe("Concierge tools", () => {
     expect(cutoffs[0]).toBeGreaterThanOrEqual(askedAt);
   });
 
+  it("turns down an approval a stopped task's work asks for after its interrupt was accepted", async () => {
+    const s = setup();
+    const stopped = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    const open = JSON.parse(
+      (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+    );
+    await s.service.stopTask(stopped.taskId, "guardian");
+    const turnedDown: [string, string][] = [];
+    s.service.attachApprovalExpiry(async (chat, turnDown) => {
+      turnedDown.push([chat, turnDown.resolvedBy]);
+      return 1;
+    });
+    await s.settle();
+    turnedDown.length = 0;
+    const ask = (chatId: string) =>
+      s.createApproval({
+        status: "pending",
+        description: "Send the booking email",
+        payload: { channelContext: { threadId: chatId } },
+      });
+    ask(stopped.chatId);
+    ask(open.chatId);
+    await s.settle();
+    expect(turnedDown).toEqual([[stopped.chatId, RESOLVED_BY_STOP]]);
+  });
+
   it("drops a stop's turn-down retry once the task is taken up again", async () => {
     const s = setup();
     s.fakeTimers();

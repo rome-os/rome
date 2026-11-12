@@ -125,6 +125,32 @@ describe("TaskEventCoalescer", () => {
     });
   });
 
+  it("keeps news that replaced a row's settled news while its report ran to its end", async () => {
+    const s = setup();
+    s.holdTurns();
+    s.coalescer.mark(urgent("t1"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    expect(s.flushes).toHaveLength(1);
+    // The Concierge says it in that turn, and new news comes before the turn ends.
+    s.coalescer.settle("t1");
+    s.coalescer.mark(urgent("t1", "approval"));
+    await s.endTurn();
+    expect(s.coalescer.pending).toContain("t1");
+  });
+
+  it("forgets only the news a turn said, not news that came after a flush took it", async () => {
+    const s = setup();
+    s.holdTurns();
+    s.coalescer.mark(urgent("t1"));
+    // A turn says it before any flush built it.
+    const said = s.coalescer.snapshot("t1");
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    // A flush built it; then one new change starts a new round in the same entry.
+    s.coalescer.mark(urgent("t1", "approval"));
+    expect(s.coalescer.forgetSaid("t1", said)).toBe(false);
+    expect(s.coalescer.pending).toContain("t1");
+  });
+
   it("flushes an urgent change after 2 s, as one non-quiet batch", async () => {
     const s = setup();
     s.coalescer.mark(urgent("a"));

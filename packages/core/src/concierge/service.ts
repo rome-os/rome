@@ -1106,6 +1106,15 @@ export class ConciergeService {
     if (expire) void this.sweepStoppedApprovals();
   }
 
+  /**
+   * An approval was asked for in task chat `chatId` while its task is
+   * stopped: everything pending there was the stopped work's, so it is
+   * turned down.
+   */
+  async turnDownWhileStopped(chatId: string): Promise<void> {
+    await this.turnDownForStop(chatId, Number.POSITIVE_INFINITY);
+  }
+
   /** Turns down every approval still pending in a stopped task's chat. */
   async sweepStoppedApprovals(): Promise<void> {
     const chats = await this.deps.tasks.repo.stoppedTaskChats().catch((error: unknown) => {
