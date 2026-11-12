@@ -287,6 +287,7 @@ cmd_reset() {
 cmd_walk() {
   cmd_reset
   log "walking from the landing page to a Rome's chat ..."
+  rm -rf "$STATE_DIR/walk"
   mkdir -p "$STATE_DIR/walk"
   docker run --rm --user "$(id -u):$(id -g)" -e HOME=/tmp \
     -e "CLOUD_ORIGIN=$CLOUD_ORIGIN" -e "ROME_DOMAIN=$DOMAIN" -e OUT=/out \

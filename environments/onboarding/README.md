@@ -51,5 +51,6 @@ Measured on the devbox:
 | --- | --- |
 | `up` with the Rome image already built and the database removed | 12 s |
 | `walk`, from reset to the Rome's chat | 88 s |
+| `walk` after `down` and a new commit, including the image rebuild | 97 s |
 
-A change to Rome code adds the Rome image build to `up`, which takes a few minutes and has not been timed separately.
+A rebuild with an empty Docker build cache takes longer and has not been timed.
