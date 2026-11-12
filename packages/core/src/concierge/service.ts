@@ -40,7 +40,7 @@ import type { ConciergeTasks } from "./tasks.js";
 import type { TaskSchedules } from "./task-schedule.js";
 import { taskChatPlace } from "./task-chat.js";
 import type { TaskChecks } from "./task-checks.js";
-import type { TurnDown } from "./approval-expiry.js";
+import { RESOLVED_BY_STOP, type TurnDown } from "./approval-expiry.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../webchat/owner.js";
@@ -246,6 +246,8 @@ export class ConciergeService {
   private readonly handedOnPrompts = new Map<string, string[]>();
   /** Per Concierge turn, the tasks whose result it said. */
   private readonly relayedInTurn = new Map<string, Set<string>>();
+  /** What each Concierge turn said, by its parts, task and answered messages: a repeat is the same message. */
+  private readonly saidByKey = new Map<string, Map<string, string>>();
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
   private attachedFollowing: ConciergeFollowing | null = null;
   private readonly push: ConciergePush | null;
@@ -826,10 +828,23 @@ export class ConciergeService {
     this.taskEvents?.settle(taskId);
   }
 
+  /** The message Concierge turn `turnId` said as `key` already, if it did. */
+  saidInTurn(turnId: string, key: string): string | undefined {
+    return this.saidByKey.get(turnId)?.get(key);
+  }
+
+  /** Concierge turn `turnId` said message `id` as `key`; forgotten with its relayed tasks. */
+  keepSaid(turnId: string, key: string, id: string): void {
+    const said = this.saidByKey.get(turnId) ?? new Map<string, string>();
+    said.set(key, id);
+    this.saidByKey.set(turnId, said);
+  }
+
   /** The tasks whose result Concierge turn `turnId` said, forgotten once read. */
   takeRelayed(turnId: string): string[] {
     const tasks = this.relayedInTurn.get(turnId);
     this.relayedInTurn.delete(turnId);
+    this.saidByKey.delete(turnId);
     return tasks ? [...tasks] : [];
   }
 
@@ -841,6 +856,12 @@ export class ConciergeService {
    */
   carriedReport(chatId: string): readonly string[] | undefined {
     return this.carriedReports.get(chatId);
+  }
+
+  /** Whether a running Concierge turn took over a cut-short report that holds task `taskId`'s news. */
+  carriesReport(taskId: string): boolean {
+    for (const tasks of this.carriedReports.values()) if (tasks.includes(taskId)) return true;
+    return false;
   }
 
   /** A Concierge turn in `chatId` ended without handing its work on. */
@@ -1039,26 +1060,29 @@ export class ConciergeService {
     this.approvalExpiry = expire;
   }
 
-  /** Turns down task chat `chatId`'s approvals still pending (approval-expiry.ts). */
+  /**
+   * Turns down task chat `chatId`'s approvals still pending (approval-expiry.ts).
+   * A failure reaches the caller, so an expiry that turned none down is not
+   * taken as handled and is tried again.
+   */
   async expireApprovals(chatId: string, turnDown: TurnDown): Promise<number> {
-    return (
-      (await this.approvalExpiry?.(chatId, turnDown).catch((error: unknown) => {
-        log.warn("failed to turn down a task chat's approvals", {
-          chatId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        return 0;
-      })) ?? 0
-    );
+    return (await this.approvalExpiry?.(chatId, turnDown)) ?? 0;
   }
 
   /** A task ended by a stop: nothing approved later runs for it, and no turn carries on. */
   private async turnDownForStop(chatId: string): Promise<void> {
+    // The stop goes ahead whatever happens here.
     await this.expireApprovals(chatId, {
       until: Number.POSITIVE_INFINITY,
       reason: "The task was stopped",
+      resolvedBy: RESOLVED_BY_STOP,
       continueTurn: false,
-    });
+    }).catch((error: unknown) =>
+      log.warn("failed to turn down a stopped task chat's approvals", {
+        chatId,
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    );
   }
 
   /** Cancels every check scheduled for task `taskId`, and its schedule, as when it is stopped or archived. */
@@ -1077,16 +1101,6 @@ export class ConciergeService {
         error: error instanceof Error ? error.message : String(error),
       }),
     );
-  }
-
-  /**
-   * Cancels task `taskId`'s pending checks from its row, and leaves the task
-   * in place: a wake-up is removed, its schedule skips only its next run.
-   */
-  async cancelPendingChecks(taskId: string): Promise<void> {
-    const row = await this.deps.tasks.repo.get(taskId);
-    if (!row) return;
-    await this.deps.checks?.cancelFor(taskId, ownerOf(row), { keepSchedule: true });
   }
 
   /** Task chats whose scheduled run in flight reports only when it matters. */
@@ -1136,6 +1150,20 @@ export class ConciergeService {
    */
   takeQuietRun(chatId: string): boolean {
     return this.quietRuns.delete(chatId);
+  }
+
+  /**
+   * Task `taskId`'s owner called its checks off from its row: a wake-up is
+   * removed, and its schedule skips only its next run. A failure reaches the
+   * caller; once they are cancelled, the Concierge hears of it
+   * quietly, so it expects no wake-up from them.
+   */
+  async cancelChecksByOwner(taskId: string): Promise<void> {
+    const row = await this.deps.tasks.repo.get(taskId);
+    if (!row) return;
+    await this.deps.checks?.cancelFor(taskId, ownerOf(row), { keepSchedule: true });
+    this.taskEvents?.mark({ taskId, kind: "checks_cancelled_by_owner", urgent: false });
+    await this.deps.tasks.taskChanged(taskId);
   }
 
   /**

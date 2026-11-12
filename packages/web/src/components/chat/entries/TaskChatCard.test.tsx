@@ -201,38 +201,34 @@ function show(isLatestForChat = true, as?: "task" | "ask") {
 }
 
 describe("TaskChatCard shown as one card or the other", () => {
-  it("shows a task's question alone under a header that opens the task chat, with no Stop, Open or status", async () => {
+  const expiredRow = {
+    id: "task-9",
+    title: "Draft email",
+    state: "dropped",
+    status: "ended",
+    endReason: "no_response",
+    chat: { id: chatId, name: "Draft email" },
+    conciergeChat: { id: "concierge", name: "Concierge", main: true },
+    createdAt: 1,
+    updatedAt: 2,
+  };
+  const answered = (value: string): ChatMessage =>
+    message("answer", [
+      {
+        type: "interaction_result",
+        toolUseId: "item_0",
+        output: { answers: [{ questionId: "tone", value }] },
+      },
+    ]);
+
+  it("shows a task's question alone, with no header, Stop, Open or status", async () => {
     show(true, "ask");
     expect(await screen.findByText("Which tone?")).toBeTruthy();
-    expect(
-      screen.getByRole("link", { name: "Open task chat Draft email" }).getAttribute("href"),
-    ).toBe(`/chat/${chatId}`);
+    expect(screen.queryByRole("link")).toBeNull();
     expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
-    expect(screen.queryByRole("link", { name: "Open" })).toBeNull();
     expect(screen.queryByText(/Task chat ·/)).toBeNull();
-  });
-
-  it("folds an answered question to a short line", async () => {
-    postAction = () => {
-      waiting = false;
-      // The task chat now holds the answer.
-      messages = [
-        ...messages,
-        message("answer", [
-          {
-            type: "interaction_result",
-            toolUseId: "item_0",
-            output: { answers: [{ questionId: "tone", value: "Warm" }] },
-          },
-        ]),
-      ];
-    };
-    show(true, "ask");
-    const user = userEvent.setup();
-    await user.click(await screen.findByRole("button", { name: "Warm" }));
-    await user.click(screen.getByRole("button", { name: "Send" }));
-    await waitFor(() => expect(screen.queryByText("Which tone?")).toBeNull());
-    expect(await screen.findByText("Answered: Warm")).toBeTruthy();
+    // It waits on the guardian: the Needs you jump counts it.
+    expect(document.querySelector("[data-chat-task-waiting]")).toBeTruthy();
   });
 
   it("shows an approval the same way", async () => {
@@ -243,34 +239,64 @@ describe("TaskChatCard shown as one card or the other", () => {
     expect(screen.queryByText(/Task chat ·/)).toBeNull();
   });
 
-  it("still says an expired question takes an answer", async () => {
-    taskRows = [
-      {
-        id: "task-9",
-        title: "Draft email",
-        state: "dropped",
-        status: "ended",
-        endReason: "no_response",
-        chat: { id: chatId, name: "Draft email" },
-        conciergeChat: { id: "concierge", name: "Concierge", main: true },
-        createdAt: 1,
-        updatedAt: 2,
-      },
+  it("folds an answered question to what it asked and how it ended, and opens it read-only", async () => {
+    postAction = () => {
+      waiting = false;
+      messages = [...messages, answered("Warm")];
+    };
+    show(true, "ask");
+    const user = userEvent.setup();
+    await user.click(await screen.findByRole("button", { name: "Warm" }));
+    await user.click(screen.getByRole("button", { name: "Send" }));
+    const folded = (await screen.findByText("Answered: Warm")).closest("button")!;
+    expect(folded.textContent).toContain("Which tone?");
+    expect(folded.getAttribute("aria-expanded")).toBe("false");
+    await user.click(folded);
+    expect(folded.getAttribute("aria-expanded")).toBe("true");
+    // The original card, answered: nothing to send.
+    expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
+  });
+
+  it("shows an app's own waiting card as a card that opens the task chat, not an empty block", async () => {
+    messages = [
+      message("ask", [
+        {
+          type: "pending_interaction",
+          toolUseId: "item_1",
+          appId: "connector",
+          render: { kind: "inline", componentId: "login-card", props: {} },
+        },
+      ]),
     ];
     show(true, "ask");
-    expect(await screen.findByText("Expired — answer to continue")).toBeTruthy();
+    const card = await screen.findByRole("button", { name: "Open the task chat to answer" });
+    // It is what the "Needs you" jump lands on.
+    expect(card.closest("[data-chat-task-waiting]")).toBeTruthy();
+  });
+
+  it("folds an expired question to a card that waits on no one, and opens to the form", async () => {
+    taskRows = [expiredRow];
+    show(true, "ask");
+    // In a card like any settled one: what it asked, then that it expired.
+    const line = await screen.findByRole("button", {
+      name: "Which tone?Expired · answer to continue",
+    });
+    expect(line.closest("[data-chat-settled-card]")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Warm" })).toBeNull();
+    expect(document.querySelector("[data-chat-task-waiting]")).toBeNull();
+    await userEvent.setup().click(line);
     expect(await screen.findByText("Which tone?")).toBeTruthy();
+    expect(screen.getByText("Expired — answer to continue")).toBeTruthy();
+    // Opened, it still takes an answer, but counts as waiting nowhere.
+    expect(document.querySelector("[data-chat-task-waiting]")).toBeNull();
   });
 
   describe("folded", () => {
-    const folded = async (line: string) => {
+    const folded = async (outcome: string) => {
       waiting = false;
       show(true, "ask");
-      const text = await screen.findByText(line);
-      // One card holds the task's header and the line.
-      const card = text.parentElement!;
-      expect(card.querySelector('a[aria-label="Open task chat Draft email"]')).toBeTruthy();
-      expect(card.className).toContain("rounded-12");
+      const text = await screen.findByText(outcome);
+      return text.closest("button")!;
     };
     const decided = (status: string, resolvedBy: string) => ({
       ...approval(),
@@ -280,32 +306,12 @@ describe("TaskChatCard shown as one card or the other", () => {
     });
 
     it("says a question was answered, with the answer when it is short", async () => {
-      messages = [
-        message("ask", [question]),
-        message("answer", [
-          {
-            type: "interaction_result",
-            toolUseId: "item_0",
-            output: { answers: [{ questionId: "tone", value: "Warm" }] },
-          },
-        ]),
-      ];
-      await folded("Answered: Warm");
+      messages = [message("ask", [question]), answered("Warm")];
+      expect((await folded("Answered: Warm")).textContent).toContain("Which tone?");
     });
 
     it("says only Answered when the answer is long", async () => {
-      messages = [
-        message("ask", [question]),
-        message("answer", [
-          {
-            type: "interaction_result",
-            toolUseId: "item_0",
-            output: {
-              answers: [{ questionId: "tone", value: "Warm, but keep it short and kind" }],
-            },
-          },
-        ]),
-      ];
+      messages = [message("ask", [question]), answered("Warm, but keep it short and kind")];
       await folded("Answered");
     });
 
@@ -314,14 +320,24 @@ describe("TaskChatCard shown as one card or the other", () => {
       await folded("Dismissed");
     });
 
-    it("says an approval the guardian approved", async () => {
+    it("says an approval the guardian approved, under its title", async () => {
       allApprovals = [decided("executed", "dev")];
-      await folded("Approved");
+      expect((await folded("Approved")).textContent).toContain("Send the draft");
     });
 
     it("says an approval the guardian rejected", async () => {
       allApprovals = [decided("rejected", "dev")];
       await folded("Rejected");
+    });
+
+    it("says an approval Rome turned down when the wait ran out", async () => {
+      allApprovals = [decided("rejected", "rome:task-ended")];
+      await folded("Turned down: no answer within a day");
+    });
+
+    it("says an approval Rome turned down because its task was stopped", async () => {
+      allApprovals = [decided("rejected", "rome:task-stopped")];
+      await folded("Turned down: task stopped");
     });
 
     it("says a copy shown again still waits, for the card below, rather than claim an answer", async () => {
@@ -332,11 +348,6 @@ describe("TaskChatCard shown as one card or the other", () => {
       expect(screen.queryByText(/^Answered/)).toBeNull();
     });
 
-    it("says an approval Rome turned down when the wait ran out", async () => {
-      allApprovals = [decided("rejected", "rome:task-ended")];
-      await folded("Turned down: no answer within a day");
-    });
-
     it("says it in Chinese too", async () => {
       await i18n.changeLanguage("zh-CN");
       allApprovals = [decided("rejected", "rome:task-ended")];
@@ -344,30 +355,6 @@ describe("TaskChatCard shown as one card or the other", () => {
       show(true, "ask");
       expect(await screen.findByText("已自动拒绝：一天内没有回应")).toBeTruthy();
     });
-  });
-
-  it("keeps an expired question's header and its expired line inside the card, above the form", async () => {
-    taskRows = [
-      {
-        id: "task-9",
-        title: "Draft email",
-        state: "dropped",
-        status: "ended",
-        endReason: "no_response",
-        chat: { id: chatId, name: "Draft email" },
-        conciergeChat: { id: "concierge", name: "Concierge", main: true },
-        createdAt: 1,
-        updatedAt: 2,
-      },
-    ];
-    show(true, "ask");
-    const expired = await screen.findByText("Expired — answer to continue");
-    const card = expired.closest("[data-chat-pending-card]")!;
-    expect(card).toBeTruthy();
-    expect(card.querySelector('a[aria-label="Open task chat Draft email"]')).toBeTruthy();
-    expect(card.textContent?.indexOf("Expired")).toBeLessThan(
-      card.textContent!.indexOf("Which tone?"),
-    );
   });
 
   it("keeps the task card to its title, status, Stop and Open, with no question inside", async () => {
@@ -609,7 +596,7 @@ describe("TaskChatCard", () => {
       ],
     });
     expect(screen.queryByRole("button", { name: "Send" })).toBeNull();
-    expect(screen.getByText("Answered")).toBeTruthy();
+    expect(screen.getByText("Answered: Warm")).toBeTruthy();
     expect(screen.getByRole("link").getAttribute("href")).toBe(`/chat/${chatId}`);
     await waitFor(() =>
       expect(

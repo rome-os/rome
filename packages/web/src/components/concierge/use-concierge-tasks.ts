@@ -42,6 +42,7 @@ const taskSchema = z.object({
   dueAt: z.number().nullable(),
   rank: z.number().nullable(),
   chat: z.object({ id: z.string(), name: z.string() }).nullable(),
+  threadRoot: z.string().nullable().optional(),
   // A row that names no Concierge chat is the main chat's.
   conciergeChat: z
     .object({ id: z.string(), name: z.string(), main: z.boolean() })

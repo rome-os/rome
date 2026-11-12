@@ -33,13 +33,16 @@
       "checkFailed": "Could not check the connection"
     },
     "ask": {
+      "expiredFold": "Expired · answer to continue",
       "answered": "Answered",
       "answeredWith": "Answered: {{answer}}",
       "dismissed": "Dismissed",
       "approved": "Approved",
       "rejected": "Rejected",
       "waitingBelow": "Waiting: answer the card below",
-      "turnedDown": "Turned down: no answer within a day"
+      "turnedDown": "Turned down: no answer within a day",
+      "turnedDownStopped": "Turned down: task stopped",
+      "openToAnswer": "Open the task chat to answer"
     },
     "taskCardAlreadyAnswered": "This card was already answered. The task has been refreshed.",
     "openTaskChat": "Open",
@@ -416,7 +419,6 @@
     "typeAnswer": "Type your answer…",
     "dismissed": "Dismissed",
     "answered": "Answered",
-    "askedByRome": "Asked by Rome",
     "dismiss": "Dismiss",
     "send": "Send"
   },
@@ -618,6 +620,7 @@
   },
   "thread": {
     "title": "Chat thread",
+    "openTaskChat": "Open task chat",
     "close": "Close chat thread",
     "loadFailed": "Couldn't load this chat thread.",
     "replyPlaceholder": "Reply"

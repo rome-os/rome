@@ -5,6 +5,7 @@ import { Field, FieldGroup, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { answerOutcome, SettledCard } from "./SettledCard";
 
 // Core built-in rendering of the agent's `ask_question` tool. The tool parks the
 // turn with a `pending_interaction` whose render is `{ kind: "inline",
@@ -129,16 +130,38 @@ export interface QuestionCardProps {
   onDismiss: (toolUseId: string) => void;
   /** Shown at the top inside the card, such as the task it is for. */
   header?: ReactNode;
+  /**
+   * How it shows once answered or dismissed: folded to what it asked and how
+   * it ended, opening to the whole card read-only (the default), or whole.
+   */
+  settled?: "fold" | "full";
 }
 
-export function QuestionCard({
+export function QuestionCard({ settled = "fold", ...card }: QuestionCardProps) {
+  const { t } = useTranslation("chat");
+  if (settled === "fold" && card.result !== undefined) {
+    const title = parseQuestions(card.props)
+      .map((q) => q.question)
+      .join(" · ");
+    return (
+      <SettledCard
+        title={title || null}
+        outcome={answerOutcome(t, card.result)}
+        full={<WholeQuestionCard {...card} />}
+      />
+    );
+  }
+  return <WholeQuestionCard {...card} />;
+}
+
+function WholeQuestionCard({
   toolUseId,
   props,
   result,
   onSubmit,
   onDismiss,
   header,
-}: QuestionCardProps) {
+}: Omit<QuestionCardProps, "settled">) {
   const { t } = useTranslation("chat");
   const questions = parseQuestions(props);
   const resolved = result !== undefined;
@@ -249,13 +272,14 @@ export function QuestionCard({
   return (
     <div
       tabIndex={-1}
+      data-chat-card
       data-chat-pending-card={!locked ? "" : undefined}
       className="mb-4 min-w-0 max-w-full rounded-12 border border-border bg-surface"
     >
       {header ? <div className="flex min-w-0 flex-col px-4 pt-3">{header}</div> : null}
       {/* A fieldset defaults to min-width: min-content, which can widen the card. */}
-      <fieldset disabled={locked} className="min-w-0 p-4">
-        <FieldGroup className="space-y-5">
+      <fieldset disabled={locked} className="min-w-0 px-4 pt-3 pb-2">
+        <FieldGroup className="space-y-4">
           {questions.map((q) => (
             <Field key={q.id} className="space-y-2">
               <FieldLabel className="wrap-anywhere">
@@ -355,14 +379,12 @@ export function QuestionCard({
         </FieldGroup>
       </fieldset>
 
-      <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-4 py-3">
-        <span className="text-aux text-muted-foreground">
-          {locked
-            ? dismissed
-              ? t("questionCard.dismissed")
-              : t("questionCard.answered")
-            : t("questionCard.askedByRome")}
-        </span>
+      <div className="flex flex-wrap items-center justify-end gap-2 px-4 pb-3">
+        {locked ? (
+          <span className="mr-auto text-aux text-muted-foreground">
+            {dismissed ? t("questionCard.dismissed") : t("questionCard.answered")}
+          </span>
+        ) : null}
         {!locked && (
           <div className="flex gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => onDismiss(toolUseId)}>

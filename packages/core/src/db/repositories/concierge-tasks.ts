@@ -218,6 +218,19 @@ export class ConciergeTasksRepository {
     await this.announce(row.id, "refresh");
   }
 
+  /**
+   * Task `id`'s summary, from the result its task chat just gave: Rome keeps
+   * a finished task's line current. A summary the Concierge writes after
+   * this replaces it, as any write does.
+   */
+  async setResultSummary(id: string, summary: string, now = new Date()): Promise<void> {
+    await this.db
+      .update(conciergeTasks)
+      .set({ summary, updatedAt: now })
+      .where(eq(conciergeTasks.id, id));
+    await this.announce(id, "refresh");
+  }
+
   /** How task `id`'s task chat's latest work ended. Rome writes it; the Concierge never does. */
   async setLastOutcome(
     id: string,
@@ -851,6 +864,19 @@ export class ConciergeTasksRepository {
       .returning({ id: conciergeTasks.id });
     if (marked.length > 0) await this.announce(id, "refresh");
     return marked.length > 0;
+  }
+
+  /**
+   * Task `id` was written to after its wait ended for no response, and that
+   * wait is over: it ends for no response no more.
+   */
+  async clearWaitExpired(id: string): Promise<void> {
+    const cleared = await this.db
+      .update(conciergeTasks)
+      .set({ expiredWaitAt: null, noResponseUnlisted: false })
+      .where(and(eq(conciergeTasks.id, id), isNotNull(conciergeTasks.expiredWaitAt)))
+      .returning({ id: conciergeTasks.id });
+    if (cleared.length > 0) await this.announce(id, "refresh");
   }
 
   /** The tasks of `taskIds` that ended for no response and no digest listed yet. */

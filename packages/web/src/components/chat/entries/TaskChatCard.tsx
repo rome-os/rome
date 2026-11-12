@@ -2,7 +2,7 @@ import { ChatBubbleIcon } from "@radix-ui/react-icons";
 import { useQuery } from "@tanstack/react-query";
 import { createContext, type ReactNode, useContext, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { taskStatusOfDto } from "@rome/api-types/concierge-task-status";
 import { stopTask } from "@/components/concierge/send-task-action";
@@ -10,12 +10,12 @@ import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
 import { Button } from "@/components/ui/button";
 import { useApprovals } from "@/hooks/use-approvals";
 import { listSessionMessagePage, postSessionTurnJson } from "@/lib/chat-api";
-import type { ChatMessage } from "@/lib/chat-types";
+import type { ApprovalCardStatus, ChatMessage } from "@/lib/chat-types";
 import { ApprovalCard } from "../approval/ApprovalCard";
-import { ForwardedChip } from "../ForwardedChip";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
 import { QuestionCard } from "./QuestionCard";
+import { answerOutcome, approvalOutcome, SettledCard } from "./SettledCard";
 
 const sessionRunningSchema = z.object({ sessionId: z.string(), running: z.boolean() });
 
@@ -49,14 +49,15 @@ export function TaskChatCard(props: {
 }
 
 /**
- * A task's question or approval, shown in the Concierge chat on its own: a
- * quiet header that names the task and opens its chat, inside the card. Once
- * answered, decided or turned down, or superseded by a later one, it folds to
- * one small card that says how it ended.
+ * A task's question or approval, shown in the Concierge chat on its own. The
+ * label under its message names the task. Once answered, decided or turned
+ * down, or superseded by a later one, it folds to a small card: what it
+ * asked, then how it ended, opening to the original read-only. An expired
+ * question folds to one quiet line that opens to the form, and counts as
+ * waiting nowhere until it is opened.
  */
 function TaskAskCard({
   chatId,
-  title,
   isLatestForChat,
 }: {
   chatId: string;
@@ -66,11 +67,13 @@ function TaskAskCard({
   const { t } = useTranslation("chat");
   const { sessions, invalidate } = useChatSessions("all", "all");
   const { tasks } = useConciergeTasks();
+  const [open, setOpen] = useState(false);
   const session = sessions?.find((candidate) => candidate.id === chatId);
   const task = tasks.find((candidate) => candidate.chat?.id === chatId);
   const derived = task ? taskStatusOfDto(task) : null;
   const waiting = isLatestForChat && session?.awaitingGuardian === true;
-  const chip = <ForwardedChip chatId={chatId} title={session?.name ?? title} />;
+  const expired = waiting && derived?.endReason === "no_response";
+  if (expired && !open) return <ExpiredAskCard chatId={chatId} onOpen={() => setOpen(true)} />;
   if (waiting) {
     return (
       <div className="flex w-full min-w-0 max-w-md flex-col">
@@ -78,25 +81,40 @@ function TaskAskCard({
           key={chatId}
           chatId={chatId}
           onRefresh={invalidate}
+          // An expired question opened again takes an answer, yet waits on no one.
+          countsAsWaiting={!expired}
           header={
-            <>
-              {chip}
-              {derived?.endReason === "no_response" ? (
-                // The wait ran out and the task ended, yet its card still takes an answer.
-                <p className="text-aux text-muted-foreground">{t("concierge.tasks.expired")}</p>
-              ) : null}
-            </>
+            expired ? (
+              <p className="text-aux text-muted-foreground">{t("concierge.tasks.expired")}</p>
+            ) : undefined
           }
         />
       </div>
     );
   }
   if (!session) return null;
+  return <FoldedAskCard chatId={chatId} />;
+}
+
+/**
+ * An expired question, folded to a card: what it asked, then that it expired
+ * and takes an answer still. A click opens the form.
+ */
+function ExpiredAskCard({ chatId, onOpen }: { chatId: string; onOpen: () => void }) {
+  const { t } = useTranslation("chat");
+  const messages = useQuery({
+    queryKey: ["task-chat-cards", chatId],
+    queryFn: () => listSessionMessagePage(chatId, { limit: 2 }),
+  });
+  const props = latestOpenInteraction(messages.data?.messages ?? [])?.part.render?.props;
+  const question = (props?.questions as { question?: unknown }[] | undefined)?.[0]?.question;
   return (
-    <div className="flex w-full min-w-0 max-w-md flex-col rounded-12 border border-border bg-surface px-4 py-2">
-      {chip}
-      <FoldedAskLine chatId={chatId} />
-    </div>
+    <SettledCard
+      title={typeof question === "string" ? question : null}
+      outcome={t("concierge.ask.expiredFold")}
+      onOpen={onOpen}
+      chevron
+    />
   );
 }
 
@@ -106,15 +124,13 @@ const resultSchema = z.object({
   output: z.record(z.string(), z.unknown()).optional(),
 });
 
-/** An answer short enough to repeat on the folded card. */
-const SHORT_ANSWER = 24;
-
 /**
- * How a task's question or approval ended, from the task chat's latest one:
- * the answer, or that it was dismissed; an approval approved, rejected, or
- * turned down by Rome when the wait ran out.
+ * A task's question or approval that is no longer open: what it asked, then
+ * how it ended (the answer, or that it was dismissed; an approval approved,
+ * rejected, or turned down by Rome when the wait ran out; or still waiting
+ * on a newer copy below). It opens to the original, read-only.
  */
-function FoldedAskLine({ chatId }: { chatId: string }) {
+function FoldedAskCard({ chatId }: { chatId: string }) {
   const { t } = useTranslation("chat");
   const messages = useQuery({
     queryKey: ["task-chat-cards", chatId],
@@ -122,14 +138,16 @@ function FoldedAskLine({ chatId }: { chatId: string }) {
   });
   const approvals = useApprovals();
   const approval = (approvals.data ?? [])
-    .filter(
-      (row) =>
-        approvalPayloadSchema.safeParse(row.payload).data?.channelContext.threadId === chatId,
-    )
-    .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))[0];
-  // The latest answer to a question, and when it came, and the latest question asked.
-  let answer: { at: string; output: Record<string, unknown> } | null = null;
-  let asked: string | null = null;
+    .flatMap((row) => {
+      const payload = approvalPayloadSchema.safeParse(row.payload);
+      return payload.success && payload.data.channelContext.threadId === chatId
+        ? [{ row, payload: payload.data }]
+        : [];
+    })
+    .sort((a, b) => Date.parse(b.row.createdAt) - Date.parse(a.row.createdAt))[0];
+  // The latest question asked, and the latest answer, with when each came.
+  let answer: { at: string; toolUseId: string; output: Record<string, unknown> } | null = null;
+  let asked: { at: string; part: z.infer<typeof interactionSchema> } | null = null;
   for (const message of messages.data?.messages ?? []) {
     let parts: unknown;
     try {
@@ -139,46 +157,84 @@ function FoldedAskLine({ chatId }: { chatId: string }) {
     }
     if (!Array.isArray(parts)) continue;
     for (const raw of parts) {
-      const parsed = resultSchema.safeParse(raw);
-      if (parsed.success) answer = { at: message.createdAt, output: parsed.data.output ?? {} };
-      if (interactionSchema.safeParse(raw).data?.type === "pending_interaction") {
-        asked = message.createdAt;
+      const result = resultSchema.safeParse(raw);
+      if (result.success) {
+        answer = {
+          at: message.createdAt,
+          toolUseId: result.data.toolUseId,
+          output: result.data.output ?? {},
+        };
+      }
+      const interaction = interactionSchema.safeParse(raw);
+      if (interaction.success && interaction.data.type === "pending_interaction") {
+        asked = { at: message.createdAt, part: interaction.data };
       }
     }
   }
+  const lastQuestionAt = Math.max(
+    asked ? Date.parse(asked.at) : 0,
+    answer ? Date.parse(answer.at) : 0,
+  );
   const approvalIsLatest =
-    approval !== undefined &&
-    (answer === null || Date.parse(approval.createdAt) > Date.parse(answer.at));
-  // A copy shown again later still waits: the newer card below takes the answer.
+    approval !== undefined && Date.parse(approval.row.createdAt) > lastQuestionAt;
   const questionOpen =
     !approvalIsLatest &&
     asked !== null &&
-    (answer === null || Date.parse(asked) > Date.parse(answer.at));
-  let line: string;
-  if ((approvalIsLatest && approval.status === "pending") || questionOpen) {
-    line = t("concierge.ask.waitingBelow");
+    (answer === null || Date.parse(asked.at) > Date.parse(answer.at));
+  const props = asked?.part.render?.props;
+  const questionTitle = (props?.questions as { question?: unknown }[] | undefined)?.[0]?.question as
+    | string
+    | undefined;
+  const title = approvalIsLatest
+    ? approval.payload.preview?.kind === "generic"
+      ? approval.payload.preview.title
+      : approval.row.description
+    : (questionTitle ?? null);
+  let outcome: string;
+  if ((approvalIsLatest && approval.row.status === "pending") || questionOpen) {
+    outcome = t("concierge.ask.waitingBelow");
   } else if (approvalIsLatest) {
-    line =
-      approval.resolvedBy === "rome:task-ended"
-        ? t("concierge.ask.turnedDown")
-        : approval.status === "rejected"
-          ? t("concierge.ask.rejected")
-          : t("concierge.ask.approved");
-  } else if (answer?.output.dismissed === true) {
-    line = t("concierge.ask.dismissed");
+    outcome = approvalOutcome(t, approval.row.status, approval.row.resolvedBy);
   } else {
-    const values = (Array.isArray(answer?.output.answers) ? answer.output.answers : [])
-      .map((entry) =>
-        entry && typeof entry === "object" ? (entry as { value?: unknown }).value : undefined,
-      )
-      .filter((value): value is string => typeof value === "string" && value.trim() !== "");
-    const text = values.join(", ");
-    line =
-      text && text.length <= SHORT_ANSWER
-        ? t("concierge.ask.answeredWith", { answer: text })
-        : t("concierge.ask.answered");
+    outcome = answerOutcome(t, answer?.output ?? {});
   }
-  return <p className="text-aux text-muted-foreground">{line}</p>;
+  return (
+    <SettledCard
+      title={title}
+      outcome={outcome}
+      full={
+        approvalIsLatest ? (
+          <ApprovalCard
+            approvalId={approval.row.id}
+            actionName={approval.payload.actionName}
+            preview={
+              approval.payload.preview ?? {
+                kind: "generic",
+                title: approval.row.description,
+                summary: "",
+              }
+            }
+            status={approval.row.status as ApprovalCardStatus}
+            onResolved={() => {}}
+            settled="full"
+          />
+        ) : !questionOpen && asked?.part.render?.componentId === "question-card" ? (
+          <QuestionCard
+            toolUseId={asked.part.toolUseId}
+            props={props}
+            result={
+              answer && answer.toolUseId === asked.part.toolUseId
+                ? answer.output
+                : { dismissed: true }
+            }
+            onSubmit={() => {}}
+            onDismiss={() => {}}
+            settled="full"
+          />
+        ) : undefined
+      }
+    />
+  );
 }
 
 function StaticTaskChatCard({ title }: { title: string }) {
@@ -359,13 +415,17 @@ function WaitingTaskCard({
   chatId,
   onRefresh,
   header,
+  countsAsWaiting = true,
 }: {
   chatId: string;
   onRefresh: () => Promise<void>;
   /** Shown at the top inside the question or approval card. */
   header?: ReactNode;
+  /** Whether the "Needs you" jump counts it; an expired question does not. */
+  countsAsWaiting?: boolean;
 }) {
   const { t } = useTranslation("chat");
+  const navigate = useNavigate();
   const messages = useQuery({
     queryKey: ["task-chat-cards", chatId],
     // Waiting questions follow the last user prompt. Pages contain whole turns,
@@ -423,7 +483,10 @@ function WaitingTaskCard({
   }
 
   return (
-    <div data-chat-task-waiting={chatId} className="min-w-0 wrap-anywhere">
+    <div
+      data-chat-task-waiting={countsAsWaiting ? chatId : undefined}
+      className="min-w-0 wrap-anywhere"
+    >
       {error && (
         <p role="status" className="mb-2 text-aux text-muted-foreground">
           {error}
@@ -447,6 +510,18 @@ function WaitingTaskCard({
           onResolved={() => {
             void refresh();
           }}
+        />
+      ) : interaction &&
+        !(
+          interaction.part.render?.builtin &&
+          interaction.part.render.componentId === "question-card"
+        ) ? (
+        // An app's own card, such as a sign-in, is answered in its task chat.
+        <SettledCard
+          title={null}
+          outcome={t("concierge.ask.openToAnswer")}
+          onOpen={() => navigate(`/chat/${chatId}`)}
+          chevron
         />
       ) : interaction?.part.render?.builtin &&
         interaction.part.render.componentId === "question-card" ? (

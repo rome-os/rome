@@ -151,7 +151,8 @@ export function conciergeRoutes(
   });
 
   // Cancels a task's pending checks, as from its row in the task panel. The
-  // task stays, and its status is read again without them.
+  // task stays, its status is read again without them, and the Concierge
+  // hears of it. A failure answers as one.
   app.delete("/concierge/tasks/:taskId/checks", async (c) => {
     const owner = await callerOwner();
     if (!owner) return c.json({ error: "Not authenticated" }, 401);
@@ -160,8 +161,7 @@ export function conciergeRoutes(
     const taskId = c.req.param("taskId");
     const found = await concierge.deps.tasks.repo.getWithChat(taskId);
     if (!found || found.owner !== owner) return c.json({ error: "No such task" }, 404);
-    await concierge.cancelPendingChecks(taskId);
-    await concierge.deps.tasks.taskChanged(taskId);
+    await concierge.cancelChecksByOwner(taskId);
     return c.json({ ok: true });
   });
 

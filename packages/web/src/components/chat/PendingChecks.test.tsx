@@ -127,6 +127,42 @@ describe("PendingChecks", () => {
     await waitFor(() => expect(deleted).toEqual(["r-3"]));
   });
 
+  it("drops a check from the strip once its time has passed", async () => {
+    serve([
+      { id: "soon", name: "Soon", at: Date.now() + 1_500, waitingFor: null, taskId: null },
+      later("Later", 2),
+    ]);
+    renderChecks();
+    expect(await screen.findByText(/^2 checks · next: Soon/)).toBeTruthy();
+    expect(await screen.findByText("Later · in 2 hr", undefined, { timeout: 5_000 })).toBeTruthy();
+  });
+
+  it("counts a check's time from now, not from when the strip first showed", async () => {
+    serve([]);
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const at = (turnKey: boolean) => (
+      <QueryClientProvider client={client}>
+        <PendingChecks chatId="chat-1" turnKey={turnKey} />
+      </QueryClientProvider>
+    );
+    const { rerender } = render(at(false));
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+    // The chat stays open ten minutes before the agent schedules a check.
+    const realNow = Date.now.bind(Date);
+    rs.spyOn(Date, "now").mockImplementation(() => realNow() + 10 * 60_000);
+    serve([
+      {
+        id: "soon",
+        name: "Soon",
+        at: Date.now() + 5 * 60_000 + 1_000,
+        waitingFor: null,
+        taskId: null,
+      },
+    ]);
+    rerender(at(true));
+    expect(await screen.findByText("Soon · in 5 min")).toBeTruthy();
+  });
+
   it("shows nothing when no check is pending", async () => {
     serve([]);
     const { container } = renderChecks();

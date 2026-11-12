@@ -14,10 +14,17 @@ export interface ApprovalExpiryDeps {
 }
 
 /** What turning a chat's approvals down asks for. */
+/** Who an approval Rome turned down reads as resolved by: its task's wait ran out. */
+export const RESOLVED_BY_EXPIRY = "rome:task-ended";
+/** Who an approval Rome turned down reads as resolved by: its task was stopped, archived or deleted. */
+export const RESOLVED_BY_STOP = "rome:task-stopped";
+
 export interface TurnDown {
   /** Only approvals that began by then, epoch milliseconds. */
   until: number;
   reason: string;
+  /** Why Rome turned them down, as the approval records it. */
+  resolvedBy: typeof RESOLVED_BY_EXPIRY | typeof RESOLVED_BY_STOP;
   /**
    * Whether the turn that asked carries on, told of the refusal, as on any
    * rejection. A stopped task's turn does not.
@@ -40,7 +47,11 @@ export async function turnDownApprovals(
     const threadId = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
       ?.channelContext?.threadId;
     if (threadId !== chatId || approval.createdAt.getTime() > turnDown.until) continue;
-    const resolved = await deps.approvals.resolvePending(approval.id, "reject", "rome:task-ended");
+    const resolved = await deps.approvals.resolvePending(
+      approval.id,
+      "reject",
+      turnDown.resolvedBy,
+    );
     if (resolved.outcome !== "resolved") continue;
     turnedDown += 1;
     if (!turnDown.continueTurn || approval.type !== "action_execution") continue;

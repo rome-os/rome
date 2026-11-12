@@ -5,7 +5,7 @@
 // list the task once. The card stays answerable. docs/domains/chats.md#task
 
 import type { ConciergeTasks, TaskStatusView } from "./tasks.js";
-import type { TurnDown } from "./approval-expiry.js";
+import { RESOLVED_BY_EXPIRY, type TurnDown } from "./approval-expiry.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("concierge-wait-expiry");
@@ -66,8 +66,13 @@ export class WaitExpiry {
   private arm(taskId: string, status: TaskStatusView): void {
     if (this.stopped) return;
     const known = this.timers.get(taskId);
-    // A stopped task waits for no one.
-    if (status.waitingSince === null || status.endReason === "stopped") {
+    // A stopped task waits for no one, and a wait Rome already ended waits
+    // for nothing more, though its card stays answerable.
+    if (
+      status.waitingSince === null ||
+      status.endReason === "stopped" ||
+      status.expiredWaitAt === status.waitingSince
+    ) {
       if (known) clearTimeout(known.timer);
       this.timers.delete(taskId);
       return;
@@ -118,6 +123,7 @@ export class WaitExpiry {
     const turnedDown = await this.deps.expireApprovals?.(row.sessionId, {
       until: status.waitingSince + this.deps.tasks.waitExpiry,
       reason: NO_RESPONSE_REASON,
+      resolvedBy: RESOLVED_BY_EXPIRY,
       continueTurn: true,
     });
     if (!(await this.deps.tasks.repo.markWaitExpired(taskId, new Date(status.waitingSince)))) {

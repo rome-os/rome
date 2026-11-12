@@ -16,7 +16,9 @@
 // is harmless. A turn that ran to its end settles what it carried: Rome keeps
 // each task's status, so the Concierge owes no write. A row whose turn did
 // not run to its end, such as when the Concierge is out of quota, is tried
-// again RETRY_MS later. A row whose turn the guardian stopped is given up.
+// again RETRY_MS later. A row whose turn a newer message cut short is tried
+// again with the next flush, once the turn that took it over no longer
+// carries it. A row whose turn the guardian stopped is given up.
 
 import { withoutSessionActor } from "../access/session-actor.js";
 import { createLogger } from "../logger.js";
@@ -74,6 +76,11 @@ export interface TaskEventDeps {
   deliver(delivery: TaskEventDelivery): Promise<"completed" | "stopped" | "interrupted" | "failed">;
   /** The turn that carried the row was stopped by the guardian: its news is not handed over again. */
   giveUp(taskId: string): void;
+  /**
+   * Whether a Concierge turn that took a cut-short report over still runs
+   * with this row's news, which it may say itself. Such a row waits for it.
+   */
+  carried?(taskId: string): boolean;
 }
 
 interface Dirty {
@@ -83,6 +90,8 @@ interface Dirty {
   urgent: boolean;
   /** Every change needs no word: the row waits for another one's flush. */
   passive: boolean;
+  /** Until when the row waits for a turn that took its cut-short report over: never past RETRY_MS. */
+  carriedUntil?: number;
   /** When the flush that took this row built its payload. */
   builtAt?: number;
   /** The turn that carried the row did not run to its end: its changes still wait. */
@@ -252,13 +261,26 @@ export class TaskEventCoalescer {
     const builtAt = this.deps.now();
     this.lastFlushStartedAt = builtAt;
     // A row waiting out a turn that did not run stays behind until its time.
-    const taken = [...this.dirty.entries()].filter(
-      ([, entry]) => (entry.notBefore ?? Number.NEGATIVE_INFINITY) <= builtAt,
-    );
+    // One the turn that took a cut-short report over still carries waits for
+    // it, and is looked at again with the next flush.
+    const taken = [...this.dirty.entries()].filter(([taskId, entry]) => {
+      if ((entry.notBefore ?? Number.NEGATIVE_INFINITY) > builtAt) return false;
+      if (builtAt >= (entry.carriedUntil ?? 0) || !this.deps.carried?.(taskId)) return true;
+      entry.notBefore = builtAt + MIN_FLUSH_SPACING_MS;
+      return false;
+    });
+    // Every row waits: nothing to hand over yet.
+    if (taken.length === 0) {
+      this.flushing = false;
+      this.arm();
+      return;
+    }
     // Rows whose turn did not run to its end; all of them until delivery starts.
     const notRun = new Set(taken.map(([taskId]) => taskId));
     // Rows whose turn the guardian stopped.
     const stopped = new Set<string>();
+    // Rows whose turn a newer message cut short.
+    const superseded = new Set<string>();
     // What each row's turn carries, kept in case the turn does not run.
     const carried = new Map(
       taken.map(([taskId, entry]) => [
@@ -299,7 +321,8 @@ export class TaskEventCoalescer {
         }
         // Only a Stop drops what the turn carried. A turn a newer message cut
         // short may never have sent it to the model.
-        const ended = outcome === "stopped" ? stopped : notRun;
+        const ended =
+          outcome === "stopped" ? stopped : outcome === "interrupted" ? superseded : notRun;
         for (const taskId of delivery.taskIds) ended.add(taskId);
       }
     } catch (error) {
@@ -312,6 +335,7 @@ export class TaskEventCoalescer {
       this.afterFlush(
         taken.map(([taskId]) => taskId),
         notRun,
+        superseded,
         stopped,
         completed,
         carried,
@@ -324,6 +348,7 @@ export class TaskEventCoalescer {
   private afterFlush(
     taskIds: string[],
     notRun: Set<string>,
+    superseded: Set<string>,
     stopped: Set<string>,
     completed: Set<string>,
     carried: Map<string, { entry: Dirty; changes: TaskChange[]; urgent: boolean }>,
@@ -331,7 +356,7 @@ export class TaskEventCoalescer {
     for (const taskId of taskIds) {
       const entry = this.dirty.get(taskId);
       if (!entry) continue;
-      if (notRun.has(taskId)) {
+      if (notRun.has(taskId) || superseded.has(taskId)) {
         // The turn did not run to its end: the changes stay, later ones join
         // them, a write still settles them, and the attempt does not count.
         const before = carried.get(taskId);
@@ -346,7 +371,12 @@ export class TaskEventCoalescer {
           entry.builtAt = undefined;
         }
         entry.undelivered = true;
-        entry.notBefore = this.deps.now() + RETRY_MS;
+        // A newer message took the turn over: the next flush tries again,
+        // once that turn no longer carries the row. A failure waits RETRY_MS.
+        entry.notBefore = superseded.has(taskId)
+          ? this.deps.now() + URGENT_DELAY_MS
+          : this.deps.now() + RETRY_MS;
+        if (superseded.has(taskId)) entry.carriedUntil = this.deps.now() + RETRY_MS;
       } else if (stopped.has(taskId) && entry.changes === carried.get(taskId)?.changes) {
         // The guardian stopped the turn: what it carried is never handed over
         // again, and the row shows it is not synced.

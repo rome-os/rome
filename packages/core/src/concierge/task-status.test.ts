@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import {
   type ConciergeTaskFacts,
   legacyTaskState,
+  messageStatusReaction,
   parseTaskStatus,
   taskStatus,
 } from "@rome/api-types/concierge-task-status";
@@ -80,11 +81,31 @@ describe("taskStatus", () => {
     );
   });
 
+  it("stays ended for no response after a wait Rome ended, whatever the turn after it did", () => {
+    expect(taskStatus(facts({ waitExpired: true, lastOutcome: "failed" }), NOW)).toEqual({
+      status: "ended",
+      endReason: "no_response",
+    });
+    expect(taskStatus(facts({ waitExpired: true, running: true }), NOW).status).toBe("active");
+  });
+
   it("ends done, failed or stopped by how the task chat's last turn ended", () => {
     expect(taskStatus(facts({ lastOutcome: "succeeded" }), NOW).endReason).toBe("done");
     expect(taskStatus(facts({ lastOutcome: "failed" }), NOW).endReason).toBe("failed");
     expect(taskStatus(facts({ lastOutcome: "stopped" }), NOW).endReason).toBe("stopped");
     expect(taskStatus(facts(), NOW).endReason).toBe("done");
+  });
+});
+
+describe("messageStatusReaction", () => {
+  it("shows failed for a result Rome gave up telling, unless its task was stopped since", () => {
+    const lost = { status: "ended" as const, reportLost: true };
+    expect(messageStatusReaction({ answered: true, tasks: [{ ...lost, endReason: "done" }] })).toBe(
+      "failed",
+    );
+    expect(
+      messageStatusReaction({ answered: true, tasks: [{ ...lost, endReason: "stopped" }] }),
+    ).toBeNull();
   });
 });
 

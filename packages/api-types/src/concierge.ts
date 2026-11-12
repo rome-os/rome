@@ -98,6 +98,8 @@ export interface ConciergeTaskDto {
   rank: number | null;
   /** The linked task chat, with its current name, or null when the row has none. */
   chat: { id: string; name: string } | null;
+  /** The id of the first message of the task's chat thread in its Concierge chat, or null. */
+  threadRoot?: string | null;
   /** The Concierge chat the row came from; its results and the panel's buttons go there. */
   conciergeChat: ConciergeChatRef;
   /**

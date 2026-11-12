@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { RESOLVED_BY_EXPIRY } from "./approval-expiry.js";
 import type { DrizzleTx } from "../db/index.js";
 import { POSTPONED_CHECKS } from "./service.js";
 import type {
@@ -27,8 +28,9 @@ import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js"
 import { createTestDb, type TestDb } from "../test/db.js";
 import { readWebchatMessages } from "../webchat/adapter.js";
 import type { AgentTurnFailedBeforeStart, TurnLifecycleListener } from "../agent/index.js";
-import { startConciergeEvents } from "./events.js";
-import { RETRY_MS } from "./task-events.js";
+import { CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
+import { resultSummary, startConciergeEvents } from "./events.js";
+import { MIN_FLUSH_SPACING_MS, RETRY_MS } from "./task-events.js";
 import { NUDGE_PROMPT, quotaRecoveryPrompt } from "./nudge.js";
 import { mainChatIdOf } from "./main-chat.js";
 import { createConciergeOwners } from "./owners.js";
@@ -646,6 +648,22 @@ describe("Concierge tools", () => {
       [{ type: "text", content: "apple.txt is made." }],
       [{ type: "text", content: "pear.txt is made." }],
     ]);
+  });
+
+  it("says the same words about two tasks as two messages, one for each", async () => {
+    const s = setup();
+    const idOf = (result: unknown) =>
+      JSON.parse((result as { content: { text: string }[] }).content[0]!.text).messageId as string;
+    const [apple, pear] = await s.taskRepo.upsertMany([
+      { title: "Apple", state: "doing", chatId: CONCIERGE_CHAT },
+      { title: "Pear", state: "doing", chatId: CONCIERGE_CHAT },
+    ]);
+    const first = idOf(await s.tool("say", { text: "Done ✅", task: apple!.id }));
+    const second = idOf(await s.tool("say", { text: "Done ✅", task: pear!.id }));
+    expect(second).not.toBe(first);
+    expect(s.messages.get(CONCIERGE_CHAT)).toHaveLength(2);
+    // The same words about the same task are still one message.
+    expect(idOf(await s.tool("say", { text: "Done ✅", task: pear!.id }))).toBe(second);
   });
 
   describe("chat threads", () => {
@@ -1508,6 +1526,44 @@ describe("Concierge tools", () => {
     ]);
   });
 
+  it("lets a failed turn-down reach the expiry, and a stop go ahead anyway", async () => {
+    const s = setup();
+    s.service.attachApprovalExpiry(async () => {
+      throw new Error("database is locked");
+    });
+    await expect(
+      s.service.expireApprovals("task-1", {
+        until: 0,
+        reason: "No response",
+        resolvedBy: RESOLVED_BY_EXPIRY,
+        continueTurn: true,
+      }),
+    ).rejects.toThrow("database is locked");
+    const { taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.service.stopTask(taskId, "guardian");
+    expect((await s.taskRepo.get(taskId))?.stoppedAt).toEqual(expect.any(Date));
+  });
+
+  it("tells the Concierge quietly when the owner cancels a task's checks, and lets a failure through", async () => {
+    const s = setup();
+    const [row] = await s.taskRepo.upsertMany([{ title: "PR 42", chatId: CONCIERGE_CHAT }]);
+    const pending = () =>
+      (s.service as unknown as { taskEvents: { pending: string[] } }).taskEvents.pending;
+    s.deps.checks = {
+      cancelFor: async () => {
+        throw new Error("database is locked");
+      },
+      laterOf: async () => new Map(),
+    } as never;
+    await expect(s.service.cancelChecksByOwner(row!.id)).rejects.toThrow("database is locked");
+    expect(pending()).not.toContain(row!.id);
+    s.deps.checks = { cancelFor: async () => 1, laterOf: async () => new Map() } as never;
+    await s.service.cancelChecksByOwner(row!.id);
+    expect(pending()).toContain(row!.id);
+  });
+
   it("archiving a task that is still open stops it, and leaves an ended one's outcome alone", async () => {
     const s = setup();
     const { taskId } = JSON.parse(
@@ -2023,6 +2079,23 @@ describe("Concierge task list tools", () => {
     s.taskRepo.onChange(({ row }) => seen.push(row.title));
     await s.tool("task_upsert", { tasks: [{ title: "A" }, { title: "B" }] });
     expect(seen).toEqual(["A", "B"]);
+  });
+
+  it("task_list lists a task whose check waits on an event with no deadline, with no time", async () => {
+    const s = setup({ startEvents: false });
+    const [row] = await s.taskRepo.upsertMany([{ title: "CI run", chatId: CONCIERGE_CHAT }]);
+    s.tasks.attachFacts({
+      now: () => Date.now(),
+      running: () => false,
+      waitingSince: async () => new Map(),
+      reportPending: () => [],
+      laterOf: async () => new Map([[row!.id, Number.POSITIVE_INFINITY]]),
+    });
+    const listed = text(await s.tool("task_list", {})).tasks;
+    expect(listed).toEqual([expect.objectContaining({ id: row!.id, status: "later" })]);
+    expect(listed[0]).not.toHaveProperty("laterAt");
+    const [dto] = await s.tasks.toDtos([(await s.taskRepo.getWithChat(row!.id))!]);
+    expect(dto?.laterAt).toBeNull();
   });
 
   it("task_list answers compact rows with their status, and the ended ones on request", async () => {
@@ -2616,6 +2689,92 @@ describe("Concierge events", () => {
       text: "x",
     });
 
+  it("keeps a finished task's line current: the result's first sentence, until the Concierge writes another", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await s.taskRepo.upsertMany([{ id: taskId, summary: "Waiting for the airline" }]);
+    await s.finish({
+      turnId: "task-turn-1",
+      agentName: "core:main",
+      chatId,
+      text: concluded(
+        "Saved [flights.md](/projects/default/flights.md) with three options. Prices change daily.",
+      ),
+    });
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Saved flights.md with three options.");
+    // A summary the Concierge writes after the result wins.
+    await s.tool("task_upsert", { tasks: [{ id: taskId, summary: "Booked the 9am" }] });
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Booked the 9am");
+  });
+
+  it("takes a result's first sentence in Chinese too, no longer than a summary the Concierge writes", () => {
+    expect(resultSummary("我订好了明天的机票。航班号是CA123，早上八点起飞。")).toBe(
+      "我订好了明天的机票。",
+    );
+    expect(resultSummary("Done. Next step.")).toBe("Done.");
+    const long = resultSummary(`${"word ".repeat(60)}end.`);
+    expect(long?.length).toBe(CONCIERGE_TASK_SUMMARY_MAX_LENGTH);
+    expect(long?.endsWith("…")).toBe(true);
+  });
+
+  it("keeps a failed task's line as it was", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await s.taskRepo.upsertMany([{ id: taskId, summary: "Searching flights" }]);
+    await s.finish({
+      turnId: "task-turn-1",
+      agentName: "core:main",
+      chatId,
+      status: "error",
+      text: "Something broke.",
+    });
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Searching flights");
+  });
+
+  it("holds a result its chat's other work outlives, until the task ends, unless the Concierge writes first", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    await s.taskRepo.upsertMany([{ id: taskId, summary: "Waiting for approval" }]);
+    // An approved action's turn ends inside the stream it runs in, which runs on.
+    const stillRunning = (id: string) => (id === chatId ? ["backend:approval"] : []);
+    s.chats.activeTurns = stillRunning;
+    s.chats.isRunning = (id: string) => stillRunning(id).length > 0;
+    await s.finish({
+      turnId: "task-turn-2",
+      agentName: "core:main",
+      chatId,
+      text: concluded("Sent the booking email. It went to Eric."),
+    });
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Waiting for approval");
+
+    s.chats.activeTurns = () => [];
+    s.chats.isRunning = () => false;
+    const row = await s.taskRepo.get(taskId);
+    await s.tasks.statusOf(row ? [row] : []);
+    await s.settle();
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Sent the booking email.");
+
+    // A result held when the Concierge writes the task is dropped.
+    s.chats.activeTurns = stillRunning;
+    s.chats.isRunning = (id: string) => stillRunning(id).length > 0;
+    await s.finish({
+      turnId: "task-turn-3",
+      agentName: "core:main",
+      chatId,
+      text: concluded("Sent the follow-up."),
+    });
+    await s.tool("task_upsert", { tasks: [{ id: taskId, summary: "Eric replied" }] });
+    s.chats.activeTurns = () => [];
+    s.chats.isRunning = () => false;
+    const again = await s.taskRepo.get(taskId);
+    await s.tasks.statusOf(again ? [again] : []);
+    await s.settle();
+    expect((await s.taskRepo.get(taskId))?.summary).toBe("Eric replied");
+  });
+
   it("tells the Concierge of a result it asked for two seconds after the turn ends, as one batch", async () => {
     const s = setup();
     const { chatId, taskId } = await startTask(s);
@@ -2788,7 +2947,10 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
     s.onBackendTurn(() => "completed");
-    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    // The guardian's turn that took the report over ends without saying it:
+    // the next flush does, not RETRY_MS later.
+    s.service.turnSettled(CONCIERGE_CHAT);
+    await rs.advanceTimersByTimeAsync(MIN_FLUSH_SPACING_MS);
     expect(s.backendTurns).toHaveLength(2);
   });
 
@@ -5544,6 +5706,19 @@ describe("scheduled tasks", () => {
 
     expect(await s.service.runScheduledTask(taskId, Date.now())).toBe("stopped");
     expect(s.posted).toEqual([]);
+  });
+
+  it("keeps a task's schedule when its owner cancels its checks from its row", async () => {
+    const s = setup();
+    const schedules = withSchedules(s, "every_run");
+    const { taskId } = await startScheduled(s);
+    const cancelFor = rs.fn(async () => 1);
+    s.deps.checks = { cancelFor, laterOf: async () => new Map() } as never;
+
+    await s.service.cancelChecksByOwner(taskId);
+    // The row's cancel skips the next run only; a stop removes the schedule.
+    expect(cancelFor).toHaveBeenCalledWith(taskId, "guardian", { keepSchedule: true });
+    expect(schedules.remove).not.toHaveBeenCalled();
   });
 
   it("changes or removes a task's schedule from task_upsert, keeping its brief", async () => {

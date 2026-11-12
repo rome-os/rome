@@ -4,7 +4,7 @@
 
 import type { ForwardedFrom } from "@rome/api-types/chat";
 import { CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
-import type { TaskStatusView } from "./tasks.js";
+import { finiteOrNull, type TaskStatusView } from "./tasks.js";
 import type { SaidMessage } from "../chats/message.js";
 import type { ChatThreadPlacement } from "../webchat/repository.js";
 import type { SendResult } from "../chats/send.js";
@@ -105,9 +105,6 @@ function statusOf(
   return chat?.lastTurnFailed ? "failed" : "idle";
 }
 
-/** The ISO time of a nullable instant, for the Concierge to read. */
-const isoOf = (date: Date | null) => date?.toISOString();
-
 /** A row as the Concierge reads it: compact, with no empty fields. Rome derives its status. */
 function compactTask(
   { row }: ConciergeTaskWithChat,
@@ -119,7 +116,9 @@ function compactTask(
     title: row.title,
     ...(status ? { status: status.status } : {}),
     ...(status?.endReason ? { endReason: status.endReason } : {}),
-    ...(status?.laterAt ? { laterAt: new Date(status.laterAt).toISOString() } : {}),
+    ...(finiteOrNull(status?.laterAt ?? null) !== null
+      ? { laterAt: new Date(status?.laterAt as number).toISOString() }
+      : {}),
     ...(row.summary ? { summary: row.summary } : {}),
     ...(row.note ? { note: row.note } : {}),
     ...(row.sessionId ? { chatId: row.sessionId } : {}),
@@ -333,12 +332,11 @@ export async function buildConciergeTools(
     return said[said.length - 1]?.id ?? null;
   };
 
-  // A message the Concierge already said this turn with exactly these parts.
-  const sameMessageThisTurn = async (content: string) => {
-    const { chatId, turnId } = currentTurn();
-    const rows = await webchatRepo.getTurnChatMessages(chatId, turnId);
-    return rows.find((row) => row.role === "assistant" && row.content === content)?.id ?? null;
-  };
+  // A message is what its parts say, about which task, answering which
+  // messages: the same words about another task, or answering another
+  // message, are another message.
+  const sayKey = (content: string, taskId: string | undefined, answers: unknown) =>
+    JSON.stringify([taskId ?? null, answers ?? null, content]);
 
   const NO_ROW_MESSAGE =
     "A new row needs a message to point to. Call say first, then pass the messageId it returns.";
@@ -816,9 +814,11 @@ export async function buildConciergeTools(
     ];
     // A model sometimes repeats a message word for word in one turn. Each
     // message can ring the guardian's phone, so the repeat is the same message.
-    const repeated = await sameMessageThisTurn(JSON.stringify(parts));
+    const key = sayKey(JSON.stringify(parts), taskId, answers);
+    const repeated = service.saidInTurn(turnId, key);
     if (repeated) return repeated;
     const id = await addMessage(parts, await placementFor(answers, taskId ? { taskId } : {}));
+    service.keepSaid(turnId, key, id);
     if (taskId) service.noteRelayed(turnId, chatId, taskId);
     noteAnswers(id, answers);
     said(chatId, turnId, text, isPrivate);

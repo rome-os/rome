@@ -47,9 +47,25 @@ export function PendingChecks({ chatId, turnKey }: { chatId: string; turnKey: un
     onError: (error) => toast.error(error.message),
     onSettled: () => queryClient.invalidateQueries({ queryKey: checksKey(chatId) }),
   });
-  const checks = [...(data?.checks ?? [])].sort(bySoonest);
-  if (checks.length === 0) return null;
+  // A check whose time passed has fired: it leaves the strip then, not only
+  // at the next turn boundary. Until then its time counts down by the minute.
+  const [tick, setTick] = useState(0);
   const now = Date.now();
+  const all = data?.checks ?? [];
+  const nextAt = Math.min(
+    ...all.map((check) => check.at ?? Number.POSITIVE_INFINITY).filter((at) => at > now),
+  );
+  useEffect(() => {
+    void tick;
+    if (!Number.isFinite(nextAt)) return;
+    const timer = window.setTimeout(
+      () => setTick((n) => n + 1),
+      Math.min(Math.max(0, nextAt - Date.now()) + 1_000, 60_000),
+    );
+    return () => window.clearTimeout(timer);
+  }, [nextAt, tick]);
+  const checks = all.filter((check) => check.at === null || check.at > now).sort(bySoonest);
+  if (checks.length === 0) return null;
   // A check for a task goes by the task's title; a wait with no deadline has no time.
   const lineOf = (check: ChatPendingCheckDto) => {
     const when = check.at === null ? null : formatTaskTime(check.at, now, i18n.language);

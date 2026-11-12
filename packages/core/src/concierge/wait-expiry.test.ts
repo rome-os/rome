@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
@@ -119,6 +119,37 @@ describe("WaitExpiry", () => {
     await new Promise((resolve) => setTimeout(resolve, 30));
     expect(told).toEqual([row!.id]);
     stop();
+  });
+
+  it("stops reading a task once its wait is handled, though its card stays open", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    waiting.set("task-chat", NOW - 30 * HOUR);
+    const reads = rs.spyOn(repo, "get");
+    const stop = expiry.start();
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(told).toEqual([row!.id]);
+    const afterExpiry = reads.mock.calls.length;
+    // The open card is read again, as any read of the task does; no timer follows.
+    await tasks.statusOf([(await repo.get(row!.id))!]);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    expect(reads.mock.calls.length).toBe(afterExpiry + 1);
+    stop();
+  });
+
+  it("keeps a task whose approval Rome turned down ended for no response, through the turn that carries on", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    waiting.set("task-chat", NOW - 30 * HOUR);
+    await expiry.expire(row!.id);
+    // The approval is turned down, so nothing waits; the turn that carries on
+    // ends, even failed, and its report is said.
+    waiting.delete("task-chat");
+    await repo.setLastOutcome(row!.id, "failed", new Date(), { reported: false });
+    const status = async () => (await tasks.statusOf([(await repo.get(row!.id))!])).get(row!.id);
+    expect(await status()).toMatchObject({ status: "ended", endReason: "no_response" });
+    // Someone wrote to it after: it ends as that work does.
+    await repo.clearWaitExpired(row!.id);
+    await repo.setLastOutcome(row!.id, "succeeded", new Date(), { reported: false });
+    expect(await status()).toMatchObject({ status: "ended", endReason: "done" });
   });
 
   it("lists a task that ended for no response in the next digest, once", async () => {

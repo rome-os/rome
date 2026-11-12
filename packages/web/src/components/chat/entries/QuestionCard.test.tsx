@@ -146,6 +146,7 @@ describe("QuestionCard — single free-text", () => {
           result={{ answers: [{ questionId: "ok", value }] }}
           onSubmit={() => {}}
           onDismiss={() => {}}
+          settled="full"
         />,
       );
     resolvedCard("No");
@@ -242,6 +243,7 @@ describe("QuestionCard — multi-choice", () => {
         result={{ answers: [{ questionId: "interests", value: "AI, Design" }] }}
         onSubmit={() => {}}
         onDismiss={() => {}}
+        settled="full"
       />,
     );
     expect(pressed("AI")).toBe("true");
@@ -377,6 +379,7 @@ describe("QuestionCard — defaults and descriptions", () => {
         result={{ answers: [{ questionId: "scope", value: "All" }] }}
         onSubmit={() => {}}
         onDismiss={() => {}}
+        settled="full"
       />,
     );
     expect(pressed("Reviews Requests for review.")).toBe("false");
@@ -421,6 +424,7 @@ describe("QuestionCard — defaults and descriptions", () => {
         result={result}
         onSubmit={() => {}}
         onDismiss={() => {}}
+        settled="full"
       />,
     );
     expect(pressed("Comments, mentions")).toBe("true");
@@ -453,5 +457,42 @@ describe("QuestionCard — defaults and descriptions", () => {
       },
       "B · A note",
     );
+  });
+});
+
+describe("QuestionCard — settled", () => {
+  it("folds an answered card to its question and the answer, opening to the whole card", async () => {
+    render(
+      <QuestionCard
+        toolUseId="t-1"
+        props={MULTI_PROPS}
+        result={{ answers: [{ questionId: "interests", value: "AI, Design" }] }}
+        onSubmit={() => {}}
+        onDismiss={() => {}}
+      />,
+    );
+    const fold = screen.getByRole("button", { name: "Which areas?Answered: AI, Design" });
+    expect(screen.queryByRole("button", { name: "AI" })).toBeNull();
+    await userEvent.click(fold);
+    expect(pressed("AI")).toBe("true");
+  });
+
+  it("folds a dismissed card to say so", () => {
+    render(
+      <QuestionCard
+        toolUseId="t-1"
+        props={MULTI_PROPS}
+        result={{ dismissed: true }}
+        onSubmit={() => {}}
+        onDismiss={() => {}}
+      />,
+    );
+    expect(screen.getByRole("button", { name: "Which areas?Dismissed" })).toBeTruthy();
+  });
+
+  it("has no footer line while it asks, only Dismiss and Send", () => {
+    renderCard(MULTI_PROPS);
+    const footer = screen.getByRole("button", { name: "Send" }).parentElement?.parentElement;
+    expect(footer?.textContent).toBe("DismissSend");
   });
 });
