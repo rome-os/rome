@@ -9,17 +9,29 @@ import { dirname, relative, resolve } from "node:path";
 import ts from "typescript";
 import { moduleSpecifiers, readPackage, TS_EXTENSION, toPosix } from "./move-files.js";
 
-/** What the service asks of the code it writes: `.js` endings, as NodeNext requires. */
-export const PREFERENCES: ts.UserPreferences = {
-  importModuleSpecifierEnding: "js",
-  importModuleSpecifierPreference: "relative",
-  providePrefixAndSuffixTextForRename: true,
-  allowRenameOfImportPath: false,
-};
+/**
+ * How the service writes imports, following how the package resolves them. A
+ * package that Node runs, resolved as NodeNext, gets relative imports with a
+ * `.js` ending. A bundled package gets the shortest specifier, `@/` included,
+ * with no ending, as its own code writes them.
+ */
+function preferencesFor(options: ts.CompilerOptions): ts.UserPreferences {
+  const bundled = options.moduleResolution === ts.ModuleResolutionKind.Bundler;
+  return {
+    importModuleSpecifierEnding: bundled ? "minimal" : "js",
+    importModuleSpecifierPreference: bundled ? "shortest" : "relative",
+    allowRenameOfImportPath: false,
+  };
+}
 
 export interface PackageService {
   service: ts.LanguageService;
   pkgDir: string;
+  /** True when the package resolves imports through a bundler, so `@/` survives the build. */
+  bundled: boolean;
+  preferences: ts.UserPreferences;
+  /** The file an import of `specifier` written in `importer` reaches, with the edits so far. */
+  resolveImport(specifier: string, importer: string): string | undefined;
   /** The current text of a file, with the edits so far. */
   text(file: string): string | undefined;
   /** Applies the service's edits in memory. */
@@ -58,9 +70,20 @@ export function packageService(file: string): PackageService {
     fileNames.add(f);
   };
   const service = ts.createLanguageService(host, ts.createDocumentRegistry());
+  const resolutionHost: ts.ModuleResolutionHost = {
+    fileExists: (f) => overlay.has(resolve(f)) || ts.sys.fileExists(f),
+    readFile: (f) => text(resolve(f)),
+  };
   return {
     service,
     pkgDir,
+    bundled: parsed.options.moduleResolution === ts.ModuleResolutionKind.Bundler,
+    preferences: preferencesFor(parsed.options),
+    resolveImport: (specifier, importer) => {
+      const found = ts.resolveModuleName(specifier, importer, parsed.options, resolutionHost);
+      const f = found.resolvedModule?.resolvedFileName;
+      return f === undefined ? undefined : resolve(f);
+    },
     text,
     apply(edits) {
       for (const edit of edits) {
@@ -86,8 +109,8 @@ export function packageService(file: string): PackageService {
 
 /**
  * `text` with each `@/` import respelled relative to `file`, keeping its
- * ending, except the ones `before` already held. The package's build keeps
- * `@/` as written, and Node cannot resolve it.
+ * ending, except the ones `before` already held. For a package Node runs: its
+ * build keeps `@/` as written, and Node cannot resolve it.
  */
 export function relativeAliases(
   file: string,
@@ -161,4 +184,24 @@ export function topLevelDeclarations(
   const absent = names.filter((n) => !nameOf.has(n));
   if (absent.length > 0) throw new Error(`${absent.join(", ")} not declared at the top of ${file}`);
   return { sf, statements, nameOf };
+}
+
+/** The identifier that starts at `pos` in `sf`. */
+export function identifierAt(sf: ts.SourceFile, pos: number): ts.Identifier | undefined {
+  const find = (n: ts.Node): ts.Identifier | undefined => {
+    if (pos < n.getStart(sf) || pos >= n.getEnd()) return undefined;
+    if (ts.isIdentifier(n)) return n;
+    return ts.forEachChild(n, find);
+  };
+  return find(sf);
+}
+
+/** Runs `run`, and on an error prints its message and exits 1, since a refusal needs no stack. */
+export function refuseCleanly<T>(run: () => T): T {
+  try {
+    return run();
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : String(error));
+    process.exit(1);
+  }
 }
