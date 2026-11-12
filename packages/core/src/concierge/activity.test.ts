@@ -189,6 +189,7 @@ function world() {
               reportPending: pending.includes(row.id),
               laterAt: null,
               lastOutcome: null,
+              started: true,
             },
             now,
           );

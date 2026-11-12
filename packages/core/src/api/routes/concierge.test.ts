@@ -153,6 +153,7 @@ describe("GET /concierge/tasks", () => {
     await repo.upsertMany([{ title: "Old needs you", state: "needs_user" }], old);
     await repo.upsertMany([{ title: "Old watching", state: "watching" }], old);
     const [oldDone] = await repo.upsertMany([{ title: "Old done", state: "done" }], old);
+    await repo.setLastOutcome(oldDone!.id, "succeeded", old, { reported: false });
     await repo.keepEnded([oldDone!.id], [], old);
     const fresh = new Date(Date.now() - DAY);
     const [freshDropped] = await repo.upsertMany(

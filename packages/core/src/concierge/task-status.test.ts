@@ -21,6 +21,7 @@ const facts = (extra: Partial<ConciergeTaskFacts> = {}): ConciergeTaskFacts => (
   reportPending: false,
   laterAt: null,
   lastOutcome: null,
+  started: true,
   ...extra,
 });
 
@@ -49,6 +50,18 @@ describe("taskStatus", () => {
     expect(taskStatus(facts({ laterAt: NOW + HOUR, lastOutcome: "succeeded" }), NOW)).toEqual({
       status: "later",
       endReason: null,
+    });
+  });
+
+  it("is later, with no time, while no task chat was started for it", () => {
+    expect(taskStatus(facts({ started: false }), NOW)).toEqual({
+      status: "later",
+      endReason: null,
+    });
+    // Stopping it ends it, before its chat ever started.
+    expect(taskStatus(facts({ started: false, stoppedAt: NOW }), NOW)).toEqual({
+      status: "ended",
+      endReason: "stopped",
     });
   });
 
@@ -142,6 +155,24 @@ describe("ConciergeTasks status", () => {
     expect(await tasks.listForPanel()).toMatchObject([
       { status: "needs_you", state: "needs_user", waitingSince: NOW - HOUR },
     ]);
+  });
+
+  it("reads a row with no task chat as later until its chat starts, and ended·stopped once stopped", async () => {
+    const [row] = await repo.upsertMany([{ title: "Follow the launch" }]);
+    expect(await tasks.listForPanel()).toMatchObject([
+      { status: "later", endReason: null, laterAt: null },
+    ]);
+
+    await repo.upsertMany([{ id: row!.id, sessionId: "task-chat" }]);
+    running.add("task-chat");
+    expect(await tasks.listForPanel()).toMatchObject([{ status: "active" }]);
+
+    const [other] = await repo.upsertMany([{ title: "Watch the price" }]);
+    await repo.stop(other!.id, "concierge");
+    expect((await tasks.statusOf([(await repo.get(other!.id))!])).get(other!.id)).toMatchObject({
+      status: "ended",
+      endReason: "stopped",
+    });
   });
 
   it("keeps a task running while its ended turn's outcome is written, so its status does not flicker", async () => {

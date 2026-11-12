@@ -1521,6 +1521,7 @@ describe("Concierge tools", () => {
     });
     s.chats.activeTurns = () => [];
     const [done] = await s.taskRepo.upsertMany([{ title: "Done" }]);
+    await s.taskRepo.setLastOutcome(done!.id, "succeeded", new Date(), { reported: false });
     await s.tool("task_upsert", { tasks: [{ id: done!.id, archived: true }] });
     expect((await s.taskRepo.get(done!.id))?.stoppedAt).toBeNull();
   });
@@ -1952,7 +1953,8 @@ describe("Concierge task list tools", () => {
         tasks: [{ id: passport.id, summary: "Sent", note: null }],
       }),
     );
-    expect(updated.tasks).toEqual([expect.objectContaining({ id: passport.id, status: "ended" })]);
+    // A row with no task chat yet is later until the Concierge starts or stops it.
+    expect(updated.tasks).toEqual([expect.objectContaining({ id: passport.id, status: "later" })]);
     expect(await s.taskRepo.get(passport.id)).toMatchObject({ summary: "Sent", note: null });
   });
 
@@ -2003,7 +2005,8 @@ describe("Concierge task list tools", () => {
     const s = setup();
     const { taskId } = text(await s.tool("chat_start", { title: "Flights", brief: "Find" }));
     await s.tool("task_upsert", { tasks: [{ id: taskId, note: "Fly Friday" }] });
-    await s.tool("task_upsert", { tasks: [{ title: "Finished" }] });
+    const finished = text(await s.tool("task_upsert", { tasks: [{ title: "Finished" }] })).tasks[0];
+    await s.taskRepo.setLastOutcome(finished.id, "succeeded", new Date(), { reported: false });
     s.chats.activeTurns = () => ["t1"];
     const open = text(await s.tool("task_list", {}));
     expect(open.tasks).toEqual([
@@ -2486,7 +2489,7 @@ describe("Concierge task anchors", () => {
     expect(made.tasks[0]).toEqual({
       id: expect.any(String),
       title: "New",
-      status: "ended",
+      status: "later",
       anchor: "said-1",
     });
     const [legacy] = await s.taskRepo.upsertMany([{ title: "Old", state: "next" }]);
@@ -2494,7 +2497,7 @@ describe("Concierge task anchors", () => {
     expect(kept.tasks[0]).toEqual({
       id: legacy.id,
       title: "Old",
-      status: "ended",
+      status: "later",
       anchorKept: true,
     });
   });
@@ -4228,7 +4231,11 @@ describe("Concierge chats", () => {
     // "Book dentist" runs in its task chat; "Old" has ended.
     await s.tool("say", { text: "On it" });
     await s.tool("chat_start", { title: "Book dentist", brief: "Book it" });
-    await s.tool("task_upsert", { tasks: [{ title: "Old" }] });
+    const made = (await s.tool("task_upsert", { tasks: [{ title: "Old" }] })) as {
+      content: { text: string }[];
+    };
+    const oldId = JSON.parse(made.content[0]!.text).tasks[0].id as string;
+    await s.taskRepo.setLastOutcome(oldId, "succeeded", new Date(), { reported: false });
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: (chatId) => chatId === "task-1",

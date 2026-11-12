@@ -97,7 +97,9 @@ export function applyTaskUpsert(
  */
 export function taskTime(task: ConciergeTaskDto): number | null {
   const { status } = taskStatusOfDto(task);
-  if (status === "later") return task.laterAt ?? task.dueAt;
+  // A row with no check and no task chat yet is later with no time. Only a
+  // server from before sends no laterAt, and its time was dueAt.
+  if (status === "later") return task.laterAt === undefined ? task.dueAt : task.laterAt;
   if (status === "ended") return endedAt(task);
   return null;
 }

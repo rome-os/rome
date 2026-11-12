@@ -100,6 +100,7 @@ export class ConciergeTasks {
           reportPending: pending.has(row.id) || row.outcomeUnsaid,
           laterAt: later.get(row.id) ?? legacyLaterOf(row, this.now()),
           lastOutcome: row.lastOutcome ?? null,
+          started: row.linkedAt !== null || row.sessionId !== null || row.lastOutcome !== null,
         },
       ]),
     );

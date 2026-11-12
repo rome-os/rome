@@ -36,6 +36,12 @@ export interface ConciergeTaskFacts {
   /** When a check scheduled for the task is due, or null when none is pending. */
   laterAt: number | null;
   lastOutcome: ConciergeTaskOutcome | null;
+  /**
+   * A task chat was started for it, or its start was tried. A row the
+   * Concierge wrote with no chat yet, such as an event worth following up,
+   * is not started.
+   */
+  started: boolean;
 }
 
 /** How long a wait on the owner keeps a task waiting for them, by default: a day. */
@@ -45,7 +51,8 @@ export const CONCIERGE_TASK_WAIT_EXPIRY_MS = 24 * 60 * 60 * 1000;
  * A task's status, checked in this order: stopped is always ended·stopped;
  * then a wait on its owner younger than `waitExpiryMs` (needs you); then a
  * running or queued turn, or a result waiting to be reported (active); then a
- * pending check (later); else ended, with its reason. A wait older than
+ * pending check, or no task chat started yet (later); else ended, with its
+ * reason. A wait older than
  * `waitExpiryMs` with nothing running ends the task for no response.
  */
 export function taskStatus(
@@ -59,7 +66,7 @@ export function taskStatus(
     return { status: "needs_you", endReason: null };
   }
   if (facts.running || facts.reportPending) return { status: "active", endReason: null };
-  if (facts.laterAt !== null) return { status: "later", endReason: null };
+  if (facts.laterAt !== null || !facts.started) return { status: "later", endReason: null };
   if (waiting) return { status: "ended", endReason: "no_response" };
   if (facts.lastOutcome === "failed") return { status: "ended", endReason: "failed" };
   if (facts.lastOutcome === "stopped") return { status: "ended", endReason: "stopped" };

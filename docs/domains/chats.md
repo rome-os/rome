@@ -152,7 +152,7 @@ One piece of work the Concierge keeps on its owner's task list, with a title, a 
 - Rome **derives** a task's status from facts it holds. The status is one of four, checked in this order:
   - **Waiting for you**: its task chat has an unanswered question card or approval, opened less than a day ago.
   - **Active**: a turn runs or is queued in its task chat, or its result waits for the Concierge to report it.
-  - **Later**: a check is scheduled for it, and nothing runs.
+  - **Later**: a check is scheduled for it and nothing runs, or the Concierge wrote it as a row and has not started its task chat yet. A row without a check shows no time. Starting its chat takes it from there, and stopping it ends it.
   - **Ended**, with a reason: done, failed, stopped, or no response, when a wait went unanswered for a day.
 - A stopped task is always ended·stopped, whoever stopped it: the Concierge, its owner, or archiving or deleting its task chat. New words sent to it take it up again, whether the owner types them in its chat or the Concierge passes them on or starts its row: it is active once more, as when its owner answers an expired card. A task stopped by archiving or deleting its chat stays stopped.
 - A stop, an archive or a delete turns down the task chat's pending approvals, so nothing approved later runs for a task that ended. Archiving a task that is still open stops it. An ended task leaves the task list a week after it ended.

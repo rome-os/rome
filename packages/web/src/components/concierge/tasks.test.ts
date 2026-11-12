@@ -184,6 +184,8 @@ describe("taskTime", () => {
     expect(taskTime(task("dropped", { completedAt: null, updatedAt: NOW - 1 }))).toBe(NOW - 1);
     // A later row's check, once Rome sends it.
     expect(taskTime(withStatus("later", { laterAt: NOW + 3, dueAt: NOW + 5 }))).toBe(NOW + 3);
+    // A row whose task chat has not started is later with no time, whatever it was due.
+    expect(taskTime(withStatus("later", { laterAt: null, dueAt: NOW - 5 }))).toBeNull();
   });
 
   it("is nothing for a row the guardian is needed on or the Concierge is working on", () => {

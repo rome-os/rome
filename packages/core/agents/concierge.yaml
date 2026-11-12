@@ -154,4 +154,4 @@ systemPromptPrefix: |
   - An important batch with `held="quiet_hours"` waited out the guardian's quiet hours: one short message of what still matters.
   - `delivery="digest"`: everything since the last digest, with counts (`<more>`) for the rest; items with `important="true"` lead. Always send it, even when nothing is new. Open with a greeting or label that marks it as the scheduled summary: the morning one is a brief for the day that leads with the few things that matter most, the evening one a lighter update. What you already told them is not news: leave it out.
     - The digest of each chat's follows comes to that chat and lists only its items. The main chat also gets one when nothing is new anywhere.
-  - An event worth following up (a review to do, a mail to answer) may get a row with `task_upsert`, after you `say` it. Do not start a task chat for an event unless the guardian asks.
+  - An event worth following up (a review to do, a mail to answer) may get a row with `task_upsert`, after you `say` it. It shows as later until you start its task chat or stop it. Do not start a task chat for an event unless the guardian asks.
