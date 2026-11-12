@@ -236,6 +236,19 @@ Something shown in a chat that people can look at or act on: a question with cho
 - An agent shows a widget by calling a tool.
 - A widget either asks something or only shows something. One that asks keeps the agent waiting until it is answered. One that only shows something leaves the agent to go on, and nobody answers it.
 - An app's widget belongs to the app whose action showed it, and is one of the kinds that app adds. An action cannot show another app's widget.
+- A widget is a message of its own, and is known by that message. A message that holds a widget holds nothing else (zhangfan, 2026-11-12).
+- A widget's owner is the app that showed it, or Rome for its own kinds, such as the question. A widget keeps no state of its own: what it shows comes from its owner, read again when it is drawn and after each event.
+- People do two things with a widget. An **edit**, such as picking an option or typing an answer, changes only what the widget shows on the screen in front of them. An **event**, such as pressing Send or a button that logs a glass of water, asks Rome to act, and carries the edits it needs. An edit never leaves the screen on its own.
+- Every event goes to the widget's owner, which alone says what it means: an app's widget calls its app, and Rome's question answers the agent waiting on it. A widget accepts only the events it names, and only from someone who may open its chat.
+- What the agent reads of an answer is written by Rome from the widget and the event. Anything the owner app adds reads as the app's, never as the words of the person who acted.
+
+## Client
+
+One of the apps a person uses to reach a [platform](#platform): the dashboard in a browser and the Rome app on a phone are two clients of the dashboard.
+
+- A client draws widgets and sends what people do with them. It decides nothing about what an event means: that is the widget's owner's (zhangfan, 2026-11-12).
+- Two clients of one platform show the same widget the same way and send the same events for it.
+- A client shows an event as sent once Rome takes it, and leaves the widget usable when Rome does not.
 
 ## Platform
 
@@ -299,6 +312,8 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 
 ## Decided against
 
+- **Event names every widget shares,** such as one name for "answer the agent" on any widget. Who owns a widget already says what its events mean, and a shared name made every client learn it.
+- **Each client deciding what a widget event means.** The rule lived once per client and drifted between the dashboard and the phone.
 - **A link to one message, apart from sharing turns.** It was a second way to share, with its own card, its own link per message and its own rules, beside the share mode every chat already has. Share on a message now opens that share mode with its turn picked.
 - **A New chat button, pinned chats and pinned projects at the top of the chat list.** They showed the same ideas twice beside the main chat, and a person had to choose between the Concierge and a new chat for every request. The main chat is where a person talks to Rome, and a common chat starts from Projects.
 - **Task chats out of the chat list.** The guardian lost sight of work running on their behalf, and the task list and cards were the only way back to it.
