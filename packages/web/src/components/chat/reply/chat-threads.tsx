@@ -1,27 +1,27 @@
-// The label under each of the agent's messages in a chat thread, in a
+// The label under each of the agent's messages in a task's chat thread, in a
 // Concierge chat's main transcript (docs/domains/chats.md#chat-thread): it
-// names the thread and opens its view. The thread view's own transcript has
-// no provider, so it shows none.
+// names the task and opens its thread's view. Only a task has a thread, so a
+// thread no task has, from before, shows no label. The thread view's own
+// transcript has no provider, so it shows none.
 
 import { createContext, useContext, useMemo } from "react";
-import { useTranslation } from "react-i18next";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatMessage } from "@/lib/chat-types";
 import { useReplyDraft } from "./reply-draft";
 import { replyPreview } from "./reply-source";
 
-/** What the label under one message names: its thread, by the task's title or the root's words. */
+/** What the label under one message names: its task's thread, by the task's title. */
 export interface ThreadLabel {
   thread: string;
-  /** The title of the task the thread is, or null for a thread no task has. */
-  title: string | null;
-  /** The start of the thread's first message, when it is loaded. */
-  rootPreview: string | null;
+  /** The title of the task the thread is. */
+  title: string;
 }
 
 export interface ChatThreads {
   /** The labels to show, by the id of the agent message each sits under. */
   labels: ReadonlyMap<string, ThreadLabel>;
+  /** The task thread each message in one is in, by message id: the guardian's too. */
+  taskThreads: ReadonlyMap<string, string>;
 }
 
 const ChatThreadsContext = createContext<ChatThreads | null>(null);
@@ -38,33 +38,45 @@ export type ThreadTimelineMessage = Pick<ChatMessage, "id" | "role" | "chatThrea
   Partial<Pick<ChatMessage, "content" | "chatThreadTitle">>;
 
 /**
- * The labels of a loaded timeline: one under every agent message in a chat
- * thread, and none under the guardian's. A thread is named by its task's
- * title, from any of its messages or `liveTitles`, else by its root's words.
+ * The task thread each message of a loaded timeline is in. A thread is a
+ * task's when the task's title is known, from any of its messages or
+ * `liveTitles`; a thread no task has counts as none.
  */
-export function threadLabels(
+export function taskThreads(
   messages: readonly ThreadTimelineMessage[],
   liveTitles: ReadonlyMap<string, string> = new Map(),
-): Map<string, ThreadLabel> {
+): { threads: Map<string, string>; titles: Map<string, string> } {
   const titles = new Map<string, string>();
-  const byId = new Map(messages.map((message) => [message.id, message]));
   for (const message of messages) {
     if (message.chatThreadId && message.chatThreadTitle) {
       titles.set(message.chatThreadId, message.chatThreadTitle);
     }
   }
   for (const [thread, title] of liveTitles) titles.set(thread, title);
+  const threads = new Map<string, string>();
+  for (const message of messages) {
+    if (message.chatThreadId && titles.has(message.chatThreadId)) {
+      threads.set(message.id, message.chatThreadId);
+    }
+  }
+  return { threads, titles };
+}
+
+/**
+ * The labels of a loaded timeline: one under every agent message in a task's
+ * thread, named by the task's title, and none under the guardian's.
+ */
+export function threadLabels(
+  messages: readonly ThreadTimelineMessage[],
+  liveTitles: ReadonlyMap<string, string> = new Map(),
+): Map<string, ThreadLabel> {
+  const { threads, titles } = taskThreads(messages, liveTitles);
   const labels = new Map<string, ThreadLabel>();
   for (const message of messages) {
-    const thread = message.chatThreadId;
-    if (message.role !== "assistant" || !thread) continue;
-    const root = byId.get(thread);
-    const words = root?.content ? wordsOf({ id: root.id, content: root.content }) : "";
-    labels.set(message.id, {
-      thread,
-      title: titles.get(thread) ?? null,
-      rootPreview: words ? replyPreview(words) : null,
-    });
+    const thread = threads.get(message.id);
+    const title = thread ? titles.get(thread) : undefined;
+    if (message.role !== "assistant" || !thread || !title) continue;
+    labels.set(message.id, { thread, title });
   }
   return labels;
 }
@@ -88,10 +100,13 @@ export function useChatThreadsValue(
   rethreaded: ReadonlyMap<string, ThreadPlacement>,
   liveTitles: ReadonlyMap<string, string>,
 ): ChatThreads {
-  return useMemo(
-    () => ({ labels: threadLabels(placed(messages, rethreaded), liveTitles) }),
-    [messages, rethreaded, liveTitles],
-  );
+  return useMemo(() => {
+    const shown = placed(messages, rethreaded);
+    return {
+      labels: threadLabels(shown, liveTitles),
+      taskThreads: taskThreads(shown, liveTitles).threads,
+    };
+  }, [messages, rethreaded, liveTitles]);
 }
 
 /**
@@ -136,18 +151,16 @@ function wordsOf(message: Pick<ChatMessage, "id" | "content">): string {
 }
 
 /**
- * The subdued `↳ <name>` label under an agent message in a chat thread, which
- * opens the thread. The name is the task's title, else the start of the
- * thread's first message. Renders nothing under the guardian's messages and
- * inside the thread view.
+ * The subdued `↳ <task title>` label under an agent message in a task's chat
+ * thread, which opens the thread. Renders nothing under the guardian's
+ * messages and inside the thread view.
  */
 export function ThreadLabelLine({ message }: { message: ChatMessage }) {
-  const { t } = useTranslation("chat");
   const threads = useChatThreads();
   const draft = useReplyDraft();
   const label = threads?.labels.get(message.id);
   if (!label || !draft?.threads || draft.sessionId !== message.sessionId) return null;
-  const name = label.title ?? t("thread.replyTo", { preview: label.rootPreview ?? "…" });
+  const name = label.title;
   return (
     <button
       type="button"

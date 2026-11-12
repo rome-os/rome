@@ -111,7 +111,6 @@ import { z } from "zod";
 import { withReplyContext } from "../../agent/index.js";
 import { resolveReply, type ReplyResolution } from "./webchat-reply.js";
 import type { ChatThreadPlacement } from "../../webchat/repository.js";
-import { messageContentText } from "../../chats/history/messages-agent.js";
 
 /** The agent of a chat that saved no agent, under the name its sessions are saved by. */
 const MAIN_AGENT = "core:main";
@@ -121,29 +120,19 @@ const log = createLogger("api:webchat");
 const inputPrioritySchema = z.enum(["now", "next"]).optional();
 
 // Client-sent parts never carry a reply: only `replyToMessageId` builds one.
-/** How much of a chat thread's first message the Concierge reads to know what it is about. */
-const CHAT_THREAD_ABOUT_LIMIT = 80;
-
 /**
  * The line that names the guardian's message to the Concierge, so an answer
- * can say which one it answers, and, when the message is in a chat thread,
- * which thread and what it is about (its first message, shortened). A
- * message that starts its own thread is about nothing else.
+ * can say which one it answers, and, when the message is in a task's chat
+ * thread, which task it belongs to.
  */
 function chatThreadLine(
   messageId: string,
-  thread: string | null,
-  firstMessage: string | null,
+  thread: { root: string; task: { id: string; title: string } } | null,
 ): string {
-  const about =
-    thread && thread !== messageId && firstMessage
-      ? ` about="${xmlAttr(
-          firstMessage.length > CHAT_THREAD_ABOUT_LIMIT
-            ? `${firstMessage.slice(0, CHAT_THREAD_ABOUT_LIMIT - 1)}…`
-            : firstMessage,
-        )}"`
-      : "";
-  return `<chat_thread message_id="${messageId}"${thread ? ` thread="${thread}"` : ""}${about}/>`;
+  const task = thread
+    ? ` thread="${thread.root}" task="${xmlAttr(thread.task.id)}" task_title="${xmlAttr(thread.task.title)}"`
+    : "";
+  return `<chat_thread message_id="${messageId}"${task}/>`;
 }
 
 function xmlAttr(value: string): string {
@@ -3909,16 +3898,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     if (body.chatThread !== undefined && typeof body.chatThread !== "string") {
       return answer({ error: "chatThread must be a message id" }, 400);
     }
-    // In a Concierge chat a message sent into a chat thread, or as a reply,
-    // stays in that thread. Any other is in none
-    // (docs/domains/chats.md#chat-thread).
-    const chatThread: ChatThreadPlacement | undefined = !isConciergeChat(session)
+    // In a Concierge chat a message sent into a task's chat thread, or as a
+    // reply to a message in one, stays in that thread. Only a task has a
+    // thread, so any other is in none, a reply to a message in no task
+    // included (docs/domains/chats.md#chat-thread).
+    const threadTarget = !isConciergeChat(session)
       ? undefined
-      : body.chatThread
-        ? { in: body.chatThread, settle: true }
-        : reply
-          ? { in: body.replyToMessageId as string, settle: true }
-          : undefined;
+      : (body.chatThread ?? (reply ? (body.replyToMessageId as string) : undefined));
+    const targetRoot = threadTarget
+      ? ((await deps.webchatRepo.getReplyTarget(sessionId, threadTarget))?.chatThreadId ?? null)
+      : null;
+    const threadTask = targetRoot
+      ? ((await deps.concierge?.deps.tasks.repo.taskOfThread(sessionId, targetRoot)) ?? null)
+      : null;
+    const chatThread: ChatThreadPlacement | undefined =
+      targetRoot && threadTask ? { in: targetRoot, settle: true } : undefined;
     if (
       !(await deps.webchatRepo.recordUserInput(
         inputId,
@@ -3946,14 +3940,11 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       messageId: inputId,
       text: displayText,
     });
-    // The Concierge reads which message this is, and the thread it is in.
+    // The Concierge reads which message this is, and the task it belongs to.
     if (conciergeHeader) {
-      const placedIn = chatThread ? await deps.webchatRepo.chatThreadOf(sessionId, inputId) : null;
-      const first = placedIn ? await deps.webchatRepo.getReplyTarget(sessionId, placedIn) : null;
       const line = chatThreadLine(
         inputId,
-        placedIn,
-        first ? messageContentText(first.content) : null,
+        targetRoot && threadTask ? { root: targetRoot, task: threadTask } : null,
       );
       promptText = `${conciergeHeader}\n${line}\n\n${noticedPrompt}`;
     }

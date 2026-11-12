@@ -603,6 +603,9 @@ describe("Concierge tools", () => {
     };
     const saidId = (result: unknown) =>
       JSON.parse((result as { content: { text: string }[] }).content[0]!.text).messageId as string;
+    /** A task whose chat thread starts at message `root`: only a task has a thread. */
+    const taskOwns = (s: ReturnType<typeof setup>, root: string, title = "Flights") =>
+      s.taskRepo.upsertMany([{ title, state: "doing", chatId: CONCIERGE_CHAT, threadRoot: root }]);
 
     it("leaves a plain question and its answer in no thread", async () => {
       const s = setup({ said: false });
@@ -614,28 +617,31 @@ describe("Concierge tools", () => {
       expect(threadOf(s, said)).toBeUndefined();
     });
 
-    it("answers a message in a thread in that thread, and one in none in none", async () => {
+    it("answers a message in a task's thread in that thread, and one in none in none", async () => {
       const s = setup({ said: false });
+      await taskOwns(s, "flights");
       guardianSays(s, { id: "g1" });
       guardianSays(s, { id: "g2", chatThread: "flights", settled: true });
+      // A thread from before that no task has counts as none.
+      guardianSays(s, { id: "g3", chatThread: "old", settled: true });
 
       const first = saidId(await s.tool("say", { text: "About the first" }));
       const second = saidId(await s.tool("say", { text: "Flights update", answers: "g2" }));
+      const third = saidId(await s.tool("say", { text: "About that", answers: "g3" }));
 
       expect(threadOf(s, first)).toBeUndefined();
       expect(threadOf(s, second)).toBe("flights");
+      expect(threadOf(s, third)).toBeUndefined();
       expect(threadOf(s, "g1")).toBeUndefined();
       await expect(s.tool("say", { text: "x", answers: "elsewhere" })).resolves.toMatchObject({
         isError: true,
       });
-      // A named thread holds in a turn the guardian started too.
-      const named = saidId(await s.tool("say", { text: "Flights news", thread: "g2" }));
-      expect(threadOf(s, named)).toBe("flights");
     });
 
     it("puts an answer in no thread when the turn holds several guardian messages and names none", async () => {
       const s = setup({ said: false });
-      // Three tasks started from one message, which is now their thread's root.
+      // A task started from one message, which is now its thread's root.
+      await taskOwns(s, "tasks");
       guardianSays(s, { id: "tasks", chatThread: "tasks", settled: true, turnId: "older" });
       // Taken by one turn: the Nile follow-up, already relayed into the tasks' thread, and an unrelated question.
       guardianSays(s, { id: "nile", chatThread: "tasks", settled: true });
@@ -646,18 +652,6 @@ describe("Concierge tools", () => {
 
       expect(threadOf(s, answer)).toBeUndefined();
       expect(threadOf(s, relayed)).toBe("tasks");
-    });
-
-    it("lets a turn about several tasks name the thread a message reports on, never a new one", async () => {
-      const s = setup({ said: false });
-      guardianSays(s, { id: "g0", chatThread: "g0", settled: true, turnId: "older" });
-      s.inTurn("task-events-turn");
-
-      const named = saidId(await s.tool("say", { text: "Both done", thread: "g0" }));
-      expect(threadOf(s, named)).toBe("g0");
-      await expect(s.tool("say", { text: "x", thread: "new" })).resolves.toMatchObject({
-        isError: true,
-      });
     });
 
     it("sends on only the guardian message it names, or the turn's only one", async () => {
@@ -677,21 +671,6 @@ describe("Concierge tools", () => {
 
       await s.tool("chat_send", { chatId, text: "Make it Saturday", answers: "saturday" });
       expect([threadOf(s, "saturday"), threadOf(s, "squared")]).toEqual(["g0", undefined]);
-    });
-
-    it("lets a report name the thread a guardian's reply started", async () => {
-      const s = setup({ said: false });
-      guardianSays(s, { id: "answer", role: "assistant", turnId: "older" });
-      guardianSays(s, { id: "reply", turnId: "older" });
-      await s.deps.webchatRepo.placeInChatThread(CONCIERGE_CHAT, "reply", {
-        in: "answer",
-        settle: true,
-      });
-      expect(threadOf(s, "answer")).toBe("answer");
-
-      s.inTurn("task-events-turn");
-      const said = saidId(await s.tool("say", { text: "Update", thread: "answer" }));
-      expect(threadOf(s, said)).toBe("answer");
     });
 
     it("takes the guardian's words sent on to a task into the task's thread, but never a reply", async () => {
@@ -818,6 +797,7 @@ describe("Concierge tools", () => {
       const s = setup({ said: false });
       const short = await startTaskFor(s, "ask-short", ["g0"]);
       await reportTakenOver(s, short.taskId);
+      await taskOwns(s, "g1", "Notes");
       s.inTurn("notes");
       guardianSays(s, { id: "g1", turnId: "notes", chatThread: "g1" });
       const unnamed = saidId(await s.tool("say", { text: "Updated short.txt" }));
@@ -836,6 +816,7 @@ describe("Concierge tools", () => {
 
     it("puts a message naming nothing in its turn's one guardian message's thread", async () => {
       const s = setup({ said: false });
+      await taskOwns(s, "g0");
       s.inTurn("ask");
       guardianSays(s, { id: "g1", turnId: "ask", chatThread: "g0" });
       expect(threadOf(s, saidId(await s.tool("say", { text: "Sunny" })))).toBe("g0");
@@ -925,7 +906,8 @@ describe("Concierge tools", () => {
       expect([threadOf(s, "eiffel"), threadOf(s, ack)]).toEqual(["eiffel", "eiffel"]);
       expect([threadOf(s, "times"), threadOf(s, fiftySix)]).toEqual([undefined, undefined]);
 
-      // Naming A's message with answers from turn B works too.
+      // A's message is now the Eiffel task's: a second task for it takes no
+      // root from it, as a task has one thread and a thread one task.
       const named = JSON.parse(
         (
           await s.tool("chat_start", {
@@ -935,7 +917,7 @@ describe("Concierge tools", () => {
           })
         ).content[0].text,
       );
-      expect(await s.tasks.repo.threadRoot(named.taskId)).toBe("eiffel");
+      expect(await s.tasks.repo.threadRoot(named.taskId)).toBeNull();
     });
 
     it("1. roots a task at the thread its guardian message is in, or at that message", async () => {
@@ -1008,7 +990,7 @@ describe("Concierge tools", () => {
       expect(placements).not.toContain("chosen");
     });
 
-    it("5. gives the tasks one guardian message starts one shared root, and its acknowledgement joins it once", async () => {
+    it("5. roots only the first task one guardian message starts there, and its acknowledgement joins it once", async () => {
       const s = setup({ said: false });
       const first = await startTaskFor(s, "ask", ["g0"]);
       const second = JSON.parse(
@@ -1016,7 +998,8 @@ describe("Concierge tools", () => {
       ) as { taskId: string };
 
       expect(await s.tasks.repo.threadRoot(first.taskId)).toBe("g0");
-      expect(await s.tasks.repo.threadRoot(second.taskId)).toBe("g0");
+      // One thread per task: the second roots at the first thing it brings back.
+      expect(await s.tasks.repo.threadRoot(second.taskId)).toBeNull();
       expect(threadOf(s, first.ack)).toBe("g0");
       expect(inThread(s, "g0")).toBe(1);
     });
@@ -1054,7 +1037,7 @@ describe("Concierge tools", () => {
       expect(threadOf(s, "show")).toBeUndefined();
     });
 
-    it("(g) gives a task from before stored roots the thread its message is in, once", async () => {
+    it("(g) roots a task from before stored roots at its first report, not at a thread no task had", async () => {
       const s = setup({ said: false });
       guardianSays(s, { id: "old", chatThread: "old", settled: true, turnId: "older" });
       s.messages.get(CONCIERGE_CHAT)?.push({
@@ -1070,8 +1053,58 @@ describe("Concierge tools", () => {
       expect(await s.tasks.repo.threadRoot(row!.id)).toBeNull();
 
       reportTurn(s, "result", row!.id);
-      expect(threadOf(s, saidId(await s.tool("say", { text: "Done" })))).toBe("old");
-      expect(await s.tasks.repo.threadRoot(row!.id)).toBe("old");
+      const done = saidId(await s.tool("say", { text: "Done" }));
+      expect(threadOf(s, done)).toBe(done);
+      expect(await s.tasks.repo.threadRoot(row!.id)).toBe(done);
+    });
+
+    it("sends a message in a task's thread on to that task only, never to another", async () => {
+      const s = setup({ said: false });
+      const flights = await startTaskFor(s, "ask", ["g0"]);
+      const hotels = await startTaskFor(s, "ask-2", ["h0"]);
+      s.inTurn("reply-turn");
+      guardianSays(s, { id: "reply", turnId: "reply-turn", chatThread: "g0", settled: true });
+
+      const refused = await s.tool("chat_send", { chatId: hotels.chatId, text: "Saturday" });
+      expect(refused).toMatchObject({ isError: true });
+      expect(JSON.stringify(refused)).toContain(`thread of task ${flights.taskId}`);
+      s.messages.get(hotels.chatId)?.push({
+        role: "assistant",
+        content: JSON.stringify([{ type: "text", content: "2 hotels" }]),
+      });
+      expect(await s.tool("chat_forward", { chatId: hotels.chatId })).toMatchObject({
+        isError: true,
+      });
+      const sent = await s.tool("chat_send", { chatId: flights.chatId, text: "Saturday" });
+      expect(sent.isError).toBeFalsy();
+      expect(threadOf(s, "reply")).toBe("g0");
+    });
+
+    it("starts a task for a message in another task's thread with no root, so each task keeps one thread", async () => {
+      const s = setup({ said: false });
+      await startTaskFor(s, "ask", ["g0"]);
+      s.inTurn("reply-turn");
+      guardianSays(s, { id: "reply", turnId: "reply-turn", chatThread: "g0", settled: true });
+      const { taskId } = JSON.parse(
+        (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+      );
+      expect(await s.tasks.repo.threadRoot(taskId)).toBeNull();
+      expect(threadOf(s, "reply")).toBe("g0");
+      expect((await s.taskRepo.reactionsOf(CONCIERGE_CHAT, ["reply"])).get("reply")).toBe(
+        "working",
+      );
+    });
+
+    it("roots a task started for a reply to a message in no task at that reply", async () => {
+      const s = setup({ said: false });
+      s.inTurn("reply-turn");
+      // A reply to a plain answer is only a quote: it is in no thread.
+      guardianSays(s, { id: "reply", turnId: "reply-turn" });
+      const { taskId } = JSON.parse(
+        (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+      );
+      expect(await s.tasks.repo.threadRoot(taskId)).toBe("reply");
+      expect(threadOf(s, "reply")).toBe("reply");
     });
 
     it("checks the named guardian message before chat_send reaches the task", async () => {

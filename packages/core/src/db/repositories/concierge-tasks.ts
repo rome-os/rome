@@ -230,6 +230,18 @@ export class ConciergeTasksRepository {
     return titles;
   }
 
+  /**
+   * The task whose chat thread starts with message `root` in Concierge chat
+   * `chatId`, or null: a thread no task has is no task's
+   * (docs/domains/chats.md#chat-thread).
+   */
+  async taskOfThread(chatId: string, root: string): Promise<{ id: string; title: string } | null> {
+    for (const { row, conciergeChat } of await this.withChat(eq(conciergeTasks.threadRoot, root))) {
+      if (conciergeChat.id === chatId) return { id: row.id, title: row.title };
+    }
+    return null;
+  }
+
   /** The key of the message that names the row's chat thread, or null. */
   async threadRoot(id: string): Promise<string | null> {
     return (await this.get(id))?.threadRoot ?? null;

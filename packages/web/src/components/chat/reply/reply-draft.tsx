@@ -31,7 +31,8 @@ export interface ReplyDraft {
   target: ReplyTarget | null;
   /** Picks the reply and opens only the reply bar. The thread view stays as
    *  it is: open when the reply is picked inside it, else closed. Sending the
-   *  reply puts it in the replied message's chat thread either way. */
+   *  reply puts it in the replied message's task thread when it is in one;
+   *  any other reply is only a quote. */
   set: (target: ReplyTarget) => void;
   /** Drops the reply, and closes the thread view with it. Answers the
    *  draft's change count after it, for `restore`. */
@@ -56,8 +57,8 @@ export interface ReplyDraft {
   threads: boolean;
   /** A message of the chat thread the thread view shows, or null when it is closed. While it is open, the composer sends into that thread. */
   thread: string | null;
-  /** Opens the thread view on `target`'s thread, with `target` as the reply.
-   *  Only a thread label opens it. */
+  /** Opens the thread view on `target`'s task thread, with `target` as the
+   *  reply. Only a task thread's label, or a quote in it, opens it. */
   openThread: (target: ReplyTarget) => void;
   /** Closes the thread view and its reply bar: the same as `clear`. */
   closeThread: () => void;

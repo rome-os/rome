@@ -4390,7 +4390,9 @@ describe("Webchat API", () => {
     it("opens a Concierge chat's turn with the chat it runs in, and no other chat's", async () => {
       const { sentTurns } = mockScriptedManager();
       rs.spyOn(deps.agentLoader, "find").mockImplementation((name) => buildAgent(name));
+      const repo = new ConciergeTasksRepository(testDb.db);
       deps.concierge = {
+        deps: { tasks: { repo } },
         switchIfExhausted: async () => null,
         conciergeChat: async (id: string) =>
           id === "topic-1" ? { id, name: "Calendar", main: false } : null,
@@ -4424,15 +4426,41 @@ describe("Webchat API", () => {
       expect(first).toBeTruthy();
       expect(sentTurns[1]?.prompt).toBe("hello");
 
-      // One sent from a thread view reads the thread and what it is about.
+      // A reply to a message in no task is only a quote: it is in no thread.
+      const quoted = await app.request(`/chat/sessions/topic-1/turns`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: "about that", replyToMessageId: first }),
+      });
+      await drainTurn(app, quoted);
+      expect(sentTurns[2]?.prompt).toMatch(/<chat_thread message_id="[^"]+"\/>/);
+      const quotedId = sentTurns[2]?.prompt.match(/message_id="([^"]+)"/)?.[1] as string;
+      expect(await deps.webchatRepo.chatThreadOf("topic-1", quotedId)).toBe(quotedId);
+      expect((await deps.webchatRepo.getReplyTarget("topic-1", quotedId))?.chatThreadId).toBeNull();
+
+      // Once a task's thread starts at it, a message sent there reads the task.
+      const [task] = await repo.upsertMany([
+        { title: 'Book "dinner"', state: "doing", chatId: "topic-1" },
+      ]);
+      await repo.setThreadRoot(task.id, first as string);
+      await deps.webchatRepo.placeInChatThread("topic-1", first as string, {
+        starts: true,
+        settle: true,
+      });
       const next = await app.request(`/chat/sessions/topic-1/turns`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text: "and later?", chatThread: first }),
       });
       await drainTurn(app, next);
-      expect(sentTurns[2]?.prompt).toMatch(
-        new RegExp(`<chat_thread message_id="[^"]+" thread="${first}" about="hello"/>`),
+      expect(sentTurns[3]?.prompt).toMatch(
+        new RegExp(
+          `<chat_thread message_id="[^"]+" thread="${first}" task="${task.id}" task_title="Book &quot;dinner&quot;"/>`,
+        ),
+      );
+      const threaded = sentTurns[3]?.prompt.match(/message_id="([^"]+)"/)?.[1] as string;
+      expect((await deps.webchatRepo.getReplyTarget("topic-1", threaded))?.chatThreadId).toBe(
+        first,
       );
     });
 

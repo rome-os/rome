@@ -20,6 +20,7 @@ import { ChatThreadView, chatThreadQueryKey } from "./ChatThreadView";
 import { ConciergeTranscript } from "./ConciergeTranscript";
 import { buildRows } from "./chat-view";
 import type { BlockActions } from "./MessageList";
+import { ChatThreadsProvider } from "./reply/chat-threads";
 import { QuotedReply } from "./reply/QuotedReply";
 import { ReplyBar } from "./reply/ReplyBar";
 import { ReplyDraftProvider, useReplyDraftState, type ReplyDraft } from "./reply/reply-draft";
@@ -154,7 +155,7 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     expect(draft.target?.messageId).toBe("old");
   });
 
-  it("opens the thread view from a reply's quote", () => {
+  it("opens the thread view from the quote of a reply in a task's thread", () => {
     let draft!: ReplyDraft;
     const part: ReplyToPart = {
       type: "reply_to",
@@ -164,7 +165,9 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     };
     render(
       <ThreadsDraft onDraft={(next) => (draft = next)}>
-        <QuotedReply part={part} />
+        <ChatThreadsProvider value={{ labels: new Map(), taskThreads: new Map([["r1", "m1"]]) }}>
+          <QuotedReply part={part} hostId="r1" />
+        </ChatThreadsProvider>
       </ThreadsDraft>,
     );
 
@@ -173,6 +176,40 @@ describe("the reply draft of a chat that keeps chat threads", () => {
     expect(draft.thread).toBe("a1");
     // Opening either opens both: the quote also picks the reply.
     expect(draft.target).toMatchObject({ messageId: "a1", preview: "Which day?" });
+  });
+
+  it("jumps to the original from the quote of a reply in no task, and opens no thread view", () => {
+    let draft!: ReplyDraft;
+    const jump = rs.fn();
+    const part: ReplyToPart = {
+      type: "reply_to",
+      messageId: "a1",
+      author: "agent",
+      text: "Which day?",
+    };
+    function Draft({ children }: { children: ReactNode }) {
+      draft = useReplyDraftState({
+        chatId: "concierge",
+        sessionId: "concierge",
+        messageIds: new Set(["a1"]),
+        jump,
+        focusComposer: () => {},
+        threads: true,
+      });
+      return <ReplyDraftProvider value={draft}>{children}</ReplyDraftProvider>;
+    }
+    render(
+      <Draft>
+        <ChatThreadsProvider value={{ labels: new Map(), taskThreads: new Map() }}>
+          <QuotedReply part={part} hostId="r1" />
+        </ChatThreadsProvider>
+      </Draft>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Go to the original message" }));
+
+    expect(jump).toHaveBeenCalledWith("a1");
+    expect(draft.thread).toBeNull();
   });
 
   it("puts a failed send's reply and thread back only when nothing changed since the send", () => {

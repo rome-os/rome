@@ -28,21 +28,19 @@ A chat inside a chat, usually started from one of its messages. A thread is not 
 
 ## Chat thread
 
-One line of conversation inside a [Concierge chat](#concierge-chat) that its owner follows on its own. Unlike a [thread](#thread), it is not a place: its messages stay in the chat's own timeline. A chat thread exists only on demand, and the Concierge never places a message.
+One [task](#task)'s conversation inside a [Concierge chat](#concierge-chat), which its owner follows on its own. Unlike a [thread](#thread), it is not a place: its messages stay in the chat's own timeline. Only a task has a chat thread, and a task has exactly one.
 
 - A chat thread is known by its chat and the id of its first message, its root.
-- An owner's message sent as a reply, or from the thread view, is in that thread at once, and nothing moves it.
-- A task has one root, kept for good. A task started for an owner's message has that message's thread, or that message as its root. The Concierge's messages in that turn that answer the message join the thread with it. A task no one owner's message started takes the first owner's message sent on to it, or the first thing it brings back.
-- Whatever a task brings back later, its result, its question card or a forward, joins the task's thread. So does an owner's message sent on to it, which keeps a follow-up in the task's story.
-- A Concierge message that names what it is about goes there, whatever turn says it: a task's result or news joins that task's thread, and a message naming a thread, or the owner's message it answers, goes where that is. Only a message that names nothing goes by its turn: into the thread of the task the turn reports on, or of the turn's one owner's message.
-- A turn about two things, the owner's message and another task's news that a newer message took over, is mixed. There a message that names nothing goes in no thread, and is never guessed into the owner's.
-- A task's row points to the owner's message the task is for, before anything said in the same turn, which may be another task's report.
+- A task's root is kept for good: the owner's message that started the task. A task no owner's message started takes the first owner's message sent on to it, or the first thing it brings back. A message already in another task's thread starts no thread, so a task started for it takes its root the same way.
+- Rome places the messages of a task's thread, never the owner and never by guess. A task's thread holds what the task brings back, its results, question cards and forwards, the owner's messages sent on to it, and the Concierge's answers to those messages. The Concierge's messages that answer the message a task was started for join it too.
+- A Concierge message that names its task goes into that task's thread, whatever turn says it. One that names nothing goes by its turn: into the thread of the task the turn reports on, or of the task the turn's one owner's message is in. A turn about several things, as the owner's message and another task's news, or several tasks' news, puts a message that names nothing in no thread.
+- A reply to a message in a task's thread is in that thread at once, and nothing moves it. The Concierge reads which task it belongs to. It sends the message on to that task or answers it itself, and Rome refuses to send it on to any other task.
+- A reply to a message in no task's thread is only a quote: it is in no thread. A task the Concierge then starts for it takes it as its root.
+- Any other message is in no chat thread: an owner's message typed in the chat, the Concierge's answer to one, and every message of a thread from before that no task has.
 - A task moved to another Concierge chat leaves its thread behind, and starts a new one there the same way.
-- Any other message is in no chat thread: an owner's message typed in the chat, and the Concierge's answer to one. The Concierge's answer to a message in a thread is in that thread.
-- A message in no chat thread opens a thread view that shows it alone.
-- Only a thread's label, or the quote in a reply's bubble, opens the thread view. Reply on a message opens the reply bar alone, and the reply still goes into that message's thread. Reply inside an open thread view keeps it open. Closing the reply bar, or sending, closes an open view with it.
-- The chat's timeline shows every message in the order it was said, whatever its thread. The thread view shows one thread's messages on their own.
-- In the chat's timeline, every Concierge message in a chat thread shows a label under it that names the thread and opens it: the task's title for a task's thread, else the start of its first message. The owner's own messages show none, and neither does the thread view. A label shows no count.
+- The chat's timeline shows every message in the order it was said, whatever its thread. The thread view shows one task's thread on its own.
+- In the chat's timeline, every Concierge message in a task's thread shows the task's title under it, which opens the thread view. The owner's own messages show none, and neither does the thread view. A label shows no count.
+- Only that label, or the quote in a reply that is in a task's thread, opens the thread view. The quote in any other reply goes to the original message and tints it. Reply on a message opens the reply bar alone. Reply inside an open thread view keeps it open. Closing the reply bar, or sending, closes an open view with it.
 
 ## Place
 
@@ -119,7 +117,7 @@ A mark Rome puts on its owner's message in a [Concierge chat](#concierge-chat) t
   - A newer input supersedes its turn and the work carries into the next turn: still working, until that turn ends.
 - A stopped task that is resumed or given more words is working again.
 - A message counts only the work not stopped: working while any of it works, then failed if any failed, else none. When all of it was stopped, it has none too.
-- The turn's part of the work is done as soon as the Concierge answers the message, though the turn runs on. A message with no task then shows no mark. The Concierge answers it when its answer names it, or when the message is the turn's only one and the answer is about no task and no other thread. A turn that holds several of its owner's messages and names none in an answer settles them only when it ends.
+- The turn's part of the work is done as soon as the Concierge answers the message, though the turn runs on. A message with no task then shows no mark. The Concierge answers it when its answer names it, or when the message is the turn's only one and the answer names no task. A turn that holds several of its owner's messages and names none in an answer settles them only when it ends.
 - It is not a message. It never reaches the phone as a push, and it does nothing when pressed.
 - A common chat has none, and neither does a task chat.
 
@@ -156,6 +154,17 @@ A Concierge chat its owner starts for one topic, such as the calendar or a proje
 - One started from the dashboard opens blank, like a new chat, and exists from its first message, which names it. One the Concierge starts with a name keeps it, and the main chat's name never changes on its own.
 - Its owner can **rename**, **archive** and **delete** it. Archiving or deleting it moves its follows and tasks to its owner's main chat, and the Concierge says so there.
 - An owner may have any number of topic chats.
+
+## Task
+
+One piece of work the Concierge keeps on its owner's task list, with a title, a state and, while an agent works on it, a [task chat](#task-chat). It belongs to the Concierge chat it reports to.
+
+- Its states are planned (next), in progress (doing), waiting on something outside (watching), waiting on its owner (needs_user), done, and dropped, for work called off.
+- The Concierge **writes** a task: it creates it, moves it between states and marks it done or dropped. Starting a task chat for one makes it in progress. Nothing else sets a task's state.
+- Rome tells the Concierge what a task's chat does, and marks a task not synced when the Concierge never takes in what it was told.
+- A task has at most one [chat thread](#chat-thread), and its root is kept for good.
+- A task moves to its owner's main chat when its Concierge chat is archived or deleted.
+- A message a task works for shows a [status reaction](#status-reaction) until the Concierge says the task's result, marks it done, or drops it.
 
 ## Task chat
 
@@ -306,7 +315,8 @@ The other kind of link: an agent linked to the guardian's own account, so it ans
 - **"Channel" for a topic chat, as in Claude Duet.** Channel names nothing the guardian meets in Rome, and bringing it back for one kind of chat would give it a meaning no other surface shares.
 - **"Sub chat" for a topic chat.** It reads as a chat under another, which is what a task chat is. A topic chat stands beside the main chat.
 - **A platform thread for a chat thread.** A platform thread is a place of its own, so its messages leave the chat's timeline. The guardian wants every message in the timeline, grouped only when they open one thread.
-- **The guardian sorting messages into chat threads.** It asks them to file every message by hand. Threads start only when the guardian replies, or when a task brings something back.
+- **The guardian sorting messages into chat threads.** It asks them to file every message by hand. Threads start only with a task.
+- **A chat thread for any reply, named "Reply to …" when no task had it.** A reply to a plain answer opened a second, nameless kind of thread, and a message could sit in one task's thread while the Concierge sent it to another. One thread per task keeps a thread's name and its work the same.
 - **Every message in a chat thread, with the Concierge placing each one.** The Concierge rarely started a new thread, so one thread swallowed the whole timeline, and opening it showed the same list as the timeline.
 - **A topic chat as a thread of the main chat.** A thread's messages are messages of its chat, so the main chat would still carry every topic. Separate topics need separate chats.
 - **Several Concierges, each with its own memory, follows and tasks.** One event would be triaged and told once per Concierge, and the isolation it promises does not exist inside one Rome. The reasons are in [One Concierge with several chats](../adrs/one-concierge-with-several-chats.md).

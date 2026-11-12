@@ -2,19 +2,26 @@ import { Reply } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import type { ReplyToPart } from "@rome/api-types/chat";
 import { cn } from "@/lib/utils";
+import { useChatThreads } from "./chat-threads";
 import { useReplyDraft } from "./reply-draft";
 import { plainQuote } from "./reply-source";
 
 /**
  * The quote a reply carries, inside the reply's bubble: a gray left edge, a
- * reply arrow, and the first two lines of what was quoted. In a chat that keeps chat
- * threads it opens the thread view. Elsewhere it jumps to the original when the
- * loaded transcript holds it, and is plain text otherwise.
+ * reply arrow, and the first two lines of what was quoted. A reply in a task's
+ * chat thread opens the thread view, as does any inside the open view. Any
+ * other jumps to the original when the loaded transcript holds it, and is
+ * plain text otherwise (docs/domains/chats.md#chat-thread).
  */
-export function QuotedReply({ part }: { part: ReplyToPart }) {
+export function QuotedReply({ part, hostId }: { part: ReplyToPart; hostId?: string }) {
   const { t } = useTranslation("chat");
   const draft = useReplyDraft();
-  const opensThread = draft?.threads === true;
+  const threads = useChatThreads();
+  // The thread view's own transcript has no threads provider: all of it is the task's.
+  const inTaskThread = threads
+    ? hostId !== undefined && threads.taskThreads.has(hostId)
+    : draft?.thread !== null && draft?.thread !== undefined;
+  const opensThread = draft?.threads === true && inTaskThread;
   const jumpable = opensThread || draft?.has(part.messageId) === true;
   const body = (
     <>
