@@ -2188,6 +2188,7 @@ class AgentSessionImpl implements AgentSession {
   }
 
   private async runEventsLoop(session: ModelSession): Promise<void> {
+    let failure: string | undefined;
     try {
       this.deps.sessionTracing.enterSession(this.sessionId);
       for await (const event of session.events) {
@@ -2339,17 +2340,28 @@ class AgentSessionImpl implements AgentSession {
         }
       }
     } catch (err) {
+      failure = err instanceof Error ? err.message : String(err);
       this.log.warn("agent session events loop ended", {
         sessionId: this.sessionId,
         provider: session.providerId,
-        error: err instanceof Error ? err.message : String(err),
+        error: failure,
       });
     } finally {
       if (this.replacingModelSession === session || this.modelSession !== session) return;
       const sink = this.currentSink;
       this.inputs.close();
+      // The loop died on an error while nobody is closing the session: the
+      // provider process would otherwise keep running with no owner.
+      if (failure !== undefined && !this.closing) {
+        session.close().catch((err) => {
+          this.log.warn("modelSession close after events loop failure threw", {
+            sessionId: this.sessionId,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        });
+      }
       if (sink && !sink.done) {
-        this.failTurn(sink, "session closed mid-turn");
+        this.failTurn(sink, failure ?? "session closed mid-turn");
       }
       this.status = "closed";
       this.emitStatus();

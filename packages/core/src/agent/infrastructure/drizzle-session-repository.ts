@@ -93,16 +93,22 @@ export class DrizzleSessionRepository implements SessionRepository {
   async save(session: Session): Promise<void> {
     const state = session.snapshot();
     const pending = session.pendingChanges();
-    this.db.transaction((tx) => {
-      const stored = tx
-        .select({ id: sessions.id })
-        .from(sessions)
-        .where(eq(sessions.id, state.id))
-        .get();
-      if (!stored) throw new Error(`Session "${state.id}" was never added`);
-      writeChanges(tx, state, pending.changes);
-      for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
-    });
+    // Immediate: a deferred read-then-write fails at once with "database is
+    // locked" when another connection holds the write lock; BEGIN IMMEDIATE
+    // waits for it under busy_timeout instead.
+    this.db.transaction(
+      (tx) => {
+        const stored = tx
+          .select({ id: sessions.id })
+          .from(sessions)
+          .where(eq(sessions.id, state.id))
+          .get();
+        if (!stored) throw new Error(`Session "${state.id}" was never added`);
+        writeChanges(tx, state, pending.changes);
+        for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
+      },
+      { behavior: "immediate" },
+    );
     session.markSaved();
   }
 
