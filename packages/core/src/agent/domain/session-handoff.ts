@@ -48,6 +48,12 @@ export interface HandoffContext {
 export interface RenewalHandoffs {
   /** How long the retired session has to write its handoff before the fallback writes it. */
   readonly timeoutMs: number;
+  /**
+   * The context size, in tokens, past which a session that renews with a
+   * handoff is renewed once its turn ends. Absent, only a setup change or a
+   * reset renews it.
+   */
+  readonly contextLimitTokens?: number;
   /** Runs `work` while chat `chatId` says it is tidying up its context. */
   tidying<T>(chatId: string | undefined, work: () => Promise<T>): Promise<T>;
   /**

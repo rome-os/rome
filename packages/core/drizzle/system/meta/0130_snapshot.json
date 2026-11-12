@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "7f610a02-4151-40fa-ae54-feff88c781a0",
+  "id": "6640628d-bca4-4232-95b2-6507b39623ed",
   "prevId": "a4a64f30-31c3-4c3e-90f1-106400caf23b",
   "tables": {
     "account_profiles": {
@@ -3774,6 +3774,13 @@
         "handoff": {
           "name": "handoff",
           "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "context_tokens": {
+          "name": "context_tokens",
+          "type": "integer",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false

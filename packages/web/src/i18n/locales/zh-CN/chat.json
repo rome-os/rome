@@ -599,6 +599,7 @@
     "hideHandoff": "收起交接",
     "handoffTitle": "交给新会话的交接说明",
     "reasons": {
+      "context": "上下文已满",
       "setup": "设定已变",
       "idle": "闲置后",
       "daily": "每日重置",

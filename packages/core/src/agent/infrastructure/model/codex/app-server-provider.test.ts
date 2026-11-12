@@ -2317,6 +2317,55 @@ describe("CodexAppServerProvider", () => {
     await session.close();
   });
 
+  it("reports the context window as the turn's last model request filled it", async () => {
+    const provider = new CodexAppServerProvider();
+
+    requestMock.mockImplementation(async (method: string) => {
+      if (method === "thread/start") {
+        captured.onNotification?.("thread/started", { thread: { id: "thr-1" } });
+      }
+      if (method === "turn/start") {
+        const n = captured.onNotification!;
+        n("turn/started", { threadId: "thr-1", turn: { id: "turn-1" } });
+        // Two requests: the turn's usage is their sum, its context the last one.
+        n("thread/tokenUsage/updated", {
+          threadId: "thr-1",
+          turnId: "turn-1",
+          tokenUsage: { ...usage({ inputTokens: 60_000 }), modelContextWindow: 258_000 },
+        });
+        n("thread/tokenUsage/updated", {
+          threadId: "thr-1",
+          turnId: "turn-1",
+          tokenUsage: {
+            ...usage({ inputTokens: 62_000 }, { inputTokens: 122_000, totalTokens: 20 }),
+            modelContextWindow: 258_000,
+          },
+        });
+        n("item/completed", {
+          item: { type: "agentMessage", id: "m1", text: "done", phase: "final_answer" },
+          threadId: "thr-1",
+          turnId: "turn-1",
+          completedAtMs: 0,
+        });
+        n("turn/completed", { threadId: "thr-1", turn: { id: "turn-1", status: "completed" } });
+      }
+      return {};
+    });
+
+    const session = await provider.openSession(buildParams());
+    const collected = collectUntilTerminal(session);
+    await session.sendUserInput({ text: "hi" });
+    const result = (await collected).find((m) => m.type === "result") as
+      | { accounting?: { context?: unknown; usage?: { inputTokens: number } } }
+      | undefined;
+    expect(result?.accounting?.context).toEqual({
+      usedTokens: 62_000,
+      windowTokens: 258_000,
+      remainingTokens: 196_000,
+    });
+    await session.close();
+  });
+
   it("ignores delayed token usage updates from a previous turn", async () => {
     const provider = new CodexAppServerProvider();
 

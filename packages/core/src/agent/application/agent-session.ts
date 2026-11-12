@@ -454,12 +454,43 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     sessions.delete(keyOf(sess.key));
   };
 
+  // A renewal for a full context, by key, from the turn end that found the
+  // context past its limit until the successor is written. An open of the
+  // same key waits for it, and opens the successor.
+  const contextRenewals = new Map<string, Promise<void>>();
+  const onContextFull = (sess: AgentSessionImpl) => {
+    const k = keyOf(sess.key);
+    if (contextRenewals.has(k) || shutDown) return;
+    const run = (async () => {
+      await waitUntilQuiescent(sess);
+      // Only a quiet session still serving its chat, with no approval
+      // holding it: something queued or held keeps it until its next turn end.
+      if (sess.status === "closed" || sessions.get(k) !== sess) return;
+      if (await deps.heldMidTurn?.(sess.sessionId)) return;
+      if (!sess.isQuiescentForRotation || sessions.get(k) !== sess) return;
+      await sess.close("idle");
+      await renewForContext(deps, sess);
+    })()
+      .catch((err) =>
+        log.warn("provider_session.context_renewal_failed", {
+          agentName: sess.key.agentName,
+          sessionId: sess.sessionId,
+          error: err instanceof Error ? err.message : String(err),
+        }),
+      )
+      .finally(() => contextRenewals.delete(k));
+    contextRenewals.set(k, run);
+  };
+
   const acquireInner = async (
     key: AgentSessionKey,
     span: Span,
     init?: OpenRequest,
   ): Promise<AgentSession> => {
     const k = keyOf(key);
+    // A renewal for a full context writes the successor this open is for.
+    const renewal = contextRenewals.get(k);
+    if (renewal) await renewal;
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
     // from a reopen (a live session existed but was torn down for TTL/auth). The
@@ -556,6 +587,7 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
       const sess = await openSession(deps, key, init ?? {}, {
         keepAlive,
         onClosed: onSessionClosed,
+        onContextFull,
         isSubagent,
         turns,
       });
@@ -663,6 +695,8 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
 interface OpenOptions {
   keepAlive: boolean;
   onClosed: (s: AgentSessionImpl) => void;
+  /** A turn of the session ended with its context past the handoff limit. */
+  onContextFull?: (s: AgentSessionImpl) => void;
   isSubagent: boolean;
   turns: TurnsById;
 }
@@ -990,6 +1024,58 @@ async function prepareSetup(
       return prompt;
     },
   };
+}
+
+/**
+ * Renews the chat of a session just closed for a full context: the retired
+ * session writes its handoff, and its successor is written with it, on no
+ * thread yet, for the chat's next open to start (docs/concepts/sessions.md#handoff).
+ * Nothing is written when no handoff is, so the chat keeps its session until
+ * a later turn end tries again, or the provider's own compaction runs.
+ */
+async function renewForContext(deps: ManagerDeps, closed: AgentSessionImpl): Promise<void> {
+  const { log } = deps;
+  const { key } = closed;
+  if (!deps.handoffs || !key.channelThreadKey) return;
+  const retired = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
+  if (!retired || retired.id !== closed.sessionId) return;
+  const handoff = await writeRenewalHandoff(
+    {
+      retired,
+      agentName: key.agentName,
+      chatId: closed.chatId,
+      systemPrompt: closed.openedSystemPrompt,
+      workingDir: closed.workingDirectory,
+      env: {},
+    },
+    {
+      handoffs: deps.handoffs,
+      modelResolver: deps.modelResolver,
+      turnUsage: deps.turnUsage,
+      log,
+    },
+  );
+  if (!handoff) return;
+  // Something else renewed the chat meanwhile: its session stays.
+  const still = await deps.sessionRepository.current(key.channelThreadKey, key.agentName);
+  if (!still || still.id !== retired.id) return;
+  const successor = still.replace({
+    setup: still.setup ?? undefined,
+    reason: "context",
+    workingDir: still.workingDir ?? undefined,
+    handoff,
+  });
+  await deps.sessionRepository.replace(still, successor);
+  log.info("provider_session.rotated", {
+    chatId: closed.chatId,
+    agentName: key.agentName,
+    provider: still.provider ?? undefined,
+    oldSessionId: still.id,
+    newSessionId: successor.id,
+    resetReason: "context",
+    contextTokens: still.contextTokens ?? undefined,
+    result: "succeeded",
+  });
 }
 
 async function openSession(
@@ -1655,6 +1741,15 @@ async function openSession(
     subagentToolNames: active.source.subagentToolNames,
     keepAlive: opts.keepAlive,
     onClosed: () => opts.onClosed(impl),
+    // Past this size a turn's end renews the session with a handoff
+    // (docs/concepts/sessions.md#handoff).
+    contextLimitTokens:
+      !opts.isSubagent &&
+      !config.codeBacked &&
+      resolveAgentPolicy({ name: agent.localName, policy: config.policy }).handoffOnRenewal
+        ? deps.handoffs?.contextLimitTokens
+        : undefined,
+    onContextFull: opts.onContextFull ? () => opts.onContextFull?.(impl) : undefined,
   });
 
   impl.startModelSessionEvents();
@@ -1721,6 +1816,9 @@ interface ImplArgs {
   subagentToolNames: Set<string>;
   keepAlive: boolean;
   onClosed: () => void;
+  /** The context size past which a turn's end calls `onContextFull`. */
+  contextLimitTokens?: number;
+  onContextFull?: () => void;
 }
 
 interface TurnSink {
@@ -2003,6 +2101,8 @@ class AgentSessionImpl implements AgentSession {
   );
   private keepAlive: boolean;
   private onClosed: () => void;
+  private contextLimitTokens?: number;
+  private onContextFull?: () => void;
   private closingPromise?: Promise<void>;
 
   constructor(args: ImplArgs) {
@@ -2038,6 +2138,18 @@ class AgentSessionImpl implements AgentSession {
     this.subagentToolNames = args.subagentToolNames;
     this.keepAlive = args.keepAlive;
     this.onClosed = args.onClosed;
+    this.contextLimitTokens = args.contextLimitTokens;
+    this.onContextFull = args.onContextFull;
+  }
+
+  /** The chat the session serves, when it serves one. */
+  get chatId(): string | undefined {
+    return this.threadContext?.romeSessionId;
+  }
+
+  /** The system prompt the session opened with. */
+  get openedSystemPrompt(): string {
+    return this.systemPrompt;
   }
 
   /** Current per-turn OTel context, exposed for closures that need to bind
@@ -2369,9 +2481,14 @@ class AgentSessionImpl implements AgentSession {
               sink.turnId,
               reasoningEffort,
               interrupted ? undefined : position,
+              outbound.accounting?.context?.usedTokens,
             );
             if (sink.carriesContinuation) this.continuationPending = false;
             if (sink.carriesHandoff) this.handoff = undefined;
+            const used = outbound.accounting?.context?.usedTokens;
+            if (this.contextLimitTokens && used !== undefined && used >= this.contextLimitTokens) {
+              this.onContextFull?.();
+            }
           }
           // Use `outbound` (not `msg`) so provider-output validation is
           // reflected in span status and the turn_end bracket. The turn_end
@@ -2624,6 +2741,7 @@ class AgentSessionImpl implements AgentSession {
     turnId: string,
     reasoningEffort: string | undefined,
     position: ModelPosition | undefined,
+    contextTokens?: number,
   ): Promise<void> {
     try {
       this.session.recordTurn({
@@ -2632,6 +2750,7 @@ class AgentSessionImpl implements AgentSession {
         model: session.model,
         reasoningEffort,
         checkpoint: position ? { turnId, checkpointId: position.checkpointId } : undefined,
+        ...(contextTokens !== undefined ? { contextTokens } : {}),
       });
       await this.deps.sessionRepository.save(this.session);
       // The pin becomes readable only once recorded: later turns of this live

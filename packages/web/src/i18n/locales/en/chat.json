@@ -599,6 +599,7 @@
     "hideHandoff": "hide handoff",
     "handoffTitle": "Handoff to the new session",
     "reasons": {
+      "context": "context was full",
       "setup": "setup changed",
       "idle": "after a quiet period",
       "daily": "daily reset",

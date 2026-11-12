@@ -78,12 +78,22 @@ import {
   type DynamicToolCallResponse,
 } from "./app-server-protocol.js";
 import { buildTurnInput } from "./turn-input.js";
-import { buildOpenAiAccounting, calculateOpenAiCostUsd, type Usage } from "./common.js";
+import {
+  buildOpenAiAccounting,
+  calculateOpenAiCostUsd,
+  codexContextUsage,
+  type Usage,
+} from "./common.js";
 import { stripLegacyReasoningSuffix } from "../../../domain/model-alias.js";
 import type { LearnsRefusedTurns } from "../refused-turn.js";
 import type { LearnsRefusedModels } from "./account-service.js";
 import type { CodexLoginChoice, ModelLoginKind } from "../../../domain/model-login.js";
-import type { AgentEvent, AgentPlan, AgentPlanStepStatus } from "../../../../types.js";
+import type {
+  AgentContextUsage,
+  AgentEvent,
+  AgentPlan,
+  AgentPlanStepStatus,
+} from "../../../../types.js";
 import { classifyCodexErrorInfo } from "./error-info.js";
 import {
   type CodexTurnError,
@@ -378,6 +388,7 @@ function updateTurnUsage(turn: ActiveTurn, update: ThreadTokenUsage): void {
       }
     : last;
   turn.requestUsages.push(last);
+  turn.context = codexContextUsage(last.inputTokens, update.modelContextWindow) ?? turn.context;
 }
 
 function calculateTurnCostUsd(usages: TokenUsageBreakdown[], model: string): number | undefined {
@@ -404,6 +415,8 @@ interface ActiveTurn {
   usage?: TokenUsageBreakdown;
   /** Per-request usage retained so non-linear pricing is applied correctly. */
   requestUsages: TokenUsageBreakdown[];
+  /** How full the context window was at the turn's latest model request. */
+  context?: AgentContextUsage;
   finalText: string;
   startedAt: number;
   /** Resolves when turn/completed (or a terminal error) lands. */
@@ -1108,6 +1121,7 @@ export class CodexAppServerProvider implements ModelProvider {
         stop: codexStop(turn.nativeStatus ?? undefined, failed),
         stopReason: failed ? "error" : "end_turn",
         durationMs: Date.now() - turn.startedAt,
+        context: turn.context,
       });
 
     // A failed turn still counts, and its token cost comes from the

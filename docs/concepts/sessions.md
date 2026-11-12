@@ -61,7 +61,7 @@ Memory, follows and tasks are not part of it, since a session reads them while i
 
 ## Renewal
 
-A renewal replaces a chat's session with a fresh one, on a new provider thread, for a changed [setup](#setup) or a reset its chat's policy says is due. It happens only when a session is opened cold: opened by continuity key while it is not live in memory.
+A renewal replaces a chat's session with a fresh one, on a new provider thread, for a changed [setup](#setup), a reset its chat's policy says is due, or a [full context](#handoff). It happens only when a session is opened cold: opened by continuity key while it is not live in memory.
 
 **Contracts:**
 
@@ -85,6 +85,8 @@ A handoff is the private note a retired session writes for the session that rene
 - The handoff is stored with the successor and does not change. The successor's first turns carry it inside the continuation notice, with the chat's open tasks as Rome holds them when the turn runs and the chat's latest messages up to about 8,000 tokens. They stop carrying it once a turn of the successor succeeds.
 - The chat's renewal line opens to show the handoff. A renewal that wrote none shows the line as before.
 - An approval that holds a session still defers its renewal, so no handoff is written while it holds.
+- A session whose policy asks for a handoff is also renewed when a turn of it ends with its context past a limit (`SESSION_HANDOFF_CONTEXT_TOKENS`, 120,000 tokens by default). The handoff is written then, in the background, once nothing is queued on the session and no approval holds it, and the successor is stored with reason `context` on no thread yet. The next message opens it without waiting for a handoff. A message that comes while it is written waits for it. When no handoff is written, the session stays, and a later turn end tries again.
+- A session's context size is the input of its latest model request, as the provider reports it. Each turn that reports one records it on the session. The providers' own compaction stays on as the safety net.
 
 ## Session in use
 

@@ -1232,6 +1232,7 @@ async function main() {
       // A renewal whose agent asks for it starts from a handoff (Concierge chats).
       handoffs: createRenewalHandoffs({
         timeoutMs: config.sessionHandoffTimeoutSeconds * 1_000,
+        contextLimitTokens: config.sessionHandoffContextTokens,
         modelResolver,
         rows: async (chatId, turns) =>
           (await webchatRepo.getMessagesPage(chatId, { limit: turns })).rows,

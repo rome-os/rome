@@ -3952,6 +3952,72 @@ describe("AgentRunner", () => {
           expect(provider.calls.at(-1)?.prompt).not.toContain("<handoff>");
         });
 
+        /** A result whose last model request read `usedTokens` of context. */
+        const fullResult = (usedTokens: number, content = "ok") =>
+          [
+            {
+              type: "result" as const,
+              content,
+              accounting: {
+                provider: "mock",
+                model: "mock",
+                usage: {
+                  inputTokens: usedTokens,
+                  outputTokens: 1,
+                  cacheReadTokens: 0,
+                  cacheWriteTokens: 0,
+                },
+                context: { usedTokens, windowTokens: 1_000, remainingTokens: 1_000 - usedTokens },
+                costUsd: 0,
+              },
+            },
+          ] as AgentEvent[];
+
+        it("renews a session whose turn ended past the context limit, with a handoff, before the next message", async () => {
+          const provider = threadedProvider(4);
+          provider["responses"][0] = fullResult(900);
+          provider["responses"][1] = [{ type: "result", content: HANDOFF }];
+          const { handoffs, asked } = fakeHandoffs({ contextLimitTokens: 500 });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner, { live: true });
+          expect((await sessionRepository.session(first!))?.contextTokens).toBe(900);
+
+          // The next message, with no eviction: the renewal ran when the turn ended.
+          const events = await collectMessages(
+            runner.run({ agentName: "test-renewing", prompt: "Hi", channelThreadKey: key }),
+          );
+          const start = events.find((event) => event.type === "turn_start");
+          const renewed = await sessionRepository.current(key, "core:test-renewing");
+          expect(renewed?.id).not.toBe(first);
+          expect(renewed?.handoff).toBe(HANDOFF);
+          expect((await sessionRepository.session(first!))?.supersededFor).toBe("context");
+          expect(start && "sessionRenewal" in start ? start.sessionRenewal : undefined).toEqual({
+            reason: "context",
+            sessionId: renewed?.id,
+          });
+          expect(provider.sessions.map((params) => params.thread)).toEqual([
+            { kind: "new" },
+            { kind: "resume", modelThreadId: "thread-1" },
+            { kind: "new" },
+          ]);
+          expect(provider.calls[2]?.prompt).toContain(`<handoff>\n${HANDOFF}\n</handoff>`);
+          expect(asked.tidying).toHaveLength(1);
+        });
+
+        it("keeps a session under the limit, or one an approval holds", async () => {
+          const provider = threadedProvider(4);
+          provider["responses"][0] = fullResult(400);
+          provider["responses"][1] = fullResult(900);
+          const { handoffs, asked } = fakeHandoffs({ contextLimitTokens: 500 });
+          const runner = renewingRunner(provider, undefined, { handoffs });
+          const first = await turn(runner, { live: true });
+          held.add(first!);
+          expect(await turn(runner, { live: true })).toBe(first);
+          expect(await turn(runner, { live: true })).toBe(first);
+          expect(asked.tidying).toEqual([]);
+          expect((await sessionRepository.current(key, "core:test-renewing"))?.id).toBe(first);
+        });
+
         it("writes none for an agent whose policy does not ask for one", async () => {
           handoffAgent.definition = original;
           const provider = threadedProvider(2);
