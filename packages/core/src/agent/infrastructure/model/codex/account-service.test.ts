@@ -158,6 +158,39 @@ describe("SharedCodexAccountService", () => {
     }
   });
 
+  it("preserves known subscription limits across credits-only reports and toggles", async () => {
+    const rpc = new FakeAccountRpc();
+    let enabled = false;
+    const reset = Math.floor((Date.now() + 3_600_000) / 1000);
+    const service = createService(rpc, { allowChatgptCredits: async () => enabled });
+    const read = async (primary?: { usedPercent: number; resetsAt?: number }) => {
+      rpc.queue("account/read", { account: { type: "chatgpt", planType: "plus" } });
+      rpc.queue("account/rateLimits/read", {
+        rateLimits: { primary, credits: { hasCredits: true, unlimited: false, balance: "125.75" } },
+      });
+      return service.report();
+    };
+    const limited = {
+      state: "usage_limit_reached",
+      usageLimitUntil: new Date(reset * 1000).toISOString(),
+    };
+    try {
+      expect(await read({ usedPercent: 100, resetsAt: reset })).toMatchObject(limited);
+      const creditsOnly = await read();
+      expect(creditsOnly).toMatchObject(limited);
+      expect(creditsOnly.usage?.credits?.balance).toBe("125.75");
+      expect(creditsOnly.usage?.error).toBeUndefined();
+      enabled = true;
+      expect(await read()).toMatchObject({ state: "available", requiresChatgptCredits: true });
+      enabled = false;
+      expect(await read()).toMatchObject(limited);
+      expect(await read({ usedPercent: 0 })).toMatchObject({ state: "available" });
+      expect(await read()).toMatchObject({ state: "available" });
+    } finally {
+      service.close();
+    }
+  });
+
   it.each([
     ["125.75", "125.75"],
     ["0", "0"],

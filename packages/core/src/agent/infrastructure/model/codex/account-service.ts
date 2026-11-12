@@ -190,8 +190,10 @@ export class SharedCodexAccountService
   private lastLoginError: string | null = null;
   /** The usage refusal the adapter last saw, until a later usage read shows capacity. */
   private refusal: UsageRefusal | undefined;
-  /** The last report, so a limit still ahead survives a usage read that fails. */
+  /** The account report, including any allowed ChatGPT credit capacity. */
   private last: ModelAccountReport | undefined;
+  /** Keep subscription limits even when credits make the account available. */
+  private lastSubscription: ModelAccountReport | undefined;
   private readonly readRomeCredits: () => Promise<RomeCreditsView | null>;
   /** The gateway's list for the current login, or null while it has not said. */
   private modelsServed: readonly string[] | null = null;
@@ -247,11 +249,15 @@ export class SharedCodexAccountService
     }
     const refusal = this.heldRefusal();
     const now = this.now();
-    // Preserve the subscription limit across failed reads while credits make the last report available.
-    const previous = this.last?.requiresChatgptCredits
-      ? accountReport(this.last.account, this.last.usage ?? null, undefined, now)
-      : this.last;
-    const subscription = accountReport(status, usage, refusal, now, previous);
+    const subscriptionUsage = usage?.fiveHour || usage?.sevenDay ? usage : null;
+    const subscription = accountReport(
+      status,
+      subscriptionUsage,
+      refusal,
+      now,
+      this.lastSubscription,
+    );
+    this.lastSubscription = subscription;
     // Credits cover subscription windows; a refused turn still blocks requests.
     this.last = useCredits
       ? accountReport(status, { ...usage, fiveHour: undefined, sevenDay: undefined }, refusal, now)
@@ -539,6 +545,7 @@ export class SharedCodexAccountService
     await this.manager.request(Method.accountLogout);
     this.refusal = undefined;
     this.last = undefined;
+    this.lastSubscription = undefined;
     this.emitAccountChanged();
   }
 
@@ -658,6 +665,7 @@ export class SharedCodexAccountService
       // limit were the old one's.
       this.refusal = undefined;
       this.last = undefined;
+      this.lastSubscription = undefined;
     } else {
       this.lastLoginError =
         typeof notification.error === "string" && notification.error.trim()
