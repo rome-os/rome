@@ -1,10 +1,13 @@
+import { execFileSync } from "node:child_process";
 import {
   existsSync,
   mkdirSync,
   mkdtempSync,
   readdirSync,
   readFileSync,
+  realpathSync,
   rmSync,
+  utimesSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -107,6 +110,7 @@ function makeDeps(
   return {
     carrierDir,
     memoryDir: "/p/memory",
+    lockfilePath: join(dirname(carrierDir), "apps.lock.json"),
     // The memory agent plays the scripted events; the practice agent after it
     // finishes without changing anything.
     agentRunner: {
@@ -614,6 +618,48 @@ describe("dream skills", () => {
         .changes(runId)
         .map((c) => c.path),
     ).toContain(journalPath);
+  });
+
+  it("removes the app worktrees chats left behind before the practice agent runs", async () => {
+    const projects = realpathSync(mkdtempSync(join(tmpdir(), "dream-projects-")));
+    carrierDir = join(projects, "apps", "user-skills");
+    const repo = join(projects, "apps", "notes");
+    mkdirSync(repo, { recursive: true });
+    const git = (cwd: string, ...args: string[]) =>
+      execFileSync("git", args, { cwd, encoding: "utf8" }).trim();
+    git(repo, "init", "-q", "-b", "main");
+    git(repo, "config", "user.email", "t@example.com");
+    git(repo, "config", "user.name", "Test");
+    writeFileSync(join(repo, "app.yaml"), "id: notes\n");
+    git(repo, "add", ".");
+    git(repo, "commit", "-q", "-m", "init");
+    const finished = join(projects, "notes-csv-export");
+    git(repo, "worktree", "add", "-q", "-b", "task/csv-export", finished);
+    const monthAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    utimesSync(join(finished, "app.yaml"), monthAgo, monthAgo);
+    utimesSync(finished, monthAgo, monthAgo);
+    writeFileSync(
+      join(dirname(carrierDir), "apps.lock.json"),
+      JSON.stringify({ apps: { notes: { source: { mode: "source", path: repo } } } }),
+    );
+    let seenByPractice: boolean | undefined;
+    const runner = skillWritingRunner([{ type: "result", content: "Nothing to fix." }], () => {
+      seenByPractice = existsSync(finished);
+    });
+    const { deps } = withRunner(runner);
+
+    const result = await createAction(actionConfig, deps).execute({});
+
+    expect(seenByPractice).toBe(false);
+    expect(git(repo, "branch", "--list", "task/csv-export")).toContain("task/csv-export");
+    const { summary, runId } = (result as { data: { summary: string; runId: string } }).data;
+    expect(summary).toContain(
+      "Removed 1 finished app worktree, keeping their commits: notes-csv-export.",
+    );
+    // The removal is not the practice agent's app change.
+    const changes = createRunsRepository(appDb()).changes(runId);
+    expect(changes.some((c) => c.path.startsWith(finished))).toBe(false);
+    rmSync(projects, { recursive: true, force: true });
   });
 
   it("records the app files the practice agent changed without file tools", async () => {
