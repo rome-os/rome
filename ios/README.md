@@ -21,7 +21,7 @@ Device builds need a team: copy `Config/Local.xcconfig.example` to `Config/Local
 Signing is automatic and authenticates with the team's App Store Connect API key, so it works without an Apple ID in Xcode. Command-line builds often cannot see Xcode's signed-in account, even right after signing in, and then fail with "No Accounts". Keep the key's arguments in a shell array (see "Signing with the API key"). `xcrun devicectl list devices` gives the phone's identifier; the phone needs Developer Mode on.
 
 ```bash
-xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Debug -destination 'id=<device-id>' -derivedDataPath /tmp/rome-device -allowProvisioningUpdates "${ASC_KEY[@]}" build
+xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Debug -destination 'id=<device-id>' -derivedDataPath /tmp/rome-device -allowProvisioningUpdates -allowProvisioningDeviceRegistration "${ASC_KEY[@]}" build
 ```
 
 ```bash
@@ -74,9 +74,9 @@ Every signed build passes a team App Store Connect API key. Keep its arguments i
 ASC_KEY=(-authenticationKeyPath "$HOME/.appstoreconnect/private_keys/AuthKey_<KEY_ID>.p8" -authenticationKeyID <KEY_ID> -authenticationKeyIssuerID <ISSUER_ID>)
 ```
 
-A path with `~` inside quotes is not expanded, and the arguments joined into one string reach `xcodebuild` as one; both fail with "Authentication failed". The key needs the Admin role, because the export creates or uses the cloud-managed distribution certificate. Its `.p8` stays outside every repository, at that path with mode 600. App Store Connect offers the file for download only once.
+A path with `~` inside quotes is not expanded, and the arguments joined into one string reach `xcodebuild` as one; both fail with "Authentication failed". The key needs the Admin role, because the export creates or uses the cloud-managed distribution certificate. Its `.p8` stays outside every repository, at that path with mode 600. App Store Connect offers the file for download only once. A build with `ASC_KEY` unset in the shell signs with Xcode's account instead, so a personal Apple ID still works wherever `xcodebuild` can see it, and the Admin key is needed only on the Mac that ships builds.
 
-The key registers bundle ids, devices and profiles, but cannot create an App Group. A new group is made once on the Apple Developer site (Identifiers → App Groups) and ticked under App Groups on each App ID that uses it. `group.cc.romeos.mobile` and `group.cc.romeos.mobile.dev` already exist, on the app's and the widget's App IDs.
+The key registers bundle ids, devices (with `-allowProvisioningDeviceRegistration`, as in the phone build) and profiles, but cannot create an App Group. A new group is made once on the Apple Developer site (Identifiers → App Groups) and ticked under App Groups on each App ID that uses it. `group.cc.romeos.mobile` and `group.cc.romeos.mobile.dev` already exist, on the app's and the widget's App IDs.
 
 To check a Release build without signing: `xcodebuild -project Rome.xcodeproj -scheme Rome -configuration Release -destination 'generic/platform=iOS' -derivedDataPath /tmp/rome-release CODE_SIGNING_ALLOWED=NO build`.
 
