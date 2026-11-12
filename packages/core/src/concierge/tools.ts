@@ -169,17 +169,33 @@ export async function buildConciergeTools(
     return chat;
   };
 
+  // Whether the row `taskId` belongs to this Concierge chat, with the chat
+  // that owns it. A row with no owner to find counts as ours.
+  const rowOwnedElsewhere = async (taskId: string) => {
+    const { chatId: here } = currentTurn();
+    const found = await tasks.repo.getWithChat(taskId);
+    return found && found.conciergeChat.id !== here ? found.conciergeChat : null;
+  };
+
+  // Refuses a write that would move a row another Concierge chat owns here:
+  // its result and thread belong to that chat.
+  const requireRowHere = async (taskId: string, then: string) => {
+    const other = await rowOwnedElsewhere(taskId);
+    if (other) {
+      throw new Error(`Task ${taskId} belongs to another Concierge chat (${other.name}). ${then}`);
+    }
+  };
+
   // A task chat this Concierge chat started, which it may send into or
-  // forward. A task another Concierge chat started is refused: its result and
-  // thread belong to that chat. A task chat with no row yet counts as ours.
+  // forward. A task another Concierge chat started is refused. A task chat
+  // with no row yet counts as ours.
   const requireOwnTaskChat = async (chatId: string) => {
     const chat = await requireTaskChat(chatId);
-    const { chatId: here } = currentTurn();
     const task = await tasks.repo.findBySession(chatId);
-    const found = task ? await tasks.repo.getWithChat(task.id) : null;
-    if (found && found.conciergeChat.id !== here) {
+    const other = task ? await rowOwnedElsewhere(task.id) : null;
+    if (other) {
       throw new Error(
-        `Task chat ${chatId} belongs to another Concierge chat (${found.conciergeChat.name}). ` +
+        `Task chat ${chatId} belongs to another Concierge chat (${other.name}). ` +
           "Start a task here with chat_start; read that chat with chat_read first to reuse what it found.",
       );
     }
@@ -339,6 +355,10 @@ export async function buildConciergeTools(
       write.sourceMessageId = await sourceMessageForNewRow(messageId);
       write.chatId = currentTurn().chatId;
     } else if (messageId) {
+      await requireRowHere(
+        write.id,
+        "Update it there, or start a task here with chat_start. Without a messageId you can still update its state or summary.",
+      );
       write.sourceMessageId = await requireSourceMessage(messageId);
       write.chatId = currentTurn().chatId;
     }
@@ -576,7 +596,8 @@ export async function buildConciergeTools(
   const pointTaskTo = async (taskChatId: string, messageId: string) => {
     const { chatId } = currentTurn();
     const task = await tasks.repo.findBySession(taskChatId);
-    if (!task) return null;
+    // A row another Concierge chat owns stays where it is.
+    if (!task || (await rowOwnedElsewhere(task.id))) return null;
     await tasks.repo.setSourceMessage(task.id, chatId, messageId);
     return task;
   };
@@ -848,6 +869,9 @@ export async function buildConciergeTools(
           const messageId = optionalString(args, "messageId");
           if (taskId) {
             const planned = await requireTaskRow(taskId);
+            if (messageId) {
+              await requireRowHere(taskId, "Start a task here without taskId instead.");
+            }
             if (planned.sessionId) {
               throw new Error(
                 `Task ${taskId} already has chat ${planned.sessionId}. Use chat_send to continue it.`,

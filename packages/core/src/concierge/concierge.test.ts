@@ -1716,6 +1716,82 @@ describe("Concierge task anchors", () => {
       expect(await s.taskRepo.get(taskId)).toEqual(row);
     });
 
+    it("shows a card for it from a topic chat without moving the row", async () => {
+      const { s, chatId, taskId, row } = await startInMain();
+      const cardsBefore = s.messages.get(TOPIC_CHAT)?.length ?? 0;
+
+      const result = await s.tool("chat_card", { chatId });
+
+      expect(result.isError).toBeFalsy();
+      expect(text(result)).toEqual({
+        sent: "Shown; the guardian sees the card.",
+        messageId: expect.any(String),
+      });
+      expect(s.messages.get(TOPIC_CHAT)).toHaveLength(cardsBefore + 1);
+      expect(await s.taskRepo.get(taskId)).toEqual(row);
+      expect(await s.tasks.repo.threadRoot(taskId)).toBe("g0");
+
+      // The main chat still owns it.
+      s.turnIn(CONCIERGE_CHAT);
+      s.inTurn("concierge-turn-1");
+      const sent = s.posted.length;
+      expect((await s.tool("chat_send", { chatId, text: "Make it Saturday" })).isError).toBeFalsy();
+      expect(s.posted).toHaveLength(sent + 1);
+    });
+
+    it("refuses task_upsert with a messageId on its row from a topic chat, and writes nothing", async () => {
+      const { s, taskId, row } = await startInMain();
+      const messageId = text(await s.tool("say", { text: "Checking" })).messageId;
+
+      const result = await s.tool("task_upsert", {
+        tasks: [
+          { title: "Other errand", messageId },
+          { id: taskId, state: "watching", messageId },
+        ],
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("belongs to another Concierge chat");
+      expect(await s.taskRepo.get(taskId)).toEqual(row);
+      expect(await s.taskRepo.listForAgent(true)).toHaveLength(1);
+    });
+
+    it("still lets a topic chat update the state or summary of its row without a messageId", async () => {
+      const { s, taskId, row } = await startInMain();
+
+      const result = await s.tool("task_upsert", {
+        tasks: [{ id: taskId, summary: "Found 3 options" }],
+      });
+
+      expect(result.isError).toBeFalsy();
+      expect(await s.taskRepo.get(taskId)).toEqual({
+        ...row,
+        summary: "Found 3 options",
+        updatedAt: expect.anything(),
+      });
+    });
+
+    it("refuses chat_start from a topic chat that would take a planned row of the main chat", async () => {
+      const { s } = await startInMain();
+      const [planned] = await s.taskRepo.upsertMany([
+        { title: "Plan trip", state: "next", chatId: CONCIERGE_CHAT },
+      ]);
+      const messageId = text(await s.tool("say", { text: "Starting" })).messageId;
+
+      const result = await s.tool("chat_start", {
+        title: "Plan trip",
+        brief: "Plan it",
+        taskId: planned!.id,
+        messageId,
+      });
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("belongs to another Concierge chat");
+      // Only the main chat's own task started a chat.
+      expect(s.chats.startChat).toHaveBeenCalledTimes(1);
+      expect((await s.taskRepo.get(planned!.id))?.sessionId).toBeNull();
+    });
+
     it("still lets the topic chat read it", async () => {
       const { s, chatId } = await startInMain();
       expect((await s.tool("chat_read", { chatId })).isError).toBeFalsy();
