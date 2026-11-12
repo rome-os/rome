@@ -114,8 +114,12 @@ const deferInputSchema = z
 export function parseDeferInput(
   input: unknown,
   now: number,
-  options: { eventWaitDeadline?: boolean } = {},
+  options: { taskChecks?: boolean } = {},
 ): ParsedDefer {
+  // Only an agent whose policy checks tasks (the Concierge) links one.
+  if (!options.taskChecks && input && typeof input === "object" && "taskId" in input) {
+    return { ok: false, error: "defer.taskId is not available to this agent" };
+  }
   const parsed = deferInputSchema.safeParse(input);
   if (!parsed.success) {
     const issue = parsed.error.issues[0];
@@ -133,7 +137,7 @@ export function parseDeferInput(
     const { deadline, waitingFor, ...match } = event;
     // An agent whose policy asks for them (the Concierge) labels every wait
     // and gives it a deadline; any other agent's wait takes neither.
-    if (!options.eventWaitDeadline) {
+    if (!options.taskChecks) {
       return { ok: true, wakeUp: { kind: "event", name, note, event: match, ...task } };
     }
     if (!waitingFor) return { ok: false, error: WAITING_FOR_REQUIRED };

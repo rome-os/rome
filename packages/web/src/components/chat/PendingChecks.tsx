@@ -45,10 +45,14 @@ export function PendingChecks({ chatId, turnKey }: { chatId: string; turnKey: un
   return (
     <ul aria-label={t("checks.label")} className="flex flex-col gap-1 px-1 pb-1">
       {checks.map((check) => {
-        const when = formatTaskTime(check.at, now, i18n.language);
-        const line = check.waitingFor
-          ? t("checks.waiting", { what: check.waitingFor, when })
-          : t("checks.timed", { name: check.name, when });
+        // A wait with no deadline has no time: it shows its name alone.
+        const when = check.at === null ? null : formatTaskTime(check.at, now, i18n.language);
+        const line =
+          when === null
+            ? check.name
+            : check.waitingFor
+              ? t("checks.waiting", { what: check.waitingFor, when })
+              : t("checks.timed", { name: check.name, when });
         return (
           <li
             key={check.id}

@@ -790,6 +790,11 @@ export const conciergeTasks = sqliteTable(
      * its owner was never told; cleared by the next result.
      */
     reportGivenUp: integer("report_given_up", { mode: "boolean" }).notNull().default(false),
+    /**
+     * When the task's derived status first read ended, cleared if it opens
+     * again. The lists age ended rows by it.
+     */
+    endedAt: integer("ended_at", { mode: "timestamp_ms" }),
   },
   (table) => [
     // A chat belongs to at most one row, so a chat event maps to exactly one row.

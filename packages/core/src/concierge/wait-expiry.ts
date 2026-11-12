@@ -5,6 +5,7 @@
 // list the task once. The card stays answerable. docs/domains/chats.md#task
 
 import type { ConciergeTasks, TaskStatusView } from "./tasks.js";
+import type { TurnDown } from "./approval-expiry.js";
 import { createLogger } from "../logger.js";
 
 const log = createLogger("concierge-wait-expiry");
@@ -17,8 +18,8 @@ const MAX_TIMER_MS = 24 * 24 * 60 * 60 * 1000;
 
 export interface WaitExpiryDeps {
   tasks: ConciergeTasks;
-  /** Turns down chat `chatId`'s approvals still pending that began by `until`. Answers how many. */
-  expireApprovals?: (chatId: string, until: number, reason: string) => Promise<number>;
+  /** Turns down chat `chatId`'s approvals still pending (approval-expiry.ts). Answers how many. */
+  expireApprovals?: (chatId: string, turnDown: TurnDown) => Promise<number>;
   /** Tells the Concierge that task `taskId` ended for no response. */
   tell: (taskId: string) => void;
   now?: () => number;
@@ -63,7 +64,8 @@ export class WaitExpiry {
   private arm(taskId: string, status: TaskStatusView): void {
     if (this.stopped) return;
     const known = this.timers.get(taskId);
-    if (status.waitingSince === null) {
+    // A stopped task waits for no one.
+    if (status.waitingSince === null || status.endReason === "stopped") {
       if (known) clearTimeout(known.timer);
       this.timers.delete(taskId);
       return;
@@ -88,19 +90,23 @@ export class WaitExpiry {
   /** The wait of task `taskId` may have expired: handles it once, if it did. */
   async expire(taskId: string): Promise<void> {
     const row = await this.deps.tasks.repo.get(taskId);
-    if (!row?.sessionId) return;
+    // A stopped or archived task ended otherwise: its wait ends with nothing to tell.
+    if (!row?.sessionId || row.stoppedAt || row.archivedAt) return;
     // Read again: the read re-arms a wait that is not due yet.
     const status = (await this.deps.tasks.statusOf([row])).get(taskId);
     if (!status || status.waitingSince === null) return;
     if (this.now() < status.waitingSince + this.deps.tasks.waitExpiry) return;
+    if (row.expiredWaitAt?.getTime() === status.waitingSince) return;
+    // Approvals first: a turn-down is idempotent, so a crash before the wait
+    // is marked handled turns down nothing twice and leaves none pending.
+    const turnedDown = await this.deps.expireApprovals?.(row.sessionId, {
+      until: status.waitingSince + this.deps.tasks.waitExpiry,
+      reason: NO_RESPONSE_REASON,
+      continueTurn: true,
+    });
     if (!(await this.deps.tasks.repo.markWaitExpired(taskId, new Date(status.waitingSince)))) {
       return;
     }
-    const turnedDown = await this.deps.expireApprovals?.(
-      row.sessionId,
-      status.waitingSince + this.deps.tasks.waitExpiry,
-      NO_RESPONSE_REASON,
-    );
     log.info("task wait expired", { taskId, approvals: turnedDown ?? 0 });
     this.deps.tell(taskId);
     await this.deps.tasks.taskChanged(taskId);

@@ -6871,7 +6871,7 @@ describe("Webchat API", () => {
       deps.concierge = {
         deps: {
           checks: {
-            inChat: async (chatId: string) => (chatId === "chat-a" ? [check] : []),
+            inChatForApi: async (chatId: string) => (chatId === "chat-a" ? [check] : []),
             cancel: async (chatId: string, id: string) => {
               cancelled.push([chatId, id]);
               return id === "r-1";

@@ -910,9 +910,14 @@ export async function buildConciergeTools(
           }
           const rows = await tasks.repo.upsertMany(writes);
           for (const taskId of stops) await stopTask(taskId);
-          // An archived task has nothing left to check on.
+          // Archiving a task that is still open stops it, so nothing runs
+          // hidden; an archived task has nothing left to check on.
           for (const write of writes) {
-            if (write.id && write.archived === true) await service.cancelChecks(write.id);
+            if (!write.id || write.archived !== true) continue;
+            const row = await tasks.repo.get(write.id);
+            const open = row && (await tasks.statusOf([row])).get(row.id)?.status !== "ended";
+            if (open && !stops.includes(write.id)) await stopTask(write.id);
+            await service.cancelChecks(write.id);
           }
           // A row made in this turn is a task for its guardian message.
           for (const [index, row] of rows.entries()) {
@@ -1048,8 +1053,12 @@ export async function buildConciergeTools(
                 : undefined),
           );
           const { chatId: conciergeChatId, turnId } = currentTurn();
-          const startKey = taskId ?? title;
-          const failedBefore = service.failedStart(conciergeChatId, turnId, startKey);
+          // A retry may rename the task: a start counts as failed before by
+          // its row, its title or its brief.
+          const startKeys = [taskId ?? title, `brief:${brief}`];
+          const failedBefore = startKeys
+            .map((key) => service.failedStart(conciergeChatId, turnId, key))
+            .find((id) => id !== null);
           if (failedBefore) {
             throw new Error(
               `Task ${failedBefore} already failed to start this turn and is marked failed. Do not start it again; tell the guardian.`,
@@ -1090,6 +1099,8 @@ export async function buildConciergeTools(
             ]);
             const started = task.id;
             await sendMarked(started, start?.answered, () => sendInput(chatId, brief, skill?.name));
+            // A planned row that was stopped is taken up again by its start.
+            if (taskId) await tasks.repo.resume(taskId);
           } catch (error) {
             await webchatRepo.deleteSession(chatId).catch((cleanup: unknown) =>
               log.warn("failed to remove a task chat that did not start", {
@@ -1099,7 +1110,9 @@ export async function buildConciergeTools(
             );
             if (!task) throw error;
             await tasks.repo.markStartFailed(task.id);
-            service.noteFailedStart(conciergeChatId, turnId, startKey, task.id);
+            for (const key of startKeys) {
+              service.noteFailedStart(conciergeChatId, turnId, key, task.id);
+            }
             const reason = error instanceof Error ? error.message : String(error);
             throw new Error(
               `${reason} Task ${task.id} did not start and is marked failed. Do not start it again; tell the guardian.`,

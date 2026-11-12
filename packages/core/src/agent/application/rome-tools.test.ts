@@ -265,9 +265,25 @@ describe("defer", () => {
     });
   });
 
+  it("names no task for an agent whose policy checks none", async () => {
+    const schedule = rs.fn().mockResolvedValue({ ok: true });
+    const served = tools({ defer: { schedule, finalText: "deliver" } });
+    const schema = served.listTools("ask_user").find((tool) => tool.name === "defer")
+      ?.inputSchema as { properties: Record<string, unknown> };
+    expect(schema.properties).not.toHaveProperty("taskId");
+    const refused = await served.callTool("ask_user", "defer", {
+      name: "CI",
+      note: "Read the run.",
+      afterMinutes: 5,
+      taskId: "task-1",
+    });
+    expect(refused.isError).toBe(true);
+    expect(schedule).not.toHaveBeenCalled();
+  });
+
   it("asks for a label and a deadline on an event wait when the agent's policy does", async () => {
     const schedule = rs.fn().mockResolvedValue({ ok: true });
-    const served = tools({ defer: { schedule, finalText: "private", eventWaitDeadline: true } });
+    const served = tools({ defer: { schedule, finalText: "private", taskChecks: true } });
     const event = (
       served.listTools("ask_user").find((tool) => tool.name === "defer")?.inputSchema as {
         properties: { event: { required: string[] } };

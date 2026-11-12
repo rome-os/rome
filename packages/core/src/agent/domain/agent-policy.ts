@@ -24,11 +24,12 @@ export interface AgentPolicy {
    */
   freshSessionOnSetupChange: boolean;
   /**
-   * Whether the agent's `defer` waits for an event only with a label saying
-   * what it waits for and a deadline when it wakes anyway, as the
-   * Concierge's checks do. Off, an event wait takes neither.
+   * Whether the agent's `defer` checks on tasks, as the Concierge's does: it
+   * may name the task a check is for, and an event wait needs a label saying
+   * what it waits for and a deadline when it wakes anyway. Off, `defer` takes
+   * neither, as for every other agent.
    */
-  eventWaitDeadline: boolean;
+  taskChecks: boolean;
 }
 
 export function resolveAgentPolicy(agent: {
@@ -40,6 +41,6 @@ export function resolveAgentPolicy(agent: {
     autoTitle: agent.policy?.autoTitle ?? true,
     loadMemory: agent.policy?.loadMemory ?? agent.name === "main",
     freshSessionOnSetupChange: agent.policy?.freshSessionOnSetupChange ?? false,
-    eventWaitDeadline: agent.policy?.eventWaitDeadline ?? false,
+    taskChecks: agent.policy?.taskChecks ?? false,
   };
 }

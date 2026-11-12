@@ -216,6 +216,7 @@ import { ownerOfChat } from "./webchat/owner.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { continuationActor } from "./webchat/continuation-actor.js";
 import { TaskChecks } from "./concierge/task-checks.js";
+import { turnDownApprovals } from "./concierge/approval-expiry.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
@@ -1230,6 +1231,8 @@ async function main() {
         webchatRepo,
         eventSources,
         sessionTools: (context) => buildConciergeTools(concierge, context),
+        taskOwner: async (taskId) =>
+          (await concierge.deps.tasks.repo.get(taskId))?.ownerKey ?? null,
       }),
       // A session an approval waits to resume mid-turn stays until it ends.
       heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),
@@ -1368,32 +1371,11 @@ async function main() {
     // An approved action, and the turn it resumes, act for whoever's turn asked.
     executionRequester(actionExecutionsRepo),
   );
-  // A task chat's approval nobody answered within the wait is turned down,
-  // and its turn finishes as on any rejection.
-  concierge.attachApprovalExpiry(async (chatId, until, reason) => {
-    let turnedDown = 0;
-    for (const approval of await approvalsRepo.list("pending")) {
-      const threadId = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
-        ?.channelContext?.threadId;
-      if (threadId !== chatId || approval.createdAt.getTime() > until) continue;
-      const resolved = await approvalsRepo.resolvePending(
-        approval.id,
-        "reject",
-        "rome:no-response",
-      );
-      if (resolved.outcome !== "resolved") continue;
-      turnedDown += 1;
-      if (approval.type === "action_execution") {
-        await approvalHandler.onRejected(approval.id, reason).catch((error: unknown) =>
-          log.warn("failed to finish a turned-down approval's turn", {
-            approvalId: approval.id,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
-      }
-    }
-    return turnedDown;
-  });
+  // A task chat's approvals are turned down when its wait runs out, or when
+  // its task is stopped, archived or deleted.
+  concierge.attachApprovalExpiry((chatId, turnDown) =>
+    turnDownApprovals({ approvals: approvalsRepo, handler: approvalHandler }, chatId, turnDown),
+  );
 
   // Learn whether this boot's release version differs from the last completed
   // boot's — the dashboard reads the result via /api/build-info. The stored

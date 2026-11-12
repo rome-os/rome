@@ -51,6 +51,8 @@ export class ConciergeTasks {
   /** The status each task was last told with, so a fact that changes none tells nothing. */
   private told = new Map<string, string>();
   private statusListeners = new Set<(taskId: string, status: TaskStatusView) => void>();
+  /** Task chats whose turn ended and whose outcome is not written yet. */
+  private settling = new Map<string, number>();
 
   constructor(
     readonly repo: ConciergeTasksRepository,
@@ -90,11 +92,13 @@ export class ConciergeTasks {
         {
           stoppedAt: row.stoppedAt?.getTime() ?? null,
           waitingSince: row.sessionId ? (since.get(row.sessionId) ?? null) : null,
-          running: row.sessionId ? running(row.sessionId) : false,
+          running: row.sessionId
+            ? running(row.sessionId) || this.settling.has(row.sessionId)
+            : false,
           // Held in memory while the event waits, and on the row once the
           // chat's work ended, so a restart still knows it was never said.
           reportPending: pending.has(row.id) || row.outcomeUnsaid,
-          laterAt: later.get(row.id) ?? null,
+          laterAt: later.get(row.id) ?? legacyLaterOf(row, this.now()),
           lastOutcome: row.lastOutcome ?? null,
         },
       ]),
@@ -131,11 +135,40 @@ export class ConciergeTasks {
     );
     // As the task is now, not as a report would leave it.
     if (!options.asReported) {
+      const ended = rows.filter((row) => read.get(row.id)?.status === "ended");
+      const open = rows.filter((row) => read.get(row.id)?.status !== "ended");
+      await this.repo
+        .keepEnded(
+          ended.filter((row) => !row.endedAt).map((row) => row.id),
+          open.filter((row) => row.endedAt).map((row) => row.id),
+          new Date(now),
+        )
+        .catch((error: unknown) =>
+          log.warn("failed to keep when tasks ended", {
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
       for (const [taskId, status] of read) {
         for (const listener of this.statusListeners) listener(taskId, status);
       }
     }
     return read;
+  }
+
+  /**
+   * Task chat `chatId`'s turn ended and its outcome is being written: the
+   * task reads as running until then. Returns the release.
+   */
+  holdRunning(chatId: string): () => void {
+    this.settling.set(chatId, (this.settling.get(chatId) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const left = (this.settling.get(chatId) ?? 1) - 1;
+      if (left > 0) this.settling.set(chatId, left);
+      else this.settling.delete(chatId);
+    };
   }
 
   /** How long a wait on the owner keeps a task waiting for them, in milliseconds. */
@@ -172,7 +205,8 @@ export class ConciergeTasks {
       sourceMessageId,
       createdAt: row.createdAt.getTime(),
       updatedAt: row.updatedAt.getTime(),
-      completedAt: row.completedAt?.getTime() ?? null,
+      // When it ended, as its status read it; the panel ages ended rows by it.
+      completedAt: (row.endedAt ?? row.completedAt)?.getTime() ?? null,
       archivedAt: row.archivedAt?.getTime() ?? null,
       notSynced: this.notSynced.has(row.id),
     };
@@ -318,6 +352,17 @@ export class ConciergeTasks {
     this.notSynced.add(taskId);
     void this.repo.reannounce(taskId);
   }
+}
+
+/**
+ * A row planned or watched before checks named their task, with a time still
+ * ahead, is later until then.
+ */
+function legacyLaterOf(row: ConciergeTaskRow, now: number): number | null {
+  const due = row.dueAt?.getTime() ?? null;
+  return (row.state === "next" || row.state === "watching") && due !== null && due > now
+    ? due
+    : null;
 }
 
 function keyOf(status: TaskStatusView): string {

@@ -1300,7 +1300,15 @@ export class WebChatRepository {
    * wait, epoch milliseconds: its newest open card or newest pending
    * approval. Sessions that wait on nothing, or name no chat, are left out.
    */
-  async awaitingGuardianSince(sessionIds: readonly string[]): Promise<Map<string, number>> {
+  /**
+   * `oldest`: when the oldest open wait began, for how long a task has
+   * waited, rather than the newest, for whether it waits since its owner
+   * last spoke. A chat's card is its newest either way.
+   */
+  async awaitingGuardianSince(
+    sessionIds: readonly string[],
+    options: { oldest?: boolean } = {},
+  ): Promise<Map<string, number>> {
     if (sessionIds.length === 0) return new Map();
     const ids = [...sessionIds];
     const cards = await this.db
@@ -1313,7 +1321,12 @@ export class WebChatRepository {
     // chat's.
     const threadId = sql<string>`json_extract(${approvals.payload}, '$.channelContext.threadId')`;
     const pending = await this.db
-      .select({ id: threadId, since: sql<number>`max(cast(${approvals.createdAt} as integer))` })
+      .select({
+        id: threadId,
+        since: options.oldest
+          ? sql<number>`min(cast(${approvals.createdAt} as integer))`
+          : sql<number>`max(cast(${approvals.createdAt} as integer))`,
+      })
       .from(approvals)
       .where(and(eq(approvals.status, "pending"), inArray(threadId, ids)))
       .groupBy(threadId);
@@ -1321,7 +1334,8 @@ export class WebChatRepository {
     for (const row of [...cards, ...pending]) {
       if (row.since === null) continue;
       const at = Number(row.since) * 1000;
-      since.set(row.id, Math.max(at, since.get(row.id) ?? at));
+      const known = since.get(row.id) ?? at;
+      since.set(row.id, options.oldest ? Math.min(at, known) : Math.max(at, known));
     }
     return since;
   }

@@ -235,6 +235,7 @@ export function startConciergeEvents(
       return await service.systemTurnOutcome(chatId, prompt, { quiet, pushLevel: "active" });
     },
     giveUp: (taskId) => {
+      coalescer.forget(taskId);
       tasks.markNotSynced(taskId);
       // Its result will not be said: it waits for no report any more, and its
       // messages show that their owner was never told.
@@ -249,10 +250,16 @@ export function startConciergeEvents(
   service.attachTaskEvents(coalescer);
 
   const activity = startActivity(service, coalescer);
+  // A stopped or archived task keeps no check, whatever a crash left.
+  void service.cancelChecksOfEndedTasks().catch((error: unknown) =>
+    log.warn("failed to cancel ended tasks' checks", {
+      error: error instanceof Error ? error.message : String(error),
+    }),
+  );
   // A wait nobody answered within the expiry ends its task for no response.
   const stopWaitExpiry = new WaitExpiry({
     tasks,
-    expireApprovals: (chatId, until, reason) => service.expireApprovals(chatId, until, reason),
+    expireApprovals: (chatId, turnDown) => service.expireApprovals(chatId, turnDown),
     tell: (taskId) => coalescer.mark({ taskId, kind: "no_response", urgent: false }),
   }).start();
 
@@ -310,8 +317,10 @@ export function startConciergeEvents(
           }),
         );
     }
-    // The tasks whose result this turn said have been reported.
+    // The tasks whose result this turn said have been reported: their news
+    // waits for no other turn.
     const relayed = service.takeRelayed(event.turn.turnId);
+    for (const taskId of relayed) coalescer.forget(taskId);
     if (relayed.length > 0) {
       void tasks.repo.markReported(relayed).catch((error: unknown) =>
         log.warn("failed to settle reported results", {
@@ -417,20 +426,24 @@ export function startConciergeEvents(
     if (carriesApproval) approvalAnswered.delete(chatId);
     const taskId = await taskOf(chatId);
     if (!taskId) return;
-    await waitForTurnStream(service, chatId, event.turn.turnId);
-    // How the task chat's work ended, once it has nothing left to run: a turn
-    // a newer input took over hands its work on, and ends nothing.
-    const stillRunning = service.dashboard.chats
-      .activeTurns(chatId)
-      .filter((id) => id !== event.turn.turnId);
-    if (stillRunning.length === 0 && (event as EndedAgentTurn).handedOn !== true) {
-      await tasks.repo.setLastOutcome(taskId, outcomeOf(event.status)).catch((error: unknown) =>
-        log.warn("failed to write a task's outcome", {
-          taskId,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
+    // The task reads as running until its outcome is written, so its status
+    // does not flicker to ended while the turn's stream drains.
+    const release = tasks.holdRunning(chatId);
+    try {
+      await onTaskChatTurnHeld(event, chatId, taskId, carriesApproval);
+    } finally {
+      release();
+      await guard("task status after a turn", tasks.chatChanged(chatId));
     }
+  };
+
+  const onTaskChatTurnHeld = async (
+    event: AgentTurnFinishedEvent,
+    chatId: string,
+    taskId: string,
+    carriesApproval: boolean,
+  ) => {
+    await waitForTurnStream(service, chatId, event.turn.turnId);
     const rows = await webchatRepo.getTurnChatMessages(chatId, event.turn.turnId);
     const userRows = rows.filter((row) => row.role === "user");
     // A follow-up the task chat queued or deferred sits under the turn that
@@ -447,6 +460,25 @@ export function startConciergeEvents(
     const words = userRows.map((row) => userText(row.content)).join(" | ");
     const said = by === "guardian" ? `guardian: ${excerpt(words, DETAIL_EXCERPT_CHARS)}` : null;
     const question = event.status === "completed" ? openQuestion(rows) : null;
+    // A scheduled turn that finished with no question, approval or error
+    // needs no word: its result waits for no report.
+    const passive =
+      by === "system" && event.status === "completed" && !carriesApproval && !question;
+    // How the task chat's work ended, once it has nothing left to run: a turn
+    // a newer input took over hands its work on, and ends nothing.
+    const stillRunning = service.dashboard.chats
+      .activeTurns(chatId)
+      .filter((id) => id !== event.turn.turnId);
+    if (stillRunning.length === 0 && (event as EndedAgentTurn).handedOn !== true) {
+      await tasks.repo
+        .setLastOutcome(taskId, outcomeOf(event.status), new Date(), { reported: !passive })
+        .catch((error: unknown) =>
+          log.warn("failed to write a task's outcome", {
+            taskId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+    }
     if (question) {
       const options = question.options?.length ? ` (options: ${question.options.join(" | ")})` : "";
       coalescer.mark({
@@ -474,9 +506,7 @@ export function startConciergeEvents(
       // A scheduled turn that finished with no question, approval or error
       // needs no word: its row holds the outcome, and it goes with the next
       // flush or digest rather than waking a turn of its own.
-      ...(by === "system" && event.status === "completed" && !carriesApproval
-        ? { passive: true }
-        : {}),
+      ...(passive ? { passive: true } : {}),
       ...(detail.length ? { detail: detail.join("\n") } : {}),
     });
   };
@@ -681,7 +711,8 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
   tasks.attachFacts({
     now: () => Date.now(),
     running: (chatId) => service.dashboard.chats.activeTurns(chatId).length > 0,
-    waitingSince: (chatIds) => webchatRepo.awaitingGuardianSince(chatIds),
+    // How long a task has waited is read from its oldest open wait.
+    waitingSince: (chatIds) => webchatRepo.awaitingGuardianSince(chatIds, { oldest: true }),
     reportPending: () => coalescer.awaitingReport,
     laterOf: async (taskIds) => (await service.deps.checks?.laterOf(taskIds)) ?? new Map(),
   });

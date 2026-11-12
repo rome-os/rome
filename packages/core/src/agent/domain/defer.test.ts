@@ -89,7 +89,7 @@ describe("parseDeferInput with an event", () => {
         taskId: " task-1 ",
       },
       NOW,
-      { eventWaitDeadline: true },
+      { taskChecks: true },
     );
     expect(r.ok).toBe(true);
     if (r.ok && r.wakeUp.kind === "event") {
@@ -119,7 +119,7 @@ describe("parseDeferInput with an event", () => {
   it("needs a deadline in the future and a label for what it waits for, for an agent whose policy asks", () => {
     const wait = (event: Record<string, unknown>) =>
       parseDeferInput({ name: "CI", note: "n", event: { eventName: "ci.done", ...event } }, NOW, {
-        eventWaitDeadline: true,
+        taskChecks: true,
       });
     expect(wait({ deadline: "2030-01-01T00:00:00Z" })).toMatchObject({
       ok: false,

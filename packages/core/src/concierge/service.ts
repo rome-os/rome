@@ -37,6 +37,7 @@ import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
 import type { ConciergeTasks } from "./tasks.js";
 import type { TaskChecks } from "./task-checks.js";
+import type { TurnDown } from "./approval-expiry.js";
 import type { NotifyLevel } from "../instance/notify-client.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../webchat/owner.js";
@@ -221,9 +222,7 @@ export class ConciergeService {
   private readonly creating = new Map<ConciergeOwner, Promise<string>>();
   private attached: ConciergeDashboard | null = null;
   private failedStarts = new Map<string, { turnId: string; starts: Map<string, string> }>();
-  private approvalExpiry:
-    | ((chatId: string, until: number, reason: string) => Promise<number>)
-    | null = null;
+  private approvalExpiry: ((chatId: string, turnDown: TurnDown) => Promise<number>) | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
   /** Per Concierge chat, the task whose report a newer input took over. */
   private readonly carriedReports = new Map<string, readonly string[]>();
@@ -872,8 +871,15 @@ export class ConciergeService {
    */
   async endTaskChat(chatId: string, end: "archived" | "deleted"): Promise<string | null> {
     const chat = await this.deps.webchatRepo.getSession(chatId);
-    if (!chat) return null;
     const { webchatRepo } = this.deps;
+    // A chat already gone has no row of its owner to end: the write still runs.
+    if (!chat) {
+      if (end === "deleted") await webchatRepo.deleteSession(chatId);
+      return null;
+    }
+    // Nothing approved later runs for a task that ends with its chat.
+    const linked = await this.deps.tasks.repo.findBySession(chatId);
+    if (linked && ownerOf(linked) === ownerOf(chat)) await this.turnDownForStop(chatId);
     const row = await this.deps.tasks.repo.endWithChat(chatId, ownerOf(chat), end, (tx) =>
       end === "archived"
         ? webchatRepo.archiveSessionIn(tx, chatId)
@@ -983,7 +989,10 @@ export class ConciergeService {
     if (by === "guardian")
       this.taskEvents?.mark({ taskId, kind: "stopped_by_owner", urgent: false });
     const chatId = (await this.deps.tasks.repo.get(taskId))?.sessionId;
-    if (!chatId || !this.attached) return 0;
+    if (!chatId) return 0;
+    // Nothing approved later runs for a stopped task.
+    await this.turnDownForStop(chatId);
+    if (!this.attached) return 0;
     const { chats } = this.attached;
     const turns = chats.activeTurns(chatId);
     for (const turnId of turns) await chats.interruptTurn(turnId);
@@ -995,24 +1004,66 @@ export class ConciergeService {
    * approval handling is up. Until then an expiry turns none down.
    */
   attachApprovalExpiry(
-    expire: ((chatId: string, until: number, reason: string) => Promise<number>) | null,
+    expire: ((chatId: string, turnDown: TurnDown) => Promise<number>) | null,
   ): void {
     this.approvalExpiry = expire;
   }
 
-  /** Turns down task chat `chatId`'s approvals still pending that began by `until`, with `reason`. */
-  async expireApprovals(chatId: string, until: number, reason: string): Promise<number> {
-    return (await this.approvalExpiry?.(chatId, until, reason)) ?? 0;
+  /** Turns down task chat `chatId`'s approvals still pending (approval-expiry.ts). */
+  async expireApprovals(chatId: string, turnDown: TurnDown): Promise<number> {
+    return (
+      (await this.approvalExpiry?.(chatId, turnDown).catch((error: unknown) => {
+        log.warn("failed to turn down a task chat's approvals", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return 0;
+      })) ?? 0
+    );
+  }
+
+  /** A task ended by a stop: nothing approved later runs for it, and no turn carries on. */
+  private async turnDownForStop(chatId: string): Promise<void> {
+    await this.expireApprovals(chatId, {
+      until: Number.POSITIVE_INFINITY,
+      reason: "The task was stopped",
+      continueTurn: false,
+    });
   }
 
   /** Cancels every check scheduled for task `taskId`, as when it is stopped or archived. */
   async cancelChecks(taskId: string): Promise<void> {
-    await this.deps.checks?.cancelFor(taskId).catch((error: unknown) =>
+    const row = await this.deps.tasks.repo.get(taskId);
+    if (!row) return;
+    await this.deps.checks?.cancelFor(taskId, ownerOf(row)).catch((error: unknown) =>
       log.warn("failed to cancel a task's checks", {
         taskId,
         error: error instanceof Error ? error.message : String(error),
       }),
     );
+  }
+
+  /**
+   * New words reached task chat `chatId` from its owner, typed in the chat:
+   * a task its owner or the Concierge stopped is taken up again. One stopped
+   * by archiving or deleting its chat stays stopped.
+   */
+  async resumeTaskChat(chatId: string): Promise<void> {
+    const chat = await this.deps.webchatRepo.getSession(chatId);
+    if (!chat || isConciergeChat(chat)) return;
+    const row = await this.deps.tasks.repo.findBySession(chatId);
+    if (row && ownerOf(row) === ownerOf(chat)) await this.deps.tasks.repo.resume(row.id);
+  }
+
+  /**
+   * Cancels the checks a stopped or archived task still has, as a crash
+   * between its stop and its cancel may leave. Run once at startup.
+   */
+  async cancelChecksOfEndedTasks(): Promise<void> {
+    for (const taskId of (await this.deps.checks?.pendingTaskIds()) ?? []) {
+      const row = await this.deps.tasks.repo.get(taskId);
+      if (row && (row.stoppedAt || row.archivedAt)) await this.cancelChecks(taskId);
+    }
   }
 
   /** Unarchived task chat `chatId` brings back the row archiving it archived; the task stays stopped. */

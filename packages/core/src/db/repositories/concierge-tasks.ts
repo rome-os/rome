@@ -7,6 +7,7 @@ import {
   eq,
   gte,
   inArray,
+  isNotNull,
   isNull,
   ne,
   notInArray,
@@ -222,13 +223,15 @@ export class ConciergeTasksRepository {
     id: string,
     outcome: "succeeded" | "failed" | "stopped",
     now = new Date(),
+    options: { reported?: boolean } = {},
   ): Promise<void> {
     await this.db
       .update(conciergeTasks)
       // A result waits for the Concierge's report; a stop has none to give.
       .set({
         lastOutcome: outcome,
-        outcomeUnsaid: outcome !== "stopped",
+        // Only a result the Concierge will be told of waits for its report.
+        outcomeUnsaid: outcome !== "stopped" && options.reported !== false,
         reportGivenUp: false,
         updatedAt: now,
       })
@@ -412,13 +415,8 @@ export class ConciergeTasksRepository {
     return this.withChat(
       and(
         isNull(conciergeTasks.archivedAt),
-        or(
-          and(ne(conciergeTasks.state, "done"), ne(conciergeTasks.state, "dropped")),
-          gte(
-            sql`coalesce(${conciergeTasks.completedAt}, ${conciergeTasks.updatedAt})`,
-            doneSince.getTime(),
-          ),
-        ),
+        // Open, or ended inside the window, as its derived status read it.
+        or(isNull(conciergeTasks.endedAt), gte(conciergeTasks.endedAt, doneSince)),
       ),
     );
   }
@@ -446,10 +444,7 @@ export class ConciergeTasksRepository {
       and(
         ofChat,
         isNull(conciergeTasks.archivedAt),
-        or(
-          and(ne(conciergeTasks.state, "done"), ne(conciergeTasks.state, "dropped")),
-          gte(romeSessions.activityAt, activeSince),
-        ),
+        or(isNull(conciergeTasks.endedAt), gte(romeSessions.activityAt, activeSince)),
       ),
     );
     return rows.filter((task) => task.conciergeChat.id === conciergeChatId);
@@ -457,8 +452,12 @@ export class ConciergeTasksRepository {
 
   /** The Concierge's own view: not archived, finished rows only on request. */
   async listForAgent(includeDone: boolean): Promise<ConciergeTaskWithChat[]> {
-    const open = and(ne(conciergeTasks.state, "done"), ne(conciergeTasks.state, "dropped"));
-    return this.withChat(and(isNull(conciergeTasks.archivedAt), includeDone ? undefined : open));
+    return this.withChat(
+      and(
+        isNull(conciergeTasks.archivedAt),
+        includeDone ? undefined : isNull(conciergeTasks.endedAt),
+      ),
+    );
   }
 
   /**
@@ -865,6 +864,30 @@ export class ConciergeTasksRepository {
       )
       .returning({ id: conciergeTasks.id });
     return rows.map((row) => row.id);
+  }
+
+  /**
+   * Keeps when each task's derived status ended: `ended` ids get the time
+   * when they have none, `open` ids lose it. Tells no listener, since it
+   * changes nothing a reader sees.
+   */
+  async keepEnded(
+    ended: readonly string[],
+    open: readonly string[],
+    now = new Date(),
+  ): Promise<void> {
+    if (ended.length > 0) {
+      await this.db
+        .update(conciergeTasks)
+        .set({ endedAt: now })
+        .where(and(inArray(conciergeTasks.id, [...ended]), isNull(conciergeTasks.endedAt)));
+    }
+    if (open.length > 0) {
+      await this.db
+        .update(conciergeTasks)
+        .set({ endedAt: null })
+        .where(and(inArray(conciergeTasks.id, [...open]), isNotNull(conciergeTasks.endedAt)));
+    }
   }
 
   /** The tasks whose task chat's result the Concierge has not reported yet. */

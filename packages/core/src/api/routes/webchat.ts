@@ -2902,7 +2902,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
-    const checks = (await deps.concierge?.deps.checks?.inChat(sessionId)) ?? [];
+    const checks = (await deps.concierge?.deps.checks?.inChatForApi(sessionId)) ?? [];
     return c.json({ checks } satisfies ChatPendingChecksResponse);
   });
 
@@ -4036,6 +4036,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       messageId: inputId,
       text: displayText,
     });
+    // Words typed into a task chat take a stopped task up again.
+    if (!conciergeHeader) {
+      await deps.concierge?.resumeTaskChat?.(sessionId).catch((error: unknown) =>
+        log.warn("failed to take a stopped task up again", {
+          sessionId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     // The Concierge reads which message this is, and the task it belongs to.
     if (conciergeHeader) {
       const line = chatThreadLine(

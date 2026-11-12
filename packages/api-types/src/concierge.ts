@@ -121,8 +121,8 @@ export interface ConciergeTaskDto {
 export interface ChatPendingCheckDto {
   id: string;
   name: string;
-  /** When it wakes the chat: its time, or the deadline of the event it waits for. */
-  at: number;
+  /** When it wakes the chat: its time, or the deadline of the event it waits for; null for an event wait with no deadline. */
+  at: number | null;
   /** What an event wait waits for; null for a timed check. */
   waitingFor: string | null;
   /** The task it is for, or null. */

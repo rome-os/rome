@@ -15,7 +15,7 @@ export interface DeferTool {
   /** The agent's text never reaches the guardian, so `defer` asks for no confirmation in text. */
   finalText: AgentPolicy["finalText"];
   /** An event wait needs `waitingFor` and a `deadline` (agent-policy.ts). Absent: it needs neither. */
-  eventWaitDeadline?: boolean;
+  taskChecks?: boolean;
 }
 
 const DEFER_DESCRIPTION =
@@ -23,8 +23,8 @@ const DEFER_DESCRIPTION =
   "watching something that isn't ready yet (a CI run, a build, a reply) instead of ending the turn empty. " +
   "Give a short `name` for what you're watching (it becomes the routine's name) and exactly one of " +
   "`afterMinutes`, `at`, or `event`. Prefer `event` when something announces completion (CI finished, a PR " +
-  "merged, a reply): it wakes as soon as a matching event-bus event is published, once, on the first match, " +
-  "with no timeout. Look up the event name and payload fields with the search_event_catalog action first. " +
+  "merged, a reply): it wakes as soon as a matching event-bus event is published, once, on the first match. " +
+  "Look up the event name and payload fields with the search_event_catalog action first. " +
   "For a `subscribable` type, filter on one of its `keys` (e.g. repository.full_name); defer then subscribes " +
   "at the provider and fails with the reason if it can't. Events are not replayed and a new subscription " +
   "only sees future events: after an event defer, check the current state once more, and if what you're " +
@@ -41,6 +41,9 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
     name: "defer",
     description:
       DEFER_DESCRIPTION +
+      (defer.taskChecks
+        ? "An event wait also needs `waitingFor` and a `deadline`, when it wakes anyway if the event never came. "
+        : "An event wait has no timeout. ") +
       (defer.finalText === "private" ? DEFER_END_OF_TURN_TEXT_PRIVATE : DEFER_END_OF_TURN),
     inputSchema: {
       type: "object",
@@ -69,19 +72,21 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
           description:
             "Absolute wakeup time as an ISO 8601 instant, e.g. 2026-06-25T14:30:00Z. Provide exactly one of afterMinutes, at, or event.",
         },
-        taskId: {
-          type: "string",
-          description:
-            "Optional: the task this check is for, from your task list. The task shows as later until you wake, and stopping or archiving it cancels the check.",
-        },
+        ...(defer.taskChecks
+          ? {
+              taskId: {
+                type: "string",
+                description:
+                  "Optional: the task this check is for, from your task list. The task shows as later until you wake, and stopping or archiving it cancels the check.",
+              },
+            }
+          : {}),
         event: {
           type: "object",
-          description: defer.eventWaitDeadline
+          description: defer.taskChecks
             ? "Wake on the next event-bus event that matches, or at its deadline if none comes. Provide exactly one of afterMinutes, at, or event."
             : "Wake on the next event-bus event that matches. Provide exactly one of afterMinutes, at, or event.",
-          required: defer.eventWaitDeadline
-            ? ["eventName", "waitingFor", "deadline"]
-            : ["eventName"],
+          required: defer.taskChecks ? ["eventName", "waitingFor", "deadline"] : ["eventName"],
           properties: {
             eventName: {
               type: "string",
@@ -93,7 +98,7 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
               description:
                 "Optional: only match events from this source (an appId); a single * matches any run of characters.",
             },
-            ...(defer.eventWaitDeadline
+            ...(defer.taskChecks
               ? {
                   waitingFor: {
                     type: "string",
@@ -130,7 +135,7 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
     handler: (input) =>
       run("defer", input, () => {
         const parsed = parseDeferInput(input, Date.now(), {
-          eventWaitDeadline: defer.eventWaitDeadline === true,
+          taskChecks: defer.taskChecks === true,
         });
         if (!parsed.ok) throw new Error(parsed.error);
         return defer.schedule(turn, parsed.wakeUp);

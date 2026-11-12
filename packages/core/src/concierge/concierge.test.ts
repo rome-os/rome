@@ -1466,6 +1466,59 @@ describe("Concierge tools", () => {
     });
   });
 
+  it("a stop, an archive or a delete turns down the task chat's approvals, and runs no turn on", async () => {
+    const s = setup();
+    const turnedDown: [string, number, boolean][] = [];
+    s.service.attachApprovalExpiry(async (chatId, turnDown) => {
+      turnedDown.push([chatId, turnDown.until, turnDown.continueTurn]);
+      return 1;
+    });
+    const first = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.service.stopTask(first.taskId, "guardian");
+    const second = JSON.parse(
+      (await s.tool("chat_start", { title: "Hotels", brief: "Find hotels" })).content[0].text,
+    );
+    await s.service.endTaskChat(second.chatId, "archived");
+    expect(turnedDown).toEqual([
+      [first.chatId, Number.POSITIVE_INFINITY, false],
+      [second.chatId, Number.POSITIVE_INFINITY, false],
+    ]);
+  });
+
+  it("archiving a task that is still open stops it, and leaves an ended one's outcome alone", async () => {
+    const s = setup();
+    const { taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    s.chats.activeTurns = () => ["t1"];
+    await s.tool("task_upsert", { tasks: [{ id: taskId, archived: true }] });
+    expect(await s.taskRepo.get(taskId)).toMatchObject({
+      stopReason: "concierge",
+      archivedAt: expect.any(Date),
+    });
+    s.chats.activeTurns = () => [];
+    const [done] = await s.taskRepo.upsertMany([{ title: "Done" }]);
+    await s.tool("task_upsert", { tasks: [{ id: done!.id, archived: true }] });
+    expect((await s.taskRepo.get(done!.id))?.stoppedAt).toBeNull();
+  });
+
+  it("takes a stopped task up again when its owner types in its chat, or the Concierge starts its row", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    await s.service.stopTask(taskId, "concierge");
+    await s.service.resumeTaskChat(chatId);
+    expect((await s.taskRepo.get(taskId))?.stoppedAt).toBeNull();
+
+    const [planned] = await s.taskRepo.upsertMany([{ title: "Later" }]);
+    await s.taskRepo.stop(planned!.id, "guardian");
+    await s.tool("chat_start", { title: "Later", brief: "Go", taskId: planned!.id });
+    expect((await s.taskRepo.get(planned!.id))?.stoppedAt).toBeNull();
+  });
+
   it("chat_start that cannot send its brief leaves no chat, a failed row, and no second task on retry", async () => {
     const s = setup();
     const error = "The chat cannot take a message";
@@ -1485,6 +1538,9 @@ describe("Concierge tools", () => {
     const retry = await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
     expect(retry.isError).toBe(true);
     expect(retry.content[0].text).toContain(`Task ${row.row.id} already failed to start`);
+    // A retry that renames the task is the same start.
+    const renamed = await s.tool("chat_start", { title: "Flight search", brief: "Find flights" });
+    expect(renamed.content[0].text).toContain(`Task ${row.row.id} already failed to start`);
     expect(s.chats.startChat).toHaveBeenCalledTimes(1);
     expect(await s.tasks.repo.listForAgent(true)).toHaveLength(1);
   });
@@ -2043,7 +2099,10 @@ describe("Concierge task anchors", () => {
       expect(result.content[0].text).toContain("belongs to another Concierge chat");
       // Only the main chat's own task started a chat.
       expect(s.chats.startChat).toHaveBeenCalledTimes(1);
-      expect(await s.taskRepo.get(planned!.id)).toEqual(before);
+      expect({ ...(await s.taskRepo.get(planned!.id)), endedAt: null }).toEqual({
+        ...before,
+        endedAt: null,
+      });
       expect(await s.tasks.repo.threadRoot(planned!.id)).toBeNull();
     });
 
@@ -2759,6 +2818,11 @@ describe("Concierge events", () => {
     });
     await rs.advanceTimersByTimeAsync(10 * 60_000);
     expect(s.backendTurns).toEqual([]);
+    // Its result waits for no report: the task ended, and nothing stays working.
+    expect(await s.taskRepo.get(taskId)).toMatchObject({
+      lastOutcome: "succeeded",
+      outcomeUnsaid: false,
+    });
     expect(await s.service.digestTaskNotes(CONCIERGE_CHAT, "guardian")).toContain(
       `<ran_on_schedule task="${taskId}" title="Flights"/>`,
     );
@@ -4236,8 +4300,9 @@ describe("Concierge status reactions", () => {
     status?: AgentTurnFinishedEvent["status"],
     { reported = true }: { reported?: boolean } = {},
   ) => {
+    // The turn the Concierge's brief started, so it reports to the Concierge.
     await s.finish({
-      turnId: `task-turn-${chatId}`,
+      turnId: "task-turn-1",
       agentName: "core:main",
       chatId,
       status,
@@ -4255,7 +4320,7 @@ describe("Concierge status reactions", () => {
       role: "user",
       content: JSON.stringify([{ type: "text", content: "Also check Friday" }]),
       senderId: "guardian-1",
-      turnId: `task-turn-${chatId}`,
+      turnId: "task-turn-1",
     });
   /** Task chat `chatId` wrote a reply, so its turn's end has news to report. */
   const replies = (s: ReturnType<typeof setup>, chatId: string) =>

@@ -93,12 +93,31 @@ describe("TaskChecks", () => {
     expect(deactivated).toEqual([id]);
   });
 
-  it("cancels every check of a task, and no other", async () => {
+  it("cancels every check of a task its owner's chats scheduled, and no other", async () => {
     await timed("chat-1", NOW + HOUR, { taskId: "task-1" });
     await waiting("chat-1", NOW + HOUR, { taskId: "task-1" });
     const kept = await timed("chat-1", NOW + HOUR, { taskId: "task-2" });
-    expect(await checks.cancelFor("task-1")).toBe(2);
-    expect((await routines.findAll()).map((routine) => routine.id)).toEqual([kept]);
+    const others = await timed("ann-chat", NOW + HOUR, {
+      taskId: "task-1",
+      ownerKey: "visitor:acct-ann",
+    });
+    expect(await checks.cancelFor("task-1", "guardian")).toBe(2);
+    expect((await routines.findAll()).map((routine) => routine.id).sort()).toEqual(
+      [kept, others].sort(),
+    );
+  });
+
+  it("counts an event wait from before deadlines as pending, with no time", async () => {
+    const old = await routines.create({
+      name: "old wait",
+      trigger: { type: "event-bus", eventName: "ci.done", once: true },
+      actionName: "resume_session",
+      args: { channel: "webchat", threadId: "chat-1", sessionId: "s", taskId: "task-1" },
+    });
+    expect(await checks.laterOf(["task-1"])).toEqual(new Map([["task-1", Infinity]]));
+    expect(await checks.inChatForApi("chat-1")).toEqual([
+      { id: old, name: "old wait", at: null, waitingFor: null, taskId: "task-1" },
+    ]);
   });
 
   it("tells each task whose soonest check came, moved or went", async () => {
@@ -115,7 +134,7 @@ describe("TaskChecks", () => {
     for (const listener of listeners) listener(id);
     await flush();
     expect(changed).toEqual(["task-1"]);
-    await checks.cancelFor("task-1");
+    await checks.cancelFor("task-1", "guardian");
     for (const listener of listeners) listener(id);
     await flush();
     expect(changed).toEqual(["task-1", "task-1"]);

@@ -5,7 +5,13 @@ import Database from "better-sqlite3";
 import { describe, expect, it } from "@rstest/core";
 
 const MIGRATIONS_DIR = resolve(dirname(fileURLToPath(import.meta.url)), "../../drizzle/system");
-const TAGS = ["0133_concierge_message_marks", "0134_concierge_drop_reaction_ledgers"];
+const TAGS = [
+  "0133_concierge_message_marks",
+  "0134_concierge_drop_reaction_ledgers",
+  "0135_concierge_stopped_requests",
+  "0136_concierge_wait_expiry",
+  "0137_concierge_failed_marks",
+];
 
 function migrationSql(tag: string): string[] {
   return readFileSync(join(MIGRATIONS_DIR, `${tag}.sql`), "utf8")
@@ -36,6 +42,7 @@ describe("the Concierge message marks migration", () => {
     );
     task.run("held", "Held");
     task.run("plain", "Plain");
+    task.run("broke", "Broke");
     const turn = sqlite.prepare(
       "INSERT INTO concierge_turn_reactions (turn_id, chat_id, message_key, state, updated_at) VALUES (?, 'c', ?, ?, ?)",
     );
@@ -49,6 +56,7 @@ describe("the Concierge message marks migration", () => {
     );
     taskMark.run("held", "open", "done_unsaid");
     taskMark.run("plain", "done", "stopped");
+    taskMark.run("broke", "done", "failed");
 
     for (const tag of TAGS) for (const statement of migrationSql(tag)) sqlite.exec(statement);
 
@@ -68,12 +76,29 @@ describe("the Concierge message marks migration", () => {
         .prepare("SELECT task_id, message_key FROM concierge_message_tasks ORDER BY task_id")
         .all(),
     ).toEqual([
+      { task_id: "broke", message_key: "done" },
       { task_id: "held", message_key: "open" },
       { task_id: "plain", message_key: "done" },
     ]);
+    // A failed turn and a failed task keep their ⚠️.
+    expect(
+      sqlite
+        .prepare(
+          "SELECT message_key, turn_failed FROM concierge_message_turns ORDER BY message_key",
+        )
+        .all(),
+    ).toEqual([
+      { message_key: "done", turn_failed: 1 },
+      { message_key: "moved", turn_failed: 0 },
+      { message_key: "open", turn_failed: 0 },
+    ]);
+    expect(
+      sqlite.prepare("SELECT last_outcome FROM concierge_tasks WHERE id = 'broke'").get(),
+    ).toEqual({ last_outcome: "failed" });
     expect(
       sqlite.prepare("SELECT id, outcome_unsaid FROM concierge_tasks ORDER BY id").all(),
     ).toEqual([
+      { id: "broke", outcome_unsaid: 0 },
       { id: "held", outcome_unsaid: 1 },
       { id: "plain", outcome_unsaid: 0 },
     ]);

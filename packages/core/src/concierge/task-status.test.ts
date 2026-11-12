@@ -12,7 +12,7 @@ import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
 import { ConciergeTasks } from "./tasks.js";
 
 const HOUR = 60 * 60 * 1000;
-const NOW = 100 * HOUR;
+const NOW = Date.now();
 
 const facts = (extra: Partial<ConciergeTaskFacts> = {}): ConciergeTaskFacts => ({
   stoppedAt: null,
@@ -142,6 +142,24 @@ describe("ConciergeTasks status", () => {
     expect(await tasks.listForPanel()).toMatchObject([
       { status: "needs_you", state: "needs_user", waitingSince: NOW - HOUR },
     ]);
+  });
+
+  it("keeps a task running while its ended turn's outcome is written, so its status does not flicker", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const release = tasks.holdRunning("task-chat");
+    expect((await tasks.statusOf([row!])).get(row!.id)?.status).toBe("active");
+    release();
+    release();
+    expect((await tasks.statusOf([row!])).get(row!.id)?.status).toBe("ended");
+  });
+
+  it("keeps when a task ended, and forgets it when the task opens again", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await tasks.statusOf([row!]);
+    expect((await repo.get(row!.id))?.endedAt).toEqual(new Date(NOW));
+    running.add("task-chat");
+    await tasks.statusOf([(await repo.get(row!.id))!]);
+    expect((await repo.get(row!.id))?.endedAt).toBeNull();
   });
 
   it("tells a task's changes in the order they happened", async () => {

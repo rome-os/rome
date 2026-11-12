@@ -152,11 +152,14 @@ describe("GET /concierge/tasks", () => {
     const old = new Date(Date.now() - 30 * DAY);
     await repo.upsertMany([{ title: "Old needs you", state: "needs_user" }], old);
     await repo.upsertMany([{ title: "Old watching", state: "watching" }], old);
-    await repo.upsertMany([{ title: "Old done", state: "done" }], old);
-    await repo.upsertMany(
+    const [oldDone] = await repo.upsertMany([{ title: "Old done", state: "done" }], old);
+    await repo.keepEnded([oldDone!.id], [], old);
+    const fresh = new Date(Date.now() - DAY);
+    const [freshDropped] = await repo.upsertMany(
       [{ title: "Fresh dropped", state: "dropped" }],
-      new Date(Date.now() - DAY),
+      fresh,
     );
+    await repo.keepEnded([freshDropped!.id], [], fresh);
   });
   afterEach(() => testDb.close());
 

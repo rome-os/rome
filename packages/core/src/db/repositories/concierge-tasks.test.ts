@@ -227,7 +227,8 @@ describe("ConciergeTasksRepository", () => {
     await repo.upsertMany([{ title: "Topic's", state: "doing", chatId: "topic" }]);
     await repo.upsertMany([{ title: "Gone topic's", state: "doing", chatId: "gone-topic" }]);
     await repo.upsertMany([{ title: "Visitor's", state: "doing", chatId: visitorMain }]);
-    await repo.upsertMany([{ title: "Old done", state: "done" }], new Date(now - 30 * DAY));
+    const [oldDone] = await repo.upsertMany([{ title: "Old done" }], new Date(now - 30 * DAY));
+    await repo.keepEnded([oldDone!.id], [], new Date(now - 30 * DAY));
     // Finished long ago, with a task chat: one resumed now, one quiet since.
     await chats.createSession("resumed-chat", "Resumed");
     await chats.createSession("quiet-chat", "Quiet");
@@ -235,11 +236,16 @@ describe("ConciergeTasksRepository", () => {
       .update(romeSessions)
       .set({ activityAt: new Date(now - 30 * DAY) })
       .where(eq(romeSessions.id, "quiet-chat"));
-    await repo.upsertMany(
+    const finished = await repo.upsertMany(
       [
-        { title: "Resumed old task", state: "done", sessionId: "resumed-chat" },
-        { title: "Quiet old task", state: "done", sessionId: "quiet-chat" },
+        { title: "Resumed old task", sessionId: "resumed-chat" },
+        { title: "Quiet old task", sessionId: "quiet-chat" },
       ],
+      new Date(now - 30 * DAY),
+    );
+    await repo.keepEnded(
+      finished.map((row) => row.id),
+      [],
       new Date(now - 30 * DAY),
     );
     await chats.deleteSession("gone-topic");
@@ -256,14 +262,20 @@ describe("ConciergeTasksRepository", () => {
     expect(await titles(visitorMain, "visitor:a")).toEqual(["Visitor's"]);
   });
 
-  it("lists open rows whatever their age and finished rows only inside the window", async () => {
+  it("lists open rows whatever their age and ended rows only inside the window, by when they ended", async () => {
     const now = Date.now();
     const old = new Date(now - 30 * DAY);
-    await repo.upsertMany([{ title: "Old watch", state: "watching" }], old);
-    await repo.upsertMany([{ title: "Old done", state: "done" }], old);
-    await repo.upsertMany([{ title: "Old dropped", state: "dropped" }], old);
-    await repo.upsertMany([{ title: "Fresh done", state: "done" }], new Date(now - DAY));
-    const [archived] = await repo.upsertMany([{ title: "Archived", state: "done" }]);
+    // When each ended, as its derived status read it.
+    const ended = async (title: string, at: Date | null) => {
+      const [row] = await repo.upsertMany([{ title }], old);
+      if (at) await repo.keepEnded([row!.id], [], at);
+      return row!;
+    };
+    await ended("Old watch", null);
+    await ended("Old done", old);
+    await ended("Old dropped", old);
+    await ended("Fresh done", new Date(now - DAY));
+    const archived = await ended("Archived", new Date(now));
     await repo.upsertMany([{ id: archived.id, archived: true }]);
 
     const titles = (await repo.listForPanel(new Date(now - 7 * DAY))).map(({ row }) => row.title);
