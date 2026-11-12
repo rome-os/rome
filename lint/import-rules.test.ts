@@ -5,6 +5,7 @@ import { afterAll, describe, expect, it } from "@rstest/core";
 import { checkImports, formatImportViolation } from "./import-rules.js";
 import { contextRules } from "./rules/contexts.js";
 import { layerRules } from "./rules/layers.js";
+import { libraryRules } from "./rules/library.js";
 
 const root = mkdtempSync(join(tmpdir(), "import-rules-"));
 
@@ -76,6 +77,16 @@ write(
   ),
 );
 write("src/routines/agent-probe.ts", 'import "../agent/index.js";\n');
+write("src/lib/clock.ts", "export const now = 1;\n");
+write(
+  "src/lib/probe.test.ts",
+  [
+    'import type { AppCatalog } from "../apps/catalog.js";',
+    'import "@/agent/index.js";',
+    'import "./clock.js";',
+    'import "../logger.js";',
+  ].join("\n"),
+);
 
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
@@ -127,6 +138,19 @@ describe("checkImports with the context rules", () => {
     expect(lines).toEqual([
       "agent/infrastructure/apps-probe.ts:1 → ../../apps/catalog.js (apps/catalog.ts) [agent-never-imports-apps]",
       "agent/infrastructure/apps-probe.ts:2 → @/apps/catalog.js (apps/catalog.ts) [agent-never-imports-apps]",
+    ]);
+  });
+});
+
+describe("checkImports with the library rule", () => {
+  it("rejects every import from lib/ into a context, type-only and tests included, and allows the rest", () => {
+    const lines = checkImports(join(root, "src"), join(root, "tsconfig.json"), libraryRules)
+      .map(formatImportViolation)
+      .map((line) => line.replace(/: .*$/, ""))
+      .filter((line) => !line.includes("[unresolved]"));
+    expect(lines).toEqual([
+      "lib/probe.test.ts:1 → ../apps/catalog.js (apps/catalog.ts) [lib-imports-no-context]",
+      "lib/probe.test.ts:2 → @/agent/index.js (agent/index.ts) [lib-imports-no-context]",
     ]);
   });
 });

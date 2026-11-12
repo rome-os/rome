@@ -14,7 +14,7 @@ rs.mock("node:os", () => ({
   homedir: () => fakeHome.dir,
 }));
 
-rs.mock("../logger.js", () => ({
+rs.mock("../../../logger.js", () => ({
   createLogger: () => ({ error: logError, info: rs.fn(), warn: rs.fn(), debug: rs.fn() }),
 }));
 

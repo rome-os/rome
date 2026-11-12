@@ -2,7 +2,7 @@ import type {
   ForkRunParams as SdkForkRunParams,
   RunParams as SdkRunParams,
 } from "@rome-os/app-runtime";
-import type { NotifyLevel } from "../lib/notify-client.js";
+import type { NotifyLevel } from "../instance/notify-client.js";
 import type { TurnActor } from "../agent/index.js";
 import type { AgentEvent } from "../types.js";
 

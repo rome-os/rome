@@ -4,7 +4,7 @@
 
 import type { BackendTurnParams } from "@rome-os/app-runtime";
 import type { SessionActor } from "../../access/session-actor.js";
-import type { NotifyLevel } from "../../lib/notify-client.js";
+import type { NotifyLevel } from "../../instance/notify-client.js";
 import type { AgentEvent } from "../../types.js";
 
 export interface BackendTurnOptions {

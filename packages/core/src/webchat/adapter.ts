@@ -30,6 +30,8 @@ function messagePartText(part: MessagePart): string | null {
     case "text":
     case "turn_recap":
       return part.content;
+    case "widget":
+      return part.text;
     default:
       return null;
   }

@@ -11,7 +11,7 @@ import type {
   NotifyService,
   SendOutcome,
   SystemNotifyContent,
-} from "../lib/notify-client.js";
+} from "../instance/notify-client.js";
 import { actionExecutionContext, type ActionExecutionStore } from "../apps/actions/context.js";
 
 /** The person and the dashboard chat behind an action's call. */

@@ -10,7 +10,7 @@ import {
 import { messageCursor, parseMessageCursor, type Message } from "@rome/api-types/message";
 import { timelinePageLimit, type TimelinePage } from "@rome/api-types/people";
 import { AGENTS_KIND } from "../../connections/integrations/agents.js";
-import { isAgentId } from "../../lib/rome-cloud-agents.js";
+import { isAgentId } from "../../connections/integrations/rome-cloud-agents.js";
 import { createLogger } from "../../logger.js";
 import type { SaidMessage } from "../../chats/storage/message.js";
 import type { MessageCursor, MessagePage } from "../../chats/storage/message-repository.js";

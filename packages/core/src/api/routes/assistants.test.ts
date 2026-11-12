@@ -5,7 +5,7 @@ import type { TimelinePage } from "@rome/api-types/people";
 import { assistantsRoutes } from "./assistants.js";
 import { buildTestDeps, createTestDb, type TestDeps } from "../../test/helpers.js";
 import { seedBaseline } from "../../test/seeds.js";
-import type { ExternalAgent } from "../../lib/rome-cloud-agents.js";
+import type { ExternalAgent } from "../../connections/integrations/rome-cloud-agents.js";
 
 // Assistants: the agents Rome Cloud lists, each one chat. What these pin is
 // that an assistant is listed before anyone has written, that the guardian's

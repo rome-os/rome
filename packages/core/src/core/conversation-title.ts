@@ -122,6 +122,7 @@ export function createConversationTitleGenerator(
             actions: {
               list: () => [],
               permits: () => false,
+              appOf: () => undefined,
               run: async () => {
                 throw new Error("Conversation title generation cannot execute actions");
               },

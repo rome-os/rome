@@ -32,6 +32,9 @@ export interface AgentActions {
    * either becomes an error result.
    */
   run(turn: TurnFacts, name: string, input: unknown): Promise<ActionResult>;
+  /** The app that owns action `name`, under any of its names, or undefined
+   *  for an action Rome owns or one it does not know. */
+  appOf(name: string): string | undefined;
 }
 
 interface ActionArgumentSummary {
@@ -211,12 +214,57 @@ export function searchActions(
 
 /**
  * What a tool call on an action hands back, read by two parties: the model,
- * and the webchat drain, which mounts cards from `pendingInteraction`, `appId`,
- * `render` and `placeWidget`. Those field names are a contract with the drain.
- * An `error` result passes through as data and reaches the model as an
- * ordinary tool result, not an error one.
+ * and the webchat drain, which mounts cards from `pendingInteraction`,
+ * `showWidget`, `appId`, `render`, `componentId`, `props`, `text` and
+ * `placeWidget`.
+ * Those field names are a contract with the drain. An `error` result passes
+ * through as data and reaches the model as an ordinary tool result, not an
+ * error one. `appId` is the app that owns the action; a `show_widget` card is
+ * that app's, and an action no app owns shows none.
  */
-export function actionToolOutput(result: ActionResult, widgetsShow: boolean): unknown {
+export function actionToolOutput(
+  result: ActionResult,
+  widgetsShow: boolean,
+  appId?: string,
+): unknown {
+  if (result.status === "show_widget") {
+    const { componentId, props, text, waits } = result.widget;
+    if (!appId) {
+      return {
+        message: `No card was shown: only an app's action can show one. ${text}`,
+      };
+    }
+    // A widget that waits is the same card as a pending interaction, and
+    // stores the same part, so the iOS app and stored messages read it as one.
+    if (waits === true) {
+      return actionToolOutput(
+        {
+          status: "pending_interaction",
+          interaction: {
+            appId,
+            promptText: text,
+            render: { kind: "inline", componentId, ...(props ? { props } : {}) },
+          },
+        },
+        widgetsShow,
+      );
+    }
+    if (!widgetsShow) {
+      return {
+        message:
+          `The "${componentId}" card could not be shown, because this conversation cannot ` +
+          `show cards. Tell the guardian what it would have shown, in a message: ${text}`,
+      };
+    }
+    return {
+      showWidget: true,
+      appId,
+      componentId,
+      ...(props ? { props } : {}),
+      text,
+      message: `${text} The card is shown in your message. Continue your turn as normal.`,
+    };
+  }
   if (result.status === "pending_approval") {
     return {
       pendingApproval: true,

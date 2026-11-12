@@ -119,7 +119,11 @@ export function actionTools(
             tool: "execute_action",
             action: actionName,
           });
-          return actionToolOutput(await actions.run(turn, actionName, parsedArgs), widgetsShow);
+          return actionToolOutput(
+            await actions.run(turn, actionName, parsedArgs),
+            widgetsShow,
+            actions.appOf(actionName),
+          );
         }),
     },
   ];
