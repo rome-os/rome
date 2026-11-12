@@ -140,6 +140,9 @@ function renderRecentChats(
   );
 }
 
+// The width at which the sidebar becomes a column (`useDesktop`).
+const WIDE_QUERY = "(min-width: 48rem)";
+
 function LocationProbe() {
   const location = useLocation();
   return (
@@ -782,6 +785,45 @@ describe("RecentChats", () => {
     expect(screen.getByText("Cached chat")).toBeTruthy();
   });
 
+  it("still shows the cached topic chats after a long time away", async () => {
+    concierge.chatId = "concierge";
+    concierge.fromServer = true;
+    let conciergeCalls = 0;
+    rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.startsWith("/api/chat/sessions")) return Response.json([]);
+      if (url === "/api/concierge/chats") {
+        conciergeCalls += 1;
+        return Response.json({
+          chats: [
+            { id: "concierge", name: "Concierge", main: true, unread: 0 },
+            { id: "topic-1", name: "Cached topic", main: false, unread: 0 },
+          ],
+        });
+      }
+      if (url === "/api/concierge/session") return Response.json({ id: "concierge", unread: 0 });
+      return new Response("not found", { status: 404 });
+    }) as typeof fetch);
+    const queryClient = testQueryClient();
+    const view = renderRecentChats("/chat", undefined, queryClient);
+    await screen.findByRole("link", { name: "Cached topic" });
+    rs.useFakeTimers();
+    view.unmount();
+    // Past React Query's default five-minute garbage collection.
+    await act(async () => {
+      await rs.advanceTimersByTimeAsync(10 * 60_000);
+    });
+    const before = conciergeCalls;
+
+    renderRecentChats("/chat", undefined, queryClient);
+
+    // Synchronously, before any response: the cached topic chat, which the
+    // remount still refetches behind.
+    expect(screen.getByRole("link", { name: "Cached topic" })).toBeTruthy();
+    rs.useRealTimers();
+    await waitFor(() => expect(conciergeCalls).toBe(before + 1));
+  });
+
   it("offers a retry instead of claiming the guardian has no chats when the fetch fails", async () => {
     let attempts = 0;
     rs.spyOn(globalThis, "fetch").mockImplementation((async (input: RequestInfo | URL) => {
@@ -1243,12 +1285,96 @@ describe("RecentChats", () => {
     // Each project row starts a chat in its own project.
     const alphaRow = within(projects).getByRole("button", { name: "Alpha project" })
       .parentElement as HTMLElement;
-    const plus = within(alphaRow).getByRole("button", { name: "New chat in this project" });
+    const plus = within(alphaRow).getByRole("link", { name: "New chat in this project" });
     expect(plus.className).toContain("group-hover/project:opacity-100");
     expect(plus.className).toContain("touch-show");
     await user.click(plus);
     expect(screen.getByTestId("location-path").textContent).toBe("/chat");
     expect(screen.getByTestId("location-state").textContent).toBe('{"projectPath":"alpha"}');
+  });
+
+  describe("a project's plus", () => {
+    const alpha = {
+      id: "alpha-chat",
+      name: "Alpha chat",
+      createdAt: "2026-07-01T00:00:00.000Z",
+      activityAt: "2026-07-09T10:00:00.000Z",
+      lastSeenActivityAt: null,
+      unread: false,
+      projectName: "Alpha project",
+      projectPath: "work/alpha beta",
+    };
+
+    // Answers only the queries a test lists; every other one keeps jsdom's "no match".
+    function stubMatchMedia(...matching: string[]) {
+      rs.stubGlobal("matchMedia", (query: string) => ({
+        matches: matching.includes(query),
+        media: query,
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      }));
+    }
+
+    async function findPlus() {
+      const projects = await screen.findByRole("region", { name: "Projects" });
+      await within(projects).findByRole("link", { name: "Alpha chat" });
+      const row = within(projects).getByRole("button", { name: "Alpha project" })
+        .parentElement as HTMLElement;
+      return within(row).getByRole("link", { name: "New chat in this project" });
+    }
+
+    afterEach(() => {
+      rs.unstubAllGlobals();
+      delete window.rome;
+    });
+
+    it("opens a new tab in a wide browser window, so the open chat stays", async () => {
+      mockSessions([alpha]);
+      stubMatchMedia(WIDE_QUERY);
+      const user = userEvent.setup();
+      renderRecentChats();
+
+      const plus = await findPlus();
+      expect(plus.getAttribute("href")).toBe("/chat?project=work%2Falpha%20beta");
+      expect(plus.getAttribute("target")).toBe("_blank");
+      expect(plus.getAttribute("rel")).toBe("noopener noreferrer");
+      expect(plus.className).toContain("group-hover/project:opacity-100");
+      expect(plus.className).toContain("touch-show");
+
+      // The click is the browser's to follow: this page does not navigate.
+      await user.click(plus);
+      expect(screen.getByTestId("location-path").textContent).toBe("/chat");
+      expect(screen.getByTestId("location-state").textContent).toBe("null");
+    });
+
+    it.each([
+      ["a narrow window", []],
+      ["the installed home-screen app", [WIDE_QUERY, "(display-mode: standalone)"]],
+      ["a touch device", [WIDE_QUERY, "(hover: none) and (pointer: coarse)"]],
+    ])("opens in the same tab in %s", async (_name, matching) => {
+      mockSessions([alpha]);
+      stubMatchMedia(...matching);
+      const user = userEvent.setup();
+      renderRecentChats("/chat/alpha-chat");
+
+      const plus = await findPlus();
+      expect(plus.getAttribute("target")).toBeNull();
+      expect(plus.getAttribute("href")).toBe("/chat?project=work%2Falpha%20beta");
+      await user.click(plus);
+      expect(screen.getByTestId("location-path").textContent).toBe("/chat");
+      expect(screen.getByTestId("location-state").textContent).toBe(
+        '{"projectPath":"work/alpha beta"}',
+      );
+    });
+
+    it("opens in the same tab in the Mac app, whose new tab holds no Rome session", async () => {
+      mockSessions([alpha]);
+      stubMatchMedia(WIDE_QUERY);
+      window.rome = {};
+      renderRecentChats();
+
+      expect((await findPlus()).getAttribute("target")).toBeNull();
+    });
   });
 
   it("shows the default project as just its row, with its plus, when it has no chats", async () => {
@@ -1278,12 +1404,14 @@ describe("RecentChats", () => {
     // Nothing to expand, and no empty-state text: the row alone.
     const row = within(defaultGroup).getByRole("button", { name: "default" });
     expect(row.getAttribute("aria-expanded")).toBeNull();
-    expect(within(defaultGroup).queryAllByRole("link")).toHaveLength(0);
+    expect(
+      within(defaultGroup)
+        .queryAllByRole("link")
+        .map((link) => link.getAttribute("aria-label")),
+    ).toEqual(["New chat in this project"]);
     expect(defaultGroup.textContent).toBe("default");
 
-    await user.click(
-      within(defaultGroup).getByRole("button", { name: "New chat in this project" }),
-    );
+    await user.click(within(defaultGroup).getByRole("link", { name: "New chat in this project" }));
     expect(screen.getByTestId("location-path").textContent).toBe("/chat");
     expect(screen.getByTestId("location-state").textContent).toBe('{"projectPath":"default"}');
   });
@@ -1323,7 +1451,7 @@ describe("RecentChats", () => {
       "project:alpha",
     ]);
     expect(
-      within(groups[0] as HTMLElement).getByRole("button", { name: "New chat in this project" }),
+      within(groups[0] as HTMLElement).getByRole("link", { name: "New chat in this project" }),
     ).toBeTruthy();
   });
 

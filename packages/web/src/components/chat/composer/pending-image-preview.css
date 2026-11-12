@@ -1,3 +1,5 @@
+@import "react-medium-image-zoom/dist/styles.css";
+
 /* The viewer animates out of the thumbnail, so the card's number and action
    would otherwise float over an empty slot while it is open. */
 body:has(.pending-image-preview[open]) [data-pending-card-overlay] {

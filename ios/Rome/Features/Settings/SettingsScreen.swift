@@ -278,24 +278,28 @@ struct SettingsScreen: View {
     private var accountCard: some View {
         Button(action: onInstances) {
             HStack(spacing: 14) {
-                InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host, account: workspace.backend.account, size: 48)
-                VStack(alignment: .leading, spacing: 1) {
+                InitialAvatar(text: workspace.accountLabel, imageURL: workspace.avatarURL, instance: workspace.host, account: workspace.backend.account, size: 44)
+                // Centered on the avatar as a pair, with room between the lines.
+                VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
+                        // An email keeps its start and its domain; the name is
+                        // cut, never the badge.
                         Text(workspace.accountLabel)
-                            .romeFont(17, .semibold)
+                            .romeFont(16, .semibold)
                             .foregroundStyle(Palette.fg)
                             .lineLimit(1)
-                        if model.currentInstance?.isVisitor == true { VisitorBadge() }
+                            .truncationMode(workspace.accountLabel.contains("@") ? .middle : .tail)
+                        if model.currentInstance?.isVisitor == true { VisitorBadge().fixedSize() }
                     }
                     HStack(spacing: 6) {
                         Circle().fill(Palette.success).frame(width: 7, height: 7)
-                        // The version first: a long domain is cut, never the version.
+                        // The version before the host: a long domain is cut, never the version.
                         if let version = InstanceLine.version(model.update.runningVersion) {
                             Text(verbatim: "\(version) ·").fixedSize()
                         }
                         Text(verbatim: workspace.host).lineLimit(1).truncationMode(.middle)
                     }
-                    .romeFont(14)
+                    .romeFont(13)
                     .foregroundStyle(Palette.sub)
                 }
                 Spacer(minLength: 0)

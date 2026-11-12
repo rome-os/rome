@@ -47,9 +47,14 @@ import {
   sessionActivityTime,
 } from "@/lib/chat-session";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
+import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import { useConciergeChatId, useConciergeName, useRefreshTopicChats } from "@/hooks/use-concierge";
+import { useDesktop } from "@/hooks/use-desktop";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
+import { useMediaQuery } from "@/hooks/use-media-query";
 import { ConciergeChats } from "./ConciergeEntry";
+import { isElectronShell } from "@/lib/electron-shell";
+import { STANDALONE_DISPLAY_QUERY } from "@/lib/media-query";
 import { emitSessionsChanged, useArchiveSession } from "@/lib/session-events";
 
 /** What a chat row's mark says. Waiting, running and failed describe the chat,
@@ -213,6 +218,15 @@ function projectPathForSession(session: ChatSession): string {
   return isDefaultProjectChat(session) ? DEFAULT_PROJECT_NAME : session.projectPath || "";
 }
 
+/** A project row's plus: hidden until the row is hovered, shown at once on touch. */
+const PROJECT_PLUS_CLASS =
+  "touch-show mr-1 shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100";
+
+/** The new chat page with the project chosen, as an address a new tab can open. */
+function newChatInProjectHref(projectPath: string): string {
+  return `/chat?project=${encodeURIComponent(projectPath)}`;
+}
+
 const PROJECT_DEFAULT_VISIBLE = 4;
 const PROJECT_LOAD_MORE_COUNT = 10;
 // Keep in sync with the server-side cap in webchat.ts (PATCH /chat/sessions/:id/name).
@@ -300,6 +314,16 @@ export function RecentChats({
   const { t } = useTranslation("common");
   const navigate = useNavigate();
   const location = useLocation();
+  // A project's plus opens its chat in a new tab, so the chat on screen stays
+  // open, wherever there are tabs to open: a wide window of a normal browser.
+  // A phone, the installed home-screen app, the Mac app and the mobile app's
+  // WebView have none, and a new tab there would take the user out of Rome.
+  // The touch signal is the one AppGrid uses for the WebView, which sets no
+  // marker of its own.
+  const wideWindow = useDesktop();
+  const installedApp = useMediaQuery(STANDALONE_DISPLAY_QUERY);
+  const coarsePointer = useCoarsePointer();
+  const plusOpensNewTab = wideWindow && !installedApp && !coarsePointer && !isElectronShell();
   const [scope, setScope] = useState<SessionScope>(() => readScope());
   const [statusFilter, setStatusFilter] = useState<StatusFilter>(() => readStatusFilter());
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() =>
@@ -879,19 +903,31 @@ export function RecentChats({
             </button>
           ) : null}
           {projectPath ? (
-            <button
-              type="button"
-              onClick={() =>
-                navigate("/chat", {
-                  state: { projectPath },
-                })
-              }
-              aria-label={t("recentChats.newChatInProject")}
-              title={t("recentChats.newChatInProject")}
-              className="touch-show mr-1 shrink-0 rounded-4 p-1 text-subtle-foreground opacity-0 transition-opacity hover:text-foreground focus:outline-none focus-visible:opacity-100 group-hover/project:opacity-100"
-            >
-              <Plus className="h-3.5 w-3.5" aria-hidden />
-            </button>
+            // A real link either way, so "open in new tab" works from the
+            // keyboard and the context menu. The project rides the URL because
+            // a new tab does not inherit router state.
+            plusOpensNewTab ? (
+              <a
+                href={newChatInProjectHref(projectPath)}
+                target="_blank"
+                rel="noopener noreferrer"
+                aria-label={t("recentChats.newChatInProject")}
+                title={t("recentChats.newChatInProject")}
+                className={PROJECT_PLUS_CLASS}
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+              </a>
+            ) : (
+              <Link
+                to={newChatInProjectHref(projectPath)}
+                state={{ projectPath }}
+                aria-label={t("recentChats.newChatInProject")}
+                title={t("recentChats.newChatInProject")}
+                className={PROJECT_PLUS_CLASS}
+              >
+                <Plus className="h-3.5 w-3.5" aria-hidden />
+              </Link>
+            )
           ) : null}
         </div>
         {collapsed ? null : (

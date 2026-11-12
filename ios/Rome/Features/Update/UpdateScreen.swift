@@ -134,22 +134,35 @@ struct UpdateScreen: View {
     private var center: some View {
         switch updater.state {
         case .starting, .updating:
-            VStack(spacing: 12) {
-                LoadingDots()
-                if let line = statusLine {
-                    Text(line)
-                        .romeFont(17, .semibold)
-                        .contentTransition(.opacity)
-                        .id(line)
-                        .transition(.opacity)
+            VStack(spacing: 16) {
+                VStack(spacing: 12) {
+                    LoadingDots()
+                    if let line = statusLine {
+                        Text(line)
+                            .romeFont(17, .semibold)
+                            .contentTransition(.opacity)
+                            .id(line)
+                            .transition(.opacity)
+                    }
+                    Text("This runs on your Rome's server, not on this phone, and can take a few minutes. You can leave the app and come back.")
+                        .romeFont(15)
+                        .lineSpacing(3)
+                        .foregroundStyle(Palette.sub)
                 }
-                Text("This runs on your Rome's server, not on this phone, and can take a few minutes. You can leave the app and come back.")
-                    .romeFont(15)
-                    .lineSpacing(3)
-                    .foregroundStyle(Palette.sub)
+                .multilineTextAlignment(.center)
+                .accessibilityElement(children: .combine)
+                // Something to do while it waits; the game keeps this status.
+                Button { model.stackGame = StackGameLaunch(fromUpdate: true) } label: {
+                    Label("Play a game", systemImage: "gamecontroller")
+                        .romeFont(15, .medium)
+                        .foregroundStyle(Palette.fg)
+                        .padding(.horizontal, 16)
+                        .frame(height: 38)
+                        .background(Palette.fill, in: Capsule())
+                        .contentShape(Capsule())
+                }
+                .buttonStyle(PressScaleStyle(scale: 0.97))
             }
-            .multilineTextAlignment(.center)
-            .accessibilityElement(children: .combine)
             .transition(.opacity)
         case .failed(let failure):
             VStack(spacing: 8) {

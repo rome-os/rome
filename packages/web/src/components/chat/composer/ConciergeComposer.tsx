@@ -58,6 +58,7 @@ import { ReplyBar } from "../reply/ReplyBar";
 import { useReplyDraft } from "../reply/reply-draft";
 import { ComposerChip } from "./ComposerChip";
 import { PendingUploadsList } from "./PendingUploadsList";
+import { useFittedPlaceholder } from "./use-fitted-placeholder";
 import { useSlashSkill } from "./use-slash-skill";
 import { SkillCommandChip, type SkillSelection } from "./SkillCommandChip";
 import { SlashSkillMenu } from "./SlashSkillMenu";
@@ -78,6 +79,8 @@ export interface ConciergeComposerProps {
   isStreaming?: boolean;
   onStop?: () => void;
   streamError?: string | ChatErrorNotice | null;
+  /** An open topic chat's own name, which the placeholder says it is a message "in". Unset in the main chat. */
+  chatName?: string | null;
   /** The chat's own model pick. Unset hides the model row. */
   modelSelection?: { value: string; onChange: (next: string) => void };
   onSend: (
@@ -94,7 +97,7 @@ export interface ConciergeComposerProps {
  */
 export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeComposerProps>(
   function ConciergeComposer(
-    { boxClassName, isStreaming = false, onStop, streamError, modelSelection, onSend },
+    { boxClassName, isStreaming = false, onStop, streamError, chatName, modelSelection, onSend },
     ref,
   ) {
     const { t } = useTranslation("chat");
@@ -119,6 +122,10 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
     const openPickerAfterCloseRef = useRef(false);
     const locations = useChatLocations(folderPickerOpen);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    // An open topic chat's own name, shortened to fit the box's one line.
+    const namedPlaceholder = useFittedPlaceholder(textareaRef, chatName, (name) =>
+      t("concierge.placeholderIn", { name }),
+    );
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaFocusedAtPressRef = useRef(false);
     // The ref closes the same-event gap before React commits the state.
@@ -591,10 +598,10 @@ export const ConciergeComposer = forwardRef<ChatComposerHandle, ConciergeCompose
                         ? t("composer.placeholderWithUploads")
                         : replyDraft?.thread
                           ? t("thread.replyPlaceholder")
-                          : t("concierge.placeholder")
+                          : (namedPlaceholder ?? t("concierge.placeholder"))
                     }
                     rows={1}
-                    className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:text-subtle-foreground focus:outline-none"
+                    className="block w-full resize-none border-0 bg-transparent text-composer text-foreground placeholder:truncate placeholder:text-subtle-foreground focus:outline-none"
                     style={{
                       minHeight: "1lh",
                       maxHeight: `${TEXTAREA_MAX_HEIGHT}px`,
