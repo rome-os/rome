@@ -41,11 +41,17 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text }: WidgetUiCardP
   const { t } = useTranslation("chat");
   const [failed, setFailed] = useState(false);
   const [busy, setBusy] = useState(false);
+  // Buttons wait for the first read: a press before it would post a context
+  // whose paths are not loaded yet.
+  const [ready, setReady] = useState(false);
   // A re-render hands new objects for the same stored part; key on content
   // so the surface is built once per card.
   const bindKey = JSON.stringify(bind ?? {});
   const uiKey = JSON.stringify(ui);
   const inFlight = useRef(false);
+  // Only the newest read writes the data: a slow first read must not land
+  // after a press's refresh and put back an older value.
+  const reads = useRef(0);
   const valid = useMemo(
     () => isDrawableCard(appId, JSON.parse(uiKey), JSON.parse(bindKey)),
     [appId, uiKey, bindKey],
@@ -54,12 +60,14 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text }: WidgetUiCardP
   const load = useCallback(
     async (processor: MessageProcessor) => {
       if (!valid) return;
+      const read = ++reads.current;
       const entries = Object.entries(JSON.parse(bindKey) as Record<string, string>);
       const values = await Promise.all(
         entries.map(([, path]) =>
           fetchJson<unknown>(appApi(appId, path), { fallback: "Could not read the card's data" }),
         ),
       );
+      if (read !== reads.current) return;
       processor.processMessages(
         entries.map(([pointer], i) => ({
           version: "v0.9" as const,
@@ -116,7 +124,9 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text }: WidgetUiCardP
 
   useEffect(() => {
     let live = true;
-    load(processor).catch(() => live && setFailed(true));
+    load(processor)
+      .catch(() => live && setFailed(true))
+      .finally(() => live && setReady(true));
     return () => {
       live = false;
     };
@@ -137,7 +147,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text }: WidgetUiCardP
       data-widget-app={appId}
     >
       {surface ? (
-        <WidgetBusyContext.Provider value={busy}>
+        <WidgetBusyContext.Provider value={busy || !ready}>
           <CardBoundary fallback={undrawable}>
             <A2uiSurface
               surface={surface as unknown as ComponentProps<typeof A2uiSurface>["surface"]}
