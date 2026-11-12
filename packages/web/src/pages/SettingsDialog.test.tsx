@@ -1,7 +1,7 @@
 // @rstest-environment jsdom
 import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeAll, describe, expect, it, rs } from "@rstest/core";
-import { type ReactNode, useEffect } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import {
   MemoryRouter,
   Route,
@@ -13,6 +13,7 @@ import {
 import { toast } from "sonner";
 import { DetailPane } from "@/components/connections/detail-pane";
 import { Toaster } from "@/components/ui/sonner";
+import { useSettingsBack } from "@/hooks/use-settings-back";
 import { useSettingsBackdrop } from "@/hooks/use-settings-backdrop";
 import i18n from "@/i18n";
 import SettingsDialog from "./SettingsDialog";
@@ -151,6 +152,26 @@ describe("SettingsDialog", () => {
     expect(location()).toBe("/settings/connections");
     fireEvent.keyDown(document, { key: "Escape" });
     expect(location()).toBe("/apps");
+  });
+
+  it("keeps a view's own back step once a pane that opened later goes away", () => {
+    const back = rs.fn();
+    let showPane: (shown: boolean) => void = () => {};
+    // Loading, then loaded, then a refetch that failed: the pane mounts after
+    // the view and unmounts before it.
+    function View() {
+      const [pane, setPane] = useState(false);
+      showPane = setPane;
+      useSettingsBack(back);
+      return pane ? <Pane onClose={back} /> : <p>Loading</p>;
+    }
+    renderDialog("/apps", <View />);
+    act(() => navigateTo("/settings/connections/telegram"));
+    act(() => showPane(true));
+    act(() => showPane(false));
+    fireEvent.keyDown(document, { key: "Escape" });
+    expect(back).toHaveBeenCalledTimes(1);
+    expect(location()).toBe("/settings/connections/telegram");
   });
 
   it("stays open when the guardian acts on a toast", async () => {

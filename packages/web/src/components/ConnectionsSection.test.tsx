@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { toast } from "sonner";
 import i18n from "@/i18n";
 import { ConnectionsSection } from "@/components/ConnectionsSection";
+import SettingsDialog from "@/pages/SettingsDialog";
 import type { ApiConnection, GrantDisplay, GrantState } from "@/lib/connections-api";
 import type { ComposioCliStatus } from "@/lib/provider-types";
 import { stateOfGrants } from "@/test/connection-state";
@@ -22,7 +23,7 @@ beforeAll(async () => {
 });
 
 beforeEach(() => {
-  // Opening a row's detail dialog mounts ceremony cards that self-fetch their
+  // Opening a row's detail pane mounts ceremony cards that self-fetch their
   // transient status (verify-status, telegram user/status, ...). None of these
   // tests assert ceremony state, so a fresh minimal ok JSON keeps them quiet.
   rs.spyOn(globalThis, "fetch").mockImplementation(
@@ -160,6 +161,10 @@ function sectionWith(
   );
 }
 
+/** Leaves the open detail pane by its back button. */
+const goBack = () =>
+  fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Connections" }));
+
 const connectedList = () => screen.getByRole("region", { name: /^Connected/ });
 const addList = () => screen.getByRole("region", { name: "Add a connection" });
 const namesIn = (region: HTMLElement) =>
@@ -192,22 +197,22 @@ describe("ConnectionsSection — cards", () => {
     expect(emailRow.querySelector("svg.lucide-mail")).toBeTruthy();
   });
 
-  it("opens every service in a dialog, with no links away from the tab", () => {
+  it("opens every service in place, with no links away from the tab", () => {
     renderSection([...minimalConnections(), oauth("github", "authorized")]);
 
     expect(screen.queryAllByRole("link")).toHaveLength(0);
     expect(within(connectedList()).getByRole("button", { name: "Open GitHub" })).toBeTruthy();
   });
 
-  it("clicking a card opens the detail dialog with the connect ceremony", () => {
+  it("clicking a card opens the detail pane with the connect ceremony", () => {
     renderSection([...minimalConnections(), oauth("github")]);
 
-    // Dialog is closed initially.
+    // No pane is open initially.
     expect(screen.queryByRole("dialog")).toBeNull();
 
     fireEvent.click(screen.getByRole("button", { name: "Open GitHub" }));
 
-    // The dialog mounts the ceremony body.
+    // The pane mounts the ceremony body.
     expect(within(screen.getByRole("dialog")).getByText("Connect")).toBeTruthy();
   });
 
@@ -253,17 +258,17 @@ describe("ConnectionsSection — cards", () => {
   });
 });
 
-describe("ConnectionsSection — Connected and Add", () => {
-  function mixed(): ApiConnection[] {
-    return [
-      telegramBot("authorized", "rome_bot"),
-      connection({ connectionKind: "whatsapp", grants: { session: "unauthorized" }, display: {} }),
-      oauth("github", "authorized"),
-      oauth("slack", "degraded"),
-      oauth("google"),
-    ];
-  }
+function mixed(): ApiConnection[] {
+  return [
+    telegramBot("authorized", "rome_bot"),
+    connection({ connectionKind: "whatsapp", grants: { session: "unauthorized" }, display: {} }),
+    oauth("github", "authorized"),
+    oauth("slack", "degraded"),
+    oauth("google"),
+  ];
+}
 
+describe("ConnectionsSection — Connected and Add", () => {
   it("lists connected services with whatever needs attention first, and the rest under Add", () => {
     renderSection(mixed());
     expect(connectedList().getAttribute("aria-labelledby")).toBeTruthy();
@@ -289,7 +294,7 @@ describe("ConnectionsSection — Connected and Add", () => {
     expect(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }),
     ).toBeTruthy();
-    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    goBack();
     fireEvent.click(screen.getByRole("button", { name: "Open Google" }));
     expect(
       within(screen.getByRole("dialog")).getByRole("button", { name: "Connect" }),
@@ -350,6 +355,104 @@ describe("ConnectionsSection — Connected and Add", () => {
   });
 });
 
+/** The section as Settings shows it: inside the Settings dialog. */
+function renderInSettings(
+  connections: ApiConnection[],
+  composio: ComposioCliStatus | null = null,
+  onRefresh: (backgroundRefresh?: boolean) => Promise<ApiConnection[] | null> = rs.fn(
+    async () => null,
+  ),
+) {
+  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const closed = rs.fn();
+  const section = (list: ApiConnection[]) => (
+    <QueryClientProvider client={queryClient}>
+      <MemoryRouter initialEntries={["/settings/connections"]}>
+        <SettingsDialog onClose={closed}>
+          <ConnectionsSection
+            connections={list}
+            composio={composio}
+            loading={false}
+            error={null}
+            onRefresh={onRefresh}
+            onFlash={rs.fn()}
+          />
+        </SettingsDialog>
+      </MemoryRouter>
+    </QueryClientProvider>
+  );
+  const view = render(section(connections));
+  return {
+    closed,
+    settings: screen.getByRole("dialog", { name: "Settings" }),
+    rerender: (list: ApiConnection[]) => view.rerender(section(list)),
+  };
+}
+
+/** Every dialog in the document that does not sit inside Settings. */
+const dialogsOutside = (settings: HTMLElement) =>
+  [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].filter(
+    (dialog) => !settings.contains(dialog),
+  );
+
+describe("ConnectionsSection — inside Settings", () => {
+  it("opens a card's detail in place, and Escape returns to the card", () => {
+    const { closed, settings } = renderInSettings(mixed());
+    fireEvent.click(screen.getByRole("button", { name: "Open GitHub" }));
+
+    const pane = within(settings).getByRole("dialog", { name: "GitHub" });
+    expect(within(pane).getByRole("button", { name: "Disconnect" })).toBeTruthy();
+    expect(dialogsOutside(settings)).toEqual([]);
+    expect(within(settings).queryByRole("region", { name: /^Connected/ })).toBeNull();
+
+    fireEvent.keyDown(document.activeElement ?? document, { key: "Escape" });
+    expect(closed).not.toHaveBeenCalled();
+    expect(within(settings).queryByRole("dialog", { name: "GitHub" })).toBeNull();
+    const card = within(connectedList()).getByRole("button", { name: "Open GitHub" });
+    expect(document.activeElement).toBe(card);
+  });
+
+  it("confirms a Telegram disconnect in the one dialog on Settings, which Escape leaves alone", () => {
+    // An account an agent is linked to asks before it is removed.
+    const bot = { ...telegramBot("authorized", "mybot"), link: "own_account" as const };
+    const { closed, settings } = renderInSettings([bot]);
+    fireEvent.click(screen.getByRole("button", { name: "Open Telegram" }));
+    const pane = within(settings).getByRole("dialog", { name: "Telegram" });
+    fireEvent.click(within(pane).getByRole("button", { name: "Disconnect" }));
+    const [confirm] = dialogsOutside(settings);
+    expect(dialogsOutside(settings)).toHaveLength(1);
+
+    // A destructive confirm takes no Escape, and Settings under it does not see one.
+    fireEvent.keyDown(document.activeElement ?? document, { key: "Escape" });
+    expect(dialogsOutside(settings)).toEqual([confirm]);
+    expect(closed).not.toHaveBeenCalled();
+
+    fireEvent.click(within(confirm as HTMLElement).getByRole("button", { name: "Cancel" }));
+    expect(dialogsOutside(settings)).toEqual([]);
+    expect(within(settings).getByRole("dialog", { name: "Telegram" })).toBeTruthy();
+  });
+
+  it("hands focus to a card connected from its pane, now under Connected", () => {
+    const onRefresh = rs.fn(async () => null);
+    const { rerender } = renderInSettings([oauth("google")], null, onRefresh);
+    fireEvent.click(screen.getByRole("button", { name: "Open Google" }));
+    rerender([oauth("google", "authorized")]);
+    fireEvent.keyDown(document.activeElement ?? document, { key: "Escape" });
+    expect(document.activeElement).toBe(
+      within(connectedList()).getByRole("button", { name: "Open Google" }),
+    );
+  });
+
+  it("refreshes in the background from a pane, so no loading skeleton shows above it", async () => {
+    const onRefresh = rs.fn(async () => null);
+    renderSection([oauth("github", "authorized")], null, onRefresh);
+    fireEvent.click(screen.getByRole("button", { name: "Open GitHub" }));
+    fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
+    await waitFor(() => expect(onRefresh).toHaveBeenCalled());
+    expect(onRefresh.mock.calls.every(([background]) => background === true)).toBe(true);
+  });
+});
+
 describe("ConnectionsSection — Telegram fold card status", () => {
   function telegramRow(connections: ApiConnection[]): HTMLElement {
     renderSection(connections);
@@ -376,7 +479,7 @@ describe("ConnectionsSection — Telegram fold card status", () => {
     renderSection([telegramBot("authorized", "mybot"), telegramUser("unauthorized")]);
     fireEvent.click(screen.getByRole("button", { name: "Open Telegram" }));
 
-    // Both slot cards render inside the one dialog: the connected bot (identity
+    // Both slot cards render inside the one pane: the connected bot (identity
     // header) and the addable personal-account card (its static title).
     expect(screen.getByText("mybot")).toBeTruthy();
     expect(screen.getByText("Your account")).toBeTruthy();
@@ -462,7 +565,7 @@ describe("ConnectionsSection — several accounts", () => {
     expect(within(dialog).getByText("Feishu · Sales Bot")).toBeTruthy();
   });
 
-  it("moves the dialog to a new account once the refreshed list has it", async () => {
+  it("moves the pane to a new account once the refreshed list has it", async () => {
     const second = feishu({
       id: "conn-feishu-2",
       channel: SECOND_FEISHU,
@@ -489,7 +592,7 @@ describe("ConnectionsSection — several accounts", () => {
     );
   });
 
-  it("keeps the dialog on the current account when the new one is not listed yet", async () => {
+  it("keeps the pane on the current account when the new one is not listed yet", async () => {
     const second = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       if (String(input).endsWith("/setup") && init?.method === "POST") {
@@ -508,7 +611,7 @@ describe("ConnectionsSection — several accounts", () => {
     expect(within(screen.getByRole("dialog")).getByText("Feishu")).toBeTruthy();
   });
 
-  it("leaves the dialog closed when the guardian closed it during the add", async () => {
+  it("leaves the pane closed when the guardian closed it during the add", async () => {
     const second = feishu({ id: "conn-feishu-2", channel: SECOND_FEISHU });
     rs.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       if (String(input).endsWith("/setup") && init?.method === "POST") {
@@ -530,7 +633,7 @@ describe("ConnectionsSection — several accounts", () => {
     fireEvent.click(screen.getByRole("button", { name: "Connect" }));
     await waitFor(() => expect(onRefresh).toHaveBeenCalledWith(true));
 
-    fireEvent.keyDown(screen.getByRole("dialog"), { key: "Escape" });
+    goBack();
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
     finishRefresh([feishu(), second]);
     view.rerender(sectionWith([feishu(), second], onRefresh));
@@ -917,13 +1020,25 @@ describe("ConnectionsSection — Composio services", () => {
     expect(screen.queryByRole("button", { name: "Connect Gmail" })).toBeNull();
   });
 
+  it("opens a connected service in place inside Settings, and Escape returns to its card", async () => {
+    const { closed, settings } = renderInSettings([oauth("github", "authorized")], signedIn());
+    fireEvent.click(await screen.findByRole("button", { name: "Open Gmail" }));
+    expect(within(settings).getByRole("dialog", { name: "Gmail" })).toBeTruthy();
+    expect(dialogsOutside(settings)).toEqual([]);
+    fireEvent.keyDown(document.activeElement ?? document, { key: "Escape" });
+    expect(closed).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(
+      within(connectedList()).getByRole("button", { name: "Open Gmail" }),
+    );
+  });
+
   it("opens the next service fresh after one vanishes mid-confirmation", async () => {
     renderSection([oauth("github", "authorized")], signedIn());
     fireEvent.click(await screen.findByRole("button", { name: "Open Gmail" }));
     fireEvent.click(within(screen.getByRole("dialog")).getByRole("button", { name: "Disconnect" }));
     expect(within(screen.getByRole("dialog")).getByText(/Disconnect Gmail\?/)).toBeTruthy();
     // Gmail is disconnected elsewhere; the refetch on return drops its row,
-    // which closes the dialog without going through its Close button.
+    // which closes the pane without going through its back button.
     gmailGone = true;
     fireEvent(window, new Event("visibilitychange"));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());

@@ -6,6 +6,7 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DetailPane } from "@/components/connections/detail-pane";
+import { useSettingsBack } from "@/hooks/use-settings-back";
 import { ConnectionBrandBadge } from "@/components/brand-icons/connection-badges";
 import { StatusIndicator } from "@/lib/connection-status";
 import { ConnectionDetailBody } from "@/components/ConnectionDetail";
@@ -23,7 +24,7 @@ import { Page, Measure, Section } from "@rome-os/ui/page";
  * first account routes as the service (`feishu`), later ones by their channel
  * id. Unknown or unmatched ids redirect back to the list. The connect ceremony
  * + enablement copy is the shared `ConnectionDetailBody` (also used by the
- * in-list dialog).
+ * in-list `ConnectionDetailPane`).
  */
 
 const BACK_TO_LIST = "/settings/connections";
@@ -64,6 +65,10 @@ export default function ConnectionDetailPage() {
   const composioQuery = useComposioStatus();
 
   const loading = connectionsQuery.isLoading || composioQuery.isLoading;
+  const backToList = () => navigate(BACK_TO_LIST);
+  // Registered here as well as by the pane, which is absent while loading or
+  // after a failed load, so Escape steps back in those states too.
+  useSettingsBack(backToList);
 
   const refresh = () => {
     void connectionsQuery.refetch();
@@ -147,7 +152,7 @@ export default function ConnectionDetailPage() {
       <DetailPane
         label={card.label}
         backLabel="Connections"
-        onClose={() => navigate(BACK_TO_LIST)}
+        onClose={backToList}
         mark={<ConnectionBrandBadge connection={card.service} />}
         status={<StatusIndicator card={card} />}
       >

@@ -83,6 +83,8 @@ export default function App() {
     <SlotProvider>
       <Toaster position="top-right" />
       <Suspense fallback={null}>
+        {/* A route that only redirects also goes in REDIRECT_ONLY in
+            use-settings-backdrop.ts, or it would close Settings from behind. */}
         <Routes location={backdrop}>
           <Route
             path="/login"

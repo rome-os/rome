@@ -26,7 +26,7 @@ export default function SettingsDialog({
   const activeSlug = pathname.split("/")[2] ?? tabToSlug(TABS[0]);
   // Focus starts on the section, so nothing wears a ring until the keyboard moves.
   const section = useRef<HTMLDivElement>(null);
-  const back = useRef<(() => void) | null>(null);
+  const back = useRef<(() => void)[]>([]);
   const activeTab = normalizeTab(activeSlug);
   useDocumentTitle([activeTab ? t(`tabs.${activeTab}` as const) : null, t("page.title")], "dialog");
 
@@ -40,9 +40,10 @@ export default function SettingsDialog({
       // Escape steps back one level rather than leaving Settings.
       {...{
         onEscapeKeyDown: (event: Event) => {
-          if (!back.current) return;
+          const step = back.current.at(-1);
+          if (!step) return;
           event.preventDefault();
-          back.current();
+          step();
         },
       }}
       className="flex h-[min(760px,calc(100dvh-2rem))] max-w-[960px] flex-col overflow-hidden p-0 max-sm:h-dvh max-sm:rounded-none sm:w-[calc(100vw-2rem)] sm:flex-row"

@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from "storybook-react-rsbuild";
 import { MemoryRouter } from "react-router-dom";
 import "../src/i18n";
-import { ConnectionDetailDialog } from "../src/components/ConnectionDetail";
+import { ConnectionDetailPane } from "../src/components/ConnectionDetail";
 import type { ConnectionCard } from "../src/lib/connection-cards";
 
 const notConnected: ConnectionCard = {
@@ -43,9 +43,10 @@ const connected: ConnectionCard = {
 
 const meta = {
   title: "Dev/Connections/Channel status",
-  component: ConnectionDetailDialog,
+  component: ConnectionDetailPane,
   parameters: { layout: "padded" },
   args: {
+    backLabel: "Connections",
     composio: null,
     onClose: () => undefined,
     onRefresh: () => undefined,
@@ -65,7 +66,7 @@ const meta = {
       </MemoryRouter>
     ),
   ],
-} satisfies Meta<typeof ConnectionDetailDialog>;
+} satisfies Meta<typeof ConnectionDetailPane>;
 
 export default meta;
 type Story = StoryObj<typeof meta>;

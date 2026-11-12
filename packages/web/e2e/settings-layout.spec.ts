@@ -67,3 +67,27 @@ for (const width of [390, 1440]) {
     ).toBeLessThanOrEqual(width);
   });
 }
+
+test("A Connections card opens its detail inside Settings, and Escape returns to the card", async ({
+  page,
+}) => {
+  await page.addInitScript(() => localStorage.setItem("i18nextLng", "en"));
+  await page.goto("/settings/connections");
+  const dialog = page.getByRole("dialog", { name: "Settings" });
+  const card = dialog.getByRole("button", { name: "Open GitHub" });
+  await card.click();
+  await expect(dialog.getByRole("dialog", { name: "GitHub" })).toBeVisible();
+  await expect(dialog.getByLabel("Search connections")).toBeHidden();
+  // Settings is the only modal: no dialog sits outside it.
+  const outside = await dialog.evaluate(
+    (settings) =>
+      [...document.querySelectorAll('[role="dialog"], [role="alertdialog"]')].filter(
+        (other) => other !== settings && !settings.contains(other),
+      ).length,
+  );
+  expect(outside).toBe(0);
+  await page.keyboard.press("Escape");
+  await expect(card).toBeFocused();
+  await expect(dialog).toBeVisible();
+  await expect(page).toHaveURL(/\/settings\/connections$/);
+});
