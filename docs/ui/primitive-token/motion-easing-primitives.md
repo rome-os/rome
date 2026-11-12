@@ -2,7 +2,7 @@
 
 A primitive token doc for the motion easing dimension. [ui-primitive-tokens.md](../../authoring/ui-primitive-tokens.md) is the rulebook.
 
-The values live in `packages/ui/src/styles.css`. `packages/web/src/lib/motion.ts` mirrors them as arrays for `motion`, which cannot read a CSS variable, and a test holds the two equal.
+The values live in `packages/ui/src/styles.css`. Where this doc and the file disagree, the file is right and the doc updates.
 
 ## Tokens
 
@@ -21,5 +21,5 @@ One flat scale, `--rome-ease-*`, of two curves. `[mech]`
 
 ## Forbidden usage
 
-- A new call site never writes a literal `cubic-bezier()`. `[mech]`
+- A new call site never writes a literal `cubic-bezier()`. It reads a curve through the `ease-*` utility of the same name, such as `ease-out-expo`. `[mech]`
 - A curve never overshoots its target. A y value outside 0 to 1 belongs to a spring, which the call site declares through `motion`. `[mech]`
