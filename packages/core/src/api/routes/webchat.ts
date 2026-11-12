@@ -2925,7 +2925,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     const sessionId = c.req.param("id");
     const lookup = await getTopLevelWebchatSession(c, sessionId);
     if ("response" in lookup) return lookup.response;
-    const checks = (await deps.concierge?.deps.checks?.inChatForApi(sessionId)) ?? [];
+    const pending = (await deps.concierge?.deps.checks?.inChatForApi(sessionId)) ?? [];
+    // A check for a task names it, so the strip can say which task it is for.
+    const tasks = deps.concierge?.deps.tasks.repo;
+    const checks = await Promise.all(
+      pending.map(async (check) => ({
+        ...check,
+        taskTitle: check.taskId ? ((await tasks?.get(check.taskId))?.title ?? null) : null,
+      })),
+    );
     return c.json({ checks } satisfies ChatPendingChecksResponse);
   });
 

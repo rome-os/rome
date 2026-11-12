@@ -52,6 +52,7 @@
       "expired": "已过期，回答后继续",
       "stop": "停止",
       "done": "完成",
+      "cancelCheck": "取消检查",
       "archive": "归档",
       "retry": "再试一次",
       "pending": {
@@ -170,6 +171,9 @@
     "waiting": "等待{{what}} · {{when}}检查",
     "cancel": "取消「{{name}}」",
     "loadFailed": "无法加载排好的检查",
+    "summary": "{{count}} 个检查 · 下一个：{{next}}",
+    "expand": "展开排好的检查",
+    "collapse": "收起排好的检查",
     "cancelFailed": "无法取消这个检查"
   },
   "share": {

@@ -52,6 +52,7 @@
       "expired": "Expired — answer to continue",
       "stop": "Stop",
       "done": "Done",
+      "cancelCheck": "Cancel check",
       "archive": "Archive",
       "retry": "Try again",
       "pending": {
@@ -170,6 +171,9 @@
     "waiting": "Waiting for {{what}} · checks {{when}}",
     "cancel": "Cancel {{name}}",
     "loadFailed": "Failed to load scheduled checks",
+    "summary": "{{count}} checks · next: {{next}}",
+    "expand": "Show scheduled checks",
+    "collapse": "Hide scheduled checks",
     "cancelFailed": "Failed to cancel the check"
   },
   "share": {
