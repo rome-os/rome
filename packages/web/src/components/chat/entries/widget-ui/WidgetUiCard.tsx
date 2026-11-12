@@ -1,16 +1,7 @@
 import { MessageProcessor } from "@a2ui/web_core/v0_9";
 import { A2uiSurface } from "@a2ui/react/v0_9";
-import type { TranscriptPart } from "@rome/api-types/chat";
-import {
-  Component,
-  type ComponentProps,
-  type ReactNode,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from "react";
+import { checkWidgetUi, type TranscriptPart } from "@rome/api-types/chat";
+import { type ComponentProps, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { fetchJson } from "@/lib/fetch-json";
 import { CardBoundary } from "./CardBoundary";
@@ -85,6 +76,17 @@ function splitClears(components: unknown[]): {
 }
 
 /**
+ * Whether a stored card may be drawn and may call its app. A stored part is
+ * read back as data, so the dashboard runs core's check again rather than
+ * trust it: every component drawable, every path inside the app, and an app
+ * id that stays one path segment once the browser normalizes the URL.
+ */
+export function isDrawableCard(appId: string, ui: unknown, bind: unknown, waits = false): boolean {
+  if (!appId || appId === "." || appId === "..") return false;
+  return checkWidgetUi(ui, bind ?? {}, { waits }).length === 0;
+}
+
+/**
  * A card an app described as data (`ui`), drawn with Rome's A2UI catalog.
  * Each `bind` is read from the app's API when the card mounts, so the card
  * shows the app's data as it stands. A button POSTs its event's context to
@@ -114,9 +116,15 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
       Array.isArray(components) ? (withHostStrings(components, t) as unknown[]) : [],
     );
   }, [uiKey, t]);
+  const waits = waiting !== undefined;
+  const valid = useMemo(
+    () => isDrawableCard(appId, JSON.parse(uiKey), JSON.parse(bindKey), waits),
+    [appId, uiKey, bindKey, waits],
+  );
 
   const load = useCallback(
     async (processor: MessageProcessor) => {
+      if (!valid) return;
       const entries = Object.entries(JSON.parse(bindKey) as Record<string, string>);
       const values = await Promise.all(
         entries.map(([, path]) =>
@@ -130,7 +138,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
         })),
       );
     },
-    [appId, bindKey, toolUseId],
+    [appId, bindKey, toolUseId, valid],
   );
 
   const { processor, drawable } = useMemo(() => {
@@ -165,6 +173,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
     // `constructor`; such a card shows its fallback line instead of throwing
     // out of the transcript.
     try {
+      if (!valid) throw new Error("The card fails core's check");
       p.processMessages([
         {
           version: "v0.9",
@@ -188,7 +197,7 @@ export function WidgetUiCard({ toolUseId, appId, ui, bind, text, waiting }: Widg
       return { processor: p, drawable: false };
     }
     return { processor: p, drawable: true };
-  }, [appId, load, toolUseId, uiKey, parts]);
+  }, [appId, load, toolUseId, uiKey, parts, valid]);
 
   // An answered card shows what the guardian sent, which core keeps as `card`.
   // A dismissed card was never answered, so it shows nothing picked rather

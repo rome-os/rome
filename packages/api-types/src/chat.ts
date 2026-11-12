@@ -12,6 +12,10 @@ export type {
   RoutineDraftSpec,
 } from "@rome-os/app-runtime";
 
+// The check core runs before it stores a described card, so a reader can run
+// it again on the stored part before drawing it or calling the app.
+export { checkWidgetUi, isWidgetAppPath } from "@rome-os/app-runtime";
+
 /** Error core stores as a turn's assistant content when model resolution fails
  * before the turn runs. It carries the trace error event's fields. */
 export type StoredErrorPart = Pick<
