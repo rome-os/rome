@@ -40,8 +40,8 @@ const CONTENT =
 
 /**
  * One chat thread of a Concierge chat on its own (docs/domains/chats.md#chat-thread),
- * laid over the transcript column. The chat behind it stays in view, blurred
- * and lightly dimmed; `header` floats on top, and the thread's messages, drawn
+ * laid over the transcript column. The chat behind it is all but covered,
+ * only a blurred trace of it showing through; `header` floats on top, and the thread's messages, drawn
  * by `renderMessages`, sit at the bottom above the composer and scroll when
  * long. With `originTop`, the message it was opened from keeps the place it
  * had in the timeline instead (see `threadAnchor`). New messages in the
@@ -230,17 +230,22 @@ export function ChatThreadView({
       className={cn("absolute inset-0 z-20 flex flex-col", className)}
     >
       {/* Each layer fades on its own: an ancestor's opacity would cut the
-          backdrop's blur off from the chat behind it while it fades. */}
+          backdrop's blur off from the chat behind it while it fades. The
+          backdrop is near-opaque, so the thread reads the same wherever the
+          blur is lost; the blur only softens the little that shows through. */}
       <div
         aria-hidden
         data-chat-thread-fade
-        className="absolute inset-0 bg-chat-canvas/90 backdrop-blur-xl supports-[backdrop-filter]:bg-chat-canvas/75"
+        className="absolute inset-0 bg-chat-canvas/95 backdrop-blur-xl"
       />
+      {/* `isolate` keeps a blend mode in a message (an avatar's ring) inside
+          the list. Without it the blend isolates the whole view, and the
+          backdrop then blurs only the view itself, not the chat behind. */}
       <div
         ref={listRef}
         onScroll={onScroll}
         data-chat-thread-fade
-        className="scrollbar-idle-hidden relative flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain concierge-header-clear"
+        className="scrollbar-idle-hidden relative isolate flex min-h-0 flex-1 flex-col overflow-y-auto overscroll-contain concierge-header-clear"
         style={{ paddingBottom: floorHeight + lift }}
       >
         <div ref={contentRef} className="mt-auto">
