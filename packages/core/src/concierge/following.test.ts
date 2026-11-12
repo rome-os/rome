@@ -215,6 +215,8 @@ function setup(
   const turns: string[] = [];
   /** While on, every Concierge turn fails to run to its end. */
   const turnFails = { on: false };
+  /** The chats whose turns fail to run to their end, or throw. */
+  const failingChats = { ends: new Set<string>(), throws: new Set<string>() };
   const inputLabels: (string | undefined)[] = [];
   const pushLevels: (string | undefined)[] = [];
   const triaged: string[][] = [];
@@ -381,7 +383,8 @@ function setup(
       turns.push(prompt);
       inputLabels.push(turnOptions?.inputLabel);
       pushLevels.push(turnOptions?.pushLevel);
-      return !turnFails.on;
+      if (failingChats.throws.has(chatId)) throw new Error("the session crashed");
+      return !turnFails.on && !failingChats.ends.has(chatId);
     },
     attachFollowing: (attached: ConciergeFollowing | null) => (following = attached),
   } as unknown as ConciergeService;
@@ -396,6 +399,7 @@ function setup(
     action,
     turns,
     turnFails,
+    failingChats,
     inputLabels,
     pushLevels,
     triaged,
@@ -1387,24 +1391,103 @@ describe("follows in several Concierge chats", () => {
     s.stop();
   });
 
-  it("digests every chat's items in the main chat, grouped by chat", async () => {
-    rs.useFakeTimers();
-    const s = setup({ triage: { e1: "digest", e2: "digest" } });
-    s.calling.chat = "calendar";
-    await s.following().follow({ source: "github", target: "acme/widgets" });
-    s.calling.chat = null;
-    await s.following().follow({ source: "github", target: "acme/other" });
-    await fire(s, "e1", "acme/widgets");
-    await fire(s, "e2", "acme/other");
-    await rs.advanceTimersByTimeAsync(5 * 60_000);
-    s.turnChats.length = 0;
-    await s.action("core:concierge_digest").execute({}, {} as never);
-    expect(s.turnChats).toEqual(["concierge"]);
-    const digest = s.turns.at(-1) ?? "";
-    expect(digest).toContain('<chat id="calendar" name="Calendar" main="false">');
-    expect(digest).toContain('<chat id="concierge" name="Concierge" main="true">');
-    expect(digest.indexOf("line for e2")).toBeLessThan(digest.indexOf('name="Calendar"'));
-    s.stop();
+  describe("digest per chat", () => {
+    /** One digest-class item in the calendar chat (e1) and one in the main chat (e2). */
+    const withItemsInTwoChats = async () => {
+      rs.useFakeTimers();
+      const s = setup({ triage: { e1: "digest", e2: "digest" } });
+      s.calling.chat = "calendar";
+      await s.following().follow({ source: "github", target: "acme/widgets" });
+      s.calling.chat = null;
+      await s.following().follow({ source: "github", target: "acme/other" });
+      await fire(s, "e1", "acme/widgets");
+      await fire(s, "e2", "acme/other");
+      await rs.advanceTimersByTimeAsync(5 * 60_000);
+      s.turnChats.length = 0;
+      s.turns.length = 0;
+      s.inputLabels.length = 0;
+      s.pushLevels.length = 0;
+      return s;
+    };
+    const digest = (s: ReturnType<typeof setup>) =>
+      s.action("core:concierge_digest").execute({}, {} as never);
+    /** The digest turn sent to one chat. */
+    const turnIn = (s: ReturnType<typeof setup>, chatId: string) =>
+      s.turns[s.turnChats.indexOf(chatId)] ?? "";
+
+    it("sends each chat the digest of its own follows, flat, and marks them all", async () => {
+      const s = await withItemsInTwoChats();
+      expect(await digest(s)).toEqual({ status: "ok", data: { items: 2 } });
+      expect([...s.turnChats].sort()).toEqual(["calendar", "concierge"]);
+      const calendar = turnIn(s, "calendar");
+      const main = turnIn(s, "concierge");
+      expect(calendar).toContain("line for e1");
+      expect(calendar).not.toContain("line for e2");
+      expect(calendar).toContain('delivery="digest" count="1"');
+      expect(main).toContain("line for e2");
+      expect(main).not.toContain("line for e1");
+      expect(main).toContain('delivery="digest" count="1"');
+      expect(calendar + main).not.toContain("<chat");
+      expect(s.inputLabels).toEqual(["Following · digest (1)", "Following · digest (1)"]);
+      expect(s.pushLevels).toEqual(["passive", "passive"]);
+      expect(await s.items.owedToDigest()).toEqual([]);
+      s.stop();
+    });
+
+    it.each([
+      ["a turn that does not run to its end", "ends"],
+      ["a turn that throws", "throws"],
+    ] as const)("leaves only that chat's items owed after %s", async (_name, how) => {
+      const s = await withItemsInTwoChats();
+      s.failingChats[how].add("calendar");
+      expect(await digest(s)).toEqual({ status: "ok", data: { items: 1 } });
+      expect([...s.turnChats].sort()).toEqual(["calendar", "concierge"]);
+      expect((await s.items.owedToDigest()).map((i) => i.eventId)).toEqual(["e1"]);
+      // The next digest brings only what is still owed, to the chat it belongs to.
+      s.failingChats[how].clear();
+      s.turnChats.length = 0;
+      expect(await digest(s)).toEqual({ status: "ok", data: { items: 1 } });
+      expect(s.turnChats).toEqual(["calendar"]);
+      expect(await s.items.owedToDigest()).toEqual([]);
+      s.stop();
+    });
+
+    it("sends the main chat one empty digest when nothing is owed, however many chats follow", async () => {
+      const s = await withItemsInTwoChats();
+      await digest(s);
+      s.turnChats.length = 0;
+      s.turns.length = 0;
+      expect(await digest(s)).toEqual({ status: "ok", data: { items: 0 } });
+      expect(s.turnChats).toEqual(["concierge"]);
+      expect(s.turns[0]).toContain('delivery="digest" count="0"');
+      s.stop();
+    });
+
+    it("sends the main chat no digest when only a topic chat has items", async () => {
+      rs.useFakeTimers();
+      const s = setup({ triage: { e1: "digest" } });
+      s.calling.chat = "calendar";
+      await s.following().follow({ source: "github", target: "acme/widgets" });
+      await fire(s, "e1", "acme/widgets");
+      await rs.advanceTimersByTimeAsync(5 * 60_000);
+      s.turnChats.length = 0;
+      expect(await digest(s)).toEqual({ status: "ok", data: { items: 1 } });
+      expect(s.turnChats).toEqual(["calendar"]);
+      s.stop();
+    });
+
+    it("sends an archived chat's items to the main chat, in its one digest", async () => {
+      const s = await withItemsInTwoChats();
+      s.liveChats.delete("calendar");
+      expect(await digest(s)).toEqual({ status: "ok", data: { items: 2 } });
+      expect(s.turnChats).toEqual(["concierge"]);
+      expect(s.turns[0]).toContain('delivery="digest" count="2"');
+      expect(s.turns[0]).toContain("line for e1");
+      expect(s.turns[0]).toContain("line for e2");
+      expect(s.inputLabels).toEqual(["Following · digest (2)"]);
+      expect(await s.items.owedToDigest()).toEqual([]);
+      s.stop();
+    });
   });
 
   it("moves a retired chat's follows and owed items to the main chat", async () => {
