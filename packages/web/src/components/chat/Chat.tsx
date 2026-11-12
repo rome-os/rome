@@ -2389,7 +2389,10 @@ export function Chat({
                 // Concierge has no timeline rail, so no lane for it. Its
                 // header floats over the messages, so the first one starts
                 // below it, and a jump to a message stops below it too.
-                concierge ? "concierge-header-clear" : "@min-[48rem]/transcript:pl-8",
+                // 宽度策略只由普通聊天启用，避免影响复用消息列表的分享页和历史查看页。
+                concierge
+                  ? "concierge-header-clear"
+                  : "@min-[48rem]/transcript:pl-8 [--chat-assistant-text-max-width:896px]",
               )}
             >
               {conciergeEmpty ? (

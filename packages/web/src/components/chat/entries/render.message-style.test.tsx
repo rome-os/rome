@@ -37,6 +37,16 @@ describe("message text style", () => {
     expect(root?.closest(".rounded-16")).not.toBeNull();
   });
 
+  it.each([
+    false,
+    true,
+  ])("marks only assistant transcript text for the shared width policy (live=%s)", (live) => {
+    const root = renderAnswer({ transcript: { live } });
+    const bubble = root?.closest("[data-chat-assistant-text]");
+    expect(bubble).not.toBeNull();
+    expect(bubble?.className).toContain("--chat-assistant-text-max-width");
+  });
+
   it("leaves Markdown outside a message in the kit's default style", () => {
     render(
       <MemoryRouter>
