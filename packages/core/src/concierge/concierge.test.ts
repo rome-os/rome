@@ -633,6 +633,21 @@ describe("Concierge tools", () => {
     ]);
   });
 
+  it("sends a message repeated word for word in one turn once, so the phone rings once", async () => {
+    const s = setup();
+    const idOf = (result: unknown) =>
+      JSON.parse((result as { content: { text: string }[] }).content[0]!.text).messageId as string;
+    const first = idOf(await s.tool("say", { text: "apple.txt is made." }));
+    await s.tool("say", { text: "pear.txt is made." });
+    const again = idOf(await s.tool("say", { text: "apple.txt is made." }));
+
+    expect(again).toBe(first);
+    expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
+      [{ type: "text", content: "apple.txt is made." }],
+      [{ type: "text", content: "pear.txt is made." }],
+    ]);
+  });
+
   describe("chat threads", () => {
     const threadOf = (s: ReturnType<typeof setup>, id: string) =>
       s.messages.get(CONCIERGE_CHAT)?.find((row) => row.id === id)?.chatThread;
@@ -2019,7 +2034,7 @@ describe("Concierge task anchors", () => {
 
   it("say, chat_card and chat_forward answer the id of the message they stored", async () => {
     const s = setup();
-    const said = text(await s.tool("say", { text: "On it" }));
+    const said = text(await s.tool("say", { text: "Looking for flights" }));
     expect(said).toEqual({ sent: expect.any(String), messageId: "said-1" });
     await s.tool("chat_start", { title: "Flights", brief: "Find flights" });
     s.messages.get("task-1")?.push({

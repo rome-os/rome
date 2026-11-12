@@ -282,6 +282,13 @@ export async function buildConciergeTools(
     return said[said.length - 1]?.id ?? null;
   };
 
+  // A message the Concierge already said this turn with exactly these parts.
+  const sameMessageThisTurn = async (content: string) => {
+    const { chatId, turnId } = currentTurn();
+    const rows = await webchatRepo.getTurnChatMessages(chatId, turnId);
+    return rows.find((row) => row.role === "assistant" && row.content === content)?.id ?? null;
+  };
+
   const NO_ROW_MESSAGE =
     "A new row needs a message to point to. Call say first, then pass the messageId it returns.";
 
@@ -753,10 +760,14 @@ export async function buildConciergeTools(
         throw new Error(`No task ${taskId} in this chat. Pass a task id from task_list.`);
       }
     }
-    const id = await addMessage(
-      [{ type: "text", content: text, ...(format === "long" ? { format } : {}) }],
-      await placementFor(answers, taskId ? { taskId } : {}),
-    );
+    const parts: Parameters<typeof webchatRepo.addBackendMessage>[2] = [
+      { type: "text", content: text, ...(format === "long" ? { format } : {}) },
+    ];
+    // A model sometimes repeats a message word for word in one turn. Each
+    // message can ring the guardian's phone, so the repeat is the same message.
+    const repeated = await sameMessageThisTurn(JSON.stringify(parts));
+    if (repeated) return repeated;
+    const id = await addMessage(parts, await placementFor(answers, taskId ? { taskId } : {}));
     if (taskId) service.noteRelayed(turnId, chatId, taskId);
     noteAnswers(id, answers);
     said(chatId, turnId, text, isPrivate);
