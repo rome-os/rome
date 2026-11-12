@@ -151,6 +151,8 @@ final class Workspace {
     var kept: KeptIdentity? {
         role == .unknown ? nil : KeptIdentity(guardian: role == .guardian, name: accountLabel, avatarURL: avatarURL)
     }
+    /// The instance's id in Rome Cloud, for the widget's copy of its apps.
+    var instanceID: String?
     /// Prompts for chats' composers, unsent, by the chat's draft key (the
     /// main Chat's is `conciergeChatID`); a chat takes its own once its draft
     /// is restored, and clears it.
@@ -345,7 +347,11 @@ final class Workspace {
         watchAgentName()
         tasks.start()
         topics.start()
-        if role == .unknown { Task { await readRole() } }
+        Task {
+            if role == .unknown { await readRole() }
+            // The widget shows this instance's apps, even before Apps opens.
+            if isGuardian, let apps = try? await backend.apps() { await shelve(AppLinks.mine(apps)) }
+        }
         await openConcierge()
     }
 
@@ -442,6 +448,8 @@ final class Workspace {
     func shelve(_ apps: [InstalledApp]) async {
         guard backend.account.isCurrent else { return }
         if appsCache != apps { appsCache = apps }
+        guard let instanceID else { return }
+        await WidgetShelf.shelve(apps, instanceId: instanceID, backend: backend)
     }
 
     func stop() {
@@ -509,6 +517,8 @@ final class AppModel {
         didSet {
             if phase.isSignedIn != oldValue.isSignedIn { node.setSignedIn(phase.isSignedIn) }
             if !phase.isSignedIn { stackGame = nil }
+            // Signed out, however it came about: the widget offers to make an app.
+            if phase == .signedOut, oldValue != .signedOut { WidgetShelf.clear() }
         }
     }
     private(set) var workspace: Workspace? {
@@ -537,6 +547,10 @@ final class AppModel {
     private var pendingPush: PushTarget?
     /// The instance whose stopped page shows, when a push led there.
     private var stoppedInstanceID: String?
+    /// Goes up when a widget link asks the shell to open an app, Apps or Chat.
+    private(set) var widgetRequest = WidgetRequest(serial: 0, link: nil)
+    /// A widget link waiting for an instance to open.
+    private var pendingLink: WidgetLink?
 
     let cloud: CloudAuth
     let push: PushCenter
@@ -1023,6 +1037,8 @@ final class AppModel {
         node.accountEnded()
         leaveAccount()
         pendingPush = nil
+        pendingLink = nil
+        WidgetShelf.clear()
         await push.signOut { await cloud.signOut() }
         forgetAccountData()
         browserSignIn = nil
@@ -1139,6 +1155,7 @@ final class AppModel {
     private func open(_ workspace: Workspace) async {
         // A banner from the workspace this one replaces does not carry over.
         sessionExpired = false
+        workspace.instanceID = currentInstanceID
         self.workspace = workspace
         syncLanguage()
         // Its own task: the poll that reports the finish is cancelled when the
@@ -1165,6 +1182,11 @@ final class AppModel {
         if pendingPush != nil {
             await routePendingPush()
             // The push was for another instance, now open in its place.
+            guard self.workspace === workspace else { return }
+        }
+        if pendingLink != nil {
+            await routePendingLink()
+            // The link was for another instance, now open in its place.
             guard self.workspace === workspace else { return }
         }
         await workspace.start()
@@ -1324,6 +1346,37 @@ final class AppModel {
             // be reconnecting, or never paused if the tap came over the open app.
             if let topic { workspace?.showLatest(inTopic: topic) } else { workspace?.showLatest() }
         }
+    }
+
+    // MARK: Widget links
+
+    /// A tap on the widget: an app on its instance, the Apps page, or Chat
+    /// to make an app. It waits while no instance is open, as a push does.
+    func openFromWidget(_ link: WidgetLink) async {
+        pendingLink = link
+        await routePendingLink()
+    }
+
+    private func routePendingLink() async {
+        guard let link = pendingLink, phase == .ready, workspace != nil else { return }
+        pendingLink = nil
+        if case .app(let instanceId, _) = link {
+            if instanceId != currentInstanceID, !instances.contains(where: { $0.id == instanceId }) {
+                await refreshInstances()
+            }
+            if case .switchTo(let instance) = PushRoute.decide(instanceId: instanceId, currentInstanceID: currentInstanceID, instances: instances) {
+                pendingLink = link
+                await switchInstance(to: instance)
+                return
+            }
+            // An instance this account cannot open now: its apps are not
+            // here, so the open instance's Apps page shows.
+            if instanceId != currentInstanceID {
+                widgetRequest = WidgetRequest(serial: widgetRequest.serial + 1, link: .apps)
+                return
+            }
+        }
+        widgetRequest = WidgetRequest(serial: widgetRequest.serial + 1, link: link)
     }
 
     /// The topic chat a push names, when this account has it; otherwise the

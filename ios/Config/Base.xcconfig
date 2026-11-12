@@ -16,6 +16,12 @@ ROME_DISPLAY_NAME[config=Release] = Rome
 ROME_APS_ENVIRONMENT = development
 ROME_APS_ENVIRONMENT[config=Release] = production
 
+// The App Group the app shares its apps list with the widget through, and
+// the scheme of the widget's links: each build on one phone has its own.
+ROME_APP_GROUP = group.$(ROME_BUNDLE_IDENTIFIER)
+ROME_URL_SCHEME = rome-dev
+ROME_URL_SCHEME[config=Release] = rome
+
 // The version testers see. The build number is 1 for local builds; an
 // archive sets it to a UTC timestamp (see README.md, "Release to TestFlight").
 MARKETING_VERSION = 1.0.0

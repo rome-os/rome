@@ -620,6 +620,93 @@ final class StubBackend: RomeBackend {
     }
 }
 
+@Suite struct WidgetSlotsTests {
+    private static func app(_ id: String, opens: Bool = true) -> ShelfApp {
+        ShelfApp(id: id, name: id.capitalized, opens: opens, hasIcon: false)
+    }
+
+    private static let list = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"].map { app($0) }
+
+    /// Picked apps first in their order, then the ones opened last, then the rest.
+    @Test func pickedThenRecentThenTheRest() {
+        #expect(WidgetSlots.choose(picked: ["c"], recent: ["e"], apps: Self.list).map(\.id) == ["c", "e", "a", "b"])
+        #expect(WidgetSlots.choose(picked: ["c", "a"], recent: ["e", "b"], apps: Self.list).map(\.id) == ["c", "a", "e", "b"])
+        // More picks than spots: the first four win.
+        #expect(WidgetSlots.choose(picked: ["j", "i", "h", "g", "f"], recent: ["a"], apps: Self.list).map(\.id) == ["j", "i", "h", "g"])
+    }
+
+    /// Each app once, four at most, and only apps the list still has.
+    @Test func dedupedCappedAndCurrent() {
+        let chosen = WidgetSlots.choose(picked: ["b", "gone", "b"], recent: ["b", "a", "gone"], apps: Self.list)
+        #expect(chosen.map(\.id) == ["b", "a", "c", "d"])
+        #expect(WidgetSlots.small == 4)
+        #expect(Set(chosen.map(\.id)).count == chosen.count)
+        #expect(WidgetSlots.choose(picked: [], recent: [], apps: Array(Self.list.prefix(3))).map(\.id) == ["a", "b", "c"])
+        #expect(WidgetSlots.choose(picked: ["a"], recent: [], apps: []).isEmpty)
+    }
+
+    /// Opening an app puts it first among the recent ones, once.
+    @Test func recentOpensComeFirst() throws {
+        let suite = "rome-tests-\(UUID().uuidString)"
+        let root = FileManager.default.temporaryDirectory.appending(path: suite, directoryHint: .isDirectory)
+        let store = AppShelfStore(root: root, suite: suite)
+        defer {
+            UserDefaults().removePersistentDomain(forName: suite)
+            try? FileManager.default.removeItem(at: root)
+        }
+        store.recordOpen(instanceId: "i1", appId: "a")
+        store.recordOpen(instanceId: "i1", appId: "b")
+        store.recordOpen(instanceId: "i1", appId: "a")
+        store.recordOpen(instanceId: "i2", appId: "z")
+        #expect(store.recent(instanceId: "i1") == ["a", "b"])
+        #expect(store.recent(instanceId: "i2") == ["z"])
+
+        let shelf = Shelf(instanceId: "i1", apps: [Self.app("a")])
+        #expect(store.write(shelf))
+        #expect(!store.write(shelf))
+        #expect(store.read() == shelf)
+        store.clear()
+        #expect(store.read() == nil)
+    }
+}
+
+@Suite struct WidgetLinkTests {
+    /// An app's link names its instance and app, and reads back the same.
+    @Test func anAppLinkRoundTrips() throws {
+        let link = WidgetLink.app(instanceId: "inst-1", appId: "habits")
+        let url = link.url(scheme: "rome")
+        #expect(url.absoluteString == "rome://app/inst-1/habits")
+        #expect(WidgetLink(url: url) == link)
+        #expect(WidgetLink(url: link.url(scheme: "rome-dev")) == link)
+        // An id with a slash or a space survives the trip.
+        let odd = WidgetLink.app(instanceId: "i 2", appId: "a/b")
+        #expect(WidgetLink(url: odd.url(scheme: "rome")) == odd)
+    }
+
+    @Test func theAppsPageAndNewApp() throws {
+        #expect(WidgetLink(url: try #require(URL(string: "rome://apps"))) == .apps)
+        #expect(WidgetLink(url: try #require(URL(string: "rome-dev://new-app"))) == .newApp)
+        #expect(WidgetLink.newApp.url(scheme: "rome").absoluteString == "rome://new-app")
+    }
+
+    /// Anything else is not a widget link.
+    @Test func otherURLsAreRefused() throws {
+        for text in ["https://romeos.cc/app/a/b", "rome://app/only-one", "rome://app//b", "rome://app/a/b/c", "rome://apps/x", "rome://chat", "other://app/a/b"] {
+            #expect(WidgetLink(url: try #require(URL(string: text))) == nil, "\(text)")
+        }
+    }
+
+    /// A link to another running instance switches to it first, as a push
+    /// does; a stopped one is named as such, and the widget then opens Apps.
+    @Test func anotherInstanceIsSwitchedTo() {
+        let other = CloudInstance(id: "i2", name: "Team", slug: "team", origin: "https://team.romeos.cc", status: "running")
+        let stopped = CloudInstance(id: "i3", name: "Old", slug: "old", origin: "https://old.romeos.cc", status: "stopped")
+        #expect(PushRoute.decide(instanceId: "i2", currentInstanceID: "i1", instances: [other]) == .switchTo(other))
+        #expect(PushRoute.decide(instanceId: "i1", currentInstanceID: "i1", instances: [other]) == .openConcierge)
+        #expect(PushRoute.decide(instanceId: "i3", currentInstanceID: "i1", instances: [stopped]) == .showStopped(stopped))
+    }
+}
+
 @Suite struct ChatLinkTests {
     private static let origin = URL(string: "https://me.romeos.cc")!
     private static let apps = [
