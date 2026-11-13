@@ -48,6 +48,45 @@ describe("parsePictureSet", () => {
     expect(set?.pictures[0]).toMatchObject({ src: "https://example.com/a.jpg", note: "note" });
   });
 
+  it("keeps balanced parentheses in an address whole", () => {
+    const fuji =
+      "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/Mount_Fuji_(Japan).jpg/960px-Mount_Fuji_(Japan).jpg";
+    const set = parsePictureSet(
+      `![Fuji](${fuji}) Spring\n![One](https://example.com/photo_(1).jpg)\n![Two](/memory/pictures/a_(2).png) Note\n`,
+    );
+    expect(set?.pictures.map(({ src, note }) => [src, note])).toEqual([
+      [fuji, "Spring"],
+      ["https://example.com/photo_(1).jpg", ""],
+      ["/api/memory/asset/a_(2).png?path=memory%2Fpictures%2Fa_(2).png", "Note"],
+    ]);
+  });
+
+  it("reads an escaped label and shows it unescaped", () => {
+    const set = parsePictureSet(
+      "![photo \\[1\\].png](https://example.com/a.png) Beach\n![a \\\\ b \\x](https://example.com/b.png)\n",
+    );
+    expect(set?.pictures.map(({ title, note }) => [title, note])).toEqual([
+      ["photo [1].png", "Beach"],
+      ["a \\ b \\x", ""],
+    ]);
+  });
+
+  it("keeps text after the image's parenthesis as the note", () => {
+    const set = parsePictureSet(
+      "![a](https://example.com/b.jpg) (c)\n![d](https://example.com/e.jpg)(f)\n",
+    );
+    expect(set?.pictures.map(({ src, note }) => [src, note])).toEqual([
+      ["https://example.com/b.jpg", "(c)"],
+      ["https://example.com/e.jpg", "(f)"],
+    ]);
+  });
+
+  it("still drops an unsafe address that has parentheses", () => {
+    expect(
+      parsePictureSet("![a](javascript:alert(1))\n![b](http://example.com/b_(1).jpg)\n"),
+    ).toBeNull();
+  });
+
   it("leaves a note empty when the line has none", () => {
     expect(parsePictureSet("![A](https://example.com/a.jpg)\n")?.pictures[0]?.note).toBe("");
   });

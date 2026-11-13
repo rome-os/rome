@@ -21,7 +21,15 @@ export interface PictureSet {
 
 // One line: a Markdown image, then its note. This is the image grammar of the
 // iOS parser (`MarkdownParser.imagePattern`), so both clients read a line alike.
-const PICTURE_LINE = /^\s*!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)(.*)$/;
+// The label may hold backslash escapes (`\[1\]`). The address may hold one level
+// of balanced parentheses (`Mount_Fuji_(Japan).jpg`).
+const PICTURE_LINE =
+  /^\s*!\[((?:[^\]\\]|\\.)*)\]\(\s*<?((?:[^()\s<>]|\([^()\s]*\))+)>?(?:\s+"[^"]*")?\s*\)(.*)$/;
+
+/** `label` with its Markdown backslash escapes read: `\[1\]` shows as `[1]`. */
+function unescapeLabel(label: string): string {
+  return label.replace(/\\([!-/:-@[-`{-~])/g, "$1");
+}
 
 // The URL transform reads only the tag name of the element a URL belongs to.
 const IMG_NODE = { tagName: "img" } as Parameters<typeof transformMarkdownUrl>[2];
@@ -88,7 +96,7 @@ export function parsePictureSet(
     pictures.push({
       src: safe.src,
       host: safe.host,
-      title: (match[1] ?? "").trim(),
+      title: unescapeLabel(match[1] ?? "").trim(),
       note: (match[3] ?? "").trim(),
     });
   }

@@ -199,6 +199,32 @@ import Testing
         #expect(MarkdownParser.parse("```pictures\n![A](https://example.com/a.jpg) on") == [.code(language: "pictures", text: "![A](https://example.com/a.jpg) on")])
     }
 
+    @Test func balancedParenthesesStayInAnAddress() {
+        let fuji = "https://upload.wikimedia.org/wikipedia/commons/thumb/1/1b/Mount_Fuji_(Japan).jpg/960px-Mount_Fuji_(Japan).jpg"
+        let middle = "https://example.com/photo_(1).jpg"
+        let blocks = MarkdownParser.parse("```pictures\n![Fuji](\(fuji)) Spring\n![One](\(middle))\n```")
+        #expect(blocks == [.pictures(layout: .grid, items: [item("Fuji", fuji, "Spring"), item("One", middle)])])
+    }
+
+    @Test func anEscapedLabelIsShownUnescaped() {
+        let blocks = MarkdownParser.parse(#"""
+        ```pictures
+        ![photo \[1\].png](https://example.com/a.png) Beach
+        ![a \\ b \x](https://example.com/b.png)
+        ```
+        """#)
+        #expect(blocks == [.pictures(layout: .grid, items: [item("photo [1].png", "https://example.com/a.png", "Beach"), item(#"a \ b \x"#, "https://example.com/b.png")])])
+    }
+
+    @Test func textAfterTheImagesParenthesisStaysTheNote() {
+        let blocks = MarkdownParser.parse("```pictures\n![a](https://example.com/b.jpg) (c)\n![d](https://example.com/e.jpg)(f)\n```")
+        #expect(blocks == [.pictures(layout: .grid, items: [item("a", "https://example.com/b.jpg", "(c)"), item("d", "https://example.com/e.jpg", "(f)")])])
+    }
+
+    @Test func anUnsafeAddressWithParenthesesIsStillSkipped() {
+        #expect(MarkdownParser.parse("```pictures\n![b](http://example.com/b_(1).jpg)\n```") == [.code(language: "pictures", text: "![b](http://example.com/b_(1).jpg)")])
+    }
+
     @Test func textAroundASetStaysAsBlocks() {
         let blocks = MarkdownParser.parse("Here:\n\n```pictures\n![A](https://example.com/a.jpg)\n```\n\nWhich one?")
         #expect(blocks == [

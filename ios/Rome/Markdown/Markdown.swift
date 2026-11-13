@@ -204,14 +204,38 @@ enum MarkdownParser {
             let src = text.substring(with: match.range(at: 2))
             guard ImageSource(src: src) != .rejected else { continue }
             items.append(PictureItem(
-                alt: text.substring(with: match.range(at: 1)).trimmingCharacters(in: .whitespaces),
+                alt: unescapedLabel(text.substring(with: match.range(at: 1))).trimmingCharacters(in: .whitespaces),
                 src: src,
                 note: text.substring(from: match.range.location + match.range.length).trimmingCharacters(in: .whitespaces)))
         }
         return items.isEmpty ? nil : .pictures(layout: layout, items: items)
     }
 
-    nonisolated(unsafe) private static let imagePattern = try! NSRegularExpression(pattern: #"!\[([^\]]*)\]\(\s*<?([^)\s>]+)>?(?:\s+"[^"]*")?\s*\)"#)
+    /// A Markdown image. The label may hold backslash escapes (`\[1\]`), and the
+    /// address one level of balanced parentheses (`Mount_Fuji_(Japan).jpg`). The
+    /// web's `PICTURE_LINE` (`packages/web/src/lib/picture-set.ts`) reads the
+    /// same grammar, so keep the two alike.
+    nonisolated(unsafe) private static let imagePattern = try! NSRegularExpression(pattern: #"!\[((?:[^\]\\]|\\.)*)\]\(\s*<?((?:[^()\s<>]|\([^()\s]*\))+)>?(?:\s+"[^"]*")?\s*\)"#)
+
+    /// A label with its Markdown backslash escapes read: `\[1\]` shows as `[1]`.
+    /// A backslash before anything but ASCII punctuation stays.
+    static func unescapedLabel(_ text: String) -> String {
+        var result = ""
+        var escaped = false
+        for character in text {
+            if escaped {
+                if !(character.isASCII && (character.isPunctuation || character.isSymbol)) { result.append("\\") }
+                result.append(character)
+                escaped = false
+            } else if character == "\\" {
+                escaped = true
+            } else {
+                result.append(character)
+            }
+        }
+        if escaped { result.append("\\") }
+        return result
+    }
 
     /// A paragraph's text with its Markdown images as blocks of their own.
     /// Only image syntax counts: a plain link to an image file stays a link.
@@ -225,7 +249,7 @@ enum MarkdownParser {
             let before = nsText.substring(with: NSRange(location: cursor, length: match.range.location - cursor))
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             if !before.isEmpty { blocks.append(.paragraph(before)) }
-            blocks.append(.image(alt: nsText.substring(with: match.range(at: 1)), src: nsText.substring(with: match.range(at: 2))))
+            blocks.append(.image(alt: unescapedLabel(nsText.substring(with: match.range(at: 1))), src: nsText.substring(with: match.range(at: 2))))
             cursor = match.range.location + match.range.length
         }
         let after = nsText.substring(from: cursor).trimmingCharacters(in: .whitespacesAndNewlines)
