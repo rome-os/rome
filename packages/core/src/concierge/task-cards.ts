@@ -1,13 +1,14 @@
 // What a task card in a Concierge chat shows: the question or approval its
 // task chat waited on when the card was said, and how it ended. The stored
-// `task_chat` part only points at its task chat. Rome fills the card in each
-// time it hands the message out, in one read per page, and tells the chats
-// that show it when it settles (docs/domains/chats.md#task).
+// `task_chat` part points at its task chat and the item it waited on. Rome
+// fills the card in each time it hands the message out, in one read per page,
+// and tells the chats that show it when it settles (docs/domains/chats.md#task).
 
 import type {
   ChatCardSettledEvent,
   TaskApprovalOutcome,
   TaskCard,
+  TaskChatWaitedOn,
   TaskQuestionOutcome,
 } from "@rome/api-types/chat";
 import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
@@ -31,7 +32,12 @@ export interface TaskCardSources {
 }
 
 /** A `task_chat` part that shows a question or approval: an `ask` card, or one from before. */
-function showsAsk(part: Record<string, unknown>): part is { type: "task_chat"; chatId: string } {
+function showsAsk(part: Record<string, unknown>): part is {
+  type: "task_chat";
+  chatId: string;
+  show?: "ask";
+  waitedOn?: TaskChatWaitedOn;
+} {
   return part.type === "task_chat" && typeof part.chatId === "string" && part.show !== "task";
 }
 
@@ -147,8 +153,9 @@ export function questionCard(
 }
 
 /**
- * The card a task card said at `at` shows: the newest question or approval
- * its task chat had asked by then, or `unavailable` when it had none.
+ * The card a task card said at `at` shows when its part names no item (a
+ * part from before `waitedOn`): the newest question or approval its task
+ * chat had asked by then, or `unavailable` when it had none.
  */
 export function cardAt(
   asked: TaskChatCards | undefined,
@@ -169,6 +176,23 @@ export function cardAt(
   return { kind: "unavailable" };
 }
 
+/** The item `waitedOn` names, as its card now reads, or `unavailable` when the chat has no such item. */
+function cardOf(
+  asked: TaskChatCards | undefined,
+  waitedOn: TaskChatWaitedOn,
+  row: ConciergeTaskRow | undefined,
+  waitExpiry: number,
+): TaskCard {
+  if (waitedOn.kind === "approval") {
+    const approval = asked?.approvals.find((each) => each.id === waitedOn.id);
+    return approval ? approvalCard(approval) : { kind: "unavailable" };
+  }
+  const question = asked?.questions.find(
+    (each) => each.id === waitedOn.id && each.messageId === waitedOn.messageId,
+  );
+  return question ? questionCard(question, row, waitExpiry) : { kind: "unavailable" };
+}
+
 /**
  * `messages` with the card of each task card filled in, read once for the
  * whole page. A message with none comes back as it was; a page whose read
@@ -179,8 +203,12 @@ export async function withTaskCards<
 >(
   sources: TaskCardSources,
   messages: T[],
-  /** Whose Concierge chat the messages are: a card shows only that owner's own task chats. */
-  owner: string,
+  /**
+   * The owner of the private Concierge chat the messages are in: a card
+   * shows only that owner's own task chats. Null for any other chat, whose
+   * cards all show as unavailable, since others may read it.
+   */
+  owner: string | null,
 ): Promise<T[]> {
   const parsed = messages.map((message) => {
     if (message.role !== "assistant" || !message.content.includes('"task_chat"')) return null;
@@ -223,11 +251,19 @@ export async function withTaskCards<
       // A part can name any chat. Only a task chat of the reader's own shows
       // what it asked: another owner's, or a chat with no task, shows none.
       const row = rows.get(part.chatId);
-      const own = row !== undefined && (row.ownerKey ?? GUARDIAN_OWNER) === owner;
+      const own = owner !== null && row !== undefined && (row.ownerKey ?? GUARDIAN_OWNER) === owner;
       const card: TaskCard =
         failed || !own
           ? { kind: "unavailable" }
-          : cardAt(asked.get(part.chatId), at, row, sources.waitExpiry);
+          : part.waitedOn
+            ? cardOf(asked.get(part.chatId), part.waitedOn, row, sources.waitExpiry)
+            : // A card from before `show` shows what its task waits on now.
+              cardAt(
+                asked.get(part.chatId),
+                part.show === undefined ? Number.POSITIVE_INFINITY : at,
+                row,
+                sources.waitExpiry,
+              );
       return { ...part, card };
     });
     return { ...message, content: JSON.stringify(filled) };

@@ -137,14 +137,85 @@ describe("withTaskCards", () => {
     expect(JSON.parse(filled!.content)[0].card).toEqual({ kind: "unavailable" });
   });
 
-  it("fills a card from before, which shows its task chat's question inside", async () => {
+  it("fills a card from before `show` with what its task chat asked last, not what it had asked then", async () => {
     const { read } = sources(new Map([["task-1", asked()]]));
     const [filled] = await withTaskCards(
       read,
       [message("c1", T + 60_000, [{ type: "task_chat", chatId: "task-1", title: "Draft" }])],
       "guardian",
     );
-    expect(JSON.parse(filled!.content)[0].card).toMatchObject({ kind: "question", id: "q1" });
+    expect(JSON.parse(filled!.content)[0].card).toMatchObject({ kind: "question", id: "q2" });
+  });
+
+  it("shows the item an ask card waited on, not a newer one asked and settled since", async () => {
+    const cards: TaskChatCards = {
+      questions: [],
+      approvals: [
+        {
+          id: "older",
+          status: "pending",
+          resolvedBy: null,
+          description: "Pay the bill",
+          payload: {},
+          since: T,
+        },
+        {
+          id: "newer",
+          status: "rejected",
+          resolvedBy: "guardian",
+          description: "Send the draft",
+          payload: {},
+          since: T + DAY,
+        },
+      ],
+    };
+    const { read } = sources(new Map([["task-1", cards]]));
+    const waited = {
+      ...ask(),
+      waitedOn: { kind: "approval", id: "older" },
+    };
+    const [filled] = await withTaskCards(
+      read,
+      [message("c1", T + DAY + 60_000, [waited])],
+      "guardian",
+    );
+    expect(JSON.parse(filled!.content)[0].card).toEqual({
+      kind: "approval",
+      id: "older",
+      title: "Pay the bill",
+      since: T,
+    });
+  });
+
+  it("matches a waited-on question by its message as well as its tool use id", async () => {
+    const cards: TaskChatCards = {
+      questions: [
+        { id: "ask", messageId: "m1", render, since: T, output: { dismissed: true } },
+        { id: "ask", messageId: "m2", render, since: T + DAY },
+      ],
+      approvals: [],
+    };
+    const { read } = sources(new Map([["task-1", cards]]));
+    const waited = (messageId: string) => ({
+      ...ask(),
+      waitedOn: { kind: "question", id: "ask", messageId },
+    });
+    const filled = await withTaskCards(
+      read,
+      [message("c1", T + 60_000, [waited("m1")]), message("c2", T + DAY + 60_000, [waited("m2")])],
+      "guardian",
+    );
+    expect(filled.map((each) => JSON.parse(each.content)[0].card)).toMatchObject([
+      { messageId: "m1", outcome: { kind: "dismissed" } },
+      { messageId: "m2" },
+    ]);
+    expect(JSON.parse(filled[1]!.content)[0].card.outcome).toBeUndefined();
+  });
+
+  it("shows nothing in a chat that is not a private Concierge chat", async () => {
+    const { read } = sources(new Map([["task-1", asked()]]));
+    const [filled] = await withTaskCards(read, [message("c1", T + 60_000, [ask()])], null);
+    expect(JSON.parse(filled!.content)[0].card).toEqual({ kind: "unavailable" });
   });
 
   it("shows nothing of a chat that is not the reader's own task chat", async () => {

@@ -15,6 +15,7 @@ import type { TaskApprovalOutcome, TaskCard } from "@rome/api-types/chat";
 import { ApprovalCard } from "../approval/ApprovalCard";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
+import { isOpenWait } from "./live-task-cards";
 import { QuestionCard } from "./QuestionCard";
 import { answerOutcome, approvalOutcome, SettledCard } from "./SettledCard";
 
@@ -67,8 +68,7 @@ function waitsOn(
   if (!card || card.kind === "unavailable" || card.outcome) return false;
   // Until the list loads, an open card is taken to wait, so it does not flash folded.
   if (!task) return !loaded;
-  const wait = task.openWait;
-  return !!wait && wait.id === card.id && (wait.kind === "approval") === (card.kind === "approval");
+  return isOpenWait(task.openWait, card);
 }
 
 /**

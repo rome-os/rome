@@ -537,9 +537,6 @@ export function startConciergeEvents(
     const context = { threadId: approval.threadId };
     const byRome = approval.resolvedBy?.startsWith("rome:") === true;
     approvalAnswered.set(context.threadId, { at: Date.now(), byRome });
-    // The decision is news of its own: the task's last turn may have ended
-    // awaiting it, and no turn may follow, as after a rejection. It rides
-    // along with the turn that carries on, when one does.
     const chatId = context.threadId;
     if (approval.id) {
       void guard(
@@ -547,6 +544,14 @@ export function startConciergeEvents(
         service.cardSettled(chatId, { kind: "approval", id: approval.id }),
       );
     }
+    // The decision is news of its own when the task's turn already ended
+    // awaiting it, since no turn may follow, as after a rejection. A turn
+    // still running tells its own outcome, and Rome's turn-down on a Stop or
+    // an expiry is already the task's stopped or no_response news.
+    if (approval.resolvedBy === RESOLVED_BY_STOP || approval.resolvedBy === RESOLVED_BY_EXPIRY) {
+      return;
+    }
+    if (service.dashboard.chats.activeTurns(chatId).length > 0) return;
     void guard(
       "approval decision event",
       taskOf(chatId).then((taskId) => {

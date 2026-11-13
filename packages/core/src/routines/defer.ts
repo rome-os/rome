@@ -116,6 +116,14 @@ function wakePrompt(headline: string, wakeUp: WakeUp, context: DeferContext): st
   return `${headline}\n<defer_note ${attrs}>\n${wakeUp.note}\n</defer_note>`;
 }
 
+/**
+ * The check's name as its headline shows it, on one line, so no line of a
+ * name can pass for the `<defer_note>` header under it.
+ */
+function headlineName(name: string): string {
+  return name.replace(/\s+/g, " ").trim();
+}
+
 function xmlAttr(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll('"', "&quot;").replaceAll("<", "&lt;");
 }
@@ -149,7 +157,7 @@ export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferRe
       args: buildResumeArgs(
         deps.context,
         {
-          text: wakePrompt(`📨 Event arrived: ${parsed.name}`, parsed, deps.context),
+          text: wakePrompt(`📨 Event arrived: ${headlineName(parsed.name)}`, parsed, deps.context),
           attachEvent: true,
           // What the chat shows while it waits, and when the wait ends without
           // the event: the trigger wakes the session then with a payload that
@@ -197,7 +205,7 @@ export async function runDefer(parsed: WakeUp, deps: DeferDeps): Promise<DeferRe
     // The ⏰ prefix marks it in the thread, and the note says what to do.
     args: buildResumeArgs(
       deps.context,
-      { text: wakePrompt(`⏰ Time's up: ${parsed.name}`, parsed, deps.context) },
+      { text: wakePrompt(`⏰ Time's up: ${headlineName(parsed.name)}`, parsed, deps.context) },
       parsed,
     ),
   };

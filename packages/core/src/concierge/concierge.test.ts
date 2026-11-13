@@ -1980,7 +1980,17 @@ describe("Concierge tools", () => {
     });
     await s.tool("chat_card", { chatId: "task-1" });
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
-      [{ type: "task_chat", chatId: "task-1", title: "Flights", show: "ask" }],
+      // The ask card keeps what the task waited on, so it shows that item
+      // even once a newer one is asked and settled.
+      [
+        {
+          type: "task_chat",
+          chatId: "task-1",
+          title: "Flights",
+          show: "ask",
+          waitedOn: { kind: "approval", id: "approval-task-1" },
+        },
+      ],
       [{ type: "task_chat", chatId: "task-1", title: "Flights", show: "task" }],
     ]);
   });
@@ -3414,6 +3424,8 @@ describe("Concierge events", () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.fakeTimers();
+    // The task's turn ended awaiting the decision.
+    s.chats.activeTurns = () => [];
     s.resolveApproval({ status: "approved", payload: { channelContext: { threadId: chatId } } });
     // The carried-on turn's prompt is the action's result, recorded with no sender.
     s.messages.get(chatId)?.push({
@@ -3456,7 +3468,6 @@ describe("Concierge events", () => {
   it.each([
     ["rejected", "guardian", "rejected by the guardian"],
     ["approved", "guardian", "approved by the guardian"],
-    ["rejected", "rome:task-ended", "turned down: nobody answered in time"],
   ])("tells the Concierge an approval was %s after its task's turn ended (%s)", async (status, resolvedBy, said) => {
     const s = setup();
     const { chatId } = await startTask(s);
@@ -3475,6 +3486,28 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(60_000);
     expect(s.backendTurns).toHaveLength(2);
     expect(s.backendTurns[1].prompt).toContain(`approval: Send the invoice — ${said}`);
+  });
+
+  it.each([
+    ["Rome turned it down on the task's Stop", "rome:task-stopped", false],
+    ["Rome turned it down when its wait expired", "rome:task-ended", false],
+    ["the guardian decided while a task turn ran", "guardian", true],
+  ])("tells the Concierge no separate decision when %s", async (_case, resolvedBy, running) => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    if (running) s.chats.activeTurns = (id: string) => (id === chatId ? ["task-turn-2"] : []);
+    s.resolveApproval({
+      status: "rejected",
+      resolvedBy,
+      description: "Send the invoice",
+      payload: { channelContext: { threadId: chatId } },
+    });
+    await rs.advanceTimersByTimeAsync(60_000);
+    expect(s.backendTurns).toHaveLength(1);
   });
 
   it("tells the chat showing a task's approval card how it was decided, as it reads now", async () => {
