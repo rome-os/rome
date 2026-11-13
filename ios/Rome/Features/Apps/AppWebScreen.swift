@@ -62,10 +62,12 @@ struct AppWebScreen: View {
         .background(Palette.bg.ignoresSafeArea())
         .toolbar(.hidden, for: .navigationBar)
         .background { if !inSheet { SwipeBackEnabler() } }
-        // Apps keeps the apps last opened from this phone at its top.
+        // Apps keeps the apps last opened from this phone at its top, and
+        // the widget fills its spare spots with them.
         .task(id: app.id) {
             guard pageURL == nil else { return }
             RecentApps(host: workspace.host, account: workspace.backend.account).record(app.id)
+            WidgetShelf.shared.recordOpen(appId: app.id, instanceId: workspace.instanceID)
         }
     }
 

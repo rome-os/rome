@@ -64,22 +64,29 @@ export class DrizzleSessionRepository implements SessionRepository {
   async add(session: Session): Promise<void> {
     const state = session.snapshot();
     const pending = session.pendingChanges();
-    this.db.transaction((tx) => {
-      if (state.continuityKey !== null) {
-        const active = tx
-          .select({ id: sessions.id })
-          .from(sessions)
-          .where(exactlyActive(state.continuityKey, state.agentName))
-          .get();
-        if (active) {
-          throw new ActiveSessionExistsError(state.continuityKey, state.agentName, active.id);
+    // Immediate: the active-session check reads before the insert writes, and a
+    // deferred transaction fails at once with "database is locked" when another
+    // connection holds the write lock; BEGIN IMMEDIATE waits for it under
+    // busy_timeout instead.
+    this.db.transaction(
+      (tx) => {
+        if (state.continuityKey !== null) {
+          const active = tx
+            .select({ id: sessions.id })
+            .from(sessions)
+            .where(exactlyActive(state.continuityKey, state.agentName))
+            .get();
+          if (active) {
+            throw new ActiveSessionExistsError(state.continuityKey, state.agentName, active.id);
+          }
         }
-      }
-      // The row carries every fact the session holds, so a turn recorded
-      // before the add needs only its checkpoint written beside it.
-      tx.insert(sessions).values(toRow(state)).run();
-      for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
-    });
+        // The row carries every fact the session holds, so a turn recorded
+        // before the add needs only its checkpoint written beside it.
+        tx.insert(sessions).values(toRow(state)).run();
+        for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
+      },
+      { behavior: "immediate" },
+    );
     session.markSaved();
   }
 
@@ -93,16 +100,22 @@ export class DrizzleSessionRepository implements SessionRepository {
   async save(session: Session): Promise<void> {
     const state = session.snapshot();
     const pending = session.pendingChanges();
-    this.db.transaction((tx) => {
-      const stored = tx
-        .select({ id: sessions.id })
-        .from(sessions)
-        .where(eq(sessions.id, state.id))
-        .get();
-      if (!stored) throw new Error(`Session "${state.id}" was never added`);
-      writeChanges(tx, state, pending.changes);
-      for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
-    });
+    // Immediate: a deferred read-then-write fails at once with "database is
+    // locked" when another connection holds the write lock; BEGIN IMMEDIATE
+    // waits for it under busy_timeout instead.
+    this.db.transaction(
+      (tx) => {
+        const stored = tx
+          .select({ id: sessions.id })
+          .from(sessions)
+          .where(eq(sessions.id, state.id))
+          .get();
+        if (!stored) throw new Error(`Session "${state.id}" was never added`);
+        writeChanges(tx, state, pending.changes);
+        for (const checkpoint of pending.checkpoints) upsertCheckpoint(tx, checkpoint);
+      },
+      { behavior: "immediate" },
+    );
     session.markSaved();
   }
 
