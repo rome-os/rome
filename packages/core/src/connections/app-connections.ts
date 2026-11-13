@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { ProviderOperationError } from "./errors.js";
 import { Ajv2020, type ValidateFunction } from "ajv/dist/2020.js";
 import type {
   Action,
@@ -652,6 +653,17 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         input: invocation.input,
         ...(expectedEffect === "write" ? { requestId: invocation.id } : {}),
       });
+      if (expectedEffect === "read-only") {
+        const currentGrant = await this.registry.grantOf(connection.id);
+        if (
+          !currentGrant ||
+          currentGrant.state !== "authorized" ||
+          currentGrant.grantEpoch !== grant.grantEpoch ||
+          !this.access.isInvocationPolicyCurrent(invocation, "not_required")
+        ) {
+          return await fail("access_denied");
+        }
+      }
       const output = serializeBounded(data ?? null, MAX_OUTPUT_BYTES);
       if (!output.ok) {
         if (expectedEffect === "read-only") return await fail("provider_error");
@@ -669,7 +681,7 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
           ...(data === undefined || expectedApproval ? {} : { data: JSON.parse(output.value) }),
         },
       };
-    } catch {
+    } catch (error) {
       if (expectedEffect === "write") {
         await this.access.updateInvocation(
           invocation.id,
@@ -680,6 +692,15 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
         await this.audit(invocation, executionApproval, "outcome_unknown");
         return { ok: true, value: { status: "outcome_unknown", executionId: invocation.id } };
       }
+      if (error instanceof ProviderOperationError) {
+        return await this.failInvocation(
+          invocation,
+          "provider_error",
+          error.retryable,
+          executionApproval,
+          error.reason,
+        );
+      }
       return await fail("provider_error", true);
     }
   }
@@ -689,10 +710,11 @@ export class AppConnectionBroker implements AppConnectionBrokerPort, AppConnecti
     code: AppConnectionErrorBody["code"],
     retryable = false,
     approval: "not_required" | "approved" = "not_required",
+    message = messageFor(code),
   ): Promise<AppConnectionBrokerResult<never>> {
     await this.access.updateInvocation(invocation.id, "failed", code, true);
     await this.audit(invocation, approval, code);
-    return failure(code, messageFor(code), retryable);
+    return failure(code, message, retryable);
   }
 
   private async failUnclaimedInvocation(

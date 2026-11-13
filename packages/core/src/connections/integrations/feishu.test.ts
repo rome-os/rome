@@ -167,7 +167,7 @@ describe("feishu descriptor shape", () => {
     const desc = makeDescriptor(new FakeLarkChannel());
     expect(desc.connectionKind).toBe("feishu");
     expect(desc.grant).toBe("app");
-    expect(desc.capabilities.actor).toBeUndefined();
+    expect(desc.capabilities.actor?.operations?.map((op) => op.name)).toEqual(["feishu.document.read"]);
     expect(desc.capabilities.watcher).toBeUndefined();
   });
 

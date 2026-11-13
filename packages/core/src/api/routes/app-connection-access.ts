@@ -1,4 +1,9 @@
 import { Hono } from "hono";
+import type { DocumentAccessOptions } from "@rome/api-types/app-connection-access";
+import {
+  FEISHU_DOCUMENT_READ,
+  FEISHU_DOCUMENT_SCOPE,
+} from "../../connections/integrations/feishu-documents.js";
 import { z } from "zod";
 import { isResolvedApp } from "../../apps/state.js";
 import { appAccessibleOperations } from "../../connections/app-connections.js";
@@ -65,6 +70,62 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
         }),
       ),
     });
+  });
+
+  app.get("/app-connection-access/:appId/documents", async (c) => {
+    const target = deps.appCatalog.get(c.req.param("appId"));
+    if (!isResolvedApp(target) || !target.enabled)
+      return c.json({ error: "App not found or disabled." }, 404);
+    const parsed = AuditQuerySchema.safeParse(c.req.query());
+    if (!parsed.success) return c.json({ error: "Invalid pagination." }, 400);
+    const registry = deps.connectionRegistry;
+    if (!registry) return c.json({ error: "Connections are unavailable." }, 503);
+    const all = registry
+      .all()
+      .filter((connection) => connection.connectionKind === "feishu")
+      .sort((left, right) => left.id.localeCompare(right.id));
+    const { cursor, limit } = parsed.data;
+    const selected = all.slice(cursor, cursor + limit);
+    const connections = await Promise.all(
+      selected.map(async (connection) => {
+        const descriptor = registry.getDescriptor(connection.connectionKind);
+        const grant = await registry.grantOf(connection.id);
+        const profile = grant?.profile;
+        const appId =
+          typeof profile?.appId === "string" && /^cli_[a-zA-Z0-9]+$/.test(profile.appId)
+            ? profile.appId
+            : null;
+        const brands =
+          profile?.domain === "feishu" || profile?.domain === "lark"
+            ? [profile.domain]
+            : ["feishu", "lark"];
+        const supported =
+          descriptor?.capabilities.actor?.operations?.some(
+            (operation) =>
+              operation.name === FEISHU_DOCUMENT_READ &&
+              operation.appAccess?.sideEffects === "read-only",
+          ) ?? false;
+        return {
+          connectionId: connection.id,
+          label: connection.label,
+          identity: descriptor?.grant ?? "app",
+          operation: FEISHU_DOCUMENT_READ,
+          supported,
+          authorized: grant?.state === "authorized",
+          scope: FEISHU_DOCUMENT_SCOPE,
+          scopeStatus: "not_checked" as const,
+          consoles: brands.map((brand) => ({
+            brand: brand as "feishu" | "lark",
+            url: `${brand === "lark" ? "https://open.larksuite.com" : "https://open.feishu.cn"}/app${appId ? `/${encodeURIComponent(appId)}/auth` : ""}`,
+          })),
+        };
+      }),
+    );
+    const result: DocumentAccessOptions = {
+      connections,
+      ...(cursor + limit < all.length ? { nextCursor: cursor + limit } : {}),
+    };
+    return c.json(result);
   });
 
   app.get("/app-connection-access/:appId/audit", async (c) => {
