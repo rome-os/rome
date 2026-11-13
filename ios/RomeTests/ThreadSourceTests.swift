@@ -149,7 +149,28 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         backend.threads["q"] = [card, answer]
         store.reopenThread(ThreadTarget(messageId: "q", instanceKnowsThreads: true))
         await settle { store.thread != nil }
-        let rows = store.thread?.rows(answers: store.answers) ?? []
+        let rows = store.thread?.rows(chatMessages: store.messages) ?? []
+        guard case .question(_, _, _, let answered) = rows.first(where: { if case .question = $0 { return true } else { return false } }) else {
+            Issue.record("no question row"); return
+        }
+        #expect(answered != nil)
+        store.closeThread()
+    }
+
+    /// A card only in the thread's older read, answered in a message only the
+    /// chat's pages hold, shows done.
+    @Test func aCardAndItsAnswerFromDifferentReadsMeet() async {
+        let backend = FakeBackend()
+        let question: [String: Any] = ["type": "pending_interaction", "toolUseId": "item_0", "render": ["componentId": "question-card", "builtin": true, "props": ["questions": [["id": "s", "question": "Which?", "type": "single", "options": ["A", "B"]]]]]]
+        let content = String(data: try! JSONSerialization.data(withJSONObject: [question]), encoding: .utf8)!
+        let card = ChatMessage(id: "q", sessionId: "concierge", role: "assistant", content: content, createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000)), chatThreadId: "q", knowsThreads: true)
+        let answerContent = String(data: try! JSONSerialization.data(withJSONObject: [["type": "interaction_result", "toolUseId": "item_0", "output": ["answers": [["questionId": "s", "value": "A"]]]]]), encoding: .utf8)!
+        let answer = ChatMessage(id: "ans", sessionId: "concierge", role: "user", content: answerContent, createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_010)), chatThreadId: "q", knowsThreads: true)
+        let store = await chat(backend, [answer, message("later", at: 100, thread: "later")])
+        backend.threads["q"] = [card]
+        store.reopenThread(ThreadTarget(messageId: "q", instanceKnowsThreads: true))
+        await settle { store.thread != nil }
+        let rows = store.thread?.rows(chatMessages: store.messages) ?? []
         guard case .question(_, _, _, let answered) = rows.first(where: { if case .question = $0 { return true } else { return false } }) else {
             Issue.record("no question row"); return
         }

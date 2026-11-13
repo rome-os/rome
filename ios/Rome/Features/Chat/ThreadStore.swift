@@ -136,11 +136,12 @@ final class ThreadStore {
     }
 
     /// The rows the thread shows: the chat's bubbles and cards, without
-    /// thread labels. Answers come from the chat and from the thread's own
-    /// older messages, so a card answered before the chat's pages shows done.
-    func rows(answers: [String: JSONValue]) -> [TranscriptRow] {
-        var all = TranscriptBuilder.answers(in: older)
-        all.merge(answers) { _, chat in chat }
-        return TranscriptBuilder.rows(messages: messages, pending: pendingResends, answers: all, options: .init())
+    /// thread labels. Answers are read over the thread's own older messages
+    /// and the chat's together, in order, so a card on one and its answer on
+    /// the other still meet.
+    func rows(chatMessages: [ChatMessage]) -> [TranscriptRow] {
+        let seen = Set(older.map(\.id))
+        let answers = TranscriptBuilder.answers(in: older + chatMessages.filter { !seen.contains($0.id) })
+        return TranscriptBuilder.rows(messages: messages, pending: pendingResends, answers: answers, options: .init())
     }
 }
