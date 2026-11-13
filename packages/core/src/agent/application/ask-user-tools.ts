@@ -58,7 +58,8 @@ function deferTool(defer: DeferTool, turn: TurnFacts, run: RomeToolRunner): Rome
         name: {
           type: "string",
           description:
-            'A short name for what you\'re watching, e.g. "GitHub CI run" or "Dana\'s reply". Stored as the ' +
+            'A short name for what you\'re watching, e.g. "GitHub CI run" or "Dana\'s reply". Name what, never when: ' +
+            'no time or duration such as "(2 minutes)", since the wake-up time is shown beside it. Stored as the ' +
             "routine's name and shown on the Routines page; you'll be pinged back in this same conversation when the time is up.",
         },
         afterMinutes: {

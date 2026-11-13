@@ -20,6 +20,7 @@ function setup(carried: Set<string> = new Set()) {
   const flushes: Array<{ ids: string[]; quiet: boolean; at: number }> = [];
   const rendered: string[][] = [];
   const gaveUp: string[] = [];
+  const reported: string[] = [];
   /** How the next turns end. */
   let outcome: "completed" | "stopped" | "interrupted" | "failed" = "completed";
   /** Settles the running flush's turn. */
@@ -45,6 +46,7 @@ function setup(carried: Set<string> = new Set()) {
       return outcome;
     },
     giveUp: (taskId) => gaveUp.push(taskId),
+    reported: (taskIds) => reported.push(...taskIds),
     carried: (taskId) => carried.has(taskId),
   });
   return {
@@ -52,6 +54,7 @@ function setup(carried: Set<string> = new Set()) {
     flushes,
     rendered,
     gaveUp,
+    reported,
     /** Makes the next turns fail, as when the Concierge is out of quota, or run again. */
     turnsRun: (value: boolean) => {
       outcome = value ? "completed" : "failed";
@@ -317,6 +320,34 @@ describe("TaskEventCoalescer", () => {
     expect(s.coalescer.pending).toEqual([]);
   });
 
+  it("still retries news a failing turn carried when a change needing no word arrives while it runs", async () => {
+    const s = setup();
+    s.turnsRun(false);
+    s.holdTurns();
+    s.coalescer.mark(urgent("a"));
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    // A scheduled turn finishes with nothing to say while the report turn runs, which then fails.
+    await rs.advanceTimersByTimeAsync(1_000);
+    s.coalescer.mark({
+      taskId: "a",
+      kind: "turn_end:completed by=system",
+      urgent: false,
+      passive: true,
+    });
+    await s.endTurn();
+    expect(s.coalescer.passiveOf(["a"])).toEqual([]);
+
+    s.turnsRun(true);
+    await rs.advanceTimersByTimeAsync(RETRY_MS);
+    await s.endTurn();
+    expect(s.flushes).toHaveLength(2);
+    expect(s.rendered[1]).toEqual([
+      "turn_end:completed by=concierge",
+      "turn_end:completed by=system",
+    ]);
+    expect(s.coalescer.pending).toEqual([]);
+  });
+
   it("delivers a change that arrives during the wait with the next turn that runs", async () => {
     const s = setup();
     s.turnsRun(false);
@@ -414,6 +445,23 @@ describe("TaskEventCoalescer", () => {
         .flat()
         .filter((id) => id === "a"),
     ).toHaveLength(1);
+  });
+
+  it("counts a result the stopped turn said before the Stop as said, and gives up the rest", async () => {
+    const s = setup();
+    s.turnsStopped();
+    s.holdTurns();
+    s.coalescer.mark(urgent("a"));
+    s.coalescer.mark(urgent("b"));
+    // Saying it before any turn carries the news counts for nothing.
+    s.coalescer.said("b");
+    await rs.advanceTimersByTimeAsync(URGENT_DELAY_MS);
+    // The report turn says "a", then the guardian presses Stop.
+    s.coalescer.said("a");
+    await s.endTurn();
+    expect(s.coalescer.pending).toEqual([]);
+    expect(s.reported).toEqual(["a"]);
+    expect(s.gaveUp).toEqual(["b"]);
   });
 
   it("tries a report a newer message cut short again with the next flush, not minutes later", async () => {

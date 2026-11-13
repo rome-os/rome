@@ -5,6 +5,8 @@
 // transcript has no provider, so it shows none.
 
 import { createContext, useContext, useMemo } from "react";
+import { useTranslation } from "react-i18next";
+import type { SystemInputSource } from "@rome/api-types/trace-segments";
 import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
 import type { ChatMessage } from "@/lib/chat-types";
 import { useReplyDraft } from "./reply-draft";
@@ -165,16 +167,30 @@ function wordsOf(message: Pick<ChatMessage, "id" | "content">): string {
     .trim();
 }
 
+/** The quiet look of a label under a message: about a spacing step from its bubble, faint, cut short when long. */
+const LABEL_LINE = "-mt-1 mb-1 flex max-w-full min-w-0 px-1 text-aux text-subtle-foreground/70";
+
 /**
  * The subdued `↳ <task title>` label under an agent message in a task's chat
  * thread, which opens the thread. Renders nothing under the guardian's
- * messages and inside the thread view.
+ * messages and inside the thread view. A message in no thread whose turn the
+ * Concierge took on its own, from a routine, an app, another agent or what
+ * it follows, shows `source` instead, in the same place and look, as plain
+ * text: one label per message, and a thread's wins.
  */
-export function ThreadLabelLine({ message }: { message: ChatMessage }) {
+export function ThreadLabelLine({
+  message,
+  source,
+}: {
+  message: ChatMessage;
+  source?: SystemInputSource;
+}) {
   const threads = useChatThreads();
   const draft = useReplyDraft();
   const label = threads?.labels.get(message.id);
-  if (!label || !draft?.threads || draft.sessionId !== message.sessionId) return null;
+  if (!label || !draft?.threads || draft.sessionId !== message.sessionId) {
+    return source ? <SourceLabel source={source} /> : null;
+  }
   const name = label.title;
   return (
     <button
@@ -192,12 +208,24 @@ export function ThreadLabelLine({ message }: { message: ChatMessage }) {
       // reads as its bubble's. Regular weight and faint until hovered or
       // focused; a long title is cut at a fixed width, whole in the tooltip
       // and the accessible name.
-      className="-mt-1 mb-1 flex max-w-full min-w-0 rounded-4 px-1 text-left text-aux text-subtle-foreground/70 outline-1 outline-offset-0 outline-transparent transition-colors hover:text-muted-foreground focus-visible:text-muted-foreground focus-visible:outline-solid focus-visible:outline-ring/50 motion-reduce:transition-none"
+      className={`${LABEL_LINE} rounded-4 text-left outline-1 outline-offset-0 outline-transparent transition-colors hover:text-muted-foreground focus-visible:text-muted-foreground focus-visible:outline-solid focus-visible:outline-ring/50 motion-reduce:transition-none`}
     >
       <span aria-hidden="true" className="shrink-0">
         ↳&nbsp;
       </span>
       <span className="max-w-56 truncate">{name}</span>
     </button>
+  );
+}
+
+/** Where a message's turn came from, such as "Routine · Daily summary": text, not a control. */
+function SourceLabel({ source }: { source: SystemInputSource }) {
+  const { t } = useTranslation("chat");
+  const kind = t(`automatedInput.kinds.${source.type}`);
+  const name = source.name ? t("automatedInput.named", { kind, name: source.name }) : kind;
+  return (
+    <p data-source-label={source.type} title={name} className={LABEL_LINE}>
+      <span className="max-w-56 truncate">{name}</span>
+    </p>
   );
 }

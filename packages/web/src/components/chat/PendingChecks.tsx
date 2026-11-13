@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, ChevronRight, Clock, X } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { toast } from "sonner";
 import type { ChatPendingCheckDto, ChatPendingChecksResponse } from "@rome/api-types/concierge";
@@ -9,6 +9,9 @@ import { fetchJson } from "@/lib/fetch-json";
 import { formatTaskTime } from "@/components/concierge/tasks";
 
 const checksKey = (chatId: string) => ["chat-checks", chatId] as const;
+
+/** How long after a scheduled run fires its next run is surely stored. */
+const RUN_STORED_MS = 2_000;
 
 /** Soonest first; a wait with no deadline last. */
 function bySoonest(a: ChatPendingCheckDto, b: ChatPendingCheckDto): number {
@@ -64,6 +67,24 @@ export function PendingChecks({ chatId, turnKey }: { chatId: string; turnKey: un
     );
     return () => window.clearTimeout(timer);
   }, [nextAt, tick]);
+  // A scheduled task's run that passed has a next one, which no turn of this
+  // chat brings (a quiet run starts none): read the checks again a moment
+  // after, once Rome has stored it. Once per run, so a slow store waits for
+  // the next turn rather than looping.
+  const reread = useRef(new Set<string>());
+  useEffect(() => {
+    void tick;
+    const passed = all
+      .filter((check) => check.recurring && check.at !== null && check.at <= Date.now())
+      .map((check) => `${check.id}@${check.at}`)
+      .filter((run) => !reread.current.has(run));
+    if (passed.length === 0) return;
+    for (const run of passed) reread.current.add(run);
+    window.setTimeout(
+      () => void queryClient.invalidateQueries({ queryKey: checksKey(chatId) }),
+      RUN_STORED_MS,
+    );
+  }, [all, tick, chatId, queryClient]);
   const checks = all.filter((check) => check.at === null || check.at > now).sort(bySoonest);
   if (checks.length === 0) return null;
   // A check for a task goes by the task's title; a wait with no deadline has no time.
@@ -108,7 +129,9 @@ export function PendingChecks({ chatId, turnKey }: { chatId: string; turnKey: un
                 <span className="min-w-0 flex-1 truncate">{lineOf(check)}</span>
                 <IconButton
                   size="xs"
-                  label={t("checks.cancel", { name: check.taskTitle ?? check.name })}
+                  label={t(check.recurring ? "checks.skip" : "checks.cancel", {
+                    name: check.taskTitle ?? check.name,
+                  })}
                   icon={<X />}
                   disabled={cancel.isPending && cancel.variables === check.id}
                   onClick={() => cancel.mutate(check.id)}

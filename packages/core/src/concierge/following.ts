@@ -46,7 +46,12 @@ import {
   renderDigestTurn,
   renderImportantTurn,
 } from "./alerts.js";
-import { mergeConnectors, type ProviderService, type ProviderWatchSection } from "./connectors.js";
+import {
+  agentViewOf,
+  mergeConnectors,
+  type ProviderService,
+  type ProviderWatchSection,
+} from "./connectors.js";
 import { addressedToOf, cleanLabels } from "./event-shape.js";
 import { optionValue, renderOptions } from "./follow-options.js";
 import type { ConciergeService, DigestTaskNotes } from "./service.js";
@@ -161,6 +166,15 @@ export interface WatchSource extends ProviderWatchSectionWithTriggers {
   provider: WatchProvider;
 }
 
+/** The kind of events `items` are, as their replies' label names it, when they are all one kind. */
+function oneKind(
+  items: readonly { source: string; kind: string }[],
+  kindLabel: (source: string, kind: string) => string,
+): string | null {
+  const kinds = new Set(items.map((item) => kindLabel(item.source, item.kind)));
+  return kinds.size === 1 ? ([...kinds][0] ?? null) : null;
+}
+
 const kindLabelsOf = (sources: WatchSource[]) => (source: string, kind: string) =>
   sources.find((s) => s.source === source)?.kinds.find((k) => k.kind === kind)?.label ?? kind;
 
@@ -235,6 +249,8 @@ export interface ConciergeFollowingDeps {
   >;
   /** Runs the triage agent. */
   agentRunner: AgentRunnerInterface;
+  /** Tells what else runs at an owner's local times that their zone moved. */
+  timezoneMoved?: (owner: ConciergeOwner, timezone: string) => Promise<void>;
   /** Where triage runs are recorded, so Sessions shows them. */
   triageRecord?: TriageRecordStore;
   now?: () => number;
@@ -280,6 +296,8 @@ export interface ConciergeFollowing {
   ): Promise<ConciergeFollowRules>;
   /** Keeps a visitor's time zone, as their browser reports it. The guardian's is their own setting. */
   setTimezone(owner: ConciergeOwner, timezone: string): Promise<void>;
+  /** Where an owner is: their time zone, else the guardian's. */
+  timezone(owner: ConciergeOwner): Promise<string>;
   /** Subscribes every follow again, for one whose subscription another app removed. */
   reconcile(): Promise<void>;
   /**
@@ -596,6 +614,12 @@ export function startConciergeFollowing(
         (await service.runSystemTurn(chatId, renderImportantTurn(items, held, at, kindLabel), {
           quiet: true,
           inputLabel: `Following · important (${items.length})`,
+          // Its replies are labelled with what it follows: the kind of
+          // events, when they are all of one kind.
+          inputSource: {
+            type: "following",
+            name: oneKind(items, kindLabel),
+          },
           pushLevel: "active",
         }));
       // Items the Concierge never had stay owed, and the delivery tries again.
@@ -794,6 +818,7 @@ export function startConciergeFollowing(
             service.runSystemTurn(chatId, prompt, {
               quiet: true,
               inputLabel: `Following · digest (${items.length})`,
+              inputSource: { type: "digest", name: null },
               // A digest is expected at its time, so it arrives without an alert.
               pushLevel: "passive",
             }),
@@ -1284,6 +1309,7 @@ export function startConciergeFollowing(
       return next;
     },
 
+    timezone: (owner) => timezoneOf(owner),
     async setTimezone(owner, timezone) {
       if (owner === GUARDIAN_OWNER) return;
       const stored = await readStored();
@@ -1292,8 +1318,9 @@ export function startConciergeFollowing(
         ...stored,
         people: { ...stored.people, [owner]: { ...stored.people?.[owner], timezone } },
       });
-      // A visitor's digest runs at their own local times.
+      // A visitor's digest, and their scheduled tasks, run at their own local times.
       await syncDigest();
+      await deps.timezoneMoved?.(owner, timezone);
     },
 
     async moveToMainChat(chatId, to = null) {
@@ -1539,13 +1566,25 @@ function registerFollowingActions(
   actions.register({
     config: followingActionConfig(
       CONCIERGE_FOLLOWING_ACTIONS.list,
-      "Everything about what the Concierge follows for the guardian, in one structure: every source (ready or not, with what is missing), its account, target format, kinds and options, what is followed there with its current settings, and the rules. Call it first for anything about following.",
+      "Everything about what the Concierge follows for the guardian, in one structure: every service (connected or not, with what is missing), its account, what is followed there with its current settings, and the rules. Pass service for that service's watch catalog too: its target format, kinds and options, which a follow card is built from.",
       "read-only",
     ),
-    inputSchema: { type: "object", properties: {} },
-    execute: async () => {
+    inputSchema: {
+      type: "object",
+      properties: {
+        service: {
+          type: "string",
+          description: "One service, as the list names it, with its watch catalog.",
+        },
+      },
+    },
+    execute: async (args) => {
       try {
-        return { status: "ok", data: await following.list(await callingOwner()) };
+        const service = typeof args.service === "string" && args.service ? args.service : undefined;
+        return {
+          status: "ok",
+          data: agentViewOf(await following.list(await callingOwner()), service),
+        };
       } catch (error) {
         return errorOf(error);
       }

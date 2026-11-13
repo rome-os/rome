@@ -127,12 +127,14 @@ export class ConciergeTasksRepository {
    * Concierge chat `chatId` is archived or deleted. Its rows stay its own,
    * and read as its owner's main chat's from now on, so none is moved. Its
    * rows that `isOpen` keeps let go of their chat thread there, so their next
-   * report starts one in the main chat; an ended row keeps its thread.
+   * report starts one in the main chat; an ended row keeps its thread, unless
+   * the chat is `deleted` and its messages with it.
    * Answers how many rows are open.
    */
   async leaveChat(
     chatId: string,
     isOpen: (rows: ConciergeTaskRow[]) => Promise<Set<string>>,
+    options: { deleted?: boolean } = {},
     now = new Date(),
   ): Promise<number> {
     const rows = await this.db
@@ -141,7 +143,8 @@ export class ConciergeTasksRepository {
       .where(and(eq(conciergeTasks.chatId, chatId), isNull(conciergeTasks.archivedAt)));
     const openIds = await isOpen(rows);
     const open = rows.filter((row) => openIds.has(row.id));
-    const rooted = open.filter((row) => row.threadRoot);
+    // A deleted chat's messages are gone, so no row keeps a root among them.
+    const rooted = (options.deleted ? rows : open).filter((row) => row.threadRoot);
     if (rooted.length > 0) {
       await this.db
         .update(conciergeTasks)
@@ -329,9 +332,27 @@ export class ConciergeTasksRepository {
     return row ?? null;
   }
 
+  /** The rows of `ids` that exist, in one read. */
+  async getMany(ids: readonly string[]): Promise<ConciergeTaskRow[]> {
+    if (ids.length === 0) return [];
+    return this.db
+      .select()
+      .from(conciergeTasks)
+      .where(inArray(conciergeTasks.id, [...ids]));
+  }
+
   async getWithChat(id: string): Promise<ConciergeTaskWithChat | null> {
     const found = await this.withChat(eq(conciergeTasks.id, id));
     return found[0] ?? null;
+  }
+
+  /** The rows of the task chats `sessionIds`, in one read. */
+  async findBySessions(sessionIds: readonly string[]): Promise<ConciergeTaskRow[]> {
+    if (sessionIds.length === 0) return [];
+    return this.db
+      .select()
+      .from(conciergeTasks)
+      .where(inArray(conciergeTasks.sessionId, [...new Set(sessionIds)]));
   }
 
   async findBySession(sessionId: string): Promise<ConciergeTaskRow | null> {

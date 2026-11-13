@@ -22,7 +22,8 @@
 // not run to its end, such as when the Concierge is out of quota, is tried
 // again RETRY_MS later. A row whose turn a newer message cut short is tried
 // again with the next flush, once the turn that took it over no longer
-// carries it. A row whose turn the guardian stopped is given up.
+// carries it. A row whose turn the guardian stopped is given up, unless that
+// turn said its result before the Stop.
 
 import { withoutSessionActor } from "../access/session-actor.js";
 import { createLogger } from "../logger.js";
@@ -119,6 +120,8 @@ export class TaskEventCoalescer {
   private lastFlushStartedAt = Number.NEGATIVE_INFINITY;
   /** Rows the running flush took, until it ends. */
   private inFlight = new Set<string>();
+  /** Rows of the running flush whose result the Concierge said while its turn ran. */
+  private saidInFlight = new Set<string>();
   private listeners = new Set<() => void>();
 
   constructor(private deps: TaskEventDeps) {}
@@ -198,6 +201,15 @@ export class TaskEventCoalescer {
   }
 
   /**
+   * The Concierge said task `taskId`'s result, as `say` naming it does. It
+   * counts only while a report turn carries the row's news: then a Stop that
+   * ends that turn leaves nothing untold.
+   */
+  said(taskId: string): void {
+    if (this.inFlight.has(taskId)) this.saidInFlight.add(taskId);
+  }
+
+  /**
    * The rows of `taskIds` whose every change needs no word, which a digest
    * lists instead of a turn of their own. Read only: the digest settles them
    * with {@link settlePassive} once its turn ran to its end.
@@ -229,6 +241,7 @@ export class TaskEventCoalescer {
     this.timer = null;
     this.dirty.clear();
     this.inFlight.clear();
+    this.saidInFlight.clear();
     this.changed();
     this.listeners.clear();
   }
@@ -286,7 +299,13 @@ export class TaskEventCoalescer {
     const carried = new Map(
       taken.map(([taskId, entry]) => [
         taskId,
-        { entry, changes: entry.changes, urgent: entry.urgent, version: entry.version },
+        {
+          entry,
+          changes: entry.changes,
+          urgent: entry.urgent,
+          passive: entry.passive,
+          version: entry.version,
+        },
       ]),
     );
     // Rows whose turn ran to its end.
@@ -341,6 +360,7 @@ export class TaskEventCoalescer {
         completed,
         carried,
       );
+      this.saidInFlight.clear();
       this.arm();
       this.changed();
     }
@@ -352,7 +372,10 @@ export class TaskEventCoalescer {
     superseded: Set<string>,
     stopped: Set<string>,
     completed: Set<string>,
-    carried: Map<string, { entry: Dirty; changes: TaskChange[]; urgent: boolean; version: number }>,
+    carried: Map<
+      string,
+      { entry: Dirty; changes: TaskChange[]; urgent: boolean; passive: boolean; version: number }
+    >,
   ): void {
     const reported: string[] = [];
     for (const taskId of taskIds) {
@@ -370,6 +393,8 @@ export class TaskEventCoalescer {
           // changes go back in front of it, and no write has settled them.
           entry.changes = [...before.changes, ...entry.changes];
           entry.urgent ||= before.urgent;
+          // News that needs a word stays so with a passive change after it.
+          entry.passive &&= before.passive;
           entry.builtAt = undefined;
         }
         entry.undelivered = true;
@@ -381,9 +406,11 @@ export class TaskEventCoalescer {
         if (superseded.has(taskId)) entry.carriedUntil = this.deps.now() + RETRY_MS;
       } else if (stopped.has(taskId) && entry.changes === carried.get(taskId)?.changes) {
         // The guardian stopped the turn: what it carried is never handed over
-        // again, and the row shows it is not synced.
+        // again. A result it said before the Stop counts as said; otherwise
+        // the row shows it is not synced.
         this.dirty.delete(taskId);
-        this.deps.giveUp(taskId);
+        if (this.saidInFlight.has(taskId)) reported.push(taskId);
+        else this.deps.giveUp(taskId);
       } else if (entry.builtAt !== undefined && entry.since > entry.builtAt) {
         // A change came after the build: it waits for its own flush.
         entry.builtAt = undefined;

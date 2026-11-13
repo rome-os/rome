@@ -62,6 +62,12 @@ export const sessions = sqliteTable(
     supersededBy: text("superseded_by"),
     /** Why the reset replaced it: setup, idle, daily or working_dir. */
     supersededFor: text("superseded_for"),
+    /** The handoff the session it replaced wrote for it in a renewal. Null
+     *  for a session that no renewal handoff started. */
+    handoff: text("handoff"),
+    /** How many tokens the provider's context held at the session's last
+     *  turn that reported it. Null until one does. */
+    contextTokens: integer("context_tokens"),
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
     lastActiveAt: integer("last_active_at", { mode: "timestamp" }).notNull(),
     status: text("status", {
@@ -365,22 +371,32 @@ export const sentinelLog = sqliteTable("sentinel_log", {
   createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
 });
 
-export const approvals = sqliteTable("approvals", {
-  id: text("id").primaryKey(),
-  type: text("type", { enum: APPROVAL_TYPES }).notNull(),
-  status: text("status", { enum: APPROVAL_STATUSES }).notNull(),
-  executionState: text("execution_state", { enum: APPROVAL_EXECUTION_STATES })
-    .notNull()
-    .default("idle"),
-  requestedBy: text("requested_by").notNull(),
-  description: text("description").notNull(),
-  payload: text("payload", { mode: "json" }),
-  createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
-  resolvedAt: integer("resolved_at", { mode: "timestamp" }),
-  resolvedBy: text("resolved_by"),
-  executedAt: integer("executed_at", { mode: "timestamp" }),
-  executionError: text("execution_error"),
-});
+export const approvals = sqliteTable(
+  "approvals",
+  {
+    id: text("id").primaryKey(),
+    type: text("type", { enum: APPROVAL_TYPES }).notNull(),
+    status: text("status", { enum: APPROVAL_STATUSES }).notNull(),
+    executionState: text("execution_state", { enum: APPROVAL_EXECUTION_STATES })
+      .notNull()
+      .default("idle"),
+    requestedBy: text("requested_by").notNull(),
+    description: text("description").notNull(),
+    payload: text("payload", { mode: "json" }),
+    createdAt: integer("created_at", { mode: "timestamp" }).notNull(),
+    resolvedAt: integer("resolved_at", { mode: "timestamp" }),
+    resolvedBy: text("resolved_by"),
+    executedAt: integer("executed_at", { mode: "timestamp" }),
+    executionError: text("execution_error"),
+  },
+  (table) => [
+    // A chat's approvals are found by the chat their payload names: one copy
+    // of that fact, indexed where it is.
+    index("idx_approvals_thread").on(
+      sql`json_extract(${table.payload}, '$.channelContext.threadId')`,
+    ),
+  ],
+);
 
 export const settings = sqliteTable("settings", {
   key: text("key").primaryKey(),
@@ -706,7 +722,8 @@ export const conciergeTasks = sqliteTable(
     title: text("title").notNull(),
     /**
      * The state the Concierge wrote before Rome derived a task's status. Read
-     * only, by the migration that set the facts it stood for; nothing writes it.
+     * only, by the migration that set the facts it stood for. Only a failed
+     * start still writes it, as dropped, beside its outcome.
      */
     state: text("state", {
       enum: ["next", "doing", "watching", "needs_user", "done", "dropped"],
@@ -766,7 +783,10 @@ export const conciergeTasks = sqliteTable(
     archivedWithChat: integer("archived_with_chat", { mode: "boolean" }).notNull().default(false),
     /** When a task chat was first linked. A row links one task chat in its life. */
     linkedAt: integer("linked_at", { mode: "timestamp_ms" }),
-    /** When the task was stopped, and who or what stopped it. Never cleared. */
+    /**
+     * When the task was stopped, and who or what stopped it. Cleared when new
+     * words take the task up again (`resume`).
+     */
     stoppedAt: integer("stopped_at", { mode: "timestamp_ms" }),
     stopReason: text("stop_reason", { enum: ["concierge", "guardian", "archived", "deleted"] }),
     /** How the task chat's latest turn ended, or its start failed. Rome writes it. */
@@ -797,8 +817,8 @@ export const conciergeTasks = sqliteTable(
      */
     reportGivenUp: integer("report_given_up", { mode: "boolean" }).notNull().default(false),
     /**
-     * When the task's derived status first read ended, cleared if it opens
-     * again. The lists age ended rows by it.
+     * When the task's derived status ended, kept as a fact it follows from
+     * changes and cleared if it opens again. The lists age ended rows by it.
      */
     endedAt: integer("ended_at", { mode: "timestamp_ms" }),
   },

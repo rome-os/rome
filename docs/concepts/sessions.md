@@ -61,7 +61,7 @@ Memory, follows and tasks are not part of it, since a session reads them while i
 
 ## Renewal
 
-A renewal replaces a chat's session with a fresh one, on a new provider thread, for a changed [setup](#setup) or a reset its chat's policy says is due. It happens only when a session is opened cold: opened by continuity key while it is not live in memory.
+A renewal replaces a chat's session with a fresh one, on a new provider thread, for a changed [setup](#setup), a reset its chat's policy says is due, or a [full context](#handoff). It happens only when a session is opened cold: opened by continuity key while it is not live in memory.
 
 **Contracts:**
 
@@ -70,6 +70,26 @@ A renewal replaces a chat's session with a fresh one, on a new provider thread, 
 - While an approval holds a session, a cold open resumes it instead of renewing it. The first cold open after the hold ends renews it.
 - A renewal opens the new session exactly as a fresh open would, from the agent's setup as it is then. Its model comes from the agent's tier or model as they map now, never the retired session's [model pin](#model-pin). A model the guardian picked for the chat still applies.
 - The successor is written, with its setup, its reason and the working folder, and the retired session marked superseded, only once the fresh thread has opened. If that open fails, nothing is written, and the next cold open tries again on a fresh thread, never the retired one.
+- An agent whose policy asks for it starts the successor from a [handoff](#handoff). The Concierge's chats work this way.
+
+## Handoff
+
+A handoff is the note a retired session writes for the session that renews it: what was in progress, what was agreed with the guardian, what is still open, and the ids that work refers to. It is written at send time, when a cold open decides to renew, and not while the chat is quiet.
+
+**Contracts:**
+
+- Only an agent whose policy asks for it gets a handoff. Every other renewal starts with the [continuation](#continuation) notice alone.
+- The retired session writes it, in one turn on its own thread with no tools, asked for the note alone. Nothing of that turn reaches the chat or the guardian's phone: it has no turn of its own in the chat, marks no message, and consumes no task event. The retired thread is not resumed after it.
+- When the retired session has not written it within 30 seconds (`SESSION_HANDOFF_TIMEOUT_SECONDS`), or cannot, a small model writes it from the chat's recent messages and open tasks, within another 30 seconds (`SESSION_HANDOFF_FALLBACK_TIMEOUT_SECONDS`). When that fails too, the renewal goes on without one.
+- While it is written, a Concierge chat's header says it is tidying up its context ([Concierge activity](../architecture/concierge-activity.md)). The message that caused the cold open waits, and the successor answers it.
+- The handoff is stored with the successor and does not change. The successor's first turns carry it inside the continuation notice, with the chat's open tasks as Rome holds them when the turn runs and the chat's latest messages up to about 8,000 tokens. They stop carrying it once a turn of the successor succeeds.
+- The chat shows a renewal as one plain line, such as "Context tidied up · setup updated", which opens nothing: the handoff is the successor's, not shown in the chat. The model writing it is still told the chat's owner, who may be a visitor, could read it, and writes only what may be shown to them.
+- An approval that holds a session still defers its renewal, so no handoff is written while it holds.
+- A session whose policy asks for a handoff is also renewed when a turn of it ends with its context past a limit (`SESSION_HANDOFF_CONTEXT_TOKENS`, 150,000 tokens by default, at least 50,000). The handoff is written then, in the background, once the turn has settled with nothing queued on the session, no caller holding it and no approval holding it, and the successor is stored with reason `context` on no thread yet. Otherwise the renewal steps aside and the next turn end past the limit tries again. Nothing waits on it while the session is in use. The next message opens the successor without waiting for a handoff, and a message that comes while it is written waits for it. When no handoff is written, the session stays, and a later turn end tries again.
+- A session that started from a handoff and that no turn has run on yet has no thread to hand off from. A setup change before its first turn gives it the new setup in place, and it keeps its handoff and the renewal it came from.
+- A handoff written for a renewal whose fresh session then fails to open is kept, in memory, and the next cold open reuses it rather than asking the retired session again.
+- A new session starts at about the size of its setup, its handoff and its recent messages (about 30,000 tokens for the Concierge). A limit near that size renews it after every turn, so the limit stays well above it.
+- A session's context size is the input of its latest model request, as the provider reports it. Each turn that reports one records it on the session. The providers' own compaction stays on as the safety net.
 
 ## Session in use
 
@@ -128,6 +148,7 @@ A turn is one request to an agent plus the agent work that follows until the age
 - Usage reporting counts the user inputs, assistant output, and trace evidence of one turn once, not once per input. A turn can consume more than one user input.
 - A turn ends completed, failed, stopped or abandoned. A Rome stop (the user's Stop, or a `now` input superseding the turn) or the provider's own stop decides first, and the turn is stopped. Otherwise the terminal event decides: an error event fails the turn and a result completes it. A turn whose stream ends with no terminal event and no stop is abandoned. On the wire these are `completed`, `error`, `interrupted` and `stopped`. The rule is `turnStatus` in [`packages/core/src/agent/domain/turn-end.ts`](../../packages/core/src/agent/domain/turn-end.ts).
 - Failed, stopped and abandoned turns still count as turns.
+- A failed turn's stored summary keeps its error's code, provider and reason, as the turn's end event carried them, so a client shows the same guidance after a reload as while the turn ran.
 - A turn is found by its id, whoever started it and in whichever session, from its start until 30 seconds after it ends. A reader that finds it in that time gets every event from the turn's start, then each new one until the turn ends.
 - Stop targets one turn and requests provider cancellation. Until that turn ends, Stop can be retried. Accepting the request does not mean execution has ended.
 - Stopping preserves received text and tool evidence, including partial replies. It does not roll back changes. A tool call without a received result has an unknown outcome, not a guarantee that nothing ran.

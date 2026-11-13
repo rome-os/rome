@@ -1,6 +1,5 @@
 import { ThreadLabelLine } from "@/components/chat/reply/chat-threads";
 import { Fragment, memo, useMemo, type ReactNode } from "react";
-import { UserMessage } from "./UserMessage";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { CollapsibleBubbleContent } from "@/components/chat/CollapsibleBubbleContent";
@@ -18,6 +17,12 @@ import { isSettledUserMessage } from "@/components/chat/reply/reply-source";
 import type { ArrivalProps } from "@/components/chat/use-bubble-arrivals";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
+
+// Room every guardian bubble keeps above it for its status reaction, which
+// hangs half out of the bubble's top-left corner (status-reaction.tsx). With
+// the group's 8px gap it clears the bubble above. It is there whether or not
+// a mark shows, so nothing moves when one comes or goes.
+const GUARDIAN_BUBBLE_GAP = "mt-2";
 
 // The same bubble reparses nothing while the transcript re-renders around it;
 // a message's identity changes on every reload, so compare what it shows.
@@ -47,6 +52,7 @@ const GuardianBubble = memo(
         }
         anchorId={msg.id}
         arrival={arrival}
+        className={GUARDIAN_BUBBLE_GAP}
       >
         <UserMessageBubble
           msg={msg}
@@ -120,7 +126,6 @@ const AgentEntry = memo(function AgentEntry({
             ...actions,
             sessionId: message.sessionId,
             turnId: message.turnId ?? undefined,
-            messageAt: message.createdAt,
           })}
         </ConciergeBubble>
       );
@@ -209,15 +214,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
       {group.entries.map((entry) => {
         const bubble = (
           <>
-            {entry.message.sender?.kind === "automated" ? (
-              <div
-                key={entry.message.id}
-                data-timeline-anchor={entry.message.id}
-                className="w-full self-start"
-              >
-                <UserMessage msg={entry.message} />
-              </div>
-            ) : group.sender === "guardian" ? (
+            {group.sender === "guardian" ? (
               <GuardianBubble
                 key={entry.message.id}
                 msg={entry.message}
@@ -232,7 +229,7 @@ export const ConciergeGroup = memo(function ConciergeGroup({
                 arrival={arrival}
               />
             )}
-            <ThreadLabelLine message={entry.message} />
+            <ThreadLabelLine message={entry.message} source={entry.source} />
           </>
         );
         if (!selection) return <Fragment key={entry.message.id}>{bubble}</Fragment>;

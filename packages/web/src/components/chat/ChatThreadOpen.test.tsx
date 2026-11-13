@@ -334,3 +334,57 @@ describe("the thread label in the transcript", () => {
     expect(thread()).toBeNull();
   });
 });
+
+describe("the source label in the transcript", () => {
+  /** The trace of turn `turnId`, which ran on input from `source`. */
+  const trace = (
+    turnId: string,
+    minute: number,
+    source: { type: "routine" | "agent"; name: string },
+  ) =>
+    ({
+      id: `trace-${turnId}`,
+      sessionId: "concierge",
+      turnId,
+      role: "trace",
+      content: "[]",
+      createdAt: at(minute),
+      traceSummary: {
+        distinctApps: [],
+        invocationCounts: {},
+        totalSteps: 0,
+        automatedInput: source,
+      },
+    }) as ChatMessage;
+  const reply = (id: string, minute: number, chatThreadId: string | null = null) =>
+    ({
+      ...message(id, "assistant", `said ${id}`, chatThreadId ?? "", minute),
+      chatThreadId,
+    }) as ChatMessage;
+
+  it("sits under the Concierge's reply to a routine, names it, and opens nothing", () => {
+    renderTranscript([
+      trace("t-r1", 10, { type: "routine", name: "Daily summary" }),
+      reply("r1", 10),
+    ]);
+    const label = screen.getByText("Routine · Daily summary");
+    expect(label.closest("button")).toBeNull();
+    expect(label.closest("[data-source-label]")?.getAttribute("data-source-label")).toBe("routine");
+    expect(screen.queryByRole("note")).toBeNull();
+  });
+
+  it("shows nothing for an agent's input the Concierge did not answer", () => {
+    renderTranscript([trace("t-x", 10, { type: "agent", name: "Flint" })]);
+    expect(screen.queryByText(/Flint/)).toBeNull();
+  });
+
+  it("gives a reply in a task's thread its thread label alone", () => {
+    renderTranscript([
+      ...messages,
+      trace("t-a3", 12, { type: "routine", name: "Check-in" }),
+      reply("a3", 12, "m1"),
+    ]);
+    expect(screen.getAllByRole("button", { name: "Kyoto trip" })).toHaveLength(3);
+    expect(screen.queryByText("Routine · Check-in")).toBeNull();
+  });
+});

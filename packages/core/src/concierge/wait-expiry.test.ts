@@ -1,8 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { approvalWaits } from "../test/open-waits.js";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { ConciergeTasksRepository } from "../db/repositories/concierge-tasks.js";
 import { ChatsWebChatRepository } from "../webchat/chats-webchat-repository.js";
-import { ConciergeTasks } from "./tasks.js";
+import { ConciergeTasks, currentWait } from "./tasks.js";
+import type { OpenWaitItem } from "../webchat/repository.js";
 import { NO_RESPONSE_REASON, WaitExpiry } from "./wait-expiry.js";
 
 const HOUR = 3_600_000;
@@ -27,8 +29,10 @@ describe("WaitExpiry", () => {
     tasks.attachFacts({
       now: () => now,
       running: () => false,
-      waitingSince: async (chatIds) =>
-        new Map(chatIds.flatMap((id) => (waiting.has(id) ? [[id, waiting.get(id)!]] : []))),
+      openWaits: async (chatIds) =>
+        approvalWaits(
+          new Map(chatIds.flatMap((id) => (waiting.has(id) ? [[id, waiting.get(id)!]] : []))),
+        ),
       reportPending: () => [],
     });
     told = [];
@@ -219,5 +223,67 @@ describe("WaitExpiry", () => {
     expect(await repo.noResponseUnlisted([row!.id])).toEqual([row!.id]);
     await repo.markNoResponseListed([row!.id]);
     expect(await repo.noResponseUnlisted([row!.id])).toEqual([]);
+  });
+
+  it("ends all the waits open in a task chat as one, and does not end it again for a newer card in it", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    const t0 = NOW - 30 * HOUR;
+    const t1 = NOW - 20 * HOUR;
+    // An approval at T0, and a question card at T1 nobody answered either.
+    let items: OpenWaitItem[] = [
+      { kind: "approval", id: "a1", since: t0 },
+      { kind: "card", id: "q1", messageId: "m1", render: null, since: t1 },
+    ];
+    tasks.attachFacts({
+      now: () => now,
+      running: () => false,
+      openWaits: async () => new Map([["task-chat", items]]),
+      reportPending: () => [],
+    });
+    const turnsDown = new WaitExpiry({
+      tasks,
+      // Rome turns down the approval; the card stays answerable.
+      expireApprovals: async () => {
+        items = items.filter((item) => item.kind !== "approval");
+        return 1;
+      },
+      tell: (taskId) => told.push(taskId),
+      now: () => now,
+    });
+    await turnsDown.expire(row!.id);
+    expect(told).toEqual([row!.id]);
+    expect((await repo.get(row!.id))?.expiredWaitAt?.getTime()).toBe(t0);
+    const status = async () => (await tasks.statusOf([(await repo.get(row!.id))!])).get(row!.id);
+    expect(await status()).toMatchObject({ status: "ended", endReason: "no_response" });
+
+    // A day after the card: it was part of the wait that ended, so nothing ends again.
+    now = t1 + 25 * HOUR;
+    await turnsDown.expire(row!.id);
+    expect(told).toEqual([row!.id]);
+    expect(await status()).toMatchObject({ status: "ended", endReason: "no_response" });
+    expect((await status())?.openWait).toMatchObject({ kind: "card", id: "q1", since: t0 });
+  });
+});
+
+describe("currentWait", () => {
+  const DAY = 24 * HOUR;
+  const approval = (id: string, since: number): OpenWaitItem => ({ kind: "approval", id, since });
+
+  it("begins at the oldest open item, whichever is newest", () => {
+    expect(currentWait([approval("a", 5), approval("b", 9)], null, DAY)).toMatchObject({
+      since: 5,
+      newest: { id: "b" },
+    });
+  });
+
+  it("keeps the items said by an ended wait's deadline in it, and begins a new wait only after", () => {
+    expect(currentWait([approval("b", 10 * HOUR)], 0, DAY)?.since).toBe(0);
+    expect(currentWait([approval("b", 10 * HOUR), approval("c", 30 * HOUR)], 0, DAY)?.since).toBe(
+      30 * HOUR,
+    );
+  });
+
+  it("is no wait when nothing is open", () => {
+    expect(currentWait([], 0, DAY)).toBeNull();
   });
 });

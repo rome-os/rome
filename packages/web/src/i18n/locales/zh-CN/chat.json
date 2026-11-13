@@ -10,6 +10,10 @@
   "title": "Rome",
   "concierge": {
     "typing": "正在输入",
+    "newMessages": "以下为新消息",
+    "newMessagesPill_one": "{{label}} 条新消息",
+    "newMessagesPill_other": "{{label}} 条新消息",
+    "newMessagesMissing": "找不到新消息的起点",
     "taskChat": "任务对话",
     "taskStatus": {
       "running": "进行中",
@@ -34,6 +38,7 @@
     },
     "ask": {
       "expiredFold": "已过期 · 回答后继续",
+      "unavailable": "这个问题或审批已无法显示",
       "answered": "已回答",
       "answeredWith": "已回答：{{answer}}",
       "dismissed": "已忽略",
@@ -133,7 +138,8 @@
         "startingTopic": "正在开启话题对话",
         "checkingFollows": "正在查看你的关注",
         "searchingWeb": "正在搜索网页",
-        "readingPage": "正在阅读网页"
+        "readingPage": "正在阅读网页",
+        "tidyingUp": "正在整理上下文"
       }
     },
     "statusReaction": {
@@ -181,6 +187,7 @@
     "timed": "{{name}} · {{when}}",
     "waiting": "等待{{what}} · {{when}}检查",
     "cancel": "取消「{{name}}」",
+    "skip": "跳过 {{name}} 的下一次运行",
     "loadFailed": "无法加载排好的检查",
     "summary": "{{count}} 个检查 · 下一个：{{next}}",
     "expand": "展开排好的检查",
@@ -625,12 +632,25 @@
     "replyPlaceholder": "回复"
   },
   "sessionRenewal": {
-    "notice": "新会话 · {{reason}}",
+    "notice": "已整理上下文 · {{reason}}",
     "reasons": {
-      "setup": "设定已变",
+      "context": "对话较长",
+      "setup": "设定已更新",
       "idle": "闲置后",
       "daily": "每日重置",
       "working_dir": "工作目录不存在"
+    }
+  },
+  "automatedInput": {
+    "named": "{{kind}} · {{name}}",
+    "kinds": {
+      "routine": "例程",
+      "app": "应用",
+      "agent": "Agent",
+      "automation": "自动化",
+      "following": "关注",
+      "digest": "关注 · 摘要",
+      "check": "检查"
     }
   },
   "routineCard": {

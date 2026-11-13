@@ -165,7 +165,7 @@ export interface MessageMarkFacts {
  * for its owner, is active or is checked later; failed when its turn failed,
  * a task made for it ended failed, or Rome gave up telling the result of a
  * task not stopped since; else none. A task that ended for no response shows
- * none.
+ * none, even when Rome gave up telling it.
  */
 export function messageStatusReaction(facts: MessageMarkFacts): ConciergeStatusReaction | null {
   const open = (task: ConciergeTaskStatusResult) => task.status !== "ended";
@@ -174,7 +174,10 @@ export function messageStatusReaction(facts: MessageMarkFacts): ConciergeStatusR
     facts.turnFailed === true ||
     facts.tasks.some(
       (task) =>
-        task.endReason === "failed" || (task.reportLost === true && task.endReason !== "stopped"),
+        task.endReason === "failed" ||
+        (task.reportLost === true &&
+          task.endReason !== "stopped" &&
+          task.endReason !== "no_response"),
     );
   return failed ? "failed" : null;
 }

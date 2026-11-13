@@ -1,4 +1,5 @@
 import { createContext, lazy, Suspense, useContext } from "react";
+import { useLiveTaskCard } from "./live-task-cards";
 import type { ChatEntry } from "@/lib/chat-types";
 import { normalizeTracePayload } from "@/lib/trace-format";
 import { interactionResultKey } from "@/components/chat/chat-view";
@@ -33,21 +34,17 @@ const WidgetUiCard = lazy(() =>
 /** Latest parsed task_chat block per task in the Concierge transcript. */
 export const LatestTaskChatsContext = createContext<ReadonlyMap<string, ChatEntry> | null>(null);
 
-function TaskChatEntry({
-  block,
-  messageAt,
-}: {
-  block: Extract<ChatEntry, { type: "task_chat" }>;
-  messageAt?: string;
-}) {
+function TaskChatEntry({ block }: { block: Extract<ChatEntry, { type: "task_chat" }> }) {
   const latest = useContext(LatestTaskChatsContext);
+  // As a live event settled it since the message loaded.
+  const card = useLiveTaskCard(block.card);
   return (
     <TaskChatCard
       chatId={block.chatId}
       title={block.title}
       isLatestForChat={!latest || latest.get(block.chatId) === block}
       show={block.show}
-      shownAt={messageAt}
+      card={card}
     />
   );
 }
@@ -78,8 +75,6 @@ export interface RenderEntryOptions {
   /** Set by the chat transcript: each text block renders as its own bubble,
    * and every entry comes in once while `live` (its turn is running). */
   transcript?: { live: boolean };
-  /** When the message these blocks belong to was said, as an ISO time. */
-  messageAt?: string;
 }
 
 export function renderSingleEntry(
@@ -298,7 +293,7 @@ export function renderSingleEntry(
         />
       );
     case "task_chat":
-      return <TaskChatEntry key={key} block={block} messageAt={options.messageAt} />;
+      return <TaskChatEntry key={key} block={block} />;
     case "connect_card":
       return (
         <ConnectCard

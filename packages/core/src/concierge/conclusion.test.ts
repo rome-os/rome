@@ -98,6 +98,10 @@ describe("the instruction every task chat gets", () => {
   it("names both markers, the cap, and every turn", () => {
     expect(CONCLUSION_INSTRUCTION).toContain(CONCLUSION_OPEN);
     expect(CONCLUSION_INSTRUCTION).toContain(CONCLUSION_CLOSE);
+    // The result reaches the guardian through the Concierge, never by a send of the task chat's own.
+    expect(CONCLUSION_INSTRUCTION).toContain(
+      "Never send a message into the guardian's Concierge chat yourself",
+    );
     expect(CONCLUSION_INSTRUCTION).toContain(`${CONCLUSION_MAX_CHARS} characters`);
     expect(CONCLUSION_INSTRUCTION).toContain("in every final answer");
     expect(CONCLUSION_INSTRUCTION).toContain("when the guardian writes to you directly");

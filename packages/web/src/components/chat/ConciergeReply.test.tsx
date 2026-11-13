@@ -211,7 +211,7 @@ describe("the reply a Concierge bubble sends", () => {
   });
 });
 
-it("keeps an on-behalf source with the guardian's messages and names the source in a reply", () => {
+it("draws no owner bubble for an on-behalf message from before, which its turn's reply names instead", () => {
   const message: ChatMessage = {
     id: "m1",
     sessionId: "concierge",
@@ -226,40 +226,8 @@ it("keeps an on-behalf source with the guardian's messages and names the source 
       onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
     },
   };
-  const sent = renderChat([{ kind: "user", key: message.id, message }]);
-  expect(screen.getByText("Find flights").closest(".justify-end")).not.toBeNull();
-  expect(screen.getByText("Sent by Concierge")).toBeTruthy();
-  expect(screen.getByTitle("Ray")).toBeTruthy();
-  fireEvent.click(screen.getByRole("button", { name: "Reply" }));
-  expect(sent()).toEqual({ replyToMessageId: "m1" });
-  expect(sent.target()).toMatchObject({
-    author: "automated",
-    name: "Concierge",
-    preview: "Find flights",
-  });
-});
-
-it("anchors an automated message, so a selection quotes it and a jump can find it", () => {
-  const message: ChatMessage = {
-    id: "m1",
-    sessionId: "concierge",
-    role: "user",
-    createdAt: at,
-    content: JSON.stringify([{ type: "text", content: "Find flights\n\nBook the cheapest" }]),
-    sender: {
-      kind: "automated",
-      sourceType: "agent",
-      name: "Concierge",
-      iconUrl: null,
-      onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
-    },
-  };
-  const sent = renderChat([{ kind: "user", key: message.id, message }]);
-  const line = screen.getByText("Book the cheapest");
-  expect(findMessageAnchor(document, "m1")?.contains(line)).toBe(true);
-
-  window.getSelection()?.selectAllChildren(line);
-  fireEvent.click(screen.getByRole("button", { name: "Reply" }));
-
-  expect(sent()).toEqual({ replyToMessageId: "m1", replyQuote: "Book the cheapest" });
+  renderChat([{ kind: "user", key: message.id, message }]);
+  expect(screen.queryByText("Find flights")).toBeNull();
+  expect(screen.queryByText("Sent by Concierge")).toBeNull();
+  expect(screen.queryByRole("button", { name: "Reply" })).toBeNull();
 });

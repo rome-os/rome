@@ -10,6 +10,10 @@
   "title": "Rome",
   "concierge": {
     "typing": "Typing",
+    "newMessages": "New messages",
+    "newMessagesPill_one": "{{label}} new message",
+    "newMessagesPill_other": "{{label}} new messages",
+    "newMessagesMissing": "Can't find where the new messages start",
     "taskChat": "Task chat",
     "taskStatus": {
       "running": "Working",
@@ -34,6 +38,7 @@
     },
     "ask": {
       "expiredFold": "Expired · answer to continue",
+      "unavailable": "This question or approval can no longer be shown",
       "answered": "Answered",
       "answeredWith": "Answered: {{answer}}",
       "dismissed": "Dismissed",
@@ -133,7 +138,8 @@
         "startingTopic": "Starting a topic chat",
         "checkingFollows": "Checking what you follow",
         "searchingWeb": "Searching the web",
-        "readingPage": "Reading a page"
+        "readingPage": "Reading a page",
+        "tidyingUp": "Tidying up context"
       }
     },
     "statusReaction": {
@@ -181,6 +187,7 @@
     "timed": "{{name}} · {{when}}",
     "waiting": "Waiting for {{what}} · checks {{when}}",
     "cancel": "Cancel {{name}}",
+    "skip": "Skip the next run of {{name}}",
     "loadFailed": "Failed to load scheduled checks",
     "summary": "{{count}} checks · next: {{next}}",
     "expand": "Show scheduled checks",
@@ -625,12 +632,25 @@
     "replyPlaceholder": "Reply"
   },
   "sessionRenewal": {
-    "notice": "New session · {{reason}}",
+    "notice": "Context tidied up · {{reason}}",
     "reasons": {
-      "setup": "setup changed",
+      "context": "conversation got long",
+      "setup": "setup updated",
       "idle": "after a quiet period",
       "daily": "daily reset",
       "working_dir": "working folder gone"
+    }
+  },
+  "automatedInput": {
+    "named": "{{kind}} · {{name}}",
+    "kinds": {
+      "routine": "Routine",
+      "app": "App",
+      "agent": "Agent",
+      "automation": "Automation",
+      "following": "Following",
+      "digest": "Following · digest",
+      "check": "Check"
     }
   },
   "routineCard": {
