@@ -388,6 +388,40 @@ const transcripts: Record<string, ChatMessage[]> = {
         forwardedFrom: { chatId: "mock-chat-lisbon", title: "Lisbon flights" },
       } as TranscriptPart,
     ]),
+    // A task's thread: the Concierge's reply in it carries the task's label.
+    {
+      id: `${CONCIERGE_CHAT_ID}-thread-1`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-thread-turn`,
+      role: "assistant",
+      content: JSON.stringify([text("I found three tables for Friday at 7.")]),
+      createdAt: "2026-08-07T13:01:00.000Z",
+      chatThreadId: "mock-thread-table",
+      chatThreadTitle: "Book a table for Friday",
+    },
+    // A routine made the Concierge speak: its reply carries the routine's name.
+    {
+      id: `${CONCIERGE_CHAT_ID}-routine-trace`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
+      role: "trace",
+      content: "[]",
+      createdAt: "2026-08-07T13:02:00.000Z",
+      traceSummary: {
+        distinctApps: [],
+        invocationCounts: {},
+        totalSteps: 0,
+        automatedInput: { type: "routine", name: "Daily summary" },
+      },
+    },
+    {
+      id: `${CONCIERGE_CHAT_ID}-routine-reply`,
+      sessionId: CONCIERGE_CHAT_ID,
+      turnId: `${CONCIERGE_CHAT_ID}-routine-turn`,
+      role: "assistant",
+      content: JSON.stringify([text("Today: two meetings, and the plumber at 4.")]),
+      createdAt: "2026-08-07T13:02:01.000Z",
+    },
     // The owner's latest message, which the Concierge is still working on: it
     // carries the working status reaction, as a live turn sets it.
     {

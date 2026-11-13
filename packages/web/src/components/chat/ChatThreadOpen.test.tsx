@@ -375,6 +375,21 @@ describe("the thread label in the transcript", () => {
     expect(label.className).not.toContain("text-badge");
   });
 
+  it("draws iOS's thin turn-down arrow before the title, keeps its look on hover, and shows a pointer", () => {
+    renderTranscript();
+    const [label] = screen.getAllByRole("button", { name: "Kyoto trip" });
+    const arrow = label!.firstElementChild;
+    expect(arrow?.tagName.toLowerCase()).toBe("svg");
+    expect(arrow?.getAttribute("aria-hidden")).toBe("true");
+    expect(arrow?.getAttribute("stroke-width")).toBe("1.5");
+    expect(label!.textContent).not.toContain("↳");
+    const classes = label!.className.split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining(["cursor-pointer", "text-muted-foreground/75"]));
+    expect(classes.some((name) => name.startsWith("hover:"))).toBe(false);
+    // Keyboard focus still shows.
+    expect(classes).toContain("focus-visible:outline-solid");
+  });
+
   it("sits under none of the guardian's messages", () => {
     renderTranscript();
     const labelled = screen
@@ -425,6 +440,10 @@ describe("the source label in the transcript", () => {
     ]);
     const label = screen.getByText("Routine · Daily summary");
     expect(label.closest("button")).toBeNull();
+    // The same arrow as a thread label, before the text.
+    expect(
+      label.closest("[data-source-label]")?.querySelector("svg[aria-hidden='true']"),
+    ).not.toBeNull();
     expect(label.closest("[data-source-label]")?.getAttribute("data-source-label")).toBe("routine");
     expect(screen.queryByRole("note")).toBeNull();
   });
