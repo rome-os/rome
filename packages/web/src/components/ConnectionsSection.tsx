@@ -249,7 +249,9 @@ export function ConnectionsSection({
 
   return (
     <Measure className="space-y-6">
-      <AppDocumentAccess />
+      {connections.some((connection) => connection.connectionKind === "feishu" && connection.id) ? (
+        <AppDocumentAccess />
+      ) : null}
       <Section>
         {loading ? (
           <div className="flex flex-col gap-2" role="status" aria-label={t("connections.loading")}>

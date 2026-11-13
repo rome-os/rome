@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import type { DocumentAccessOptions } from "@rome/api-types/app-connection-access";
 import {
   FEISHU_DOCUMENT_READ,
-  FEISHU_DOCUMENT_SCOPE,
+  feishuDocumentGuidance,
 } from "../../connections/integrations/feishu-documents.js";
 import { z } from "zod";
 import { isResolvedApp } from "../../apps/state.js";
@@ -90,21 +90,18 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
       selected.map(async (connection) => {
         const descriptor = registry.getDescriptor(connection.connectionKind);
         const grant = await registry.grantOf(connection.id);
-        const profile = grant?.profile;
-        const appId =
-          typeof profile?.appId === "string" && /^cli_[a-zA-Z0-9]+$/.test(profile.appId)
-            ? profile.appId
-            : null;
-        const brands =
-          profile?.domain === "feishu" || profile?.domain === "lark"
-            ? [profile.domain]
-            : ["feishu", "lark"];
+        const accessible = appAccessibleOperations(
+          registry,
+          connection,
+          descriptor?.grant ?? "app",
+        );
         const supported =
-          descriptor?.capabilities.actor?.operations?.some(
+          accessible.ok &&
+          accessible.value.some(
             (operation) =>
               operation.name === FEISHU_DOCUMENT_READ &&
               operation.appAccess?.sideEffects === "read-only",
-          ) ?? false;
+          );
         return {
           connectionId: connection.id,
           label: connection.label,
@@ -112,12 +109,7 @@ export function appConnectionAccessRoutes(deps: ApiDeps): Hono {
           operation: FEISHU_DOCUMENT_READ,
           supported,
           authorized: grant?.state === "authorized",
-          scope: FEISHU_DOCUMENT_SCOPE,
-          scopeStatus: "not_checked" as const,
-          consoles: brands.map((brand) => ({
-            brand: brand as "feishu" | "lark",
-            url: `${brand === "lark" ? "https://open.larksuite.com" : "https://open.feishu.cn"}/app${appId ? `/${encodeURIComponent(appId)}/auth` : ""}`,
-          })),
+          ...feishuDocumentGuidance(grant?.profile),
         };
       }),
     );
