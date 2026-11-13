@@ -1,3 +1,4 @@
+import { appDocumentAccessHandlers } from "./app-document-access";
 import type { BootstrapState, DashboardIdentity } from "@rome/api-types";
 import type {
   ChatId,
@@ -1235,6 +1236,7 @@ const upgradeStatus = (): Omit<UpgradeStatus, "receivedAt"> => ({
 });
 
 export const handlers = [
+  ...appDocumentAccessHandlers,
   http.get("/api/health", () => HttpResponse.json({ status: "ok" })),
   // A healthy snapshot for the Advanced tab. Identity is already enrolled, so the
   // section shows the account row rather than a reconnect prompt.
