@@ -6781,7 +6781,7 @@ describe("Webchat API", () => {
         openWaits: async () => new Map(),
         reportPending: () => [],
       });
-      deps.concierge = { deps: { tasks } } as never;
+      deps.concierge = { deps: { tasks }, onCardSettled: () => () => {} } as never;
       await deps.webchatRepo.createSession(
         "topic",
         "Topic",
@@ -6838,9 +6838,95 @@ describe("Webchat API", () => {
       expect(listed.find((m) => m.id === "g2")).not.toHaveProperty("statusReaction");
     });
 
+    it("hands a task card out with its card, in one read per page, and streams a card that settles", async () => {
+      const listeners = new Set<(event: unknown) => void>();
+      const reads: string[][] = [];
+      const tasks = new ConciergeTasks(new ConciergeTasksRepository(testDb.db));
+      deps.concierge = {
+        deps: { tasks },
+        taskCardSources: () => ({
+          taskCardsOf: async (chatIds: readonly string[]) => {
+            reads.push([...chatIds]);
+            return new Map([
+              [
+                "task-chat",
+                {
+                  questions: [
+                    {
+                      id: "q1",
+                      messageId: "m1",
+                      render: null,
+                      since: 0,
+                      output: { dismissed: true },
+                    },
+                  ],
+                  approvals: [],
+                },
+              ],
+            ]);
+          },
+          findBySessions: async () => [],
+          waitExpiry: 1,
+        }),
+        onCardSettled: (listener: (event: unknown) => void) => {
+          listeners.add(listener);
+          return () => listeners.delete(listener);
+        },
+      } as never;
+      await deps.webchatRepo.createSession(
+        "topic",
+        "Topic",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const card = (chatId: string) =>
+        JSON.stringify([{ type: "task_chat", chatId, title: "Draft", show: "ask" }]);
+      await deps.webchatRepo.addMessage("a1", "topic", "assistant", card("task-chat"), "turn-1");
+      await deps.webchatRepo.addMessage("a2", "topic", "assistant", card("task-chat"), "turn-2");
+      const app = createWebchatRuntime(deps).routes;
+      const page = (await (await app.request("/chat/sessions/topic/messages?limit=10")).json()) as {
+        messages: { id: string; content: string }[];
+      };
+      expect(reads).toHaveLength(1);
+      for (const message of page.messages) {
+        expect(JSON.parse(message.content)[0].card).toMatchObject({
+          kind: "question",
+          id: "q1",
+          outcome: { kind: "dismissed" },
+        });
+      }
+      // What is stored stays a pointer.
+      const stored = await deps.webchatRepo.getMessages("topic");
+      expect(JSON.parse(stored.find((m) => m.id === "a1")!.content)[0]).not.toHaveProperty("card");
+
+      const events = (await app.request("/chat/sessions/topic/events")).body!.getReader();
+      const settled = readSseUntil(events, "event: chat_card_settled");
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      for (const listener of listeners) {
+        listener({
+          sessionId: "topic",
+          card: {
+            kind: "approval",
+            id: "a9",
+            title: "Send",
+            since: 0,
+            outcome: { kind: "approved" },
+          },
+        });
+      }
+      expect(await settled).toContain('"id":"a9"');
+      await events.cancel();
+    });
+
     it("names a task's chat thread on its messages and on a live placement, and no other thread", async () => {
       const repo = new ConciergeTasksRepository(testDb.db);
-      deps.concierge = { deps: { tasks: new ConciergeTasks(repo) } } as never;
+      deps.concierge = {
+        deps: { tasks: new ConciergeTasks(repo) },
+        onCardSettled: () => () => {},
+      } as never;
       await deps.webchatRepo.createSession(
         "topic",
         "Topic",

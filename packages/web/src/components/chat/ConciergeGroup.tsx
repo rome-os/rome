@@ -119,7 +119,6 @@ const AgentEntry = memo(function AgentEntry({
             ...actions,
             sessionId: message.sessionId,
             turnId: message.turnId ?? undefined,
-            messageAt: message.createdAt,
           })}
         </ConciergeBubble>
       );

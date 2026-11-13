@@ -34,6 +34,7 @@
     },
     "ask": {
       "expiredFold": "Expired · answer to continue",
+      "unavailable": "This question or approval can no longer be shown",
       "answered": "Answered",
       "answeredWith": "Answered: {{answer}}",
       "dismissed": "Dismissed",

@@ -156,6 +156,28 @@ export const chatsSessionOpenCards = sql<string | null>`(
 )`;
 
 /**
+ * Every card the session asked and every answer sent to one, as a JSON array
+ * of { type, id, messageId, render, output, at }: the Chats version of the
+ * legacy `sessionInteractions`.
+ */
+export const chatsSessionInteractions = sql<string | null>`(
+  select json_group_array(json_object(
+    'type', json_extract(part."value", '$.type'),
+    'id', json_extract(part."value", '$.toolUseId'),
+    'messageId', m."key",
+    'render', json(json_extract(part."value", '$.render')),
+    'output', json(json_extract(part."value", '$.output')),
+    'at', m."said_at"
+  ))
+  from ${CHAT_MESSAGES} m
+  cross join json_each(m."parts") part
+  where m."chat_id" = "rome_sessions"."chat_id" and m."thread_id" is "rome_sessions"."thread_id"
+  and json_valid(m."parts")
+  and case when part."type" = 'object' then json_extract(part."value", '$.type') end
+    in ('pending_interaction', 'interaction_result')
+)`;
+
+/**
  * When the session's owner last said something in it, unix seconds, or null:
  * the newest line said by a person, not by Rome's agents or on an app's,
  * routine's or agent's behalf.

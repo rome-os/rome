@@ -1,3 +1,4 @@
+import { withTaskCards } from "../../concierge/task-cards.js";
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type {
@@ -1038,7 +1039,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     runningListeners.add(runningListener);
     if (runningSessions.has(sessionId)) runningListener({ sessionId, running: true });
     const unsubscribeMessages = deps.webchatRepo.onMessageInserted((message) => {
-      if (message.sessionId === sessionId) emit("message_insert", message);
+      if (message.sessionId !== sessionId) return;
+      // A task card arrives with its card, as a page would hand it out.
+      if (message.role !== "assistant" || !message.content.includes('"task_chat"')) {
+        emit("message_insert", message);
+        return;
+      }
+      void fillTaskCards([message])
+        .catch(() => [message])
+        .then(([filled]) => emit("message_insert", filled ?? message));
+    });
+    // A card a task card shows settled: the client patches it in place.
+    const unsubscribeCards = deps.concierge?.onCardSettled((event) => {
+      if (event.sessionId === sessionId) emit("chat_card_settled", event);
     });
     const unsubscribeSessionName = deps.webchatRepo.onSessionNameChanged((event) => {
       if (event.sessionId === sessionId) emit("session_name", event);
@@ -1077,6 +1090,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       unsubscribeSessionName();
       unsubscribeChatThread();
       unsubscribeReaction?.();
+      unsubscribeCards?.();
     };
   };
 
@@ -1502,10 +1516,21 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return statusReaction ? { ...message, statusReaction } : message;
     });
   };
+  // A task card's question or approval and how it ended, read for the whole
+  // page at once (concierge/task-cards.ts). Only a Concierge chat has them.
+  const fillTaskCards = <T extends { role: string; content: string; createdAt: Date | string }>(
+    messages: T[],
+  ): Promise<T[]> =>
+    deps.concierge && messages.some((message) => message.content.includes('"task_chat"'))
+      ? withTaskCards(deps.concierge.taskCardSources(), messages)
+      : Promise.resolve(messages);
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
     const withTraces = await attachChatThreadTitles(
       sessionId,
-      await attachStatusReactions(sessionId, await attachTraceSummaries(sessionId, messages)),
+      await attachStatusReactions(
+        sessionId,
+        await attachTraceSummaries(sessionId, await fillTaskCards(messages)),
+      ),
     );
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
     const shownIds = new Set(messages.map((m) => m.id));

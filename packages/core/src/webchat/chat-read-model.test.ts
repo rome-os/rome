@@ -672,6 +672,54 @@ describe("ChatReadModel", () => {
       ]);
     });
 
+    it("reads every card a chat asked with the answer each got, and every approval, settled ones too", async () => {
+      const chat = dashboardChat("chat-1");
+      const render = { builtin: true, componentId: "question-card", props: { questions: [] } };
+      const question = (toolUseId: string) => [{ type: "pending_interaction", toolUseId, render }];
+      fixture.say({
+        id: "c1",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(20_000),
+        parts: question("tu-1"),
+      });
+      fixture.say({
+        id: "r1",
+        chat,
+        from: "guardian",
+        at: new Date(25_000),
+        parts: [{ type: "interaction_result", toolUseId: "tu-1", output: { dismissed: true } }],
+      });
+      fixture.say({
+        id: "c2",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(30_000),
+        parts: question("tu-2"),
+      });
+      await testDb.db.insert(approvals).values({
+        id: "approval-1",
+        type: "action_execution",
+        status: "rejected",
+        executionState: "idle",
+        requestedBy: "main",
+        description: "approve",
+        resolvedBy: "guardian",
+        payload: { channelContext: { threadId: "chat-1" } },
+        createdAt: new Date(22_000),
+      });
+      const cards = (await repo.taskCardsOf(["chat-1"])).get("chat-1");
+      expect(cards?.questions).toEqual([
+        { id: "tu-1", messageId: "c1", render, since: 20_000, output: { dismissed: true } },
+        { id: "tu-2", messageId: "c2", render, since: 30_000 },
+      ]);
+      expect(cards?.approvals).toMatchObject([
+        { id: "approval-1", status: "rejected", resolvedBy: "guardian", since: 22_000 },
+      ]);
+    });
+
     it("reads the pending approvals once for every chat asked, with the same answer per chat", async () => {
       const chat = dashboardChat("chat-1");
       dashboardChat("chat-2");

@@ -449,6 +449,23 @@ export const sessionOpenCards = sql<string | null>`(
     ), 0)
     and case when part."type" = 'object' then json_extract(part."value", '$.type') end = 'pending_interaction'
 )`;
+// Every card the session asked and every answer sent to one, as a JSON array
+// of { type, id, messageId, render, output, at }, oldest first: the task
+// cards a Concierge chat shows read their question and outcome from it.
+export const sessionInteractions = sql<string | null>`(
+    select json_group_array(json_object(
+      'type', json_extract(part."value", '$.type'),
+      'id', json_extract(part."value", '$.toolUseId'),
+      'messageId', m."id",
+      'render', json(json_extract(part."value", '$.render')),
+      'output', json(json_extract(part."value", '$.output')),
+      'at', cast(m."created_at" as integer)
+    ))
+    from "rome_agent_messages" m, json_each(m."content") part
+    where m."session_id" = "rome_sessions"."id" and json_valid(m."content")
+    and case when part."type" = 'object' then json_extract(part."value", '$.type') end
+      in ('pending_interaction', 'interaction_result')
+)`;
 // When the guardian last said something in the session, unix seconds, or null.
 export const sessionOwnerSpokeAt = sql<number | null>`(
   select max(cast(u."created_at" as integer)) from "rome_agent_messages" u
@@ -807,6 +824,8 @@ export class WebChatRepository {
 
   /** A session's open cards, as a JSON array (`sessionOpenCards`). */
   protected readonly openCardsColumn: SQL<string | null> = sessionOpenCards;
+  /** A session's cards and their answers, as a JSON array (`sessionInteractions`). */
+  protected readonly interactionsColumn: SQL<string | null> = sessionInteractions;
   /** When the session's owner last said something in it, unix seconds, or null. */
   protected readonly ownerSpokeAtColumn: SQL<number | null> = sessionOwnerSpokeAt;
 
@@ -1352,6 +1371,50 @@ export class WebChatRepository {
     }
     for (const items of open.values()) items.sort((a, b) => a.since - b.since);
     return open;
+  }
+
+  /**
+   * The cards each of `sessionIds` asked, with the answer each got, if any,
+   * and every approval asked in it whatever became of it: what the task cards
+   * of a Concierge chat show. One read of each kind for all of them.
+   */
+  async taskCardsOf(sessionIds: readonly string[]): Promise<Map<string, TaskChatCards>> {
+    const out = new Map<string, TaskChatCards>();
+    if (sessionIds.length === 0) return out;
+    const ids = [...new Set(sessionIds)];
+    for (const id of ids) out.set(id, { questions: [], approvals: [] });
+    const rows = await this.db
+      .select({ id: romeSessions.id, parts: this.interactionsColumn })
+      .from(romeSessions)
+      .where(inArray(romeSessions.id, ids));
+    for (const row of rows) {
+      const chat = out.get(row.id) as TaskChatCards;
+      chat.questions = questionsOf(row.parts);
+    }
+    const threadId = sql<string>`json_extract(${approvals.payload}, '$.channelContext.threadId')`;
+    const asked = await this.db
+      .select({
+        chatId: threadId,
+        id: approvals.id,
+        status: approvals.status,
+        resolvedBy: approvals.resolvedBy,
+        description: approvals.description,
+        payload: approvals.payload,
+        since: sql<number>`cast(${approvals.createdAt} as integer)`,
+      })
+      .from(approvals)
+      .where(inArray(threadId, ids));
+    for (const row of asked) {
+      out.get(row.chatId)?.approvals.push({
+        id: row.id,
+        status: row.status,
+        resolvedBy: row.resolvedBy,
+        description: row.description,
+        payload: row.payload,
+        since: Number(row.since) * 1000,
+      });
+    }
+    return out;
   }
 
   /** When the session's owner last said something in it, epoch milliseconds, or null. */
@@ -3160,16 +3223,91 @@ function parseOpenCards(json: string | null): OpenWaitItem[] {
   return rows.flatMap((row): OpenWaitItem[] => {
     const { id, messageId, render, at } = (row ?? {}) as Record<string, unknown>;
     if (typeof at !== "number") return [];
-    const rendered =
-      render &&
-      typeof render === "object" &&
-      typeof (render as { componentId?: unknown }).componentId === "string"
-        ? (render as { builtin?: boolean; componentId: string; props?: Record<string, unknown> })
-        : null;
+    const rendered = cardRender(render);
     // A card with no tool use id is named by its message.
     const named = typeof id === "string" ? id : String(messageId);
     return [
       { kind: "card", id: named, messageId: String(messageId), render: rendered, since: at * 1000 },
     ];
   });
+}
+
+/** A card a chat asked, with the answer sent to it, if one was. */
+export interface AskedQuestion {
+  id: string;
+  messageId: string;
+  render: { builtin?: boolean; componentId: string; props?: Record<string, unknown> } | null;
+  since: number;
+  /** What the answer sent, `{ dismissed: true }` for a dismissal; absent while unanswered. */
+  output?: Record<string, unknown>;
+}
+
+/** An approval a chat asked for, whatever became of it. */
+export interface AskedApproval {
+  id: string;
+  status: string;
+  resolvedBy: string | null;
+  description: string;
+  payload: unknown;
+  since: number;
+}
+
+/** What a task chat asked its owner: its cards, oldest first, and its approvals. */
+export interface TaskChatCards {
+  questions: AskedQuestion[];
+  approvals: AskedApproval[];
+}
+
+/**
+ * The cards of a `sessionInteractions` column, each with the answer sent to
+ * it: an answer closes the newest card of its id asked before it, since a
+ * later turn can ask again under the same id.
+ */
+function questionsOf(json: string | null): AskedQuestion[] {
+  if (!json) return [];
+  let rows: unknown;
+  try {
+    rows = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(rows)) return [];
+  const asked: AskedQuestion[] = [];
+  const open = new Map<string, AskedQuestion>();
+  const parsed = rows
+    .map((row) => (row ?? {}) as Record<string, unknown>)
+    .filter((row) => typeof row.id === "string" && typeof row.at === "number")
+    .sort((a, b) => (a.at as number) - (b.at as number));
+  for (const row of parsed) {
+    const id = row.id as string;
+    if (row.type === "pending_interaction") {
+      const render = cardRender(row.render);
+      const question: AskedQuestion = {
+        id,
+        messageId: String(row.messageId),
+        render,
+        since: (row.at as number) * 1000,
+      };
+      asked.push(question);
+      open.set(id, question);
+    } else {
+      const question = open.get(id);
+      if (!question) continue;
+      open.delete(id);
+      question.output =
+        row.output && typeof row.output === "object" ? (row.output as Record<string, unknown>) : {};
+    }
+  }
+  return asked;
+}
+
+/** How a card renders, when its column holds a usable one. */
+export function cardRender(
+  render: unknown,
+): { builtin?: boolean; componentId: string; props?: Record<string, unknown> } | null {
+  return render &&
+    typeof render === "object" &&
+    typeof (render as { componentId?: unknown }).componentId === "string"
+    ? (render as { builtin?: boolean; componentId: string; props?: Record<string, unknown> })
+    : null;
 }

@@ -346,6 +346,15 @@ export class ConciergeTasksRepository {
     return found[0] ?? null;
   }
 
+  /** The rows of the task chats `sessionIds`, in one read. */
+  async findBySessions(sessionIds: readonly string[]): Promise<ConciergeTaskRow[]> {
+    if (sessionIds.length === 0) return [];
+    return this.db
+      .select()
+      .from(conciergeTasks)
+      .where(inArray(conciergeTasks.sessionId, [...new Set(sessionIds)]));
+  }
+
   async findBySession(sessionId: string): Promise<ConciergeTaskRow | null> {
     const [row] = await this.db
       .select()

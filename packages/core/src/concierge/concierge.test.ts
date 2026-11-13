@@ -354,6 +354,7 @@ function setup(
       onMessageInserted: () => () => {},
       awaitingGuardianSince: async () => new Map<string, number>(),
       openWaitsOf: async () => new Map(),
+      taskCardsOf: async () => new Map(),
       ownerSpokeAt: async () => null,
     },
     tasks,
@@ -3456,6 +3457,35 @@ describe("Concierge events", () => {
     await rs.advanceTimersByTimeAsync(60_000);
     expect(s.backendTurns).toHaveLength(2);
     expect(s.backendTurns[1].prompt).toContain(`approval: Send the invoice — ${said}`);
+  });
+
+  it("tells the chat showing a task's approval card how it was decided, as it reads now", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    const asked = {
+      id: "approval-1",
+      status: "rejected",
+      resolvedBy: "guardian",
+      description: "Send the invoice",
+      payload: { channelContext: { threadId: chatId } },
+      since: Date.now(),
+    };
+    (s.deps.webchatRepo as { taskCardsOf: unknown }).taskCardsOf = async () =>
+      new Map([[chatId, { questions: [], approvals: [asked] }]]);
+    const events: unknown[] = [];
+    s.service.onCardSettled((event) => events.push(event));
+    s.resolveApproval({ ...asked });
+    await s.settle();
+    expect(events).toEqual([
+      {
+        sessionId: CONCIERGE_CHAT,
+        card: expect.objectContaining({
+          kind: "approval",
+          id: "approval-1",
+          outcome: { kind: "rejected" },
+        }),
+      },
+    ]);
   });
 
   it("tells the Concierge of a pending approval in a task chat at once", async () => {

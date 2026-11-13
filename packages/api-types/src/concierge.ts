@@ -3,6 +3,7 @@
 
 import type { ConciergeActivity } from "./concierge-activity.js";
 import type { ConciergeTaskEndReason, ConciergeTaskStatus } from "./concierge-task-status.js";
+import type { TaskCardRender } from "./chat.js";
 
 /**
  * What a task row is doing, as apps from before derived status read it. Rome
@@ -86,7 +87,7 @@ export type ConciergeOpenWait =
       kind: "card";
       id: string;
       messageId: string;
-      render: { builtin?: boolean; componentId: string; props?: Record<string, unknown> } | null;
+      render: TaskCardRender | null;
       since: number;
     }
   | { kind: "approval"; id: string; since: number };

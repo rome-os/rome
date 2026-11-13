@@ -72,6 +72,22 @@ function replyExcerpt(text: string): string {
 }
 
 /** The text of a stored user message, for the guardian's words in a task event. */
+/** The tool use ids a message sends an answer or a dismissal to. */
+function answeredCards(content: string): string[] {
+  if (!content.includes("interaction_result")) return [];
+  try {
+    const parts: unknown = JSON.parse(content);
+    if (!Array.isArray(parts)) return [];
+    return parts.flatMap((part) => {
+      if (!part || typeof part !== "object") return [];
+      const { type, toolUseId } = part as { type?: unknown; toolUseId?: unknown };
+      return type === "interaction_result" && typeof toolUseId === "string" ? [toolUseId] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Whether the line answers a card: it carries an `interaction_result` that is
  * not a dismissal. A typed reply dismisses the open cards it passes, which
@@ -323,7 +339,18 @@ export function startConciergeEvents(
   const stopWaitExpiry = new WaitExpiry({
     tasks,
     expireApprovals: (chatId, turnDown) => service.expireApprovals(chatId, turnDown),
-    tell: (taskId) => coalescer.mark({ taskId, kind: "no_response", urgent: false }),
+    tell: (taskId) => {
+      coalescer.mark({ taskId, kind: "no_response", urgent: false });
+      // Its questions still open read expired now; its approvals settle as they are turned down.
+      void guard(
+        "expired question cards",
+        tasks.repo
+          .get(taskId)
+          .then((row) =>
+            row?.sessionId ? service.cardSettled(row.sessionId, "openQuestions") : undefined,
+          ),
+      );
+    },
   }).start();
 
   // The owner's messages a Concierge turn took settle once the chat runs no
@@ -469,6 +496,7 @@ export function startConciergeEvents(
   // it is the first to start after.
   const approvalAnswered = new Map<string, { at: number; byRome: boolean }>();
   const onApprovalResolved = (approval: {
+    id?: string;
     status?: string;
     description?: string;
     payload: unknown;
@@ -483,6 +511,12 @@ export function startConciergeEvents(
     // awaiting it, and no turn may follow, as after a rejection. It rides
     // along with the turn that carries on, when one does.
     const chatId = context.threadId;
+    if (approval.id) {
+      void guard(
+        "decided approval card",
+        service.cardSettled(chatId, { kind: "approval", id: approval.id }),
+      );
+    }
     void guard(
       "approval decision event",
       taskOf(chatId).then((taskId) => {
@@ -769,6 +803,15 @@ export function startConciergeEvents(
     tasks.onStatus(onTaskStatus),
     approvals.onCreated((approval) => void guard("approval event", onApproval(approval))),
     approvals.onResolved(onApprovalResolved),
+    // An answer or a dismissal of a card settles it.
+    webchatRepo.onMessageInserted((message) => {
+      for (const id of answeredCards(message.content)) {
+        void guard(
+          "answered card",
+          service.cardSettled(message.sessionId, { kind: "question", id }),
+        );
+      }
+    }),
   ];
 
   return () => {

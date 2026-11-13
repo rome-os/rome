@@ -45,6 +45,8 @@ import type { NotifyLevel } from "../instance/notify-client.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../webchat/owner.js";
 import { isMainConciergeChat, MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
+import type { ChatCardSettledEvent } from "@rome/api-types/chat";
+import { openQuestionCards, settledCard, type TaskCardSources } from "./task-cards.js";
 import {
   CONCIERGE_AGENT_ID,
   canOpenChat,
@@ -183,6 +185,7 @@ export interface ConciergeDeps {
     | "onMessageInserted"
     | "awaitingGuardianSince"
     | "openWaitsOf"
+    | "taskCardsOf"
     | "ownerSpokeAt"
     | "archiveSessionIn"
     | "deleteSessionIn"
@@ -253,6 +256,7 @@ export class ConciergeService {
   private failedStarts = new Map<string, { turnId: string; starts: Map<string, string> }>();
   private approvalExpiry: ((chatId: string, turnDown: TurnDown) => Promise<number>) | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
+  private readonly cardListeners = new Set<(event: ChatCardSettledEvent) => void>();
   /** Per Concierge chat, the task whose report a newer input took over. */
   private readonly carriedReports = new Map<string, readonly string[]>();
   /** Per Concierge chat, the guardian messages superseded turns handed on. */
@@ -889,6 +893,52 @@ export class ConciergeService {
   }
 
   /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */
+  /** Calls `listener` whenever a card a task card shows settles. Returns the unsubscribe. */
+  onCardSettled(listener: (event: ChatCardSettledEvent) => void): () => void {
+    this.cardListeners.add(listener);
+    return () => {
+      this.cardListeners.delete(listener);
+    };
+  }
+
+  /**
+   * A question or approval of task chat `chatId` settled: answered,
+   * dismissed, decided, turned down, or out of time (`openQuestions`, as a
+   * wait's expiry ends every one still open). The Concierge chats its task
+   * reports to hear it as it reads now. Every settle comes through here.
+   */
+  async cardSettled(
+    chatId: string,
+    item: { kind: "question" | "approval"; id: string } | "openQuestions",
+  ): Promise<void> {
+    if (this.cardListeners.size === 0) return;
+    const row = await this.deps.tasks.repo.findBySession(chatId);
+    if (!row) return;
+    const found = await this.deps.tasks.repo.getWithChat(row.id);
+    // The chat it reports to now, and the one it was said in, if it moved since.
+    const chats = new Set([found?.conciergeChat.id, row.chatId]);
+    const sources = this.taskCardSources();
+    const cards =
+      item === "openQuestions"
+        ? await openQuestionCards(sources, chatId)
+        : [await settledCard(sources, chatId, item)].filter((card) => card !== null);
+    for (const card of cards) {
+      for (const sessionId of chats) {
+        if (!sessionId) continue;
+        for (const listener of this.cardListeners) listener({ sessionId, card });
+      }
+    }
+  }
+
+  /** Where task cards read what they show (task-cards.ts). */
+  taskCardSources(): TaskCardSources {
+    return {
+      taskCardsOf: (chatIds) => this.deps.webchatRepo.taskCardsOf(chatIds),
+      findBySessions: (chatIds) => this.deps.tasks.repo.findBySessions(chatIds),
+      waitExpiry: this.deps.tasks.waitExpiry,
+    };
+  }
+
   attachTaskEvents(events: TaskEventCoalescer | null): void {
     this.taskEvents = events;
   }

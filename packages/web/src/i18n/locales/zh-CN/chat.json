@@ -34,6 +34,7 @@
     },
     "ask": {
       "expiredFold": "已过期 · 回答后继续",
+      "unavailable": "这个问题或审批已无法显示",
       "answered": "已回答",
       "answeredWith": "已回答：{{answer}}",
       "dismissed": "已忽略",
