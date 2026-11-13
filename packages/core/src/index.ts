@@ -1449,16 +1449,18 @@ async function main() {
         : null) ?? { sourceType: null, name: null },
     runSystemTurn: (chatId, prompt, options) => concierge.runSystemTurn(chatId, prompt, options),
   });
-  const appChannelsService: ChannelsService = {
-    ...channelsService,
-    send: async (target, chatId, message) =>
+  // Built on the service, not spread from it, so the removed members still
+  // answer with their migration message.
+  const appChannelsService = Object.create(channelsService) as ChannelsService;
+  Object.defineProperty(appChannelsService, "send", {
+    value: async (...[target, chatId, message]: Parameters<ChannelsService["send"]>) =>
       (await intoConciergeChat(
         target,
         chatId,
         message,
         actionExecutionContext.getStore()?.agentName,
       )) ?? channelsService.send(target, chatId, message),
-  };
+  });
   const appActionDeps = {
     agentRunner,
     resolveOneOffDate: (trigger: Trigger) =>
