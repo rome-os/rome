@@ -1,6 +1,8 @@
-import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { createTestDb, type TestDb } from "../test/db.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
+import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.js";
+import type { Routine } from "../routines/types.js";
 import { TaskChecks } from "./task-checks.js";
 import {
   CONCIERGE_TASK_RUN_ACTION,
@@ -53,14 +55,29 @@ describe("TaskSchedules", () => {
   let schedules: TaskSchedules;
   let checks: TaskChecks;
   let active: Set<string>;
+  // The zone the guardian's floating schedules fire in now.
+  let zone: string;
+  let provider: ScheduleTriggerProvider;
 
   beforeEach(() => {
+    rs.useFakeTimers({ shouldAdvanceTime: false });
+    rs.setSystemTime(new Date(NOW));
     testDb = createTestDb();
     routines = new RoutinesRepository(testDb.db);
     active = new Set();
+    zone = "Asia/Shanghai";
+    // The real schedule trigger, so each schedule's next run is stored as
+    // the engine stores it; no fire happens while the clock stands still.
+    provider = new ScheduleTriggerProvider(routines, async () => zone);
     const routineEngine = {
-      activate: async (routine: { id: string }) => void active.add(routine.id),
-      deactivate: async (id: string) => void active.delete(id),
+      activate: async (routine: Routine) => {
+        active.add(routine.id);
+        await provider.activate(routine, async () => {});
+      },
+      deactivate: async (id: string) => {
+        active.delete(id);
+        provider.deactivate(id);
+      },
       onChange: () => () => {},
       setFireGate: () => {},
     };
@@ -68,7 +85,7 @@ describe("TaskSchedules", () => {
       routines,
       routineEngine,
       timezoneOf: async (owner) => (owner === "guardian" ? "Asia/Shanghai" : "UTC"),
-      now: () => NOW,
+      floatingZone: async () => zone,
     });
     checks = new TaskChecks({
       routines,
@@ -80,9 +97,20 @@ describe("TaskSchedules", () => {
       now: () => NOW,
     });
   });
-  afterEach(() => testDb.close());
+  afterEach(() => {
+    for (const id of active) provider.deactivate(id);
+    rs.useRealTimers();
+    testDb.close();
+  });
 
   const task = { id: "task-1", title: "Daily summary", owner: "guardian" };
+  /** The engine re-activating floating schedules after the guardian's zone changed. */
+  const moveTo = async (newZone: string) => {
+    zone = newZone;
+    for (const routine of await routines.listRoutines()) {
+      await provider.activate(routine, async () => {});
+    }
+  };
 
   it("keeps one routine per task, in the owner's zone, and reads it back", async () => {
     await schedules.set(task, { at: "12:25", report: "every_run", brief: "Sum up my day" });
@@ -146,6 +174,30 @@ describe("TaskSchedules", () => {
     expect(await schedules.of("task-1")).toMatchObject({ nextRunAt: at(13, 4, 25) });
   });
 
+  it("follows the guardian's zone as the engine does, and skips the run that really fires", async () => {
+    await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
+    await moveTo("Europe/London");
+
+    // 12:25 in London today, not in the zone the schedule was set in.
+    expect(await schedules.of("task-1")).toMatchObject({ nextRunAt: at(12, 12, 25) });
+    const [check] = await checks.inChat("concierge");
+    expect(check).toMatchObject({ at: at(12, 12, 25) });
+    expect(await checks.cancel("concierge", check!.id)).toBe(true);
+    expect(await checks.inChat("concierge")).toMatchObject([{ at: at(13, 12, 25) }]);
+    expect(await schedules.takeSkip("task-1", at(12, 12, 25))).toBe(true);
+  });
+
+  it("honours a skip when its fire comes late, and keeps it through a run by hand", async () => {
+    await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
+    const [check] = await checks.inChat("concierge");
+    await checks.cancel("concierge", check!.id);
+
+    // A run started by hand before its time is no scheduled fire.
+    expect(await schedules.takeSkip("task-1", NOW)).toBe(false);
+    // The host slept, and the 12:25 fire came five minutes late.
+    expect(await schedules.takeSkip("task-1", at(13, 4, 30))).toBe(true);
+  });
+
   it("removes the schedule when the task's checks are cancelled, as a stop does", async () => {
     await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
 
@@ -174,6 +226,14 @@ describe("TaskSchedules", () => {
       },
     );
     expect(await checks.laterOf(["gone"])).toEqual(new Map());
+  });
+
+  it("stores a schedule's skill, and reads it back for each run", async () => {
+    await schedules.set(task, { at: "12:25", report: "every_run", brief: "b", skill: "s:x" });
+    expect((await routines.findByKey(taskScheduleKey("task-1")))?.args).toMatchObject({
+      skill: "s:x",
+    });
+    expect(await schedules.of("task-1")).toMatchObject({ brief: "b", skill: "s:x" });
   });
 
   it("fixes a visitor's schedule to their own zone", async () => {

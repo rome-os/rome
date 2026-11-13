@@ -38,6 +38,8 @@ export interface TaskSchedule {
   report: ScheduleReport;
   /** What each run sends into the task chat. */
   brief: string;
+  /** The skill each run's brief is sent with, by name. */
+  skill?: string;
 }
 
 /** A task's schedule as the Concierge reads it back. */
@@ -142,30 +144,8 @@ export function scheduleOfRoutine(routine: Routine): (TaskSchedule & { taskId: s
     ...(days ? { days } : {}),
     report: args.report === "when_it_matters" ? "when_it_matters" : "every_run",
     brief: args.brief,
+    ...(typeof args.skill === "string" && args.skill ? { skill: args.skill } : {}),
   };
-}
-
-/**
- * When a schedule routine runs next, past the run its owner skipped: an
- * epoch time, or null when it has no run to come.
- */
-export function nextScheduledRun(routine: Routine, now: number): number | null {
-  if (!routine.enabled || routine.trigger.type !== "schedule") return null;
-  const schedule = scheduleOfRoutine(routine);
-  if (!schedule) return null;
-  const [hour, minute] = schedule.at.split(":").map(Number);
-  const days = schedule.days ? schedule.days.map((day) => CRON_DAY[day]).join(",") : "*";
-  const cron = new Cron(`${minute} ${hour} * * ${days}`, { timezone: routine.trigger.tzid });
-  const skipAt = skipOf(routine);
-  // The run the engine has next, unless it is gone by or skipped.
-  let from = new Date(now);
-  for (let i = 0; i < 2; i++) {
-    const next = cron.nextRun(from);
-    if (!next) return null;
-    if (skipAt === null || Math.abs(next.getTime() - skipAt) > 60_000) return next.getTime();
-    from = next;
-  }
-  return null;
 }
 
 /** The run the owner skipped, as epoch milliseconds, or null. */
@@ -183,16 +163,13 @@ export interface TaskSchedulesDeps {
   routineEngine: Pick<RoutineEngine, "activate" | "deactivate">;
   /** The owner's time zone. */
   timezoneOf: (owner: ConciergeOwner) => Promise<string>;
-  now?: () => number;
+  /** The zone a floating schedule fires in now, as the schedule trigger resolves it. */
+  floatingZone: () => Promise<string>;
 }
 
 /** Each task's schedule: written, read back, skipped once, removed. */
 export class TaskSchedules {
-  private readonly now: () => number;
-
-  constructor(private readonly deps: TaskSchedulesDeps) {
-    this.now = deps.now ?? Date.now;
-  }
+  constructor(private readonly deps: TaskSchedulesDeps) {}
 
   /** Sets task `taskId`'s schedule, replacing any it had. */
   async set(
@@ -205,7 +182,12 @@ export class TaskSchedules {
     const trigger = triggerOf(schedule, await this.deps.timezoneOf(task.owner), floating);
     // The task is the one source of truth for where a run goes: its task
     // chat and the Concierge chat it reports to are read from its row.
-    const args = { taskId: task.id, report: schedule.report, brief: schedule.brief };
+    const args = {
+      taskId: task.id,
+      report: schedule.report,
+      brief: schedule.brief,
+      ...(schedule.skill ? { skill: schedule.skill } : {}),
+    };
     const key = taskScheduleKey(task.id);
     const existing = await this.deps.routines.findByKey(key);
     const id = existing
@@ -241,7 +223,8 @@ export class TaskSchedules {
 
   /** Skips the next run of the schedule routine `routine`; the one after runs. */
   async skipNext(routine: Routine): Promise<boolean> {
-    const next = nextScheduledRun(routine, this.now());
+    // The run the engine fires next, as it stored it.
+    const next = routine.enabled ? (routine.nextRunAt?.getTime() ?? null) : null;
     if (next === null) return false;
     await this.deps.routines.update(routine.id, {
       args: { ...routine.args, skipAt: new Date(next).toISOString() },
@@ -257,22 +240,45 @@ export class TaskSchedules {
     const schedule = scheduleOfRoutine(routine);
     if (!schedule) return null;
     const { taskId: _task, ...view } = schedule;
-    return { ...view, nextRunAt: nextScheduledRun(routine, this.now()) };
+    return { ...view, nextRunAt: await this.nextRunOf(routine) };
+  }
+
+  /**
+   * When schedule routine `routine` runs next: the run the engine has stored,
+   * or, when its owner skipped that one, the run after it, in the zone the
+   * schedule trigger fires in. Null when it has no run to come.
+   */
+  async nextRunOf(routine: Routine): Promise<number | null> {
+    if (!routine.enabled || routine.trigger.type !== "schedule") return null;
+    const next = routine.nextRunAt?.getTime() ?? null;
+    if (next === null || skipOf(routine) !== next) return next;
+    const schedule = scheduleOfRoutine(routine);
+    if (!schedule) return null;
+    const zone =
+      routine.trigger.tzMode === "fixed" ? routine.trigger.tzid : await this.deps.floatingZone();
+    const [hour, minute] = schedule.at.split(":").map(Number);
+    const days = schedule.days ? schedule.days.map((day) => CRON_DAY[day]).join(",") : "*";
+    const cron = new Cron(`${minute} ${hour} * * ${days}`, { timezone: zone });
+    return cron.nextRun(new Date(next))?.getTime() ?? null;
   }
 
   /**
    * Whether a fire at `firedAt` of task `taskId`'s schedule is the run its
-   * owner skipped. A skipped run is let go, and the next one runs.
+   * owner skipped. While a fire runs, the engine's stored next run is the
+   * one firing, so a late fire still matches its skip. A skipped run is let
+   * go, and the next one runs; a skip whose run passed is cleared.
    */
   async takeSkip(taskId: string, firedAt: number): Promise<boolean> {
     const routine = await this.deps.routines.findByKey(taskScheduleKey(taskId));
     const skipAt = routine ? skipOf(routine) : null;
-    if (!routine || skipAt === null) return false;
-    // A skip is for one run: the one at its time. One past it is cleared.
-    if (firedAt < skipAt - 60_000) return false;
+    const firing = routine?.nextRunAt?.getTime() ?? null;
+    if (!routine || skipAt === null || firing === null) return false;
+    // A run started by hand before its time is no scheduled fire, and a skip
+    // of a later run waits for it.
+    if (firedAt < firing - 60_000 || skipAt > firing) return false;
     const { skipAt: _skip, ...args } = routine.args as Record<string, unknown>;
     await this.deps.routines.update(routine.id, { args });
-    return Math.abs(firedAt - skipAt) <= 60_000;
+    return skipAt === firing;
   }
 
   private async reactivate(id: string): Promise<void> {
