@@ -2,6 +2,7 @@ import { createServer, type IncomingMessage, type ServerResponse } from "node:ht
 import { once } from "node:events";
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
 import { defaultHttpInstance } from "@larksuiteoapi/node-sdk";
+import { CredentialRejected } from "../errors.js";
 import { createFeishuDocumentActor, FEISHU_DOCUMENT_READ } from "./feishu-documents.js";
 
 const call = { operation: FEISHU_DOCUMENT_READ, input: { documentId: "DocumentA" } };
@@ -64,6 +65,23 @@ function json(response: ServerResponse, value: unknown) {
 }
 
 describe("Feishu document reads with the real SDK and loopback HTTP", () => {
+  for (const status of [200, 400]) {
+    it(`classifies a token credential rejection with HTTP ${status} without exposing provider text`, async () => {
+      const h = await fixture((_request, response) => {
+        response.writeHead(status, { "content-type": "application/json" });
+        response.end(JSON.stringify({ code: 10003, msg: "SYNTHETIC_PRIVATE_PROVIDER_ERROR" }));
+      });
+      const actor = createFeishuDocumentActor({ ...material, appId: `cli_rejected_${status}` });
+      try {
+        await expect(actor.invoke(call)).rejects.toEqual(new CredentialRejected({ grant: "app" }));
+        expect(h.requests).toHaveLength(1);
+      } finally {
+        actor.stop?.();
+        await h.close();
+      }
+    });
+  }
+
   it("bounds both a cold token POST and the document GET and isolates cache across actor epochs", async () => {
     let tokens = 0;
     const h = await fixture((request, response) => {

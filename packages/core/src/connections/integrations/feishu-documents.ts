@@ -47,7 +47,18 @@ function createDocumentRequest(): FeishuDocumentRequest {
       maxRedirects: 0,
       signal,
     }));
-    http.interceptors.response.use((response) => response.data);
+    http.interceptors.response.use((response) => {
+      // Classify token business failures before the SDK flattens their code into text.
+      const code = z.object({ code: z.number() }).safeParse(response.data);
+      if (
+        response.config.url?.endsWith("/open-apis/auth/v3/tenant_access_token/internal") &&
+        code.success &&
+        code.data.code !== 0
+      ) {
+        throw responseError(response.data);
+      }
+      return response.data;
+    });
     const quiet = () => {};
     const client = new Client({
       appId: material.appId,
@@ -91,7 +102,13 @@ export function feishuDocumentGuidance(profile?: ProfileRecord) {
 function responseError(value: unknown): ProviderOperationError | CredentialRejected {
   const parsed = z.object({ code: z.number() }).safeParse(value);
   const code = parsed.success ? parsed.data.code : undefined;
-  if (code === 99991663 || code === 99991664 || code === 99991668 || code === 99991671) {
+  if (
+    code === 10003 ||
+    code === 99991663 ||
+    code === 99991664 ||
+    code === 99991668 ||
+    code === 99991671
+  ) {
     return new CredentialRejected({ grant: "app" });
   }
   // Document permission failures must not degrade the grant shared with IM.
@@ -132,6 +149,8 @@ export function createFeishuDocumentActor(
           if (onAbort) signal.removeEventListener("abort", onAbort);
         }
       } catch (error) {
+        if (error instanceof CredentialRejected || error instanceof ProviderOperationError)
+          throw error;
         // Axios errors can contain request headers. Expose only allowlisted reasons.
         const sizeFailure = z
           .object({
