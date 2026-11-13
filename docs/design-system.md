@@ -81,7 +81,7 @@ Use semantic tokens in components: `bg-chat-canvas`, `bg-app-canvas`, `text-fore
 
 **`brand` is a near-legacy alias for `primary`.** shadcn has no `--brand` token, and ours predates the strong-color discipline. New code uses `primary`. In Ember and Slate the two resolve to the same color, so existing `bg-brand` and `text-brand` call sites are visually correct and only need migrating.
 
-Ash is the exception. Its `primary` deepened to clear AA on lighter surfaces while `brand` kept Ember's original coral, so the mark stays on-brand across themes. Migrating a `brand` call site there is a visible change, so check whether the site paints a logo or an affordance first. Add no new `bg-brand`, `text-brand`, or `border-brand` references.
+Ash is the exception. Its `primary` deepened to clear AA on lighter surfaces while `brand` kept Ember's original coral, so the mark stays on-brand across themes. Migrating a `brand` call site there is a visible change, so check whether the site paints a logo or an affordance first. Add no new `bg-brand`, `text-brand`, or `border-brand` references. The four pastel themes split the two in light mode as well: `brand` reads the accent's step 600, one step deeper than `primary`, so that `text-brand` clears AA on a canvas, a card and a 15% tint of itself. In dark mode their `brand` is the soft step 300.
 
 Never reference a primitive directly in a component, such as `bg-[var(--neutral-‹step›)]`. Never reference a raw color either, whether `oklch(…)`, hex, or `bg-[#‹hex›]`. Theming and dark mode both rely on the semantic indirection. Primitives are referenced in exactly one place: the theme mappings in `src/lib/themes.ts`.
 

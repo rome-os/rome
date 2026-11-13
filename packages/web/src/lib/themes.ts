@@ -244,8 +244,9 @@ const ORANGE: Palette = {
 // `--orange-*`. The four pastel themes each read one of them (`pastelLight` and
 // `pastelDark` below). Every theme carries all four, per the rule above, so a
 // theme that wants a different accent re-points a mapping and adds nothing.
-// Steps 50 and 100 are pale fills, 300 is the soft brand tone, 550 is the
-// white-label step, 800 is the deep ring, and 200 and 500 serve the dark half.
+// Steps 50 and 100 are pale fills, 300 is the dark-mode brand tone, 550 is the
+// white-label step, 600 is the light-mode brand text, 800 is the deep ring, and
+// 200 and 500 serve the dark half.
 
 /** Sky blue, hue 242 — cooler and softer than `--blue-*`, which stays the
  *  informational blue. */
@@ -848,7 +849,10 @@ const slate: ThemeDefinition = {
 // Steps the mapping picks, and why:
 //   - `primary` is step 550 of the accent: a white label clears AA on it, and it
 //     clears AA as link ink on the canvas. Moving it lighter breaks both. `brand`
-//     is the lighter step 300 with dark ink, as Ash does, so logo marks stay soft.
+//     is step 600 in light with a white label, because `text-brand` is body text
+//     on the canvas, a card and a 15% tint of itself, and step 600 clears AA on all
+//     three. In dark it is the soft step 300 with dark ink, which clears AA on the
+//     dark surfaces.
 //   - `ring` is step 800 in light and step 500 in dark. The gate holds the ring
 //     3:1 away from the canvas *and* from the primary fill, so it sits on the
 //     opposite side of the primary from the canvas: deeper than the primary on a
@@ -896,8 +900,11 @@ const pastelLight = (accent: PastelAccent) =>
     "primary-foreground": "var(--neutral-0)",
     "primary-hover": `var(--${accent}-700)`,
 
-    brand: `var(--${accent}-300)`,
-    "brand-fg": "var(--neutral-900)",
+    // Text-safe in light: `text-brand` paints the canvas, a card and a 15% tint of
+    // itself, so it takes the deeper step 600 with a white label rather than the
+    // soft step 300 the dark half uses.
+    brand: `var(--${accent}-600)`,
+    "brand-fg": "var(--neutral-0)",
 
     overlay: "color-mix(in srgb, var(--neutral-900) 45%, transparent)",
 
