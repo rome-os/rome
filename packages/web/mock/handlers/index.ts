@@ -388,6 +388,12 @@ const transcripts: Record<string, ChatMessage[]> = {
         forwardedFrom: { chatId: "mock-chat-lisbon", title: "Lisbon flights" },
       } as TranscriptPart,
     ]),
+    // The owner's latest message, which the Concierge is still working on: it
+    // carries the working status reaction, as a live turn sets it.
+    {
+      ...turn(CONCIERGE_CHAT_ID, 10, "2026-08-07T13:05:00.000Z", "Book the 9:40 one", [])[0]!,
+      statusReaction: "working",
+    },
   ],
   // The task chat the conclusion above came from: the full answer, then its conclusion.
   "mock-chat-lisbon": turn(

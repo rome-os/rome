@@ -18,11 +18,12 @@ import type { ArrivalProps } from "@/components/chat/use-bubble-arrivals";
 import type { ChatMessage, TranscriptPart } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 
-// Room every guardian bubble keeps above it for its status reaction, which
-// hangs half out of the bubble's top-left corner (status-reaction.tsx). With
-// the group's 8px gap it clears the bubble above. It is there whether or not
-// a mark shows, so nothing moves when one comes or goes.
-const GUARDIAN_BUBBLE_GAP = "mt-2";
+// Room every guardian bubble keeps above it for its status reaction, whose
+// badge stands 14px above the bubble's top-left corner (status-reaction.tsx).
+// With the group's 8px gap it leaves 10px clear of the message above, its
+// shadow included. It is there whether or not a mark shows, so nothing moves
+// when one comes or goes.
+const GUARDIAN_BUBBLE_GAP = "mt-4";
 
 // The same bubble reparses nothing while the transcript re-renders around it;
 // a message's identity changes on every reload, so compare what it shows.
