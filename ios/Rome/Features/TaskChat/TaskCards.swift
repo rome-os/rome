@@ -551,7 +551,7 @@ struct QuestionCardView: View {
 
     private var answeredCard: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("Answered")
+            (answered?["dismissed"]?.bool == true ? Text("Dismissed") : Text("Answered"))
                 .romeFont(CardScale.label)
                 .foregroundStyle(Palette.sub)
             ForEach(part.questions, id: \.id) { question in

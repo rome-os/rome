@@ -92,6 +92,9 @@ struct ThreadOverlay: View {
                     .lineLimit(1)
                 if let taskChat {
                     Button {
+                        // The view sits over the chat, and would cover the
+                        // task chat pushed under it: it closes first.
+                        chat.closeThread()
                         onOpenChat(taskChat.id, tasks.title(forChat: taskChat.id, fallback: title))
                     } label: {
                         HStack(spacing: 3) {
