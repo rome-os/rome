@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { approvalWaits } from "../test/open-waits.js";
 import {
   type ConciergeTaskFacts,
   legacyTaskState,
@@ -156,8 +157,10 @@ describe("ConciergeTasks status", () => {
     tasks.attachFacts({
       now: () => NOW,
       running: (chatId) => running.has(chatId),
-      waitingSince: async (chatIds) =>
-        new Map(chatIds.flatMap((id) => (waiting.has(id) ? [[id, waiting.get(id)!]] : []))),
+      openWaits: async (chatIds) =>
+        approvalWaits(
+          new Map(chatIds.flatMap((id) => (waiting.has(id) ? [[id, waiting.get(id)!]] : []))),
+        ),
       reportPending: () => [],
     });
     told = [];

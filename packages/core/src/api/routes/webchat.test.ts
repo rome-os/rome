@@ -6737,7 +6737,7 @@ describe("Webchat API", () => {
       tasks.attachFacts({
         now: () => Date.now(),
         running: () => running,
-        waitingSince: async () => new Map(),
+        openWaits: async () => new Map(),
         reportPending: () => [],
       });
       deps.concierge = { deps: { tasks } } as never;
@@ -6933,7 +6933,7 @@ describe("Webchat API", () => {
         tasks.attachFacts({
           now: () => Date.now(),
           running: (chatId) => chatId === "task-chat",
-          waitingSince: async () => new Map(),
+          openWaits: async () => new Map(),
           reportPending: () => [],
         });
         const service = new ConciergeService({

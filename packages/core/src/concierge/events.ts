@@ -488,10 +488,11 @@ export function startConciergeEvents(
     if (summary) await guard("task result summary", writeResultSummary(taskId, summary));
   };
 
-  const reopenAfterExpiry = async (chatId: string, taskId: string) => {
+  const reopenAfterExpiry = async (taskId: string) => {
     const row = await tasks.repo.get(taskId);
     if (!row?.expiredWaitAt) return;
-    const since = (await webchatRepo.awaitingGuardianSince([chatId], { oldest: true })).get(chatId);
+    // The expired wait goes on while an item it held is still open.
+    const since = (await tasks.statusOf([row])).get(taskId)?.waitingSince;
     if (since === row.expiredWaitAt.getTime()) return;
     await tasks.repo.clearWaitExpired(taskId);
   };
@@ -536,7 +537,7 @@ export function startConciergeEvents(
     // Someone wrote to a task whose wait ended for no response: once that
     // wait is over, it ends as its new work does. Rome's own turn-down of an
     // approval, and the turn that carries on from it, reopen nothing.
-    if (!turnedDownByRome && userRows.length > 0) await reopenAfterExpiry(chatId, taskId);
+    if (!turnedDownByRome && userRows.length > 0) await reopenAfterExpiry(taskId);
     // A follow-up the task chat queued or deferred sits under the turn that
     // answered it, so the turn is Concierge's when any of its inputs was said
     // as Concierge's account. The guardian answering the task's own card or
@@ -828,7 +829,7 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     now: () => Date.now(),
     running: (chatId) => service.dashboard.chats.activeTurns(chatId).length > 0,
     // How long a task has waited is read from its oldest open wait.
-    waitingSince: (chatIds) => webchatRepo.awaitingGuardianSince(chatIds, { oldest: true }),
+    openWaits: (chatIds) => webchatRepo.openWaitsOf(chatIds),
     reportPending: () => coalescer.awaitingReport,
     laterOf: async (taskIds) => (await service.deps.checks?.laterOf(taskIds)) ?? new Map(),
   });

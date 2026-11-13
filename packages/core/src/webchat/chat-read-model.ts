@@ -132,14 +132,17 @@ export const chatsSessionAwaitingGuardian = sql<boolean>`(exists (
 ))`.mapWith(Boolean);
 
 /**
- * When the session's newest open card was said, unix seconds, or null: the
- * newest card of those {@link chatsSessionAwaitingGuardian} counts open.
- * Pending approvals are read apart, once per call, by the repository's
- * `awaitingGuardianSince`. The Chats version of the legacy
- * `sessionAwaitingCardSince`.
+ * The session's open cards, as a JSON array of { id, messageId, render, at }:
+ * the cards after its last prompt that `chatsSessionAwaitingGuardian` counts
+ * open, `at` in unix seconds. Pending approvals are read apart.
  */
-export const chatsSessionAwaitingCardSince = sql<number | null>`(
-  select max(m."said_at") from (
+export const chatsSessionOpenCards = sql<string | null>`(
+  select json_group_array(json_object(
+    'id', json_extract(part."value", '$.toolUseId'),
+    'messageId', m."key",
+    'render', json(json_extract(part."value", '$.render')),
+    'at', m."said_at"
+  )) from (
     select coalesce(max(u."seq"), 0) as "cut" from ${CHAT_MESSAGES} u
     where u."chat_id" = "rome_sessions"."chat_id" and u."thread_id" is "rome_sessions"."thread_id"
     and exists (select 1 from "agent_turn_messages" ul where ul."message_id" = u."id" and ul."role" = 'prompt')

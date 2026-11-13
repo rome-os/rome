@@ -94,6 +94,11 @@ export function useConciergeTasks(options: { enabled?: boolean; allDone?: boolea
     // Events missed while disconnected are gone, so read the list again.
     { enabled, onReconnect: () => void refetch() },
   );
+  // Every list read again, as after answering a card the task waits on.
+  const reload = useCallback(
+    () => queryClient.invalidateQueries({ queryKey: CONCIERGE_TASKS_QUERY_KEY }),
+    [queryClient],
+  );
   // A failed refetch keeps the last list, which is still the one to show.
-  return { tasks: query.data ?? [], loaded: query.data !== undefined };
+  return { tasks: query.data ?? [], loaded: query.data !== undefined, reload };
 }

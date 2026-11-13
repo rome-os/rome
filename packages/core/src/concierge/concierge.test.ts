@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { approvalWaits } from "../test/open-waits.js";
 import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { DrizzleTx } from "../db/index.js";
 import { POSTPONED_CHECKS } from "./service.js";
@@ -352,6 +353,7 @@ function setup(
       // The activity's own sources (activity.test.ts covers it).
       onMessageInserted: () => () => {},
       awaitingGuardianSince: async () => new Map<string, number>(),
+      openWaitsOf: async () => new Map(),
       ownerSpokeAt: async () => null,
     },
     tasks,
@@ -1737,7 +1739,8 @@ describe("Concierge tools", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: () => false,
-      waitingSince: async (ids) => new Map([...waiting].filter(([id]) => ids.includes(id))),
+      openWaits: async (ids) =>
+        approvalWaits(new Map([...waiting].filter(([id]) => ids.includes(id)))),
       reportPending: () => [],
     });
     s.service.attachApprovalExpiry(async (chat) => {
@@ -1933,7 +1936,7 @@ describe("Concierge tools", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: () => false,
-      waitingSince: async (ids) => new Map(ids.map((id) => [id, Date.now() - 60_000])),
+      openWaits: async (ids) => approvalWaits(new Map(ids.map((id) => [id, Date.now() - 60_000]))),
       reportPending: () => [],
     });
     await s.tool("chat_card", { chatId: "task-1" });
@@ -1941,7 +1944,7 @@ describe("Concierge tools", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: () => false,
-      waitingSince: async () => new Map(),
+      openWaits: async () => new Map(),
       reportPending: () => [],
     });
     await s.tool("chat_card", { chatId: "task-1" });
@@ -2278,7 +2281,7 @@ describe("Concierge task list tools", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: () => false,
-      waitingSince: async () => new Map(),
+      openWaits: async () => new Map(),
       reportPending: () => [],
       laterOf: async () => new Map([[row!.id, Number.POSITIVE_INFINITY]]),
     });
@@ -4745,7 +4748,7 @@ describe("Concierge chats", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: (chatId) => chatId === "task-1",
-      waitingSince: async () => new Map(),
+      openWaits: async () => new Map(),
       reportPending: () => [],
     });
     await s.storedChats.archiveSession(TOPIC_CHAT);
@@ -4780,7 +4783,7 @@ describe("Concierge chats", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: () => false,
-      waitingSince: async () => new Map(),
+      openWaits: async () => new Map(),
       reportPending: () => [],
       laterOf: async () => new Map([[checked!.id, Date.now() + 60_000]]),
     });
@@ -4800,7 +4803,7 @@ describe("Concierge chats", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: () => false,
-      waitingSince: async () => new Map(),
+      openWaits: async () => new Map(),
       reportPending: () => [],
       laterOf: async (ids) => new Map(ids.map((id) => [id, Date.now() + 60_000])),
     });

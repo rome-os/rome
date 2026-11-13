@@ -429,11 +429,18 @@ export const sessionAwaitingGuardian = sql<boolean>`(exists (
   where a."status" = 'pending'
   and json_extract(a."payload", '$.channelContext.threadId') is not null
 ))`.mapWith(Boolean);
-// When the session's newest open card was said, unix seconds, or null: the
-// newest card of those `sessionAwaitingGuardian` counts open. Pending
-// approvals are read apart, once per call, by `awaitingGuardianSince`.
-export const sessionAwaitingCardSince = sql<number | null>`(
-    select max(cast(m."created_at" as integer)) from "rome_agent_messages" m, json_each(m."content") part
+// The session's open cards, as a JSON array of { id, messageId, render, at }:
+// the cards after its last prompt that `sessionAwaitingGuardian` counts open,
+// each with its tool use id and how it renders, `at` in unix seconds. Pending
+// approvals are read apart, once per call, by `openWaitsOf`.
+export const sessionOpenCards = sql<string | null>`(
+    select json_group_array(json_object(
+      'id', json_extract(part."value", '$.toolUseId'),
+      'messageId', m."id",
+      'render', json(json_extract(part."value", '$.render')),
+      'at', cast(m."created_at" as integer)
+    ))
+    from "rome_agent_messages" m, json_each(m."content") part
     where m."session_id" = "rome_sessions"."id" and m."role" = 'assistant'
     and json_valid(m."content")
     and m."rowid" > coalesce((
@@ -798,8 +805,8 @@ export class WebChatRepository {
   /** Whether a listed session waits on the guardian, as a column of its row. */
   protected readonly awaitingGuardianColumn: SQL<boolean> = sessionAwaitingGuardian;
 
-  /** When a session's newest open card was said, unix seconds, or null. */
-  protected readonly awaitingCardSinceColumn: SQL<number | null> = sessionAwaitingCardSince;
+  /** A session's open cards, as a JSON array (`sessionOpenCards`). */
+  protected readonly openCardsColumn: SQL<string | null> = sessionOpenCards;
   /** When the session's owner last said something in it, unix seconds, or null. */
   protected readonly ownerSpokeAtColumn: SQL<number | null> = sessionOwnerSpokeAt;
 
@@ -1300,19 +1307,25 @@ export class WebChatRepository {
    * wait, epoch milliseconds: its newest open card or newest pending
    * approval. Sessions that wait on nothing, or name no chat, are left out.
    */
+  async awaitingGuardianSince(sessionIds: readonly string[]): Promise<Map<string, number>> {
+    const since = new Map<string, number>();
+    for (const [id, items] of await this.openWaitsOf(sessionIds)) {
+      since.set(id, Math.max(...items.map((item) => item.since)));
+    }
+    return since;
+  }
+
   /**
-   * `oldest`: when the oldest open wait began, for how long a task has
-   * waited, rather than the newest, for whether it waits since its owner
-   * last spoke. A chat's card is its newest either way.
+   * What each of `sessionIds` waits on the guardian for, by the same rule as
+   * `awaitingGuardianOf`: every card after its last prompt and every pending
+   * approval in it, oldest first. Sessions that wait on nothing, or name no
+   * chat, are left out.
    */
-  async awaitingGuardianSince(
-    sessionIds: readonly string[],
-    options: { oldest?: boolean } = {},
-  ): Promise<Map<string, number>> {
+  async openWaitsOf(sessionIds: readonly string[]): Promise<Map<string, OpenWaitItem[]>> {
     if (sessionIds.length === 0) return new Map();
     const ids = [...sessionIds];
     const cards = await this.db
-      .select({ id: romeSessions.id, since: this.awaitingCardSinceColumn })
+      .select({ id: romeSessions.id, cards: this.openCardsColumn })
       .from(romeSessions)
       .where(inArray(romeSessions.id, ids));
     // The pending approvals are read once for all the chats, as
@@ -1322,22 +1335,23 @@ export class WebChatRepository {
     const threadId = sql<string>`json_extract(${approvals.payload}, '$.channelContext.threadId')`;
     const pending = await this.db
       .select({
-        id: threadId,
-        since: options.oldest
-          ? sql<number>`min(cast(${approvals.createdAt} as integer))`
-          : sql<number>`max(cast(${approvals.createdAt} as integer))`,
+        chatId: threadId,
+        id: approvals.id,
+        since: sql<number>`cast(${approvals.createdAt} as integer)`,
       })
       .from(approvals)
-      .where(and(eq(approvals.status, "pending"), inArray(threadId, ids)))
-      .groupBy(threadId);
-    const since = new Map<string, number>();
-    for (const row of [...cards, ...pending]) {
-      if (row.since === null) continue;
-      const at = Number(row.since) * 1000;
-      const known = since.get(row.id) ?? at;
-      since.set(row.id, options.oldest ? Math.min(at, known) : Math.max(at, known));
+      .where(and(eq(approvals.status, "pending"), inArray(threadId, ids)));
+    const open = new Map<string, OpenWaitItem[]>();
+    const add = (chatId: string, item: OpenWaitItem) =>
+      open.set(chatId, [...(open.get(chatId) ?? []), item]);
+    for (const row of cards) {
+      for (const card of parseOpenCards(row.cards)) add(row.id, card);
     }
-    return since;
+    for (const row of pending) {
+      add(row.chatId, { kind: "approval", id: row.id, since: Number(row.since) * 1000 });
+    }
+    for (const items of open.values()) items.sort((a, b) => a.since - b.since);
+    return open;
   }
 
   /** When the session's owner last said something in it, epoch milliseconds, or null. */
@@ -3120,4 +3134,42 @@ export class WebChatRepository {
       });
     return inserted[0] ?? null;
   }
+}
+
+/** One card or pending approval a chat waits on its owner for; `since` is when it was said, epoch milliseconds. */
+export type OpenWaitItem =
+  | {
+      kind: "card";
+      id: string;
+      messageId: string;
+      render: { builtin?: boolean; componentId: string; props?: Record<string, unknown> } | null;
+      since: number;
+    }
+  | { kind: "approval"; id: string; since: number };
+
+/** The open cards of a `sessionOpenCards` column; a malformed one is left out. */
+function parseOpenCards(json: string | null): OpenWaitItem[] {
+  if (!json) return [];
+  let rows: unknown;
+  try {
+    rows = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(rows)) return [];
+  return rows.flatMap((row): OpenWaitItem[] => {
+    const { id, messageId, render, at } = (row ?? {}) as Record<string, unknown>;
+    if (typeof at !== "number") return [];
+    const rendered =
+      render &&
+      typeof render === "object" &&
+      typeof (render as { componentId?: unknown }).componentId === "string"
+        ? (render as { builtin?: boolean; componentId: string; props?: Record<string, unknown> })
+        : null;
+    // A card with no tool use id is named by its message.
+    const named = typeof id === "string" ? id : String(messageId);
+    return [
+      { kind: "card", id: named, messageId: String(messageId), render: rendered, since: at * 1000 },
+    ];
+  });
 }

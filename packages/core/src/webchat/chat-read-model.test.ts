@@ -629,6 +629,49 @@ describe("ChatReadModel", () => {
       expect(await repo.awaitingGuardianSince(["chat-1"])).toEqual(new Map([["chat-1", 40_000]]));
     });
 
+    it("lists every open card and pending approval of a chat, oldest first, with how each card renders", async () => {
+      const chat = dashboardChat("chat-1");
+      const question = (toolUseId: string) => [
+        {
+          type: "pending_interaction",
+          toolUseId,
+          render: { builtin: true, componentId: "question-card", props: { questions: [] } },
+        },
+      ];
+      fixture.say({
+        id: "c1",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(20_000),
+        parts: question("tu-1"),
+      });
+      fixture.say({
+        id: "c2",
+        chat,
+        from: "agent:main",
+        agent: "main",
+        at: new Date(30_000),
+        parts: question("tu-2"),
+      });
+      await testDb.db.insert(approvals).values({
+        id: "approval-1",
+        type: "action_execution",
+        status: "pending",
+        executionState: "idle",
+        requestedBy: "main",
+        description: "approve",
+        payload: { channelContext: { threadId: "chat-1" } },
+        createdAt: new Date(25_000),
+      });
+      const render = { builtin: true, componentId: "question-card", props: { questions: [] } };
+      expect((await repo.openWaitsOf(["chat-1"])).get("chat-1")).toEqual([
+        { kind: "card", id: "tu-1", messageId: "c1", render, since: 20_000 },
+        { kind: "approval", id: "approval-1", since: 25_000 },
+        { kind: "card", id: "tu-2", messageId: "c2", render, since: 30_000 },
+      ]);
+    });
+
     it("reads the pending approvals once for every chat asked, with the same answer per chat", async () => {
       const chat = dashboardChat("chat-1");
       dashboardChat("chat-2");

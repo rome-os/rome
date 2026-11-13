@@ -2,7 +2,11 @@
 // their chat's name, each task's status derived from the facts Rome holds,
 // and the "not synced" mark the event delivery keeps in memory.
 
-import { CONCIERGE_DONE_DAYS, type ConciergeTaskDto } from "@rome/api-types/concierge";
+import {
+  CONCIERGE_DONE_DAYS,
+  type ConciergeOpenWait,
+  type ConciergeTaskDto,
+} from "@rome/api-types/concierge";
 import type { ConciergeStatusReaction } from "@rome/api-types/concierge";
 import {
   CONCIERGE_TASK_WAIT_EXPIRY_MS,
@@ -13,6 +17,7 @@ import {
   taskStatus,
 } from "@rome/api-types/concierge-task-status";
 import type { LiveEventEmit } from "../lib/live-event.js";
+import type { OpenWaitItem } from "../webchat/repository.js";
 import { createLogger } from "../logger.js";
 import { type ConciergeOwner, GUARDIAN_OWNER } from "../webchat/owner.js";
 import type {
@@ -31,17 +36,50 @@ export interface TaskFactSources {
   now(): number;
   /** Whether a turn runs or is queued in the task chat. */
   running(chatId: string): boolean;
-  /** When each task chat's newest unanswered card or approval began, epoch milliseconds. */
-  waitingSince(chatIds: readonly string[]): Promise<Map<string, number>>;
+  /** What each task chat waits on its owner for: its open cards and pending approvals, oldest first. */
+  openWaits(chatIds: readonly string[]): Promise<Map<string, OpenWaitItem[]>>;
   /** The tasks whose result waits for the Concierge turn that reports it. */
   reportPending(): readonly string[];
   /** When each task's soonest pending check is due, epoch milliseconds. */
   laterOf?(taskIds: readonly string[]): Promise<Map<string, number>>;
 }
 
+/**
+ * The wait a task chat's open items make. All of them are one wait, which
+ * began at the oldest. Once Rome ended a wait for no response, every item
+ * said by its deadline stays part of it, though a card stays answerable:
+ * only an item said after that deadline begins a new wait, at the oldest
+ * such item. Null when nothing is open.
+ */
+export function currentWait(
+  items: readonly OpenWaitItem[],
+  expiredWaitAt: number | null,
+  waitExpiryMs: number,
+): { since: number; newest: OpenWaitItem } | null {
+  if (items.length === 0) return null;
+  const newest = items.reduce((a, b) => (b.since >= a.since ? b : a));
+  const oldest = Math.min(...items.map((item) => item.since));
+  if (expiredWaitAt === null || oldest > expiredWaitAt + waitExpiryMs) {
+    return { since: oldest, newest };
+  }
+  const deadline = expiredWaitAt + waitExpiryMs;
+  const after = items.filter((item) => item.since > deadline);
+  return {
+    since: after.length > 0 ? Math.min(...after.map((item) => item.since)) : expiredWaitAt,
+    newest,
+  };
+}
+
+/** The newest open item of a wait, as the DTO carries it: `since` is when the wait began. */
+function openWaitOf(wait: ReturnType<typeof currentWait>): ConciergeOpenWait | null {
+  return wait ? { ...wait.newest, since: wait.since } : null;
+}
+
 /** A task's status, with the facts the panel shows beside it. */
 export interface TaskStatusView extends ConciergeTaskStatusResult {
   waitingSince: number | null;
+  /** What its task chat waits on its owner for now, as the DTO carries it. */
+  openWait: ConciergeOpenWait | null;
   laterAt: number | null;
   /** When the wait Rome last ended for no response began, or null. */
   expiredWaitAt: number | null;
@@ -75,10 +113,23 @@ export class ConciergeTasks {
   /** The facts of each row, read now. */
   private async factsOf(
     rows: readonly ConciergeTaskRow[],
-  ): Promise<Map<string, ConciergeTaskFacts>> {
+  ): Promise<Map<string, ConciergeTaskFacts & { openWait: ConciergeOpenWait | null }>> {
     const facts = this.facts;
     const chats = rows.flatMap((row) => (row.sessionId ? [row.sessionId] : []));
-    const since = facts && chats.length > 0 ? await facts.waitingSince(chats) : new Map();
+    const open =
+      facts && chats.length > 0 ? await facts.openWaits(chats) : new Map<string, OpenWaitItem[]>();
+    const waits = new Map(
+      rows.map((row) => [
+        row.id,
+        row.sessionId
+          ? currentWait(
+              open.get(row.sessionId) ?? [],
+              row.expiredWaitAt?.getTime() ?? null,
+              this.waitExpiryMs,
+            )
+          : null,
+      ]),
+    );
     const pending = new Set(facts?.reportPending() ?? []);
     const later = (await facts?.laterOf?.(rows.map((row) => row.id))) ?? new Map<string, number>();
     const running = (chatId: string) => {
@@ -93,7 +144,8 @@ export class ConciergeTasks {
         row.id,
         {
           stoppedAt: row.stoppedAt?.getTime() ?? null,
-          waitingSince: row.sessionId ? (since.get(row.sessionId) ?? null) : null,
+          waitingSince: waits.get(row.id)?.since ?? null,
+          openWait: openWaitOf(waits.get(row.id) ?? null),
           running: row.sessionId
             ? running(row.sessionId) || this.settling.has(row.sessionId)
             : false,
@@ -126,12 +178,13 @@ export class ConciergeTasks {
     const now = this.now();
     const read = new Map(
       rows.map((row) => {
-        const of = facts.get(row.id) as ConciergeTaskFacts;
+        const of = facts.get(row.id) as ConciergeTaskFacts & { openWait: ConciergeOpenWait | null };
         return [
           row.id,
           {
             ...taskStatus(of, now, this.waitExpiryMs),
             waitingSince: of.waitingSince,
+            openWait: of.openWait,
             laterAt: of.laterAt,
             expiredWaitAt: row.expiredWaitAt?.getTime() ?? null,
           },
@@ -200,6 +253,7 @@ export class ConciergeTasks {
       status: status.status,
       endReason: status.endReason,
       waitingSince: status.waitingSince,
+      openWait: status.openWait,
       laterAt: finiteOrNull(status.laterAt),
       summary: row.summary,
       waitingOn: row.waitingOn,
@@ -397,5 +451,6 @@ export function finiteOrNull(at: number | null): number | null {
 }
 
 function keyOf(status: TaskStatusView): string {
-  return `${status.status}:${status.endReason ?? ""}:${status.waitingSince ?? ""}:${status.laterAt ?? ""}`;
+  const wait = status.openWait ? `${status.openWait.kind}/${status.openWait.id}` : "";
+  return `${status.status}:${status.endReason ?? ""}:${status.waitingSince ?? ""}:${wait}:${status.laterAt ?? ""}`;
 }

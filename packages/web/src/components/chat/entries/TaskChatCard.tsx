@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { useApprovals } from "@/hooks/use-approvals";
 import { listSessionMessagePage, postSessionTurnJson } from "@/lib/chat-api";
 import type { ApprovalCardStatus, ChatMessage } from "@/lib/chat-types";
+import type { ConciergeOpenWait } from "@rome/api-types/concierge";
 import { ApprovalCard } from "../approval/ApprovalCard";
 import { useChatSessions } from "@/hooks/use-chat-sessions";
 import { chatStatusTopic, useLiveEvents } from "@/hooks/use-live-events";
@@ -71,21 +72,25 @@ function TaskAskCard({
   const { t } = useTranslation("chat");
   const { sessions, invalidate } = useChatSessions("all", "all");
   // The whole list: a card or thread outlives the panel's window of recent ended tasks.
-  const { tasks } = useConciergeTasks({ allDone: true });
+  const { tasks, reload } = useConciergeTasks({ allDone: true });
+  const refresh = async () => {
+    await Promise.all([invalidate(), reload()]);
+  };
   const [open, setOpen] = useState(false);
   const session = sessions?.find((candidate) => candidate.id === chatId);
   const task = tasks.find((candidate) => candidate.chat?.id === chatId);
   const derived = task ? taskStatusOfDto(task) : null;
-  const waiting = isLatestForChat && session?.awaitingGuardian === true;
-  const expired = waiting && derived?.endReason === "no_response";
-  if (expired && !open) return <ExpiredAskCard chatId={chatId} onOpen={() => setOpen(true)} />;
-  if (waiting) {
+  const wait = isLatestForChat ? (task?.openWait ?? null) : null;
+  const expired = wait !== null && derived?.endReason === "no_response";
+  if (expired && !open) return <ExpiredAskCard wait={wait} onOpen={() => setOpen(true)} />;
+  if (wait) {
     return (
       <div className="flex w-full min-w-0 max-w-md flex-col">
         <WaitingTaskCard
           key={chatId}
           chatId={chatId}
-          onRefresh={invalidate}
+          wait={wait}
+          onRefresh={refresh}
           // An expired question opened again takes an answer, yet waits on no one.
           countsAsWaiting={!expired}
           header={
@@ -105,13 +110,9 @@ function TaskAskCard({
  * An expired question, folded to a card: what it asked, then that it expired
  * and takes an answer still. A click opens the form.
  */
-function ExpiredAskCard({ chatId, onOpen }: { chatId: string; onOpen: () => void }) {
+function ExpiredAskCard({ wait, onOpen }: { wait: ConciergeOpenWait; onOpen: () => void }) {
   const { t } = useTranslation("chat");
-  const messages = useQuery({
-    queryKey: ["task-chat-cards", chatId],
-    queryFn: () => listSessionMessagePage(chatId, { limit: 2 }),
-  });
-  const props = latestOpenInteraction(messages.data?.messages ?? [])?.part.render?.props;
+  const props = wait.kind === "card" ? wait.render?.props : undefined;
   const question = (props?.questions as { question?: unknown }[] | undefined)?.[0]?.question;
   return (
     <SettledCard
@@ -331,7 +332,10 @@ function LiveTaskChatCard({
         : "idle";
   // The card says what the task list says: its task's status, when it has one.
   // The whole list: a card or thread outlives the panel's window of recent ended tasks.
-  const { tasks } = useConciergeTasks({ allDone: true });
+  const { tasks, reload } = useConciergeTasks({ allDone: true });
+  const refresh = async () => {
+    await Promise.all([invalidate(), reload()]);
+  };
   const task = tasks.find((candidate) => candidate.chat?.id === chatId);
   const derived = task ? taskStatusOfDto(task) : null;
   // An archived task chat's task was stopped with it, and the list holds no
@@ -372,13 +376,14 @@ function LiveTaskChatCard({
       </div>
       {embedWait &&
       isLatestForChat &&
-      status === "waiting" &&
+      !running &&
+      task?.openWait &&
       derived?.endReason === "no_response" ? (
         // The wait ran out and the task ended, yet its card still takes an answer.
         <p className="text-aux text-muted-foreground">{t("concierge.tasks.expired")}</p>
       ) : null}
-      {embedWait && isLatestForChat && status === "waiting" && (
-        <WaitingTaskCard key={chatId} chatId={chatId} onRefresh={invalidate} />
+      {embedWait && isLatestForChat && !running && task?.openWait && (
+        <WaitingTaskCard key={chatId} chatId={chatId} wait={task.openWait} onRefresh={refresh} />
       )}
     </div>
   );
@@ -419,41 +424,19 @@ const approvalPayloadSchema = z.object({
     .catch(undefined),
 });
 
-function latestOpenInteraction(messages: ChatMessage[]) {
-  const open = new Map<
-    string,
-    { part: z.infer<typeof interactionSchema>; key: string; at: string }
-  >();
-  // Results close only earlier cards: a later turn can reuse the same toolUseId.
-  for (const message of messages) {
-    if (message.role !== "assistant" && message.role !== "user") continue;
-    let parts: unknown;
-    try {
-      parts = JSON.parse(message.content);
-    } catch {
-      continue;
-    }
-    if (!Array.isArray(parts)) continue;
-    for (const [index, raw] of parts.entries()) {
-      const parsed = interactionSchema.safeParse(raw);
-      if (!parsed.success) continue;
-      const part = parsed.data;
-      open.delete(part.toolUseId);
-      if (part.type === "pending_interaction") {
-        open.set(part.toolUseId, { part, key: `${message.id}:${index}`, at: message.createdAt });
-      }
-    }
-  }
-  return [...open.values()].at(-1);
-}
-
+/**
+ * The card or approval a task waits on its owner for, as the server names it
+ * in the task's `openWait`, so the card and the task's status follow one rule.
+ */
 function WaitingTaskCard({
   chatId,
+  wait,
   onRefresh,
   header,
   countsAsWaiting = true,
 }: {
   chatId: string;
+  wait: ConciergeOpenWait;
   onRefresh: () => Promise<void>;
   /** Shown at the top inside the question or approval card. */
   header?: ReactNode;
@@ -462,13 +445,6 @@ function WaitingTaskCard({
 }) {
   const { t } = useTranslation("chat");
   const navigate = useNavigate();
-  const messages = useQuery({
-    queryKey: ["task-chat-cards", chatId],
-    // Waiting questions follow the last user prompt. Pages contain whole turns,
-    // so two turns cover that question even when a turn has many message rows.
-    queryFn: () => listSessionMessagePage(chatId, { limit: 2 }),
-    refetchOnMount: "always",
-  });
   const approvals = useApprovals({ status: "pending" });
   const [submitted, setSubmitted] = useState<{
     key: string;
@@ -476,20 +452,25 @@ function WaitingTaskCard({
   } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
-  const interaction = latestOpenInteraction(messages.data?.messages ?? []);
-  const approval = (approvals.data ?? [])
-    .flatMap((row) => {
-      const payload = approvalPayloadSchema.safeParse(row.payload);
-      return row.status === "pending" &&
-        payload.success &&
-        payload.data.channelContext.threadId === chatId
-        ? [{ row, payload: payload.data }]
-        : [];
-    })
-    .sort((a, b) => Date.parse(b.row.createdAt) - Date.parse(a.row.createdAt))[0];
+  const interaction =
+    wait.kind === "card"
+      ? {
+          part: { toolUseId: wait.id, render: wait.render ?? undefined },
+          key: `${wait.messageId}:${wait.id}`,
+        }
+      : undefined;
+  const approval =
+    wait.kind === "approval"
+      ? (approvals.data ?? []).flatMap((row) => {
+          const payload = approvalPayloadSchema.safeParse(row.payload);
+          return row.id === wait.id && row.status === "pending" && payload.success
+            ? [{ row, payload: payload.data }]
+            : [];
+        })[0]
+      : undefined;
 
   async function refresh() {
-    await Promise.all([messages.refetch(), approvals.refetch(), onRefresh()]);
+    await Promise.all([approvals.refetch(), onRefresh()]);
   }
 
   async function submit(toolUseId: string, output: Record<string, unknown>) {
@@ -528,8 +509,7 @@ function WaitingTaskCard({
           {error}
         </p>
       )}
-      {approval &&
-      (!interaction || Date.parse(approval.row.createdAt) > Date.parse(interaction.at)) ? (
+      {approval ? (
         <ApprovalCard
           key={approval.row.id}
           approvalId={approval.row.id}

@@ -179,6 +179,7 @@ export interface ConciergeDeps {
     | "listProjects"
     | "onMessageInserted"
     | "awaitingGuardianSince"
+    | "openWaitsOf"
     | "ownerSpokeAt"
     | "archiveSessionIn"
     | "deleteSessionIn"
