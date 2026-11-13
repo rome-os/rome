@@ -60,6 +60,10 @@ struct MainShell: View {
     /// A blank topic chat that started its chat keeps its view under the new id.
     @State private var startedTopics: [String: UUID] = [:]
     @State private var showSettings = false
+    /// Goes up with each widget link followed: a later one wins.
+    @State private var linkSerial = 0
+    /// A short notice after a widget link, such as an app that is gone.
+    @State private var linkNotice: String?
     /// "See usage" was pressed inside the Agent page: Settings opens as it closes.
     @State private var openUsageAfterCover = false
     @State private var settingsPath: [SettingsRoute] = []
@@ -243,27 +247,7 @@ struct MainShell: View {
         // built (a sign-in, a switch) waits for it.
         .onChange(of: model.widgetRequest, initial: true) {
             guard let link = model.takeWidgetLink(for: workspace.instanceID) else { return }
-            agentPage = nil
-            showSettings = false
-            page = nil
-            settingsPage = nil
-            closeDrawer()
-            switch link {
-            case .app(_, let appId):
-                show(.apps)
-                // The list as the app knows it; the widget's copy names one
-                // not read yet.
-                let app = workspace.apps.first { $0.id == appId }
-                    ?? InstalledApp(id: appId, displayName: AppShelfStore.shared?.read()?.apps.first { $0.id == appId }?.name)
-                path = [.app(app)]
-            case .apps:
-                show(.apps)
-                path = []
-            case .newApp:
-                show(.chat)
-                path = []
-                workspace.composerPrefills[conciergeChatID] = AppIdea.own.prompt
-            }
+            Task { await follow(link) }
         }
         // A tapped push for this instance: its chat in front, nothing over it.
         .onChange(of: model.chatRequest) { _, request in
@@ -305,9 +289,64 @@ struct MainShell: View {
         #endif
     }
 
+    /// A tap on the widget: its app, Apps or Chat in front, nothing over it.
+    /// Everything presented closes first, the screens' own sheets and covers
+    /// included (a photo, a share sheet, a page from an app), and the link is
+    /// followed once they are gone, so the app never opens under one. A later
+    /// tap wins over one still on its way.
+    private func follow(_ link: WidgetLink) async {
+        linkSerial += 1
+        let mine = linkSerial
+        agentPage = nil
+        agentPath = []
+        agentLinkPage = nil
+        showSettings = false
+        page = nil
+        settingsPage = nil
+        closeDrawer()
+        Keyboard.dismiss()
+        await Presentations.dismissAll()
+        guard mine == linkSerial else { return }
+        switch link {
+        case .app(_, let appId):
+            show(.apps)
+            switch await WidgetApps.resolve(appId, in: workspace) {
+            case .found(let app):
+                guard mine == linkSerial else { return }
+                path = [.app(app)]
+            case .gone:
+                // Never a quiet nothing: the Apps grid, and why.
+                guard mine == linkSerial else { return }
+                path = []
+                say(String(localized: "App not found"))
+            }
+        case .apps:
+            show(.apps)
+            path = []
+        case .newApp:
+            show(.chat)
+            path = []
+            workspace.composerPrefills[conciergeChatID] = AppIdea.own.prompt
+        }
+    }
+
+    private func say(_ text: String) {
+        linkNotice = text
+        Task {
+            try? await Task.sleep(for: .seconds(3))
+            if linkNotice == text { linkNotice = nil }
+        }
+    }
+
     /// Session expired, at the top of the page's column.
     @ViewBuilder
     private var banners: some View {
+        if let linkNotice {
+            TopBanner(kind: .error, text: linkNotice)
+                .readableColumn()
+                .padding(.top, 58)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
         if model.sessionExpired {
             TopBanner(kind: .error, text: String(localized: "Session expired"), actionTitle: String(localized: "Sign in again")) {
                 Task { await model.reauthenticate() }
