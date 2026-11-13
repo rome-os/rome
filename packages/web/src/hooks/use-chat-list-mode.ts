@@ -14,7 +14,7 @@ import {
   writeChatListMode,
   writeLastOrdinaryChatId,
 } from "@/lib/chat-list-mode";
-import { activeSessionFromPath, type ChatKind, chatKind } from "@/lib/chat-session";
+import { activeSessionFromPath, type ChatKind, chatKind, isChatPath } from "@/lib/chat-session";
 
 /** The stored mode, or null on a device that has not shown one. */
 export function useStoredChatListMode(): ChatListMode | null {
@@ -70,12 +70,19 @@ export function useChatListFollowsRoute(mainChatId: string | null): void {
   const routeKey = `${location.key}:${location.pathname}`;
   const mode = route?.mode;
   const ordinaryChatId = route?.ordinaryChatId;
+  const onChatPage = isChatPath(location.pathname);
   useEffect(() => {
+    // Leaving the chat pages forgets the last navigation, so Back to the same
+    // history entry applies its mode again.
+    if (!onChatPage) {
+      applied.current = null;
+      return;
+    }
     if (!mode || applied.current === routeKey) return;
     applied.current = routeKey;
     writeChatListMode(mode);
     if (ordinaryChatId) writeLastOrdinaryChatId(ordinaryChatId);
-  }, [mode, ordinaryChatId, routeKey]);
+  }, [mode, ordinaryChatId, routeKey, onChatPage]);
 }
 
 /**

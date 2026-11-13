@@ -69,7 +69,7 @@ afterEach(() => {
   seedChatListMode();
 });
 
-let go: (to: string) => void = () => {};
+let go: (to: string | number) => void = () => {};
 function Navigator() {
   go = useNavigate();
   return null;
@@ -174,6 +174,19 @@ describe("the shell keeps the chat list's mode with the open chat", () => {
     act(() => go("/chat/task"));
     await waitFor(() => expect(readChatListMode()).toBe("concierge"));
     act(() => go("/chat/fork"));
+    await waitFor(() => expect(readChatListMode()).toBe("chat"));
+  });
+
+  it("applies the open chat's mode again when Back returns to it from another page", async () => {
+    openShell("/chat/mine");
+    await waitFor(() => expect(readChatListMode()).toBe("chat"));
+    act(() => writeChatListMode("concierge"));
+    act(() => go("/apps"));
+    await act(async () => {});
+    // The other page leaves the mode as the guardian set it.
+    expect(readChatListMode()).toBe("concierge");
+
+    act(() => go(-1));
     await waitFor(() => expect(readChatListMode()).toBe("chat"));
   });
 
