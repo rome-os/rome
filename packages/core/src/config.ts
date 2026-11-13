@@ -40,6 +40,15 @@ const configSchema = z.object({
   // silence. Fits inside the reserved 3:00–3:30am nightly window.
   systemUpgradeCountdownMinutes: z.coerce.number().int().positive().default(10),
 
+  // How long a question card or an approval in a Concierge task chat keeps
+  // the task waiting for its owner. After it the task ends for no response
+  // and an approval is turned down. A day by default; shorter for live tests.
+  conciergeTaskWaitExpiryMinutes: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(24 * 60),
+
   hostExecutionSocket: z.string().startsWith("/").optional(),
   hostExecutionEnabled: z
     .enum(["true", "false"])
@@ -131,6 +140,9 @@ function envToRawConfig(env: NodeJS.ProcessEnv): Record<string, unknown> {
   // Scalars
   if (env.SYSTEM_UPGRADE_COUNTDOWN_MINUTES) {
     raw.systemUpgradeCountdownMinutes = env.SYSTEM_UPGRADE_COUNTDOWN_MINUTES;
+  }
+  if (env.CONCIERGE_TASK_WAIT_EXPIRY_MINUTES) {
+    raw.conciergeTaskWaitExpiryMinutes = env.CONCIERGE_TASK_WAIT_EXPIRY_MINUTES;
   }
   if (env.ROME_HOST_EXECUTION_SOCKET) {
     raw.hostExecutionSocket = env.ROME_HOST_EXECUTION_SOCKET;

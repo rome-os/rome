@@ -33,13 +33,21 @@ const WidgetUiCard = lazy(() =>
 /** Latest parsed task_chat block per task in the Concierge transcript. */
 export const LatestTaskChatsContext = createContext<ReadonlyMap<string, ChatEntry> | null>(null);
 
-function TaskChatEntry({ block }: { block: Extract<ChatEntry, { type: "task_chat" }> }) {
+function TaskChatEntry({
+  block,
+  messageAt,
+}: {
+  block: Extract<ChatEntry, { type: "task_chat" }>;
+  messageAt?: string;
+}) {
   const latest = useContext(LatestTaskChatsContext);
   return (
     <TaskChatCard
       chatId={block.chatId}
       title={block.title}
       isLatestForChat={!latest || latest.get(block.chatId) === block}
+      show={block.show}
+      shownAt={messageAt}
     />
   );
 }
@@ -70,6 +78,8 @@ export interface RenderEntryOptions {
   /** Set by the chat transcript: each text block renders as its own bubble,
    * and every entry comes in once while `live` (its turn is running). */
   transcript?: { live: boolean };
+  /** When the message these blocks belong to was said, as an ISO time. */
+  messageAt?: string;
 }
 
 export function renderSingleEntry(
@@ -288,7 +298,7 @@ export function renderSingleEntry(
         />
       );
     case "task_chat":
-      return <TaskChatEntry key={key} block={block} />;
+      return <TaskChatEntry key={key} block={block} messageAt={options.messageAt} />;
     case "connect_card":
       return (
         <ConnectCard

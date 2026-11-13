@@ -108,7 +108,7 @@ import {
   type ChatComposerSnapshot,
 } from "@/components/chat/ChatComposer";
 import { ConciergeComposer } from "@/components/chat/composer/ConciergeComposer";
-import { ChatThreadView } from "@/components/chat/ChatThreadView";
+import { ChatThreadView, OpenThreadTaskChat } from "@/components/chat/ChatThreadView";
 import {
   type LiveStatusReactions,
   LiveStatusReactionsProvider,
@@ -133,6 +133,7 @@ import {
   FLOATING_SURFACE,
 } from "@/components/concierge/ConciergeHeaderStatus";
 import { useConciergeTaskList } from "@/components/concierge/ConciergeTaskList";
+import { PendingChecks } from "./PendingChecks";
 import { useToolTasks } from "@/pages/free/tool-tasks";
 import { useConciergeActivity } from "@/components/concierge/use-concierge-activity";
 import { type TurnPollOutcome, useTurnPoll } from "@/components/chat/use-turn-poll";
@@ -2420,6 +2421,10 @@ export function Chat({
     displayMessages.map((message) => [message.id, message.chatThreadId ?? null]),
   );
   const chatThreads = useChatThreadsValue(displayMessages, rethreaded, liveThreadTitles);
+  // The open thread view's thread, whose task chat its header opens.
+  const threadRootOfView = threadView
+    ? (chatThreads.taskThreads.get(threadView) ?? threadView)
+    : null;
   const conciergeHeader = concierge ? (
     <>
       {threadOpen ? null : conciergeHeaderWith(navbarActions)}
@@ -2651,6 +2656,9 @@ export function Chat({
                   {/* Share mode hides the composer rather than unmounting it,
                       so a draft is still there when share mode ends. */}
                   <div className={shareMode && mainSessionId ? "hidden" : "contents"}>
+                    {mainSessionId && !isArchived ? (
+                      <PendingChecks chatId={mainSessionId} turnKey={displayedStreaming} />
+                    ) : null}
                     {isArchived ? (
                       <div className="flex items-center justify-between gap-3 rounded-16 border border-border bg-surface/95 px-4 py-3 text-ui text-muted-foreground shadow-10 backdrop-blur-md supports-[backdrop-filter]:bg-surface/80">
                         <span className="min-w-0 flex-1">{t("archived.readOnly")}</span>
@@ -2738,13 +2746,22 @@ export function Chat({
                 floor={floorEl}
                 originTop={threadOrigin(threadView)}
                 header={conciergeHeaderWith(
-                  <IconButton
-                    size={floating ? "md" : "sm"}
-                    label={t("thread.close")}
-                    icon={<X />}
-                    onClick={replyDraft.closeThread}
-                    className={actionBadge}
-                  />,
+                  <>
+                    {threadRootOfView ? (
+                      <OpenThreadTaskChat
+                        threadRoot={threadRootOfView}
+                        size={floating ? "md" : "sm"}
+                        className={actionBadge}
+                      />
+                    ) : null}
+                    <IconButton
+                      size={floating ? "md" : "sm"}
+                      label={t("thread.close")}
+                      icon={<X />}
+                      onClick={replyDraft.closeThread}
+                      className={actionBadge}
+                    />
+                  </>,
                 )}
                 renderMessages={(threadMessages) => (
                   // The thread view offers Copy and Reply, not Share: a share

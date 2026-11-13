@@ -216,6 +216,8 @@ import { privateChildren, privateOwnerOf } from "./webchat/privacy.js";
 import { ownerOfChat } from "./webchat/owner.js";
 import { legacyRoutineActor } from "./routines/legacy-actor.js";
 import { continuationActor } from "./webchat/continuation-actor.js";
+import { TaskChecks } from "./concierge/task-checks.js";
+import { turnDownApprovals } from "./concierge/approval-expiry.js";
 import { ConciergeTasks } from "./concierge/tasks.js";
 import { ConciergeTasksRepository } from "./db/repositories/concierge-tasks.js";
 import { buildConciergeTools } from "./concierge/tools.js";
@@ -1183,7 +1185,12 @@ async function main() {
     // Task chats are read from Chats, where their lines are now said.
     messages: chatsTaskChatMessages(db),
     agentSessionManager: { find: (continuityKey) => agentSessionManager.find(continuityKey) },
-    tasks: new ConciergeTasks(new ConciergeTasksRepository(db)),
+    // Created before the routine engine runs any wake-up, which it reads.
+    checks: new TaskChecks({ routines: routinesRepo, routineEngine }),
+    tasks: new ConciergeTasks(
+      new ConciergeTasksRepository(db),
+      config.conciergeTaskWaitExpiryMinutes * 60_000,
+    ),
     approvals: approvalsRepo,
     runBackendTurn: (params, options) => backendTurnRunner.runAndReport(params, options),
     notify: notifyClient,
@@ -1230,6 +1237,8 @@ async function main() {
         webchatRepo,
         eventSources,
         sessionTools: (context) => buildConciergeTools(concierge, context),
+        taskOwner: async (taskId) =>
+          (await concierge.deps.tasks.repo.get(taskId))?.ownerKey ?? null,
       }),
       // A session an approval waits to resume mid-turn stays until it ends.
       heldMidTurn: (sessionId) => approvalsRepo.holdsSession(sessionId),
@@ -1368,6 +1377,11 @@ async function main() {
     appConnections,
     // An approved action, and the turn it resumes, act for whoever's turn asked.
     executionRequester(actionExecutionsRepo),
+  );
+  // A task chat's approvals are turned down when its wait runs out, or when
+  // its task is stopped, archived or deleted.
+  concierge.attachApprovalExpiry((chatId, turnDown) =>
+    turnDownApprovals({ approvals: approvalsRepo, handler: approvalHandler }, chatId, turnDown),
   );
 
   // Learn whether this boot's release version differs from the last completed
@@ -2405,8 +2419,7 @@ async function main() {
     actorOf: continuationActorOf,
     // A Concierge turn a limit stopped shows its messages failed; run again,
     // they work again until the continuation ends.
-    onContinue: (turn) =>
-      concierge.deps.tasks.repo.reopenTurnReactions(turn.sessionId, turn.turnId),
+    onContinue: (turn) => concierge.deps.tasks.repo.reopenTurn(turn.sessionId, turn.turnId),
   });
 
   // Best-effort instance-identity check. Fire-and-forget: announces

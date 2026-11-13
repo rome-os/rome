@@ -1,3 +1,7 @@
+import { MessageSquare } from "lucide-react";
+import { useNavigate } from "react-router-dom";
+import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
+import { IconButton } from "@/components/ui/icon-button";
 import { useQuery } from "@tanstack/react-query";
 import {
   type PointerEvent,
@@ -14,7 +18,13 @@ import { listChatThreadMessages } from "@/lib/chat-api";
 import type { ChatMessage } from "@/lib/chat-types";
 import { cn } from "@/lib/utils";
 import { findMessageAnchor } from "./reply/reply-source";
-import { LANDING_MS, playLanding, THREAD_FADE_MS, threadAnchor } from "./reply/thread-anchor";
+import {
+  LANDING_MS,
+  messageBubbles,
+  playLanding,
+  THREAD_FADE_MS,
+  threadAnchor,
+} from "./reply/thread-anchor";
 
 /** The query key of one chat thread, named by any of its messages. */
 export function chatThreadQueryKey(sessionId: string, messageId: string) {
@@ -172,24 +182,27 @@ export function ChatThreadView({
     const list = listRef.current;
     if (!list || !shown || landed.current) return;
     const still = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ?? false;
-    let copy: HTMLElement | null = null;
+    // The whole message lands, every bubble of it, not only its first.
+    let copies: HTMLElement[] = [];
     const start = window.setTimeout(
       () => {
-        copy = findMessageAnchor(list, messageId);
-        if (!copy) return;
+        copies = messageBubbles(list, messageId);
+        if (copies.length === 0) return;
         landed.current = true;
-        playLanding(copy);
+        for (const copy of copies) playLanding(copy);
       },
       still ? 0 : THREAD_FADE_MS,
     );
     const end = window.setTimeout(
-      () => copy?.removeAttribute("data-timeline-landed"),
+      () => {
+        for (const copy of copies) copy.removeAttribute("data-timeline-landed");
+      },
       (still ? 0 : THREAD_FADE_MS) + LANDING_MS,
     );
     return () => {
       window.clearTimeout(start);
       window.clearTimeout(end);
-      copy?.removeAttribute("data-timeline-landed");
+      for (const copy of copies) copy.removeAttribute("data-timeline-landed");
     };
   }, [shown, messageId]);
 
@@ -245,5 +258,35 @@ export function ChatThreadView({
       </div>
       {header ? <div data-chat-thread-fade>{header}</div> : null}
     </div>
+  );
+}
+
+/**
+ * The thread view header's way into the open thread's task chat, when a task
+ * of the chat has that thread.
+ */
+export function OpenThreadTaskChat({
+  threadRoot,
+  size,
+  className,
+}: {
+  threadRoot: string;
+  size: "sm" | "md";
+  className?: string;
+}) {
+  const { t } = useTranslation("chat");
+  const navigate = useNavigate();
+  // The whole list: a card or thread outlives the panel's window of recent ended tasks.
+  const { tasks } = useConciergeTasks({ allDone: true });
+  const chat = tasks.find((task) => task.threadRoot === threadRoot)?.chat;
+  if (!chat) return null;
+  return (
+    <IconButton
+      size={size}
+      label={t("thread.openTaskChat")}
+      icon={<MessageSquare />}
+      onClick={() => navigate(`/chat/${chat.id}`)}
+      className={className}
+    />
   );
 }

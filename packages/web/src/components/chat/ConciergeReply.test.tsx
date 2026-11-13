@@ -159,7 +159,7 @@ describe("the reply the toolbar and the tap row send", () => {
     expect(screen.getByRole("button", { name: "Reply" })).toBeTruthy();
   });
 
-  it("keeps the toolbar outside the clipped text and clear of the chip's row", () => {
+  it("keeps the toolbar outside the clipped text, over the bubble's top edge", () => {
     renderChat([agentRow("m1", forward)]);
 
     const toolbars = document.querySelectorAll("[data-bubble-toolbar]");
@@ -170,12 +170,8 @@ describe("the reply the toolbar and the tap row send", () => {
       expect(toolbar.className).toContain("bottom-full");
       expect(toolbar.closest("[data-concierge-bubble]")).toBeNull();
     }
-    // The toolbar overlaps 8px of the bubble, inside its 9px of border and
-    // padding, so the chip at the top needs no margin of its own.
+    // The toolbar overlaps 8px of the bubble, inside its 9px of border and padding.
     for (const toolbar of toolbars) expect(toolbar.className).toContain("translate-y-2");
-    expect(screen.getByRole("link", { name: "Open task chat Flights" }).className).not.toContain(
-      "mt-1",
-    );
   });
 });
 

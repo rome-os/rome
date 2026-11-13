@@ -1,12 +1,10 @@
 import { ThreadLabelLine } from "@/components/chat/reply/chat-threads";
 import { Fragment, memo, useMemo, type ReactNode } from "react";
-import type { ForwardedFrom } from "@rome/api-types/chat";
 import { UserMessage } from "./UserMessage";
 import { ChatBubble } from "@/components/chat/ChatBubble";
 import Markdown from "@/components/chat/ChatMarkdown";
 import { CollapsibleBubbleContent } from "@/components/chat/CollapsibleBubbleContent";
 import { ConciergeBubble } from "@/components/chat/ConciergeBubble";
-import { ForwardedChip } from "@/components/chat/ForwardedChip";
 import { UserMessageBubble } from "@/components/chat/UserMessageBubble";
 import { StatusReactionBadge, useStatusReaction } from "@/components/chat/status-reaction";
 import { renderFlatEntries } from "@/components/chat/entries";
@@ -67,24 +65,11 @@ const GuardianBubble = memo(
     prev.arrival === next.arrival,
 );
 
-// Core stores a text part's origin as it was written, so it is read as unknown.
-function forwardedOrigin(value: unknown): ForwardedFrom | undefined {
-  if (!value || typeof value !== "object") return undefined;
-  const { chatId, title } = value as Partial<ForwardedFrom>;
-  return typeof chatId === "string" && typeof title === "string" ? { chatId, title } : undefined;
-}
-
-// The task chat a text part was forwarded from, when it carries one.
-function originOf(part: TranscriptPart): ForwardedFrom | undefined {
-  return part.type === "text" && "forwardedFrom" in part
-    ? forwardedOrigin(part.forwardedFrom)
-    : undefined;
-}
-
 // Each `say` call is its own message, so each text part is its own bubble,
-// cut with a toggle when it is tall. A forwarded report is a bubble of its own
-// with a chip that names its task chat; the intro that came with it is the
-// bubble above. Task chat cards render as they do anywhere.
+// cut with a toggle when it is tall. A forwarded report is a bubble of its own,
+// named, like every message of a task's thread, by the label under it; the
+// intro that came with it is the bubble above. Task chat cards render as they
+// do anywhere.
 const AgentEntry = memo(function AgentEntry({
   entry,
   actions,
@@ -129,11 +114,13 @@ const AgentEntry = memo(function AgentEntry({
           feedbackTurn={null}
           reply={replyTo(`[Task chat] ${part.title} (chat ${part.chatId})`)}
           anchorId={index === firstBubble ? message.id : undefined}
+          partOf={message.id}
         >
           {renderFlatEntries([part], {
             ...actions,
             sessionId: message.sessionId,
             turnId: message.turnId ?? undefined,
+            messageAt: message.createdAt,
           })}
         </ConciergeBubble>
       );
@@ -152,7 +139,6 @@ const AgentEntry = memo(function AgentEntry({
     }
     if (!part.content.trim()) return null;
     const long = "format" in part && part.format === "long";
-    const forwardedFrom = originOf(part);
     return (
       <ConciergeBubble
         key={key}
@@ -166,11 +152,9 @@ const AgentEntry = memo(function AgentEntry({
         }
         reply={replyTo(part.content)}
         anchorId={index === firstBubble ? message.id : undefined}
+        partOf={message.id}
       >
         <ChatBubble tone="received" data-concierge-bubble {...arrival(message.id)}>
-          {forwardedFrom ? (
-            <ForwardedChip chatId={forwardedFrom.chatId} title={forwardedFrom.title} />
-          ) : null}
           <CollapsibleBubbleContent>
             <Markdown
               className="min-w-0 text-foreground"
@@ -216,7 +200,9 @@ export const ConciergeGroup = memo(function ConciergeGroup({
   return (
     <div
       className={cn(
-        "flex flex-col gap-2",
+        // A card keeps no margin of its own here, so its thread label sits as
+        // close to it as a bubble's does.
+        "flex flex-col gap-2 [&_[data-chat-card]]:mb-0",
         group.sender === "guardian" ? "items-end" : "items-start",
       )}
     >
