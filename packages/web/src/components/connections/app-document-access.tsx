@@ -87,7 +87,7 @@ export function AppDocumentAccess() {
       </Button>
       {open ? (
         <div className="space-y-3">
-          <p className="text-sm text-muted-foreground">{copy("scope")}</p>
+          <p className="text-ui text-muted-foreground">{copy("scope")}</p>
           <Select
             value={appId}
             disabled={busy}
@@ -161,7 +161,7 @@ export function AppDocumentAccess() {
                 <>
                   {!selected.supported ? <p role="status">{copy("unsupported")}</p> : null}
                   {!selected.authorized ? <p role="status">{copy("disconnected")}</p> : null}
-                  <p className="text-sm text-muted-foreground">
+                  <p className="text-ui text-muted-foreground">
                     {copy("providerScope")} <code>{selected.scope}</code>
                   </p>
                   <div className="flex flex-wrap gap-3">
@@ -171,13 +171,13 @@ export function AppDocumentAccess() {
                         href={console.url}
                         target="_blank"
                         rel="noreferrer"
-                        className="text-sm underline"
+                        className="text-ui underline"
                       >
                         {console.brand === "lark" ? copy("larkConsole") : copy("feishuConsole")}
                       </a>
                     ))}
                   </div>
-                  <p className="text-sm text-muted-foreground">{copy("providerGuidance")}</p>
+                  <p className="text-ui text-muted-foreground">{copy("providerGuidance")}</p>
                   <Input
                     aria-label={copy("document")}
                     placeholder={copy("document")}
@@ -188,7 +188,7 @@ export function AppDocumentAccess() {
                       mutation.reset();
                     }}
                   />
-                  <p className="text-sm text-muted-foreground">{copy("replaceWarning")}</p>
+                  <p className="text-ui text-muted-foreground">{copy("replaceWarning")}</p>
                   <Button
                     disabled={
                       busy ||
@@ -213,7 +213,7 @@ export function AppDocumentAccess() {
                 .map((policy) => (
                   <div
                     key={`${policy.connectionId}:${policy.identity}`}
-                    className="space-y-1 border-t border-border pt-3 text-sm"
+                    className="space-y-1 border-t border-border pt-3 text-ui"
                   >
                     <p>
                       {policy.connectionId} ·{" "}

@@ -184,7 +184,7 @@ The guardian grants an installed app access in Settings → Connections → App
 document access. The screen grants one document for 24 hours and states that it
 replaces the app's document-read rule on that connection. It also lists and
 revokes existing rules. Each app needs its own policy. The backend policy API
-continues to support explicit expiry and resource constraints; the screen does
+continues to support explicit expiry and resource constraints. The screen does
 not create a parallel permission store.
 
 The bot separately needs `docx:document:readonly` (or a provider permission that
@@ -192,7 +192,7 @@ includes it) and permission to open that document. Core shows the requirement an
 the corresponding developer-console link, but does not query the scope inventory
 or submit a provider permission request. The administrator must configure,
 approve and publish permissions as needed, then give the bot document access.
-The directory says `scopeStatus: "not_checked"`; an authorized connection does
+The directory says `scopeStatus: "not_checked"`. An authorized connection does
 not prove that its bot has a document scope or a document's ACL.
 
 Any independently authorized app uses the same SDK operation:
@@ -210,7 +210,7 @@ The gateway compares the canonical ID against the app's resource constraint.
 Read results are discarded when app access expires or is revoked during provider
 I/O, or when the provider grant changes. Provider failures expose only fixed
 reasons such as `provider_scope_required`, `provider_resource_denied` and
-`provider_not_found`, with the SDK error code `provider_error`; provider messages,
+`provider_not_found`, with the SDK error code `provider_error`. Provider messages,
 headers and credentials are not forwarded. The audit keeps no document content.
 
 This does not add user OAuth, managed writes, a raw HTTP broker, or automatic
