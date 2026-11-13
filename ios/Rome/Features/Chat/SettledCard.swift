@@ -117,6 +117,11 @@ struct TaskAskView: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
+        // The newest card of its task stopped waiting with no outcome held:
+        // `chat_card_settled` may have been missed, so read the page again once.
+        .task(id: mode == .open && latest ? card?.id : nil) {
+            if mode == .open, latest { store.resync() }
+        }
     }
 
     private var mode: TaskAskMode {
