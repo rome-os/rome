@@ -148,11 +148,21 @@ export function scheduleOfRoutine(routine: Routine): (TaskSchedule & { taskId: s
   };
 }
 
-/** The run the owner skipped, as epoch milliseconds, or null. */
-function skipOf(routine: Routine): number | null {
-  const skip = (routine.args as Record<string, unknown>).skipAt;
-  const at = typeof skip === "string" ? Date.parse(skip) : Number.NaN;
-  return Number.isNaN(at) ? null : at;
+/** The runs the owner skipped that have not fired yet, as epoch milliseconds. */
+function skipsOf(routine: Routine): number[] {
+  const skips = (routine.args as Record<string, unknown>).skips;
+  if (!Array.isArray(skips)) return [];
+  return skips
+    .map((skip) => (typeof skip === "string" ? Date.parse(skip) : Number.NaN))
+    .filter((at) => !Number.isNaN(at));
+}
+
+/** A schedule routine's args with skips `skips`, none when the list is empty. */
+function withSkips(routine: Routine, skips: number[]): Record<string, unknown> {
+  const { skips: _old, ...args } = routine.args as Record<string, unknown>;
+  return skips.length === 0
+    ? args
+    : { ...args, skips: skips.map((at) => new Date(at).toISOString()) };
 }
 
 export interface TaskSchedulesDeps {
@@ -221,14 +231,17 @@ export class TaskSchedules {
     return true;
   }
 
-  /** Skips the next run of the schedule routine `routine`; the one after runs. */
+  /**
+   * Skips the next run of the schedule routine `routine` that is not skipped
+   * already; the one after runs. Each skip holds until its own run fires.
+   */
   async skipNext(routine: Routine): Promise<boolean> {
-    // The run the engine fires next, as it stored it.
-    const next = routine.enabled ? (routine.nextRunAt?.getTime() ?? null) : null;
+    const next = await this.nextRunOf(routine);
     if (next === null) return false;
-    await this.deps.routines.update(routine.id, {
-      args: { ...routine.args, skipAt: new Date(next).toISOString() },
-    });
+    // A skip whose run is gone by is dropped.
+    const firing = routine.nextRunAt?.getTime() ?? next;
+    const kept = skipsOf(routine).filter((at) => at >= firing);
+    await this.deps.routines.update(routine.id, { args: withSkips(routine, [...kept, next]) });
     await this.reactivate(routine.id);
     return true;
   }
@@ -245,13 +258,14 @@ export class TaskSchedules {
 
   /**
    * When schedule routine `routine` runs next: the run the engine has stored,
-   * or, when its owner skipped that one, the run after it, in the zone the
-   * schedule trigger fires in. Null when it has no run to come.
+   * or, past the runs its owner skipped, the first one after them, in the
+   * zone the schedule trigger fires in. Null when it has no run to come.
    */
   async nextRunOf(routine: Routine): Promise<number | null> {
     if (!routine.enabled || routine.trigger.type !== "schedule") return null;
-    const next = routine.nextRunAt?.getTime() ?? null;
-    if (next === null || skipOf(routine) !== next) return next;
+    let next = routine.nextRunAt?.getTime() ?? null;
+    const skips = new Set(skipsOf(routine));
+    if (next === null || !skips.has(next)) return next;
     const schedule = scheduleOfRoutine(routine);
     if (!schedule) return null;
     const zone =
@@ -259,26 +273,32 @@ export class TaskSchedules {
     const [hour, minute] = schedule.at.split(":").map(Number);
     const days = schedule.days ? schedule.days.map((day) => CRON_DAY[day]).join(",") : "*";
     const cron = new Cron(`${minute} ${hour} * * ${days}`, { timezone: zone });
-    return cron.nextRun(new Date(next))?.getTime() ?? null;
+    // Each skip is one run, so the walk ends within as many steps.
+    for (let step = 0; next !== null && skips.has(next) && step <= skips.size; step++) {
+      next = cron.nextRun(new Date(next))?.getTime() ?? null;
+    }
+    return next;
   }
 
   /**
-   * Whether a fire at `firedAt` of task `taskId`'s schedule is the run its
+   * Whether a fire at `firedAt` of task `taskId`'s schedule is a run its
    * owner skipped. While a fire runs, the engine's stored next run is the
    * one firing, so a late fire still matches its skip. A skipped run is let
-   * go, and the next one runs; a skip whose run passed is cleared.
+   * go, and the next one runs; its skip, and any whose run passed, are
+   * dropped.
    */
   async takeSkip(taskId: string, firedAt: number): Promise<boolean> {
     const routine = await this.deps.routines.findByKey(taskScheduleKey(taskId));
-    const skipAt = routine ? skipOf(routine) : null;
     const firing = routine?.nextRunAt?.getTime() ?? null;
-    if (!routine || skipAt === null || firing === null) return false;
-    // A run started by hand before its time is no scheduled fire, and a skip
-    // of a later run waits for it.
-    if (firedAt < firing - 60_000 || skipAt > firing) return false;
-    const { skipAt: _skip, ...args } = routine.args as Record<string, unknown>;
-    await this.deps.routines.update(routine.id, { args });
-    return skipAt === firing;
+    if (!routine || firing === null) return false;
+    const skips = skipsOf(routine);
+    // A run started by hand before its time is no scheduled fire.
+    if (skips.length === 0 || firedAt < firing - 60_000) return false;
+    const later = skips.filter((at) => at > firing);
+    if (later.length !== skips.length) {
+      await this.deps.routines.update(routine.id, { args: withSkips(routine, later) });
+    }
+    return skips.includes(firing);
   }
 
   private async reactivate(id: string): Promise<void> {

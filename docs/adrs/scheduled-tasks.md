@@ -15,7 +15,7 @@ A task can carry a repeating schedule: every day, or on some weekdays, at a time
 
 The schedule says whether each run is reported, or only one that asks the owner something or fails. A quiet run with nothing to ask goes into the next digest.
 
-Between runs the task is later, and its next run is its check: the run the routine engine has next, in the zone it fires in. Cancelling that check skips that run, even when its fire comes late. Stopping or archiving the task removes the schedule. The Concierge sets one with `chat_start`, and changes or removes one with `task_upsert`.
+Between runs the task is later, and its next run is its check: the run the routine engine has next, in the zone it fires in. Cancelling that check skips that run, even when its fire comes late. Cancelling again skips the run after it, and every skipped run stays skipped. Stopping or archiving the task removes the schedule. The Concierge sets one with `chat_start`, and changes or removes one with `task_upsert`.
 
 ## Alternatives
 

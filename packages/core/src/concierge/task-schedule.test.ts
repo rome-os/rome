@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
-import { createTestDb, type TestDb } from "../test/db.js";
+import { createActionEngineRepos, createTestDb, type TestDb } from "../test/db.js";
+import { ActionEngine } from "../apps/actions/engine.js";
+import { ActionRegistryImpl } from "../apps/actions/registry.js";
 import { RoutinesRepository } from "../db/repositories/routines.js";
 import { ScheduleTriggerProvider } from "../routines/schedule-trigger-provider.js";
 import type { Routine } from "../routines/types.js";
@@ -187,6 +189,44 @@ describe("TaskSchedules", () => {
     expect(await schedules.takeSkip("task-1", at(12, 12, 25))).toBe(true);
   });
 
+  it("keeps the check and its skip on the engine's fire when the zone moves from UTC to Los Angeles", async () => {
+    zone = "UTC";
+    await schedules.set(task, { at: "08:00", report: "every_run", brief: "b" });
+    await moveTo("America/Los_Angeles");
+    const engineNext = async () =>
+      (await routines.findByKey(taskScheduleKey("task-1")))?.nextRunAt?.getTime();
+
+    // 08:00 in Los Angeles is 16:00 UTC, still to come today.
+    expect(await engineNext()).toBe(at(12, 16));
+    const [check] = await checks.inChat("concierge");
+    expect(check?.at).toBe(await engineNext());
+    await checks.cancel("concierge", check!.id);
+    expect((await routines.findByKey(taskScheduleKey("task-1")))?.args).toMatchObject({
+      skips: [new Date(at(12, 16)).toISOString()],
+    });
+    expect(await checks.inChat("concierge")).toMatchObject([{ at: at(13, 16) }]);
+    expect(await schedules.takeSkip("task-1", at(12, 16))).toBe(true);
+  });
+
+  it("skips every run cancelled before the first of them fires", async () => {
+    await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
+    const cancelNext = async () => {
+      const [check] = await checks.inChat("concierge");
+      expect(await checks.cancel("concierge", check!.id)).toBe(true);
+    };
+    await cancelNext();
+    await cancelNext();
+    expect(await checks.inChat("concierge")).toMatchObject([{ at: at(15, 4, 25) }]);
+
+    // The engine fires each day in turn, moving its next run on after each.
+    const id = (await routines.findByKey(taskScheduleKey("task-1")))!.id;
+    expect(await schedules.takeSkip("task-1", at(13, 4, 25))).toBe(true);
+    await routines.updateNextRun(id, new Date(at(14, 4, 25)));
+    expect(await schedules.takeSkip("task-1", at(14, 4, 25))).toBe(true);
+    await routines.updateNextRun(id, new Date(at(15, 4, 25)));
+    expect(await schedules.takeSkip("task-1", at(15, 4, 25))).toBe(false);
+  });
+
   it("honours a skip when its fire comes late, and keeps it through a run by hand", async () => {
     await schedules.set(task, { at: "12:25", report: "every_run", brief: "b" });
     const [check] = await checks.inChat("concierge");
@@ -274,5 +314,43 @@ describe("registerTaskRunAction", () => {
     });
     expect(runs).toEqual([["task-1", NOW]]);
     expect(await action!.execute({}, {} as never)).toMatchObject({ status: "error" });
+  });
+});
+
+describe("a task's scheduled run on the action engine", () => {
+  it("runs in main, where the Concierge is, and lets the turn it starts call actions", async () => {
+    const registry = new ActionRegistryImpl();
+    const runs: unknown[] = [];
+    // The run starts the task chat's turn, whose agent calls actions of its own.
+    registerTaskRunAction(registry, {
+      runScheduledTask: async (taskId) => {
+        runs.push(taskId, await engine.run("system:send_message", {}));
+        return "sent";
+      },
+    });
+    registry.register({
+      config: {
+        name: "system:send_message",
+        type: "system",
+        description: "Sends a message.",
+        complexity: "simple",
+        speed: "fast",
+        reliability: "high",
+        sideEffects: "write",
+      },
+      execute: async () => ({ status: "ok", data: "sent-in-main" }),
+    });
+    // No worker to fork: a root that left main would fail.
+    const engine = new ActionEngine(registry, createActionEngineRepos(), {
+      processRole: "main",
+      workerWarmPoolSize: 0,
+      isFirstPartyAction: () => true,
+    });
+
+    await expect(engine.run(CONCIERGE_TASK_RUN_ACTION, { taskId: "task-1" })).resolves.toEqual({
+      status: "ok",
+      data: { run: "sent" },
+    });
+    expect(runs).toEqual(["task-1", { status: "ok", data: "sent-in-main" }]);
   });
 });
