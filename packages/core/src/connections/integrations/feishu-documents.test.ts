@@ -3,10 +3,15 @@ import {
   createFeishuDocumentActor,
   FEISHU_DOCUMENT_OPERATIONS,
   FEISHU_DOCUMENT_READ,
+  feishuDocumentGuidance,
 } from "./feishu-documents.js";
 import { CredentialRejected, ProviderOperationError } from "../errors.js";
 rs.mock("@larksuiteoapi/node-sdk", () => ({
   Domain: { Feishu: "https://open.feishu.cn", Lark: "https://open.larksuite.com" },
+  DefaultCache: class {},
+  defaultHttpInstance: {
+    create: () => ({ interceptors: { request: { use: () => {} }, response: { use: () => {} } } }),
+  },
   Client: class {
     constructor(private options: Record<string, unknown>) {}
     async request(input: Record<string, unknown>) {
@@ -28,6 +33,28 @@ rs.mock("@larksuiteoapi/node-sdk", () => ({
 }));
 const material = { appId: "cli_fixture", appSecret: "synthetic-only", domain: "feishu" as const };
 const call = { operation: FEISHU_DOCUMENT_READ, input: { documentId: "DocumentA" } };
+describe("Feishu document guidance", () => {
+  it("uses only valid public profile fields and never guesses an unknown provider region", () => {
+    expect(
+      feishuDocumentGuidance({ appId: "https://untrusted.example", domain: "unknown" }).consoles,
+    ).toEqual([
+      { brand: "feishu", url: "https://open.feishu.cn/app" },
+      { brand: "lark", url: "https://open.larksuite.com/app" },
+    ]);
+    expect(
+      feishuDocumentGuidance({
+        appId: "cli_fixture",
+        domain: "feishu",
+        secret: "SYNTHETIC_NOT_FOR_UI",
+      }),
+    ).toEqual({
+      scope: "docx:document:readonly",
+      scopeStatus: "not_checked",
+      consoles: [{ brand: "feishu", url: "https://open.feishu.cn/app/cli_fixture/auth" }],
+    });
+  });
+});
+
 describe("Feishu document reads", () => {
   it("exposes one read-only operation, with no arbitrary transport or write", () => {
     expect(FEISHU_DOCUMENT_OPERATIONS).toHaveLength(1);
@@ -83,6 +110,30 @@ describe("Feishu document reads", () => {
     }
     const refused = createFeishuDocumentActor(material, async () => ({ code: 99991663 }));
     await expect(refused.invoke(call)).rejects.toBeInstanceOf(CredentialRejected);
+  });
+  it("maps the Axios response ceiling to a permanent size failure, not a retryable outage", async () => {
+    const actor = createFeishuDocumentActor(material, async () => {
+      throw Object.assign(new Error("maxContentLength size of 262144 exceeded"), {
+        code: "ERR_BAD_RESPONSE",
+      });
+    });
+    await expect(actor.invoke(call)).rejects.toEqual(
+      new ProviderOperationError("provider_response_too_large"),
+    );
+    const unrelated = createFeishuDocumentActor(material, async () => {
+      throw Object.assign(new Error("unrelated failure"), { code: "ERR_BAD_RESPONSE" });
+    });
+    await expect(unrelated.invoke(call)).rejects.toEqual(
+      new ProviderOperationError("provider_unavailable", true),
+    );
+  });
+  it("does not degrade the bot for missing document permission, but rejects invalid app tokens", async () => {
+    await expect(
+      createFeishuDocumentActor(material, async () => ({ code: 99991679 })).invoke(call),
+    ).rejects.toEqual(new ProviderOperationError("provider_scope_required"));
+    await expect(
+      createFeishuDocumentActor(material, async () => ({ code: 99991664 })).invoke(call),
+    ).rejects.toBeInstanceOf(CredentialRejected);
   });
   it("rejects oversized, partial and malformed responses, never claiming a truncated result is complete", async () => {
     for (const value of [

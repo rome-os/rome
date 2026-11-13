@@ -1,7 +1,7 @@
 // App access contract: docs/concepts/apps.md#connection-access.
 import { z } from "zod";
 import { CredentialRejected, ProviderOperationError } from "../errors.js";
-import type { Actor, OperationDescriptor } from "../types.js";
+import type { Actor, OperationDescriptor, ProfileRecord } from "../types.js";
 import type { FeishuAppMaterial } from "./feishu.js";
 
 export const FEISHU_DOCUMENT_READ = "feishu.document.read";
@@ -31,35 +31,71 @@ export type FeishuDocumentRequest = (
   signal: AbortSignal,
 ) => Promise<unknown>;
 
-async function requestDocument(
-  material: FeishuAppMaterial,
-  documentId: string,
-  signal: AbortSignal,
-): Promise<unknown> {
-  const { Client, Domain } = await import("@larksuiteoapi/node-sdk");
-  const quiet = () => {};
-  const client = new Client({
-    appId: material.appId,
-    appSecret: material.appSecret,
-    domain: material.domain === "lark" ? Domain.Lark : Domain.Feishu,
-    logger: { error: quiet, warn: quiet, info: quiet, debug: quiet, trace: quiet },
-  });
-  return client.request({
-    method: "GET",
-    url: `/open-apis/docx/v1/documents/${documentId}/raw_content`,
-    timeout: 15_000,
-    maxContentLength: MAX_RESPONSE_BYTES,
-    maxRedirects: 0,
-    signal,
-  });
+function createDocumentRequest(): FeishuDocumentRequest {
+  let cache: import("@larksuiteoapi/node-sdk").DefaultCache | undefined;
+  return async (material, documentId, signal) => {
+    const { Client, Domain, DefaultCache, defaultHttpInstance } = await import(
+      "@larksuiteoapi/node-sdk"
+    );
+    // A grant epoch owns its cache. Concurrent reads need separate cancellation scopes.
+    cache ??= new DefaultCache();
+    const http = defaultHttpInstance.create();
+    http.interceptors.request.use((config) => ({
+      ...config,
+      timeout: 15_000,
+      maxContentLength: MAX_RESPONSE_BYTES,
+      maxRedirects: 0,
+      signal,
+    }));
+    http.interceptors.response.use((response) => response.data);
+    const quiet = () => {};
+    const client = new Client({
+      appId: material.appId,
+      appSecret: material.appSecret,
+      domain: material.domain === "lark" ? Domain.Lark : Domain.Feishu,
+      cache,
+      httpInstance: http,
+      logger: { error: quiet, warn: quiet, info: quiet, debug: quiet, trace: quiet },
+    });
+    return client.request({
+      method: "GET",
+      url: `/open-apis/docx/v1/documents/${documentId}/raw_content`,
+      timeout: 15_000,
+      maxContentLength: MAX_RESPONSE_BYTES,
+      maxRedirects: 0,
+      signal,
+    });
+  };
+}
+
+/** Only public profile fields may become provider-console links. */
+export function feishuDocumentGuidance(profile?: ProfileRecord) {
+  const appId =
+    typeof profile?.appId === "string" && /^cli_[a-zA-Z0-9]+$/.test(profile.appId)
+      ? profile.appId
+      : null;
+  const brands: Array<"feishu" | "lark"> =
+    profile?.domain === "feishu" || profile?.domain === "lark"
+      ? [profile.domain]
+      : ["feishu", "lark"];
+  return {
+    scope: FEISHU_DOCUMENT_SCOPE,
+    scopeStatus: "not_checked" as const,
+    consoles: brands.map((brand) => ({
+      brand,
+      url: `${brand === "lark" ? "https://open.larksuite.com" : "https://open.feishu.cn"}/app${appId ? `/${encodeURIComponent(appId)}/auth` : ""}`,
+    })),
+  };
 }
 
 function responseError(value: unknown): ProviderOperationError | CredentialRejected {
   const parsed = z.object({ code: z.number() }).safeParse(value);
   const code = parsed.success ? parsed.data.code : undefined;
-  if (code === 99991663 || code === 99991668 || code === 99991671) {
+  if (code === 99991663 || code === 99991664 || code === 99991668 || code === 99991671) {
     return new CredentialRejected({ grant: "app" });
   }
+  // Document permission failures must not degrade the grant shared with IM.
+  // The Talker classifies transport faults, not document authorization responses.
   if (code === 99991672 || code === 99991676 || code === 99991679) {
     return new ProviderOperationError("provider_scope_required");
   }
@@ -72,7 +108,7 @@ function responseError(value: unknown): ProviderOperationError | CredentialRejec
 /** Uses only the connected app identity; no user OAuth, URL input, or CLI fallback. */
 export function createFeishuDocumentActor(
   material: FeishuAppMaterial,
-  request: FeishuDocumentRequest = requestDocument,
+  request: FeishuDocumentRequest = createDocumentRequest(),
 ): Actor {
   const stopped = new AbortController();
   return {
@@ -96,7 +132,14 @@ export function createFeishuDocumentActor(
           if (onAbort) signal.removeEventListener("abort", onAbort);
         }
       } catch (error) {
-        // Axios errors can contain request headers. Only inspect status/code, never log them.
+        // Axios errors can contain request headers. Expose only allowlisted reasons.
+        const sizeFailure = z
+          .object({
+            code: z.literal("ERR_BAD_RESPONSE"),
+            message: z.string().regex(/^maxContentLength size of \d+ exceeded$/),
+          })
+          .safeParse(error);
+        if (sizeFailure.success) throw new ProviderOperationError("provider_response_too_large");
         const response = z
           .object({ response: z.object({ status: z.number(), data: z.unknown() }) })
           .safeParse(error);
