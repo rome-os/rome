@@ -1,4 +1,10 @@
 import { CONCIERGE_CHAT_ID } from "@/hooks/use-concierge";
+import {
+  cardKey,
+  chatCardSettledSchema,
+  type LiveTaskCards,
+  LiveTaskCardsProvider,
+} from "./entries/live-task-cards";
 import type { DraftDeviceFolder } from "@/lib/device-folder";
 import { flushSync } from "react-dom";
 import {
@@ -79,7 +85,7 @@ import type {
 } from "@rome/api-types/trace-segments";
 import { useStableMap } from "@/hooks/use-stable-map";
 import { HOLD_STICK_EVENT, useStickToBottom } from "@/hooks/use-stick-to-bottom";
-import { ChatPendingCardJump } from "@/components/chat/ChatPendingCardJump";
+import { ChatPendingCardJump, ConciergeCardJump } from "@/components/chat/ChatPendingCardJump";
 import {
   CHAT_PAGE_TURNS,
   CONCIERGE_PAGE_TURNS,
@@ -286,6 +292,8 @@ interface ChatSessionEventsProps {
   onChatThreadRetired?: (event: z.infer<typeof chatThreadRetiredSchema>) => void;
   /** Rome changed the status reaction on a guardian message of a Concierge chat. */
   onMessageStatusReaction?: (event: z.infer<typeof messageStatusReactionSchema>) => void;
+  /** A question or approval a task card shows settled. */
+  onChatCardSettled?: (event: z.infer<typeof chatCardSettledSchema>) => void;
   onSessionName: (sessionId: string, event: z.infer<typeof sessionNameSchema>) => void;
   onSessionRunning: (event: z.infer<typeof sessionRunningSchema>) => void;
   onReconnect: (sessionId: string) => void;
@@ -297,6 +305,7 @@ function ChatSessionEvents({
   onMessageChatThread,
   onChatThreadRetired,
   onMessageStatusReaction,
+  onChatCardSettled,
   onSessionName,
   onSessionRunning,
   onReconnect,
@@ -328,6 +337,12 @@ function ChatSessionEvents({
         schema: messageStatusReactionSchema,
         fn: (event) => {
           if (event.sessionId === sessionId) onMessageStatusReaction?.(event);
+        },
+      },
+      chat_card_settled: {
+        schema: chatCardSettledSchema,
+        fn: (event) => {
+          if (event.sessionId === sessionId) onChatCardSettled?.(event);
         },
       },
       session_running: {
@@ -574,6 +589,14 @@ export function Chat({
   const handleMessageStatusReaction = useCallback(
     ({ messageId, statusReaction }: z.infer<typeof messageStatusReactionSchema>) =>
       setLiveReactions((prev) => new Map(prev).set(messageId, statusReaction)),
+    [],
+  );
+  // Task cards' questions and approvals live events settled since the
+  // messages loaded. A reconnect reloads the messages, which carry them.
+  const [liveCards, setLiveCards] = useState<LiveTaskCards>(new Map());
+  const handleChatCardSettled = useCallback(
+    ({ card }: z.infer<typeof chatCardSettledSchema>) =>
+      setLiveCards((prev) => new Map(prev).set(cardKey(card), card)),
     [],
   );
   // Inline share flow: pick turns directly on the transcript.
@@ -1038,6 +1061,7 @@ export function Chat({
     () => new Set(currentReplyMessages(view, runningTurnId).map((message) => message.id)),
     [view, runningTurnId],
   );
+
   const lastTurnFailed = useMemo(() => isLastTurnFailed(view), [view]);
   // The latest assistant text block. The live row follows it (and smooths it
   // into typing, see LiveTail); the chat does not render for it.
@@ -1703,6 +1727,7 @@ export function Chat({
   const handleSessionEventsReconnect = useCallback(
     (sid: string) => {
       setLiveReactions(new Map());
+      setLiveCards(new Map());
       resyncSessionMessages(sid);
       if (sid === mainSessionIdRef.current) kickTurnPoll();
     },
@@ -2536,6 +2561,7 @@ export function Chat({
           onMessageChatThread={handleMessageChatThread}
           onChatThreadRetired={handleChatThreadRetired}
           onMessageStatusReaction={handleMessageStatusReaction}
+          onChatCardSettled={handleChatCardSettled}
           onSessionName={handleSessionName}
           onSessionRunning={handleSessionRunning}
           onReconnect={handleSessionEventsReconnect}
@@ -2725,12 +2751,23 @@ export function Chat({
                       centered jump to latest. */}
                   {mainSessionId && !threadOpen && (
                     <div className="pointer-events-none absolute right-0 bottom-full mb-2">
-                      <ChatPendingCardJump
-                        scroller={scrollerEl}
-                        content={contentEl}
-                        floor={floorEl}
-                        currentReplyMessageIds={currentReplyMessageIds}
-                      />
+                      {concierge ? (
+                        <ConciergeCardJump
+                          scroller={scrollerEl}
+                          content={contentEl}
+                          floor={floorEl}
+                          currentReplyMessageIds={currentReplyMessageIds}
+                          messages={view.displayMessages}
+                          liveCards={liveCards}
+                        />
+                      ) : (
+                        <ChatPendingCardJump
+                          scroller={scrollerEl}
+                          content={contentEl}
+                          floor={floorEl}
+                          currentReplyMessageIds={currentReplyMessageIds}
+                        />
+                      )}
                     </div>
                   )}
                   {shareMode && mainSessionId ? (
@@ -2936,7 +2973,9 @@ export function Chat({
   return (
     <ReplyDraftProvider value={replyDraft}>
       <MessageSharingContext.Provider value={shareMessageTurn}>
-        <LiveStatusReactionsProvider value={liveReactions}>{page}</LiveStatusReactionsProvider>
+        <LiveStatusReactionsProvider value={liveReactions}>
+          <LiveTaskCardsProvider value={liveCards}>{page}</LiveTaskCardsProvider>
+        </LiveStatusReactionsProvider>
       </MessageSharingContext.Provider>
     </ReplyDraftProvider>
   );

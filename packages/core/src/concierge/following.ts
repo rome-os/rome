@@ -166,6 +166,15 @@ export interface WatchSource extends ProviderWatchSectionWithTriggers {
   provider: WatchProvider;
 }
 
+/** The kind of events `items` are, as their replies' label names it, when they are all one kind. */
+function oneKind(
+  items: readonly { source: string; kind: string }[],
+  kindLabel: (source: string, kind: string) => string,
+): string | null {
+  const kinds = new Set(items.map((item) => kindLabel(item.source, item.kind)));
+  return kinds.size === 1 ? ([...kinds][0] ?? null) : null;
+}
+
 const kindLabelsOf = (sources: WatchSource[]) => (source: string, kind: string) =>
   sources.find((s) => s.source === source)?.kinds.find((k) => k.kind === kind)?.label ?? kind;
 
@@ -605,6 +614,12 @@ export function startConciergeFollowing(
         (await service.runSystemTurn(chatId, renderImportantTurn(items, held, at, kindLabel), {
           quiet: true,
           inputLabel: `Following · important (${items.length})`,
+          // Its replies are labelled with what it follows: the kind of
+          // events, when they are all of one kind.
+          inputSource: {
+            type: "following",
+            name: oneKind(items, kindLabel),
+          },
           pushLevel: "active",
         }));
       // Items the Concierge never had stay owed, and the delivery tries again.
@@ -803,6 +818,7 @@ export function startConciergeFollowing(
             service.runSystemTurn(chatId, prompt, {
               quiet: true,
               inputLabel: `Following · digest (${items.length})`,
+              inputSource: { type: "digest", name: null },
               // A digest is expected at its time, so it arrives without an alert.
               pushLevel: "passive",
             }),

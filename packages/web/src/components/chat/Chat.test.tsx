@@ -491,6 +491,17 @@ function pane(children: ReactNode) {
   return <ToolTraceContext.Provider value={host}>{children}</ToolTraceContext.Provider>;
 }
 
+/** A query client as the app gives every chat: the Concierge chat reads its task list through it. */
+const queries = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
+
+/** Wraps what a test renders, and every rerender of it, in a query client of its own. */
+function withQueries() {
+  const client = queries();
+  return ({ children }: { children: ReactNode }) => (
+    <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  );
+}
+
 function renderChat(children: ReactNode, live?: LiveEventsClient) {
   const routed = <MemoryRouter>{pane(children)}</MemoryRouter>;
   return render(
@@ -499,6 +510,7 @@ function renderChat(children: ReactNode, live?: LiveEventsClient) {
     ) : (
       routed
     ),
+    { wrapper: withQueries() },
   );
 }
 
@@ -697,6 +709,10 @@ describe("Chat read marking", () => {
   });
 });
 
+/** The chat's own event stream: a Concierge chat also listens to its task list. */
+const chatEvents = () =>
+  MockEventSource.instances.find((source) => String(source.url).includes("/chat/sessions/"));
+
 describe("Chat unread divider", () => {
   const agentMessage = (id: string, minute: number) => ({
     id,
@@ -751,10 +767,10 @@ describe("Chat unread divider", () => {
     const { loadReadMark, answer } = deferredMark();
     renderChat(<Chat sessionId="concierge" variant="concierge" loadReadMark={loadReadMark} />);
     await screen.findByTestId("message-list");
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    await waitFor(() => expect(chatEvents()).toBeTruthy());
 
     act(() => {
-      MockEventSource.instances[0]?.emit("message_insert", agentMessage("a5", 4));
+      chatEvents()?.emit("message_insert", agentMessage("a5", 4));
     });
     await answer(MARK);
     await waitFor(() => expect(unreadFrom()).toBe("a3"));
@@ -770,11 +786,11 @@ describe("Chat unread divider", () => {
       />,
     );
     await waitFor(() => expect(markSessionRead).toHaveBeenCalled());
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    await waitFor(() => expect(chatEvents()).toBeTruthy());
     expect(unreadFrom()).toBe("");
 
     act(() => {
-      MockEventSource.instances[0]?.emit("message_insert", agentMessage("a5", 4));
+      chatEvents()?.emit("message_insert", agentMessage("a5", 4));
     });
     await act(idle);
     expect(unreadFrom()).toBe("");
@@ -787,10 +803,10 @@ describe("Chat unread divider", () => {
     );
     await waitFor(() => expect(unreadFrom()).toBe("a3"));
     await waitFor(() => expect(markSessionRead).toHaveBeenCalled());
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    await waitFor(() => expect(chatEvents()).toBeTruthy());
 
     act(() => {
-      MockEventSource.instances[0]?.emit("message_insert", agentMessage("a5", 4));
+      chatEvents()?.emit("message_insert", agentMessage("a5", 4));
     });
     await act(idle);
     expect(unreadFrom()).toBe("a3");
@@ -835,10 +851,10 @@ describe("Chat unread divider", () => {
       />,
     );
     await waitFor(() => expect(markSessionRead).toHaveBeenCalled());
-    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    await waitFor(() => expect(chatEvents()).toBeTruthy());
 
     act(() => {
-      MockEventSource.instances[0]?.emit("message_insert", inTurn("a2", 9, "turn-a"));
+      chatEvents()?.emit("message_insert", inTurn("a2", 9, "turn-a"));
     });
     await act(async () => observers.at(-1)?.());
     await waitFor(() => expect(listSessionMessagePage).toHaveBeenCalledTimes(2));
@@ -2422,7 +2438,7 @@ describe("Chat Concierge empty state", () => {
         </ToolTasksContext.Provider>
       </SlotProvider>
     );
-    const view = render(<MemoryRouter>{at(true, false)}</MemoryRouter>);
+    const view = render(<MemoryRouter>{at(true, false)}</MemoryRouter>, { wrapper: withQueries() });
     // Chat on screen: its floating header takes the shell's buttons.
     await waitFor(() => expect(seen.outlet).toBe(true));
 
@@ -2553,7 +2569,7 @@ describe("Chat Concierge empty state", () => {
         </SlotProvider>
       </MemoryRouter>
     );
-    const view = render(at(false, false));
+    const view = render(at(false, false), { wrapper: withQueries() });
     const hang = screen.getByTestId("hang");
     const bar = screen.getByTestId("bar");
     // The same badge, name tag and status as the floating header.

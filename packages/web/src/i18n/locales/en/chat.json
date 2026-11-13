@@ -38,6 +38,7 @@
     },
     "ask": {
       "expiredFold": "Expired · answer to continue",
+      "unavailable": "This question or approval can no longer be shown",
       "answered": "Answered",
       "answeredWith": "Answered: {{answer}}",
       "dismissed": "Dismissed",
@@ -632,9 +633,6 @@
   },
   "sessionRenewal": {
     "notice": "Context tidied up · {{reason}}",
-    "showHandoff": "Show summary",
-    "hideHandoff": "Hide summary",
-    "handoffTitle": "Summary carried over",
     "reasons": {
       "context": "conversation got long",
       "setup": "setup updated",
@@ -649,7 +647,10 @@
       "routine": "Routine",
       "app": "App",
       "agent": "Agent",
-      "automation": "Automation"
+      "automation": "Automation",
+      "following": "Following",
+      "digest": "Following · digest",
+      "check": "Check"
     }
   },
   "routineCard": {

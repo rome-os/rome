@@ -38,6 +38,7 @@
     },
     "ask": {
       "expiredFold": "已过期 · 回答后继续",
+      "unavailable": "这个问题或审批已无法显示",
       "answered": "已回答",
       "answeredWith": "已回答：{{answer}}",
       "dismissed": "已忽略",
@@ -632,9 +633,6 @@
   },
   "sessionRenewal": {
     "notice": "已整理上下文 · {{reason}}",
-    "showHandoff": "查看摘要",
-    "hideHandoff": "收起",
-    "handoffTitle": "带到新上下文的摘要",
     "reasons": {
       "context": "对话较长",
       "setup": "设定已更新",
@@ -649,7 +647,10 @@
       "routine": "例程",
       "app": "应用",
       "agent": "Agent",
-      "automation": "自动化"
+      "automation": "自动化",
+      "following": "关注",
+      "digest": "关注 · 摘要",
+      "check": "检查"
     }
   },
   "routineCard": {

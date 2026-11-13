@@ -314,7 +314,8 @@ function ActivityViewSwitch({ view }: { view: ActivityView }) {
 function PendingApprovalsBanner({ className }: { className?: string }) {
   const navigate = useNavigate();
   const base = useActivityBase();
-  const approvals = useApprovals();
+  // Only the pending ones: the count needs no approval that was decided.
+  const approvals = useApprovals({ status: "pending" });
   const count = (approvals.data ?? []).filter((approval) => approval.status === "pending").length;
   if (count === 0) return null;
   return (

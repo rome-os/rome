@@ -52,7 +52,8 @@ import { TurnLinks } from "../sessions/turn-links.js";
 import {
   ChatReadModel,
   chatsSessionAwaitingGuardian,
-  chatsSessionAwaitingCardSince,
+  chatsSessionOpenCards,
+  chatsSessionInteractions,
   chatsSessionOwnerSpokeAt,
 } from "./chat-read-model.js";
 import {
@@ -112,7 +113,8 @@ export class ChatsWebChatRepository extends WebChatRepository {
   // A listed session counts and waits on the lines its transcript draws.
   protected override readonly messageCountColumn = chatsSessionMessageCount;
   protected override readonly awaitingGuardianColumn = chatsSessionAwaitingGuardian;
-  protected override readonly awaitingCardSinceColumn = chatsSessionAwaitingCardSince;
+  protected override readonly openCardsColumn = chatsSessionOpenCards;
+  protected override readonly interactionsColumn = chatsSessionInteractions;
   protected override readonly ownerSpokeAtColumn = chatsSessionOwnerSpokeAt;
 
   /** Searches the dashboard chats' messages in Chats, at most one match per

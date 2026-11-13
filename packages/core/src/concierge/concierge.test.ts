@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, rs } from "@rstest/core";
+import { threadIdOf } from "../apps/repositories/approvals.js";
+import { approvalWaits } from "../test/open-waits.js";
 import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { DrizzleTx } from "../db/index.js";
 import { POSTPONED_CHECKS } from "./service.js";
@@ -352,6 +354,8 @@ function setup(
       // The activity's own sources (activity.test.ts covers it).
       onMessageInserted: () => () => {},
       awaitingGuardianSince: async () => new Map<string, number>(),
+      openWaitsOf: async () => new Map(),
+      taskCardsOf: async () => new Map(),
       ownerSpokeAt: async () => null,
     },
     tasks,
@@ -536,11 +540,14 @@ function setup(
       fake = true;
       rs.useFakeTimers();
     },
+    // As the repository tells it: with the chat its payload names kept apart.
     createApproval: (approval: Record<string, unknown>) => {
-      for (const listener of approvalListeners) listener(approval);
+      for (const listener of approvalListeners)
+        listener({ ...approval, threadId: threadIdOf(approval.payload) });
     },
     resolveApproval: (approval: Record<string, unknown>) => {
-      for (const listener of resolvedListeners) listener(approval);
+      for (const listener of resolvedListeners)
+        listener({ ...approval, threadId: threadIdOf(approval.payload) });
     },
     chats,
     send,
@@ -770,40 +777,50 @@ describe("Concierge tools", () => {
       expect(threadOf(s, ack)).toBe("g0");
     });
 
-    it("a task event's turn reports on the one task it names, and a batch on none", async () => {
+    it("a turn reports on the one task it was started about, and a batch on none", async () => {
       const s = setup();
-      const [row] = await s.tasks.repo.upsertMany([
+      const [row, other] = await s.tasks.repo.upsertMany([
         { title: "Flights", state: "doing", chatId: CONCIERGE_CHAT, sourceMessageId: "ack-1" },
-      ]);
-      const resolved = await s.service.resolveTurn({
-        agentName: CONCIERGE_AGENT_ID,
-        sessionId: "runtime-1",
-        channel: "webchat",
-        threadId: CONCIERGE_CHAT,
-        prompt: `<task_events>\n<task id="${row!.id}" title="Flights">\n</task>\n</task_events>`,
-      });
-      const woken = await s.service.resolveTurn({
-        agentName: CONCIERGE_AGENT_ID,
-        sessionId: "runtime-1",
-        channel: "webchat",
-        threadId: CONCIERGE_CHAT,
-        prompt: `⏰ Time's up: check task:${row!.id}`,
-      });
-
-      expect(resolved.reportedTask).toBe(row!.id);
-      expect(woken.reportedTask).toBe(row!.id);
-
-      // A batch about two tasks answers neither, so an unnamed say goes in no thread.
-      const [other] = await s.tasks.repo.upsertMany([
         { title: "Hotels", state: "doing", chatId: CONCIERGE_CHAT, sourceMessageId: "ack-1" },
       ]);
-      const batch = await s.service.resolveTurn({
-        agentName: CONCIERGE_AGENT_ID,
-        sessionId: "runtime-1",
-        channel: "webchat",
-        threadId: CONCIERGE_CHAT,
-        prompt: `<task_events>\n<task id="${row!.id}" title="Flights">\n</task>\n<task id="${other!.id}" title="Hotels">\n</task>\n</task_events>`,
+      const turn = (prompt: string, taskIds?: string[]) =>
+        s.service.resolveTurn({
+          agentName: CONCIERGE_AGENT_ID,
+          sessionId: "runtime-1",
+          channel: "webchat",
+          threadId: CONCIERGE_CHAT,
+          prompt,
+          ...(taskIds ? { taskIds } : {}),
+        });
+      // A task event's batch of one, whatever its text names.
+      const resolved = await turn(
+        `<task_events>\n<task id="${row!.id}" title="Flights">\nguardian: see task:${other!.id}\n</task>\n</task_events>`,
+        [row!.id],
+      );
+      expect(resolved.reportedTask).toBe(row!.id);
+      // A defer wake-up names its task in Rome's header, not in its note.
+      const woken = await turn(
+        `⏰ Time's up\n<defer_note scheduled_at="2026-11-12T09:00:00.000Z" task_id="${row!.id}">\nCompare with task:${other!.id} and task_id="${other!.id}"\n</defer_note>`,
+      );
+      expect(woken.reportedTask).toBe(row!.id);
+      // A check that came due labels its replies with its name.
+      expect(woken).toMatchObject({
+        inputSource: { type: "check", name: null },
+        inputLabel: "Check",
       });
+      const named = await turn(
+        `⏰ Time's up: Tell the time\n<defer_note scheduled_at="2026-11-12T09:00:00.000Z">\nSay the time.\n</defer_note>`,
+      );
+      expect(named).toMatchObject({
+        inputSource: { type: "check", name: "Tell the time" },
+        inputLabel: "Check · Tell the time",
+      });
+      // A turn that is no wake-up carries no source.
+      expect(resolved).not.toHaveProperty("inputSource");
+      // Text alone names no task.
+      expect((await turn(`⏰ Time's up: check task:${row!.id}`)).reportedTask).toBeUndefined();
+      // A batch about two tasks answers neither, so an unnamed say goes in no thread.
+      const batch = await turn("<task_events>…</task_events>", [row!.id, other!.id]);
       expect(batch.reportedTask).toBeUndefined();
     });
 
@@ -844,6 +861,7 @@ describe("Concierge tools", () => {
       await s.service.systemTurnOutcome(
         CONCIERGE_CHAT,
         `<task_events>\n<task id="${taskId}" title="Flights">\n</task>\n</task_events>`,
+        { taskIds: [taskId] },
       );
       s.onBackendTurn(() => "completed");
     };
@@ -1550,6 +1568,25 @@ describe("Concierge tools", () => {
     expect(cutoffs[0]).toBeGreaterThanOrEqual(askedAt);
   });
 
+  it("still turns down a stopped task's approvals when stopping one of its turns throws", async () => {
+    const s = setup();
+    const { chatId, taskId } = JSON.parse(
+      (await s.tool("chat_start", { title: "Flights", brief: "Find" })).content[0].text,
+    );
+    s.chats.activeTurns = (id: string) => (id === chatId ? ["t1", "t2"] : []);
+    const interrupted: string[] = [];
+    s.chats.interruptTurn = async (turnId: string) => {
+      interrupted.push(turnId);
+      // The turn ended on its own meanwhile: the backend answers 409.
+      if (turnId === "t1") throw new Error("409 turn not running");
+    };
+    const turnedDown: string[] = [];
+    s.service.attachApprovalExpiry(async (chat) => (turnedDown.push(chat), 1));
+    expect(await s.service.stopTask(taskId, "guardian")).toBe(2);
+    expect(interrupted).toEqual(["t1", "t2"]);
+    expect(turnedDown).toEqual([chatId]);
+  });
+
   it("turns down an approval a stopped task's work asks for after its interrupt was accepted", async () => {
     const s = setup();
     const stopped = JSON.parse(
@@ -1718,7 +1755,8 @@ describe("Concierge tools", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: () => false,
-      waitingSince: async (ids) => new Map([...waiting].filter(([id]) => ids.includes(id))),
+      openWaits: async (ids) =>
+        approvalWaits(new Map([...waiting].filter(([id]) => ids.includes(id)))),
       reportPending: () => [],
     });
     s.service.attachApprovalExpiry(async (chat) => {
@@ -1929,7 +1967,7 @@ describe("Concierge tools", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: () => false,
-      waitingSince: async (ids) => new Map(ids.map((id) => [id, Date.now() - 60_000])),
+      openWaits: async (ids) => approvalWaits(new Map(ids.map((id) => [id, Date.now() - 60_000]))),
       reportPending: () => [],
     });
     await s.tool("chat_card", { chatId: "task-1" });
@@ -1937,12 +1975,22 @@ describe("Concierge tools", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: () => false,
-      waitingSince: async () => new Map(),
+      openWaits: async () => new Map(),
       reportPending: () => [],
     });
     await s.tool("chat_card", { chatId: "task-1" });
     expect(s.messages.get(CONCIERGE_CHAT)?.map((row) => JSON.parse(row.content))).toEqual([
-      [{ type: "task_chat", chatId: "task-1", title: "Flights", show: "ask" }],
+      // The ask card keeps what the task waited on, so it shows that item
+      // even once a newer one is asked and settled.
+      [
+        {
+          type: "task_chat",
+          chatId: "task-1",
+          title: "Flights",
+          show: "ask",
+          waitedOn: { kind: "approval", id: "approval-task-1" },
+        },
+      ],
       [{ type: "task_chat", chatId: "task-1", title: "Flights", show: "task" }],
     ]);
   });
@@ -2274,7 +2322,7 @@ describe("Concierge task list tools", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: () => false,
-      waitingSince: async () => new Map(),
+      openWaits: async () => new Map(),
       reportPending: () => [],
       laterOf: async () => new Map([[row!.id, Number.POSITIVE_INFINITY]]),
     });
@@ -2514,6 +2562,8 @@ describe("Concierge task anchors", () => {
         ...row,
         summary: "Found 3 options",
         updatedAt: expect.anything(),
+        // Kept as its status reads after the write.
+        endedAt: expect.toBeOneOf([null, expect.any(Date)]),
       });
     });
 
@@ -3141,6 +3191,26 @@ describe("Concierge events", () => {
     expect((await s.tasks.listForPanel()).find((row) => row.id === taskId)?.notSynced).toBe(true);
   });
 
+  it("counts a result the report turn said before the guardian's Stop as said, not as never told", async () => {
+    const s = setup();
+    const { chatId, taskId } = await startTask(s);
+    s.fakeTimers();
+    s.onBackendTurn(async () => {
+      s.inTurn("report");
+      await s.tool("say", { text: "Three options found", task: taskId });
+      return "stopped" as const;
+    });
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    await s.settle();
+    const row = await s.taskRepo.get(taskId);
+    expect(row?.reportGivenUp).toBe(false);
+    expect(row?.outcomeUnsaid).toBe(false);
+    expect(
+      (await s.tasks.listForPanel()).find((each) => each.id === taskId)?.notSynced,
+    ).toBeFalsy();
+  });
+
   it("still reports a result whose report failed after the Concierge edits the row meanwhile", async () => {
     const s = setup();
     const { chatId, taskId } = await startTask(s);
@@ -3354,6 +3424,8 @@ describe("Concierge events", () => {
     const s = setup();
     const { chatId } = await startTask(s);
     s.fakeTimers();
+    // The task's turn ended awaiting the decision.
+    s.chats.activeTurns = () => [];
     s.resolveApproval({ status: "approved", payload: { channelContext: { threadId: chatId } } });
     // The carried-on turn's prompt is the action's result, recorded with no sender.
     s.messages.get(chatId)?.push({
@@ -3370,7 +3442,11 @@ describe("Concierge events", () => {
     });
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
-    expect(s.backendTurns[0].prompt).toContain('changes="turn_end:completed by=concierge"');
+    // The decision rides along with the turn that carries on from it.
+    expect(s.backendTurns[0].prompt).toContain(
+      'changes="approval_decided, turn_end:completed by=concierge"',
+    );
+    expect(s.backendTurns[0].prompt).toContain("approved by the guardian");
 
     // Only that one turn: the guardian's next typed message is theirs again.
     s.messages.get(chatId)?.push({
@@ -3387,6 +3463,80 @@ describe("Concierge events", () => {
     });
     await rs.advanceTimersByTimeAsync(2_000);
     expect(s.backendTurns).toHaveLength(1);
+  });
+
+  it.each([
+    ["rejected", "guardian", "rejected by the guardian"],
+    ["approved", "guardian", "approved by the guardian"],
+  ])("tells the Concierge an approval was %s after its task's turn ended (%s)", async (status, resolvedBy, said) => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    // The task's turn ended awaiting the decision, and that was reported.
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    // The guardian decides on its card; no turn of the task follows.
+    s.resolveApproval({
+      status,
+      resolvedBy,
+      description: "Send the invoice",
+      payload: { channelContext: { threadId: chatId } },
+    });
+    await rs.advanceTimersByTimeAsync(60_000);
+    expect(s.backendTurns).toHaveLength(2);
+    expect(s.backendTurns[1].prompt).toContain(`approval: Send the invoice — ${said}`);
+  });
+
+  it.each([
+    ["Rome turned it down on the task's Stop", "rome:task-stopped", false],
+    ["Rome turned it down when its wait expired", "rome:task-ended", false],
+    ["the guardian decided while a task turn ran", "guardian", true],
+  ])("tells the Concierge no separate decision when %s", async (_case, resolvedBy, running) => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    s.fakeTimers();
+    await finishTask(s, chatId);
+    await rs.advanceTimersByTimeAsync(2_000);
+    expect(s.backendTurns).toHaveLength(1);
+    if (running) s.chats.activeTurns = (id: string) => (id === chatId ? ["task-turn-2"] : []);
+    s.resolveApproval({
+      status: "rejected",
+      resolvedBy,
+      description: "Send the invoice",
+      payload: { channelContext: { threadId: chatId } },
+    });
+    await rs.advanceTimersByTimeAsync(60_000);
+    expect(s.backendTurns).toHaveLength(1);
+  });
+
+  it("tells the chat showing a task's approval card how it was decided, as it reads now", async () => {
+    const s = setup();
+    const { chatId } = await startTask(s);
+    const asked = {
+      id: "approval-1",
+      status: "rejected",
+      resolvedBy: "guardian",
+      description: "Send the invoice",
+      payload: { channelContext: { threadId: chatId } },
+      since: Date.now(),
+    };
+    (s.deps.webchatRepo as { taskCardsOf: unknown }).taskCardsOf = async () =>
+      new Map([[chatId, { questions: [], approvals: [asked] }]]);
+    const events: unknown[] = [];
+    s.service.onCardSettled((event) => events.push(event));
+    s.resolveApproval({ ...asked });
+    await s.settle();
+    expect(events).toEqual([
+      {
+        sessionId: CONCIERGE_CHAT,
+        card: expect.objectContaining({
+          kind: "approval",
+          id: "approval-1",
+          outcome: { kind: "rejected" },
+        }),
+      },
+    ]);
   });
 
   it("tells the Concierge of a pending approval in a task chat at once", async () => {
@@ -4725,7 +4875,7 @@ describe("Concierge chats", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: (chatId) => chatId === "task-1",
-      waitingSince: async () => new Map(),
+      openWaits: async () => new Map(),
       reportPending: () => [],
     });
     await s.storedChats.archiveSession(TOPIC_CHAT);
@@ -4760,7 +4910,7 @@ describe("Concierge chats", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: () => false,
-      waitingSince: async () => new Map(),
+      openWaits: async () => new Map(),
       reportPending: () => [],
       laterOf: async () => new Map([[checked!.id, Date.now() + 60_000]]),
     });
@@ -4780,7 +4930,7 @@ describe("Concierge chats", () => {
     s.tasks.attachFacts({
       now: () => Date.now(),
       running: () => false,
-      waitingSince: async () => new Map(),
+      openWaits: async () => new Map(),
       reportPending: () => [],
       laterOf: async (ids) => new Map(ids.map((id) => [id, Date.now() + 60_000])),
     });
@@ -4999,6 +5149,7 @@ describe("Concierge status reactions", () => {
     await s.service.systemTurnOutcome(
       CONCIERGE_CHAT,
       `<task_events>\n<task id="${task!.id}" title="Weather">\n</task>\n</task_events>`,
+      { taskIds: [task!.id] },
     );
     s.onBackendTurn(() => "completed");
     // As the flush that carried the news settles it: only a report that ran
@@ -5344,6 +5495,34 @@ describe("Concierge status reactions", () => {
     expect(await reactionOf(s, "g1")).toBeNull();
   });
 
+  it("stops a task whose owner pressed Stop in its task chat as any Stop does", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    const { chatId, taskId } = await started(s);
+    const cancelled: string[] = [];
+    s.deps.checks = {
+      cancelFor: async (id: string) => (cancelled.push(id), 0),
+      laterOf: async () => new Map(),
+    } as never;
+    const turnedDown: string[] = [];
+    s.service.attachApprovalExpiry(async (chat) => (turnedDown.push(chat), 1));
+    // The Stop in the task chat interrupts its turn, not through the task.
+    await finishTask(s, chatId, "interrupted");
+    expect(await s.taskRepo.get(taskId)).toMatchObject({ stopReason: "guardian" });
+    expect(cancelled).toEqual([taskId]);
+    expect(turnedDown).toEqual([chatId]);
+  });
+
+  it("reads every task made for the messages in one read, not one per task", async () => {
+    const s = setup({ said: false });
+    guardianSays(s, "g1");
+    await started(s);
+    await started(s, { title: "Tides", brief: "Check the tides" });
+    const one = rs.spyOn(s.taskRepo, "get");
+    expect(await reactionOf(s, "g1")).toBe("working");
+    expect(one).not.toHaveBeenCalled();
+  });
+
   it("clears the reaction when the Concierge stops the task", async () => {
     const s = setup({ said: false });
     guardianSays(s, "g1");
@@ -5370,6 +5549,30 @@ describe("Concierge status reactions", () => {
         text: "ok",
         handedOn,
       });
+
+    it("says when the turn that took the owner's messages in ended, unless a newer one carries them on", async () => {
+      const s = setup({ said: false });
+      const settled: unknown[] = [];
+      s.service.onInputsSettled((event) => settled.push(event));
+      guardianSays(s, "press", "turn-a");
+      await conciergeEnds(s, "interrupted", "turn-a", true);
+      await s.settle();
+      expect(settled).toEqual([]);
+      guardianSays(s, "next", "turn-b");
+      // A press queued behind the turn waits for a turn of its own.
+      const list = s.messages.get(CONCIERGE_CHAT)!;
+      list.push({
+        id: "queued",
+        role: "user",
+        content: "[]",
+        turnId: "turn-b",
+        inputState: "queued",
+      });
+      await conciergeEnds(s, "completed", "turn-b");
+      await s.settle();
+      // The press the cut-short turn handed on is done with as well.
+      expect(settled).toEqual([{ sessionId: CONCIERGE_CHAT, inputIds: ["next", "press"] }]);
+    });
 
     it("is working while a direct answer's turn runs, and goes away when it completes", async () => {
       const s = setup({ said: false });

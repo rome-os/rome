@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
+import { approvalWaits } from "../test/open-waits.js";
 import {
   type ConciergeTaskFacts,
   legacyTaskState,
@@ -107,6 +108,11 @@ describe("messageStatusReaction", () => {
       messageStatusReaction({ answered: true, tasks: [{ ...lost, endReason: "stopped" }] }),
     ).toBeNull();
   });
+
+  it("shows none for a task that ended for no response, even when its report was lost", () => {
+    const lost = { status: "ended" as const, reportLost: true, endReason: "no_response" as const };
+    expect(messageStatusReaction({ answered: true, tasks: [lost] })).toBeNull();
+  });
 });
 
 describe("legacyTaskState", () => {
@@ -151,8 +157,10 @@ describe("ConciergeTasks status", () => {
     tasks.attachFacts({
       now: () => NOW,
       running: (chatId) => running.has(chatId),
-      waitingSince: async (chatIds) =>
-        new Map(chatIds.flatMap((id) => (waiting.has(id) ? [[id, waiting.get(id)!]] : []))),
+      openWaits: async (chatIds) =>
+        approvalWaits(
+          new Map(chatIds.flatMap((id) => (waiting.has(id) ? [[id, waiting.get(id)!]] : []))),
+        ),
       reportPending: () => [],
     });
     told = [];
@@ -205,13 +213,21 @@ describe("ConciergeTasks status", () => {
     expect((await tasks.statusOf([row!])).get(row!.id)?.status).toBe("ended");
   });
 
-  it("keeps when a task ended, and forgets it when the task opens again", async () => {
+  it("writes nothing when it reads a status, so when a task ended never depends on when it was read", async () => {
     const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
-    await tasks.statusOf([row!]);
+    await flush();
+    await repo.keepEnded([], [row!.id]);
+    await tasks.statusOf([(await repo.get(row!.id))!]);
+    expect((await repo.get(row!.id))?.endedAt).toBeNull();
+  });
+
+  it("keeps when a task ended as its facts change, and forgets it when the task opens again", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await tasks.chatChanged("task-chat");
     expect((await repo.get(row!.id))?.endedAt).toEqual(new Date(NOW));
     await repo.markWaitExpired(row!.id, new Date(NOW - HOUR));
     running.add("task-chat");
-    await tasks.statusOf([(await repo.get(row!.id))!]);
+    await tasks.chatChanged("task-chat");
     // Open for a while, as while Rome's own turn after a turned-down approval
     // runs: its no-response note stays for the next digest.
     expect(await repo.get(row!.id)).toMatchObject({ endedAt: null, noResponseUnlisted: true });
@@ -231,6 +247,18 @@ describe("ConciergeTasks status", () => {
     await repo.upsertMany([{ id: row.id, summary: "two" }]);
     await flush();
     expect(told.map((task) => task.summary)).toEqual([null, "one", "two"]);
+  });
+
+  it("tells a task's new status even when a read saw it first", async () => {
+    const [row] = await repo.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
+    await flush();
+    told = [];
+    running.add("task-chat");
+    // The panel reads the list after the fact changed and before its re-check.
+    await tasks.listForPanel();
+    await tasks.chatChanged("task-chat");
+    await flush();
+    expect(told.map((task) => [task.id, task.status])).toEqual([[row.id, "active"]]);
   });
 
   it("tells a task again when a fact of its chat changes its status, and only then", async () => {

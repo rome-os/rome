@@ -2,7 +2,7 @@
 // tools run its task chats and read its other Concierge chats, `topic_start`
 // starts a topic chat, and `connect_card` shows a card that connects a service.
 
-import type { ForwardedFrom } from "@rome/api-types/chat";
+import type { ForwardedFrom, TaskChatWaitedOn } from "@rome/api-types/chat";
 import { CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
 import { finiteOrNull, type TaskStatusView } from "./tasks.js";
 import type { SaidMessage } from "../chats/message.js";
@@ -695,8 +695,9 @@ export async function buildConciergeTools(
     const { chatId } = currentTurn();
     const found = await tasks.repo.getWithChat(taskId);
     if (!found || found.conciergeChat.id !== chatId || !found.row.threadRoot) return null;
-    // A row whose Concierge chat is gone reads as the main chat's, and keeps
-    // its root, which names a message only that gone chat had.
+    // A row whose Concierge chat is archived reads as the main chat's, and
+    // keeps its root, which names a message only that chat has. A deleted
+    // chat's rows keep none.
     return (await webchatRepo.getReplyTarget(chatId, found.row.threadRoot))
       ? found.row.threadRoot
       : null;
@@ -829,7 +830,7 @@ export async function buildConciergeTools(
     if (repeated) return repeated;
     const id = await addMessage(parts, await placementFor(answers, taskId ? { taskId } : {}));
     service.keepSaid(turnId, key, id);
-    if (taskId) service.noteRelayed(turnId, chatId, taskId);
+    if (taskId) service.noteSaid(taskId);
     noteAnswers(id, answers);
     said(chatId, turnId, text, isPrivate);
     const answered = answers ?? (await certainlyAnswered(taskId));
@@ -872,7 +873,7 @@ export async function buildConciergeTools(
       await placementFor(answers, { taskId: task?.id ?? null }),
     );
     // Only a result the guardian was shown counts as said.
-    if (task) service.noteRelayed(turnId, chatId, task.id);
+    if (task) service.noteSaid(task.id);
     noteAnswers(id, answers);
     // Forwarded text is the task's, not the Concierge's, and so are a task's
     // title and chat name, which can come from its output: none becomes the
@@ -884,19 +885,38 @@ export async function buildConciergeTools(
   // How `chat_card` shows task chat `chatId`: its question or approval while
   // the task waits on the guardian, an expired one included, since its card
   // still takes an answer; else its task card.
-  const shownAs = async (chatId: string): Promise<"task" | "ask"> => {
+  // An `ask` card keeps what the task waits on, so it shows that item even
+  // after a newer one is asked and settled.
+  const shownAs = async (
+    chatId: string,
+  ): Promise<{ show: "task" | "ask"; waitedOn?: TaskChatWaitedOn }> => {
     const task = await tasks.repo.findBySession(chatId);
-    if (!task) return "task";
+    if (!task) return { show: "task" };
     const status = (await tasks.statusOf([task])).get(task.id);
-    return status?.status === "needs_you" || status?.endReason === "no_response" ? "ask" : "task";
+    if (status?.status !== "needs_you" && status?.endReason !== "no_response") {
+      return { show: "task" };
+    }
+    const wait = status.openWait;
+    if (!wait) return { show: "ask" };
+    return {
+      show: "ask",
+      waitedOn:
+        wait.kind === "card"
+          ? { kind: "question", id: wait.id, messageId: wait.messageId }
+          : { kind: "approval", id: wait.id },
+    };
   };
 
   // A card that opens the task chat; it reads the chat's live status itself.
-  const showCard = async (chatId: string, title: string, show: "task" | "ask") => {
+  const showCard = async (
+    chatId: string,
+    title: string,
+    { show, waitedOn }: { show: "task" | "ask"; waitedOn?: TaskChatWaitedOn },
+  ) => {
     const { chatId: conciergeChatId, turnId } = currentTurn();
     const task = await tasks.repo.findBySession(chatId);
     const id = await addMessage(
-      [{ type: "task_chat", chatId, title, show }],
+      [{ type: "task_chat", chatId, title, show, ...(waitedOn ? { waitedOn } : {}) }],
       await placementFor(undefined, { taskId: task?.id ?? null }),
     );
     said(conciergeChatId, turnId, null);
@@ -1311,7 +1331,7 @@ export async function buildConciergeTools(
           } else {
             log.warn("task chat title too long to name the chat", { chatId });
           }
-          if (args.card === true) await showCard(chatId, title, "task");
+          if (args.card === true) await showCard(chatId, title, { show: "task" });
           if (schedule) {
             const view = await service.deps.schedules?.of(task.id);
             return {

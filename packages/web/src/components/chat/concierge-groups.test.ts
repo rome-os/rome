@@ -396,26 +396,6 @@ describe("buildConciergeItems reference stability", () => {
   });
 });
 
-it("groups an on-behalf Concierge message with adjacent guardian messages", () => {
-  const automated = guardian("on-behalf", MIN);
-  automated.sender = {
-    kind: "automated",
-    sourceType: "agent",
-    name: "Concierge",
-    iconUrl: null,
-    onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
-  };
-  const items = buildConciergeItems([userRow(guardian("typed", 0)), userRow(automated)], {
-    typing: false,
-  });
-  const groups = items.filter((item) => item.kind === "group");
-  expect(groups).toHaveLength(1);
-  expect(groups[0]).toMatchObject({
-    sender: "guardian",
-    entries: [{ message: { id: "typed" } }, { message: { id: "on-behalf" } }],
-  });
-});
-
 describe("showsTyping", () => {
   const block = (ordinal: number, b: Record<string, unknown>) => ({
     kind: "block" as const,
@@ -488,34 +468,60 @@ describe("showsTyping", () => {
   });
 });
 
-describe("automated input", () => {
-  it("shows an automated input's turn as a line naming its source, then the Concierge's words", () => {
-    const rows: ChatRow[] = [
-      {
-        kind: "automated_input",
-        key: "automated-input:t1",
-        source: { type: "routine", name: "Daily summary" },
-        turnId: "t1",
-      },
-      agentRow(say("answer", MIN, "t1", "Here is your summary.")),
-    ];
-    const items = buildConciergeItems(rows, { typing: false });
+describe("where a reply came from", () => {
+  const routine = { type: "routine" as const, name: "Daily summary" };
+  const inputRow = (turnId: string, source = routine): ChatRow => ({
+    kind: "automated_input",
+    key: `automated-input:${turnId}`,
+    source,
+    turnId,
+  });
+  const entries = (items: ConciergeItem[]) =>
+    items.flatMap((item) => (item.kind === "group" ? item.entries : []));
 
-    expect(items.map((item) => item.kind)).toEqual(["automated", "separator", "group"]);
-    expect(items[0]).toEqual({
-      kind: "automated",
-      key: "automated-input:t1",
-      source: { type: "routine", name: "Daily summary" },
-    });
+  it("labels the replies of a turn an automated input started with its source, and draws no line for it", () => {
+    const items = build([
+      inputRow("t1"),
+      agentRow(say("answer", MIN, "t1"), say("more", MIN + 1_000, "t1")),
+    ]);
+    expect(shape(items)).toEqual(["sep", "A:answer,more"]);
+    expect(entries(items).map((entry) => entry.source)).toEqual([routine, routine]);
   });
 
-  it("shows an automated message from before the rule as the same line, not a bubble", () => {
-    const old = guardian("old-auto", 0);
-    old.sender = { kind: "automated", sourceType: "agent", name: "Milo", iconUrl: null };
-    const items = buildConciergeItems([userRow(old)], { typing: false });
+  it("draws nothing for an automated input whose turn said nothing", () => {
+    expect(build([inputRow("t1")])).toEqual([]);
+  });
 
-    expect(items).toEqual([
-      { kind: "automated", key: "old-auto", source: { type: "agent", name: "Milo" } },
+  it("leaves a reply to the owner unlabelled", () => {
+    const asked = guardian("asked", 0);
+    asked.turnId = "t2";
+    const items = build([inputRow("t1"), userRow(asked), agentRow(say("answer", MIN, "t2"))]);
+    expect(entries(items).map((entry) => entry.source)).toEqual([undefined, undefined]);
+  });
+
+  it("draws an on-behalf message from before as no owner bubble, and labels its turn's reply", () => {
+    const old = guardian("on-behalf", 0);
+    old.turnId = "t1";
+    old.sender = {
+      kind: "automated",
+      sourceType: "agent",
+      name: "Flint",
+      iconUrl: null,
+      onBehalfOf: { kind: "guardian", name: "Ray", avatarUrl: null },
+    };
+    const items = build([
+      userRow(guardian("typed", -MIN)),
+      userRow(old),
+      agentRow(say("answer", MIN, "t1")),
     ]);
+    expect(shape(items)).toEqual(["sep", "G:typed", "A:answer"]);
+    expect(entries(items).at(-1)?.source).toEqual({ type: "agent", name: "Flint" });
+  });
+
+  it("draws an automated message from before as no bubble, and nothing when its turn said nothing", () => {
+    const old = guardian("old-auto", 0);
+    old.turnId = "t1";
+    old.sender = { kind: "automated", sourceType: "agent", name: "Milo", iconUrl: null };
+    expect(build([userRow(old)])).toEqual([]);
   });
 });

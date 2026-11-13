@@ -3,6 +3,7 @@
 
 import type { ConciergeActivity } from "./concierge-activity.js";
 import type { ConciergeTaskEndReason, ConciergeTaskStatus } from "./concierge-task-status.js";
+import type { TaskCardRender } from "./chat.js";
 
 /**
  * What a task row is doing, as apps from before derived status read it. Rome
@@ -75,6 +76,22 @@ export const CONCIERGE_DONE_DAYS = 7;
 export const CONCIERGE_TASK_SUMMARY_MAX_LENGTH = 120;
 
 /** One row of the task panel. Times are epoch milliseconds. */
+/**
+ * The card or approval a task chat waits on its owner for: a card by its
+ * tool use id, with the message that holds it and how it renders, or a
+ * pending approval by its id. `since` is when the wait began: the oldest
+ * item still open in the chat, as all of them are one wait.
+ */
+export type ConciergeOpenWait =
+  | {
+      kind: "card";
+      id: string;
+      messageId: string;
+      render: TaskCardRender | null;
+      since: number;
+    }
+  | { kind: "approval"; id: string; since: number };
+
 export interface ConciergeTaskDto {
   id: string;
   title: string;
@@ -90,6 +107,12 @@ export interface ConciergeTaskDto {
   endReason?: ConciergeTaskEndReason | null;
   /** When the wait on its owner began, while one is open in its task chat, epoch milliseconds. */
   waitingSince?: number | null;
+  /**
+   * What its task chat waits on its owner for now, or null: the newest open
+   * card or approval. Open after the wait expired too, since the card still
+   * takes an answer. Absent from servers before it.
+   */
+  openWait?: ConciergeOpenWait | null;
   /** When the check scheduled for it is due, while one is pending, epoch milliseconds. */
   laterAt?: number | null;
   summary: string | null;

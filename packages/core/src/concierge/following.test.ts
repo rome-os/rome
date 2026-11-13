@@ -220,6 +220,7 @@ function setup(
   /** The chats whose turns fail to run to their end, or throw. */
   const failingChats = { ends: new Set<string>(), throws: new Set<string>() };
   const inputLabels: (string | undefined)[] = [];
+  const inputSources: unknown[] = [];
   const pushLevels: (string | undefined)[] = [];
   const triaged: string[][] = [];
   const prompts: string[] = [];
@@ -381,11 +382,12 @@ function setup(
     runSystemTurn: async (
       chatId: string,
       prompt: string,
-      turnOptions?: { inputLabel?: string; pushLevel?: string },
+      turnOptions?: { inputLabel?: string; pushLevel?: string; inputSource?: unknown },
     ) => {
       turnChats.push(chatId);
       turns.push(prompt);
       inputLabels.push(turnOptions?.inputLabel);
+      inputSources.push(turnOptions?.inputSource);
       pushLevels.push(turnOptions?.pushLevel);
       if (failingChats.throws.has(chatId)) throw new Error("the session crashed");
       return !turnFails.on && !failingChats.ends.has(chatId);
@@ -415,6 +417,7 @@ function setup(
     turnFails,
     failingChats,
     inputLabels,
+    inputSources,
     pushLevels,
     triaged,
     prompts,
@@ -1153,6 +1156,11 @@ describe("the follow pipeline", () => {
     await rs.advanceTimersByTimeAsync(5 * 60_000);
     await s.action("core:concierge_digest").execute({}, {} as never);
     expect(s.inputLabels).toEqual(["Following · important (1)", "Following · digest (2)"]);
+    // The replies are labelled with where the turn came from.
+    expect(s.inputSources).toEqual([
+      { type: "following", name: expect.any(String) },
+      { type: "digest", name: null },
+    ]);
     s.stop();
   });
 

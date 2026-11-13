@@ -1,3 +1,5 @@
+import { withTaskCards } from "../../concierge/task-cards.js";
+import { ownerOf } from "../../webchat/owner.js";
 import { canOpenChat, isConciergeChat, isMainConciergeChat } from "../../concierge/service.js";
 import type { DeviceFolder } from "@rome/api-types/devices";
 import type {
@@ -1022,10 +1024,15 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       emit("session_running", event);
     runningListeners.add(listener);
     const unsubscribeName = deps.agentNameEvents?.subscribe(emit);
+    // A press's turn ended: the task panel stops waiting on it.
+    const unsubscribeInputs = deps.concierge?.onInputsSettled?.((event) =>
+      emit("inputs_settled", event),
+    );
     for (const sessionId of runningSessions) listener({ sessionId, running: true });
     return () => {
       runningListeners.delete(listener);
       unsubscribeName?.();
+      unsubscribeInputs?.();
     };
   };
   // `session_running` here is the open chat's cue to look up the turn to
@@ -1038,7 +1045,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     runningListeners.add(runningListener);
     if (runningSessions.has(sessionId)) runningListener({ sessionId, running: true });
     const unsubscribeMessages = deps.webchatRepo.onMessageInserted((message) => {
-      if (message.sessionId === sessionId) emit("message_insert", message);
+      if (message.sessionId !== sessionId) return;
+      // A task card arrives with its card, as a page would hand it out.
+      if (message.role !== "assistant" || !message.content.includes('"task_chat"')) {
+        emit("message_insert", message);
+        return;
+      }
+      void fillTaskCards(sessionId, [message])
+        .catch(() => [message])
+        .then(([filled]) => emit("message_insert", filled ?? message));
+    });
+    // A card a task card shows settled: the client patches it in place.
+    const unsubscribeCards = deps.concierge?.onCardSettled((event) => {
+      if (event.sessionId === sessionId) emit("chat_card_settled", event);
     });
     const unsubscribeSessionName = deps.webchatRepo.onSessionNameChanged((event) => {
       if (event.sessionId === sessionId) emit("session_name", event);
@@ -1077,6 +1096,7 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       unsubscribeSessionName();
       unsubscribeChatThread();
       unsubscribeReaction?.();
+      unsubscribeCards?.();
     };
   };
 
@@ -1502,10 +1522,32 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       return statusReaction ? { ...message, statusReaction } : message;
     });
   };
+  // A task card's question or approval and how it ended, read for the whole
+  // page at once (concierge/task-cards.ts). Only a Concierge chat has them.
+  const fillTaskCards = async <
+    T extends { role: string; content: string; createdAt: Date | string },
+  >(
+    sessionId: string,
+    messages: T[],
+  ): Promise<T[]> => {
+    if (!deps.concierge || !messages.some((message) => message.content.includes('"task_chat"'))) {
+      return messages;
+    }
+    // A card shows only the reader's own task chats. A Concierge chat opens
+    // only for its owner, so its owner is the reader; any other chat may be
+    // read by others, so its cards show nothing.
+    const chat = await deps.webchatRepo.getSession(sessionId);
+    if (!chat) return messages;
+    const owner = isConciergeChat(chat) ? ownerOf(chat) : null;
+    return withTaskCards(deps.concierge.taskCardSources(), messages, owner);
+  };
   const enrichStoredMessages = async (sessionId: string, messages: StoredMessages) => {
     const withTraces = await attachChatThreadTitles(
       sessionId,
-      await attachStatusReactions(sessionId, await attachTraceSummaries(sessionId, messages)),
+      await attachStatusReactions(
+        sessionId,
+        await attachTraceSummaries(sessionId, await fillTaskCards(sessionId, messages)),
+      ),
     );
     const allActors = await deps.webchatRepo.getUserMessageActors(sessionId);
     const shownIds = new Set(messages.map((m) => m.id));
@@ -3154,20 +3196,6 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
     });
   });
 
-  // The handoff a renewal started one of the chat's sessions from, for the
-  // chat's renewal line (docs/concepts/sessions.md#handoff). Null when none
-  // was written.
-  app.get("/chat/sessions/:id/renewals/:sessionId", async (c) => {
-    const chatId = c.req.param("id");
-    const lookup = await getStoredWebchatSession(c, chatId);
-    if ("response" in lookup) return lookup.response;
-    const renewed = await deps.sessionRepository.session(c.req.param("sessionId"));
-    if (!renewed || renewed.continuityKey !== webchatSessionKey(chatId)) {
-      return c.json({ error: "Session not found" }, 404);
-    }
-    return c.json({ handoff: renewed.handoff });
-  });
-
   app.get("/chat/sessions/:id/events", async (c) => {
     const sessionId = c.req.param("id");
     const lookup = await getStoredWebchatSession(c, sessionId);
@@ -4159,6 +4187,19 @@ export function createWebchatRuntime(deps: ApiDeps): { routes: Hono; runtime: We
       messageId: inputId,
       text: displayText,
     });
+    // An answer, and the cards a typed reply dismisses, settle the cards a
+    // Concierge chat shows for them. The owner's input announces no insert,
+    // so it is told here.
+    for (const toolUseId of [...(resolution ? [resolution.toolUseId] : []), ...skippedCardIds]) {
+      void deps.concierge
+        ?.cardSettled(sessionId, { kind: "question", id: toolUseId })
+        .catch((error: unknown) =>
+          log.warn("failed to tell a settled card", {
+            sessionId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+    }
     // Words typed into a task chat take a stopped task up again.
     if (!conciergeHeader) {
       await deps.concierge?.resumeTaskChat?.(sessionId).catch((error: unknown) =>

@@ -3,6 +3,7 @@
 // (task-events.ts), and a Concierge turn that wrote text without speaking gets
 // one reminder turn.
 
+import { RESOLVED_BY_EXPIRY, RESOLVED_BY_STOP } from "./approval-expiry.js";
 import type { AgentTurnFailure, AgentTurnFinishedEvent } from "@rome-os/app-runtime";
 import { CONCIERGE_DONE_DAYS, CONCIERGE_TASK_SUMMARY_MAX_LENGTH } from "@rome/api-types/concierge";
 import type { AgentTurnFailedBeforeStart, EndedAgentTurn, TurnListeners } from "../agent/index.js";
@@ -71,6 +72,22 @@ function replyExcerpt(text: string): string {
 }
 
 /** The text of a stored user message, for the guardian's words in a task event. */
+/** The tool use ids a message sends an answer or a dismissal to. */
+function answeredCards(content: string): string[] {
+  if (!content.includes("interaction_result")) return [];
+  try {
+    const parts: unknown = JSON.parse(content);
+    if (!Array.isArray(parts)) return [];
+    return parts.flatMap((part) => {
+      if (!part || typeof part !== "object") return [];
+      const { type, toolUseId } = part as { type?: unknown; toolUseId?: unknown };
+      return type === "interaction_result" && typeof toolUseId === "string" ? [toolUseId] : [];
+    });
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Whether the line answers a card: it carries an `interaction_result` that is
  * not a dismissal. A typed reply dismisses the open cards it passes, which
@@ -89,6 +106,14 @@ function answersCard(content: string): boolean {
   } catch {
     return false;
   }
+}
+
+/** How an approval in a task chat was decided, as a task event says it. */
+function decisionOf(status: string | undefined, resolvedBy: string | null | undefined): string {
+  if (resolvedBy === RESOLVED_BY_EXPIRY) return "turned down: nobody answered in time";
+  if (resolvedBy === RESOLVED_BY_STOP) return "turned down: the task was stopped";
+  if (resolvedBy?.startsWith("rome:")) return "turned down by Rome";
+  return status === "approved" ? "approved by the guardian" : "rejected by the guardian";
 }
 
 /**
@@ -261,14 +286,18 @@ export function startConciergeEvents(
   const coalescer = new TaskEventCoalescer({
     now: () => Date.now(),
     render: (dirty) => renderTaskEvents(service, dirty),
-    deliver: async ({ chatId: from, owner, prompt, quiet }) => {
+    deliver: async ({ chatId: from, owner, prompt, quiet, taskIds }) => {
       // A row whose chat is gone or archived reports to the main chat.
       const chatId = await service.deliveryChat(from, owner);
       if (!chatId) return "failed";
       // A visitor dropped from the dashboard allow-list is told nothing; their
       // rows wait, and reach them once they are back.
       if (!(await service.isServed(owner))) return "failed";
-      return await service.systemTurnOutcome(chatId, prompt, { quiet, pushLevel: "active" });
+      return await service.systemTurnOutcome(chatId, prompt, {
+        quiet,
+        pushLevel: "active",
+        taskIds,
+      });
     },
     carried: (taskId) => service.carriesReport(taskId),
     // A report that ran to its end: its results are said, and the guardian
@@ -310,7 +339,18 @@ export function startConciergeEvents(
   const stopWaitExpiry = new WaitExpiry({
     tasks,
     expireApprovals: (chatId, turnDown) => service.expireApprovals(chatId, turnDown),
-    tell: (taskId) => coalescer.mark({ taskId, kind: "no_response", urgent: false }),
+    tell: (taskId) => {
+      coalescer.mark({ taskId, kind: "no_response", urgent: false });
+      // Its questions still open read expired now; its approvals settle as they are turned down.
+      void guard(
+        "expired question cards",
+        tasks.repo
+          .get(taskId)
+          .then((row) =>
+            row?.sessionId ? service.cardSettled(row.sessionId, "openQuestions") : undefined,
+          ),
+      );
+    },
   }).start();
 
   // The owner's messages a Concierge turn took settle once the chat runs no
@@ -367,9 +407,40 @@ export function startConciergeEvents(
           }),
         );
     }
+    // The owner's messages a turn took in are done with once it ends, unless
+    // a newer input took it over and carries them on: a task panel press
+    // reads from this that its turn ended, without paging the chat.
+    if (!event.handedOn) {
+      // What earlier turns handed on to this one is done with too. Read now,
+      // before the turn's end forgets it.
+      const carried = [...service.promptsHandedOn(chatId)];
+      void webchatRepo
+        .getTurnChatMessages(chatId, event.turn.turnId)
+        .then((rows) =>
+          service.inputsSettled(chatId, [
+            ...new Set([
+              // Only what the turn took in: one queued behind it waits for its own turn.
+              ...rows
+                .filter(
+                  (row) =>
+                    row.role === "user" &&
+                    (row.inputState === "consumed" || row.inputState == null),
+                )
+                .map((row) => row.id),
+              ...carried,
+            ]),
+          ]),
+        )
+        .catch((error: unknown) =>
+          log.warn("failed to tell a turn's messages are done with", {
+            chatId,
+            error: error instanceof Error ? error.message : String(error),
+          }),
+        );
+    }
     // What this turn said settles no news: a report that carries it does,
     // once it runs to its end. Its record of what it said is done with.
-    service.takeRelayed(event.turn.turnId);
+    service.forgetTurn(event.turn.turnId);
     // Finish callbacks run before the backend promise settles. Capture them
     // synchronously so a recovery cannot start a second chain or a reminder.
     const active = recoveriesRunning.get(chatId);
@@ -455,14 +526,45 @@ export function startConciergeEvents(
   // it down rather than the guardian answering. The turn that carries on from
   // it is the first to start after.
   const approvalAnswered = new Map<string, { at: number; byRome: boolean }>();
-  const onApprovalResolved = (approval: { payload: unknown; resolvedBy?: string | null }) => {
-    const context = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
-      ?.channelContext;
-    if (typeof context?.threadId !== "string") return;
-    approvalAnswered.set(context.threadId, {
-      at: Date.now(),
-      byRome: approval.resolvedBy?.startsWith("rome:") === true,
-    });
+  const onApprovalResolved = (approval: {
+    id?: string;
+    status?: string;
+    description?: string;
+    threadId: string | null;
+    resolvedBy?: string | null;
+  }) => {
+    if (!approval.threadId) return;
+    const context = { threadId: approval.threadId };
+    const byRome = approval.resolvedBy?.startsWith("rome:") === true;
+    approvalAnswered.set(context.threadId, { at: Date.now(), byRome });
+    const chatId = context.threadId;
+    if (approval.id) {
+      void guard(
+        "decided approval card",
+        service.cardSettled(chatId, { kind: "approval", id: approval.id }),
+      );
+    }
+    // The decision is news of its own when the task's turn already ended
+    // awaiting it, since no turn may follow, as after a rejection. A turn
+    // still running tells its own outcome, and Rome's turn-down on a Stop or
+    // an expiry is already the task's stopped or no_response news.
+    if (approval.resolvedBy === RESOLVED_BY_STOP || approval.resolvedBy === RESOLVED_BY_EXPIRY) {
+      return;
+    }
+    if (service.dashboard.chats.activeTurns(chatId).length > 0) return;
+    void guard(
+      "approval decision event",
+      taskOf(chatId).then((taskId) => {
+        if (!taskId) return;
+        const description = excerpt(approval.description ?? "", DETAIL_EXCERPT_CHARS);
+        coalescer.mark({
+          taskId,
+          kind: "approval_decided",
+          urgent: false,
+          detail: `approval: ${description} — ${decisionOf(approval.status, approval.resolvedBy)}`,
+        });
+      }),
+    );
   };
 
   const onTaskChatTurn = async (event: AgentTurnFinishedEvent, chatId: string) => {
@@ -488,10 +590,11 @@ export function startConciergeEvents(
     if (summary) await guard("task result summary", writeResultSummary(taskId, summary));
   };
 
-  const reopenAfterExpiry = async (chatId: string, taskId: string) => {
+  const reopenAfterExpiry = async (taskId: string) => {
     const row = await tasks.repo.get(taskId);
     if (!row?.expiredWaitAt) return;
-    const since = (await webchatRepo.awaitingGuardianSince([chatId], { oldest: true })).get(chatId);
+    // The expired wait goes on while an item it held is still open.
+    const since = (await tasks.statusOf([row])).get(taskId)?.waitingSince;
     if (since === row.expiredWaitAt.getTime()) return;
     await tasks.repo.clearWaitExpired(taskId);
   };
@@ -536,7 +639,7 @@ export function startConciergeEvents(
     // Someone wrote to a task whose wait ended for no response: once that
     // wait is over, it ends as its new work does. Rome's own turn-down of an
     // approval, and the turn that carries on from it, reopen nothing.
-    if (!turnedDownByRome && userRows.length > 0) await reopenAfterExpiry(chatId, taskId);
+    if (!turnedDownByRome && userRows.length > 0) await reopenAfterExpiry(taskId);
     // A follow-up the task chat queued or deferred sits under the turn that
     // answered it, so the turn is Concierge's when any of its inputs was said
     // as Concierge's account. The guardian answering the task's own card or
@@ -575,6 +678,19 @@ export function startConciergeEvents(
             error: error instanceof Error ? error.message : String(error),
           }),
         );
+      // Its owner's Stop in the task chat stops the task as any Stop does:
+      // its checks are cancelled and its approvals turned down.
+      if (outcomeOf(event.status) === "stopped") {
+        const row = await tasks.repo.get(taskId);
+        if (row && !row.stoppedAt && !row.archivedAt) {
+          await service.stopTask(taskId, "guardian").catch((error: unknown) =>
+            log.warn("failed to stop a task its chat's Stop ended", {
+              taskId,
+              error: error instanceof Error ? error.message : String(error),
+            }),
+          );
+        }
+      }
     }
     // The result's first sentence, for the row's line once the task ended.
     // Work still running in the chat, such as the stream an approved action's
@@ -622,12 +738,10 @@ export function startConciergeEvents(
   const onApproval = async (approval: {
     status: string;
     description: string;
-    payload: unknown;
+    threadId: string | null;
   }) => {
-    if (approval.status !== "pending") return;
-    const context = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
-      ?.channelContext;
-    if (typeof context?.threadId !== "string") return;
+    if (approval.status !== "pending" || !approval.threadId) return;
+    const context = { threadId: approval.threadId };
     const taskId = await taskOf(context.threadId);
     if (!taskId) return;
     // A stopped task's work can still ask for one as it stops, as an
@@ -722,6 +836,15 @@ export function startConciergeEvents(
     tasks.onStatus(onTaskStatus),
     approvals.onCreated((approval) => void guard("approval event", onApproval(approval))),
     approvals.onResolved(onApprovalResolved),
+    // An answer or a dismissal of a card settles it.
+    webchatRepo.onMessageInserted((message) => {
+      for (const id of answeredCards(message.content)) {
+        void guard(
+          "answered card",
+          service.cardSettled(message.sessionId, { kind: "question", id }),
+        );
+      }
+    }),
   ];
 
   return () => {
@@ -834,18 +957,18 @@ function startActivity(service: ConciergeService, coalescer: TaskEventCoalescer)
     now: () => Date.now(),
     running: (chatId) => service.dashboard.chats.activeTurns(chatId).length > 0,
     // How long a task has waited is read from its oldest open wait.
-    waitingSince: (chatIds) => webchatRepo.awaitingGuardianSince(chatIds, { oldest: true }),
+    openWaits: (chatIds) => webchatRepo.openWaitsOf(chatIds),
     reportPending: () => coalescer.awaitingReport,
     laterOf: async (taskIds) => (await service.deps.checks?.laterOf(taskIds)) ?? new Map(),
   });
+  // What a restart lost from memory, such as a running turn, may have ended a task.
+  void guard(tasks.keepEndedAll());
   const sessionChanged = (sessionId: string, change: { toolOnly?: boolean } = {}) => {
     void guard(tracker.sessionChanged(sessionId, change));
     if (!change.toolOnly) void guard(tasks.chatChanged(sessionId));
   };
-  const approvalChanged = (approval: { payload: unknown }) => {
-    const threadId = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
-      ?.channelContext?.threadId;
-    if (typeof threadId === "string") sessionChanged(threadId);
+  const approvalChanged = (approval: { threadId: string | null }) => {
+    if (approval.threadId) sessionChanged(approval.threadId);
   };
 
   // The rows about to be reported, so a row that stops being one moves its chat too.

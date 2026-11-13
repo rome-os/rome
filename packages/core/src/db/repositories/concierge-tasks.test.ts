@@ -448,6 +448,31 @@ describe("ConciergeTasksRepository", () => {
       expect(retired).toEqual(["m0"]);
     });
 
+    it("drops every row's thread root when its chat is deleted, since the messages that named them are gone", async () => {
+      await chats.createSession(
+        "topic-1",
+        "Calendar",
+        undefined,
+        undefined,
+        null,
+        undefined,
+        "core:concierge",
+      );
+      const [open, done] = await repo.upsertMany([
+        { title: "A", chatId: "topic-1", state: "doing" },
+        { title: "B", chatId: "topic-1", state: "done" },
+      ]);
+      await repo.setThreadRoot(open.id, "m0");
+      await repo.setThreadRoot(done.id, "m1");
+      expect(
+        await repo.leaveChat("topic-1", async () => new Set([open.id]), { deleted: true }),
+      ).toBe(1);
+      expect((await repo.get(open.id))?.threadRoot).toBeNull();
+      expect((await repo.get(done.id))?.threadRoot).toBeNull();
+      // Its next message in the main chat roots a thread there.
+      expect(await repo.setThreadRoot(done.id, "main-m2")).toBe("main-m2");
+    });
+
     it("keeps a row its owner's when its chat is deleted without moving it", async () => {
       const owner = "visitor:acct-ann";
       const main = mainChatIdOf(owner);

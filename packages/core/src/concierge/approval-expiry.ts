@@ -9,7 +9,7 @@ import { createLogger } from "../logger.js";
 const log = createLogger("concierge-approval-expiry");
 
 export interface ApprovalExpiryDeps {
-  approvals: Pick<ApprovalsRepository, "list" | "resolvePending">;
+  approvals: Pick<ApprovalsRepository, "listInThread" | "resolvePending">;
   handler: Pick<ApprovalHandler, "onRejected">;
 }
 
@@ -43,10 +43,9 @@ export async function turnDownApprovals(
   turnDown: TurnDown,
 ): Promise<number> {
   let turnedDown = 0;
-  for (const approval of await deps.approvals.list("pending")) {
-    const threadId = (approval.payload as { channelContext?: { threadId?: unknown } } | null)
-      ?.channelContext?.threadId;
-    if (threadId !== chatId || approval.createdAt.getTime() > turnDown.until) continue;
+  // Only that chat's, found by its index rather than by reading every approval.
+  for (const approval of await deps.approvals.listInThread(chatId, "pending")) {
+    if (approval.createdAt.getTime() > turnDown.until) continue;
     const resolved = await deps.approvals.resolvePending(
       approval.id,
       "reject",

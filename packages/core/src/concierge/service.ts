@@ -1,4 +1,5 @@
 import type { SystemInputSource } from "@rome/api-types/trace-segments";
+import { automatedInputLabel } from "./automated-input.js";
 // Concierge: texting-style chats that hand work to task chats. One Concierge
 // talks in a main chat and in any topic chats its owner starts, all sharing one
 // memory, one list of follows and one task list (docs/domains/chats.md#concierge-chat,
@@ -45,6 +46,8 @@ import type { NotifyLevel } from "../instance/notify-client.js";
 import { ConciergePush, type ConciergePushDeps, type SaidInTurn } from "./push.js";
 import { type ConciergeOwner, GUARDIAN_OWNER, ownerOf, storedChatId } from "../webchat/owner.js";
 import { isMainConciergeChat, MAIN_CHAT_NAME, mainChatIdOf } from "./main-chat.js";
+import type { ChatCardSettledEvent, InputsSettledEvent } from "@rome/api-types/chat";
+import { openQuestionCards, settledCard, type TaskCardSources } from "./task-cards.js";
 import {
   CONCIERGE_AGENT_ID,
   canOpenChat,
@@ -182,6 +185,8 @@ export interface ConciergeDeps {
     | "listProjects"
     | "onMessageInserted"
     | "awaitingGuardianSince"
+    | "openWaitsOf"
+    | "taskCardsOf"
     | "ownerSpokeAt"
     | "archiveSessionIn"
     | "deleteSessionIn"
@@ -214,7 +219,17 @@ export interface ConciergeDeps {
 }
 
 /** A backend turn where it runs, with the message it answers when it reports on a task. */
-export type ResolvedTurn = BackendTurnParams & { reportedTask?: string };
+/**
+ * A backend turn as Rome asks for it: `taskIds`, the tasks whose news it
+ * carries, as a task event's batch names them.
+ */
+export type TurnParams = BackendTurnParams & { taskIds?: readonly string[] };
+export type ResolvedTurn = TurnParams & {
+  reportedTask?: string;
+  /** Where its input came from, when a check the Concierge set came due: its replies are labelled with it. */
+  inputSource?: SystemInputSource;
+  inputLabel?: string;
+};
 
 export interface SystemTurnOptions {
   quiet?: boolean;
@@ -224,18 +239,40 @@ export interface SystemTurnOptions {
   /** Each message the Concierge says in the turn goes to the phone of the
    *  person the chat serves at this level. A reminder, a recovery or a notice has none. */
   pushLevel?: NotifyLevel;
+  /** The tasks whose news the turn carries, as a task event's batch names them. */
+  taskIds?: readonly string[];
 }
 
 /**
- * The task ids a turn's prompt names: `<task id="…">` lines, the `task_id` of
- * a `defer` wake-up's note, and `task:<id>` names from before it.
+ * The task a `defer` wake-up is for, from the `task_id` of the `<defer_note>`
+ * line Rome writes ahead of the note (routines/defer.ts). Only the first such
+ * line counts: what the note itself says names nothing.
  */
-function namedTaskIds(prompt: string): Set<string> {
-  return new Set(
-    [...prompt.matchAll(/<task id="([^"]+)"|\btask_id="([^"]+)"|\btask:([\w-]+)/g)]
-      .map((match) => match[1] ?? match[2] ?? match[3])
-      .filter((id): id is string => Boolean(id)),
-  );
+/**
+ * The check a `defer` wake-up is, named as Rome's headline right above its
+ * `<defer_note>` line names it ("⏰ Time's up: <name>"), or null for a turn
+ * that is no wake-up.
+ */
+function deferCheckOf(prompt: string): { name: string | null } | null {
+  const lines = prompt.split("\n");
+  const header = lines.findIndex((line) => line.startsWith("<defer_note "));
+  if (header < 0) return null;
+  const name = lines[header - 1]?.match(/^(?:⏰ Time's up|📨 Event arrived): (.+)$/u)?.[1]?.trim();
+  return { name: name || null };
+}
+
+/** The source and trace label of a wake-up's turn, when the prompt is one. */
+function checkSourceOf(prompt: string): { inputSource?: SystemInputSource; inputLabel?: string } {
+  const check = deferCheckOf(prompt);
+  if (!check) return {};
+  const inputSource: SystemInputSource = { type: "check", name: check.name };
+  return { inputSource, inputLabel: automatedInputLabel(inputSource) };
+}
+
+function deferTaskIds(prompt: string): string[] {
+  const header = prompt.match(/^<defer_note [^\n]*$/m)?.[0];
+  const id = header?.match(/\btask_id="([^"]+)"/)?.[1];
+  return id ? [id.replaceAll("&quot;", '"').replaceAll("&lt;", "<").replaceAll("&amp;", "&")] : [];
 }
 
 export class ConciergeService {
@@ -246,13 +283,12 @@ export class ConciergeService {
   private failedStarts = new Map<string, { turnId: string; starts: Map<string, string> }>();
   private approvalExpiry: ((chatId: string, turnDown: TurnDown) => Promise<number>) | null = null;
   private taskEvents: TaskEventCoalescer | null = null;
+  private readonly cardListeners = new Set<(event: ChatCardSettledEvent) => void>();
+  private readonly inputListeners = new Set<(event: InputsSettledEvent) => void>();
   /** Per Concierge chat, the task whose report a newer input took over. */
   private readonly carriedReports = new Map<string, readonly string[]>();
   /** Per Concierge chat, the guardian messages superseded turns handed on. */
   private readonly handedOnPrompts = new Map<string, string[]>();
-  /** Per Concierge turn, the tasks whose result it said. */
-  /** The tasks each Concierge turn said the news of, and which news. */
-  private readonly relayedInTurn = new Map<string, Set<string>>();
   /** What each Concierge turn said, by its parts, task and answered messages: a repeat is the same message. */
   private readonly saidByKey = new Map<string, Map<string, string>>();
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
@@ -535,12 +571,16 @@ export class ConciergeService {
     const follows = (await this.attachedFollowing?.moveToMainChat(chatId, storedChatId(main))) ?? 0;
     // Its rows are its owner's main chat's from now on, as rows are read:
     // none is moved. Open ones start a new thread there.
-    const tasks = await this.deps.tasks.repo.leaveChat(chatId, async (rows) => {
-      const status = await this.deps.tasks.statusOf(rows);
-      return new Set(
-        rows.filter((row) => status.get(row.id)?.status !== "ended").map((row) => row.id),
-      );
-    });
+    const tasks = await this.deps.tasks.repo.leaveChat(
+      chatId,
+      async (rows) => {
+        const status = await this.deps.tasks.statusOf(rows);
+        return new Set(
+          rows.filter((row) => status.get(row.id)?.status !== "ended").map((row) => row.id),
+        );
+      },
+      { deleted: how === "deleted" },
+    );
     log.info("concierge chat retired", { chatId, how, follows, tasks });
     // A deleted chat is still there now: its caller tells the activity once
     // it is gone, so finished rows read as the main chat's by then.
@@ -693,7 +733,7 @@ export class ConciergeService {
    * passes here (alerts, digests, task events, recoveries and the wake-ups of
    * `defer`), so a turn never lands in a chat the guardian closed.
    */
-  async resolveTurn(params: BackendTurnParams): Promise<ResolvedTurn> {
+  async resolveTurn(params: TurnParams): Promise<ResolvedTurn> {
     if (params.channel !== "webchat" || !isConciergeAgent(params.agentName)) return params;
     // The owner a wake-up recorded when it was scheduled, else its chat's.
     // With neither, its chat is gone and nothing says whose it was: it is
@@ -717,20 +757,32 @@ export class ConciergeService {
       chat ? await this.stoppedRequestLines(chatId) : "",
     ].filter(Boolean);
     const prompt = opening.length > 0 ? `${opening.join("\n")}\n\n${params.prompt}` : params.prompt;
-    const reportedTask = await this.reportedTaskOf(params.prompt, chatId);
+    const reportedTask = await this.reportedTaskOf(this.taskIdsOf(params), chatId);
     return {
       ...params,
       threadId: chatId,
       sessionId,
       prompt,
       ...(reportedTask ? { reportedTask } : {}),
+      // A check that came due: the Concierge speaks on its own, and its
+      // replies say which check woke it.
+      ...checkSourceOf(params.prompt),
     };
   }
 
-  /** Every task row of `chatId` a turn's prompt names, as {@link reportedTaskOf} reads them. */
-  private async reportedTasksOf(prompt: string, chatId: string): Promise<string[]> {
+  /**
+   * The tasks a turn is about, from what it was started with: a task event's
+   * batch, or a `defer` wake-up's task. Never read from the text it carries,
+   * where a stray name could stand for another task.
+   */
+  private taskIdsOf(params: TurnParams): readonly string[] {
+    return params.taskIds ?? deferTaskIds(params.prompt);
+  }
+
+  /** The tasks of `taskIds` that are `chatId`'s rows. */
+  private async ownTasks(taskIds: readonly string[], chatId: string): Promise<string[]> {
     const own: string[] = [];
-    for (const id of namedTaskIds(prompt)) {
+    for (const id of taskIds) {
       const found = await this.deps.tasks.repo.getWithChat(id);
       if (found && found.conciergeChat.id === chatId) own.push(found.row.id);
     }
@@ -738,16 +790,17 @@ export class ConciergeService {
   }
 
   /**
-   * The one task row a turn reports on: the row its prompt names, when it is
-   * `chatId`'s. A turn naming several rows reports on none that a line can be
-   * filed under. A task event names a row as `<task id="…">`, and a wake-up
-   * of `defer` names it in its name as `task:<id>`, as the Concierge's
-   * instructions ask.
+   * The one task row a turn reports on: the row it was started about, when
+   * it is `chatId`'s. A turn about several rows reports on none that a line
+   * can be filed under.
    */
-  private async reportedTaskOf(prompt: string, chatId: string): Promise<string | undefined> {
+  private async reportedTaskOf(
+    taskIds: readonly string[],
+    chatId: string,
+  ): Promise<string | undefined> {
     // Which of several tasks a line reports on is not ours to guess.
-    if (namedTaskIds(prompt).size !== 1) return undefined;
-    const [own] = await this.reportedTasksOf(prompt, chatId);
+    if (new Set(taskIds).size !== 1) return undefined;
+    const [own] = await this.ownTasks(taskIds, chatId);
     return own;
   }
 
@@ -789,6 +842,7 @@ export class ConciergeService {
       channel: "webchat",
       threadId: chatId,
       prompt,
+      ...(options.taskIds ? { taskIds: options.taskIds } : {}),
     });
     if (!params.sessionId) return "failed";
     const outcome = (await this.deps.runBackendTurn(params, options)) ?? "failed";
@@ -796,7 +850,7 @@ export class ConciergeService {
     // turn that took over also carries every task's news it held, one task's
     // or a batch's.
     if (outcome === "interrupted") {
-      const carried = await this.reportedTasksOf(prompt, params.threadId);
+      const carried = await this.ownTasks(this.taskIdsOf(params), params.threadId);
       if (carried.length > 0) this.carriedReports.set(params.threadId, carried);
     }
     // The tasks it reported on settle with the flush that carried them: the
@@ -806,20 +860,13 @@ export class ConciergeService {
   }
 
   /**
-   * Task `taskId`'s result was said in Concierge turn `turnId` of chat
-   * `chatId`, as by `say` naming it. It counts only when the Concierge had
-   * the task's news: news a failed or cut-short turn never brought it stays
-   * to be reported, and the messages it holds stay working, unless this turn
-   * took that report over.
+   * Task `taskId`'s result was said, as by `say` naming it. Saying it settles
+   * nothing: the news stays until a report that carried it runs to its end.
+   * Only a Stop of that report turn reads it, so the result is not shown as
+   * never told.
    */
-  noteRelayed(turnId: string, chatId: string, taskId: string): void {
-    const unseen = this.taskEvents?.unseen(taskId) === true;
-    if (unseen && !this.carriedReports.get(chatId)?.includes(taskId)) return;
-    // Saying it settles nothing: the news stays until a report that carried
-    // it runs to its end, so a turn that fails after saying it loses none.
-    const tasks = this.relayedInTurn.get(turnId) ?? new Set<string>();
-    tasks.add(taskId);
-    this.relayedInTurn.set(turnId, tasks);
+  noteSaid(taskId: string): void {
+    this.taskEvents?.said(taskId);
   }
 
   /** The message Concierge turn `turnId` said as `key` already, if it did. */
@@ -827,19 +874,16 @@ export class ConciergeService {
     return this.saidByKey.get(turnId)?.get(key);
   }
 
-  /** Concierge turn `turnId` said message `id` as `key`; forgotten with its relayed tasks. */
+  /** Concierge turn `turnId` said message `id` as `key`; forgotten once the turn ends. */
   keepSaid(turnId: string, key: string, id: string): void {
     const said = this.saidByKey.get(turnId) ?? new Map<string, string>();
     said.set(key, id);
     this.saidByKey.set(turnId, said);
   }
 
-  /** The tasks whose result Concierge turn `turnId` said, forgotten once read. */
-  takeRelayed(turnId: string): string[] {
-    const tasks = this.relayedInTurn.get(turnId);
-    this.relayedInTurn.delete(turnId);
+  /** Forgets what Concierge turn `turnId` said, once it ended. */
+  forgetTurn(turnId: string): void {
     this.saidByKey.delete(turnId);
-    return tasks ? [...tasks] : [];
   }
 
   /**
@@ -880,6 +924,70 @@ export class ConciergeService {
   }
 
   /** The delivery of task-chat changes, once {@link startConciergeEvents} has started it. */
+  /**
+   * Calls `listener` with the owner's messages a Concierge turn took in once
+   * that turn ended and nothing carries them on. Returns the unsubscribe.
+   */
+  onInputsSettled(listener: (event: InputsSettledEvent) => void): () => void {
+    this.inputListeners.add(listener);
+    return () => {
+      this.inputListeners.delete(listener);
+    };
+  }
+
+  /** The turn that took messages `inputIds` of Concierge chat `chatId` in ended. */
+  inputsSettled(chatId: string, inputIds: readonly string[]): void {
+    if (inputIds.length === 0) return;
+    for (const listener of this.inputListeners)
+      listener({ sessionId: chatId, inputIds: [...inputIds] });
+  }
+
+  /** Calls `listener` whenever a card a task card shows settles. Returns the unsubscribe. */
+  onCardSettled(listener: (event: ChatCardSettledEvent) => void): () => void {
+    this.cardListeners.add(listener);
+    return () => {
+      this.cardListeners.delete(listener);
+    };
+  }
+
+  /**
+   * A question or approval of task chat `chatId` settled: answered,
+   * dismissed, decided, turned down, or out of time (`openQuestions`, as a
+   * wait's expiry ends every one still open). The Concierge chats its task
+   * reports to hear it as it reads now. Every settle comes through here.
+   */
+  async cardSettled(
+    chatId: string,
+    item: { kind: "question" | "approval"; id: string } | "openQuestions",
+  ): Promise<void> {
+    if (this.cardListeners.size === 0) return;
+    const row = await this.deps.tasks.repo.findBySession(chatId);
+    if (!row) return;
+    const found = await this.deps.tasks.repo.getWithChat(row.id);
+    // The chat it reports to now, and the one it was said in, if it moved since.
+    const chats = new Set([found?.conciergeChat.id, row.chatId]);
+    const sources = this.taskCardSources();
+    const cards =
+      item === "openQuestions"
+        ? await openQuestionCards(sources, chatId)
+        : [await settledCard(sources, chatId, item)].filter((card) => card !== null);
+    for (const card of cards) {
+      for (const sessionId of chats) {
+        if (!sessionId) continue;
+        for (const listener of this.cardListeners) listener({ sessionId, card });
+      }
+    }
+  }
+
+  /** Where task cards read what they show (task-cards.ts). */
+  taskCardSources(): TaskCardSources {
+    return {
+      taskCardsOf: (chatIds) => this.deps.webchatRepo.taskCardsOf(chatIds),
+      findBySessions: (chatIds) => this.deps.tasks.repo.findBySessions(chatIds),
+      waitExpiry: this.deps.tasks.waitExpiry,
+    };
+  }
+
   attachTaskEvents(events: TaskEventCoalescer | null): void {
     this.taskEvents = events;
   }
@@ -1075,7 +1183,16 @@ export class ConciergeService {
     const chatId = (await this.deps.tasks.repo.get(taskId))?.sessionId;
     if (!chatId) return 0;
     const turns = this.attached?.chats.activeTurns(chatId) ?? [];
-    for (const turnId of turns) await this.attached?.chats.interruptTurn(turnId);
+    // One turn that will not stop, as one that ended meanwhile, stops neither
+    // the others nor the turn-down below.
+    for (const turnId of turns) {
+      await this.attached?.chats.interruptTurn(turnId).catch((error: unknown) =>
+        log.warn("failed to stop a stopped task's turn", {
+          chatId,
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      );
+    }
     // Nothing approved later runs for a stopped task: turned down once its
     // work has stopped, so one its turn asked for while stopping is too.
     await this.turnDownForStop(chatId, Date.now());
