@@ -19,7 +19,7 @@ STATE_DIR="${ROME_ENV_STATE_DIR:-$HOME/.rome-environments/$NAME}"
 # Secrets come from one 1Password item, read with a service account scoped to
 # the development vault. The secrets file is the fallback when the devbox has no
 # service account token.
-OP_VAULT="${COS_OP_VAULT:-Rome dev}"
+OP_VAULT="${COS_OP_VAULT:-Rome Dev}"
 OP_ITEM="${COS_OP_ITEM:-Chief of staff test}"
 OP_TOKEN_FILE="${COS_OP_TOKEN_FILE:-$HOME/.config/op/service-account-token}"
 SECRETS_FILE="${COS_SECRETS_FILE:-$STATE_DIR/secrets.env}"
