@@ -436,6 +436,62 @@ function posts() {
   return fetchMock.mock.calls.filter(([, init]) => init?.method === "POST");
 }
 
+describe("TaskChatCard width", () => {
+  // jsdom lays nothing out, so the width is read from the classes: a message
+  // bubble's cap for a card holding a question or an approval, the compact cap
+  // for one that holds none.
+  const BUBBLE = "max-w-[min(100%,var(--container-2xl))]";
+  const WIDE = `has-[[data-chat-task-open]]:${BUBBLE}`;
+
+  for (const kind of ["question", "approval"] as const) {
+    const control = kind === "question" ? "Send" : "Approve";
+    const what = kind === "question" ? "a question" : "an approval";
+    const arrange = () => {
+      if (kind === "approval") {
+        messages = [];
+        approvals = [approval()];
+      }
+    };
+
+    it(`gives ${what} shown alone a message bubble's width`, async () => {
+      arrange();
+      show(true, "ask");
+      await screen.findByRole("button", { name: control });
+      const box = document.querySelector("[data-chat-task-waiting]")!.parentElement!;
+      expect(box.className).toContain(BUBBLE);
+      expect(box.className).not.toContain("max-w-md");
+    });
+
+    it(`opens ${what} inside a card from before to a message bubble's width`, async () => {
+      arrange();
+      show(true);
+      await screen.findByRole("button", { name: control });
+      const card = document
+        .querySelector("[data-chat-task-open]")!
+        .closest<HTMLElement>(".rounded-16")!;
+      expect(card.className).toContain("max-w-md");
+      expect(card.className).toContain(WIDE);
+    });
+  }
+
+  it("keeps the task card, which holds no question, at the compact width", async () => {
+    show(true, "task");
+    await screen.findByText("Draft email");
+    expect(document.querySelector("[data-chat-task-open]")).toBeNull();
+    expect(screen.getByText("Draft email").closest(".rounded-16")?.className).toContain("max-w-md");
+  });
+
+  it("marks no open card for a card from before when the task holds nothing to answer", async () => {
+    messages = [];
+    show(true);
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/messages"))).toBe(true),
+    );
+    await screen.findByText("Draft email");
+    expect(document.querySelector("[data-chat-task-open]")).toBeNull();
+  });
+});
+
 describe("TaskChatCard", () => {
   it("keeps older blocks compact without pending targets, tab claims or card requests", async () => {
     show(false);

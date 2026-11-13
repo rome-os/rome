@@ -81,7 +81,8 @@ function TaskAskCard({
   if (expired && !open) return <ExpiredAskCard chatId={chatId} onOpen={() => setOpen(true)} />;
   if (waiting) {
     return (
-      <div className="flex w-full min-w-0 max-w-md flex-col">
+      // As wide as a received chat bubble can be (`ChatBubble`'s cap).
+      <div className="flex w-full min-w-0 max-w-[min(100%,var(--container-2xl))] flex-col">
         <WaitingTaskCard
           key={chatId}
           chatId={chatId}
@@ -347,7 +348,9 @@ function LiveTaskChatCard({
           : t(`concierge.taskStatus.${DERIVED_LABEL[derived.status]}`)
         : t(`concierge.taskStatus.${status}`);
   return (
-    <div className="w-full min-w-0 max-w-md space-y-3 rounded-16 border border-border bg-surface px-3 py-2">
+    // One line keeps the compact cap. While a card from before holds its
+    // question or approval (`data-chat-task-open`) it is as wide as a message.
+    <div className="w-full min-w-0 max-w-md space-y-3 rounded-16 border border-border bg-surface px-3 py-2 has-[[data-chat-task-open]]:max-w-[min(100%,var(--container-2xl))]">
       <div className="flex min-w-0 items-center gap-3">
         <ChatBubbleIcon className="size-4 shrink-0 text-subtle-foreground" aria-hidden />
         <div className="flex min-w-0 flex-1 flex-col">
@@ -518,9 +521,16 @@ function WaitingTaskCard({
     await refresh();
   }
 
+  const approvalCard =
+    !!approval && (!interaction || Date.parse(approval.row.createdAt) > Date.parse(interaction.at));
+  const questionCard =
+    !approvalCard &&
+    !!interaction?.part.render?.builtin &&
+    interaction.part.render.componentId === "question-card";
   return (
     <div
       data-chat-task-waiting={countsAsWaiting ? chatId : undefined}
+      data-chat-task-open={approvalCard || questionCard ? "" : undefined}
       className="min-w-0 wrap-anywhere"
     >
       {error && (
