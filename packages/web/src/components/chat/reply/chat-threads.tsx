@@ -69,23 +69,41 @@ export function taskThreads(
 }
 
 /**
- * The labels of a loaded timeline: one under every agent message in a task's
- * thread, named by the task's title, and none under the guardian's: a plain
- * message, a forward and a question or approval card alike. A task card, the
- * one shown when its task starts, needs none: it names its task itself. One
- * label per message.
+ * The labels of a loaded timeline, named by the task's title. An agent
+ * message in a task's thread may carry one: a plain message, a forward and a
+ * question or approval card alike. A task card, the one shown when its task
+ * starts, needs none: it names its task itself. Of a run of such messages in
+ * one thread, with nothing else between them, only the first and the last
+ * show it, so a run of one or two shows it on each. Any other message, the
+ * owner's included, ends the run.
  */
 export function threadLabels(
   messages: readonly ThreadTimelineMessage[],
   liveTitles: ReadonlyMap<string, string | null> = new Map(),
 ): Map<string, ThreadLabel> {
   const { threads, titles } = taskThreads(messages, liveTitles);
-  const labels = new Map<string, ThreadLabel>();
+  // Each run of one thread's labelled messages, in order: a run ends where
+  // any other message comes between.
+  const runs: { label: ThreadLabel; ids: string[] }[] = [];
+  let open = false;
   for (const message of messages) {
+    // A turn's trace is no message of the timeline: it ends nothing.
+    if (message.role !== "assistant" && message.role !== "user") continue;
     const thread = threads.get(message.id);
     const title = thread ? titles.get(thread) : undefined;
-    if (message.role !== "assistant" || !thread || !title || isTaskCard(message)) continue;
-    labels.set(message.id, { thread, title });
+    if (message.role !== "assistant" || !thread || !title || isTaskCard(message)) {
+      open = false;
+      continue;
+    }
+    const last = runs.at(-1);
+    if (open && last?.label.thread === thread) last.ids.push(message.id);
+    else runs.push({ label: { thread, title }, ids: [message.id] });
+    open = true;
+  }
+  const labels = new Map<string, ThreadLabel>();
+  for (const { label, ids } of runs) {
+    labels.set(ids[0]!, label);
+    labels.set(ids.at(-1)!, label);
   }
   return labels;
 }
@@ -176,7 +194,7 @@ const LABEL_LINE = "-mt-1 mb-1 flex max-w-full min-w-0 px-1 text-aux text-subtle
  * messages and inside the thread view. A message in no thread whose turn the
  * Concierge took on its own, from a routine, an app, another agent or what
  * it follows, shows `source` instead, in the same place and look, as plain
- * text: one label per message, and a thread's wins.
+ * text: at most one label per message, and a thread's wins.
  */
 export function ThreadLabelLine({
   message,
@@ -189,6 +207,8 @@ export function ThreadLabelLine({
   const draft = useReplyDraft();
   const label = threads?.labels.get(message.id);
   if (!label || !draft?.threads || draft.sessionId !== message.sessionId) {
+    // A message in a task's thread shows its thread's label or none.
+    if (threads?.taskThreads.has(message.id)) return null;
     return source ? <SourceLabel source={source} /> : null;
   }
   const name = label.title;

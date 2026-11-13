@@ -12,6 +12,14 @@ const GROUP_GAP_MS = 5 * 60_000;
 /** A gap of at least this long, or a change of local day, gets a time separator. */
 const SEPARATOR_GAP_MS = 15 * 60_000;
 
+/** The sources that label a reply: someone else made the Concierge speak. */
+const LABELLED_SOURCES: ReadonlySet<SystemInputSource["type"]> = new Set([
+  "routine",
+  "app",
+  "agent",
+  "automation",
+]);
+
 /** One message in a group. */
 export interface ConciergeEntry {
   message: ChatMessage;
@@ -260,9 +268,14 @@ export function buildConciergeItems(
     previous = message;
   };
 
-  // Where each turn's input came from, when it was not the owner's own words.
-  // The chat draws no line for it: the turn's replies carry it as a label.
+  // Where each turn's input came from, when someone else made the Concierge
+  // speak. The chat draws no line for it: the turn's replies carry it as a
+  // label. The Concierge's own wake-ups (a check, what it follows, its digest)
+  // label nothing.
   const sources = new Map<string, SystemInputSource>();
+  const labelSource = (turnId: string, source: SystemInputSource) => {
+    if (LABELLED_SOURCES.has(source.type)) sources.set(turnId, source);
+  };
   let automaticModel: string | undefined;
   for (const row of rows) {
     if (row.kind === "user") {
@@ -272,7 +285,7 @@ export function buildConciergeItems(
       const sender = row.message.sender;
       if (sender?.kind === "automated") {
         if (row.message.turnId) {
-          sources.set(row.message.turnId, {
+          labelSource(row.message.turnId, {
             type: sender.sourceType ?? "automation",
             name: sender.name,
           });
@@ -300,7 +313,7 @@ export function buildConciergeItems(
       });
       group = null;
     } else if (row.kind === "automated_input") {
-      sources.set(row.turnId, row.source);
+      labelSource(row.turnId, row.source);
     } else if (row.kind === "model_switch") {
       if (row.model === automaticModel) {
         automaticModel = undefined;

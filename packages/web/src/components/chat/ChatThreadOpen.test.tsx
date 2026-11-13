@@ -104,7 +104,9 @@ describe("threadLabels", () => {
         { type: "text", content: "Here it is" },
         { type: "text", content: "# Report", forwardedFrom: { chatId: "c1", title: "Flights" } },
       ]),
+      g("x1", "q1"),
       withParts("card", [{ type: "task_chat", chatId: "c1", title: "Flights", show: "ask" }]),
+      g("x2", "q1"),
       withParts("said", [{ type: "text", content: "Two options so far." }]),
     ];
     // One label per message, each opening the thread.
@@ -112,6 +114,58 @@ describe("threadLabels", () => {
       ["forward", "q1"],
       ["card", "q1"],
       ["said", "q1"],
+    ]);
+  });
+
+  it("labels the only message of a run", () => {
+    expect(where(threadLabels([g("q1"), a("a1", "q1")], tasks))).toEqual([["a1", "q1"]]);
+  });
+
+  it("labels both messages of a run of two", () => {
+    expect(where(threadLabels([g("q1"), a("a1", "q1"), a("a2", "q1")], tasks))).toEqual([
+      ["a1", "q1"],
+      ["a2", "q1"],
+    ]);
+  });
+
+  it("labels only the first and the last of a run of three or more", () => {
+    const run = [a("a1", "q1"), a("a2", "q1"), a("a3", "q1"), a("a4", "q1")];
+    expect(where(threadLabels([g("q1"), ...run], tasks))).toEqual([
+      ["a1", "q1"],
+      ["a4", "q1"],
+    ]);
+  });
+
+  it("ends a run at another thread's message, the owner's, or one in no thread", () => {
+    const labels = threadLabels(
+      [
+        g("q1"),
+        a("a1", "q1"),
+        a("a2", "q1"),
+        a("b1", "q2"),
+        a("a3", "q1"),
+        a("a4", "q1"),
+        g("x1", "q1"),
+        a("a5", "q1"),
+        a("a6", "q1"),
+        free("w1", "assistant"),
+        a("a7", "q1"),
+        a("a8", "q1"),
+        a("a9", "q1"),
+      ],
+      tasks,
+    );
+    // Every run here is of one or two, but the last.
+    expect(where(labels)).toEqual([
+      ["a1", "q1"],
+      ["a2", "q1"],
+      ["b1", "q2"],
+      ["a3", "q1"],
+      ["a4", "q1"],
+      ["a5", "q1"],
+      ["a6", "q1"],
+      ["a7", "q1"],
+      ["a9", "q1"],
     ]);
   });
 
@@ -258,7 +312,9 @@ function renderTranscript(shown: ChatMessage[] = messages) {
       <MemoryRouter>
         <ReplyDraftProvider value={draft}>
           <ThemeProvider>
-            <ChatThreadsProvider value={{ labels: threadLabels(shown) }}>
+            <ChatThreadsProvider
+              value={{ labels: threadLabels(shown), taskThreads: taskThreads(shown).threads }}
+            >
               <ConciergeTranscript
                 rows={rows}
                 live={idle}
@@ -376,6 +432,18 @@ describe("the source label in the transcript", () => {
   it("shows nothing for an agent's input the Concierge did not answer", () => {
     renderTranscript([trace("t-x", 10, { type: "agent", name: "Flint" })]);
     expect(screen.queryByText(/Flint/)).toBeNull();
+  });
+
+  it("gives the middle of a thread's run no label, its source's neither", () => {
+    renderTranscript([
+      ...messages,
+      trace("t-a3", 12, { type: "routine", name: "Check-in" }),
+      reply("a3", 12, "m1"),
+      reply("a4", 12, "m1"),
+    ]);
+    // a2, a3 and a4 run on with nothing between: a3 shows nothing.
+    expect(screen.getAllByRole("button", { name: "Kyoto trip" })).toHaveLength(3);
+    expect(screen.queryByText("Routine · Check-in")).toBeNull();
   });
 
   it("gives a reply in a task's thread its thread label alone", () => {

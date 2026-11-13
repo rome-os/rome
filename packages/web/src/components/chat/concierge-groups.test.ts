@@ -1,7 +1,7 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatMessage } from "@/lib/chat-types";
 import type { ChatRow } from "./chat-view";
-import type { TraceSnapshot } from "@rome/api-types/trace-segments";
+import type { SystemInputSource, TraceSnapshot } from "@rome/api-types/trace-segments";
 import { buildConciergeItems, type ConciergeItem, showsTyping } from "./concierge-groups";
 
 const MIN = 60_000;
@@ -470,7 +470,7 @@ describe("showsTyping", () => {
 
 describe("where a reply came from", () => {
   const routine = { type: "routine" as const, name: "Daily summary" };
-  const inputRow = (turnId: string, source = routine): ChatRow => ({
+  const inputRow = (turnId: string, source: SystemInputSource = routine): ChatRow => ({
     kind: "automated_input",
     key: `automated-input:${turnId}`,
     source,
@@ -486,6 +486,34 @@ describe("where a reply came from", () => {
     ]);
     expect(shape(items)).toEqual(["sep", "A:answer,more"]);
     expect(entries(items).map((entry) => entry.source)).toEqual([routine, routine]);
+  });
+
+  it("labels a reply only when someone else made the Concierge speak", () => {
+    const sources = [
+      routine,
+      { type: "app" as const, name: "Inbox" },
+      { type: "agent" as const, name: "Flint" },
+      { type: "automation" as const, name: null },
+      { type: "check" as const, name: "Flights" },
+      { type: "following" as const, name: "news" },
+      { type: "digest" as const, name: null },
+    ];
+    const items = build(
+      sources.flatMap((source, index) => [
+        inputRow(`t${index}`, source),
+        agentRow(say(`reply ${index}`, MIN + index * 1_000, `t${index}`)),
+      ]),
+    );
+    // The Concierge's own wake-ups, a check, what it follows and its digest, label nothing.
+    expect(entries(items).map((entry) => entry.source?.type)).toEqual([
+      "routine",
+      "app",
+      "agent",
+      "automation",
+      undefined,
+      undefined,
+      undefined,
+    ]);
   });
 
   it("draws nothing for an automated input whose turn said nothing", () => {
