@@ -57,7 +57,7 @@ private func text(_ value: String) -> [String: Any] { ["type": "text", "content"
         #expect(question.questions.first?.options == ["A", "B"])
         #expect(parts[3] == .webOnly(.unknown, toolUseId: "app"))
         #expect(parts[4] == .other(type: "tool_use"))
-        #expect(parts[5] == .error("boom"))
+        #expect(parts[5] == .error(TurnError(text: "boom")))
     }
 
     @Test func actionNamesReadAsWords() {

@@ -236,16 +236,6 @@ final class Workspace {
             .contains { store in store.pending.contains { $0.state == .sending } }
     }
 
-    @ObservationIgnored private var taskWaits: [String: TaskWaitStore] = [:]
-
-    /// What a waiting task chat asks, for its card in the main Chat.
-    func taskWait(_ chatId: String) -> TaskWaitStore {
-        if let store = taskWaits[chatId] { return store }
-        let store = TaskWaitStore(chatId: chatId, backend: backend)
-        taskWaits[chatId] = store
-        return store
-    }
-
     func taskStore(_ chatId: String) -> TranscriptStore {
         if let store = taskStores[chatId] { return store }
         let store = TranscriptStore(sessionId: chatId, kind: .task, backend: backend)
@@ -254,18 +244,27 @@ final class Workspace {
         return store
     }
 
+    /// Why the last topic chat start failed, for the first bubble to say.
+    private(set) var startFailure: SendFailure?
+
     /// Starts a topic chat, then sends it its first message, in that order.
     /// Until the chat exists, the message is kept under the blank chat's
     /// draft key: a failed start or a kill does not lose it.
     func startTopicChat(firstMessage text: String, images: [ComposerImage] = [], blankKey: String? = nil, fromComposer: Bool = false) async -> String? {
         let startId = "start-\(UUID().uuidString)"
         if let blankKey { drafts.sending(chat: blankKey, inputId: startId, text: text, photos: images, fromComposer: fromComposer) }
-        guard let chat = try? await backend.startTopicChat() else {
+        startFailure = nil
+        let started: ConciergeChat
+        do {
+            started = try await backend.startTopicChat()
+        } catch {
+            startFailure = SendFailure(error)
             // Back into the blank chat's draft: its composer shows it, or,
             // if the guardian has left, the next blank chat does.
             if let blankKey { drafts.takeBack(chat: blankKey, inputId: startId) }
             return nil
         }
+        let chat = started
         topics.add(chat)
         let store = topicStore(chat.id)
         store.beginEmpty()
@@ -420,6 +419,12 @@ final class Workspace {
         store.cache = transcripts
         store.showCached()
         concierge = store
+    }
+
+    /// The chat came back in front, or the app did: its store tries a failed
+    /// load again, visibly, or asks once whether its turn still runs.
+    func chatShown(chat: String) {
+        if isMainChat(chat) { concierge.chatShown() } else { topicStores[chat]?.chatShown() }
     }
 
     /// The id this person's main chat goes by, here and on the server.
@@ -1279,7 +1284,11 @@ final class AppModel {
         didSet {
             guard visibleChat != oldValue else { return }
             workspace?.backend.events.watch(PushPresentation.serverChat(visibleChat, mainServerID: workspace?.mainChatServerID))
-            if let visibleChat { clearDelivered(for: visibleChat) }
+            if let visibleChat {
+                clearDelivered(for: visibleChat)
+                // Back in front: its turn may have ended unheard.
+                workspace?.chatShown(chat: visibleChat)
+            }
         }
     }
 
@@ -1312,7 +1321,10 @@ final class AppModel {
         appearance.apply()
         node.setActive(true)
         // Back in front on a chat counts as opening it: its delivered pushes go.
-        if let visibleChat { clearDelivered(for: visibleChat) }
+        if let visibleChat {
+            clearDelivered(for: visibleChat)
+            workspace?.chatShown(chat: visibleChat)
+        }
         syncLanguage()
         // Notifications turned on in the Settings app register this phone.
         Task { await push.launch() }

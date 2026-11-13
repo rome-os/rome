@@ -34,13 +34,12 @@ private func rows(_ items: [[String: Any]]) -> [TranscriptRow] {
         ])
         #expect(parsed == [
             .webOnly(.aiTools, toolUseId: "a"), .webOnly(.connectService, toolUseId: "b"), .webOnly(.connectorSignIn, toolUseId: "c"),
-            .webOnly(.app("habits"), toolUseId: "d"), .webOnly(.turnSummary), .webOnly(.modelSwitch(model: "GPT-5")),
+            .webOnly(.app("habits"), toolUseId: "d"), .webOnly(.turnSummary), .notice("Switched to GPT-5"),
         ])
         #expect(MessagePart.WebOnlyKind.aiTools.title() == "Connect Claude or ChatGPT")
         #expect(MessagePart.WebOnlyKind.connectService.title() == "A card to connect a service")
         #expect(MessagePart.WebOnlyKind.app("habits").title(appName: "Habits") == "A card from Habits")
         #expect(MessagePart.WebOnlyKind.app("habits").title() == "An app card")
-        #expect(MessagePart.WebOnlyKind.modelSwitch(model: "GPT-5").title() == "Switched to GPT-5")
     }
 
     /// An answered interactive card says it is done; an open one still asks to be opened.

@@ -7,6 +7,8 @@ enum Palette {
     static let bg = dynamic(0xF4F3EF, 0x0B0907)
     static let sheet = dynamic(0xF4F3EF, 0x120F0D)
     static let elevated = dynamic(0xFFFFFF, 0x191513)
+    /// The status mark's badge: lighter than the page in dark mode, so the emoji reads.
+    static let markFill = dynamic(0xFFFFFF, 0x4B433C)
     static let bubble = dynamic(0xEBE4DA, 0x1C1916)
     static let fill = dynamic(0xEFE9E1, 0x272320)
     static let fillStrong = dynamic(0xE8E1D7, 0x2A2523)
@@ -106,6 +108,9 @@ enum Metrics {
     static let groupRadius: CGFloat = 16
     static let bigCardRadius: CGFloat = 18
     static let bubbleMaxWidthRatio: CGFloat = 0.78
+    /// The room an agent's bubble leaves free on the right, so a long one
+    /// stops short of the column's edge. Every card stops there too.
+    static let bubbleInset: CGFloat = 64
     /// The widest a conversation runs, its page padding included. On a phone
     /// the screen is narrower; on an iPad the column stays this wide and
     /// centered, so a line never runs across the whole screen.
@@ -121,6 +126,22 @@ enum Metrics {
 }
 
 extension View {
+    /// The one width rule of a transcript: left aligned, never wider than an
+    /// agent's bubble can run, so the right edges of cards and long bubbles
+    /// line up. A light card or a bubble hugs its content inside this
+    /// width; an interactive card also asks `fillsBubbleWidth()` and takes all
+    /// of it. Bubbles and cards both go through `Metrics.bubbleInset`.
+    func bubbleWidth() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.trailing, Metrics.bubbleInset)
+    }
+
+    /// Put before a card's background: the card takes the whole width
+    /// `bubbleWidth()` leaves it.
+    func fillsBubbleWidth() -> some View {
+        frame(maxWidth: .infinity, alignment: .leading)
+    }
+
     /// Keeps a conversation's rows, composer and banners in one centered
     /// column of `Metrics.readableWidth` at most (DESIGN.md 4).
     func readableColumn() -> some View {

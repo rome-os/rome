@@ -115,6 +115,14 @@ Debug builds read these environment variables (set them in the scheme's Run opti
 | `ROME_DEMO=many-apps` | Opens the demo data with a screenful of apps, for the Apps grid and the widget. |
 | `ROME_LOCAL_ORIGIN`, `ROME_LOCAL_USER`, `ROME_LOCAL_PASSWORD` | Signs in to a Rome on this Mac with a local test guardian instead of Rome Cloud. |
 
+**A chat with every card state.** To look at the app's cards and lines against a dev stack, fill a chat with copies of the main Chat's cards (tasks, questions and approvals in every state the stack holds, forwarded results, a connect card, model switches and stored model errors). Test data only, on a dev stack, never a real instance. Make a chat (`POST /api/concierge/chats` with a name such as `zz-all-card-states`), then run the script inside the dev container, never from the host:
+
+```bash
+docker exec -i rome-rome-1 python3 - <chat id> < ios/Tools/card-states-chat.py
+```
+
+Lines that come from a turn's trace (a renewal, a failed turn) and thread labels are not copied: for those, read the demo data (`ROME_DEMO=1`) or the main Chat.
+
 The stacking game ("Build Rome") opens from the update page while a Rome upgrades, or with ten quick taps on the big mascot of the Agent page (a tap on a chat header's mascot opens it). To reach the update entry without a real upgrade, launch with `ROME_DEMO=update` and tap "Update now": the demo upgrade runs for about 8 seconds, and "Play a game" shows under its status line. The best score stays on the device, across sign-out.
 
 To run a local Rome for this, start core with its own profile so it does not touch `~/.rome/default`:
