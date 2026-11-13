@@ -64,7 +64,7 @@ export const METRICS: Metric[] = [
   { name: "Bursts", value: (s) => s.metrics.bursts, total: "sum" },
   { name: "Turns", value: (s) => s.metrics.turns, total: "sum" },
   { name: "Silent turns", value: (s) => s.metrics.silentTurns, total: "sum" },
-  { name: "In tok/turn", value: (s) => s.metrics.inputTokens.mean, total: "mean" },
+  { name: "Prompt tok/turn", value: (s) => s.metrics.inputTokens.mean, total: "mean" },
   { name: "Cached tok/turn", value: (s) => s.metrics.cacheReadTokens.mean, total: "mean" },
   { name: "Out tok/turn", value: (s) => s.metrics.outputTokens.mean, total: "mean" },
   {

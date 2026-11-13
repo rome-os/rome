@@ -115,7 +115,7 @@ function readChat(chatId: string): ChatRows {
       params: [chatId],
     },
     {
-      sql: `SELECT turn_id, input_tokens, output_tokens, cache_read_tokens, created_at
+      sql: `SELECT turn_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, created_at
             FROM rome_agent_messages WHERE role = 'trace' AND session_id = ? AND turn_id IS NOT NULL`,
       params: [chatId],
     },

@@ -58,9 +58,9 @@ Every metric comes from the stack's database, read inside the container. The scr
 | Task cards, Ask cards, Forwards, Says | The Concierge's messages by kind. Ask cards include its own question cards. |
 | Echo | A say or forward of at most 200 characters, sent after a card settled, that names the owner's pick or the card's outcome (approved, rejected, expired), and carries none of the scenario's expected result. |
 | Ack | A say or forward that opens with an acknowledgement or announces what it will do ("Got it", "I will…", "好的"). |
-| Bursts | Runs of two or more Concierge messages, each within a minute of the one before, with no owner message between. |
+| Bursts | Runs of two or more Concierge messages, each within a minute of the one before, with no owner message or card answer between. |
 | Turns, Silent turns | Concierge turns in the chat, and those that sent no message. |
-| In, Cached and Out tok/turn | The mean input, cache-read and output tokens of the chat's Concierge turns, as the provider reports them. |
+| Prompt, Cached and Out tok/turn | The mean prompt size (input, cache read and cache write together), cache-read and output tokens of the chat's Concierge turns. The prompt sum fits Anthropic, which reports the cache apart from the input, so compare labels on one provider. |
 | Checks | The decision was asked: every task that asked the owner something had its card shown. The result reached the owner: each expected result matched a Concierge message. Nothing was dropped: every owner message was answered or handed to a task, every task ended as the scenario expects, and its file was or was not written. |
 
 Echo and Ack are heuristics. Read the flagged messages in `round-N.md` before trusting a change in either.

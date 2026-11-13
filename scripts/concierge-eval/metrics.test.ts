@@ -89,6 +89,16 @@ describe("chatMetrics", () => {
     expect(m.inputTokens.mean).toBe(200);
   });
 
+  it("ends a burst at the owner's card answer", () => {
+    const m = chatMetrics({
+      messages: [owner(0, "task"), row(10, [{ type: "task_chat", show: "ask" }]), say(40, "Done.")],
+      turns: [],
+      speakingTurns: new Set(),
+      outcomes: [{ at: 20, words: ["Tea"] }],
+    });
+    expect(m.bursts).toBe(0);
+  });
+
   it("does not count a card's answer as the owner's message", () => {
     const m = chatMetrics({
       messages: [owner(0, "hi"), row(1, [{ type: "interaction_result" }], null), say(2, "Hey.")],

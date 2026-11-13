@@ -18,6 +18,7 @@ export interface TurnRow {
   input_tokens: number | null;
   output_tokens: number | null;
   cache_read_tokens: number | null;
+  cache_write_tokens?: number | null;
   created_at: number;
 }
 
@@ -55,7 +56,7 @@ export interface ChatMetrics {
   byKind: Record<MessageKind, number>;
   acks: number;
   echoes: number;
-  /** Runs of two or more Concierge messages within a minute, with no owner message between. */
+  /** Runs of two or more Concierge messages within a minute, with no owner message or card answer between. */
   bursts: number;
   messagesInBursts: number;
   turns: number;
@@ -187,7 +188,10 @@ export function chatMetrics(input: MetricsInput): ChatMetrics {
       message.echo = outcome ? isEcho(row.text, outcome, input.result) : false;
     }
     classified.push(message);
-    if (row.said_at - prevAt <= BURST_WINDOW_S && run > 0) run += 1;
+    // The owner's card answer goes to the task chat, not this one, yet it
+    // is the owner speaking: the message after it starts a new run.
+    const answeredBetween = input.outcomes.some((o) => o.at > prevAt && o.at <= row.said_at);
+    if (row.said_at - prevAt <= BURST_WINDOW_S && run > 0 && !answeredBetween) run += 1;
     else {
       closeRun();
       run = 1;
@@ -214,7 +218,11 @@ export function chatMetrics(input: MetricsInput): ChatMetrics {
     messagesInBursts,
     turns: input.turns.length,
     silentTurns: input.turns.filter((t) => !input.speakingTurns.has(t.turn_id)).length,
-    inputTokens: stat((t) => t.input_tokens),
+    // The whole prompt: Anthropic reports the cached part apart from the
+    // input. OpenAI counts it in the input, so compare one provider only.
+    inputTokens: stat(
+      (t) => (t.input_tokens ?? 0) + (t.cache_read_tokens ?? 0) + (t.cache_write_tokens ?? 0),
+    ),
     cacheReadTokens: stat((t) => t.cache_read_tokens),
     outputTokens: stat((t) => t.output_tokens),
     messages: classified,
