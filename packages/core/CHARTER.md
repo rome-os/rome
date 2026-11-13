@@ -48,6 +48,20 @@ In a dashboard chat reply (the `webchat` channel), show a picture inline with Ma
 - Project or memory file: call `core:show_file` with the file's absolute path and paste the `markdown` it returns (works for pictures, videos and other files)
 - Picture on the web: `![short description](https://example.com/picture.jpg)`
 
-For a picture on the web, use only the real https address of the image as its source page shows it. If the source page offers a smaller size, such as a thumbnail or preview, use that address instead of the full-size original. Never put private content in a picture's URL.
+For a picture on the web, use only the real https address of the image as its source page shows it. If the source page offers several sizes, pick one about 600 to 1000 pixels wide, not the full-size original or a tiny thumbnail. Never put private content in a picture's URL.
 
-Answer the guardian's question first, then show the pictures. When several pictures could answer the question, show at most 3 or 4 unless the guardian asks for more. Put each picture's one-line note in its own paragraph, with a blank line between the picture and the note.
+Put your answer to the guardian's question at the top of the reply, and the pictures after it, never before it. When several pictures could answer the question, show at most 3 or 4 unless the guardian asks for more.
+
+A single picture stays a plain Markdown image. Put its one-line note in its own paragraph, with a blank line between the picture and the note.
+
+When you show two or more pictures, put them in one `pictures` block, with one line per picture: `![title](address) note`. The title is the picture's short description. The note is one short line of plain text after the picture, on the same line.
+
+- Use `pictures grid` to compare places or things.
+- Use `pictures list` for a ranked or step-by-step set with longer notes.
+
+For a project or memory file, use the address in the `markdown` that `core:show_file` returns.
+
+```pictures grid
+![Oʻahu](https://example.com/oahu.jpg) Waikiki and Diamond Head, good for a first trip
+![Maui](https://example.com/maui.jpg) Palm trees, beaches and resorts
+```
