@@ -61,6 +61,9 @@ for f in /rome-home/.codex/*.sqlite /rome-home/.codex/*.sqlite-wal /rome-home/.c
 done
 for f in "$S/codex/"*.sqlite*; do [ -e "$f" ] && cp -a "$f" /rome-home/.codex/; done
 if [ -d "$S/claude/projects" ]; then rm -rf /rome-home/.claude/projects && cp -a "$S/claude/projects" /rome-home/.claude/projects; fi
+# The copy runs as root, and the volumes keep what it wrote as root: hand
+# them back to the user the backend runs as, or it cannot read them.
+if [ -n "$OWNER" ]; then chown -R "$OWNER" /rome-home/.claude /rome-home/.codex; fi
 echo "restored $(cat "$S/created-at")"
 `;
 
@@ -113,13 +116,8 @@ export class Stack {
     }
   }
 
-  private image(): string {
-    return run("docker", [
-      "inspect",
-      this.options.container,
-      "--format",
-      "{{.Config.Image}}",
-    ]).trim();
+  private inspect(format: string): string {
+    return run("docker", ["inspect", this.options.container, "--format", format]).trim();
   }
 
   /**
@@ -129,7 +127,8 @@ export class Stack {
    */
   private async withBackendStopped(script: string, name: string): Promise<string> {
     if (!/^[\w.-]+$/.test(name)) throw new Error(`bad snapshot name: ${name}`);
-    const image = this.image();
+    const image = this.inspect("{{.Config.Image}}");
+    const owner = this.inspect("{{.Config.User}}");
     run("docker", ["stop", "--time", "30", this.options.container]);
     try {
       return run("docker", [
@@ -139,8 +138,12 @@ export class Stack {
         this.options.container,
         "--entrypoint",
         "bash",
+        "--user",
+        "0:0",
         "-e",
         `NAME=${name}`,
+        "-e",
+        `OWNER=${owner}`,
         image,
         "-c",
         script,
