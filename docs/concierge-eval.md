@@ -22,7 +22,7 @@ pnpm concierge:eval --label before --rounds 3
 
 Each round restores the snapshot, waits for `/api/health`, and plays every scenario in its own new topic chat, all at once. Add `--serial` to play them one at a time. The script plays the owner. It answers question cards with their first option and approves or rejects approvals as the scenario says. A step ends when the chat has no running turn and no task active or waiting on the owner for 45 seconds (`--settle`), or after 25 minutes (`--timeout`).
 
-`--compare <label>` puts an earlier label beside this one. `--report <label>` rebuilds a label's summary and comparison from the saved rounds without running anything. `--only ask-one,quick` plays some scenarios only, for debugging.
+`--compare <label>` puts an earlier label beside this one. `--report <label>` rebuilds a label's summary and comparison from the saved rounds without running anything. A summary judges again whether each expected result reached the owner, from the messages each round kept, so every label is judged by the current scenario rules. `--only ask-one,quick` plays some scenarios only, for debugging.
 
 Results go to `.concierge-eval/<label>/`, which git ignores:
 

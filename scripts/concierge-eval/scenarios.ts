@@ -140,7 +140,7 @@ export const SCENARIOS: Scenario[] = [
       results: [
         /towel|swim|sandal|sunscreen/i,
         /two|2 people|both/i,
-        /serviette|maillot|crème|lunettes|chapeau/i,
+        /french|français|traduit|serviette|maillot|crème|法语/i,
       ],
       endReason: "done",
     },

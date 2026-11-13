@@ -324,13 +324,35 @@ async function runRound(label: string, round: number): Promise<RoundResult> {
   };
 }
 
+/**
+ * Judges again whether each expected result reached the owner, from the
+ * messages a round kept, so two labels are always judged by the current
+ * rules.
+ */
+function rejudge(round: RoundResult): RoundResult {
+  for (const result of round.scenarios) {
+    const expected = SCENARIOS.find((s) => s.id === result.id)?.expect.results;
+    if (!expected) continue;
+    const texts = result.metrics.messages
+      .filter((m) => m.kind === "say" || m.kind === "forward")
+      .map((m) => m.text);
+    const missing = expected.filter((r) => !texts.some((t) => r.test(t)));
+    result.checks.resultReached = missing.length === 0;
+    result.checks.notes = [
+      ...result.checks.notes.filter((n) => !n.startsWith("no result matched")),
+      ...missing.map((r) => `no result matched ${r}`),
+    ];
+  }
+  return round;
+}
+
 function readRounds(label: string): RoundResult[] {
   const dir = join(args.out, label);
   if (!existsSync(dir)) throw new Error(`no results for label ${label} in ${dir}`);
   return readdirSync(dir)
     .filter((f) => /^round-\d+\.json$/.test(f))
     .sort((a, b) => Number(a.match(/\d+/)?.[0]) - Number(b.match(/\d+/)?.[0]))
-    .map((f) => JSON.parse(readFileSync(join(dir, f), "utf8")) as RoundResult);
+    .map((f) => rejudge(JSON.parse(readFileSync(join(dir, f), "utf8")) as RoundResult));
 }
 
 function writeSummary(label: string): void {
