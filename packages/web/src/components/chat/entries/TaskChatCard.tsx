@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
 import { z } from "zod";
 import { taskStatusOfDto } from "@rome/api-types/concierge-task-status";
+import { toast } from "sonner";
 import { stopTask } from "@/components/concierge/send-task-action";
 import { useConciergeTasks } from "@/components/concierge/use-concierge-tasks";
 import { Button } from "@/components/ui/button";
@@ -340,7 +341,11 @@ function LiveTaskChatCard({
             variant="ghost"
             size="sm"
             className="shrink-0"
-            onClick={() => void stopTask(task)}
+            onClick={() =>
+              void stopTask(task).then((ok) => {
+                if (!ok) toast.error(t("concierge.taskList.failed.stop"));
+              })
+            }
           >
             {t("concierge.tasks.stop")}
           </Button>

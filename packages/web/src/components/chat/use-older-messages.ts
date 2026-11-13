@@ -61,8 +61,12 @@ export interface OlderMessages {
   hasOlder: (sessionId: string) => boolean;
   /** Attach to an element placed at the top of the transcript. */
   sentinelRef: (node: HTMLElement | null) => void;
-  /** Loads the page of turns before the oldest loaded one, keeping the viewport on what it shows. */
-  loadOlder: (sessionId: string) => Promise<void>;
+  /**
+   * Loads the page of turns before the oldest loaded one, keeping the viewport
+   * on what it shows. With `through`, the page reaches that message however
+   * far back it is, in one read.
+   */
+  loadOlder: (sessionId: string, options?: { through?: string }) => Promise<void>;
 }
 
 /**
@@ -108,13 +112,17 @@ export function useOlderMessages(
   const hasOlder = useCallback((id: string) => !!cursors.get(id), [cursors]);
 
   const loadOlder = useCallback(
-    async (id: string) => {
+    async (id: string, options: { through?: string } = {}) => {
       const cursor = cursorsRef.current.get(id);
       if (!cursor || loadingRef.current.has(id)) return;
       loadingRef.current.add(id);
       setLoading(true);
       try {
-        const page = await listSessionMessagePage(id, { limit: pageTurns, before: cursor });
+        const page = await listSessionMessagePage(id, {
+          limit: pageTurns,
+          before: cursor,
+          ...(options.through ? { through: options.through } : {}),
+        });
         // A newer response may have restarted the history while this one flew.
         if (!page || cursorsRef.current.get(id) !== cursor) return;
         const el = scrollerRef.current;

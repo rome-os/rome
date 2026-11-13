@@ -678,12 +678,12 @@ export function startConciergeEvents(
             error: error instanceof Error ? error.message : String(error),
           }),
         );
-      // Its owner's Stop in the task chat stops the task as any Stop does:
-      // its checks are cancelled and its approvals turned down.
+      // Its owner's Stop in the task chat stops the task as any Stop does,
+      // but a scheduled task's ends only this run (stopFromChat).
       if (outcomeOf(event.status) === "stopped") {
         const row = await tasks.repo.get(taskId);
         if (row && !row.stoppedAt && !row.archivedAt) {
-          await service.stopTask(taskId, "guardian").catch((error: unknown) =>
+          await service.stopFromChat(taskId).catch((error: unknown) =>
             log.warn("failed to stop a task its chat's Stop ended", {
               taskId,
               error: error instanceof Error ? error.message : String(error),

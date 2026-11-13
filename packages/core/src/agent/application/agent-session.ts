@@ -281,6 +281,8 @@ export interface AgentSession {
   readonly status: AgentSessionStatus;
   /** The turn the session is running, until it ends. */
   readonly runningTurn?: Turn;
+  /** The provider its model session runs on. */
+  readonly providerId?: ProviderId;
   /**
    * Submits an input, by default `next`. The receipt says where it landed and
    * resolves with the turn it lands in once that turn has started. An `after`

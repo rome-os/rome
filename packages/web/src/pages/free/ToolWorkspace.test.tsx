@@ -15,8 +15,8 @@ import type { ToolView, WidgetPlacement } from "./use-free-cells";
 
 rs.mock("@/hooks/use-apps", () => ({ useApps: () => ({ apps: [] }) }));
 // The panel is tested on its own; here it only has to be the tab's body.
-rs.mock("@/components/concierge/ConciergeTaskPanel", () => ({
-  ConciergeTaskPanel: () => <p>Task panel body</p>,
+rs.mock("@/components/concierge/TaskList", () => ({
+  TaskList: ({ chatId }: { chatId: string }) => <p>Task panel body {chatId}</p>,
 }));
 
 let viewportWidth = 1200;
@@ -764,7 +764,7 @@ function TasksOwner() {
   const pane = useToolTasks();
   return (
     <>
-      <button type="button" onClick={() => pane?.show()}>
+      <button type="button" onClick={() => pane?.show("chat-1")}>
         Show tasks
       </button>
       <button type="button" onClick={() => pane?.hide()}>
@@ -828,7 +828,7 @@ describe("ToolWorkspace Tasks tab", () => {
     expect(screen.queryByRole("tab")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Show tasks" }));
     expect(screen.queryByRole("textbox", { name: "Chat draft" })).toBeNull();
-    expect(screen.getByText("Task panel body")).toBeTruthy();
+    expect(screen.getByText("Task panel body chat-1")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "Close Tasks" }));
     expect(screen.getByRole("textbox", { name: "Chat draft" })).toBeTruthy();
     expect(screen.queryByRole("tab")).toBeNull();
@@ -853,7 +853,7 @@ describe("ToolWorkspace Tasks tab", () => {
 
     expect(tabNames()).toEqual(["Tasks", "desktop", "projects"]);
     expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByText("Task panel body")).toBeTruthy();
+    expect(screen.getByText("Task panel body chat-1")).toBeTruthy();
     expect(screen.getByRole("tab", { name: "desktop" }).getAttribute("aria-selected")).toBe(
       "false",
     );
@@ -881,7 +881,7 @@ describe("ToolWorkspace Tasks tab", () => {
     await user.click(screen.getByRole("button", { name: "Show tasks" }));
     await user.click(screen.getByRole("button", { name: "Close Tasks" }));
     expect(tabNames()).toEqual(["desktop", "projects"]);
-    expect(screen.queryByText("Task panel body")).toBeNull();
+    expect(screen.queryByText("Task panel body chat-1")).toBeNull();
     expect(screen.getByRole("tab", { name: "desktop" }).getAttribute("aria-selected")).toBe("true");
 
     await user.click(screen.getByRole("button", { name: "Show tasks" }));
@@ -901,7 +901,7 @@ describe("ToolWorkspace Tasks tab", () => {
 
     await user.click(screen.getByRole("tab", { name: "Tasks" }));
     expect(screen.getByRole("tab", { name: "Tasks" }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByText("Task panel body")).toBeTruthy();
+    expect(screen.getByText("Task panel body chat-1")).toBeTruthy();
   });
 
   it("shows over a collapsed pane without writing the pane state, and falls back when it goes", async () => {
@@ -915,7 +915,7 @@ describe("ToolWorkspace Tasks tab", () => {
     );
     expect(screen.queryByRole("tabpanel")).toBeNull();
     await user.click(screen.getByRole("button", { name: "Show tasks" }));
-    expect(screen.getByText("Task panel body")).toBeTruthy();
+    expect(screen.getByText("Task panel body chat-1")).toBeTruthy();
     expect(setCollapsed).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Close Tasks" }));

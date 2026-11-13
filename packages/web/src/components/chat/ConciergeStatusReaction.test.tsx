@@ -123,18 +123,25 @@ describe("Concierge status reaction", () => {
     }
   });
 
-  it("draws the emoji alone on the bubble's top-left corner, at full strength, and only shows", () => {
+  it("draws the emoji in a round badge on the bubble's top-left corner, with a thought dot, and only shows", () => {
     const { container } = render(transcript());
     const badge = container.querySelector<HTMLElement>("[data-status-reaction]");
     expect(badge).not.toBeNull();
     const classes = badge?.className.split(/\s+/) ?? [];
-    // Centered on the top-left corner, so half of it hangs out.
+    // A 28px badge centered on the top-left corner, so half of it hangs out.
     expect(classes).toEqual(
-      expect.arrayContaining(["absolute", "-top-2.5", "-left-2.5", "size-5"]),
+      expect.arrayContaining(["absolute", "-top-3.5", "-left-3.5", "size-7", "rounded-full"]),
     );
-    // No disc behind it: no fill, ring, or rounded box.
-    expect(classes.some((name) => /^(bg-|ring-|rounded-|shadow-)/.test(name))).toBe(false);
+    // Lighter than the page in both themes, through semantic tokens only.
+    expect(classes).toEqual(
+      expect.arrayContaining(["bg-surface-elevated", "dark:bg-surface-hover", "shadow-1"]),
+    );
     expect(classes.some((name) => /^(right|bottom|-right|-bottom)-/.test(name))).toBe(false);
+    // One small dot trails off its lower left, hidden from assistive tech.
+    const dot = badge?.querySelector<HTMLElement>("[aria-hidden='true']");
+    expect(dot?.className.split(/\s+/)).toEqual(
+      expect.arrayContaining(["absolute", "size-1.5", "rounded-full", "-left-0.5", "top-6"]),
+    );
     // Neither shrunk nor dimmed: the emoji keeps its own colors.
     expect(classes.some((name) => /^(scale-|opacity-)/.test(name))).toBe(false);
     expect(badge?.querySelector("[class*='opacity-']")).toBeNull();
@@ -151,8 +158,8 @@ describe("Concierge status reaction", () => {
       container.querySelector<HTMLElement>(`[data-timeline-anchor="${id}"]`)?.className ?? "";
     const room = (className: string) => className.match(/\bmt-[\w.]+/g) ?? [];
     // "weather" has a mark, "thanks" has none: the same room either way.
-    expect(room(box("weather"))).toEqual(["mt-2"]);
-    expect(room(box("thanks"))).toEqual(["mt-2"]);
+    expect(room(box("weather"))).toEqual(["mt-4"]);
+    expect(room(box("thanks"))).toEqual(["mt-4"]);
     expect(room(box("you're welcome"))).toEqual([]);
   });
 

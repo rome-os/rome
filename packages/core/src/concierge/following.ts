@@ -24,6 +24,7 @@ import {
   type ConciergeFollowOptionDto,
   type ConciergeFollowRules,
 } from "@rome/api-types/concierge";
+import type { TaskListFollowItem } from "@rome/api-types/task-list";
 import type { ConnectionView } from "../api/routes/connections.js";
 import { actionExecutionContext } from "../apps/actions/context.js";
 import type { Action } from "../apps/actions/types.js";
@@ -200,6 +201,8 @@ interface FollowRecord {
    * follows made before owners were kept, which are their chat's owner's.
    */
   owner?: ConciergeOwner;
+  /** When it was made, epoch milliseconds. Absent on follows made before it was kept. */
+  createdAt?: number;
 }
 
 /** A visitor's own rules, and the time zone their browser reported. */
@@ -305,6 +308,14 @@ export interface ConciergeFollowing {
    * owner's main chat `to` (null for the guardian's). Answers how many follows moved.
    */
   moveToMainChat(chatId: string, to?: string | null): Promise<number>;
+  /**
+   * The owner's follows whose alerts go to Concierge chat `chatId`, with the
+   * owner's digest times, read without asking the sources again. A follow of
+   * a chat that is archived or gone counts as its owner's main chat's.
+   */
+  followsIn?(chatId: string, owner: ConciergeOwner): Promise<TaskListFollowItem[]>;
+  /** Calls `listener` whenever a follow or the rules are written. Returns the unsubscribe. */
+  onChange?(listener: () => void): () => void;
 }
 
 const HHMM = /^([01]\d|2[0-3]):([0-5]\d)$/;
@@ -348,6 +359,9 @@ function parseFollows(value: unknown): FollowRecord[] {
         preference: typeof f.preference === "string" && f.preference ? f.preference : null,
         chat: typeof f.chat === "string" && f.chat ? f.chat : null,
         ...(typeof f.owner === "string" && f.owner ? { owner: f.owner } : {}),
+        ...(typeof f.createdAt === "number" && Number.isFinite(f.createdAt)
+          ? { createdAt: f.createdAt }
+          : {}),
       },
     ];
   });
@@ -462,8 +476,16 @@ export function startConciergeFollowing(
         : {}),
     };
   };
+  const changeListeners = new Set<() => void>();
   const writeStored = async (next: StoredFollowing) => {
     await deps.settings.set(CONCIERGE_FOLLOWING_SETTING_KEY, next);
+    for (const listener of changeListeners) {
+      try {
+        listener();
+      } catch (error) {
+        log.warn("following change listener failed", { error: messageOf(error) });
+      }
+    }
   };
 
   /** An owner's rules: the guardian's top-level ones, a visitor's own with the defaults. */
@@ -896,6 +918,8 @@ export function startConciergeFollowing(
         : await deps.routines.create({
             name: `Digest at ${localTime}`,
             key,
+            // Shared by every chat of its owner.
+            chatId: null,
             trigger,
             actionName: CONCIERGE_DIGEST_ACTION,
             args,
@@ -976,6 +1000,8 @@ export function startConciergeFollowing(
         id = await deps.routines.create({
           name: `Follow ${follow.target} (${source.label})`,
           key,
+          // Shared by every owner who follows the target.
+          chatId: null,
           trigger: routineTrigger,
           actionName: CONCIERGE_FOLLOW_ACTION,
           args,
@@ -1194,6 +1220,7 @@ export function startConciergeFollowing(
         preference: null,
         chat: await chatForNewFollow(change.chatId, owner),
         owner,
+        createdAt: Date.now(),
       };
       const next = {
         ...applyChange(source, base, change),
@@ -1357,6 +1384,34 @@ export function startConciergeFollowing(
   };
   const following: ConciergeFollowing = {
     ...unserialized,
+    async followsIn(chatId, owner) {
+      const [stored, sources] = await Promise.all([readStored(), readSources().catch(() => [])]);
+      const { digestTimes } = rulesOf(stored, owner);
+      const items: TaskListFollowItem[] = [];
+      for (const follow of followsOf(stored, owner)) {
+        if ((await chatRefOf(follow.chat, owner)).id !== chatId) continue;
+        const source = sources.find((s) => s.source === follow.source);
+        items.push({
+          kind: "follow",
+          source: follow.source,
+          label: source?.label ?? follow.source,
+          target: follow.target,
+          // A source that does not answer now reads as unavailable.
+          state: source
+            ? toDto(source, follow, { id: chatId, name: "", main: false }).state
+            : "unavailable",
+          digestTimes,
+          ...(follow.createdAt !== undefined ? { createdAt: follow.createdAt } : {}),
+        });
+      }
+      return items;
+    },
+    onChange(listener) {
+      changeListeners.add(listener);
+      return () => {
+        changeListeners.delete(listener);
+      };
+    },
     follow: (change, owner) => exclusive(() => unserialized.follow(change, owner)),
     configure: (change, owner) => exclusive(() => unserialized.configure(change, owner)),
     unfollow: (source, target, owner) =>
