@@ -44,7 +44,7 @@ describe("/chats/:chatId/tasks", () => {
   let calls: string[];
   let follows: Record<string, TaskListFollowItem[]>;
   let checks: Record<string, Array<{ id: string; at: number | null; taskId: string | null }>>;
-  let cardMessages: Record<string, Array<{ id: string; content: string }>>;
+  let cardMessages: Record<string, Array<{ id: string; content: string; createdAt: Date }>>;
   let taskSource: ConciergeTasks | null;
 
   const app = () => {
@@ -211,31 +211,51 @@ describe("/chats/:chatId/tasks", () => {
     expect(calls).toEqual([`stop ${flights!.id} guardian`]);
   });
 
-  it("points a task that needs its owner at the message that shows its card", async () => {
+  it("points a task that needs its owner at the message that shows the card it waits on", async () => {
     await new ChatsWebChatRepository(testDb.db).createSession("task-chat", "Flights");
     await tasks.upsertMany([{ title: "Flights", sessionId: "task-chat" }]);
     const part = (show?: string) =>
       JSON.stringify([{ type: "task_chat", chatId: "task-chat", title: "Flights", show }]);
-    cardMessages.concierge = [
-      { id: "task-card", content: part("task") },
-      { id: "old-ask", content: part() },
-      { id: "new-ask", content: part("ask") },
-      { id: "later-task-card", content: part("task") },
-    ];
-    const tasksWith = new ConciergeTasks(tasks);
     // The task chat waits on its owner: an approval opened a minute ago.
+    const since = Date.now() - 60_000;
+    const said = (id: string, at: number, show?: string) => ({
+      id,
+      content: part(show),
+      createdAt: new Date(at),
+    });
+    const tasksWith = new ConciergeTasks(tasks);
     tasksWith.attachFacts({
       now: () => Date.now(),
       running: () => false,
       openWaits: async () =>
-        new Map([
-          ["task-chat", [{ kind: "approval" as const, id: "a1", since: Date.now() - 60_000 }]],
-        ]),
+        new Map([["task-chat", [{ kind: "approval" as const, id: "a1", since }]]]),
       reportPending: () => [],
     });
     taskSource = tasksWith;
-    const [item] = (await read("concierge")).groups[0]!.items;
-    expect(item).toMatchObject({ kind: "task", cardMessageId: "new-ask" });
+    const respondTo = async () => {
+      const [item] = (await read("concierge")).groups[0]!.items;
+      return item?.kind === "task" ? item.cardMessageId : undefined;
+    };
+
+    // An ask said before the wait shows an earlier question, and a task card shows none.
+    cardMessages.concierge = [
+      said("old-ask", since - 10 * 60_000),
+      said("task-card", since + 1_000, "task"),
+    ];
+    expect(await respondTo()).toBeNull();
+
+    // Stored times are whole seconds: an ask said in the wait's own second shows it.
+    cardMessages.concierge = [said("same-second-ask", Math.floor(since / 1_000) * 1_000, "ask")];
+    expect(await respondTo()).toBe("same-second-ask");
+
+    // The newest ask said since shows it.
+    cardMessages.concierge = [
+      said("old-ask", since - 10 * 60_000),
+      said("same-second-ask", Math.floor(since / 1_000) * 1_000, "ask"),
+      said("new-ask", since + 2_000),
+      said("later-task-card", since + 3_000, "task"),
+    ];
+    expect(await respondTo()).toBe("new-ask");
   });
 
   it("opens the change stream for the chat's owner only", async () => {

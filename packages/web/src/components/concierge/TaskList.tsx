@@ -2,7 +2,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { ChevronDown, Clock, MessageSquare, Radio, Workflow } from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Link } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import { z } from "zod";
 import {
@@ -350,6 +350,7 @@ function settled(item: TaskListTaskItem | undefined, action: "stop" | "respond")
 export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: () => void }) {
   const { t } = useTranslation("chat");
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
   const [endedOpen, setEndedOpen] = useState(false);
   const [endedShown, setEndedShown] = useState(ENDED_PAGE);
   const [pending, setPending] = useState<ReadonlyMap<string, "stop" | "respond">>(new Map());
@@ -398,9 +399,14 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
     if (action === "respond") {
       const target = item.cardMessageId;
       if (!target) {
-        // No message of this chat shows the card: its task chat holds it.
+        // No message of this chat shows the card it waits on: its task chat holds it.
         release();
-        toast.error(t("concierge.tasks.sourceMissing"));
+        if (!item.task.chat) {
+          toast.error(t("concierge.tasks.sourceMissing"));
+          return;
+        }
+        onNavigate?.();
+        navigate(`/chat/${item.task.chat.id}`);
         return;
       }
       onNavigate?.();

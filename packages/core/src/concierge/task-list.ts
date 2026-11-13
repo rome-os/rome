@@ -61,7 +61,9 @@ export interface ChatTaskListDeps {
   routineRuns: Pick<RoutineRunsRepository, "findLatestByRoutineIds">;
   routineEngine: Pick<RoutineEngine, "onChange">;
   /** The assistant messages of a chat that hold a task chat part, in the order said. */
-  taskChatPartMessages: (chatId: string) => Promise<Array<{ id: string; content: string }>>;
+  taskChatPartMessages: (
+    chatId: string,
+  ) => Promise<Array<{ id: string; content: string; createdAt: Date }>>;
 }
 
 /** A routine's trigger as its row says it. */
@@ -128,17 +130,22 @@ export class ChatTaskList {
 
   /**
    * For each task that needs its owner, the message of chat `chatId` that
-   * shows its card, by its task chat. Read only while one does.
+   * shows the card of the wait it now holds, by its task chat. Read only
+   * while one does.
    */
   private async cardMessagesOf(
     chatId: string,
     tasks: readonly ConciergeTaskDto[],
   ): Promise<Map<string, string>> {
-    const waiting = tasks.flatMap((task) =>
-      task.status === "needs_you" && task.chat ? [task.chat.id] : [],
+    const waits = new Map(
+      tasks.flatMap((task) =>
+        task.status === "needs_you" && task.chat && task.openWait
+          ? [[task.chat.id, task.openWait.since] as const]
+          : [],
+      ),
     );
-    if (waiting.length === 0) return new Map();
-    return cardMessagesOf(await this.deps.taskChatPartMessages(chatId), waiting);
+    if (waits.size === 0) return new Map();
+    return cardMessagesOf(await this.deps.taskChatPartMessages(chatId), waits);
   }
 
   private async followsIn(chatId: string, owner: ConciergeOwner): Promise<TaskListFollowItem[]> {

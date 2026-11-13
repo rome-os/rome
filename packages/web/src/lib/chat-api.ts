@@ -684,6 +684,8 @@ export interface CreateRoutinePayload {
    * (other prefixes belong to apps' managed routines). A repeat create with
    * the same key returns the routine that already holds it, not a duplicate. */
   key?: string;
+  /** The chat whose card turns it on. */
+  chatId?: string;
 }
 
 export interface CreateRoutineResult {

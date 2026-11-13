@@ -1211,9 +1211,9 @@ export const routines = sqliteTable(
     // rows from before the column, whose fires act for the chat's owner.
     createdBy: text("created_by", { mode: "json" }),
 
-    // The chat the routine works for: the webchat chat whose turn created it,
-    // else the chat its args send into. Null for a routine of no one chat, such
-    // as the Concierge's follows and digests. A chat's task list reads it.
+    // The chat the routine works for: the chat its args send into, else the
+    // chat it was made in. Null for a routine of no one chat, such as the
+    // Concierge's follows and digests. A chat's task list reads it.
     chatId: text("chat_id"),
 
     createdAt: integer("created_at", { mode: "timestamp" }).notNull(),

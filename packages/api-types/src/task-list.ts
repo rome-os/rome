@@ -35,8 +35,9 @@ export interface TaskListTaskItem {
   check: TaskListTaskCheck | null;
   /**
    * While it needs its owner: the message of this Concierge chat that shows
-   * its question or approval card (else its task card), where Respond goes.
-   * Null when no message of this chat shows it, and for any other status.
+   * the question or approval card it now waits on, where Respond goes. Null
+   * when no message of this chat shows it, where Respond opens its task
+   * chat, and for any other status.
    */
   cardMessageId: string | null;
 }

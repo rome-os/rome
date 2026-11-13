@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "@rstest/core";
 import { actionExecutionContext } from "../../apps/actions/context.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
-import { RoutinesRepository } from "./routines.js";
+import { RoutinesRepository, routineChatOf } from "./routines.js";
 
 const DAILY = {
   type: "schedule",
@@ -32,7 +32,7 @@ describe("the chat a routine works for", () => {
       run,
     );
 
-  it("is the webchat chat whose turn creates it", async () => {
+  it("is the chat its args send into, wherever it is made", async () => {
     const id = await inChat("chat-a", () =>
       repo.create({
         name: "Daily summary",
@@ -41,10 +41,29 @@ describe("the chat a routine works for", () => {
         args: { sessionId: "chat-b" },
       }),
     );
-    expect(await chatOf(id)).toBe("chat-a");
+    expect(await chatOf(id)).toBe("chat-b");
   });
 
-  it("is else the chat its args send into", async () => {
+  it("is else the chat it is made in: the one named, or the webchat chat whose turn makes it", async () => {
+    const named = await repo.create({
+      name: "Wake",
+      trigger: DAILY,
+      actionName: "system:summon",
+      args: { prompt: "check in" },
+      chatId: routineChatOf("system:summon", { prompt: "check in" }, "chat-e"),
+    });
+    const inTurn = await inChat("chat-a", () =>
+      repo.create({
+        name: "Wake",
+        trigger: DAILY,
+        actionName: "system:summon",
+        args: { prompt: "check in" },
+      }),
+    );
+    expect([await chatOf(named), await chatOf(inTurn)]).toEqual(["chat-e", "chat-a"]);
+  });
+
+  it("is the chat its args send into, made outside any chat", async () => {
     const send = await repo.create({
       name: "Summary",
       trigger: DAILY,

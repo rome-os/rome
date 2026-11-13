@@ -183,7 +183,7 @@ A chat the Concierge starts to hand one piece of work to another agent. It belon
 
 ## Task list
 
-The list in a [Concierge chat](#concierge-chat)'s side panel that answers "what is my agent doing for me in this chat?". The dashboard labels it Tasks. It lists the chat's tasks, its checks, the follows whose alerts come to it, and the routines that send into it, and nothing else does. Its owner opens it from the agent's logo in the chat's header.
+The list in a [Concierge chat](#concierge-chat)'s side panel that answers "what is my agent doing for me in this chat?". The dashboard labels it Tasks. It lists the chat's tasks, its checks, the follows whose alerts come to it, and the routines that work for it: those that send into it, and those made in it that send into no chat. Nothing else does. Its owner opens it from the agent's logo in the chat's header.
 
 - It is its owner's only, like the chat: the guardian and each visitor see only their own chat's list, and a Stop on another person's chat is refused as if the chat did not exist. A common chat has none for now.
 - It gathers what Rome already holds and decides nothing: a task shows its derived status, and a check, a schedule, a follow and a routine show as their own record says.

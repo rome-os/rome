@@ -82,17 +82,23 @@ const CHAT_ARG_OF_ACTION: Record<string, string> = {
 };
 
 /**
- * The chat a routine created now works for: the webchat chat whose turn
- * creates it, else the chat its args send into (`threadId` of
- * `resume_session` and `send_message`, `sessionId` of `send_user_message`).
- * Null when neither names one. Migration 0134 fills older rows by the args rule.
+ * The chat a routine works for: the chat its args send into (`threadId` of
+ * `resume_session` and `send_message`, `sessionId` of `send_user_message`),
+ * else the chat it was made in: `madeIn`, or the webchat chat whose turn
+ * creates it. Null when neither names one. Migration 0134 fills older rows by
+ * their args alone, as nothing on them says where they were made.
  */
-export function routineChatOf(actionName: string, args: Record<string, unknown>): string | null {
-  const context = actionExecutionContext.getStore()?.channelContext;
-  if (context?.channel === "webchat" && context.threadId) return context.threadId;
+export function routineChatOf(
+  actionName: string,
+  args: Record<string, unknown>,
+  madeIn?: string,
+): string | null {
   const arg = CHAT_ARG_OF_ACTION[actionName.replace(/^system:/, "")];
   const value = arg ? args[arg] : undefined;
-  return typeof value === "string" && value ? value : null;
+  if (typeof value === "string" && value) return value;
+  if (madeIn) return madeIn;
+  const context = actionExecutionContext.getStore()?.channelContext;
+  return context?.channel === "webchat" && context.threadId ? context.threadId : null;
 }
 
 export class RoutinesRepository {
@@ -139,14 +145,14 @@ export class RoutinesRepository {
     return types.size === 1 ? [...types][0] : null;
   }
 
-  /** Look up a routine by its caller-assigned `key`. Used by create_routine to
-   * reject a duplicate key before insert (the column's UNIQUE constraint is the
-   * authoritative backstop). Returns null when the key is unused. */
   /** The routines that work for chat `chatId`, as stored rows. */
   async findByChat(chatId: string) {
     return this.db.select().from(routines).where(eq(routines.chatId, chatId));
   }
 
+  /** Look up a routine by its caller-assigned `key`. Used by create_routine to
+   * reject a duplicate key before insert (the column's UNIQUE constraint is the
+   * authoritative backstop). Returns null when the key is unused. */
   async findByKey(key: string): Promise<Routine | null> {
     const rows = await this.db.select().from(routines).where(eq(routines.key, key));
     return rows[0] ? toRoutine(rows[0]) : null;

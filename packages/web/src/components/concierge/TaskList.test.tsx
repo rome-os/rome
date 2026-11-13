@@ -2,7 +2,7 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, rs } from "@rstest/core";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useLocation } from "react-router-dom";
 import { type TaskListParts, groupTaskList } from "@rome/api-types/task-list";
 import type { ConciergeTaskDto } from "@rome/api-types/concierge";
 import { chatTasksTopicName } from "@rome/api-types/live-events";
@@ -113,6 +113,10 @@ afterEach(() => {
   rs.unstubAllGlobals();
 });
 
+function Where() {
+  return <output aria-label="Location">{useLocation().pathname}</output>;
+}
+
 function renderList() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
@@ -120,6 +124,7 @@ function renderList() {
       <LiveEventsClientContext.Provider value={fakeSocketLiveEventsClient()}>
         <MemoryRouter>
           <TaskList chatId="concierge" />
+          <Where />
         </MemoryRouter>
       </LiveEventsClientContext.Provider>
     </QueryClientProvider>,
@@ -218,6 +223,23 @@ describe("TaskList", () => {
     expect(
       within(rowOf("Pick a hotel")).getByText("Waiting for your approval · 1 hr ago"),
     ).toBeTruthy();
+    stop();
+  });
+
+  it("opens the task chat on Respond when no message here shows the card it waits on", async () => {
+    parts.tasks[0] = taskItem(parts.tasks[0]!.task, { cardMessageId: null });
+    const jumps: string[] = [];
+    const stop = onConciergeJump(async (id) => {
+      jumps.push(id);
+      return true;
+    });
+    renderList();
+    await screen.findByRole("region", { name: "Needs you" });
+    fireEvent.click(screen.getByRole("button", { name: "Respond to Pick a hotel" }));
+    expect(jumps).toEqual([]);
+    expect(screen.getByRole("status", { name: "Location" }).textContent).toBe(
+      "/chat/chat-Pick a hotel",
+    );
     stop();
   });
 
