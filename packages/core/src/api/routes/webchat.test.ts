@@ -13,6 +13,7 @@ import {
 } from "@opentelemetry/sdk-logs";
 import { eq, sql } from "drizzle-orm";
 import { afterEach, beforeEach, describe, expect, it, rs } from "@rstest/core";
+import { widgetEventRoutes } from "./widget-events.js";
 import { createWebchatRuntime, openToolOf } from "./webchat.js";
 import { Session } from "../../agent/index.js";
 import { AgentInputQueue, type AgentInputReceipt, type SubmitOptions } from "../../agent/index.js";
@@ -4881,6 +4882,65 @@ describe("Webchat API", () => {
         output: { ...answers, card: [{ values: ["Plain"], text: "" }] },
       });
       expect(ctl.sentTurns.at(-1)?.prompt ?? "").not.toContain('"card"');
+      expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain('"questionId": "tone"');
+    });
+
+    it("answers a described question card through the widget's events route, by its message id", async () => {
+      const questions: Question[] = [
+        { id: "tone", question: "Which tone?", type: "single", options: ["Warm", "Plain"] },
+      ];
+      const ctl = mockScriptedManager();
+      ctl.setEvents(async function* () {
+        yield {
+          type: "tool_result",
+          toolUseId: "tu-ask-route",
+          tool: "ask_question",
+          output: askQuestionToolOutput(questions, true),
+        };
+        yield { type: "result", content: "" };
+      });
+      const app = createWebchatRuntime(deps).routes;
+      const sessionId = await newSession(app);
+      await drainTurn(
+        app,
+        await app.request(`/chat/sessions/${sessionId}/turns`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: "help me write" }),
+        }),
+      );
+      expect(await findCard(sessionId, "tu-ask-route")).toBeDefined();
+      // A widget is a message of its own: its id is the message's.
+      const widgetId = (await deps.webchatRepo.getMessages(sessionId)).find((m) =>
+        m.content.includes("tu-ask-route"),
+      )?.id;
+      expect(widgetId).toBeDefined();
+
+      ctl.setEvents(async function* () {
+        yield { type: "result", content: "" };
+      });
+      const events = widgetEventRoutes({
+        webchatRepo: deps.webchatRepo,
+        forward: (request) =>
+          app.fetch(new Request(request.url.replace("/api/chat/", "/chat/"), request)),
+      });
+      const res = await events.request(`/chat/widgets/${widgetId}/events`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "rome:answer",
+          context: { answers: [{ values: ["Plain"], text: "" }] },
+        }),
+      });
+      expect(res.status).toBe(200);
+      expect(await userPartsIn(sessionId)).toContainEqual({
+        type: "interaction_result",
+        toolUseId: "tu-ask-route",
+        output: {
+          answers: [{ questionId: "tone", value: "Plain" }],
+          card: [{ values: ["Plain"], text: "" }],
+        },
+      });
       expect(ctl.sentTurns.at(-1)?.prompt ?? "").toContain('"questionId": "tone"');
     });
 

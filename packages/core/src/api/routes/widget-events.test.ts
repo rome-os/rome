@@ -197,3 +197,47 @@ describe("an event on a widget", () => {
     expect((await fire("missing", { name: "water" })).status).toBe(404);
   });
 });
+
+describe("an event on a widget, over the dashboard's own storage", () => {
+  it("finds a widget stored in a dashboard chat by the id clients know it by", async () => {
+    const { createTestDb } = await import("../../test/helpers.js");
+    const { TurnLinks } = await import("../../sessions/turn-links.js");
+    const { ChatsWebChatRepository } = await import("../../webchat/chats-webchat-repository.js");
+    const testDb = createTestDb();
+    try {
+      const repo = new ChatsWebChatRepository(testDb.db, { links: new TurnLinks(testDb.db) });
+      await repo.createSession("chat-1", "Meals");
+      const stored = await repo.addBackendMessage("chat-1", "turn-1", [
+        mealWidget("item_0", "meals", "water") as never,
+      ]);
+      // A dashboard chat's lines live in Chats' tables, not the session's own.
+      const { romeAgentMessages } = await import("../../db/schema.js");
+      expect(testDb.db.select().from(romeAgentMessages).all()).toEqual([]);
+      expect((await repo.getMessages("chat-1")).map((m) => m.id)).toContain(stored.id);
+      const forwarded: string[] = [];
+      const app = widgetEventRoutes({
+        webchatRepo: repo,
+        callerOwner: async () => "guardian",
+        forward: async (request) => {
+          forwarded.push(new URL(request.url).pathname);
+          return Response.json({ ok: true });
+        },
+      });
+      const res = await app.request(`/chat/widgets/${stored.id}/events`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ name: "water", context: {} }),
+      });
+      expect(res.status).toBe(200);
+      expect(forwarded).toEqual(["/api/apps/meals/water"]);
+      await expect(
+        repo.addBackendMessage("chat-1", "turn-1", [
+          mealWidget("item_1", "meals", "water") as never,
+          { type: "text", content: "and words" } as never,
+        ]),
+      ).rejects.toThrow();
+    } finally {
+      testDb.close();
+    }
+  });
+});
