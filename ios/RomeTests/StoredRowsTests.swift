@@ -208,10 +208,25 @@ private func message(
         store.stop()
     }
 
+    /// A screen stops its store when another is pushed over it (a task chat
+    /// over a topic chat) and starts it again on the way back: its cards
+    /// must still open their chats then.
+    @Test func aStoreStoppedAndStartedAgainStillOpensChats() async {
+        let backend = FakeBackend()
+        let store = await chat(backend)
+        var opened: [String] = []
+        store.actions.onOpenChat = { id, _ in opened.append(id) }
+        store.stop()
+        store.start()
+        await settle { store.loaded }
+        store.actions.openChat("task-1", "Task")
+        #expect(opened == ["task-1"])
+    }
+
     /// The screen's callback holds what holds the store (the shell, the
-    /// workspace): a stopped store lets go of it, so nothing keeps the old
+    /// workspace): a closed store lets go of it, so nothing keeps the old
     /// workspace alive after a sign-out or a switch of instance.
-    @Test func aStoppedStoreLetsGoOfTheScreenCallback() async {
+    @Test func aClosedStoreLetsGoOfTheScreenCallback() async {
         final class Owner {}
         let backend = FakeBackend()
         let store = await chat(backend)
@@ -221,8 +236,29 @@ private func message(
             released = owner
             store.actions.onOpenChat = { _, _ in _ = owner }
         }
-        #expect(released != nil)
         store.stop()
+        #expect(released != nil)
+        store.close()
+        #expect(released == nil)
+    }
+
+    /// The shell's actions and the chats' callbacks hold the shell, and so
+    /// the workspace: once it stops, nothing of it keeps it alive, whether
+    /// or not its shell saw itself leave (under the Agent page's cover).
+    @Test func aStoppedWorkspaceIsReleased() {
+        weak var released: Workspace?
+        do {
+            let drafts = DraftStore(root: FileManager.default.temporaryDirectory.appending(path: "rome-release-\(UUID().uuidString)/Drafts"), instance: "t")
+            let workspace = Workspace(backend: FakeBackend(), instanceName: "T", host: "t", accountLabel: "t", drafts: drafts)
+            released = workspace
+            workspace.shellActions.linkOpener.run = { _ in _ = workspace; return .handled }
+            workspace.shellActions.openUsage.run = { _ in _ = workspace }
+            workspace.shellActions.openUsageFromCover.run = { _ in _ = workspace }
+            workspace.concierge.actions.onOpenChat = { _, _ in _ = workspace }
+            workspace.topicStore("topic-1").actions.onOpenChat = { _, _ in _ = workspace }
+            workspace.taskStore("task-1").actions.onOpenChat = { _, _ in _ = workspace }
+            workspace.stop()
+        }
         #expect(released == nil)
     }
 
@@ -232,5 +268,7 @@ private func message(
         action.run = { $0 * 2 }
         #expect(held === action)
         #expect(held.run(4) == 8)
+        action.reset()
+        #expect(held.run(4) == 5)
     }
 }

@@ -67,14 +67,6 @@ struct MainShell: View {
     /// "See usage" was pressed inside the Agent page: Settings opens as it closes.
     @State private var openUsageAfterCover = false
     @State private var settingsPath: [SettingsRoute] = []
-    /// What the chat rows call back into the shell. The environment holds
-    /// these objects, never closures made in `body`: a shell update changes
-    /// none of them, so it draws no row and no message's text again.
-    /// `installShellActions` keeps what they run current.
-    @State private var linkOpener = ShellAction<URL, OpenURLAction.Result> { _ in .systemAction }
-    @State private var openUsage = ShellAction<Void, Void> { _ in }
-    /// The same, for the Agent page's cover, which closes before Settings opens.
-    @State private var openUsageFromCover = ShellAction<Void, Void> { _ in }
     /// A page of the instance, in a sheet over the main stack.
     @State private var page: URL?
     /// A page opened from Settings, in a sheet over that sheet.
@@ -139,8 +131,8 @@ struct MainShell: View {
                         destination(route)
                     }
                 }
-                .environment(\.chatLinkOpener, linkOpener)
-                .environment(\.openUsage, openUsage)
+                .environment(\.chatLinkOpener, workspace.shellActions.linkOpener)
+                .environment(\.openUsage, workspace.shellActions.openUsage)
                 .environment(\.agentZoom, agentZoom)
                 .environment(\.visibleChat, visibleChat)
                 .instancePageSheet(workspace: workspace, url: $page)
@@ -182,9 +174,9 @@ struct MainShell: View {
                 }
             }
             .environment(model)
-            .environment(\.chatLinkOpener, linkOpener)
+            .environment(\.chatLinkOpener, workspace.shellActions.linkOpener)
             // Settings is a sheet of this view: the cover closes first.
-            .environment(\.openUsage, openUsageFromCover)
+            .environment(\.openUsage, workspace.shellActions.openUsageFromCover)
             .environment(\.visibleChat, visibleChat)
             .environment(\.isVisitor, workspace.isVisitor)
             .environment(\.shareAgentName, AgentName.display(workspace.agentName))
@@ -226,18 +218,10 @@ struct MainShell: View {
         // Which chat is in front, for pushes: none under a sheet or the drawer.
         .onChange(of: visibleChat, initial: true) { _, chat in model.show(chat, by: screenID) }
         .onChange(of: workspace.mainChatServerID) { model.rewatch() }
+        // The workspace empties them when it stops; a shell built again
+        // for the same workspace sets them anew.
         .onAppear { installShellActions() }
-        .onChange(of: ObjectIdentifier(workspace)) { installShellActions() }
-        .onDisappear {
-            model.hide(by: screenID)
-            // They hold this view's state, which they must not outlive. The
-            // Agent page's full-screen cover takes the shell off screen too,
-            // and uses them meanwhile: they stay while it is up.
-            guard agentPage == nil else { return }
-            linkOpener.run = { _ in .systemAction }
-            openUsage.run = { _ in }
-            openUsageFromCover.run = { _ in }
-        }
+        .onDisappear { model.hide(by: screenID) }
         .sensoryFeedback(.impact(weight: .light), trigger: drawerOpen)
         .onChange(of: drawerOpen) { _, open in
             if open {
@@ -385,13 +369,17 @@ struct MainShell: View {
         }
     }
 
+    /// What the chat rows call back into the shell. The environment holds
+    /// these objects, never closures made in `body`: a shell update changes
+    /// none of them, so it draws no row and no message's text again.
     private func installShellActions() {
-        linkOpener.run = { openChatLink($0) }
-        openUsage.run = { _ in
+        let actions = workspace.shellActions
+        actions.linkOpener.run = { openChatLink($0) }
+        actions.openUsage.run = { _ in
             settingsPath = []
             showSettings = true
         }
-        openUsageFromCover.run = { _ in
+        actions.openUsageFromCover.run = { _ in
             openUsageAfterCover = true
             agentPage = nil
         }

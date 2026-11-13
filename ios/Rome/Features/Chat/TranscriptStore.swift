@@ -259,8 +259,15 @@ final class TranscriptStore {
         holdWork?.cancel()
         holdWork = nil
         held = []
-        // The screen's callback holds the shell, which holds the workspace
-        // that holds this store: a stopped store lets go of it.
+    }
+
+    /// Stops the store for good, when its workspace closes or its chat goes.
+    /// The screen's callback holds the shell, which holds the workspace that
+    /// holds this store, so only here does the store let go of it. A plain
+    /// `stop()` keeps it: a screen that comes back starts the same store
+    /// again and its cards must still open their chats.
+    func close() {
+        stop()
         actions.onOpenChat = { _, _ in }
     }
 

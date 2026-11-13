@@ -116,6 +116,10 @@ final class Workspace {
     /// The Concierge's own name; nil until read, or when none is set.
     private(set) var agentName: String?
     @ObservationIgnored private var nameWatch: UUID?
+    /// What views far below the shell call back into it. They live as long as
+    /// the workspace, so the environment's values stay the same objects even
+    /// when the shell is built again, and `stop()` empties them.
+    @ObservationIgnored let shellActions = ShellActions()
     /// Whose session this is. Apps, the update page, AI tool usage, approvals
     /// and the instance's own settings are the guardian's; a visitor never sees
     /// them. Unknown (not read yet, or unreadable) is treated as the guardian,
@@ -309,7 +313,7 @@ final class Workspace {
 
     private func dropTopic(_ chatId: String) {
         topics.remove(chatId)
-        topicStores.removeValue(forKey: chatId)?.stop()
+        topicStores.removeValue(forKey: chatId)?.close()
     }
 
     /// Archives a task chat and drops it from the task list and the cards.
@@ -332,7 +336,7 @@ final class Workspace {
 
     private func dropTaskChat(_ chatId: String) {
         tasks.forget(chat: chatId)
-        taskStores.removeValue(forKey: chatId)?.stop()
+        taskStores.removeValue(forKey: chatId)?.close()
     }
 
     /// A tapped push for a topic chat: its newest rows, fetched again.
@@ -412,7 +416,7 @@ final class Workspace {
     /// store starts once the id is known.
     private func useMainChat(_ id: String) {
         guard !id.isEmpty, id != concierge.sessionId else { return }
-        concierge.stop()
+        concierge.close()
         drafts.move(chat: concierge.sessionId, to: id)
         let store = TranscriptStore(sessionId: id, kind: .concierge, backend: backend)
         store.drafts = ChatDrafts(store: drafts, chat: id)
@@ -486,10 +490,11 @@ final class Workspace {
         if let nameWatch { backend.events.unsubscribe(nameWatch) }
         nameWatch = nil
         tasks.stop()
-        concierge.stop()
+        concierge.close()
         topics.stop()
-        for store in topicStores.values { store.stop() }
-        for store in taskStores.values { store.stop() }
+        for store in topicStores.values { store.close() }
+        for store in taskStores.values { store.close() }
+        shellActions.reset()
         backend.events.pause()
         transcripts.flush()
     }
