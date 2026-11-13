@@ -843,7 +843,7 @@ final class TranscriptStore {
         pending.removeAll { $0.id == id }
         if resends.values.contains(id) {
             resends = resends.filter { $0.value != id }
-            if let drafts { drafts.store.saveResends(chat: drafts.chat, resends) }
+            if let drafts { drafts.store.forgetResend(chat: drafts.chat, copy: id) }
         }
         if let drafts { drafts.store.delivered(chat: drafts.chat, inputId: id) }
     }
@@ -885,7 +885,7 @@ final class TranscriptStore {
 
     private func recordResend(of original: String, as inputId: String) {
         resends[original] = inputId
-        if let drafts { drafts.store.saveResends(chat: drafts.chat, resends) }
+        if let drafts { drafts.store.recordResend(chat: drafts.chat, original: original, copy: inputId) }
     }
 
     /// Whether the row is a send the app still holds, which only it can drop.

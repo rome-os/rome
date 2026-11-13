@@ -177,4 +177,27 @@ private let realList = #"""
         #expect(store.failure == nil && !store.loadFailed)
         store.stop()
     }
+
+    /// A task resumed from an older Ended page shows once: in its new group,
+    /// not also on the page read before.
+    @MainActor @Test func aResumedTaskFromPageTwoShowsOnce() async throws {
+        let backend = FakeBackend()
+        var list = try JSONDecoder().decode(TaskListResponse.self, from: Data(realList.utf8))
+        backend.taskLists["concierge"] = list
+        guard case .task(var resumed) = list.groups[2].items[0] else { Issue.record("no task"); return }
+        resumed.task = ConciergeTask(id: "back", title: "Back at work", state: .done, createdAt: 1, updatedAt: 1, status: "ended")
+        backend.endedPages["1794530852037_id-85"] = TaskListResponse(chatId: "concierge", groups: [TaskListGroup(key: .ended, items: [.task(resumed)], total: 120, nextCursor: "c2")])
+        let store = TaskListStore(chatId: "concierge", backend: backend)
+        await store.load()
+        store.showMoreEnded()
+        for _ in 0..<100 where store.endedItems.count == 20 { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(store.endedItems.contains { $0.id == "task:back" })
+        // Resumed: the next read lists it as active, the first Ended page unchanged.
+        resumed.task.status = "active"
+        list.groups.insert(TaskListGroup(key: .active, items: [.task(resumed)]), at: 0)
+        backend.taskLists["concierge"] = list
+        await store.load()
+        let everywhere = store.groups.filter { $0.key != .ended }.flatMap(\.items).map(\.id) + store.endedItems.map(\.id)
+        #expect(everywhere.filter { $0 == "task:back" }.count == 1)
+    }
 }

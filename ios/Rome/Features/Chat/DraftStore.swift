@@ -176,20 +176,34 @@ final class DraftStore {
         }
     }
 
-    /// Keeps the chat's resends; none left removes the file.
-    func saveResends(chat: String, _ resends: [String: String]) {
+    /// Adds a resend pair, merged into what the file holds, never replacing
+    /// it: pairs a cold launch has not read yet stay.
+    func recordResend(chat: String, original: String, copy: String) {
+        updateResends(chat: chat) { $0[original] = copy }
+    }
+
+    /// Forgets the pairs whose copy is `copy`.
+    func forgetResend(chat: String, copy: String) {
+        updateResends(chat: chat) { pairs in pairs = pairs.filter { $0.value != copy } }
+    }
+
+    /// Reads, changes and writes the chat's pairs in one step on the disk
+    /// queue, after any read or write asked for before it.
+    private func updateResends(chat: String, _ change: @escaping @Sendable (inout [String: String]) -> Void) {
         let folder = folder(chat)
         let file = folder.appending(path: Self.resendsFile)
         let root = root
         disk.run {
-            if resends.isEmpty {
+            var pairs = (try? Data(contentsOf: file)).flatMap { try? JSONDecoder().decode([String: String].self, from: $0) } ?? [:]
+            change(&pairs)
+            if pairs.isEmpty {
                 try? FileManager.default.removeItem(at: file)
                 Self.removeIfEmpty(folder)
                 return
             }
             try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
             Self.excludeFromBackup(root)
-            try? JSONEncoder().encode(resends).write(to: file, options: .atomic)
+            try? JSONEncoder().encode(pairs).write(to: file, options: .atomic)
         }
     }
 

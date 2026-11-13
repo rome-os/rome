@@ -86,13 +86,38 @@ import UIKit
         #expect(ids == ["in-5:0", "in-6:0", "\(copy):0"])
     }
 
+    /// A cold launch: a new resend is added to the pairs already on disk,
+    /// even before they were read, so an earlier original stays hidden.
+    @Test func aNewResendKeepsThePairsAlreadyKept() async throws {
+        let root = FileManager.default.temporaryDirectory.appending(path: "rome-resend-\(UUID().uuidString)")
+        defer { try? FileManager.default.removeItem(at: root) }
+        let first = DraftStore(root: root, instance: "t")
+        first.recordResend(chat: conciergeChatID, original: "in-12", copy: "copy-12")
+        await first.flush()
+        // The next launch writes a pair before it reads any.
+        let next = DraftStore(root: root, instance: "t")
+        next.recordResend(chat: conciergeChatID, original: "in-13", copy: "copy-13")
+        #expect(await next.resends(chat: conciergeChatID) == ["in-12": "copy-12", "in-13": "copy-13"])
+        // And a chat on it hides both originals whose copies are stored.
+        let backend = FakeBackend()
+        backend.stored = [
+            stored("in-12", inputState: "failed", text: "a"), stored("copy-12", inputState: nil, text: "a", seconds: 1),
+            stored("in-13", inputState: "unknown", text: "b", seconds: 2), stored("copy-13", inputState: nil, text: "b", seconds: 3),
+        ]
+        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        store.drafts = ChatDrafts(store: next, chat: conciergeChatID)
+        await store.reload()
+        let ids = store.rows.compactMap { row -> String? in if case .userText(let id, _, _, _) = row { return id } else { return nil } }
+        #expect(ids == ["copy-12:0", "copy-13:0"])
+    }
+
     /// A copy that never reached the instance and is gone (a relaunch drops
     /// it) brings its original back, Retry and all.
     @Test func aLostCopyBringsTheOriginalBack() async throws {
         let root = FileManager.default.temporaryDirectory.appending(path: "rome-resend-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let drafts = DraftStore(root: root, instance: "t")
-        drafts.saveResends(chat: conciergeChatID, ["in-9": "lost-copy"])
+        drafts.recordResend(chat: conciergeChatID, original: "in-9", copy: "lost-copy")
         await drafts.flush()
         let backend = FakeBackend()
         backend.stored = [stored("in-9", inputState: "failed")]

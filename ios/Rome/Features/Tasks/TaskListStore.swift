@@ -47,8 +47,10 @@ final class TaskListStore {
     /// since, each row once.
     var endedItems: [TaskListItem] {
         guard let first = groups.first(where: { $0.key == .ended }) else { return [] }
-        let ids = Set(first.items.map(\.id))
-        return first.items + olderEnded.filter { !ids.contains($0.id) }
+        // A row the latest read holds anywhere (a task that left Ended, one
+        // now on the first page) is never also drawn from an older page.
+        let current = Set(groups.flatMap { $0.items.map(\.id) })
+        return first.items + olderEnded.filter { !current.contains($0.id) }
     }
 
     /// How many ended rows there are in all.
