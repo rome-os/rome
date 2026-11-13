@@ -50,4 +50,4 @@ In a dashboard chat reply (the `webchat` channel), show a picture inline with Ma
 
 For a picture on the web, use only the real https address of the image as its source page shows it. If the source page offers a smaller size, such as a thumbnail or preview, use that address instead of the full-size original. Never put private content in a picture's URL.
 
-Answer the guardian's question first, then show the pictures. Show 3 or 4 pictures unless the guardian asks for more. Put each picture's one-line note in its own paragraph, with a blank line between the picture and the note.
+Answer the guardian's question first, then show the pictures. When several pictures could answer the question, show at most 3 or 4 unless the guardian asks for more. Put each picture's one-line note in its own paragraph, with a blank line between the picture and the note.
