@@ -138,6 +138,15 @@ describe("the Concierge agent", () => {
     expect(concierge.systemPromptPrefix).not.toContain("initiator=");
   });
 
+  it("fetches history after a renewal only when the continuation carries no recent messages", () => {
+    const rule =
+      concierge.systemPromptPrefix
+        .split("\n")
+        .find((line) => line.startsWith("- A `<continuation>` block")) ?? "";
+    expect(rule).toContain("When it carries `<recent_messages>`, those are the latest ones");
+    expect(rule).toContain("Without it, read the latest");
+  });
+
   it("starts one task chat per request", () => {
     expect(concierge.systemPromptPrefix).toContain(
       "one `chat_start` per request, never several requests in one brief or one task chat",

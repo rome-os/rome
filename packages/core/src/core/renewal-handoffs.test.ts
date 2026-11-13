@@ -66,6 +66,36 @@ describe("createRenewalHandoffs", () => {
     expect(await handoffs.fallback("chat-1", "concierge")).toBeNull();
   });
 
+  it("gives up on the small model at its deadline, even when its session never closes", async () => {
+    const stalled: ModelResolver = {
+      resolve: async () =>
+        ({
+          model: "small",
+          modelProvider: {
+            id: "mock",
+            openSession: async () => ({
+              events: (async function* () {
+                await new Promise(() => {});
+              })(),
+              sendUserInput: async () => {},
+              interrupt: async () => {},
+              close: () => new Promise<void>(() => {}),
+            }),
+          },
+        }) as never,
+    };
+    const handoffs = createRenewalHandoffs({
+      timeoutMs: 30_000,
+      fallbackTimeoutMs: 20,
+      modelResolver: stalled,
+      rows: async () => [row("user", "dinner at 7", "t1")],
+      openTasks: async () => null,
+    });
+    const started = Date.now();
+    await expect(handoffs.fallback("chat-1", "concierge")).rejects.toThrow(/timed out/);
+    expect(Date.now() - started).toBeLessThan(1_000);
+  });
+
   it("says the chat is tidying up while a handoff is written, and only for a chat", async () => {
     const tidied: string[] = [];
     const handoffs = createRenewalHandoffs({

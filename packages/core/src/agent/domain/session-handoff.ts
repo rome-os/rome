@@ -11,11 +11,15 @@ export const HANDOFF_RECENT_TOKENS = 8_000;
 /** What a message's line costs besides its text: its time and sender. */
 const LINE_TOKENS = 12;
 
-/** What the retired session is asked, as one private turn no one else sees. */
+/**
+ * What the retired session is asked, in a turn that reaches no chat. The
+ * chat's owner can open the note from the chat's renewal line, so it is
+ * written for them to read.
+ */
 export const HANDOFF_REQUEST = [
   "<handoff_request>",
   "This session is about to be replaced by a fresh one, which will not see this conversation.",
-  "Write a private handoff note for it. The guardian never sees this note, and nothing you write here is sent to anyone.",
+  "Write a handoff note for it. The person this chat serves can open the note from the chat, so write only what you would say to them; nothing else of this turn is sent to anyone.",
   "Do not call any tool. Do not answer or address the guardian. Reply with the note alone.",
   "Cover, in short bullet points under these headings:",
   "- In progress: what you were doing or about to do.",
@@ -127,7 +131,7 @@ export function recentWithin(
  */
 export function handoffSections(handoff: string, context: HandoffContext): string[] {
   const sections = [
-    "Your previous session wrote this handoff for you before it was replaced. It is private: the guardian has not seen it.",
+    "Your previous session wrote this handoff for you before it was replaced. The chat's owner can open it from the chat, but has not been told about it.",
     `<handoff>\n${handoff.trim()}\n</handoff>`,
   ];
   if (context.openTasks) {

@@ -487,7 +487,12 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
   const writtenHandoffs = new Map<string, string>();
   const onSessionClosed = (sess: AgentSessionImpl) => {
     sessions.delete(keyOf(sess.key));
-    if (sess.readHeaders.size === 0) return;
+    // A thread that read none, such as one just compacted, must send them all
+    // on its reopen, so an earlier snapshot of the same session goes too.
+    if (sess.readHeaders.size === 0) {
+      sentHeaders.delete(sess.sessionId);
+      return;
+    }
     if (sentHeaders.size >= 1_000) sentHeaders.clear();
     sentHeaders.set(sess.sessionId, sess.readHeaders);
   };
@@ -541,7 +546,8 @@ export function createSessions(deps: ManagerDeps, options: ManagerOptions = {}):
     const k = keyOf(key);
     // A renewal for a full context writes the successor this open is for.
     const renewal = contextRenewals.get(k);
-    if (renewal) await renewal;
+    // A renewal that failed leaves the session current: this open finds it.
+    if (renewal) await renewal.catch(() => undefined);
     // `reopen` distinguishes a cold open (no live session for this key — the
     // summon case, where a fresh random channelThreadKey never hits the cache)
     // from a reopen (a live session existed but was torn down for TTL/auth). The

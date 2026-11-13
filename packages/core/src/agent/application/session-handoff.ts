@@ -161,6 +161,8 @@ async function askRetiredSession(
     if (timer) clearTimeout(timer);
     finished = true;
     turn.catch(() => undefined);
-    await (session as ModelSession | null)?.close().catch(() => undefined);
+    // Not awaited: a close that stalls, as a provider's may while a turn
+    // drains, must not hold the renewal past its deadline.
+    void (session as ModelSession | null)?.close().catch(() => undefined);
   }
 }

@@ -23,7 +23,7 @@ const log = createLogger("renewal-handoffs");
 const RECENT_TURNS = 60;
 
 const FALLBACK_SYSTEM_PROMPT = [
-  "You write a private handoff note for an assistant whose session is being replaced by a fresh one that has not seen the conversation.",
+  "You write a handoff note for an assistant whose session is being replaced by a fresh one that has not seen the conversation. The person the assistant serves can read the note, so write only what may be shown to them.",
   "You get the conversation's latest messages and, when there are any, its open tasks.",
   "Write short bullet points under these headings: In progress, Agreed, Still open, Ids.",
   "In progress: what the assistant was doing or about to do. Agreed: decisions, preferences and promises made with the person the assistant serves (the user lines).",
@@ -217,6 +217,7 @@ async function askSmallModel(
     if (timer) clearTimeout(timer);
     finished = true;
     turn.catch(() => undefined);
-    await (session as ModelSession | null)?.close().catch(() => undefined);
+    // Not awaited: a close that stalls must not hold the renewal past its deadline.
+    void (session as ModelSession | null)?.close().catch(() => undefined);
   }
 }

@@ -74,7 +74,7 @@ A renewal replaces a chat's session with a fresh one, on a new provider thread, 
 
 ## Handoff
 
-A handoff is the private note a retired session writes for the session that renews it: what was in progress, what was agreed with the guardian, what is still open, and the ids that work refers to. It is written at send time, when a cold open decides to renew, and not while the chat is quiet.
+A handoff is the note a retired session writes for the session that renews it: what was in progress, what was agreed with the guardian, what is still open, and the ids that work refers to. It is written at send time, when a cold open decides to renew, and not while the chat is quiet.
 
 **Contracts:**
 
@@ -83,7 +83,7 @@ A handoff is the private note a retired session writes for the session that rene
 - When the retired session has not written it within 30 seconds (`SESSION_HANDOFF_TIMEOUT_SECONDS`), or cannot, a small model writes it from the chat's recent messages and open tasks, within another 30 seconds (`SESSION_HANDOFF_FALLBACK_TIMEOUT_SECONDS`). When that fails too, the renewal goes on without one.
 - While it is written, a Concierge chat's header says it is tidying up its context ([Concierge activity](../architecture/concierge-activity.md)). The message that caused the cold open waits, and the successor answers it.
 - The handoff is stored with the successor and does not change. The successor's first turns carry it inside the continuation notice, with the chat's open tasks as Rome holds them when the turn runs and the chat's latest messages up to about 8,000 tokens. They stop carrying it once a turn of the successor succeeds.
-- The chat's renewal line opens to show the handoff. A renewal that wrote none shows the line as before.
+- The chat's renewal line opens to show the handoff, to the chat's owner, who may be a visitor. The model writing it is told so, and writes only what may be shown to them. A renewal that wrote none shows the line as before.
 - An approval that holds a session still defers its renewal, so no handoff is written while it holds.
 - A session whose policy asks for a handoff is also renewed when a turn of it ends with its context past a limit (`SESSION_HANDOFF_CONTEXT_TOKENS`, 150,000 tokens by default, at least 50,000). The handoff is written then, in the background, once the turn has settled with nothing queued on the session, no caller holding it and no approval holding it, and the successor is stored with reason `context` on no thread yet. Otherwise the renewal steps aside and the next turn end past the limit tries again. Nothing waits on it while the session is in use. The next message opens the successor without waiting for a handoff, and a message that comes while it is written waits for it. When no handoff is written, the session stays, and a later turn end tries again.
 - A session that started from a handoff and that no turn has run on yet has no thread to hand off from. A setup change before its first turn gives it the new setup in place, and it keeps its handoff and the renewal it came from.

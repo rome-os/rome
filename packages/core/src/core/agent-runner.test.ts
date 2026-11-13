@@ -3972,6 +3972,56 @@ describe("AgentRunner", () => {
         ]);
       });
 
+      it("sends the headers after a compaction even when the session closes before its next input", async () => {
+        const provider = threadedProvider(4);
+        const withContext = (usedTokens: number) =>
+          [
+            {
+              type: "result" as const,
+              content: "ok",
+              accounting: {
+                provider: "mock",
+                model: "mock",
+                usage: {
+                  inputTokens: usedTokens,
+                  outputTokens: 1,
+                  cacheReadTokens: 0,
+                  cacheWriteTokens: 0,
+                },
+                context: { usedTokens },
+                costUsd: 0,
+              },
+            },
+          ] as AgentEvent[];
+        provider["responses"][0] = withContext(9_000);
+        provider["responses"][1] = withContext(10_000);
+        provider["responses"][2] = withContext(3_000);
+        const runner = renewingRunner(provider, undefined, { stickyHeaders: ["concierge_chat"] });
+        const say = (text: string) =>
+          collectMessages(
+            runner.run({
+              agentName: "test-renewing",
+              prompt: `<concierge_chat id="c1" name="Main"/>\n\n${text}`,
+              channelThreadKey: key,
+            }),
+          );
+        await say("one");
+        // An idle close keeps what the thread read.
+        await evict(runner);
+        await say("two");
+        // This turn's thread was compacted, and the session closes before the next input.
+        await say("three");
+        await evict(runner);
+        await say("four");
+        const prompts = provider.calls.map((call) => call.prompt);
+        expect(prompts.map((prompt) => prompt.includes("<concierge_chat"))).toEqual([
+          true,
+          false,
+          false,
+          true,
+        ]);
+      });
+
       describe("with a handoff", () => {
         const HANDOFF = "- Agreed: dinner at 7 on Friday, task t-1.";
         let handoffAgent: { definition: AgentDefinition };
@@ -4078,13 +4128,13 @@ describe("AgentRunner", () => {
           expect(provider.calls[3]?.prompt).not.toContain("<handoff>");
         });
 
-        it("writes it with the fallback when the retired session does not answer in time", async () => {
+        it("writes it with the fallback when the retired session does not answer in time, even if it never closes", async () => {
           const provider = threadedProvider(3);
           const open = provider.openSession.bind(provider);
           provider.openSession = async (params) => {
             if (params.thread.kind !== "resume") return open(params);
             provider.sessions.push(params);
-            // A thread that never answers.
+            // A thread that never answers, and whose close never settles.
             return {
               providerId: "mock",
               model: params.config.model,
@@ -4093,7 +4143,7 @@ describe("AgentRunner", () => {
               })(),
               sendUserInput: async () => {},
               interrupt: async () => {},
-              close: async () => {},
+              close: () => new Promise<void>(() => {}),
             } as ModelSession;
           };
           const { handoffs, asked } = fakeHandoffs({ timeoutMs: 20 });
