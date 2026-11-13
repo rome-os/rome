@@ -59,6 +59,8 @@ export interface TaskListFollowItem {
   state: ConciergeFollowDto["state"];
   /** When its owner's digest comes each day, `HH:mm` in their zone, sorted. */
   digestTimes: string[];
+  /** When it was followed, epoch milliseconds. Absent on follows made before it was kept. */
+  createdAt?: number;
 }
 
 /** What fires a routine, as its row says it. */
@@ -90,6 +92,8 @@ export interface TaskListRoutineItem {
     status: "success" | "error" | "running" | "pending_approval" | "cancelled";
     firedAt: number;
   } | null;
+  /** When it was made, epoch milliseconds. */
+  createdAt?: number;
 }
 
 export type TaskListItem =

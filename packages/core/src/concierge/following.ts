@@ -201,6 +201,8 @@ interface FollowRecord {
    * follows made before owners were kept, which are their chat's owner's.
    */
   owner?: ConciergeOwner;
+  /** When it was made, epoch milliseconds. Absent on follows made before it was kept. */
+  createdAt?: number;
 }
 
 /** A visitor's own rules, and the time zone their browser reported. */
@@ -357,6 +359,9 @@ function parseFollows(value: unknown): FollowRecord[] {
         preference: typeof f.preference === "string" && f.preference ? f.preference : null,
         chat: typeof f.chat === "string" && f.chat ? f.chat : null,
         ...(typeof f.owner === "string" && f.owner ? { owner: f.owner } : {}),
+        ...(typeof f.createdAt === "number" && Number.isFinite(f.createdAt)
+          ? { createdAt: f.createdAt }
+          : {}),
       },
     ];
   });
@@ -1215,6 +1220,7 @@ export function startConciergeFollowing(
         preference: null,
         chat: await chatForNewFollow(change.chatId, owner),
         owner,
+        createdAt: Date.now(),
       };
       const next = {
         ...applyChange(source, base, change),
@@ -1395,6 +1401,7 @@ export function startConciergeFollowing(
             ? toDto(source, follow, { id: chatId, name: "", main: false }).state
             : "unavailable",
           digestTimes,
+          ...(follow.createdAt !== undefined ? { createdAt: follow.createdAt } : {}),
         });
       }
       return items;

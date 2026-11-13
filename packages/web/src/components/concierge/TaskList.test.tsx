@@ -10,7 +10,7 @@ import i18n from "@/i18n";
 import { LiveEventsClientContext } from "@/hooks/use-live-events";
 import { acceptLatestSocket, fakeSocketLiveEventsClient } from "@/test/fake-websocket";
 import { onConciergeJump } from "./concierge-jump";
-import { ENDED_PAGE, TaskList } from "./TaskList";
+import { ENDED_PAGE, TaskList, creationAge } from "./TaskList";
 
 const NOW = Date.now();
 const HOUR = 60 * 60 * 1000;
@@ -173,6 +173,42 @@ describe("TaskList", () => {
     }).parentElement as HTMLElement;
     expect(buttons.className).toContain("opacity-0");
     expect(buttons.className).toContain("group-hover/row:opacity-100");
+  });
+
+  it("draws Respond and Stop as icons named by their label and tooltip", async () => {
+    renderList();
+    await screen.findByRole("region", { name: "Needs you" });
+    for (const name of ["Respond to Pick a hotel", "Stop Pick a hotel"]) {
+      const button = within(rowOf("Pick a hotel")).getByRole("button", { name });
+      expect(button.textContent).toBe("");
+      expect(button.querySelector("svg")).toBeTruthy();
+    }
+    fireEvent.focus(
+      within(rowOf("Pick a hotel")).getByRole("button", { name: "Stop Pick a hotel" }),
+    );
+    // Its tooltip names it; the row says it nowhere else.
+    expect((await screen.findAllByText("Stop")).length).toBeGreaterThan(0);
+  });
+
+  it("says how old a not-started task is, and when each row was made in its title's tooltip", async () => {
+    parts.tasks.push(taskItem(task("Plan a trip", "later", { createdAt: NOW - 3 * 24 * HOUR })));
+    renderList();
+    await screen.findByRole("region", { name: "Later" });
+    expect(within(rowOf("Plan a trip")).getByText("Not started · Created 3 days ago")).toBeTruthy();
+    // A scheduled one keeps its schedule line.
+    expect(within(rowOf("Morning brief")).getByText(/^Daily at .* · in 1 hr$/)).toBeTruthy();
+    fireEvent.focus(screen.getByText("Plan a trip"));
+    expect((await screen.findAllByText(/^Created /)).length).toBeGreaterThan(0);
+  });
+
+  it("counts a creation's age by calendar day, in the iOS app's words", () => {
+    const at = new Date(2026, 10, 13, 9, 0).getTime();
+    expect(creationAge(at - 2 * HOUR, at, "en")).toBe("today");
+    expect(creationAge(new Date(2026, 10, 12, 23, 0).getTime(), at, "en")).toBe("yesterday");
+    expect(creationAge(new Date(2026, 10, 10, 23, 0).getTime(), at, "en")).toBe("3 days ago");
+    expect(creationAge(new Date(2026, 10, 10, 23, 0).getTime(), at, "zh-CN")).toBe("3天前");
+    expect(creationAge(new Date(2026, 10, 12, 23, 0).getTime(), at, "zh-CN")).toBe("昨天");
+    expect(creationAge(at - HOUR, at, "zh-CN")).toBe("今天");
   });
 
   it("links to a task's chat beside its title only when it has one, and the row itself opens nothing", async () => {

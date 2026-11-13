@@ -139,7 +139,8 @@
           "failed": "Failed",
           "stopped": "Stopped",
           "no_response": "No response"
-        }
+        },
+        "notStartedAge": "Not started · Created {{age}}"
       },
       "schedule": {
         "daily": "Daily at {{time}}",
@@ -170,7 +171,9 @@
       },
       "failed": {
         "stop": "Failed to stop the task"
-      }
+      },
+      "created": "Created {{when}}",
+      "endedAt": "Ended {{when}}"
     }
   },
   "reply": {

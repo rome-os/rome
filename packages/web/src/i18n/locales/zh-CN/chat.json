@@ -139,7 +139,8 @@
           "failed": "失败",
           "stopped": "已停止",
           "no_response": "无回应"
-        }
+        },
+        "notStartedAge": "未开始 · {{age}}创建"
       },
       "schedule": {
         "daily": "每天 {{time}}",
@@ -170,7 +171,9 @@
       },
       "failed": {
         "stop": "停止任务失败"
-      }
+      },
+      "created": "创建于 {{when}}",
+      "endedAt": "结束于 {{when}}"
     }
   },
   "reply": {

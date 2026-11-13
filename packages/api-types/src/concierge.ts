@@ -156,6 +156,8 @@ export interface ChatPendingCheckDto {
   taskTitle?: string | null;
   /** The next run of the task's repeating schedule: cancelling it skips that run only. */
   recurring?: boolean;
+  /** When it was scheduled, epoch milliseconds. */
+  createdAt?: number;
 }
 
 /** `GET /chat/sessions/:id/checks`, the soonest first. */

@@ -1,5 +1,13 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ChevronDown, Clock, MessageSquare, Radio, Workflow } from "lucide-react";
+import {
+  ChevronDown,
+  Clock,
+  CornerUpLeft,
+  MessageSquare,
+  Radio,
+  Square,
+  Workflow,
+} from "lucide-react";
 import { type ReactNode, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Link, useNavigate } from "react-router-dom";
@@ -19,8 +27,10 @@ import { taskStatusOfDto } from "@rome/api-types/concierge-task-status";
 import { chatTasksTopicName } from "@rome/api-types/live-events";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useLiveEvents } from "@/hooks/use-live-events";
 import { fetchJson } from "@/lib/fetch-json";
+import { formatMessageTimestamp } from "@/lib/message-timestamp";
 import { cn } from "@/lib/utils";
 import { requestConciergeJump } from "./concierge-jump";
 import { TaskGlyph } from "./TaskGlyph";
@@ -40,10 +50,35 @@ type Translate = ReturnType<typeof useTranslation<"chat">>["t"];
 const stateLine = (...parts: Array<string | null | undefined | false>) =>
   parts.filter(Boolean).join(" · ");
 
-/** A row's button, shown on hover and focus, and always on a touch screen. */
+/**
+ * "today", "yesterday", "3 days ago": how long ago `createdAt` was, by
+ * calendar day, as the iOS app says a not-started task's age.
+ */
+export function creationAge(createdAt: number, now: number, locale: string): string {
+  const day = (at: number) => {
+    const date = new Date(at);
+    return Date.UTC(date.getFullYear(), date.getMonth(), date.getDate());
+  };
+  const days = Math.max(0, Math.round((day(now) - day(createdAt)) / 86_400_000));
+  return new Intl.RelativeTimeFormat(locale, { numeric: "auto" }).format(-days, "day");
+}
+
+/** A row title's tooltip: when it was made, and when it ended for one that did. */
+function timesOf(t: Translate, createdAt: number | undefined, endedAt?: number | null): string[] {
+  const at = (value: number) => formatMessageTimestamp(new Date(value).toISOString());
+  return [
+    createdAt !== undefined && t("concierge.taskList.created", { when: at(createdAt) }),
+    endedAt != null && t("concierge.taskList.endedAt", { when: at(endedAt) }),
+  ].filter((line): line is string => Boolean(line));
+}
+
+/** A row's icon button, shown on hover and focus, and always on a touch screen. */
 interface RowButton {
+  /** What it does to this row, for a screen reader. */
   label: string;
+  /** Its name, as its tooltip says it. */
   text: string;
+  icon: ReactNode;
   onPress: () => void;
 }
 
@@ -57,6 +92,7 @@ interface RowButton {
 function Row({
   glyph,
   title,
+  times = [],
   chat,
   state,
   tone,
@@ -67,6 +103,8 @@ function Row({
 }: {
   glyph: ReactNode;
   title: string;
+  /** The title's tooltip lines, such as when the row was made. */
+  times?: string[];
   chat?: { id: string; label: string } | null;
   state: string;
   tone?: "warning" | "destructive";
@@ -84,14 +122,34 @@ function Row({
       <span className={cn("flex shrink-0", dimmed && "opacity-60")}>{glyph}</span>
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1">
-          <span
-            className={cn(
-              "min-w-0 truncate text-ui",
-              dimmed ? "text-muted-foreground" : "text-foreground",
-            )}
-          >
-            {title}
-          </span>
+          {times.length > 0 ? (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <span
+                  className={cn(
+                    "min-w-0 truncate text-ui",
+                    dimmed ? "text-muted-foreground" : "text-foreground",
+                  )}
+                >
+                  {title}
+                </span>
+              </TooltipTrigger>
+              <TooltipContent side="top" align="start">
+                {times.map((line) => (
+                  <div key={line}>{line}</div>
+                ))}
+              </TooltipContent>
+            </Tooltip>
+          ) : (
+            <span
+              className={cn(
+                "min-w-0 truncate text-ui",
+                dimmed ? "text-muted-foreground" : "text-foreground",
+              )}
+            >
+              {title}
+            </span>
+          )}
           {chat ? (
             <Link
               to={`/chat/${chat.id}`}
@@ -128,16 +186,21 @@ function Row({
           )}
         >
           {buttons.map((button) => (
-            <Button
-              key={button.text}
-              variant="ghost"
-              size="xs"
-              aria-label={button.label}
-              disabled={pending}
-              onClick={button.onPress}
-            >
-              {button.text}
-            </Button>
+            <Tooltip key={button.text}>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-md"
+                  aria-label={button.label}
+                  disabled={pending}
+                  onClick={button.onPress}
+                  className="text-muted-foreground hover:text-foreground"
+                >
+                  {button.icon}
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>{button.text}</TooltipContent>
+            </Tooltip>
           ))}
         </span>
       ) : null}
@@ -156,6 +219,10 @@ function taskState(
   if (pending === "stop") return t("concierge.taskList.task.stopping");
   if (pending === "respond") return t("concierge.taskList.task.opening");
   const { task, schedule, check } = item;
+  const age = () =>
+    t("concierge.taskList.task.notStartedAge", {
+      age: creationAge(task.createdAt, now, locale),
+    });
   const status = taskStatusOfDto(task);
   const repeats = schedule ? describeTaskSchedule(schedule, t, locale) : null;
   const when = (at: number) => formatTaskTime(at, now, locale);
@@ -175,7 +242,7 @@ function taskState(
           ? stateLine(repeats, when(check.at))
           : t("concierge.taskList.task.checksIn", { when: when(check.at) });
       }
-      return repeats ?? t("concierge.taskList.task.notStarted");
+      return repeats ?? age();
     case "ended":
       return stateLine(
         t(`concierge.taskList.task.ended.${status.endReason ?? "done"}`),
@@ -206,6 +273,7 @@ function TaskRow({
     buttons.push({
       label: t("concierge.taskList.actions.respondTo", { title: task.title }),
       text: t("concierge.taskList.actions.respond"),
+      icon: <CornerUpLeft className="size-4" aria-hidden />,
       onPress: () => onPress("respond"),
     });
   }
@@ -213,6 +281,7 @@ function TaskRow({
     buttons.push({
       label: t("concierge.taskList.actions.stopTask", { title: task.title }),
       text: t("concierge.taskList.actions.stop"),
+      icon: <Square className="size-4" aria-hidden />,
       onPress: () => onPress("stop"),
     });
   }
@@ -220,6 +289,11 @@ function TaskRow({
     <Row
       glyph={<TaskGlyph status={status} />}
       title={task.title}
+      times={timesOf(
+        t,
+        task.createdAt,
+        status.status === "ended" ? (task.completedAt ?? task.updatedAt) : null,
+      )}
       chat={
         task.chat
           ? {
@@ -246,6 +320,7 @@ function CheckRow({ item, now }: { item: TaskListCheckItem; now: number }) {
     <Row
       glyph={<Clock className="size-4 shrink-0 text-subtle-foreground" aria-hidden />}
       title={check.name}
+      times={timesOf(t, check.createdAt)}
       state={
         check.waitingFor
           ? stateLine(t("concierge.taskList.check.waiting", { what: check.waitingFor }), when)
@@ -271,6 +346,7 @@ function FollowRow({ item }: { item: TaskListFollowItem }) {
     <Row
       glyph={<Radio className="size-4 shrink-0 text-subtle-foreground" aria-hidden />}
       title={item.target}
+      times={timesOf(t, item.createdAt)}
       state={stateLine(
         item.label,
         item.state === "unavailable"
@@ -290,6 +366,7 @@ function RoutineRow({ item, now }: { item: TaskListRoutineItem; now: number }) {
     <Row
       glyph={<Workflow className="size-4 shrink-0 text-subtle-foreground" aria-hidden />}
       title={item.name}
+      times={timesOf(t, item.createdAt)}
       state={stateLine(
         describeRoutineTrigger(item.trigger, t, i18n.language),
         !item.enabled && t("concierge.taskList.routine.paused"),
@@ -321,7 +398,7 @@ function LoadingRows() {
         {[0, 1, 2].map((row) => (
           <div key={row} className="flex min-h-12 items-center gap-3 px-3 py-2">
             <Skeleton className="size-4 rounded-full" />
-            <div className="flex flex-1 flex-col gap-1.5">
+            <div className="flex flex-1 flex-col gap-2">
               <Skeleton className="h-3 w-2/3" />
               <Skeleton className="h-2.5 w-1/3" />
             </div>
@@ -459,51 +536,53 @@ export function TaskList({ chatId, onNavigate }: { chatId: string; onNavigate?: 
     }
   };
   return (
-    <div className="flex flex-col gap-5 px-4 pb-6 pt-4">
-      {data.groups.map((group) => {
-        const folds = group.key === "ended";
-        const open = !folds || endedOpen;
-        const heading = t(`concierge.taskList.groups.${group.key satisfies TaskListGroupKey}`);
-        const items = folds ? group.items.slice(0, endedShown) : group.items;
-        const more = group.items.length - items.length;
-        return (
-          <section key={group.key} aria-label={heading} data-task-list-group={group.key}>
-            {folds ? (
-              <button
-                type="button"
-                aria-expanded={open}
-                onClick={() => setEndedOpen((value) => !value)}
-                className="mb-1.5 flex items-center gap-1 px-3 text-aux font-medium text-muted-foreground outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
-              >
-                <ChevronDown
-                  className={cn("size-3 shrink-0 transition-transform", !open && "-rotate-90")}
-                  aria-hidden
-                />
-                {heading}{" "}
-                <span className="tabular-nums text-subtle-foreground">{group.items.length}</span>
-              </button>
-            ) : (
-              <h3 className="mb-1.5 px-3 text-aux font-medium text-muted-foreground">{heading}</h3>
-            )}
-            {open ? (
-              <ul className="divide-y divide-border overflow-hidden rounded-12 border border-border bg-surface">
-                {items.map(row)}
-                {more > 0 ? (
-                  <li>
-                    <button
-                      type="button"
-                      onClick={() => setEndedShown((shown) => shown + ENDED_PAGE)}
-                      className="flex min-h-10 w-full items-center justify-center text-aux text-muted-foreground outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
-                    >
-                      {t("concierge.taskList.showMore", { count: Math.min(more, ENDED_PAGE) })}
-                    </button>
-                  </li>
-                ) : null}
-              </ul>
-            ) : null}
-          </section>
-        );
-      })}
-    </div>
+    <TooltipProvider delayDuration={500}>
+      <div className="flex flex-col gap-5 px-4 pb-6 pt-4">
+        {data.groups.map((group) => {
+          const folds = group.key === "ended";
+          const open = !folds || endedOpen;
+          const heading = t(`concierge.taskList.groups.${group.key satisfies TaskListGroupKey}`);
+          const items = folds ? group.items.slice(0, endedShown) : group.items;
+          const more = group.items.length - items.length;
+          return (
+            <section key={group.key} aria-label={heading} data-task-list-group={group.key}>
+              {folds ? (
+                <button
+                  type="button"
+                  aria-expanded={open}
+                  onClick={() => setEndedOpen((value) => !value)}
+                  className="mb-2 flex items-center gap-1 px-3 text-aux font-medium text-muted-foreground outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
+                >
+                  <ChevronDown
+                    className={cn("size-3 shrink-0 transition-transform", !open && "-rotate-90")}
+                    aria-hidden
+                  />
+                  {heading}{" "}
+                  <span className="tabular-nums text-subtle-foreground">{group.items.length}</span>
+                </button>
+              ) : (
+                <h3 className="mb-2 px-3 text-aux font-medium text-muted-foreground">{heading}</h3>
+              )}
+              {open ? (
+                <ul className="divide-y divide-border overflow-hidden rounded-12 border border-border bg-surface">
+                  {items.map(row)}
+                  {more > 0 ? (
+                    <li>
+                      <button
+                        type="button"
+                        onClick={() => setEndedShown((shown) => shown + ENDED_PAGE)}
+                        className="flex min-h-10 w-full items-center justify-center text-aux text-muted-foreground outline-none outline-1 -outline-offset-1 outline-transparent transition-colors hover:bg-surface-hover hover:text-foreground focus-visible:outline-solid focus-visible:outline-ring/50"
+                      >
+                        {t("concierge.taskList.showMore", { count: Math.min(more, ENDED_PAGE) })}
+                      </button>
+                    </li>
+                  ) : null}
+                </ul>
+              ) : null}
+            </section>
+          );
+        })}
+      </div>
+    </TooltipProvider>
   );
 }

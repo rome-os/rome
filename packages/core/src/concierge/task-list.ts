@@ -205,6 +205,7 @@ export class ChatTaskList {
         enabled: routine.enabled,
         nextRunAt: routine.enabled ? (routine.nextRunAt?.getTime() ?? null) : null,
         lastRun: run ? { status: run.status, firedAt: run.firedAt.getTime() } : null,
+        createdAt: routine.createdAt.getTime(),
       };
     });
   }

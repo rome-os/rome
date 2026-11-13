@@ -85,7 +85,7 @@ export function StatusReactionBadge({ reaction }: { reaction: ConciergeStatusRea
       data-leaving={leaving || undefined}
       // A 28px badge centered on the bubble's corner, lighter than the page
       // in both themes so the emoji reads, with a hairline edge.
-      className="pointer-events-none absolute -top-3.5 -left-3.5 flex size-7 select-none items-center justify-center rounded-full border-[0.5px] border-surface-foreground/10 bg-surface-elevated text-composer leading-none shadow-1 dark:bg-surface-hover"
+      className="pointer-events-none absolute -top-3.5 -left-3.5 flex size-7 select-none items-center justify-center rounded-full border-[0.5px] border-surface-foreground/10 bg-surface-elevated text-composer shadow-1 dark:bg-surface-hover"
     >
       {EMOJI[shown]}
       {/* The thought dot, trailing off the badge's lower left. */}
