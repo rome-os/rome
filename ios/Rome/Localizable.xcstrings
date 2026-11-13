@@ -601,7 +601,7 @@
         }
       }
     },
-    "Approved, but did not finish" : {
+    "Approved, but didn't finish" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -611,7 +611,7 @@
         }
       }
     },
-    "Approved, but “%@” did not finish" : {
+    "Approved, but “%@” didn't finish" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -1201,42 +1201,12 @@
         }
       }
     },
-    "Could not start the chat" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "未能开始这个聊天"
-          }
-        }
-      }
-    },
-    "Could not start the chat · %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "无法开始聊天 · %@"
-          }
-        }
-      }
-    },
     "Could not start the update" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "无法开始更新"
-          }
-        }
-      }
-    },
-    "Could not submit" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "没有提交成功"
           }
         }
       }
@@ -1311,12 +1281,42 @@
         }
       }
     },
+    "Couldn't send your decision" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能发送你的决定"
+          }
+        }
+      }
+    },
     "Couldn't send. Try again" : {
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "发送失败，请重试"
+          }
+        }
+      }
+    },
+    "Couldn't start the chat" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能开始这个聊天"
+          }
+        }
+      }
+    },
+    "Couldn't start the chat · %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没能开始聊天 · %@"
           }
         }
       }

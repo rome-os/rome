@@ -32,7 +32,7 @@ private func task(_ id: String, chat: String, status: String?, endReason: String
             task("7", chat: "c7", status: "later"),
         ]
         let store = await store(tasks: rows)
-        #expect((1...7).map { store.cardState(forChat: "c\($0)").word } == ["Done", "Failed", "Stopped", "No response", "Needs you", "Working", "Later"])
+        #expect((1...7).map { store.cardState(forChat: "c\($0)").word } == ["Done", "Didn't finish", "Stopped", "No response", "Needs you", "Working", "Later"])
     }
 
     @Test func stopShowsOnlyWhileTheTaskIsOpen() async {

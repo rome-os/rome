@@ -916,7 +916,7 @@ final class TranscriptStore {
                     watchApproval(id)
                 }
             } catch {
-                approvalErrors[id] = String(localized: "Could not submit")
+                approvalErrors[id] = String(localized: "Couldn't send your decision")
             }
             resolvingApproval[id] = nil
         }

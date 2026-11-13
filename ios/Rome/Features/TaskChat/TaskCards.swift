@@ -413,7 +413,7 @@ struct ApprovalCardView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
                 AlertGlyph(size: 15)
-                Text("Approved, but “\(title)” did not finish").romeFont(14, .medium)
+                Text("Approved, but “\(title)” didn't finish").romeFont(14, .medium)
             }
             .foregroundStyle(Palette.destructive)
             .padding(.horizontal, 12)

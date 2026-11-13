@@ -257,7 +257,7 @@ enum SettledOutcome {
         if resolvedBy == "rome:task-stopped" { return String(localized: "Turned down: task stopped") }
         switch status {
         case .rejected: return String(localized: "Rejected")
-        case .failed: return String(localized: "Approved, but did not finish")
+        case .failed: return String(localized: "Approved, but didn't finish")
         default: return String(localized: "Approved")
         }
     }

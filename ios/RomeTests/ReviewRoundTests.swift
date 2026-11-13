@@ -95,3 +95,19 @@ private func message(_ id: String, role: String = "assistant", turn: String? = n
         #expect(!tasks.stopping.contains("1"))
     }
 }
+
+@Suite struct StoredErrorSwitchTests {
+    private func error(_ id: String) -> TranscriptRow { .error(id: id, error: TurnError(text: "limit", code: "usage_limit")) }
+
+    /// The switch line says it, so the card before it is not drawn; with no switch, it stays.
+    @Test func aSwitchRetiresTheErrorCardBeforeIt() {
+        let separator = TranscriptRow.separator(id: "s", date: .now)
+        let rows: [TranscriptRow] = [
+            error("a:0"), error("b:0"), separator, .notice(id: "n", text: "Switched"),
+            error("c:0"),
+            .error(id: "failed-t", error: TurnError(text: "x", didntFinish: true)), .notice(id: "n2", text: "Switched"),
+        ]
+        let kept = TranscriptBuilder.withoutResolvedErrors(rows)
+        #expect(kept.map(\.id) == ["s", "n", "failed-t", "n2"])
+    }
+}

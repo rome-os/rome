@@ -72,6 +72,13 @@ enum TranscriptRow: Identifiable, Hashable {
     case sessionRenewal(id: String, reason: String, sessionId: String?)
     case typing
 
+    var isSeparatorOrError: Bool {
+        switch self {
+        case .separator, .error: return true
+        default: return false
+        }
+    }
+
     var id: String {
         switch self {
         case .separator(let id, _), .userText(let id, _, _, _), .agentText(let id, _, _, _, _),
@@ -348,6 +355,7 @@ enum TranscriptBuilder {
                 break
             }
         }
+        output = Self.withoutResolvedErrors(output)
         if options.typing { output.append(.typing) }
         return output
     }
@@ -362,6 +370,20 @@ enum TranscriptBuilder {
             default: return part.isVisible
             }
         }
+    }
+
+    /// A stored error card that a model switch follows is not drawn: the
+    /// switch line says what happened. With no switch after it, it stays.
+    /// A failed turn's own line (`failed-…`) is never dropped here.
+    static func withoutResolvedErrors(_ rows: [TranscriptRow]) -> [TranscriptRow] {
+        var drop = Set<Int>()
+        for (index, row) in rows.enumerated() {
+            guard case .error(let id, _) = row, !id.hasPrefix("failed-") else { continue }
+            var next = index + 1
+            while next < rows.count, rows[next].isSeparatorOrError { next += 1 }
+            if next < rows.count, case .notice = rows[next] { drop.insert(index) }
+        }
+        return drop.isEmpty ? rows : rows.enumerated().filter { !drop.contains($0.offset) }.map(\.element)
     }
 
     /// What a failed turn's trace says went wrong; nil for a turn that did not fail,

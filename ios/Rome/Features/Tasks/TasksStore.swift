@@ -265,7 +265,7 @@ final class TasksStore {
             let open = task.status != "ended"
             let word: String
             switch (task.status, task.endReason) {
-            case ("ended", "failed"?): word = String(localized: "Failed")
+            case ("ended", "failed"?): word = String(localized: "Didn't finish")
             case ("ended", "stopped"?): word = String(localized: "Stopped")
             case ("ended", "no_response"?): word = String(localized: "No response")
             case ("ended", _): word = String(localized: "Done")

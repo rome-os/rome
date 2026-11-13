@@ -113,7 +113,7 @@ struct TopicChatScreen: View {
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
                 if startFailed && store == nil {
-                    Text(startFailure.reason.map { String(localized: "Could not start the chat · \($0)") } ?? String(localized: "Could not start the chat"))
+                    Text(startFailure.reason.map { String(localized: "Couldn't start the chat · \($0)") } ?? String(localized: "Couldn't start the chat"))
                         .romeFont(13, .medium)
                         .foregroundStyle(Palette.destructive)
                         .transition(.opacity)
