@@ -1,59 +1,136 @@
 import { describe, expect, it } from "@rstest/core";
 import type { ChatMessage } from "@/lib/chat-types";
-import { firstUnreadMessageId } from "./concierge-unread";
+import { summarizeUnread } from "./concierge-unread";
 
-function message(id: string, role: ChatMessage["role"]): ChatMessage {
-  return {
-    id,
-    sessionId: "concierge",
-    role,
-    content: "[]",
-    createdAt: "2026-10-27T12:00:00.000Z",
-  };
+const MARK = "2026-10-27T12:10:00.000Z";
+const text = (content: string) => JSON.stringify([{ type: "text", content }]);
+
+function message(
+  id: string,
+  role: ChatMessage["role"],
+  createdAt: string,
+  content = text(id),
+): ChatMessage {
+  return { id, sessionId: "concierge", role, content, createdAt };
 }
 
-const agent = (id: string) => message(id, "assistant");
-const guardian = (id: string) => message(id, "user");
+const agent = (id: string, createdAt: string, content?: string) =>
+  message(id, "assistant", createdAt, content);
+const guardian = (id: string, createdAt: string) => message(id, "user", createdAt);
 
-describe("firstUnreadMessageId", () => {
-  const messages = [agent("a1"), guardian("g1"), agent("a2"), agent("a3"), guardian("g2")];
+// a1 and a2 were read, a3 and a4 were not.
+const history = [
+  agent("a1", "2026-10-27T12:00:00.000Z"),
+  guardian("g1", "2026-10-27T12:05:00.000Z"),
+  agent("a2", "2026-10-27T12:10:00.000Z"),
+  agent("a3", "2026-10-27T12:11:00.000Z"),
+  guardian("g2", "2026-10-27T12:12:00.000Z"),
+  agent("a4", "2026-10-27T12:13:00.000Z"),
+];
+const open = { watermark: MARK, newestId: "a4" };
 
-  it("names the count-th agent message from the end", () => {
-    expect(firstUnreadMessageId(messages, { count: 1, newestId: "g2" })).toBe("a3");
-    expect(firstUnreadMessageId(messages, { count: 2, newestId: "g2" })).toBe("a2");
-    expect(firstUnreadMessageId(messages, { count: 3, newestId: "g2" })).toBe("a1");
+describe("summarizeUnread", () => {
+  it("names the first agent message created after the read mark and counts those after it", () => {
+    expect(summarizeUnread(history, open, false)).toEqual({ firstId: "a3", count: 2, more: false });
   });
 
-  it("leaves the guardian's own messages out of the count", () => {
-    expect(firstUnreadMessageId([agent("a1"), guardian("g1")], { count: 1, newestId: "g1" })).toBe(
-      "a1",
-    );
+  it("counts a message in the same second as the read mark as read, as the server does", () => {
+    const late = [agent("a1", "2026-10-27T12:10:00.900Z"), agent("a2", "2026-10-27T12:10:01.000Z")];
+    expect(summarizeUnread(late, { watermark: MARK, newestId: "a2" }, false)).toEqual({
+      firstId: "a2",
+      count: 1,
+      more: false,
+    });
   });
 
-  it("returns null when nothing was unread", () => {
-    expect(firstUnreadMessageId(messages, { count: 0, newestId: "g2" })).toBeNull();
+  it("leaves the guardian's own messages out", () => {
+    const own = [
+      agent("a1", "2026-10-27T12:00:00.000Z"),
+      guardian("g1", "2026-10-27T12:20:00.000Z"),
+    ];
+    expect(summarizeUnread(own, { watermark: MARK, newestId: "g1" }, false)).toBeNull();
   });
 
-  it("returns null while the first unread message is on an older page", () => {
-    expect(firstUnreadMessageId(messages, { count: 4, newestId: "g2" })).toBeNull();
+  it("returns null when nothing is unread", () => {
+    expect(
+      summarizeUnread(history, { watermark: "2026-10-27T12:13:00.000Z", newestId: "a4" }, false),
+    ).toBeNull();
   });
 
-  it("finds it once the older page has loaded", () => {
-    const older = [agent("a0"), ...messages];
-    expect(firstUnreadMessageId(older, { count: 4, newestId: "g2" })).toBe("a0");
+  it("ignores messages that arrived after the chat opened, however many", () => {
+    const later = [
+      ...history,
+      agent("a5", "2026-10-27T12:14:00.000Z"),
+      guardian("g3", "2026-10-27T12:15:00.000Z"),
+    ];
+    expect(summarizeUnread(later, open, false)).toEqual({ firstId: "a3", count: 2, more: false });
   });
 
-  it("ignores messages that arrived after the chat opened", () => {
-    const later = [...messages, agent("a4"), agent("a5")];
-    expect(firstUnreadMessageId(later, { count: 2, newestId: "g2" })).toBe("a2");
+  it("finds no unread message in a chat that opened with none, when one arrives", () => {
+    const caughtUp = { watermark: "2026-10-27T12:13:00.000Z", newestId: "a4" };
+    const later = [...history, agent("a5", "2026-10-27T12:14:00.000Z")];
+    expect(summarizeUnread(later, caughtUp, false)).toBeNull();
   });
 
-  it("falls back to the whole transcript when the newest message at open is gone", () => {
-    expect(firstUnreadMessageId(messages, { count: 1, newestId: "gone" })).toBe("a3");
+  it("returns null, never a later message, once the newest message at open is gone", () => {
+    const rewritten = history
+      .filter((m) => m.id !== "a4")
+      .concat(agent("a5", "2026-10-27T12:14:00.000Z"));
+    expect(summarizeUnread(rewritten, open, false)).toBeNull();
   });
 
-  it("skips trace and notification messages", () => {
-    const mixed = [agent("a1"), message("tr", "trace"), message("n1", "notification"), agent("a2")];
-    expect(firstUnreadMessageId(mixed, { count: 2, newestId: "a2" })).toBe("a1");
+  it("counts only the unread messages the chat draws", () => {
+    const withHidden = [
+      agent("a1", "2026-10-27T12:00:00.000Z"),
+      agent("a2", "2026-10-27T12:11:00.000Z", text(" ")),
+      agent("a3", "2026-10-27T12:12:00.000Z"),
+      agent("a4", "2026-10-27T12:13:00.000Z"),
+    ];
+    expect(summarizeUnread(withHidden, open, false)).toEqual({
+      firstId: "a3",
+      count: 2,
+      more: false,
+    });
+  });
+
+  it("does not count a model-switch notice as a message", () => {
+    const notice = JSON.stringify([{ type: "quota_switch", from: "a", to: "b", model: "m" }]);
+    const rows = [
+      agent("a1", "2026-10-27T12:00:00.000Z"),
+      agent("a2", "2026-10-27T12:11:00.000Z", notice),
+      agent("a3", "2026-10-27T12:12:00.000Z"),
+    ];
+    expect(summarizeUnread(rows, { watermark: MARK, newestId: "a3" }, false)).toEqual({
+      firstId: "a3",
+      count: 1,
+      more: false,
+    });
+  });
+
+  it("returns null when every unread message draws nothing", () => {
+    const hidden = [
+      agent("a1", "2026-10-27T12:00:00.000Z"),
+      agent("a2", "2026-10-27T12:11:00.000Z", text(" ")),
+    ];
+    expect(summarizeUnread(hidden, { watermark: MARK, newestId: "a2" }, false)).toBeNull();
+  });
+
+  it("has no first message yet while the unread run reaches the oldest loaded page", () => {
+    const run = [agent("a3", "2026-10-27T12:11:00.000Z"), agent("a4", "2026-10-27T12:13:00.000Z")];
+    expect(summarizeUnread(run, open, true)).toEqual({ firstId: null, count: 2, more: true });
+  });
+
+  it("finds the first message once an older page shows a read one before it", () => {
+    const loaded = [agent("a2", "2026-10-27T12:10:00.000Z"), ...history.slice(3)];
+    expect(summarizeUnread(loaded, open, true)).toEqual({ firstId: "a3", count: 2, more: false });
+  });
+
+  it("takes the oldest loaded message as the first when no older page exists", () => {
+    const run = [agent("a3", "2026-10-27T12:11:00.000Z"), agent("a4", "2026-10-27T12:13:00.000Z")];
+    expect(summarizeUnread(run, open, false)).toEqual({ firstId: "a3", count: 2, more: false });
+  });
+
+  it("returns null for a read mark it cannot read", () => {
+    expect(summarizeUnread(history, { watermark: "yesterday", newestId: "a4" }, false)).toBeNull();
   });
 });

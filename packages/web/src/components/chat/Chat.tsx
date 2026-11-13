@@ -116,7 +116,7 @@ import {
 } from "@/components/chat/status-reaction";
 import { ConciergeTranscript } from "@/components/chat/ConciergeTranscript";
 import { ConciergeUnreadPill } from "@/components/chat/ConciergeUnreadPill";
-import { firstUnreadMessageId, useUnreadAtOpen } from "@/components/chat/concierge-unread";
+import { summarizeUnread, useUnreadAtOpen } from "@/components/chat/concierge-unread";
 import {
   ChatThreadsProvider,
   placeLive,
@@ -370,11 +370,12 @@ export interface ChatProps {
    */
   recoverMissingSession?: (sessionId: string) => Promise<boolean>;
   /**
-   * Asks the server how many agent messages a chat has unread right now. The
-   * chat waits for the answer before it marks itself read, so a Concierge chat
-   * can draw a divider where the unread messages start.
+   * Resolves with the chat's read mark, as the server holds it before this chat
+   * marks itself read, or null when it has none. Only a Concierge chat needs
+   * it: the chat waits for the answer before its read mark, and draws a divider
+   * where the unread messages start. Without it the chat does neither.
    */
-  countUnread?: (chatId: string) => Promise<number>;
+  loadReadMark?: (chatId: string) => Promise<string | null>;
   onSessionMessage?: (message: SessionMessage) => void;
   /**
    * Called with a session's saved workspace layout (`null` when none) when its
@@ -441,7 +442,7 @@ export function Chat({
   onSessionsChanged,
   onSessionNotFound,
   recoverMissingSession,
-  countUnread,
+  loadReadMark,
   onSessionMessage,
   onSessionLayout,
   onSessionCreated,
@@ -713,14 +714,15 @@ export function Chat({
   const { displayMessages, identityBySession, interactionResults } = view;
   // What was unread when this Concierge chat opened. It stays put while the
   // chat is open, so the divider outlives the read mark and ignores arrivals.
-  const { unread: unreadAtOpen, pendingCount } = useUnreadAtOpen({
-    chatId: sessionId,
-    newestId: displayMessages.at(-1)?.id ?? null,
-    countUnread,
-  });
-  const unreadFrom = useMemo(
-    () => (unreadAtOpen ? firstUnreadMessageId(displayMessages, unreadAtOpen) : null),
-    [displayMessages, unreadAtOpen],
+  const {
+    unread: unreadAtOpen,
+    noteOpened,
+    pendingMark,
+  } = useUnreadAtOpen({ chatId: sessionId, loadReadMark });
+  const olderRemains = mainSessionId ? hasOlder(mainSessionId) : false;
+  const unread = useMemo(
+    () => (unreadAtOpen ? summarizeUnread(displayMessages, unreadAtOpen, olderRemains) : null),
+    [displayMessages, unreadAtOpen, olderRemains],
   );
   // The main session's id, empty while a draft has none. Keys the running turn
   // and live stream (send, stop, reattach, live trace, onSessionMessage).
@@ -1075,9 +1077,14 @@ export function Chat({
   const hiddenReadsRef = useRef(new Set<string>());
   const markSessionRead = useCallback(
     async (id: string) => {
-      // Marking the chat read first would zero the count the divider needs.
-      const counting = pendingCount();
-      if (counting) await counting;
+      // Marking the chat read first would erase the read mark the divider needs.
+      const waiting = pendingMark();
+      if (waiting) {
+        await waiting;
+        // The chat may have closed, or moved on, while it waited. A read mark
+        // then would clear messages the guardian never saw.
+        if (!isMountedRef.current || id !== mainSessionIdRef.current) return;
+      }
       if (typeof document !== "undefined" && document.visibilityState === "hidden") {
         hiddenReadsRef.current.add(id);
         return;
@@ -1089,7 +1096,7 @@ export function Chat({
         // Best effort. The next successful active-session load can retry.
       }
     },
-    [notifySessionsChanged, pendingCount],
+    [notifySessionsChanged, pendingMark],
   );
   useEffect(() => {
     const flush = () => {
@@ -1210,6 +1217,9 @@ export function Chat({
           for (const messageId of localBeforeFetch) local?.delete(messageId);
           if (local?.size === 0) localOptimisticMessageIdsRef.current.delete(id);
         }
+        if (!loadedSessionsRef.current.has(id) && isReadVisibleSession(id)) {
+          noteOpened(fetchedMessages.at(-1)?.id ?? null);
+        }
         loadedSessionsRef.current.add(id);
         if (isReadVisibleSession(id)) {
           void markSessionRead(id);
@@ -1219,7 +1229,7 @@ export function Chat({
         // refresh) can retry on the next trigger.
       }
     },
-    [isReadVisibleSession, markSessionRead, pageTurns, setOlderCursor],
+    [isReadVisibleSession, markSessionRead, noteOpened, pageTurns, setOlderCursor],
   );
 
   // A new message reactivates every turn's steps. Fetch server truth once,
@@ -2610,7 +2620,7 @@ export function Chat({
                         feedback
                         fork={forkable}
                         variant={variant}
-                        unreadFrom={unreadFrom}
+                        unreadFrom={unread?.firstId ?? null}
                       />
                     </TaskChatContext.Provider>
                   </ChatThreadsProvider>
@@ -2781,7 +2791,7 @@ export function Chat({
                 <div aria-hidden data-draft-center-spacer className="hidden flex-auto md:block" />
               ) : null}
             </div>
-            {concierge && unreadAtOpen && mainSessionId ? (
+            {concierge && unread && mainSessionId ? (
               // Under the floating header, on the transcript's top-right corner.
               // Kept mounted under a thread view: the pill's state is the
               // guardian's progress through the unread messages.
@@ -2791,15 +2801,14 @@ export function Chat({
                   threadOpen && "invisible",
                 )}
               >
-                {unreadFrom !== null || hasOlder(mainSessionId) ? (
-                  <ConciergeUnreadPill
-                    scroller={scrollerEl}
-                    content={contentEl}
-                    count={unreadAtOpen.count}
-                    anchored={unreadFrom !== null}
-                    onJump={showUnreadDivider}
-                  />
-                ) : null}
+                <ConciergeUnreadPill
+                  scroller={scrollerEl}
+                  content={contentEl}
+                  count={unread.count}
+                  more={unread.more}
+                  anchored={unread.firstId !== null}
+                  onJump={showUnreadDivider}
+                />
               </div>
             ) : null}
             {concierge ? null : (

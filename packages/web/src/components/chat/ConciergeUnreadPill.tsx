@@ -2,15 +2,17 @@ import { useEffect, useState } from "react";
 import { ArrowUp } from "lucide-react";
 import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
-import { CONCIERGE_UNREAD_CAP } from "@/hooks/use-concierge";
+
+/** How long the divider must stay in view at the bottom before the pill gives up on it. */
+const SETTLE_MS = 600;
 
 /**
  * "N new messages" pill that takes the guardian up to the unread divider.
  *
  * It appears once the divider is above the visible transcript, or is not
  * loaded yet, and goes away for good when the guardian taps it or scrolls the
- * divider into view. A divider in view when the transcript rests at the
- * bottom, because the unread messages fit on screen, never shows it. `anchored` says the divider's
+ * divider into view. A divider that stays in view while the transcript rests
+ * at the bottom, because the unread messages fit on screen, never shows it. `anchored` says the divider's
  * message is loaded: when the chat draws nothing for it, there is no divider
  * and no pill.
  */
@@ -18,13 +20,17 @@ export function ConciergeUnreadPill({
   scroller,
   content,
   count,
+  more,
   anchored,
   onJump,
 }: {
   scroller: HTMLElement | null;
   /** The transcript element, which holds the divider. */
   content: HTMLElement | null;
+  /** The unread messages loaded so far. */
   count: number;
+  /** More unread messages wait on an older page, so `count` reads as "N+". */
+  more: boolean;
   anchored: boolean;
   onJump: () => void;
 }) {
@@ -34,6 +40,7 @@ export function ConciergeUnreadPill({
   useEffect(() => {
     if (!scroller || !content || phase === "done") return;
     let frame = 0;
+    let settle: ReturnType<typeof setTimeout> | undefined;
     const measure = () => {
       frame = 0;
       const divider = content.querySelector("[data-concierge-unread-divider]");
@@ -42,16 +49,25 @@ export function ConciergeUnreadPill({
       const above = divider
         ? divider.getBoundingClientRect().bottom <= scroller.getBoundingClientRect().top + clear
         : !anchored;
-      // The transcript loads at its top and then scrolls to the bottom, so a
-      // divider in view only counts as seen once the transcript is at the
-      // bottom. Seen from there, the unread messages fit on screen, and
-      // later arrivals pushing the divider up must not bring the pill.
+      if (above) {
+        clearTimeout(settle);
+        settle = undefined;
+        setPhase((current) => (current === "done" ? current : "shown"));
+        return;
+      }
+      setPhase((current) => (current === "shown" ? "done" : current));
+      // The transcript loads at its top, scrolls to the bottom, and then grows
+      // as cards and images load, which can push the divider up out of view.
+      // So a divider in view counts as seen only when it stays in view at the
+      // bottom for {@link SETTLE_MS}. Seen that way, the unread messages fit on
+      // screen, and later arrivals pushing the divider up must not bring the pill.
       const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight <= 1;
-      setPhase((current) => {
-        if (current === "done") return current;
-        if (above) return "shown";
-        return current === "shown" || atBottom ? "done" : current;
-      });
+      if (!atBottom) {
+        clearTimeout(settle);
+        settle = undefined;
+      } else if (settle === undefined) {
+        settle = setTimeout(() => setPhase((c) => (c === "waiting" ? "done" : c)), SETTLE_MS);
+      }
     };
     const schedule = () => {
       if (!frame) frame = requestAnimationFrame(measure);
@@ -65,6 +81,7 @@ export function ConciergeUnreadPill({
     schedule();
     return () => {
       cancelAnimationFrame(frame);
+      clearTimeout(settle);
       resize.disconnect();
       mutations.disconnect();
       scroller.removeEventListener("scroll", schedule);
@@ -72,7 +89,7 @@ export function ConciergeUnreadPill({
   }, [scroller, content, anchored, phase]);
 
   if (phase !== "shown") return null;
-  const label = count >= CONCIERGE_UNREAD_CAP ? "99+" : String(count);
+  const label = more ? `${count}+` : String(count);
   return (
     <Button
       variant="outline"

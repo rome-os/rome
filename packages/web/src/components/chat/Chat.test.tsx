@@ -712,8 +712,16 @@ describe("Chat unread divider", () => {
     agentMessage("a3", 2),
     agentMessage("a4", 3),
   ];
+  // Read through a2, so a3 and a4 are unread.
+  const MARK = "2026-10-27T12:01:30.000Z";
   const unreadFrom = () => screen.getByTestId("message-list").getAttribute("data-unread-from");
   const idle = () => new Promise((resolve) => setTimeout(resolve, 20));
+  /** A read mark the test answers when it chooses. */
+  function deferredMark() {
+    let resolve!: (mark: string | null) => void;
+    const loadReadMark = rs.fn(() => new Promise<string | null>((r) => (resolve = r)));
+    return { loadReadMark, answer: (mark: string | null) => act(async () => resolve(mark)) };
+  }
   beforeEach(() => {
     rs.mocked(listSessionTurns).mockResolvedValue([]);
     rs.mocked(markSessionRead).mockClear();
@@ -724,27 +732,60 @@ describe("Chat unread divider", () => {
     rs.mocked(listSessionMessages).mockResolvedValue([]);
   });
 
-  it("marks the chat read only after the unread count is in, and divides at the first unread message", async () => {
-    let resolveCount!: (count: number) => void;
-    const countUnread = rs.fn(() => new Promise<number>((resolve) => (resolveCount = resolve)));
-    renderChat(<Chat sessionId="concierge" variant="concierge" countUnread={countUnread} />);
+  it("marks the chat read only after the read mark is in, and divides at the first unread message", async () => {
+    const { loadReadMark, answer } = deferredMark();
+    renderChat(<Chat sessionId="concierge" variant="concierge" loadReadMark={loadReadMark} />);
     await screen.findByTestId("message-list");
     await act(idle);
-    expect(countUnread).toHaveBeenCalledWith("concierge");
+    expect(loadReadMark).toHaveBeenCalledWith("concierge");
     expect(markSessionRead).not.toHaveBeenCalled();
     expect(unreadFrom()).toBe("");
 
-    await act(async () => resolveCount(2));
+    await answer(MARK);
     await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("concierge"));
     expect(unreadFrom()).toBe("a3");
   });
 
-  it("keeps the divider after the chat is read, and gives a message that arrives none", async () => {
+  it("places the divider by the read mark when a message arrives while the mark is pending", async () => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    const { loadReadMark, answer } = deferredMark();
+    renderChat(<Chat sessionId="concierge" variant="concierge" loadReadMark={loadReadMark} />);
+    await screen.findByTestId("message-list");
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+
+    act(() => {
+      MockEventSource.instances[0]?.emit("message_insert", agentMessage("a5", 4));
+    });
+    await answer(MARK);
+    await waitFor(() => expect(unreadFrom()).toBe("a3"));
+  });
+
+  it("gives no divider to a message that arrives while the chat is open", async () => {
     rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
     renderChat(
-      <Chat sessionId="concierge" variant="concierge" countUnread={() => Promise.resolve(3)} />,
+      <Chat
+        sessionId="concierge"
+        variant="concierge"
+        loadReadMark={() => Promise.resolve("2026-10-27T12:03:00.000Z")}
+      />,
     );
-    await waitFor(() => expect(unreadFrom()).toBe("a2"));
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalled());
+    await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
+    expect(unreadFrom()).toBe("");
+
+    act(() => {
+      MockEventSource.instances[0]?.emit("message_insert", agentMessage("a5", 4));
+    });
+    await act(idle);
+    expect(unreadFrom()).toBe("");
+  });
+
+  it("keeps the divider after the chat is read, and when a message arrives", async () => {
+    rs.stubGlobal("EventSource", MockEventSource as unknown as typeof EventSource);
+    renderChat(
+      <Chat sessionId="concierge" variant="concierge" loadReadMark={() => Promise.resolve(MARK)} />,
+    );
+    await waitFor(() => expect(unreadFrom()).toBe("a3"));
     await waitFor(() => expect(markSessionRead).toHaveBeenCalled());
     await waitFor(() => expect(MockEventSource.instances).toHaveLength(1));
 
@@ -752,27 +793,47 @@ describe("Chat unread divider", () => {
       MockEventSource.instances[0]?.emit("message_insert", agentMessage("a5", 4));
     });
     await act(idle);
-    expect(unreadFrom()).toBe("a2");
+    expect(unreadFrom()).toBe("a3");
   });
 
-  it("draws no divider for a chat with nothing unread, and still marks it read", async () => {
+  it("does not mark the chat read when it closes while the read mark is pending", async () => {
+    const { loadReadMark, answer } = deferredMark();
+    const { unmount } = renderChat(
+      <Chat sessionId="concierge" variant="concierge" loadReadMark={loadReadMark} />,
+    );
+    await screen.findByTestId("message-list");
+    await act(idle);
+    unmount();
+
+    await answer(MARK);
+    await act(idle);
+    expect(markSessionRead).not.toHaveBeenCalled();
+  });
+
+  it("does no pre-read work, and waits for nothing, without loadReadMark", async () => {
+    renderChat(<Chat sessionId="session-1" />);
+    await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("session-1"));
+    expect(unreadFrom()).toBe("");
+  });
+
+  it("draws no divider for a chat that was never marked read", async () => {
     renderChat(
-      <Chat sessionId="concierge" variant="concierge" countUnread={() => Promise.resolve(0)} />,
+      <Chat sessionId="concierge" variant="concierge" loadReadMark={() => Promise.resolve(null)} />,
     );
     await waitFor(() => expect(markSessionRead).toHaveBeenCalledWith("concierge"));
     expect(unreadFrom()).toBe("");
   });
 
-  it("counts nothing for a draft that a first send turns into a chat", async () => {
-    const countUnread = rs.fn(() => Promise.resolve(2));
-    const { rerender } = renderChat(<Chat variant="concierge" countUnread={countUnread} />);
+  it("asks for nothing for a draft that a first send turns into a chat", async () => {
+    const loadReadMark = rs.fn(() => Promise.resolve(MARK));
+    const { rerender } = renderChat(<Chat variant="concierge" loadReadMark={loadReadMark} />);
     rerender(
       <MemoryRouter>
-        {pane(<Chat sessionId="concierge" variant="concierge" countUnread={countUnread} />)}
+        {pane(<Chat sessionId="concierge" variant="concierge" loadReadMark={loadReadMark} />)}
       </MemoryRouter>,
     );
     await act(idle);
-    expect(countUnread).not.toHaveBeenCalled();
+    expect(loadReadMark).not.toHaveBeenCalled();
   });
 });
 

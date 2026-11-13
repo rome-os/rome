@@ -48,7 +48,8 @@ export type ConciergeItem =
 
 const UNREAD_DIVIDER: ConciergeItem = { kind: "unread", key: "unread-divider" };
 
-function isRenderable(message: ChatMessage): boolean {
+/** Whether the Concierge draws something for `message`. */
+export function isRenderable(message: ChatMessage): boolean {
   if (message.role === "user") return userMessageText(message.content).length > 0;
   return parseMessageEntries(message).some((part) => part.type !== "text" || part.content.trim());
 }
@@ -199,9 +200,9 @@ function sameItem(a: ConciergeItem, b: ConciergeItem): boolean {
  * before the first message, after a gap of at least {@link SEPARATOR_GAP_MS},
  * and when the local day changes. It always ends the group before it. A message
  * with an unparsable time gets no separator and is grouped by sender alone.
- * The unread divider comes before the first drawn message at or after the
- * message `opts.unreadFrom` names, after that message's separator, and it ends
- * the group before it. A chat that never reaches `unreadFrom` has no divider.
+ * The unread divider comes before the message `opts.unreadFrom` names, after
+ * that message's separator, and it ends the group before it. A chat that does
+ * not draw that message has no divider.
  * Rows with nothing to draw (trace rows, empty messages) leave no trace.
  *
  * Items and entries are reference-stable: building again from the same message
@@ -223,10 +224,6 @@ export function buildConciergeItems(
   const slots: Slot[] = [];
   let group: Extract<Slot, { kind: "group" }> | null = null;
   let previous: ChatMessage | null = null;
-  // The divider waits for the first message the chat draws at or after
-  // `unreadFrom`, which may itself be a message it draws nothing for.
-  let unreadReached = false;
-  let unreadPlaced = false;
 
   const add = (message: ChatMessage, sender: "guardian" | "agent") => {
     const at = Date.parse(message.createdAt);
@@ -244,9 +241,8 @@ export function buildConciergeItems(
         at: message.createdAt,
       });
     }
-    if (unreadReached && !unreadPlaced) {
+    if (message.id === opts.unreadFrom) {
       slots.push({ kind: "unread" });
-      unreadPlaced = true;
       group = null;
     }
     if (!group || separate || group.sender !== sender || gap >= GROUP_GAP_MS) {
@@ -260,7 +256,6 @@ export function buildConciergeItems(
   let automaticModel: string | undefined;
   for (const row of rows) {
     if (row.kind === "user") {
-      if (row.message.id === opts.unreadFrom) unreadReached = true;
       // A Concierge chat holds no automated messages: one from before that
       // rule shows as the line a newer one gets. One said on the owner's
       // behalf is theirs, and stays their bubble.
@@ -275,7 +270,6 @@ export function buildConciergeItems(
       } else if (isRenderable(row.message)) add(row.message, "guardian");
     } else if (row.kind === "agent") {
       for (const message of row.messages) {
-        if (message.id === opts.unreadFrom) unreadReached = true;
         // Only a Concierge chat's transcript is grouped here, and any of them may switch.
         const quota = parseMessageEntries(message).find(
           (part): part is QuotaSwitchPart => part.type === "quota_switch",

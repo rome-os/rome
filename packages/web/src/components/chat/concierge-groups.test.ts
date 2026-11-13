@@ -276,22 +276,31 @@ describe("buildConciergeItems unread divider", () => {
     expect(withDivider(rows, "a1")).toEqual(["sep", "new", "A:a1", "G:g1", "A:a2"]);
   });
 
-  it("moves to the next drawn message when the first unread one draws nothing", () => {
+  it("draws no divider when the named message draws nothing", () => {
     const empty = {
       ...say("empty", MIN),
       content: JSON.stringify([{ type: "text", content: " " }]),
     };
     const rows = [agentRow(say("a1", 0), empty, say("a2", 2 * MIN))];
-    expect(withDivider(rows, "empty")).toEqual(["sep", "A:a1", "new", "A:a2"]);
+    expect(withDivider(rows, "empty")).toEqual(["sep", "A:a1,a2"]);
   });
 
-  it("draws no divider when nothing is drawn from the unread message on", () => {
+  it("gives a message that arrives after a hidden unread tail no divider", () => {
     const empty = {
       ...say("empty", MIN),
       content: JSON.stringify([{ type: "text", content: " " }]),
     };
     const rows = [agentRow(say("a1", 0), empty)];
     expect(withDivider(rows, "empty")).toEqual(["sep", "A:a1"]);
+    expect(withDivider([...rows, agentRow(say("a2", 2 * MIN))], "empty")).toEqual([
+      "sep",
+      "A:a1,a2",
+    ]);
+    expect(withDivider([...rows, userRow(guardian("g1", 2 * MIN))], "empty")).toEqual([
+      "sep",
+      "A:a1",
+      "G:g1",
+    ]);
   });
 
   it("draws no divider when the unread message is not in the rows", () => {

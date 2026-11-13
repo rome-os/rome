@@ -12,12 +12,12 @@ import type {
 } from "@rome-os/rome-web-components/news-item/schema";
 import type { ChatComposerHandle } from "@/components/chat/ChatComposer";
 import { ChatEmptyState } from "@/components/chat/ChatEmptyState";
+import { getSession } from "@/lib/chat-api";
 import { emitSessionsChanged } from "@/lib/session-events";
 import { useSettings } from "@/hooks/use-settings";
 import {
   CONCIERGE_CHAT_ID,
   ensureConciergeChat,
-  fetchConciergeUnread,
   refreshTopicChats,
   startConciergeTopicChat,
   useConciergeChat,
@@ -28,6 +28,19 @@ import { useCoarsePointer } from "@/hooks/use-coarse-pointer";
 import type { AgentMention } from "@/lib/chat-types";
 
 export type { SessionMessage };
+
+/**
+ * The chat's read mark before the chat marks itself read. The chat's identity
+ * asks for the same session at the same moment, and in-flight reads are shared,
+ * so this adds no request. It never rejects: a chat with no mark has no divider.
+ */
+async function loadReadMark(chatId: string): Promise<string | null> {
+  try {
+    return (await getSession(chatId))?.lastSeenActivityAt ?? null;
+  } catch {
+    return null;
+  }
+}
 
 // The home's last known layout, so a reload starts where the previous visit
 // ended instead of moving the composer once its sessions arrive.
@@ -278,15 +291,15 @@ export function ChatComponent({
   // first and 404; the chat waits for the creation and asks again.
   const queryClient = useQueryClient();
   const isConcierge = isListedConcierge || topicDraft;
+  // A Concierge topic chat opened from a cold start is not in the list yet, so
+  // until the list loads any chat might be one. A loaded list rules every
+  // other chat out, and those do no pre-read work.
+  const mayBeConcierge = isConcierge || conciergeChats.length === 0;
   const startTopicChat = useCallback(async () => {
     const chat = await startConciergeTopicChat();
     void refreshTopicChats(queryClient);
     return chat.id;
   }, [queryClient]);
-  const countUnread = useCallback(
-    (chatId: string) => fetchConciergeUnread(queryClient, chatId),
-    [queryClient],
-  );
   const recoverMissingSession = useCallback(
     async (missingSessionId: string) => {
       try {
@@ -316,7 +329,7 @@ export function ChatComponent({
         composerRef={composerRef}
         navbarSlot={navbarSlot}
         recoverMissingSession={isConcierge ? recoverMissingSession : undefined}
-        countUnread={countUnread}
+        loadReadMark={mayBeConcierge ? loadReadMark : undefined}
         variant={isConcierge ? "concierge" : "default"}
         conciergeMainChatId={concierge.chatId ?? CONCIERGE_CHAT_ID}
         conciergeName={conciergeName}

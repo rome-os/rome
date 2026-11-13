@@ -1,88 +1,122 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { parseMessageEntries } from "@/components/chat/entries/parse-entries";
+import { isRenderable } from "@/components/chat/concierge-groups";
 import type { ChatMessage } from "@/lib/chat-types";
 
-/** What the guardian had not read when a Concierge chat opened. */
+/** What a Concierge chat held, and where its read mark stood, when it opened. */
 export interface UnreadAtOpen {
-  /** Agent messages the server counted, at most `CONCIERGE_UNREAD_CAP`. */
-  count: number;
-  /** The newest message the chat held then, so later arrivals never count. */
+  /** The chat's read mark before the open marked it read: an ISO time, whole seconds. */
+  watermark: string;
+  /** The newest message of the history the chat opened with. Nothing after it is unread. */
   newestId: string;
 }
 
-/**
- * The id of the first message that was unread at `open`, or null when it is
- * not among `messages` yet because it sits on an older page. `messages` is the
- * chat's ordered transcript. The server counts agent messages (role
- * `assistant`), so the first unread one is the `open.count`-th from the end of
- * those that existed at open. When the count passes the server's cap, this is
- * the cap-th from the end.
- */
-export function firstUnreadMessageId(messages: ChatMessage[], open: UnreadAtOpen): string | null {
-  const end = messages.findIndex((message) => message.id === open.newestId);
-  const agent = (end === -1 ? messages : messages.slice(0, end + 1)).filter(
-    (message) => message.role === "assistant",
-  );
-  if (open.count <= 0 || agent.length < open.count) return null;
-  return agent[agent.length - open.count].id;
+/** The unread agent messages of a chat, as far as its loaded history shows them. */
+export interface UnreadSummary {
+  /** The first unread message the chat draws, or null while it is on an older page or there is none. */
+  firstId: string | null;
+  /** How many unread agent messages the chat draws among the loaded ones. */
+  count: number;
+  /** Whether more unread messages wait on an older page, so `count` is a lower bound. */
+  more: boolean;
 }
 
-/** The longest the read mark waits for the count before the chat is marked read anyway. */
-const COUNT_WAIT_MS = 2000;
+const seconds = (iso: string) => Math.floor(Date.parse(iso) / 1000);
+
+/** Whether the Concierge draws `message` as a bubble: it says something and is no model-switch notice. */
+function drawsBubble(message: ChatMessage): boolean {
+  return (
+    isRenderable(message) &&
+    !parseMessageEntries(message).some((part) => part.type === "quota_switch")
+  );
+}
 
 /**
- * Remembers what was unread when a chat opened, and gives the chat's read mark
- * something to wait for until it knows. Only a chat opened with an id counts:
- * a draft that a first send turns into a chat has nothing unread. The count
- * is asked of every such chat, because a Concierge topic chat opened from a
- * cold start is not known as one yet. The request is the Concierge chat
- * list's own, so it costs no extra call, and a chat outside the list counts 0.
+ * The agent messages of `messages` that were unread at `open`. The server's
+ * rule is the same: a message is unread when it was created after the read
+ * mark, and both times have one-second precision, so a message in the same
+ * second as the mark is read. Only the opening history counts, up to
+ * `open.newestId`, so a message that arrives later is never unread. `messages`
+ * is the chat's ordered transcript, and `hasOlder` says older pages are not
+ * loaded. Returns null when nothing is unread.
+ */
+export function summarizeUnread(
+  messages: ChatMessage[],
+  open: UnreadAtOpen,
+  hasOlder: boolean,
+): UnreadSummary | null {
+  const end = messages.findIndex((message) => message.id === open.newestId);
+  const mark = seconds(open.watermark);
+  if (end === -1 || Number.isNaN(mark)) return null;
+  const agent = messages.slice(0, end + 1).filter((message) => message.role === "assistant");
+  const first = agent.findIndex((message) => seconds(message.createdAt) > mark);
+  if (first === -1) return null;
+  const drawn = agent.slice(first).filter(drawsBubble);
+  // The loaded history starts inside the unread run, so it may reach back further.
+  const more = first === 0 && hasOlder;
+  if (drawn.length === 0) return null;
+  return { firstId: more ? null : drawn[0].id, count: drawn.length, more };
+}
+
+/** The longest the read mark waits for the chat's own read mark before the chat is marked read anyway. */
+const MARK_WAIT_MS = 2000;
+
+/**
+ * Remembers what a Concierge chat had unread when it opened. `loadReadMark`
+ * asks for the chat's read mark. It runs once, when the chat mounts, and its
+ * absence means the chat does no pre-read work. A chat opened without an id
+ * is a draft that a first send turns into a chat, and has nothing unread.
  *
- * `newestId` is the id of the newest message loaded. The first value it takes
- * after the count arrives fixes `unread`, which then never changes while the
- * chat stays open, even after the chat is marked read.
+ * Two things fix `unread`, and neither changes afterward, even once the chat
+ * is marked read: the read mark, and the newest message of the history the
+ * chat opened with, which `noteOpened` reports. Messages that arrive live
+ * after that are never unread.
  */
 export function useUnreadAtOpen({
   chatId,
-  newestId,
-  countUnread,
+  loadReadMark,
 }: {
   chatId: string | null | undefined;
-  newestId: string | null;
-  /** Asks the server how many agent messages `chatId` has unread right now. Without it, nothing is counted. */
-  countUnread?: (chatId: string) => Promise<number>;
+  /** Resolves with `chatId`'s read mark, or null when it has none. Never rejects. */
+  loadReadMark?: (chatId: string) => Promise<string | null>;
 }): {
   unread: UnreadAtOpen | null;
+  /** Reports the newest message of the history the chat opened with, once. */
+  noteOpened: (newestId: string | null) => void;
   /**
-   * Resolves once the count is known, or after {@link COUNT_WAIT_MS}. Null when
-   * no count is on the way. Await it before marking the chat read.
+   * Resolves once the read mark is known, or after {@link MARK_WAIT_MS}. Null
+   * when none is on the way. Await it before marking the chat read.
    */
-  pendingCount: () => Promise<void> | null;
+  pendingMark: () => Promise<void> | null;
 } {
   const openedAsDraft = useRef(!chatId);
   const request = useRef<Promise<void> | null>(null);
-  const [count, setCount] = useState(0);
-  const [unread, setUnread] = useState<UnreadAtOpen | null>(null);
+  const [watermark, setWatermark] = useState<string | null>(null);
+  const [newestId, setNewestId] = useState<string | null | undefined>(undefined);
 
   // The request starts in an effect that runs before the one that loads the
   // chat's messages, and nothing marks the chat read before that load.
   useEffect(() => {
-    if (!chatId || !countUnread || openedAsDraft.current || request.current) return;
+    if (!chatId || !loadReadMark || openedAsDraft.current || request.current) return;
     request.current = new Promise<void>((resolve) => {
-      const timer = setTimeout(resolve, COUNT_WAIT_MS);
-      void countUnread(chatId)
-        .then(setCount)
+      const timer = setTimeout(resolve, MARK_WAIT_MS);
+      void loadReadMark(chatId)
+        .then(setWatermark)
         .finally(() => {
           clearTimeout(timer);
           resolve();
         });
     });
-  }, [chatId, countUnread]);
+  }, [chatId, loadReadMark]);
 
-  useEffect(() => {
-    if (unread || count <= 0 || !newestId) return;
-    setUnread({ count, newestId });
-  }, [unread, count, newestId]);
-
-  const pendingCount = useCallback(() => request.current, []);
-  return { unread, pendingCount };
+  const noteOpened = useCallback(
+    (id: string | null) => setNewestId((current) => (current === undefined ? id : current)),
+    [],
+  );
+  const pendingMark = useCallback(() => request.current, []);
+  const unread = useMemo(
+    () => (watermark && newestId ? { watermark, newestId } : null),
+    [watermark, newestId],
+  );
+  return { unread, noteOpened, pendingMark };
 }
