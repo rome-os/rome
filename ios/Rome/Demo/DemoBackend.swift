@@ -583,22 +583,39 @@ final class DemoBackend: RomeBackend {
         return message
     }
 
-    /// The message, placed in the chat thread that starts at `root`.
-    private func threaded(_ message: ChatMessage, _ root: String?) -> ChatMessage {
+    /// The message, placed in the chat thread that starts at `root`: a
+    /// task's thread, named by the task's title, as the server sends it.
+    private func threaded(_ message: ChatMessage, _ root: String?, _ title: String? = nil) -> ChatMessage {
         var message = message
         message.chatThreadId = root
+        message.chatThreadTitle = root == nil ? nil : (title ?? threadTitles[root!])
         message.knowsThreads = true
         return message
+    }
+
+    /// The title of the task each demo chat thread is, by its root.
+    private var threadTitles: [String: String] = [:]
+
+    /// The guardian's reply to a message, with its quote, as the server stores it.
+    private func reply(_ id: String, _ text: String, to original: String, quoting: String, at date: Date, session: String) -> ChatMessage {
+        ChatMessage(id: id, sessionId: session, role: "user", content: json([
+            .object(["type": .string("reply_to"), "messageId": .string(original), "author": .string("agent"), "text": .string(quoting)]),
+            .object(["type": .string("text"), "content": .string(text)]),
+        ]), createdAt: RomeDate.string(date))
+    }
+
+    private func taskPart(_ chatId: String, _ title: String, show: String, at date: Date, session: String = conciergeChatID) -> ChatMessage {
+        parts([.object(["type": .string("task_chat"), "chatId": .string(chatId), "title": .string(title), "show": .string(show)])], at: date, session: session)
     }
 
     private func user(_ id: String, _ text: String, at date: Date, session: String = conciergeChatID) -> ChatMessage {
         ChatMessage(id: id, sessionId: session, role: "user", content: json([.object(["type": .string("text"), "content": .string(text)])]), createdAt: RomeDate.string(date))
     }
 
-    private func agent(_ text: String, at date: Date, session: String = conciergeChatID, long: Bool = false) -> ChatMessage {
+    private func agent(_ text: String, at date: Date, session: String = conciergeChatID, long: Bool = false, id: String? = nil) -> ChatMessage {
         var part: [String: JSONValue] = ["type": .string("text"), "content": .string(text)]
         if long { part["format"] = .string("long") }
-        return ChatMessage(id: nextID(), sessionId: session, role: "assistant", content: json([.object(part)]), createdAt: RomeDate.string(date))
+        return ChatMessage(id: id ?? nextID(), sessionId: session, role: "assistant", content: json([.object(part)]), createdAt: RomeDate.string(date))
     }
 
     private func parts(_ parts: [JSONValue], at date: Date, session: String, role: String = "assistant") -> ChatMessage {
@@ -668,7 +685,7 @@ final class DemoBackend: RomeBackend {
             ConciergeChat(id: "topic-table", name: "耳机比价", main: false, unread: 0),
         ]
 
-        func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false) -> ConciergeTask {
+        func task(_ id: String, _ title: String, _ state: TaskState, chat: String?, from topic: String? = nil, summary: String? = nil, waitingOn: String? = nil, minutesAgo: Double, due: Double? = nil, done: Bool = false, root: String? = nil, status: String? = nil, endReason: String? = nil) -> ConciergeTask {
             let updated = nowMs - minutesAgo * 60_000
             return ConciergeTask(
                 id: id, title: title, state: state, summary: summary, waitingOn: waitingOn,
@@ -676,19 +693,21 @@ final class DemoBackend: RomeBackend {
                 chat: chat.map { .init(id: $0, name: chats[$0]?.name ?? title) },
                 conciergeChat: topic.flatMap { id in topicChats.first { $0.id == id } },
                 sourceMessageId: nil, createdAt: updated - 3_600_000, updatedAt: updated,
-                completedAt: done ? updated : nil, archivedAt: nil, notSynced: false
+                completedAt: done ? updated : nil, archivedAt: nil, notSynced: false,
+                threadRoot: root, status: status, endReason: endReason
             )
         }
         tasks = [
-            task("t1", "价格追踪：发提醒邮件", .needsUser, chat: "chat-price", waitingOn: "需要批准发送邮件", minutesAgo: 10),
-            task("t2", "竞品定价调研", .needsUser, chat: "chat-research", waitingOn: "在等你回答调研范围", minutesAgo: 25),
-            task("t3", "官网首页双语文案", .doing, chat: "chat-site", summary: "正在逐段翻译首页文案", minutesAgo: 2),
+            task("t1", "价格追踪：发提醒邮件", .needsUser, chat: "chat-price", waitingOn: "需要批准发送邮件", minutesAgo: 10, root: "c-price", status: "needs_you"),
+            // Its question waited more than a day: it ended for no response.
+            task("t2", "竞品定价调研", .done, chat: "chat-research", waitingOn: "在等你回答调研范围", minutesAgo: 25, root: "c-research", status: "ended", endReason: "no_response"),
+            task("t3", "官网首页双语文案", .doing, chat: "chat-site", summary: "正在逐段翻译首页文案", minutesAgo: 2, root: "c-site", status: "active"),
             task("t4", "整理本周会议纪要", .doing, chat: "chat-notes", summary: "已读完 3 份纪要", minutesAgo: 8),
             task("t5", "同步 Notion 数据库", .doing, chat: "chat-notion", summary: "Notion 连接已过期", minutesAgo: 60 * 15),
             task("t6", "每周一整理周报", .next, chat: nil, summary: "下周一早上开始", minutesAgo: 120, due: 60 * 30),
             task("t7", "盯着降噪耳机价格", .watching, chat: nil, summary: "每天早上 9 点检查一次", minutesAgo: 300, due: 60 * 14),
-            task("t8", "修复登录页样式", .done, chat: "chat-login", summary: "按钮间距和深色模式都改好了", minutesAgo: 60 * 24 * 3, done: true),
-            task("t9", "比较京都三家酒店", .doing, chat: nil, from: "topic-trip", summary: "正在看评价和价格", minutesAgo: 6),
+            task("t8", "修复登录页样式", .done, chat: "chat-login", summary: "按钮间距和深色模式都改好了", minutesAgo: 60 * 24 * 3, done: true, root: "c-login", status: "ended", endReason: "done"),
+            task("t9", "比较京都三家酒店", .doing, chat: nil, from: "topic-trip", summary: "正在看评价和价格", minutesAgo: 6, root: "k1", status: "active"),
         ]
 
         // A topic chat about one trip.
@@ -704,6 +723,10 @@ final class DemoBackend: RomeBackend {
         // A long chat, to scroll far from the bottom.
         // The last eight chapters are one long chat thread, taller than the
         // screen: its root, chapter 17's question, carries the replies line.
+        threadTitles = [
+            "b16": "读书笔记：第 17–24 章", "k1": "比较京都三家酒店",
+            "c-site": "官网首页双语文案", "c-price": "价格追踪：发提醒邮件", "c-research": "竞品定价调研", "c-login": "修复登录页样式",
+        ]
         messages["topic-books"] = (0..<24).flatMap { index -> [ChatMessage] in
             let time = at(8, 0, daysAgo: 1).addingTimeInterval(Double(index) * 600)
             let root: String? = index >= 16 ? "b16" : nil
@@ -715,17 +738,18 @@ final class DemoBackend: RomeBackend {
                     : "第 \(index + 1) 章讲的是作者怎么把一个大问题拆成几个小问题，每个小问题都能在一天内做完，然后用一个简单的清单跟踪进度。", at: time.addingTimeInterval(30), session: "topic-books"), root),
             ]
         }
-        // One chat thread among messages in none (rome-os/rome#1976): the
-        // plan's task came back into the thread of the message that started
-        // it, so its root carries "2 replies". The weather's question and
-        // answer, and the last word typed in the composer, are in no thread.
+        // One task's chat thread among messages in none: the plan's task
+        // came back into the thread of the message that started it, so its
+        // Concierge messages carry its label. The weather's question and
+        // answer are in no thread. The last word is a reply to the hotel
+        // message, in the thread, with its quote.
         messages["topic-trip"] = [
             threaded(user("k1", "四月去京都五天，帮我排个行程。", at: at(8, 50), session: "topic-trip"), "k1"),
             threaded(agent("好。先定住处：我比较三家酒店的位置和价格，再按区域排每天的行程。", at: at(8, 51), session: "topic-trip"), "k1"),
             threaded(user("k4", "顺便看下四月京都的天气。", at: at(8, 58), session: "topic-trip"), nil),
             threaded(agent("四月白天 15–20 度，早晚凉，带件外套。月初樱花还在。", at: at(8, 59), session: "topic-trip"), nil),
-            threaded(agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/api/projects/asset/hotel.jpg?path=projects%2Fdemo%2Ftrip%2Fhotel.jpg)\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip"), "k1"),
-            threaded(user("k6", "就按它排。", at: at(9, 24), session: "topic-trip"), nil),
+            threaded(agent("酒店比较好了：河原町那家离车站最近，价格中等。\n\n![河原町酒店外观](/api/projects/asset/hotel.jpg?path=projects%2Fdemo%2Ftrip%2Fhotel.jpg)\n\n要我按它来排吗？", at: at(9, 20), session: "topic-trip", id: "k5"), "k1"),
+            threaded(reply("k6", "就按它排。", to: "k5", quoting: "酒店比较好了：河原町那家离车站最近，价格中等。", at: at(9, 24), session: "topic-trip"), "k1"),
         ]
         // A photo the guardian sent, stored the way the server stores it, and a long reply.
         let kitchen = "projects/demo/home/kitchen.jpg"
@@ -748,15 +772,24 @@ final class DemoBackend: RomeBackend {
         ]
 
         // Concierge, as on the design's Chat board.
+        // Each task's messages are in its chat thread, labelled with the
+        // task: a task card when it starts, its question or approval on its
+        // own when it asks. The login task's cards are settled and fold; the
+        // research question expired; the price approval waits.
         messages[conciergeChatID] = [
-            user("u1", "帮我把官网首页的文案改成中英双语", at: at(9, 12)),
-            agent("好，我开一个任务去改。", at: at(9, 12).addingTimeInterval(20)),
-            agent("改完告诉你。", at: at(9, 12).addingTimeInterval(21)),
-            parts([.object(["type": .string("task_chat"), "chatId": .string("chat-site"), "title": .string("官网首页双语文案")])], at: at(9, 12).addingTimeInterval(22), session: conciergeChatID),
-            agent("降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。", at: at(9, 40)),
-            parts([.object(["type": .string("task_chat"), "chatId": .string("chat-price"), "title": .string("价格追踪：发提醒邮件")])], at: at(9, 40).addingTimeInterval(1), session: conciergeChatID),
-            agent("竞品调研想确认一下范围，你看下。", at: at(9, 40).addingTimeInterval(2)),
-            parts([.object(["type": .string("task_chat"), "chatId": .string("chat-research"), "title": .string("竞品定价调研")])], at: at(9, 40).addingTimeInterval(3), session: conciergeChatID),
+            threaded(user("c-login", "登录页的按钮间距不对，深色模式下也看不清，修一下。", at: at(9, 58, daysAgo: 3)), "c-login"),
+            threaded(taskPart("chat-login", "修复登录页样式", show: "task", at: at(9, 59, daysAgo: 3)), "c-login"),
+            threaded(taskPart("chat-login", "修复登录页样式", show: "ask", at: at(10, 11, daysAgo: 3)), "c-login"),
+            threaded(taskPart("chat-login", "修复登录页样式", show: "ask", at: at(10, 31, daysAgo: 3)), "c-login"),
+            threaded(agent("改好了：按钮间距统一成 14 pt，深色模式下的文字换成了浅色。", at: at(10, 41, daysAgo: 3)), "c-login"),
+            threaded(user("c-site", "帮我把官网首页的文案改成中英双语", at: at(9, 12)), "c-site"),
+            threaded(agent("好，我开一个任务去改。", at: at(9, 12).addingTimeInterval(20)), "c-site"),
+            threaded(agent("改完告诉你。", at: at(9, 12).addingTimeInterval(21)), "c-site"),
+            threaded(taskPart("chat-site", "官网首页双语文案", show: "task", at: at(9, 12).addingTimeInterval(22)), "c-site"),
+            threaded(agent("竞品调研想确认一下范围，你看下。", at: at(9, 15), id: "c-research"), "c-research"),
+            threaded(taskPart("chat-research", "竞品定价调研", show: "ask", at: at(9, 15).addingTimeInterval(1)), "c-research"),
+            threaded(agent("降噪耳机降到 ¥899 了，价格追踪想给你发提醒邮件，需要你批准。", at: at(9, 40), id: "c-price"), "c-price"),
+            threaded(taskPart("chat-price", "价格追踪：发提醒邮件", show: "ask", at: at(9, 40).addingTimeInterval(1)), "c-price"),
             // The Concierge asks and waits for an approval in the main chat too.
             user("c3", "海口明天怎么样？", at: at(9, 52), session: conciergeChatID),
             parts([.object([

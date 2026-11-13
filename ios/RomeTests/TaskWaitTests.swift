@@ -35,10 +35,10 @@ private func approval(_ id: String, chat: String = "task-1", at seconds: TimeInt
         #expect(key == "m2:0")
     }
 
-    /// An app's own card shows only the Open link.
-    @Test func aLatestAppCardShowsNothing() {
+    /// An app's own card is answered in its task chat.
+    @Test func aLatestAppCardIsAnsweredInTheTaskChat() {
         let app: [String: Any] = ["type": "pending_interaction", "toolUseId": "app", "appId": "x", "render": ["componentId": "pricing-table"]]
-        #expect(card([message("m", [question], at: 0), message("a", [app], at: 5)]) == nil)
+        #expect(card([message("m", [question], at: 0), message("a", [app], at: 5)]) == .elsewhere)
     }
 
     @Test func aNewerApprovalWinsAndOnlyThisTasksCounts() {
@@ -96,7 +96,7 @@ private func approval(_ id: String, chat: String = "task-1", at seconds: TimeInt
             message("c3", [card("task-1")], at: 20, session: "concierge"),
         ], pending: [], answers: [:], options: .init())
         let latest = rows.compactMap { row -> String? in
-            if case .taskCard(let id, _, _, let latest) = row, latest { return id }
+            if case .taskCard(let id, _, _, let latest, _) = row, latest { return id }
             return nil
         }
         #expect(latest == ["c2:0", "c3:0"])
@@ -133,5 +133,90 @@ private func approval(_ id: String, chat: String = "task-1", at seconds: TimeInt
         await store.answer(part, key: key, answers: [])
         #expect(backend.answeredSessions == ["task-1", "task-1", "task-1"])
         #expect(store.error == nil)
+    }
+}
+
+/// Settled and expired cards (docs/domains/chats.md, rome-os/rome#2011).
+@MainActor
+@Suite struct SettledCardTests {
+    private let at = { (seconds: TimeInterval) in Date(timeIntervalSince1970: 1_800_000_000 + seconds) }
+    private func answer(_ values: [String]) -> JSONValue {
+        .object(["answers": .array(values.map { .object(["questionId": .string("s"), "value": .string($0)]) })])
+    }
+    private func answered(_ value: String, at seconds: TimeInterval) -> ChatMessage {
+        message("r\(seconds)", role: "user", [["type": "interaction_result", "toolUseId": "q1", "output": ["answers": [["questionId": "s", "value": value]]]]], at: seconds)
+    }
+
+    @Test func aQuestionFoldsToItsAnswer() {
+        #expect(SettledOutcome.answer(answer(["Tea"])) == "Answered: Tea")
+        #expect(SettledOutcome.answer(answer(["Tea", "Cake"])) == "Answered: Tea, Cake")
+        // A long answer is not repeated.
+        #expect(SettledOutcome.answer(answer([String(repeating: "x", count: 25)])) == "Answered")
+        #expect(SettledOutcome.answer(.object(["dismissed": .bool(true)])) == "Dismissed")
+    }
+
+    @Test func anApprovalFoldsToHowItEnded() {
+        #expect(SettledOutcome.approval(.executed, resolvedBy: "guardian") == "Approved")
+        #expect(SettledOutcome.approval(.rejected, resolvedBy: nil) == "Rejected")
+        #expect(SettledOutcome.approval(.rejected, resolvedBy: "rome:task-ended") == "Turned down: no answer within a day")
+        #expect(SettledOutcome.approval(.rejected, resolvedBy: "rome:task-stopped") == "Turned down: task stopped")
+        #expect(SettledOutcome.folds(.approved) && SettledOutcome.folds(.rejected))
+        #expect(!SettledOutcome.folds(.pending) && !SettledOutcome.folds(.failed))
+    }
+
+    /// A folded `ask` card shows the question open when it was said, and
+    /// the answer given since; a newer copy of an open one waits below.
+    @Test func aFoldedAskReadsTheWaitOpenAtItsTime() {
+        let messages = [message("m", [question], at: 0), answered("Tea", at: 5), message("m2", [question], at: 10)]
+        let first = TaskWaitStore.asked(messages: messages, until: at(1))
+        #expect(first?.title == "Which?" && first?.outcome == "Answered: Tea")
+        // The second copy is still open.
+        #expect(TaskWaitStore.asked(messages: messages, until: at(11))?.outcome == "Waiting: answer the card below")
+        // An approval the task asked, read from its card in the task chat.
+        let card: [String: Any] = ["type": "approval_card", "approvalId": "ap", "actionName": "send", "preview": ["kind": "generic", "title": "Send the mail", "summary": ""]]
+        guard case .approval(let part, nil)? = TaskWaitStore.asked(messages: [message("a", [card], at: 20)], until: at(21))?.kind else {
+            Issue.record("no approval"); return
+        }
+        #expect(part.approvalId == "ap" && SettledOutcome.title(part) == "Send the mail")
+        var decided = SettledAsk(kind: .approval(part, record: ApprovalRecord(id: "ap", status: "rejected", resolvedBy: "rome:task-ended")))
+        #expect(decided.outcome == "Turned down: no answer within a day")
+        decided.kind = .approval(part, record: ApprovalRecord(id: "ap", status: "pending"))
+        #expect(decided.outcome == "Waiting: answer the card below")
+    }
+
+    /// The newest `ask` card of a waiting task takes an answer; an expired
+    /// one folds until opened, and waits on no one; anything else folds.
+    @Test func anAskCardDrawsByItsTasksState() {
+        let waiting = ChatSession(id: "t", name: "", awaitingGuardian: true)
+        var task = ConciergeTask(id: "k", title: "T", state: .needsUser, createdAt: 0, updatedAt: 0)
+        task.status = "needs_you"
+        #expect(TaskAskMode.of(latest: true, session: waiting, task: task, openedExpired: false) == .waiting(expired: false))
+        #expect(TaskAskMode.of(latest: false, session: waiting, task: task, openedExpired: false) == .settled)
+        #expect(TaskAskMode.of(latest: true, session: ChatSession(id: "t", name: ""), task: task, openedExpired: false) == .settled)
+        task.status = "ended"
+        task.endReason = "no_response"
+        #expect(TaskAskMode.of(latest: true, session: waiting, task: task, openedExpired: false) == .expired)
+        #expect(TaskAskMode.of(latest: true, session: waiting, task: task, openedExpired: true) == .waiting(expired: true))
+    }
+
+    /// `show` decides the row: the question alone, the task card, or, on a
+    /// part from before, the task card with its wait inside.
+    @Test func showDecidesTheRow() {
+        let part: (String?) -> [String: Any] = { show in
+            var part: [String: Any] = ["type": "task_chat", "chatId": "task-1", "title": "T"]
+            if let show { part["show"] = show }
+            return part
+        }
+        let rows = TranscriptBuilder.rows(messages: [
+            message("a", [part("ask")], at: 0, session: "concierge"),
+            message("b", [part("task")], at: 10, session: "concierge"),
+            message("c", [part(nil)], at: 20, session: "concierge"),
+            message("d", [part("ask")], at: 30, session: "concierge"),
+        ], pending: [], answers: [:], options: .init())
+        #expect(rows.contains(.taskAsk(id: "a:0", chatId: "task-1", title: "T", latest: false, shownAt: at(0))))
+        #expect(rows.contains(.taskCard(id: "b:0", chatId: "task-1", title: "T", latest: false, embedsWait: false)))
+        #expect(rows.contains(.taskCard(id: "c:0", chatId: "task-1", title: "T", latest: false, embedsWait: true)))
+        // The newest of either kind is the latest for its task.
+        #expect(rows.contains(.taskAsk(id: "d:0", chatId: "task-1", title: "T", latest: true, shownAt: at(30))))
     }
 }

@@ -49,7 +49,7 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         let store = await chat(backend, [message("a1", at: 0, thread: "a1")])
         #expect(store.composerThread == nil)
         store.openThread(at: "a1")
-        #expect(store.composerThread == ThreadTarget(messageId: "a1", instanceKnowsThreads: true))
+        #expect(store.composerThread == ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "a1"))
         store.closeThread()
         #expect(store.composerThread == nil)
     }
@@ -60,7 +60,7 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
     @Test func aRestoredThreadDraftSurvivesAnEditAndARelaunch() async {
         let root = FileManager.default.temporaryDirectory.appending(path: "rome-thread-relaunch-\(UUID().uuidString)/Drafts", directoryHint: .isDirectory)
         defer { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
-        let target = ThreadTarget(messageId: "a1", instanceKnowsThreads: true)
+        let target = ThreadTarget(messageId: "a1", instanceKnowsThreads: true, quote: true, thread: "a1")
         let first = DraftStore(root: root, instance: "me")
         first.sending(chat: "concierge", inputId: "in-1", text: "Will it rain?", photos: [], fromComposer: true, thread: target)
         await first.flush()
@@ -171,7 +171,7 @@ private func chat(_ backend: FakeBackend, _ messages: [ChatMessage]) async -> Tr
         // A new message without the field opens a thread that sends `chatThread`.
         backend.bus.emit(LiveTopic.chat("concierge"), .messageInsert(message("fresh", at: 20, knows: false)))
         store.openThread(at: "fresh")
-        #expect(store.thread?.target == ThreadTarget(messageId: "fresh", instanceKnowsThreads: true))
+        #expect(store.composerThread?.body["chatThread"] == .string("fresh"))
         store.closeThread()
     }
 }

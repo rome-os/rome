@@ -7,8 +7,10 @@ enum MessagePart: Hashable, Sendable {
     /// Markdown text. `long` messages read as a document; `forwardedFrom` marks a
     /// report forwarded word for word from a task chat.
     case text(String, long: Bool, forwardedFrom: ForwardedFrom?)
-    /// A card for a task chat the Concierge started.
-    case taskChat(chatId: String, title: String)
+    /// A card for a task chat the Concierge started. `show` says what it
+    /// draws: the task card, or the task's question or approval alone; nil
+    /// on a part from before, which draws the task card with its wait inside.
+    case taskChat(chatId: String, title: String, show: TaskChatShow? = nil)
     /// An action paused for the guardian's approval.
     case approval(ApprovalPart)
     /// The agent asked the guardian a question (`ask_question`).
@@ -27,9 +29,19 @@ enum MessagePart: Hashable, Sendable {
     case interactionResult(toolUseId: String, output: JSONValue)
     /// A turn that failed before it ran.
     case error(String)
+    /// The message a reply quotes (`reply_to`), drawn inside the reply's bubble.
+    case replyTo(ReplyQuote)
     /// Parts the web dashboard does not show in a transcript either (tool
     /// calls, thinking, usage, a reply's quote).
     case other(type: String)
+
+    /// What a `task_chat` part draws (`show` on the wire).
+    enum TaskChatShow: String, Hashable, Sendable {
+        /// The task card: its title, opening the task chat.
+        case task
+        /// The task's question or approval on its own.
+        case ask
+    }
 
     /// What a `.webOnly` row names, after the web component's own title.
     enum WebOnlyKind: Hashable, Sendable {
@@ -73,6 +85,16 @@ enum MessagePart: Hashable, Sendable {
         "turn_start", "turn_end", "structured_output", "system_input", "plan_update",
         "subagent_start", "subagent_result", "reply_to", "handoff", "submission_card",
     ]
+
+    /// `reply_to`: what a reply quotes, as the server snapshotted it.
+    struct ReplyQuote: Hashable, Sendable {
+        let messageId: String
+        /// `guardian`, `agent` or `automated`.
+        let author: String?
+        /// An automated sender's name.
+        let name: String?
+        let text: String
+    }
 
     /// `routine_draft_card`: a routine Chat proposed, and the key it is created with.
     struct RoutineDraftPart: Hashable, Sendable {
@@ -219,7 +241,7 @@ enum MessagePart: Hashable, Sendable {
             ))
         case "task_chat":
             guard let chatId = value["chatId"]?.string else { return nil }
-            return .taskChat(chatId: chatId, title: value["title"]?.string ?? "")
+            return .taskChat(chatId: chatId, title: value["title"]?.string ?? "", show: value["show"]?.string.flatMap(TaskChatShow.init))
         case "approval_card":
             guard let approvalId = value["approvalId"]?.string else { return nil }
             return .approval(approval(value, id: approvalId))
@@ -247,6 +269,9 @@ enum MessagePart: Hashable, Sendable {
             return .webOnly(.modelSwitch(model: model))
         case "error":
             return .error(value["error"]?.string ?? "")
+        case "reply_to":
+            guard let messageId = value["messageId"]?.string else { return .other(type: type) }
+            return .replyTo(ReplyQuote(messageId: messageId, author: value["author"]?.string, name: value["name"]?.string, text: value["text"]?.string ?? ""))
         default:
             return hiddenTypes.contains(type) ? .other(type: type) : .webOnly(.unknown)
         }
@@ -363,9 +388,15 @@ extension MessagePart {
     var isVisible: Bool {
         switch self {
         case .text(let text, _, _): return !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        case .other, .interactionResult: return false
+        case .other, .interactionResult, .replyTo: return false
         default: return true
         }
+    }
+
+    /// The quote of a reply part.
+    var replyQuote: ReplyQuote? {
+        if case .replyTo(let quote) = self { return quote }
+        return nil
     }
 
     /// The text of a text part.

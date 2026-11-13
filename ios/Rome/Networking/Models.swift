@@ -38,6 +38,10 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     /// The instance sent `chatThreadId`, null included: it has chat threads.
     /// An older instance leaves the field out.
     var knowsThreads = false
+    /// The title of the task whose chat thread the message is in. The server
+    /// sends a thread only when a task has it, so a message with a thread and
+    /// no title is from an instance before task threads.
+    var chatThreadTitle: String? = nil
     /// Who said a guardian-side message, when it was not simply the guardian.
     var sender: MessageSender? = nil
 
@@ -55,7 +59,7 @@ struct ChatMessage: Codable, Identifiable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, sender
+        case id, sessionId, turnId, role, content, createdAt, traceSummary, chatThreadId, chatThreadTitle, sender
     }
 }
 
@@ -87,6 +91,7 @@ extension ChatMessage {
         traceSummary = try container.decodeIfPresent(TraceSummary.self, forKey: .traceSummary)
         chatThreadId = try container.decodeIfPresent(String.self, forKey: .chatThreadId)
         knowsThreads = container.contains(.chatThreadId)
+        chatThreadTitle = try container.decodeIfPresent(String.self, forKey: .chatThreadTitle)
         // An unknown shape never costs the message itself.
         sender = try? container.decodeIfPresent(MessageSender.self, forKey: .sender)
     }
@@ -103,6 +108,7 @@ extension ChatMessage {
         try container.encode(createdAt, forKey: .createdAt)
         try container.encodeIfPresent(traceSummary, forKey: .traceSummary)
         if knowsThreads { try container.encode(chatThreadId, forKey: .chatThreadId) }
+        try container.encodeIfPresent(chatThreadTitle, forKey: .chatThreadTitle)
         try container.encodeIfPresent(sender, forKey: .sender)
     }
 
@@ -110,22 +116,30 @@ extension ChatMessage {
     var threadRoot: String { chatThreadId ?? id }
 }
 
-/// Where a message sent from a chat thread goes. An instance with chat
-/// threads takes `chatThread`; an older one places a reply by
-/// `replyToMessageId` (every supported release has it).
+/// What a message the guardian sends replies to: the quoted message, and
+/// the thread view it was sent from, if one was open. The server places the
+/// reply in a task's thread when either is in one
+/// (docs/domains/chats.md#chat-thread).
 struct ThreadTarget: Codable, Hashable, Sendable {
-    /// A message of the open thread.
+    /// The message replied to, quoted in the reply bar.
     let messageId: String
     let instanceKnowsThreads: Bool
-    /// A reply to a message in no chat thread, quoted above the composer
-    /// instead of opened: sent, it starts that message's thread. Absent from
-    /// drafts written before quotes.
+    /// Written by a build where Reply quoted; absent from drafts written
+    /// when Reply opened the thread view.
     var quote: Bool? = nil
+    /// A message of the thread view the reply was sent from.
+    var thread: String? = nil
 
     var isQuote: Bool { quote == true }
 
+    /// The message whose thread view the reply was written in. A draft from
+    /// before quotes was always written in one, at `messageId`.
+    var threadMessage: String? { isQuote ? thread : messageId }
+
     var body: [String: JSONValue] {
-        instanceKnowsThreads ? ["chatThread": .string(messageId)] : ["replyToMessageId": .string(messageId)]
+        var body: [String: JSONValue] = ["replyToMessageId": .string(messageId)]
+        if let thread { body["chatThread"] = .string(thread) }
+        return body
     }
 }
 
@@ -286,8 +300,7 @@ enum ConciergeActivity: Hashable, Sendable {
     var statusLine: String? {
         switch self {
         case .idle: return nil
-        // Its own key: the question card's "Waiting for your answer" reads
-        // differently in Chinese.
+        // Its own key, so its Chinese reads as the header's status.
         case .needsYou: return String(localized: "status.needsYou", defaultValue: "Waiting for your answer")
         case .working: return String(localized: "Working on it")
         case .tasks(let title, let more): return more > 0 ? "\(title) +\(more)" : title
@@ -350,6 +363,13 @@ struct ConciergeTask: Codable, Identifiable, Hashable, Sendable {
     var completedAt: Double?
     var archivedAt: Double?
     var notSynced: Bool?
+    /// The first message of the task's chat thread in its Concierge chat.
+    var threadRoot: String?
+    /// How the task stands, derived by the server: `needs_you`, `active`,
+    /// `later` or `ended`.
+    var status: String?
+    /// Why an ended task ended: `done`, `failed`, `stopped` or `no_response`.
+    var endReason: String?
 }
 
 struct ConciergeTasksResponse: Codable, Sendable {
@@ -370,6 +390,9 @@ struct ApprovalRecord: Codable, Hashable, Sendable {
     var executionError: String?
     var resolvedAt: String?
     var updatedAt: String?
+    /// Who decided it; `rome:task-ended` and `rome:task-stopped` are Rome
+    /// turning it down as its task's wait ran out or its task stopped.
+    var resolvedBy: String?
 }
 
 // MARK: - Routines
