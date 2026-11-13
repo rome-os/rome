@@ -12,7 +12,7 @@ export function loadK5Questions() {
   return JSON.parse(readFileSync(new URL("k5-questions.json", seedDir), "utf8"));
 }
 
-export function rosterDocument(team) {
+function rosterDocument(team) {
   const rows = team.members.map((m) => `| ${m.name} | ${m.role} | ${m.currentWork} |`);
   return [
     "# Team roster",
@@ -24,7 +24,7 @@ export function rosterDocument(team) {
   ].join("\n");
 }
 
-export function goalsDocument(team) {
+function goalsDocument(team) {
   const current = team.goals.map((g) => `| ${g.title} | ${g.owner} | ${g.date} |`);
   const dropped = team.droppedGoals.map(
     (g) => `| ${g.title} | ${g.owner} | Dropped on ${g.dropped} |`,
