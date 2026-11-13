@@ -28,8 +28,54 @@ final class TaskListStore {
     /// The read whose list is shown; 0 before any.
     @ObservationIgnored private var applied = 0
 
-    /// How many ended rows show at first, and how many more each "Show more" adds.
+    /// How many ended rows a page holds, as the server pages them.
     nonisolated static let endedPage = 20
+
+    /// Ended pages read with "Show more", after the list's own first page.
+    private(set) var olderEnded: [TaskListItem] = []
+    /// Where the next older page starts once one was read; nil before any.
+    @ObservationIgnored private var olderCursor: String??
+    private(set) var loadingMore = false
+
+    /// The Ended group as shown: its first page, then the older pages read
+    /// since, each row once.
+    var endedItems: [TaskListItem] {
+        guard let first = groups.first(where: { $0.key == .ended }) else { return [] }
+        let ids = Set(first.items.map(\.id))
+        return first.items + olderEnded.filter { !ids.contains($0.id) }
+    }
+
+    /// How many ended rows there are in all.
+    var endedTotal: Int {
+        groups.first(where: { $0.key == .ended })?.total ?? endedItems.count
+    }
+
+    /// The cursor of the next page to read, or nil when there is none.
+    private var endedCursor: String? {
+        if let olderCursor { return olderCursor }
+        return groups.first(where: { $0.key == .ended })?.nextCursor
+    }
+
+    /// How many ended rows are still to read.
+    var endedMore: Int { endedCursor == nil ? 0 : max(endedTotal - endedItems.count, 0) }
+
+    /// "Show more": the next page of Ended, by the cursor the last page gave.
+    func showMoreEnded() {
+        guard let cursor = endedCursor, !loadingMore else { return }
+        loadingMore = true
+        Task {
+            defer { loadingMore = false }
+            do {
+                let page = try await backend.endedTasks(chatId: chatId, endedBefore: cursor)
+                let ended = page.groups.first { $0.key == .ended }
+                olderEnded += ended?.items ?? []
+                olderCursor = .some(ended?.nextCursor)
+            } catch {
+                taskListLog.error("ended page of \(self.chatId, privacy: .public) failed: \(String(describing: error), privacy: .public)")
+                fail(String(localized: "Failed to load tasks"))
+            }
+        }
+    }
 
     init(chatId: String, backend: RomeBackend) {
         self.chatId = chatId

@@ -169,6 +169,14 @@ final class FakeBackend: RomeBackend {
         guard let list = taskLists[chatId] else { throw APIError.notFound }
         return list
     }
+    /// The Ended pages after the first, by cursor; a missing one fails.
+    var endedPages: [String: TaskListResponse] = [:]
+    var endedReads: [String] = []
+    func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse {
+        endedReads.append(endedBefore)
+        guard let page = endedPages[endedBefore] else { throw APIError.notFound }
+        return page
+    }
     func stopListedTask(chatId: String, taskId: String) async throws {
         stoppedFromList.append(taskId)
         if let stopListedError { throw stopListedError }

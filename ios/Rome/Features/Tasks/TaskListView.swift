@@ -13,7 +13,6 @@ struct TaskListView: View {
     let onOpenChat: (ConciergeTask.LinkedChat) -> Void
 
     @State private var endedOpen = false
-    @State private var endedShown = TaskListStore.endedPage
     @State private var notice: String?
 
     var body: some View {
@@ -113,8 +112,9 @@ struct TaskListView: View {
     private func section(_ group: TaskListGroup, store: TaskListStore, now: Date) -> some View {
         let folds = group.key == .ended
         let open = !folds || endedOpen
-        let items = folds ? Array(group.items.prefix(endedShown)) : group.items
-        let more = group.items.count - items.count
+        // Ended is paged by the server: its first page, then the pages read since.
+        let items = folds ? store.endedItems : group.items
+        let more = folds ? store.endedMore : 0
         return VStack(alignment: .leading, spacing: 8) {
             if folds {
                 Button {
@@ -126,7 +126,7 @@ struct TaskListView: View {
                             .rotationEffect(.degrees(open ? 90 : 0))
                             .accessibilityHidden(true)
                         Text(title(group.key))
-                        Text(verbatim: "\(group.items.count)").monospacedDigit().opacity(0.7)
+                        Text(verbatim: "\(folds ? store.endedTotal : group.items.count)").monospacedDigit().opacity(0.7)
                     }
                     .romeFont(13, .semibold)
                     .foregroundStyle(Palette.sub)
@@ -150,16 +150,21 @@ struct TaskListView: View {
                             .transition(.opacity)
                     }
                     if more > 0 {
-                        Button {
-                            withAnimation(.spring(response: 0.4, dampingFraction: 0.9)) { endedShown += TaskListStore.endedPage }
-                        } label: {
-                            Text("Show \(min(more, TaskListStore.endedPage)) more")
-                                .romeFont(14)
-                                .foregroundStyle(Palette.sub)
-                                .frame(maxWidth: .infinity, minHeight: 44)
-                                .contentShape(Rectangle())
+                        Button { store.showMoreEnded() } label: {
+                            Group {
+                                if store.loadingMore {
+                                    Spinner(size: 16, color: Palette.sub)
+                                } else {
+                                    Text("Show \(min(more, TaskListStore.endedPage)) more")
+                                        .romeFont(14)
+                                        .foregroundStyle(Palette.sub)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, minHeight: 44)
+                            .contentShape(Rectangle())
                         }
                         .buttonStyle(RowPressStyle())
+                        .disabled(store.loadingMore)
                     }
                 }
                 .background(Palette.elevated, in: RoundedRectangle(cornerRadius: Metrics.groupRadius, style: .continuous))

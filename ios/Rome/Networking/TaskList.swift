@@ -40,19 +40,27 @@ struct TaskListGroup: Decodable, Hashable, Sendable, Identifiable {
 
     var key: Key
     var items: [TaskListItem]
+    /// Ended only: how many ended rows there are in all; `items` is one page.
+    var total: Int?
+    /// Ended only: where the next page starts (`?endedBefore=`), or nil after the last.
+    var nextCursor: String?
 
     var id: Key { key }
 
-    private enum CodingKeys: String, CodingKey { case key, items }
+    private enum CodingKeys: String, CodingKey { case key, items, total, nextCursor }
 
-    init(key: Key, items: [TaskListItem]) {
+    init(key: Key, items: [TaskListItem], total: Int? = nil, nextCursor: String? = nil) {
         self.key = key
         self.items = items
+        self.total = total
+        self.nextCursor = nextCursor
     }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         key = try c.decode(Key.self, forKey: .key)
+        total = (try? c.decodeIfPresent(Int.self, forKey: .total)) ?? nil
+        nextCursor = (try? c.decodeIfPresent(String.self, forKey: .nextCursor)) ?? nil
         // A row this build cannot read is left out, not the group.
         items = ((try? c.decode([Lenient<TaskListItem>].self, forKey: .items)) ?? []).compactMap(\.value)
     }

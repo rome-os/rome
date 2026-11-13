@@ -65,6 +65,8 @@ protocol RomeBackend: AnyObject, Sendable {
     /// `GET /chats/:chatId/tasks`: the Concierge chat's task list, by the
     /// chat's server id.
     func taskList(chatId: String) async throws -> TaskListResponse
+    /// The Ended group's next page alone, from `endedBefore` (its `nextCursor`).
+    func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse
     /// Stops a task from its chat's task list; a scheduled one loses its schedule.
     func stopListedTask(chatId: String, taskId: String) async throws
     func approval(id: String) async throws -> ApprovalRecord
@@ -234,6 +236,10 @@ final class LiveBackend: RomeBackend {
 
     func taskList(chatId: String) async throws -> TaskListResponse {
         try await client.get("/chats/\(escape(chatId))/tasks")
+    }
+
+    func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse {
+        try await client.get("/chats/\(escape(chatId))/tasks", query: [URLQueryItem(name: "endedBefore", value: endedBefore)])
     }
 
     func stopListedTask(chatId: String, taskId: String) async throws {
@@ -426,6 +432,7 @@ extension RomeBackend {
         try await messages(sessionId: sessionId, before: nil, limit: limit)
     }
     func taskList(chatId: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
+    func endedTasks(chatId: String, endedBefore: String) async throws -> TaskListResponse { TaskListResponse(chatId: chatId, groups: []) }
     func stopListedTask(chatId: String, taskId: String) async throws { throw APIError.notFound }
     /// Demo data and test doubles hold the file as it is.
     func asset(path: String, width: Int?) async throws -> Data { try await asset(path: path) }
