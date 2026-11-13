@@ -79,48 +79,36 @@ enum SendFailure: Hashable, Sendable {
 
 /// A failed turn, or a model error a turn stored: what it says, and which
 /// next step the guardian has.
-struct TurnError: Hashable, Sendable, ExpressibleByStringLiteral {
+struct TurnError: Hashable, Sendable {
     /// What the instance said, as it said it.
     var text: String
     var code: String?
     var provider: String?
     var reason: String?
-    /// The error came from a failed turn's trace, which has the text only;
-    /// its words are read for the kind.
-    var fromTrace = false
+    /// A turn that ended in error, as its trace says it: plain words, with the
+    /// instance's text after them, and no guidance.
+    var didntFinish = false
 
-    init(text: String, code: String? = nil, provider: String? = nil, reason: String? = nil, fromTrace: Bool = false) {
+    init(text: String, code: String? = nil, provider: String? = nil, reason: String? = nil, didntFinish: Bool = false) {
         self.text = text
         self.code = code
         self.provider = provider
         self.reason = reason
-        self.fromTrace = fromTrace
+        self.didntFinish = didntFinish
     }
 
-    init(stringLiteral value: String) { self.init(text: value) }
-
     enum Kind: Hashable, Sendable {
-        case creditsUsedUp, authRevoked, notSignedIn, limit, allAtLimit, modelDenied, noProvider
+        case notSignedIn, limit, allAtLimit, modelDenied, noProvider
         case other
     }
 
     var kind: Kind {
-        if code == "credits_used_up" { return .creditsUsedUp }
-        if code == "auth_revoked" { return .authRevoked }
         if reason == "not_logged_in" { return .notSignedIn }
         if reason == "quota_exhausted" { return provider == nil ? .allAtLimit : .limit }
         if reason == "model_access_denied" { return .modelDenied }
         if reason == "no_available_provider" || ["model_unavailable", "model_provider_unavailable", "no_model_provider_available"].contains(code) { return .noProvider }
-        if fromTrace, Self.limitWords.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil { return .limit }
         return .other
     }
-
-    /// The wording of a provider's own limit messages ("You've hit your limit",
-    /// "out of usage credits", "credit balance is too low", a spend limit).
-    private static let limitWords = try! NSRegularExpression(
-        pattern: "hit your (?:session |weekly )?limit|usage limit|out of usage credits|credit balance|spend(?:ing)? limit|shared budget",
-        options: .caseInsensitive
-    )
 
     private var providerName: String {
         switch provider {
@@ -134,37 +122,26 @@ struct TurnError: Hashable, Sendable, ExpressibleByStringLiteral {
     var title: String {
         let name = providerName
         switch kind {
-        case .creditsUsedUp: return String(localized: "Rome credits used up")
-        case .authRevoked: return String(localized: "Reconnect \(name)")
         case .notSignedIn: return String(localized: "\(name) is not signed in")
         case .limit: return provider == nil ? String(localized: "Usage limit reached") : String(localized: "\(name) usage limit reached")
         case .allAtLimit: return String(localized: "All AI tools are at their limits")
         case .modelDenied: return String(localized: "This model is unavailable")
         case .noProvider: return String(localized: "No AI tool is available")
-        case .other: return text.isEmpty ? String(localized: "This turn did not finish") : text
+        case .other:
+            if didntFinish { return text.isEmpty ? String(localized: "Didn't finish") : String(localized: "Didn't finish: \(text)") }
+            return text.isEmpty ? String(localized: "This turn did not finish") : text
         }
     }
 
     /// The next step; nil when the headline stands alone.
     var hint: String? {
         switch kind {
-        case .creditsUsedUp: return String(localized: "Connect Claude or ChatGPT, then send again")
-        case .authRevoked: return String(localized: "Its login expired. Reconnect it, then send again")
         case .notSignedIn: return String(localized: "Sign in to it, then send again")
         case .limit: return String(localized: "Wait for the reset, or use another model")
         case .allAtLimit: return String(localized: "Wait for a reset, or sign in with another account")
         case .modelDenied: return String(localized: "Check model access, or pick another model")
         case .noProvider: return String(localized: "Connect Claude or ChatGPT")
         case .other: return nil
-        }
-    }
-
-    /// Smaller words under the headline: what a failed turn said, when the
-    /// headline is ours.
-    var detail: String? {
-        switch kind {
-        case .other: return nil
-        default: return fromTrace && !text.isEmpty ? text : nil
         }
     }
 
@@ -179,10 +156,6 @@ struct ErrorLine: View {
     @Environment(\.openUsage) private var openUsage
     @Environment(\.isVisitor) private var isVisitor
 
-    init(error: TurnError) { self.error = error }
-
-    init(text: String) { self.init(error: TurnError(text: text)) }
-
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 9) {
             AlertGlyph(size: 16).alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 5 }
@@ -192,9 +165,6 @@ struct ErrorLine: View {
                     .lineSpacing(5)
                 if let hint = error.hint {
                     Text(hint).romeFont(14).foregroundStyle(Palette.sub)
-                }
-                if let detail = error.detail {
-                    Text(detail).romeFont(13).foregroundStyle(Palette.sub).lineLimit(3)
                 }
                 if error.offersUsage, !isVisitor, let openUsage {
                     Button(action: openUsage) {

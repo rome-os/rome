@@ -137,19 +137,32 @@ enum TranscriptBuilder {
         // A stored message replaces the pending bubble it came from.
         let storedIDs = Set(messages.map(\.id))
         let replies = options.showThreads ? threadLines(messages) : [:]
+        // Each message's parts, read once.
+        let parsed = messages.map(\.parts)
         // The turns whose reply is an error part.
-        let storedErrors = Set(messages.compactMap { message -> String? in
-            guard !message.isTrace, let turn = message.turnId, message.parts.contains(where: { if case .error = $0 { true } else { false } }) else { return nil }
-            return turn
-        })
-
-        // Where an agent last said something a guardian reads, so a failure
-        // the Chat recovered from (a switch of model, a retry) shows no line.
-        let lastReply = messages.lastIndex { Self.isReply($0) }
-        let repliedTurns = Set(messages.filter(Self.isReply).compactMap(\.turnId))
+        var storedErrors = Set<String>()
+        // The turns that answer a message the guardian wrote.
+        var guardianTurns = Set<String>()
+        for (message, parts) in zip(messages, parsed) {
+            guard let turn = message.turnId else { continue }
+            if message.isUser { guardianTurns.insert(turn) }
+            if !message.isTrace, parts.contains(where: { if case .error = $0 { true } else { false } }) { storedErrors.insert(turn) }
+        }
+        // Whether an agent message of a later turn says something a guardian
+        // reads: the Chat recovered from the failure (a switch of model, a retry).
+        // What the failed turn said before it failed does not count.
+        var recovered = [Bool](repeating: false, count: messages.count)
+        var seenTurns: [String?] = []
+        for index in messages.indices.reversed() {
+            let turn = messages[index].turnId
+            recovered[index] = seenTurns.contains { $0 != turn }
+            if Self.isReply(messages[index], parts: parsed[index]), seenTurns.count < 2, !seenTurns.contains(where: { $0 == turn }) {
+                seenTurns.append(turn)
+            }
+        }
 
         // Messages come in the store's order, which follows the server's turns.
-        for (index, message) in messages.enumerated() {
+        for (position, message) in messages.enumerated() {
             if message.isTrace {
                 var rows: [TranscriptRow] = []
                 if options.showTools, let steps = message.traceSummary?.totalSteps, steps > 0 {
@@ -157,8 +170,10 @@ enum TranscriptBuilder {
                 }
                 // A turn that failed mid-run leaves only its trace: the line says why.
                 // A turn that failed before it ran stored its error as a reply, which says it.
-                let replied = (lastReply.map { $0 > index } ?? false) || (message.turnId.map(repliedTurns.contains) ?? false)
-                if !replied, let error = failure(of: message, storedErrors: storedErrors) {
+                // In the Chat, only a turn that answers the guardian's own message gets
+                // one: a failed routine, digest or recovery turn is not theirs to read.
+                let theirs = options.showTools || (message.turnId.map(guardianTurns.contains) ?? false)
+                if theirs, !recovered[position], let error = failure(of: message, storedErrors: storedErrors) {
                     rows.append(.error(id: "failed-\(message.id)", error: error))
                 }
                 if !rows.isEmpty {
@@ -168,7 +183,7 @@ enum TranscriptBuilder {
             }
             var rows: [TranscriptRow] = []
             var bubbles: [Int] = []
-            for (index, part) in message.parts.enumerated() {
+            for (index, part) in parsed[position].enumerated() {
                 let id = "\(message.id):\(index)"
                 switch part {
                 case .text(let text, let long, let forwarded):
@@ -275,9 +290,9 @@ enum TranscriptBuilder {
 
     /// An agent message with something to read: text or a card. An error, a
     /// model switch and what no transcript shows do not count.
-    static func isReply(_ message: ChatMessage) -> Bool {
+    static func isReply(_ message: ChatMessage, parts: [MessagePart]) -> Bool {
         guard !message.isUser, !message.isTrace else { return false }
-        return message.parts.contains { part in
+        return parts.contains { part in
             switch part {
             case .error, .notice, .other, .interactionResult: return false
             default: return part.isVisible
@@ -291,7 +306,9 @@ enum TranscriptBuilder {
         guard trace.traceSummary?.turnStatus == "error" else { return nil }
         if let turn = trace.turnId, storedErrors.contains(turn) { return nil }
         let text = trace.traceSummary?.terminalError?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        return TurnError(text: text, fromTrace: true)
+        // The trace has the text only. When it carries a code, provider and reason,
+        // pass them here and the line takes the guided copy of a stored error.
+        return TurnError(text: text, didntFinish: true)
     }
 
     /// Where the "N replies" line goes, by message id, and its count

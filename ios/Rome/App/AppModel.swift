@@ -254,18 +254,27 @@ final class Workspace {
         return store
     }
 
+    /// Why the last topic chat start failed, for the first bubble to say.
+    private(set) var startFailure: SendFailure?
+
     /// Starts a topic chat, then sends it its first message, in that order.
     /// Until the chat exists, the message is kept under the blank chat's
     /// draft key: a failed start or a kill does not lose it.
     func startTopicChat(firstMessage text: String, images: [ComposerImage] = [], blankKey: String? = nil, fromComposer: Bool = false) async -> String? {
         let startId = "start-\(UUID().uuidString)"
         if let blankKey { drafts.sending(chat: blankKey, inputId: startId, text: text, photos: images, fromComposer: fromComposer) }
-        guard let chat = try? await backend.startTopicChat() else {
+        startFailure = nil
+        let started: ConciergeChat
+        do {
+            started = try await backend.startTopicChat()
+        } catch {
+            startFailure = SendFailure(error)
             // Back into the blank chat's draft: its composer shows it, or,
             // if the guardian has left, the next blank chat does.
             if let blankKey { drafts.takeBack(chat: blankKey, inputId: startId) }
             return nil
         }
+        let chat = started
         topics.add(chat)
         let store = topicStore(chat.id)
         store.beginEmpty()

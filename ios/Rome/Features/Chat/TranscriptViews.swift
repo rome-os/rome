@@ -114,12 +114,12 @@ struct UserBubble: View {
                             .background(Palette.primary, in: RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: Metrics.bubbleRadius, style: .continuous))
                             .bubbleMenu(text: text, menu: menu)
-                            // The mark hangs on the bubble's inner bottom corner.
-                            .overlay(alignment: .bottomLeading) {
-                                if let mark {
-                                    StatusMarkBadge(mark: mark).offset(x: -6, y: 11)
-                                }
-                            }
+                    }
+                }
+                // The mark hangs on the inner bottom corner of the bubble, or of the photos.
+                .overlay(alignment: .bottomLeading) {
+                    if let mark {
+                        StatusMarkBadge(mark: mark).offset(x: -6, y: 11)
                     }
                 }
                 .opacity(pending == .sending ? 0.55 : 1)

@@ -21,6 +21,7 @@ struct TopicChatScreen: View {
     @State private var draft = ""
     @State private var starting: String?
     @State private var startFailed = false
+    @State private var startFailure: SendFailure = .unknown
     @State private var startingImages: [ComposerImage] = []
     @State private var renaming = false
     @State private var confirmDelete = false
@@ -167,7 +168,7 @@ struct TopicChatScreen: View {
             // The chat is being started: the message waits as a pending bubble.
             ScrollView {
                 VStack(spacing: 8) {
-                    UserBubble(text: starting, images: startingImages.map(UserImage.local), pending: startFailed ? .failed(.unknown) : .sending) {
+                    UserBubble(text: starting, images: startingImages.map(UserImage.local), pending: startFailed ? .failed(startFailure) : .sending) {
                         send(text: starting, images: startingImages)
                     }
                 }
@@ -231,6 +232,7 @@ struct TopicChatScreen: View {
                 // The message goes back into the composer, as the draft.
                 starting = nil
                 startFailed = true
+                startFailure = workspace.startFailure ?? .unknown
                 draft = text
                 attachments.restore(images)
             }

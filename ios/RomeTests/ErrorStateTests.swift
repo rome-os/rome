@@ -69,9 +69,7 @@ private func message(
         #expect(error?.kind == .limit)
         #expect(error?.title == "Codex usage limit reached")
         #expect(parse(["type": "error", "error": "x", "provider": "anthropic", "reason": "not_logged_in"])?.title == "Claude is not signed in")
-        #expect(parse(["type": "error", "error": "x", "code": "credits_used_up"])?.kind == .creditsUsedUp)
         #expect(parse(["type": "error", "error": "x", "code": "model_unavailable"])?.kind == .noProvider)
-        #expect(TurnError(text: "Quota exceeded for the maps API", fromTrace: true).kind == .other)
         #expect(parse(["type": "error", "error": "x", "code": "model_unavailable", "reason": "model_access_denied"])?.kind == .modelDenied)
     }
 
@@ -83,13 +81,15 @@ private func message(
         #expect(parse(["type": "error"])?.title == "This turn did not finish")
     }
 
-    @Test func aFailedTurnsTraceIsReadForALimit() {
-        #expect(TurnError(text: "You've hit your limit · resets 3pm", fromTrace: true).kind == .limit)
-        #expect(TurnError(text: "Credit balance is too low", fromTrace: true).kind == .limit)
-        #expect(TurnError(text: "Tool crashed", fromTrace: true).kind == .other)
-        // Only a trace is read for words; a stored error says its kind in fields.
-        #expect(TurnError(text: "You've hit your limit").kind == .other)
-        #expect(TurnError(text: "You've hit your limit", fromTrace: true).detail == "You've hit your limit")
+    @Test func aFailedTurnSaysWhatTheInstanceSaidAndNothingMore() {
+        for text in ["You've hit your limit · resets 3pm", "Credit balance is too low", "Tool crashed"] {
+            let error = TurnError(text: text, didntFinish: true)
+            #expect(error.kind == .other)
+            #expect(error.title == "Didn't finish: \(text)")
+            #expect(error.hint == nil)
+            #expect(!error.offersUsage)
+        }
+        #expect(TurnError(text: "", didntFinish: true).title == "Didn't finish")
     }
 
     @Test func aModelSwitchSaysWhy() {
@@ -119,7 +119,7 @@ private func message(
             message("u", role: "user", turn: "t", [["type": "text", "content": "hi"]], at: 0),
             message("tr", role: "trace", turn: "t", at: 1, trace: trace),
         ])
-        #expect(errors(list).map(\.kind) == [.limit])
+        #expect(errors(list).map(\.title) == ["Didn't finish: You've hit your limit"])
     }
 
     @Test func aFinishedOrStoppedTurnShowsNothing() {
@@ -139,19 +139,41 @@ private func message(
         #expect(errors(list).count == 1)
     }
 
-    @Test func aFailureTheChatRecoveredFromShowsNoLine() {
-        let trace = TraceSummary(totalSteps: 0, turnStatus: "error", terminalError: "You've hit your limit")
-        let failed = message("tr", role: "trace", turn: "t1", at: 1, trace: trace)
+    private let limit = TraceSummary(totalSteps: 0, turnStatus: "error", terminalError: "You've hit your limit")
+    private var user: ChatMessage { message("u", role: "user", turn: "t1", [["type": "text", "content": "hi"]], at: 0) }
+    private var failed: ChatMessage { message("tr", role: "trace", turn: "t1", at: 1, trace: limit) }
+
+    @Test func outputTheFailedTurnSentDoesNotHideItsFailure() {
+        let partial = message("p", turn: "t1", [["type": "text", "content": "Working…"]], at: 0.5)
+        #expect(errors(rows([user, partial, failed])).count == 1)
+        let card = message("c", turn: "t1", [["type": "task_chat", "chatId": "c1", "title": "T"]], at: 0.5)
+        #expect(errors(rows([user, card, failed])).count == 1)
+    }
+
+    @Test func aReplyOfALaterTurnHidesIt() {
         let switched = message("sw", [["type": "quota_switch", "from": "openai", "to": "anthropic", "reason": "quota", "model": "claude-sonnet-5-5"]], at: 2)
-        let user = message("u", role: "user", turn: "t1", [["type": "text", "content": "hi"]], at: 0)
         // Failed, switched, nothing said yet: the line stays.
         #expect(errors(rows([user, failed, switched])).count == 1)
         // The recovery turn replied: no line.
-        let reply = message("r", turn: "t2", [["type": "text", "content": "Done"]], at: 3)
-        #expect(errors(rows([user, failed, switched, reply])).isEmpty)
-        // A turn that said something and then failed shows none either.
-        let partial = message("p", turn: "t1", [["type": "text", "content": "Working…"]], at: 0.5)
-        #expect(errors(rows([user, partial, failed])).isEmpty)
+        let recovery = message("r", turn: "t2", [["type": "text", "content": "Done"]], at: 3)
+        #expect(errors(rows([user, failed, switched, recovery])).isEmpty)
+        // So does any later turn's reply.
+        let unrelated = message("x", turn: "t9", [["type": "text", "content": "Your digest"]], at: 9)
+        #expect(errors(rows([user, failed, unrelated])).isEmpty)
+    }
+
+    @Test func aFailedBackgroundTurnIsNotTheChatsToShow() {
+        let background = message("bg", role: "trace", turn: "digest", at: 1, trace: limit)
+        #expect(errors(rows([background])).isEmpty)
+        // A task chat has no guardian turn to match, and shows it.
+        #expect(errors(rows([background], tools: true)).count == 1)
+    }
+
+    @Test func aTaskChatKeepsAFailureAfterPartialOutputAndHidesItAfterALaterTurn() {
+        let partial = message("p", turn: "t1", [["type": "text", "content": "Checking…"]], at: 0.5)
+        #expect(errors(rows([user, partial, failed], tools: true)).count == 1)
+        let later = message("l", turn: "t2", [["type": "text", "content": "Back"]], at: 5)
+        #expect(errors(rows([user, partial, failed, later], tools: true)).isEmpty)
     }
 
     @Test func aTaskChatKeepsItsToolsRowAndAddsTheLine() {
@@ -159,7 +181,7 @@ private func message(
             message("tr", role: "trace", turn: "t", at: 1, trace: TraceSummary(totalSteps: 3, turnStatus: "error", terminalError: "Tool crashed")),
         ], tools: true)
         #expect(list.contains { if case .tools = $0 { true } else { false } })
-        #expect(errors(list).first?.title == "Tool crashed")
+        #expect(errors(list).first?.title == "Didn't finish: Tool crashed")
     }
 
     @Test func aStoredMessageTheInstanceCouldNotDeliverSaysSo() {

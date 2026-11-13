@@ -991,16 +991,6 @@
         }
       }
     },
-    "Connect Claude or ChatGPT, then send again" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "连接 Claude 或 ChatGPT，然后重新发送"
-          }
-        }
-      }
-    },
     "Connected" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1391,6 +1381,16 @@
         }
       }
     },
+    "Didn't finish: %@" : {
+      "localizations" : {
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未完成：%@"
+          }
+        }
+      }
+    },
     "Dietary energy" : {
       "localizations" : {
         "zh-Hans" : {
@@ -1735,16 +1735,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "比上个月高了 4 次/分钟，主要出现在睡眠不足 6 小时的日子。"
-          }
-        }
-      }
-    },
-    "Its login expired. Reconnect it, then send again" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "登录已过期。重新连接后再发送"
           }
         }
       }
@@ -2659,16 +2649,6 @@
         }
       }
     },
-    "Reconnect %@" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "重新连接 %@"
-          }
-        }
-      }
-    },
     "Reject" : {
       "localizations" : {
         "zh-Hans" : {
@@ -2959,16 +2939,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Rome Cloud 登录已过期"
-          }
-        }
-      }
-    },
-    "Rome credits used up" : {
-      "localizations" : {
-        "zh-Hans" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rome 额度已用完"
           }
         }
       }
