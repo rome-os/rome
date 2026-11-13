@@ -47,11 +47,12 @@ struct ChatScreen: View {
         // Over the header and the transcript; the composer below stays in place.
         .overlay {
             if let thread = store.thread {
-                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: { workspace.mainChatActivity }, onOpenChat: onOpenChat) { store.closeThread() }
+                ThreadOverlay(thread: thread, chat: store, tasks: workspace.tasks, name: workspace.agentDisplayName, activity: { workspace.mainChatActivity }, onClose: { store.closeThread() })
             }
         }
         // Reply brings the keyboard up; a label opens the thread for reading.
         .onChange(of: store.replies) { composerFocused = true }
+        .onChange(of: ObjectIdentifier(store), initial: true) { store.actions.onOpenChat = onOpenChat }
         .pageBackground()
         // Also when the main chat's store is replaced by the one with its own id.
         .onChange(of: "\(store.sessionId)|\(visible)", initial: true) { store.onScreen = visible }
@@ -158,7 +159,8 @@ struct ChatScreen: View {
                 .onTapGesture { composerFocused = false }
             } else {
                 TranscriptList(store: store, composerFocused: composerFocused, latestRequest: workspace.latestRequest) { row, previous in
-                    ConciergeRow(row: row, store: store, tasks: workspace.tasks, onOpenChat: onOpenChat)
+                    ConciergeRow(row: row, info: store.info(for: row), store: store, tasks: workspace.tasks)
+                        .equatable()
                         .tinted(store.tinted != nil && row.ownMessageId == store.tinted)
                         .shareSelectable(row, share: store.share, top: TranscriptSpacing.top(row, after: previous))
                 }
@@ -239,16 +241,26 @@ private struct ChatBanners: View {
     }
 }
 
-/// One row of a Concierge chat, the main chat or a topic chat.
-struct ConciergeRow: View {
+/// One row of a Concierge chat, the main chat or a topic chat. It draws from
+/// values (`row`, `info`) and acts through the store's `ChatActions`, and so
+/// compares equal, and is not drawn again, while its message does not change.
+struct ConciergeRow: View, Equatable {
     let row: TranscriptRow
+    /// What the row draws from its message (`TranscriptStore.info(for:)`).
+    let info: RowInfo
     let store: TranscriptStore
     let tasks: TasksStore
-    let onOpenChat: (String, String) -> Void
     /// Drawn in an open thread view: no thread labels, no share mode, and a
     /// tap on a message never closes the view.
     var inThread = false
-    @Environment(AppModel.self) private var model
+
+    nonisolated static func == (lhs: ConciergeRow, rhs: ConciergeRow) -> Bool {
+        lhs.row == rhs.row && lhs.info == rhs.info && lhs.store === rhs.store && lhs.tasks === rhs.tasks && lhs.inThread == rhs.inThread
+    }
+
+    private func openChat(_ chatId: String, _ title: String) {
+        store.actions.openChat(chatId, title, inThread: inThread)
+    }
 
     /// Only the Agent's text can be replied to: never a card of any kind
     /// (task, question, approval, open or folded), nor the guardian's own.
@@ -260,36 +272,31 @@ struct ConciergeRow: View {
     /// The message's time, and Reply on the Agent's messages: the reply bar,
     /// with an open thread view kept open.
     private func menu(reply: Bool) -> BubbleMenu {
-        let message = row.messageId.flatMap { store.message($0) ?? store.thread?.messages.first { [id = $0] in $0.id == id } }
+        let actions = store.actions
         let onReply: (() -> Void)? = reply
-            ? row.messageId.map { id in { store.reply(to: id) } }
+            ? row.messageId.map { id in { actions.reply(to: id) } }
             : nil
         // Share opens share mode on the message's turn; a pending send has none.
-        let onShare: (() -> Void)? = inThread || message?.turnId == nil ? nil : { [row] in store.share.begin(fromRow: row.id) }
-        return BubbleMenu(date: message?.date, onReply: onReply, onShare: onShare, inThread: inThread)
-    }
-
-    /// The quote a reply carries, on the first bubble of its message.
-    private func quote(_ id: String) -> MessagePart.ReplyQuote? {
-        guard let messageId = row.messageId, let message = store.message(messageId) ?? store.thread?.messages.first(where: { $0.id == messageId }) else { return nil }
-        guard let first = message.parts.firstIndex(where: { $0.textContent != nil }), id == "\(messageId):\(first)" else { return nil }
-        return message.parts.lazy.compactMap(\.replyQuote).first
+        let onShare: (() -> Void)? = inThread || !info.canShare ? nil : { [rowId = row.id] in actions.share(fromRow: rowId) }
+        return BubbleMenu(date: info.date, onReply: onReply, onShare: onShare, inThread: inThread)
     }
 
     var body: some View {
+        let actions = store.actions
         switch row {
         case .separator(_, let date):
             TimeSeparator(date: date)
         case .userText(let id, let text, let images, let pending):
-            let quote = quote(id)
-            UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, onDelete: store.isPending(id) ? { store.removePending(id) } : nil, menu: menu(reply: Self.offersReply(row)),
-                       mark: store.statusMark(ofRow: row),
-                       quote: quote, onQuote: quote.flatMap { inThread ? nil : store.quoteAction(reply: row.messageId ?? "", original: $0.messageId) })
+            let replyId = row.messageId ?? ""
+            let onQuote: (() -> Void)? = inThread || !info.quoteLeads ? nil : info.quote.map { quote in { actions.quote(reply: replyId, original: quote.messageId) } }
+            UserBubble(text: text, images: images, pending: pending, onRetry: { actions.retry(id) }, onDelete: info.isPending ? { actions.remove(id) } : nil, menu: menu(reply: Self.offersReply(row)),
+                       mark: info.mark,
+                       quote: info.quote, onQuote: onQuote)
         case .agentText(_, let text, _, let forwardedFrom, let position):
-            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: onOpenChat, menu: menu(reply: Self.offersReply(row)))
+            AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, onOpenChat: { openChat($0, $1) }, menu: menu(reply: Self.offersReply(row)))
         case .threadLabel(_, let messageId, let title):
             if !inThread {
-                ThreadLabelLine(title: title) { store.openThread(at: messageId) }
+                ThreadLabelLine(title: title) { actions.openThread(at: messageId) }
             }
         case .sourceLabel(_, let text):
             if !inThread { SourceLabelLine(text: text) }
@@ -306,19 +313,19 @@ struct ConciergeRow: View {
                     stopping: state.taskId.map { tasks.stopping.contains($0) } ?? false,
                     onStop: state.taskId.map { id in { tasks.stopTask(id: id) { store.stopTaskFailed() } } }
                 ) {
-                    onOpenChat(chatId, name)
+                    openChat(chatId, name)
                 }
                 // The newest card from before `show` of a task that waits on
                 // the guardian shows what it asks, answered right here.
                 if latest, !inThread, let ask, TaskAskMode.of(card: ask, latest: true, task: tasks.task(forChat: chatId), tasksListed: tasks.listed) != .settled {
-                    TaskAskView(chatId: chatId, card: ask, latest: true, tasks: tasks, store: store) { onOpenChat(chatId, name) }
+                    TaskAskView(chatId: chatId, card: ask, latest: true, tasks: tasks, store: store) { openChat(chatId, name) }
                 }
             }
         case .taskAsk(_, let chatId, _, _, _) where tasks.isGone(chat: chatId):
             EmptyView()
         case .taskAsk(_, let chatId, let title, let card, let latest):
             TaskAskView(chatId: chatId, card: card, latest: latest, tasks: tasks, store: store) {
-                onOpenChat(chatId, tasks.title(forChat: chatId, fallback: title))
+                openChat(chatId, tasks.title(forChat: chatId, fallback: title))
             }
             .keepsTaps(inThread)
         case .typing:

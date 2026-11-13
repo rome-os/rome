@@ -13,7 +13,6 @@ struct ThreadOverlay: View {
     let name: String
     /// Read by the header copy, so a status change redraws it alone.
     var activity: () -> ConciergeActivity? = { nil }
-    let onOpenChat: (String, String) -> Void
     let onClose: () -> Void
 
     @State private var shown = false
@@ -33,7 +32,8 @@ struct ThreadOverlay: View {
             ScrollView {
                 VStack(spacing: 0) {
                     ForEach(Array(rows.enumerated()), id: \.element.id) { index, row in
-                        ConciergeRow(row: row, store: chat, tasks: tasks, onOpenChat: openFromRow, inThread: true)
+                        ConciergeRow(row: row, info: thread.info(for: row), store: chat, tasks: tasks, inThread: true)
+                            .equatable()
                             .tinted(chat.tinted != nil && row.ownMessageId == chat.tinted)
                             .padding(.top, TranscriptSpacing.top(row, after: index > 0 ? rows[index - 1] : nil))
                     }
@@ -72,15 +72,6 @@ struct ThreadOverlay: View {
         }
         .onAppear {
             withAnimation(.spring(response: 0.38, dampingFraction: 0.9)) { shown = true }
-        }
-    }
-
-    /// A chat opened from a row inside the view: the view closes first, or the
-    /// chat would be pushed under it.
-    private var openFromRow: (String, String) -> Void {
-        { id, title in
-            chat.closeThread()
-            onOpenChat(id, title)
         }
     }
 

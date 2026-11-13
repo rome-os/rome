@@ -142,13 +142,21 @@ final class ThreadStore {
     /// thread labels. Built again when the thread's messages change, and by
     /// the chat whenever its own do (`TranscriptStore.rebuildRows`).
     private(set) var rows: [TranscriptRow] = []
+    /// What each text row draws from its message, built with the rows.
+    private(set) var rowInfo: [String: RowInfo] = [:]
+
+    func info(for row: TranscriptRow) -> RowInfo { rowInfo[row.id] ?? RowInfo() }
 
     /// Answers come from the chat and from the thread's own older messages,
     /// so a card answered before the chat's pages shows done.
     func rebuildRows(chatAnswers: [String: JSONValue]? = nil) {
         var all = TranscriptBuilder.answers(in: older)
         all.merge(chatAnswers ?? chat?.answers ?? [:]) { _, chat in chat }
-        let built = TranscriptBuilder.rows(messages: messages, pending: pendingResends, answers: all, options: .init())
+        let held = messages
+        let resends = pendingResends
+        let built = TranscriptBuilder.rows(messages: held, pending: resends, answers: all, options: .init())
         if built != rows { rows = built }
+        let infos = RowInfo.build(rows: built, messages: held, pending: resends, kind: chat?.kind ?? .concierge)
+        if infos != rowInfo { rowInfo = infos }
     }
 }

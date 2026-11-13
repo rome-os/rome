@@ -168,11 +168,11 @@ struct TaskChatScreen: View {
         case .userText(let id, let text, let images, let pending):
             if let briefID, id.hasPrefix(briefID + ":") {
                 BriefCard(text: text)
-            } else if let message = row.messageId.flatMap(store.message), message.saidByAgent {
+            } else if store.info(for: row).saidByAgent {
                 // The Concierge relays the guardian's words: their side, its name.
-                ConciergeBubble(name: message.sender?.name ?? model.workspace?.agentDisplayName ?? AgentName.fallback, text: text, menu: menu(row))
+                ConciergeBubble(name: store.info(for: row).senderName ?? model.workspace?.agentDisplayName ?? AgentName.fallback, text: text, menu: menu(row))
             } else {
-                UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, onDelete: store.isPending(id) ? { store.removePending(id) } : nil, menu: menu(row))
+                UserBubble(text: text, images: images, pending: pending, onRetry: { store.retry(id) }, onDelete: store.info(for: row).isPending ? { store.removePending(id) } : nil, menu: menu(row))
             }
         case .agentText(_, let text, _, let forwardedFrom, let position):
             AgentBubble(text: text, forwardedFrom: forwardedFrom, position: position, menu: menu(row))
@@ -203,9 +203,9 @@ struct TaskChatScreen: View {
 
     /// A task chat's bubbles: the time, Copy and Share; no threads to reply in.
     private func menu(_ row: TranscriptRow) -> BubbleMenu {
-        let message = row.messageId.flatMap(store.message)
-        let onShare: (() -> Void)? = message?.turnId == nil ? nil : { store.share.begin(fromRow: row.id) }
-        return BubbleMenu(date: message?.date, onShare: onShare)
+        let info = store.info(for: row)
+        let onShare: (() -> Void)? = info.canShare ? { store.share.begin(fromRow: row.id) } : nil
+        return BubbleMenu(date: info.date, onShare: onShare)
     }
 
     /// Task chats space every block by 12 pt, as on the board; bubbles in a run keep 3 pt.

@@ -577,7 +577,7 @@ struct MarkdownText: View {
         .foregroundStyle(color)
         .tint(Palette.primaryText)
         // Links in the text: the shell's opener, else the system's.
-        .environment(\.openURL, OpenURLAction { url in linkOpener?(url) ?? .systemAction })
+        .environment(\.openURL, OpenURLAction { url in linkOpener?.run(url) ?? .systemAction })
         .fullScreenCover(isPresented: $showViewer) {
             PhotoViewer(images: gallery, start: viewerStart)
         }

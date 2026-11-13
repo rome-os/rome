@@ -84,6 +84,8 @@ final class TranscriptStore {
     private var seen: [String: Int] = [:]
     private var tokens: [UUID] = []
     private var approvalPolls: [String: Task<Void, Never>] = [:]
+    /// What the rows do when acted on; the same object for the store's life.
+    let actions = ChatActions()
     /// Where a send is kept until the server takes it.
     var drafts: ChatDrafts?
     /// Where the newest messages are kept across launches: the main Chat and
@@ -106,6 +108,7 @@ final class TranscriptStore {
         self.backend = backend
         share = ChatShareFlow(backend: backend)
         share.chat = self
+        actions.store = self
     }
 
     /// Answers given to cards, as stored.
@@ -116,6 +119,11 @@ final class TranscriptStore {
     /// What the transcript draws, built again whenever one of its inputs
     /// changes (`rebuildRows`), never on a read.
     private(set) var rows: [TranscriptRow] = []
+    /// What each text row draws from its message, built with the rows.
+    private(set) var rowInfo: [String: RowInfo] = [:]
+
+    func info(for row: TranscriptRow) -> RowInfo { rowInfo[row.id] ?? RowInfo() }
+
     /// A merge changes the messages and the sends together: one rebuild after both.
     @ObservationIgnored private var rowsHeld = false
 
@@ -130,6 +138,8 @@ final class TranscriptStore {
         )
         // An equal list is not stored: no reader is told of a change that is none.
         if built != rows { rows = built }
+        let infos = RowInfo.build(rows: built, messages: messages, pending: pending, kind: kind)
+        if infos != rowInfo { rowInfo = infos }
         thread?.rebuildRows(chatAnswers: answers)
     }
 
@@ -555,6 +565,10 @@ final class TranscriptStore {
     /// The title of the task whose chat thread `message` is in, or nil when
     /// it is in no task's thread.
     func taskThreadTitle(of message: ChatMessage) -> String? {
+        Self.taskThreadTitle(of: message, in: messages)
+    }
+
+    static func taskThreadTitle(of message: ChatMessage, in messages: [ChatMessage]) -> String? {
         guard let root = message.chatThreadId else { return nil }
         if let title = message.chatThreadTitle { return title }
         return messages.first { $0.chatThreadId == root && $0.chatThreadTitle != nil }?.chatThreadTitle
@@ -1051,12 +1065,6 @@ final class TranscriptStore {
             guard !Task.isCancelled else { return }
             self?.notice = nil
         }
-    }
-
-    /// Rome's mark on a stored guardian message.
-    func statusMark(ofRow row: TranscriptRow) -> StatusMark? {
-        guard kind == .concierge, case .userText(_, _, _, nil) = row, let id = row.messageId else { return nil }
-        return message(id)?.statusReaction.flatMap(StatusMark.init(rawValue:))
     }
 
     /// What the load-error bar shows: nil for no bar.
