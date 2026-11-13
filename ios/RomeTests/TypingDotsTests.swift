@@ -120,9 +120,8 @@ private func chatMessage(_ id: String, role: String, turn: String?, text: String
         store.stop()
     }
 
-    /// Leaving the chat drops what waits and the turn's writing state, so a
-    /// return replays no dots.
-    @Test func leavingClearsTheDots() async {
+    /// Leaving the chat drops what waits, so a return replays no held dots.
+    @Test func leavingDropsWhatWaits() async {
         let backend = FakeBackend()
         let store = store(backend)
         await store.reload()
@@ -130,7 +129,24 @@ private func chatMessage(_ id: String, role: String, turn: String?, text: String
         backend.bus.emit(LiveTopic.chat(conciergeChatID), .messageInsert(chatMessage("d1", role: "assistant", turn: "t1", at: 5)))
         #expect(dots(store))
         store.stop()
-        #expect(!dots(store) && store.held.isEmpty && store.writing == nil)
+        #expect(!dots(store) && store.held.isEmpty)
+    }
+
+    /// Leaving and coming back mid-turn: the server says writing once, so the
+    /// dots it still means show again on return; the turn's end clears them.
+    @Test func returningMidTurnKeepsTheDots() async {
+        let backend = FakeBackend()
+        let store = store(backend)
+        await store.reload()
+        writing(backend, .exact, true)
+        #expect(dots(store))
+        store.stop()
+        store.start()
+        #expect(dots(store))
+        backend.bus.emit(LiveTopic.chat(conciergeChatID), .sessionRunning(sessionId: conciergeChatID, running: false))
+        for _ in 0..<100 where dots(store) { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(!dots(store))
+        store.stop()
     }
 
     /// A quiet turn's first message never waits; its later ones do.

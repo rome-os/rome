@@ -571,10 +571,10 @@ final class DemoBackend: RomeBackend {
 
     // MARK: Updates
 
-    static let releasedVersion = "1.1.192"
+    static let releasedVersion = "1.1.195"
     /// Below the app's minimum, and between it and the latest.
     static let tooOldVersion = "1.1.120"
-    static let offeredFromVersion = "1.1.191"
+    static let offeredFromVersion = "1.1.194"
     private lazy var runningVersion = switch variant {
     case .updateRequired: Self.tooOldVersion
     case .updateOffered: Self.offeredFromVersion

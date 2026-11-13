@@ -102,6 +102,39 @@ import UIKit
         #expect(store.rows.contains { $0.id == "in-9:0" })
     }
 
+    /// The thread view pairs a resend as the timeline does: its copy shows
+    /// in the original's place, on its way or stored only in the thread's
+    /// own read, never both and never neither.
+    @Test func theThreadViewShowsTheCopyNotTheOriginal() async throws {
+        let backend = FakeBackend()
+        backend.sendError = .network
+        var root = stored("root", inputState: nil, text: "plan the trip", thread: "root")
+        root.chatThreadTitle = "Trip"
+        backend.stored = [root, stored("in-11", inputState: "failed", text: "and hotels", thread: "root", seconds: 5)]
+        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        await store.reload()
+        store.openThread(at: "root")
+        let thread = try #require(store.thread)
+        store.retry("in-11:0")
+        for _ in 0..<100 where store.pending.first?.state == .sending || store.pending.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        let copy = try #require(store.pending.first?.id)
+        func ids() -> [String] { thread.rows(answers: [:]).compactMap { row -> String? in if case .userText(let id, _, _, _) = row { return id } else { return nil } } }
+        // On its way: the copy in the original's place.
+        #expect(ids() == ["root:0", copy])
+        // Sent and stored, but held only by the thread's own read: the copy
+        // shows once, and the original stays hidden.
+        backend.sendError = .network
+        backend.sendSucceeds = true
+        store.retry(copy)
+        for _ in 0..<100 where store.pending.first?.state != .sent { try? await Task.sleep(for: .milliseconds(10)) }
+        var stored = stored(copy, inputState: nil, text: "and hotels", thread: "root", seconds: 9)
+        stored.chatThreadTitle = "Trip"
+        backend.threads["root"] = [root, backend.stored[1], stored]
+        await thread.load()
+        #expect(ids() == ["root:0", "\(copy):0"])
+        store.closeThread()
+    }
+
     /// A resend of a document keeps it: sent as a file, and drawn as a tile
     /// in the pending bubble, not an empty one.
     @Test func aDocumentResendShowsItsFile() async {

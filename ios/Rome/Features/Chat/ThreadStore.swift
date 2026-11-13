@@ -40,9 +40,19 @@ final class ThreadStore {
         let anchorCopy = chat?.message(anchor.id) ?? anchor
         let extra = (older + [anchorCopy]).filter { !heldIDs.contains($0.id) }
         let all = Self.ordered(held + extra)
-        // A message sent again shows once, as in the chat.
-        let hidden = chat?.resentOriginals ?? []
+        // A message sent again shows once, as in the chat: its copy, from the
+        // chat's pages, this thread's own read, or still on its way.
+        let hidden = chat?.resentOriginals(alsoHeld: Set(all.map(\.id))) ?? []
         return hidden.isEmpty ? all : all.filter { !hidden.contains($0.id) }
+    }
+
+    /// Resend copies still on their way whose originals are in this thread:
+    /// drawn here in their originals' place.
+    var pendingResends: [PendingSend] {
+        guard let chat else { return [] }
+        let held = Self.ordered(chat.messages(inThread: root) + older)
+        let originals = chat.resentOriginals(alsoHeld: []).intersection(held.map(\.id))
+        return chat.pendingResends(of: originals)
     }
 
     /// The title of the task the thread is, as its messages carry it.
@@ -131,6 +141,6 @@ final class ThreadStore {
     func rows(answers: [String: JSONValue]) -> [TranscriptRow] {
         var all = TranscriptBuilder.answers(in: older)
         all.merge(answers) { _, chat in chat }
-        return TranscriptBuilder.rows(messages: messages, pending: [], answers: all, options: .init())
+        return TranscriptBuilder.rows(messages: messages, pending: pendingResends, answers: all, options: .init())
     }
 }

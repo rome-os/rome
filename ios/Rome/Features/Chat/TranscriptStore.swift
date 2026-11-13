@@ -229,12 +229,12 @@ final class TranscriptStore {
         runningPoll = nil
         resyncWork?.cancel()
         resyncWork = nil
-        // Off the screen, nothing waits and no turn is known to write: the
-        // next start reads where things stand, and replays no dots.
+        // Off the screen nothing waits, so a return replays no dots. The
+        // turn's writing state stays: the server says it once, and a return
+        // mid-turn shows the dots it still means; the turn's end clears it.
         holdWork?.cancel()
         holdWork = nil
         held = []
-        writing = nil
     }
 
     func reload() async {
@@ -859,10 +859,21 @@ final class TranscriptStore {
     /// The originals a resend took the place of: hidden only while their
     /// copy is still held or stored, so a copy that failed for good and was
     /// dropped (here, or by a relaunch) brings its original back.
-    var resentOriginals: Set<String> {
+    var resentOriginals: Set<String> { resentOriginals(alsoHeld: []) }
+
+    /// The same, counting copies held elsewhere too: a thread view's own read
+    /// can hold a copy the chat's pages do not.
+    func resentOriginals(alsoHeld extra: Set<String>) -> Set<String> {
         guard !resends.isEmpty else { return [] }
-        let present = Set(pending.map(\.id)).union(messages.map(\.id))
+        let present = Set(pending.map(\.id)).union(messages.map(\.id)).union(extra)
         return Set(resends.filter { present.contains($0.value) }.keys)
+    }
+
+    /// The resend copies still on their way for these originals, for a
+    /// thread view that shows the originals' place.
+    func pendingResends(of originals: Set<String>) -> [PendingSend] {
+        let copies = Set(resends.filter { originals.contains($0.key) }.values)
+        return pending.filter { copies.contains($0.id) }
     }
 
     /// Reads the chat's resends once, before the first rows are drawn.
