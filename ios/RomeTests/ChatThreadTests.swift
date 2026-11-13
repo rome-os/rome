@@ -76,8 +76,9 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         return out
     }
 
-    /// Every Concierge message in a task's thread gets one, right under it:
-    /// plain text, a forward and a question shown alone alike.
+    /// A Concierge message in a task's thread gets one, right under it:
+    /// plain text, a forward and a question shown alone alike. Of a run of
+    /// three, the middle one shows none.
     @Test func everyConciergeMessageOfATaskThreadIsLabelled() {
         let ask: [[String: Any]] = [["type": "task_chat", "chatId": "c1", "title": "Book", "show": "ask"]]
         let forward: [[String: Any]] = [["type": "text", "content": "Done", "forwardedFrom": ["chatId": "c1", "title": "Book"]]]
@@ -88,7 +89,7 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
             message("a3", at: 30, thread: "u", parts: forward),
         ]
         let built = rows(messages)
-        #expect(labels(built) == ["a1": "Book a table", "a2": "Book a table", "a3": "Book a table"])
+        #expect(labels(built) == ["a1": "Book a table", "a3": "Book a table"])
         // Right under its own message.
         let index = built.firstIndex { $0.id == "label-a1" }!
         #expect(built[index - 1].id == "a1:0")
@@ -109,6 +110,32 @@ private func message(_ id: String, role: String = "assistant", _ text: String = 
         #expect(labels(rows(messages)).isEmpty)
         let threaded = [message("a", at: 0, thread: "u", title: "Book")]
         #expect(labels(rows(threaded, threads: false)).isEmpty)
+    }
+
+    /// Only the first and last of a run are labelled; a run of one or two
+    /// labels each. Another thread, or the guardian, ends the run.
+    @Test func onlyTheEndsOfARunAreLabelled() {
+        let messages = [
+            message("a1", at: 0, thread: "u", title: "Book"),
+            message("a2", at: 1, thread: "u"),
+            message("a3", at: 2, thread: "u"),
+            message("a4", at: 3, thread: "u"),
+            // Another thread ends it.
+            message("b1", at: 4, thread: "v", title: "Fly"),
+            message("a5", at: 5, thread: "u"),
+            message("a6", at: 6, thread: "u"),
+            // The guardian ends it too.
+            message("q", role: "user", at: 7),
+            message("a7", at: 8, thread: "u"),
+            // A message in no thread ends it.
+            message("x", at: 9),
+            message("a8", at: 10, thread: "u"),
+            message("a9", at: 11, thread: "u"),
+            message("a10", at: 12, thread: "u"),
+        ]
+        #expect(labels(rows(messages)) == [
+            "a1": "Book", "a4": "Book", "b1": "Fly", "a5": "Book", "a6": "Book", "a7": "Book", "a8": "Book", "a10": "Book",
+        ])
     }
 
     /// The title comes from any message of the thread, a live placement too.

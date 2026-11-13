@@ -65,12 +65,42 @@ private func rows(_ messages: [ChatMessage], notices: Bool = true) -> [Transcrip
         #expect(label("routine", "Daily") == "Routine · Daily")
         #expect(label("app", "Habits") == "App · Habits")
         #expect(label("agent", nil) == "Agent")
-        #expect(label("following", "Gmail") == "Following · Gmail")
-        #expect(label("digest", nil) == "Following · digest")
-        #expect(label("digest", "x") == "Following · digest")
         // A kind this build does not know reads as an automation, and still decodes.
         #expect(label("brand-new", nil) == "Automation")
         #expect(label("routine", "  ") == "Routine")
+    }
+
+    /// Only a reply someone else caused is labelled: a routine, an app, an
+    /// agent or an automation. The Concierge's own wake-ups label nothing.
+    @Test func onlyRepliesSomeoneElseCausedAreLabelled() {
+        for type in ["routine", "app", "agent", "automation"] {
+            let built = rows([text("a", turn: "t1", at: 60), trace(turn: "t1", at: 61, TraceSummary(automatedInput: .init(type: type, name: nil)))])
+            #expect(labels(built).count == 1)
+        }
+        for type in ["check", "following", "digest", "brand-new"] {
+            let built = rows([text("a", turn: "t1", at: 60), trace(turn: "t1", at: 61, TraceSummary(automatedInput: .init(type: type, name: "x")))])
+            #expect(labels(built).isEmpty)
+        }
+        // An older automated message from a follow labels nothing either.
+        let follow = MessageSender(kind: "automated", sourceType: "following", name: "Gmail")
+        #expect(labels(rows([text("old", role: "user", turn: "t0", at: 0, sender: follow), text("a", turn: "t0", at: 5)])).isEmpty)
+    }
+
+    /// In the middle of a thread's run, a task reply shows no label at all,
+    /// not its source.
+    @Test func theMiddleOfARunShowsNoSourceEither() {
+        let summary = TraceSummary(automatedInput: .init(type: "agent", name: "Flint"))
+        let run = (0..<3).map { index -> ChatMessage in
+            var message = text("m\(index)", turn: "t1", at: 60 + Double(index))
+            message.chatThreadId = "r"
+            message.chatThreadTitle = "Book flights"
+            message.knowsThreads = true
+            return message
+        }
+        let options = TranscriptBuilder.Options(showThreads: true, showNotices: true)
+        let built = TranscriptBuilder.rows(messages: run + [trace(turn: "t1", at: 70, summary)], pending: [], answers: [:], options: options)
+        #expect(labels(built).isEmpty)
+        #expect(built.filter { if case .threadLabel = $0 { true } else { false } }.map(\.id) == ["label-m0", "label-m2"])
     }
 
     /// In a task's thread only its own label shows.

@@ -49,6 +49,9 @@ final class TasksStore {
     private(set) var tasks: [ConciergeTask] = []
     private(set) var chats: [String: ChatSession] = [:]
     private(set) var loaded = false
+    /// The task list arrived at least once: a task missing from it is gone,
+    /// not just unread yet.
+    private(set) var listed = false
     private var tokens: [UUID] = []
     private var refreshingChats = false
     private var resyncWork: Task<Void, Never>?
@@ -87,7 +90,10 @@ final class TasksStore {
     func refresh() async {
         async let taskList = try? backend.tasks()
         async let sessionList = try? backend.sessions()
-        if let list = await taskList { tasks = list.filter { !isGone($0) } }
+        if let list = await taskList {
+            tasks = list.filter { !isGone($0) }
+            listed = true
+        }
         if let list = await sessionList {
             chats = Dictionary(list.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         }

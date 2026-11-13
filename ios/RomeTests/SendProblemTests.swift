@@ -1,5 +1,6 @@
 import Foundation
 import Testing
+import UIKit
 @testable import Rome
 
 /// A message that did not go through shows an icon and a menu, not lines of text.
@@ -21,10 +22,87 @@ import Testing
         #expect(SendProblem(nil, onRetry: {}, onDelete: nil) == nil)
     }
 
-    private func stored(_ id: String, inputState: String) -> ChatMessage {
-        var message = ChatMessage(id: id, sessionId: conciergeChatID, role: "user", content: #"[{"type":"text","content":"hello"}]"#, createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000)))
+    private func stored(_ id: String, inputState: String?, text: String = "hello", extra: String = "", thread: String? = nil, seconds: Double = 0) -> ChatMessage {
+        let body = String(data: try! JSONEncoder().encode(text), encoding: .utf8)!
+        var message = ChatMessage(id: id, sessionId: conciergeChatID, role: "user", content: "[\(extra){\"type\":\"text\",\"content\":\(body)}]", createdAt: RomeDate.string(Date(timeIntervalSince1970: 1_800_000_000 + seconds)), chatThreadId: thread, knowsThreads: true)
         message.inputState = inputState
         return message
+    }
+
+    /// A resend goes where the message went: its task thread, replying to the
+    /// message it quoted.
+    @Test func aResendKeepsItsThreadAndReply() async {
+        let backend = FakeBackend()
+        backend.sendSucceeds = true
+        let quote = #"{"type":"reply_to","messageId":"m-9","text":"Which day?"},"#
+        backend.stored = [stored("in-3", inputState: "failed", extra: quote, thread: "root-1")]
+        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        await store.reload()
+        store.retry("in-3:1")
+        for _ in 0..<100 where backend.sentThreads.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        let target = backend.sentThreads.first ?? nil
+        #expect(target?.body == ["replyToMessageId": .string("m-9"), "chatThread": .string("root-1")])
+        #expect(store.pending.first?.thread == target)
+    }
+
+    /// A message in a thread with no quote goes back to the thread alone; one
+    /// in neither goes to the chat.
+    @Test func aResendTargetFollowsTheStoredMessage() {
+        let inThread = TranscriptStore.resendTarget(of: stored("a", inputState: "failed", thread: "root-1"))
+        #expect(inThread?.body == ["chatThread": .string("root-1")])
+        #expect(TranscriptStore.resendTarget(of: stored("b", inputState: "failed")) == nil)
+    }
+
+    /// A stored copy that a later message repeats stays hidden on any load,
+    /// so a relaunch does not bring it back beside the delivered copy.
+    @Test func aResentMessageStaysHiddenAfterARelaunch() async {
+        let backend = FakeBackend()
+        backend.stored = [
+            stored("in-4", inputState: "failed"),
+            stored("in-5", inputState: nil, seconds: 5),
+            // The same words in another thread are another message.
+            stored("in-6", inputState: "unknown", thread: "root-2", seconds: 6),
+        ]
+        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        await store.reload()
+        let ids = store.rows.compactMap { row -> String? in if case .userText(let id, _, _, _) = row { return id } else { return nil } }
+        #expect(ids == ["in-5:0", "in-6:0"])
+        #expect(TranscriptBuilder.resent(in: backend.stored) == ["in-4"])
+    }
+
+    /// A resend carries the message's files as files, read back from the
+    /// instance, not as the link lines the instance wrote into its text.
+    @Test func aResendSendsItsFilesAsFiles() async {
+        let backend = FakeBackend()
+        backend.sendSucceeds = true
+        let picture = "0123456789abcdef0123456789abcdef.png", paper = "fedcba9876543210fedcba9876543210.pdf"
+        backend.apiFiles = [
+            "/assets/\(picture)": UIGraphicsImageRenderer(size: CGSize(width: 4, height: 4)).pngData { $0.fill(CGRect(x: 0, y: 0, width: 4, height: 4)) },
+            "/assets/\(paper)": Data("%PDF".utf8),
+        ]
+        let text = "Look\n\n- File 1: [shot.png](</api/assets/\(picture)>)\n- File 2: [plan.pdf](</api/assets/\(paper)>)"
+        backend.stored = [stored("in-7", inputState: "failed", text: text)]
+        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        await store.reload()
+        store.retry("in-7:0")
+        for _ in 0..<200 where backend.sentInputIds.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        #expect(backend.calls.last == "send \(conciergeChatID) Look [2 files]")
+        #expect(backend.sentFiles.map(\.mimeType) == ["image/jpeg", "application/pdf"])
+        #expect(backend.sentFiles.last?.name == "plan.pdf")
+        #expect(store.pending.first?.images.count == 1)
+    }
+
+    /// A resend the guardian then deletes brings the stored message back.
+    @Test func deletingAResendShowsTheStoredMessageAgain() async {
+        let backend = FakeBackend()
+        backend.stored = [stored("in-8", inputState: "failed")]
+        let store = TranscriptStore(sessionId: conciergeChatID, kind: .concierge, backend: backend)
+        await store.reload()
+        store.retry("in-8:0")
+        for _ in 0..<100 where store.pending.first?.state == .sending || store.pending.isEmpty { try? await Task.sleep(for: .milliseconds(10)) }
+        store.removePending(store.pending[0].id)
+        let ids = store.rows.compactMap { row -> String? in if case .userText(let id, _, _, _) = row { return id } else { return nil } }
+        #expect(ids == ["in-8:0"])
     }
 
     /// Retry on a stored message is a new send with a fresh id (the instance drops
@@ -43,7 +121,7 @@ import Testing
         // One bubble for the message: the stored one is not drawn beside the new one.
         let texts = store.rows.compactMap { row -> String? in if case .userText(_, let text, _, _) = row { return text } else { return nil } }
         #expect(texts == ["hello"])
-        #expect(store.replaced == ["in-1"])
+        #expect(Array(store.replaced.values) == ["in-1"])
     }
 
     /// A send the app still holds keeps its own id when retried: the instance's dedupe is right there.

@@ -108,7 +108,7 @@ final class TranscriptStore {
     var rows: [TranscriptRow] {
         let answers = answers
         return TranscriptBuilder.rows(
-            messages: replaced.isEmpty ? messages : messages.filter { !replaced.contains($0.id) },
+            messages: visibleMessages,
             pending: pending,
             answers: answers,
             options: .init(showTools: kind == .task, showThreads: kind == .concierge, showNotices: kind == .concierge, typing: showsTyping)
@@ -585,9 +585,27 @@ final class TranscriptStore {
     }
 
 
+    /// The stored messages drawn: a message sent again gives way to its new
+    /// copy, both while the copy is on its way and once it is stored.
+    var visibleMessages: [ChatMessage] {
+        let hidden = TranscriptBuilder.resent(in: messages).union(replaced.values)
+        return hidden.isEmpty ? messages : messages.filter { !hidden.contains($0.id) }
+    }
+
     /// A stored message, by id.
     func message(_ id: String) -> ChatMessage? {
         messages.first { $0.id == id }
+    }
+
+    /// Card states a re-read was asked for already (`TaskAskView`).
+    @ObservationIgnored private var recoveredCards: Set<String> = []
+
+    /// A card stopped waiting with no outcome held: `chat_card_settled` may
+    /// have been missed, so the page is read again, once per card state, however
+    /// often the card scrolls back into view.
+    func recoverCard(_ key: String) {
+        guard recoveredCards.insert(key).inserted else { return }
+        resync()
     }
 
     /// Reloads after events may have been missed. A burst of requests (one per
@@ -691,50 +709,114 @@ final class TranscriptStore {
     /// Sends the guardian's text with any photos (JPEG). Photos alone are a
     /// message too. `fromComposer`: the composer's content, cleared as it goes.
     func send(_ text: String, images: [ComposerImage] = [], fromComposer: Bool = false, thread: ThreadTarget? = nil) -> Bool {
+        send(text, images: images, files: [], fromComposer: fromComposer, thread: thread) != nil
+    }
+
+    /// The send's `inputId`, or nil when there is nothing to send. `files`:
+    /// anything other than photos, which only a resend carries.
+    private func send(_ text: String, images: [ComposerImage], files: [OutgoingFile], fromComposer: Bool = false, thread: ThreadTarget?) -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty || !images.isEmpty else { return false }
+        guard !trimmed.isEmpty || !images.isEmpty || !files.isEmpty else { return nil }
         let inputId = UUID().uuidString.lowercased()
-        pending.append(PendingSend(id: inputId, text: trimmed, images: images, createdAt: .now, state: .sending, thread: thread))
+        pending.append(PendingSend(id: inputId, text: trimmed, images: images, files: files, createdAt: .now, state: .sending, thread: thread))
         if kind == .concierge {
             markRunning()
         }
-        deliver(inputId: inputId, text: trimmed, images: images, fromComposer: fromComposer, thread: thread)
-        return true
+        deliver(inputId: inputId, text: trimmed, images: images, files: files, fromComposer: fromComposer, thread: thread)
+        return inputId
     }
 
-    /// Removes a send that failed for good, and the draft kept for it.
+    /// Removes a send that failed for good, and the draft kept for it. A
+    /// stored message it was sent in place of shows again.
     func removePending(_ id: String) {
         pending.removeAll { $0.id == id }
+        replaced[id] = nil
         if let drafts { drafts.store.delivered(chat: drafts.chat, inputId: id) }
     }
 
-    /// Stored messages a new send took the place of (a retry of a message the
-    /// instance did not take): not drawn.
-    private(set) var replaced: Set<String> = []
+    /// Stored messages a send the app still holds took the place of (a retry
+    /// of a message the instance did not take), by that send's id. Once the
+    /// new copy is stored, `TranscriptBuilder.resent` hides the old one, so
+    /// it stays hidden after a relaunch.
+    private(set) var replaced: [String: String] = [:]
+    /// Stored messages whose files are being read back for a resend.
+    private var resending: Set<String> = []
 
     /// Whether the row is a send the app still holds, which only it can drop.
     func isPending(_ rowId: String) -> Bool { pending.contains { $0.id == rowId } }
 
-    /// Tries a message again. One the app still holds is sent again; one the
-    /// instance stored as not delivered or unconfirmed is handed over again
-    /// under the id it already has.
+    /// Tries a message again. One the app still holds is sent again. One the
+    /// instance stored as not delivered or unconfirmed goes as a new message,
+    /// to the same thread and reply, with its files, and takes its place.
     func retry(_ id: String) {
         if let index = pending.firstIndex(where: { $0.id == id }) {
             pending[index].state = .sending
-            deliver(inputId: id, text: pending[index].text, images: pending[index].images, thread: pending[index].thread)
+            deliver(inputId: id, text: pending[index].text, images: pending[index].images, files: pending[index].files, thread: pending[index].thread)
             return
         }
         // The instance keeps what it stored under its own `inputId` and drops a
-        // second send of it as a duplicate, so this goes as a new message, and
-        // the stored one gives way to it: no two bubbles for one message.
-        guard let messageId = id.split(separator: ":").first.map(String.init), let stored = message(messageId),
-              let text = stored.parts.compactMap(\.textContent).first, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        // second send of it as a duplicate, so this goes as a new message.
+        guard let messageId = id.split(separator: ":").first.map(String.init), !resending.contains(messageId),
+              let stored = message(messageId) ?? thread?.messages.first(where: { $0.id == messageId }),
+              let raw = stored.parts.compactMap(\.textContent).first
         else { return }
-        replaced.insert(messageId)
-        send(text)
+        let (text, uploads) = UploadLines.split(raw)
+        guard !text.isEmpty || !uploads.isEmpty else { return }
+        let target = Self.resendTarget(of: stored)
+        guard !uploads.isEmpty else {
+            if let inputId = send(text, images: [], files: [], thread: target) { replaced[inputId] = messageId }
+            return
+        }
+        // The instance takes files only as bytes, so its stored copies are
+        // read back and sent again as attachments, not as their link lines.
+        resending.insert(messageId)
+        Task {
+            defer { resending.remove(messageId) }
+            guard let (images, files) = await readBack(uploads) else {
+                say(String(localized: "Couldn't send. Try again"))
+                return
+            }
+            if let inputId = send(text, images: images, files: files, thread: target) { replaced[inputId] = messageId }
+        }
     }
 
-    private func deliver(inputId: String, text: String, images: [ComposerImage], fromComposer: Bool = false, thread: ThreadTarget? = nil) {
+    /// Where a stored message went: its task thread, and the message it replied to.
+    static func resendTarget(of message: ChatMessage) -> ThreadTarget? {
+        let replyTo = message.parts.lazy.compactMap(\.replyQuote).first?.messageId
+        guard replyTo != nil || message.chatThreadId != nil else { return nil }
+        return ThreadTarget(
+            messageId: replyTo ?? message.chatThreadId ?? message.id,
+            instanceKnowsThreads: true,
+            quote: true,
+            thread: message.chatThreadId,
+            bare: replyTo == nil ? true : nil
+        )
+    }
+
+    /// A stored message's files: pictures as photos, anything else as the
+    /// file it was. Nil when one cannot be read.
+    private func readBack(_ uploads: [UploadLines.Upload]) async -> ([ComposerImage], [OutgoingFile])? {
+        var images: [ComposerImage] = []
+        var files: [OutgoingFile] = []
+        let backend = backend
+        for upload in uploads {
+            guard let data = try? await ImageFetch.data(
+                upload.source,
+                assetLoader: { path, width in try await backend.asset(path: path, width: width) },
+                apiLoader: { path, query in try await backend.apiFile(path: path, query: query) }
+            ) else { return nil }
+            if upload.isImage {
+                let photo = await Task.detached { ImageCompressor.jpeg(from: data).map { ComposerImage(jpeg: $0) } }.value
+                guard let photo else { return nil }
+                images.append(photo)
+            } else {
+                files.append(OutgoingFile(name: upload.name, mimeType: OutgoingFile.mimeType(of: upload.name), dataBase64: data.base64EncodedString()))
+            }
+        }
+        return (images, files)
+    }
+
+    private func deliver(inputId: String, text: String, images: [ComposerImage], files: [OutgoingFile] = [], fromComposer: Bool = false, thread: ThreadTarget? = nil) {
         // Kept as the chat's draft until the server takes it.
         // Kept with the thread it was for, so a lost send comes back there.
         if let drafts { drafts.store.sending(chat: drafts.chat, inputId: inputId, text: text, photos: images, fromComposer: fromComposer, thread: thread) }
@@ -743,7 +825,7 @@ final class TranscriptStore {
                 let turn = try await backend.send(
                     sessionId: sessionId,
                     text: text,
-                    files: OutgoingFile.photos(images),
+                    files: OutgoingFile.photos(images) + files,
                     inputId: inputId,
                     priority: kind == .concierge ? .now : .next,
                     thread: thread

@@ -271,7 +271,7 @@ struct ConciergeRow: View {
                 }
                 // The newest card from before `show` of a task that waits on
                 // the guardian shows what it asks, answered right here.
-                if latest, !inThread, let ask, TaskAskMode.of(card: ask, latest: true, task: tasks.task(forChat: chatId)) != .settled {
+                if latest, !inThread, let ask, TaskAskMode.of(card: ask, latest: true, task: tasks.task(forChat: chatId), tasksListed: tasks.listed) != .settled {
                     TaskAskView(chatId: chatId, card: ask, latest: true, tasks: tasks, store: store) { onOpenChat(chatId, name) }
                 }
             }

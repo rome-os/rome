@@ -39,7 +39,10 @@ final class ThreadStore {
         let heldIDs = Set(held.map(\.id))
         let anchorCopy = chat?.message(anchor.id) ?? anchor
         let extra = (older + [anchorCopy]).filter { !heldIDs.contains($0.id) }
-        return Self.ordered(held + extra)
+        let all = Self.ordered(held + extra)
+        // A message sent again shows once, as in the chat.
+        let hidden = TranscriptBuilder.resent(in: all).union(chat.map { Array($0.replaced.values) } ?? [])
+        return hidden.isEmpty ? all : all.filter { !hidden.contains($0.id) }
     }
 
     /// The title of the task the thread is, as its messages carry it.
