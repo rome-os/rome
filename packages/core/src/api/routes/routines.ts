@@ -1,13 +1,7 @@
 import { Hono } from "hono";
-import { v4 as uuid } from "uuid";
 import { eq } from "drizzle-orm";
 import { routines } from "../../db/schema.js";
-import {
-  publicRoutineRow,
-  routineChatOf,
-  routineCreator,
-  toRoutine,
-} from "../../db/repositories/routines.js";
+import { publicRoutineRow, toRoutine } from "../../db/repositories/routines.js";
 import { ownerOfChat } from "../../webchat/owner.js";
 import { conciergeCallerOwner } from "./concierge.js";
 import {
@@ -353,25 +347,20 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       }
     }
 
-    const now = new Date();
-    const record = {
-      id: uuid(),
-      key: body.key ?? null,
-      name: body.name ?? "",
-      enabled: body.enabled ?? true,
-      trigger: body.trigger as unknown,
-      actionName: resolvedActionName,
-      args: (body.args ?? {}) as unknown,
-      // The person turning it on, from Settings or a chat's card: its fires act for them.
-      createdBy: await routineCreator(deps.db, {}),
-      chatId: routineChatOf(resolvedActionName, body.args ?? {}, body.chatId),
-      createdAt: now,
-      lastFiredAt: null,
-      nextRunAt: null,
-    };
-
+    let id: string;
     try {
-      await deps.db.insert(routines).values(record);
+      // The one creation path, so the routine works for the right chat
+      // (routineChatOf) and acts for the person turning it on, from Settings
+      // or a chat's card.
+      id = await deps.routinesRepo.create({
+        name: body.name ?? "",
+        ...(body.key !== undefined ? { key: body.key } : {}),
+        enabled: body.enabled ?? true,
+        trigger: body.trigger,
+        actionName: resolvedActionName,
+        args: body.args ?? {},
+        ...(body.chatId ? { madeIn: body.chatId } : {}),
+      });
     } catch (err) {
       // Lost a race with a concurrent create of the same key: the UNIQUE
       // constraint is the backstop for the check above.
@@ -379,7 +368,7 @@ export function routinesRoutes(deps: ApiDeps): Hono {
       if (existingId) return keyTaken(existingId);
       throw err;
     }
-    const [inserted] = await deps.db.select().from(routines).where(eq(routines.id, record.id));
+    const [inserted] = await deps.db.select().from(routines).where(eq(routines.id, id));
 
     if (inserted?.enabled) {
       await deps.routineEngine.activate(toRoutine(inserted));

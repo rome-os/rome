@@ -229,6 +229,8 @@ export class RoutinesRepository {
     createdBy?: SessionActor | RoutineOwner;
     /** The chat it works for; absent, {@link routineChatOf} decides. Null for none. */
     chatId?: string | null;
+    /** The chat it is made in, when no webchat turn makes it (a chat's card). */
+    madeIn?: string;
   }): Promise<string> {
     const id = uuid();
     const now = new Date();
@@ -244,7 +246,10 @@ export class RoutinesRepository {
       args: data.args as unknown,
       keepTriggerPayload: data.keepTriggerPayload ?? true,
       createdBy,
-      chatId: data.chatId === undefined ? routineChatOf(data.actionName, data.args) : data.chatId,
+      chatId:
+        data.chatId === undefined
+          ? routineChatOf(data.actionName, data.args, data.madeIn)
+          : data.chatId,
       createdAt: now,
       lastFiredAt: null,
       nextRunAt: data.nextRunAt ?? null,

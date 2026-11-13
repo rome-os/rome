@@ -16,6 +16,9 @@ import {
 import { sessionActorMiddleware } from "../../access/session-actor.js";
 import type { ApiDeps } from "../deps.js";
 import { createTestDb, type TestDb } from "../../test/db.js";
+import { buildTestDeps } from "../../test/helpers.js";
+import type { ActionRegistryImpl } from "../../apps/actions/registry.js";
+import { routinesRoutes } from "./routines.js";
 import { chatTaskListRoutes } from "./task-list.js";
 
 const guardian = { headers: { Cookie: `${COOKIE_NAME}=${createSession("guardian-1")}` } };
@@ -276,6 +279,58 @@ describe("/chats/:chatId/tasks", () => {
       naming("names-another", since + 5_000, "a0"),
     ];
     expect(await respondTo()).toBe("names-it");
+  });
+
+  it("lists a routine a draft card in the chat turned on", async () => {
+    const deps = await buildTestDeps(testDb.db);
+    (deps.actionRegistry as ActionRegistryImpl).register({
+      config: {
+        name: "wake",
+        type: "system",
+        description: "test stub",
+        complexity: "simple",
+        speed: "fast",
+        reliability: "high",
+        sideEffects: "read-only",
+      },
+      execute: async () => ({ status: "ok" }),
+    });
+    const routineEngine = {
+      hasProvider: () => true,
+      activate: async () => {},
+      onChange: () => () => {},
+    } as unknown as ApiDeps["routineEngine"];
+    const concierge = { ownerOfChat: async (chatId: string) => OWNERS[chatId] ?? null };
+    const card = new Hono().use("*", sessionActorMiddleware(testDb.db)).route(
+      "/",
+      routinesRoutes({
+        ...deps,
+        routineEngine,
+        concierge: concierge as unknown as ConciergeService,
+        dashboardAccessState,
+      }),
+    );
+    // The card's "Turn it on" in chat ann-main: a routine whose args name no chat.
+    const turnOn = (as: typeof guardian) =>
+      card.request("/routines", {
+        ...as,
+        method: "POST",
+        headers: { ...as.headers, "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: "Morning nudge",
+          trigger: { type: "schedule", tzid: "UTC", tzMode: "fixed", localTime: "08:00" },
+          actionName: "wake",
+          args: {},
+          chatId: "ann-main",
+        }),
+      });
+    // Only the chat's owner turns it on there.
+    expect((await turnOn(guardian)).status).toBe(404);
+    expect((await turnOn(ann)).status).toBe(201);
+    expect(kindsIn(await read("ann-main", ann))).toEqual({
+      on_its_own: ["routine Morning nudge"],
+    });
+    expect(kindsIn(await read("concierge"))).toEqual({});
   });
 
   it("opens the change stream for the chat's owner only", async () => {
