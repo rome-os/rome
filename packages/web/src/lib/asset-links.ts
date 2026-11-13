@@ -73,3 +73,22 @@ export function splitUploadLines(text: string): { text: string; uploads: UploadL
   if (before !== undefined && before.trim() !== "") return { text, uploads: [] };
   return { text: lines.join("\n").trim(), uploads };
 }
+
+const ASSET_SRC = /^\/api\/(?:(?:projects|memory)\/asset(?:[/?]|$)|assets\/)/;
+
+/** Whether `src` is on this instance's asset routes, where the server can resize a picture. */
+export function isAssetSrc(src: string): boolean {
+  return ASSET_SRC.test(src);
+}
+
+/**
+ * `src` asking the server for a thumbnail `width` pixels wide, or `src` itself
+ * when it is not an asset route or already names a width.
+ */
+export function thumbnailSrc(src: string, width: number): string {
+  if (!ASSET_SRC.test(src) || /[?&]w=/.test(src)) return src;
+  const hashAt = src.indexOf("#");
+  const path = hashAt < 0 ? src : src.slice(0, hashAt);
+  const hash = hashAt < 0 ? "" : src.slice(hashAt);
+  return `${path}${path.includes("?") ? "&" : "?"}w=${width}${hash}`;
+}
