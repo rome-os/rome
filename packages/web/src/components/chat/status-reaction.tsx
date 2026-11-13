@@ -84,8 +84,9 @@ export function StatusReactionBadge({ reaction }: { reaction: ConciergeStatusRea
       // A 24px disc with the emoji at 15px in its own colors, ringed in the
       // chat's background (the chat sets --background to its canvas) so it
       // cuts cleanly into the bubble, with the faintest shadow. Its fill is
-      // in globals.css (`[data-status-reaction]`).
-      className="pointer-events-none absolute right-2 -bottom-3 z-10 flex size-6 select-none items-center justify-center rounded-full text-section shadow-1 ring-2 ring-background"
+      // in globals.css (`[data-status-reaction]`). It has no z-index, so the
+      // next bubble's hover toolbar, later in the page, paints over it.
+      className="pointer-events-none absolute right-2 -bottom-3 flex size-6 select-none items-center justify-center rounded-full text-section shadow-1 ring-2 ring-background"
     >
       {EMOJI[shown]}
     </span>

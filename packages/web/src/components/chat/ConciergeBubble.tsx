@@ -32,9 +32,10 @@ const BUBBLE_MAX_WIDTH = "max-w-[90%]";
  *   bubble's outer corner and running past its inner side when the bubble is
  *   narrower. It is 26px tall: 8px over the bubble's top border and padding,
  *   which hold no text whatever the first line is, and 18px above, within the
- *   group's 8px gap, the bubble above's 8px bottom padding, and the half
- *   leading under its last line. The overlap also bridges the pointer from the
- *   bubble to the toolbar.
+ *   group's gap (8px, or 16px between the guardian's bubbles), the bubble
+ *   above's 8px bottom padding, and the half leading under its last line. It
+ *   paints over a status reaction hanging from the bubble above. The overlap
+ *   also bridges the pointer from the bubble to the toolbar.
  *   The toolbar takes no
  *   pointer events while hidden, and stays visible while the feedback form it
  *   opens is open.
@@ -150,7 +151,9 @@ export const ConciergeBubble = memo(function ConciergeBubble({
         )}
       </div>
       {touch && open ? (
-        <div className="mt-1">
+        // Under a guardian bubble, the row clears its status reaction, which
+        // hangs 12px below it (status-reaction.tsx).
+        <div className={side === "end" ? "mt-4" : "mt-1"}>
           <ConciergeMessageMeta
             copyText={copyText}
             createdAt={createdAt}

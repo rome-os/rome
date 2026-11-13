@@ -133,6 +133,8 @@ describe("Concierge status reaction", () => {
       expect.arrayContaining(["absolute", "right-2", "-bottom-3", "size-6", "rounded-full"]),
     );
     expect(classes.some((name) => /^-?(top|left)-/.test(name))).toBe(false);
+    // No z-index: the next bubble's hover toolbar paints over it.
+    expect(classes.some((name) => /^z-/.test(name))).toBe(false);
     // Neither shrunk nor dimmed: the emoji keeps its own colors.
     expect(classes.some((name) => /^(scale-|opacity-)/.test(name))).toBe(false);
     expect(badge?.querySelector("[class*='opacity-']")).toBeNull();
