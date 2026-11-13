@@ -33,7 +33,7 @@ import {
 import { v7 as uuidv7 } from "uuid";
 import { createLogger } from "../logger.js";
 import type { ConciergeFollowing } from "./following.js";
-import type { SaidNews, TaskEventCoalescer } from "./task-events.js";
+import type { TaskEventCoalescer } from "./task-events.js";
 import type { ConciergeActivityTracker } from "./activity.js";
 import { type ConciergeTasks, stopHolds } from "./tasks.js";
 import type { TaskChecks } from "./task-checks.js";
@@ -245,7 +245,7 @@ export class ConciergeService {
   private readonly handedOnPrompts = new Map<string, string[]>();
   /** Per Concierge turn, the tasks whose result it said. */
   /** The tasks each Concierge turn said the news of, and which news. */
-  private readonly relayedInTurn = new Map<string, Map<string, SaidNews>>();
+  private readonly relayedInTurn = new Map<string, Set<string>>();
   /** What each Concierge turn said, by its parts, task and answered messages: a repeat is the same message. */
   private readonly saidByKey = new Map<string, Map<string, string>>();
   private failedBeforeStart: ((event: AgentTurnFailedBeforeStart) => void) | null = null;
@@ -792,26 +792,9 @@ export class ConciergeService {
       const carried = await this.reportedTasksOf(prompt, params.threadId);
       if (carried.length > 0) this.carriedReports.set(params.threadId, carried);
     }
-    // The tasks this turn reported on have had their say: the messages they
-    // held working settle (docs/domains/chats.md#status-reaction). A turn
-    // cut short or failed is handed over again, so they wait for that one. A
-    // stopped one is the coalescer's to give up, so its rows show that their
-    // owner was never told; news it said before the stop settled as it was said.
-    if (outcome === "completed") {
-      const reported = await this.reportedTasksOf(prompt, params.threadId);
-      if (reported.length > 0) {
-        // The Concierge has had their news: none of it is owed any more. A
-        // row whose news came after the payload was built still owes that.
-        for (const taskId of reported) this.taskEvents?.settle(taskId, { delivered: true });
-        const settled = reported.filter((taskId) => !this.taskEvents?.waiting(taskId));
-        await this.deps.tasks.repo.markReported(settled).catch((error: unknown) =>
-          log.warn("failed to settle reported results", {
-            chatId: params.threadId,
-            error: error instanceof Error ? error.message : String(error),
-          }),
-        );
-      }
-    }
+    // The tasks it reported on settle with the flush that carried them: the
+    // coalescer settles exactly the news a completed turn carried
+    // (docs/domains/chats.md#status-reaction).
     return outcome;
   }
 
@@ -825,11 +808,10 @@ export class ConciergeService {
   noteRelayed(turnId: string, chatId: string, taskId: string): void {
     const unseen = this.taskEvents?.unseen(taskId) === true;
     if (unseen && !this.carriedReports.get(chatId)?.includes(taskId)) return;
-    // Its news is said: a report a newer input cut short is not run again.
-    this.taskEvents?.settle(taskId);
-    const tasks = this.relayedInTurn.get(turnId) ?? new Map<string, SaidNews>();
-    // What is left is what this turn says; news that comes later is not.
-    if (!tasks.has(taskId)) tasks.set(taskId, this.taskEvents?.snapshot(taskId) ?? null);
+    // Saying it settles nothing: the news stays until a report that carried
+    // it runs to its end, so a turn that fails after saying it loses none.
+    const tasks = this.relayedInTurn.get(turnId) ?? new Set<string>();
+    tasks.add(taskId);
     this.relayedInTurn.set(turnId, tasks);
   }
 
@@ -846,11 +828,11 @@ export class ConciergeService {
   }
 
   /** The tasks whose result Concierge turn `turnId` said, forgotten once read. */
-  takeRelayed(turnId: string): { taskId: string; said: SaidNews }[] {
+  takeRelayed(turnId: string): string[] {
     const tasks = this.relayedInTurn.get(turnId);
     this.relayedInTurn.delete(turnId);
     this.saidByKey.delete(turnId);
-    return tasks ? [...tasks].map(([taskId, said]) => ({ taskId, said })) : [];
+    return tasks ? [...tasks] : [];
   }
 
   /**

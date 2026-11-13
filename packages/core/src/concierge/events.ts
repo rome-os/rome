@@ -271,8 +271,15 @@ export function startConciergeEvents(
       return await service.systemTurnOutcome(chatId, prompt, { quiet, pushLevel: "active" });
     },
     carried: (taskId) => service.carriesReport(taskId),
+    // A report that ran to its end: its results are said, and the guardian
+    // messages they held working settle.
+    reported: (taskIds) =>
+      void tasks.repo.markReported(taskIds).catch((error: unknown) =>
+        log.warn("failed to settle reported results", {
+          error: error instanceof Error ? error.message : String(error),
+        }),
+      ),
     giveUp: (taskId) => {
-      coalescer.forget(taskId);
       tasks.markNotSynced(taskId);
       // Its result will not be said: it waits for no report any more, and its
       // messages show that their owner was never told.
@@ -360,22 +367,9 @@ export function startConciergeEvents(
           }),
         );
     }
-    // The tasks whose result this turn said have been reported: their news
-    // waits for no other turn.
-    // News that came after the turn said it stays for a turn of its own, and
-    // so does the result it brought.
-    const relayed = service
-      .takeRelayed(event.turn.turnId)
-      .filter(({ taskId, said }) => coalescer.forgetSaid(taskId, said))
-      .map(({ taskId }) => taskId);
-    if (relayed.length > 0) {
-      void tasks.repo.markReported(relayed).catch((error: unknown) =>
-        log.warn("failed to settle reported results", {
-          chatId,
-          error: error instanceof Error ? error.message : String(error),
-        }),
-      );
-    }
+    // What this turn said settles no news: a report that carries it does,
+    // once it runs to its end. Its record of what it said is done with.
+    service.takeRelayed(event.turn.turnId);
     // Finish callbacks run before the backend promise settles. Capture them
     // synchronously so a recovery cannot start a second chain or a reminder.
     const active = recoveriesRunning.get(chatId);
@@ -714,8 +708,8 @@ export function startConciergeEvents(
       },
     }),
     tasks.repo.onChange(({ row }, change) => {
+      // A write settles no news: only a report that carried it does.
       if (change !== "write") return;
-      coalescer.settle(row.id);
       // The Concierge wrote the task after its result: its line stands.
       heldSummaries.delete(row.id);
     }),

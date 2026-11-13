@@ -13,8 +13,12 @@
 //
 // At most one flush runs, at least 10 s after the last one started. A flush
 // reads the rows from the database when it builds, so delivering a row twice
-// is harmless. A turn that ran to its end settles what it carried: Rome keeps
-// each task's status, so the Concierge owes no write. A row whose turn did
+// is harmless. A turn that ran to its end settles exactly the news it
+// carried, and its results count as said: Rome keeps each task's status, so
+// the Concierge owes no write. Nothing else settles a row: not a write of
+// it, not a say before the turn ends, not a failure or a newer message. News
+// that came after the build waits for its own turn, and a second report is
+// better than a lost one. A row whose turn did
 // not run to its end, such as when the Concierge is out of quota, is tried
 // again RETRY_MS later. A row whose turn a newer message cut short is tried
 // again with the next flush, once the turn that took it over no longer
@@ -76,6 +80,8 @@ export interface TaskEventDeps {
   deliver(delivery: TaskEventDelivery): Promise<"completed" | "stopped" | "interrupted" | "failed">;
   /** The turn that carried the row was stopped by the guardian: its news is not handed over again. */
   giveUp(taskId: string): void;
+  /** A report turn that carried these rows' news ran to its end: their results are said. */
+  reported?(taskIds: string[]): void;
   /**
    * Whether a Concierge turn that took a cut-short report over still runs
    * with this row's news, which it may say itself. Such a row waits for it.
@@ -104,9 +110,6 @@ interface Dirty {
   /** Not flushed before this time, after a turn that did not run. */
   notBefore?: number;
 }
-
-/** The news a turn said for one row, as {@link TaskEventCoalescer.snapshot} took it. */
-export type SaidNews = { readonly entry: object; readonly version: number } | null;
 
 export class TaskEventCoalescer {
   private dirty = new Map<string, Dirty>();
@@ -187,28 +190,6 @@ export class TaskEventCoalescer {
   }
 
   /**
-   * The Concierge wrote the row, or said its news. Clears its mark unless a
-   * change came after the build, or the turn built to carry it never reached
-   * the Concierge: that news is still owed, and its retry goes ahead. While
-   * the turn carrying it runs, how that turn ends decides: a write in a
-   * report that then fails settles nothing. `delivered` is that turn ending
-   * complete.
-   */
-  settle(taskId: string, options: { delivered?: boolean } = {}): void {
-    if (!options.delivered && this.inFlight.has(taskId)) return;
-    const entry = this.dirty.get(taskId);
-    if (
-      entry &&
-      entry.builtAt !== undefined &&
-      entry.since <= entry.builtAt &&
-      !entry.undelivered
-    ) {
-      this.dirty.delete(taskId);
-      this.changed();
-    }
-  }
-
-  /**
    * Whether task `taskId` has news a turn was built to carry but that never
    * reached the Concierge, as when that turn failed or was cut short.
    */
@@ -236,41 +217,6 @@ export class TaskEventCoalescer {
     const settled = this.passiveOf(taskIds);
     for (const taskId of settled) this.dirty.delete(taskId);
     if (settled.length > 0) this.changed();
-  }
-
-  /** Drops a row's mark, such as when its row is gone. */
-  forget(taskId: string): void {
-    if (this.dirty.delete(taskId)) this.changed();
-  }
-
-  /**
-   * The news waiting for row `taskId` now, as a turn that says it carries
-   * it: what {@link forgetSaid} later forgets, and no more.
-   */
-  snapshot(taskId: string): SaidNews {
-    const entry = this.dirty.get(taskId);
-    return entry ? { entry, version: entry.version } : null;
-  }
-
-  /**
-   * A turn said row `taskId`'s news as it stood at `said`: it waits for no
-   * other turn. News that came after stays. Answers whether nothing is left
-   * waiting for the row.
-   */
-  forgetSaid(taskId: string, said: SaidNews): boolean {
-    const entry = this.dirty.get(taskId);
-    if (!entry) return true;
-    if (said && entry === said.entry && entry.version === said.version) {
-      this.dirty.delete(taskId);
-      this.changed();
-      return true;
-    }
-    return false;
-  }
-
-  /** Whether news waits for row `taskId`. */
-  waiting(taskId: string): boolean {
-    return this.dirty.has(taskId);
   }
 
   /** The rows waiting for a flush. */
@@ -408,15 +354,16 @@ export class TaskEventCoalescer {
     completed: Set<string>,
     carried: Map<string, { entry: Dirty; changes: TaskChange[]; urgent: boolean; version: number }>,
   ): void {
+    const reported: string[] = [];
     for (const taskId of taskIds) {
       const entry = this.dirty.get(taskId);
       if (!entry) continue;
       if (notRun.has(taskId) || superseded.has(taskId)) {
         // The turn did not run to its end: the changes stay, later ones join
-        // them, a write still settles them, and the attempt does not count.
+        // them, and the attempt does not count.
         const before = carried.get(taskId);
-        // A write settled the row while the turn ran and a later change
-        // started afresh: the failed turn carried none of it.
+        // Not the entry the turn carried, as when its row went and came back:
+        // the failed turn carried none of it.
         if (before && entry !== before.entry) continue;
         if (before && entry.changes !== before.changes) {
           // A change while the turn ran started a new round: the carried
@@ -441,14 +388,18 @@ export class TaskEventCoalescer {
         // A change came after the build: it waits for its own flush.
         entry.builtAt = undefined;
       } else if (completed.has(taskId)) {
-        // The turn ran to its end with the row's news: one delivery is enough.
-        // News that replaced what it carried, after a write settled that,
-        // waits for its own flush.
+        // The turn ran to its end with the row's news: one delivery is
+        // enough, for exactly the version it carried.
         const before = carried.get(taskId);
         if (before && entry === before.entry && entry.version === before.version) {
           this.dirty.delete(taskId);
+          reported.push(taskId);
         }
       }
+    }
+    if (reported.length > 0) {
+      this.changed();
+      this.deps.reported?.(reported);
     }
   }
 }

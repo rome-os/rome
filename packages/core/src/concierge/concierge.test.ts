@@ -3138,6 +3138,43 @@ describe("Concierge events", () => {
     expect(s.backendTurns[1].prompt).toContain(`id="${taskId}"`);
   });
 
+  describe("a finished task leaves Active, whatever its report turn does", () => {
+    const outcomes = ["completed", "failed", "interrupted"] as const;
+    for (const outcome of outcomes) {
+      for (const edits of [false, true]) {
+        for (const says of [false, true]) {
+          it(`report ends ${outcome}${edits ? ", row edited mid-turn" : ""}${says ? ", result said mid-turn" : ""}`, async () => {
+            const s = setup();
+            const { chatId, taskId } = await startTask(s);
+            s.fakeTimers();
+            s.onBackendTurn(async () => {
+              if (edits) await s.taskRepo.upsertMany([{ id: taskId, note: "Edited" }]);
+              if (says) {
+                s.inTurn("report");
+                await s.tool("say", { text: "Three options found", task: taskId });
+              }
+              return outcome;
+            });
+            await finishTask(s, chatId);
+            await rs.advanceTimersByTimeAsync(2_000);
+            expect(s.backendTurns).toHaveLength(1);
+            // Every later report runs to its end.
+            s.onBackendTurn(() => "completed");
+            await rs.advanceTimersByTimeAsync(2 * RETRY_MS);
+            const reports = s.backendTurns.filter((turn) => turn.prompt.includes(`id="${taskId}"`));
+            expect(reports.length).toBeGreaterThan(0);
+            // A report that ran to its end carried it; none is left owed.
+            if (outcome !== "completed") expect(reports.length).toBeGreaterThan(1);
+            await s.settle();
+            const row = await s.taskRepo.get(taskId);
+            expect(row?.outcomeUnsaid).toBe(false);
+            expect((await s.tasks.statusOf([row!])).get(taskId)?.status).toBe("ended");
+          });
+        }
+      }
+    }
+  });
+
   it("still reports a result whose report turn wrote the row and then failed", async () => {
     const s = setup();
     const { chatId, taskId } = await startTask(s);
@@ -3145,7 +3182,7 @@ describe("Concierge events", () => {
     // The report turn renames the row, then fails before it says the result.
     s.onBackendTurn(async () => {
       await s.taskRepo.upsertMany([{ id: taskId, title: "Flights to Rome" }]);
-      return "failed";
+      return "failed" as const;
     });
     await finishTask(s, chatId);
     await rs.advanceTimersByTimeAsync(2_000);
@@ -4939,16 +4976,28 @@ describe("Concierge status reactions", () => {
     outcome: "completed" | "failed" | "interrupted" | "stopped" = "completed",
   ) => {
     const task = await s.taskRepo.findBySession(chatId);
-    // The event delivery took the task's news into this turn, as its flush does.
-    (
-      s.service as unknown as { taskEvents: { forget(taskId: string): void } | null }
-    ).taskEvents?.forget(task!.id);
     s.onBackendTurn(() => outcome);
     await s.service.systemTurnOutcome(
       CONCIERGE_CHAT,
       `<task_events>\n<task id="${task!.id}" title="Weather">\n</task>\n</task_events>`,
     );
     s.onBackendTurn(() => "completed");
+    // As the flush that carried the news settles it: only a report that ran
+    // to its end does, and its result is then said.
+    const events = (
+      s.service as unknown as {
+        taskEvents: { dirty: Map<string, unknown>; changed(): void } | null;
+      }
+    ).taskEvents;
+    if (outcome === "completed") {
+      events?.dirty.delete(task!.id);
+      events?.changed();
+      await s.taskRepo.markReported([task!.id]);
+    } else if (outcome === "stopped") {
+      events?.dirty.delete(task!.id);
+      await s.taskRepo.markGivenUp(task!.id);
+      events?.changed();
+    }
   };
   /** The task chat's turn ends `status`, and, unless it was stopped, the Concierge reports it. */
   const finishTask = async (
@@ -5641,7 +5690,7 @@ describe("Concierge status reactions", () => {
       expect(await reactionOf(s, "g1")).toBeNull();
     });
 
-    it("settles when another turn says the result, naming the task", async () => {
+    it("keeps working when another turn says the result, until a report that carried it ends", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const { chatId, taskId } = await started(s);
@@ -5649,13 +5698,15 @@ describe("Concierge status reactions", () => {
       s.inTurn("later");
       guardianSays(s, "g2", "later");
       await s.tool("say", { text: "Sunny all week", task: taskId });
-      expect(await reactionOf(s, "g1")).toBe("working");
       await s.finish({
         turnId: "later",
         agentName: "core:concierge",
         chatId: CONCIERGE_CHAT,
         text: "ok",
       });
+      // Saying it settles nothing: a report that carried it does.
+      expect(await reactionOf(s, "g1")).toBe("working");
+      await reportEnds(s, chatId);
       expect(await reactionOf(s, "g1")).toBeNull();
     });
 
@@ -5675,8 +5726,12 @@ describe("Concierge status reactions", () => {
       const { chatId, taskId } = await started(s);
       await finishTask(s, chatId, "completed", { reported: false });
       const coalescer = (
-        s.service as unknown as { taskEvents: { deps: { giveUp: (id: string) => void } } }
+        s.service as unknown as {
+          taskEvents: { dirty: Map<string, unknown>; deps: { giveUp: (id: string) => void } };
+        }
       ).taskEvents;
+      // As the coalescer does when a Stop ended the turn that carried it.
+      coalescer.dirty.delete(taskId);
       coalescer.deps.giveUp(taskId);
       await s.settle();
       // Its owner was never told, whatever the task's outcome.
@@ -5684,7 +5739,7 @@ describe("Concierge status reactions", () => {
       expect((await s.tasks.listForPanel()).find((row) => row.id === taskId)?.notSynced).toBe(true);
     });
 
-    it("runs no report again that a turn which took it over said", async () => {
+    it("reports again a result a turn that took the report over said, so none is lost", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const { chatId, taskId } = await started(s);
@@ -5706,8 +5761,10 @@ describe("Concierge status reactions", () => {
         chatId: CONCIERGE_CHAT,
         text: "",
       });
+      // Saying it settled nothing: the cut-short report runs again, to its end.
       await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
-      expect(s.backendTurns).toHaveLength(1);
+      expect(s.backendTurns).toHaveLength(2);
+      expect(s.backendTurns[1]?.prompt).toContain(taskId);
       expect(await reactionOf(s, "g1")).toBeNull();
     });
 
@@ -5851,7 +5908,7 @@ describe("Concierge status reactions", () => {
       expect(s.backendTurns.length).toBeGreaterThanOrEqual(2);
     });
 
-    it("runs no report again for two tasks a takeover turn said, after their batch was cut short", async () => {
+    it("reports again two tasks a takeover turn said, after their batch was cut short", async () => {
       const s = setup({ said: false });
       guardianSays(s, "g1");
       const weather = await started(s, { title: "Weather" });
@@ -5880,9 +5937,11 @@ describe("Concierge status reactions", () => {
         chatId: CONCIERGE_CHAT,
         text: "",
       });
-      expect(await reactionOf(s, "g1")).toBeNull();
       await rs.advanceTimersByTimeAsync(RETRY_MS + 10_000);
-      expect(s.backendTurns).toHaveLength(1);
+      expect(s.backendTurns).toHaveLength(2);
+      expect(s.backendTurns[1]?.prompt).toContain(weather.taskId);
+      expect(s.backendTurns[1]?.prompt).toContain(traffic.taskId);
+      expect(await reactionOf(s, "g1")).toBeNull();
     });
 
     it("clears a stopped task at once, with nothing to report", async () => {
